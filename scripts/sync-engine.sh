@@ -5,8 +5,9 @@
 #
 # The engine's `core` is bind-mounted (`./core -> /var/www/html`), so files
 # land in the running container the moment they are copied -- no rebuild, no
-# restart. Horizon and php-fpm pick up changed PHP on the next request, which
-# is what makes iterating on the engine against a live host cheap.
+# restart. php-fpm picks up changed PHP on the next request, which is what
+# makes iterating on the engine against a live host cheap. Queue workers keep
+# the code they booted with until `php artisan queue:restart`.
 #
 # Excluded, and why:
 #   vendor/      installed by the image; the host has no composer

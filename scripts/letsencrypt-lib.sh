@@ -194,8 +194,8 @@ le_served_lineage() {
 
 # Copy a lineage over the served pair. Nothing happens when the served files
 # already hold that certificate, so cron can call this every run; when they
-# do change, core-http is restarted -- nginx reads the files once at start,
-# and the old request script never restarted it, which left the fresh
+# do change, core-http's nginx is reloaded -- it reads the files only at start
+# or reload, and the old request script did neither, which left the fresh
 # certificate on disk and the self-signed one on :2011 until the next reboot.
 #
 #   install_lineage NAME [TARGET_BASENAME]
@@ -239,7 +239,7 @@ le_install_lineage() {
     # certificate and crt/server.key holding another's key. The API answered
     # nothing on :2011 until the .bak pair was put back.
     #
-    # Checked *before* the restart, so a bad lineage leaves the previous pair
+    # Checked *before* the reload, so a bad lineage leaves the previous pair
     # in place and the engine still serving, rather than replacing it with one
     # that cannot complete a handshake. Putting the backup back is what the
     # .bak files are for; this is the case that needs them.
@@ -253,9 +253,11 @@ le_install_lineage() {
 
     le_info "Installed ${name} as crt/${target}.cert"
 
+    # Reload, not restart: :2011 keeps answering. Restart only when nginx is not running to reload.
     if [ "$target" = "server" ]; then
-        docker compose -f "$LE_COMPOSE_FILE" restart core-http >/dev/null 2>&1 \
-            || le_warn "Could not restart core-http; the new certificate is served after the next restart"
+        docker compose -f "$LE_COMPOSE_FILE" exec -T core-http nginx -s reload >/dev/null 2>&1 \
+            || docker compose -f "$LE_COMPOSE_FILE" restart core-http >/dev/null 2>&1 \
+            || le_warn "Could not reload core-http; the new certificate is served after the next restart"
     fi
     return 0
 }
@@ -316,13 +318,15 @@ le_update_app_url() {
     rm -f "$tmp"
     le_info "APP_URL set to https://${domain}:${port}"
 
-    # If anything replaced the inode since core started (an earlier `sed -i`,
-    # an editor), the container is still reading the old file; a restart
-    # re-binds it. core-cron shares the mount.
-    if le_core_running && ! docker compose -f "$LE_COMPOSE_FILE" exec -T core grep -qx "APP_URL=https://${domain}:${port}" /var/www/html/.env 2>/dev/null; then
-        le_info "Restarting core so it reads the new APP_URL"
-        docker compose -f "$LE_COMPOSE_FILE" restart core core-cron >/dev/null 2>&1 \
-            || le_warn "Could not restart core; it reports the old URL until restarted"
+    # Never restart core for this: it runs the queue, and a restart kills every
+    # deploy in flight. php-fpm and the scheduler read .env per run; the
+    # long-lived queue workers are told to finish their job and reboot.
+    le_core_running || return 0
+    docker compose -f "$LE_COMPOSE_FILE" exec -T core php artisan queue:restart >/dev/null 2>&1 \
+        || le_warn "Could not signal the queue workers; they report the old URL until they restart"
+    # A replaced inode (an earlier `sed -i`, an editor) leaves the container on the old file.
+    if ! docker compose -f "$LE_COMPOSE_FILE" exec -T core grep -qx "APP_URL=https://${domain}:${port}" /var/www/html/.env 2>/dev/null; then
+        le_warn "core still reads an old .env-core (its inode was replaced); it reports the old URL until core is next restarted"
     fi
 }
 

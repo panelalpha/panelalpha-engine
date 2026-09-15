@@ -5,15 +5,15 @@ namespace App\Lib\Task;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\ProcessIdentity;
 use App\Models\Task;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Redis;
 
 /**
  * Retire `running` tasks whose worker is gone.
  *
  * A task row is the only handle a client has on a job: `GET /tasks/{id}`
  * answers from it forever. When the process running the work dies -- a host
- * reboot, an OOM kill, `systemctl restart horizon` -- nothing writes a
+ * reboot, an OOM kill, a restarted queue worker -- nothing writes a
  * terminal status, because the writer is the thing that died. The row then
  * reads `running` for good and every poller waits on a job that no longer
  * exists.
@@ -24,18 +24,15 @@ use Illuminate\Support\Facades\Redis;
  * skips non-terminal rows by design, since deleting an in-flight task would
  * be worse than a stuck one.
  *
- * **The queue is the evidence, not the deploy log.** A job that a worker has
- * picked up lives in `queues:{queue}:reserved` until it finishes; one that
- * has not been picked up is in `queues:{queue}`. So "is this job still
- * queued?" is answered by Redis directly, exactly, and with no window in
- * which the answer is ambiguous.
+ * **The queue is the evidence, not the deploy log.** A job keeps its row in
+ * the `jobs` table while it is pending or reserved by a worker, and loses it
+ * when it finishes. So "is this job still queued?" is answered by that table
+ * directly, exactly, and with no window in which the answer is ambiguous.
  *
- * The two reads must go through the *member*, not the uuid. Laravel stores
- * the job's whole serialised payload as the member of both structures and
- * keeps the uuid as a field inside it, so a lookup keyed by the bare uuid
- * silently misses every time -- which is what the first version of this class
- * did, and it retired nothing at all on 2.29.1.58 and 178.104.84.45 for as
- * long as it was deployed. {@see queueCheck()}
+ * The read must go through the *payload*, not the uuid: the uuid is a field
+ * inside it. A lookup keyed by the bare uuid silently misses every time --
+ * which is what the first version of this class did against Redis, and it
+ * retired nothing at all on 2.29.1.58 and 178.104.84.45. {@see queueCheck()}
  *
  * The deploy log looks like evidence and is not. It is written *by* the work,
  * so it cannot outlive it -- and it is deleted with the account on rollback,
@@ -165,46 +162,38 @@ final class TaskReconciler
      * Null means the question could not be answered, which the caller treats
      * as "leave it alone".
      *
-     * The member is the *whole payload*, not the uuid. Laravel reserves with
-     * `zadd KEYS[2], ARGV[1], reserved`, where `ARGV[1]` is the job it just
-     * decoded -- and pushes with `rpush $queue, $payload`. So the uuid is a
-     * *field inside* the member, and asking Redis for a member equal to the
-     * bare uuid can only ever miss. {@see membersCarryJob()}
+     * A row in the `jobs` table is a job that is pending or reserved; Laravel
+     * deletes it when the job finishes or fails. The uuid is a field inside
+     * the payload, so it is matched by decoding. {@see membersCarryJob()}
      *
-     * @param null|object{zrange: callable, lrange: callable} $connection
-     *        overrides the Redis connection, so the read itself is testable
+     * @param null|callable(string): iterable<mixed> $payloads
+     *        overrides the table read, so the check itself is testable
      * @return callable(Task): ?bool
      */
-    public static function queueCheck(?object $connection = null): callable
+    public static function queueCheck(?callable $payloads = null): callable
     {
-        return static function (Task $task) use ($connection): ?bool {
+        return static function (Task $task) use ($payloads): ?bool {
             $jobId = $task->job_id;
             if (!is_string($jobId) || $jobId === '') {
-                // No uuid was ever recorded (a job that died before Horizon
-                // handed it out). Nothing to look up.
+                // No uuid was ever recorded (a job that died before a worker
+                // took it). Nothing to look up.
                 return null;
             }
 
             $queue = is_string($task->queue) && $task->queue !== '' ? $task->queue : 'default';
 
             try {
-                $connection ??= Redis::connection(config('queue.connections.redis.connection') ?? 'default');
+                // Bounded by the queue depth, so reading it whole is safe.
+                $payloads ??= static fn (string $queue): iterable => DB::table(config('queue.connections.database.table') ?? 'jobs')
+                    ->where('queue', $queue)
+                    ->pluck('payload');
 
-                // Reserved: what a worker has taken and not yet finished. The
-                // set holds one member per in-flight job, so this is bounded
-                // by the worker count and safe to read whole.
-                if (self::membersCarryJob((array) $connection->zrange("queues:{$queue}:reserved", 0, -1), $jobId)) {
-                    return true;
+                $members = [];
+                foreach ($payloads($queue) as $payload) {
+                    $members[] = $payload;
                 }
 
-                // Not reserved. A worker between picking the job up and
-                // reserving it leaves it in the pending list.
-                $pending = $connection->lrange("queues:{$queue}", 0, -1);
-
-                // phpredis answers `false`, not `[]`, for a key that does not
-                // exist -- and an empty queue is exactly the case that must
-                // fall through to `false` rather than throw.
-                return self::membersCarryJob(is_array($pending) ? $pending : [], $jobId);
+                return self::membersCarryJob($members, $jobId);
             } catch (\Throwable $e) {
                 Log::warning('Could not read the queue to reconcile task ' . $task->id . ': ' . $e->getMessage());
 

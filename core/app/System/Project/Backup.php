@@ -643,7 +643,7 @@ class Backup
         }
 
         // @ suppresses the warning Laravel would promote to ErrorException
-        // ("mkdir(): Permission denied") when Horizon runs as www-data and the
+        // ("mkdir(): Permission denied") when the queue worker runs as www-data and the
         // bind-mount is still root-owned.
         if (@mkdir($path, 0755, true) || is_dir($path)) {
             return;

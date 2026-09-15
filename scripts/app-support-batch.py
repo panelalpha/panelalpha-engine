@@ -24,8 +24,8 @@ reviewing the reports.
 Parallelism inside one instance:
   --parallel=N  run up to N apps concurrently (default 1). Each app still
                gets its own account, artifacts, and verdict. N should be at
-               most the queue worker count (core/config/horizon.php
-               maxProcesses) — a higher N only deepens the queue, it does
+               most the queue worker count (QUEUE_WORKERS in .env,
+               default 8) — a higher N only deepens the queue, it does
                not finish apps faster.
 
 Multiple instances are also possible, but only with disjoint slices:
@@ -136,7 +136,7 @@ UNFINISHED_VERDICTS = frozenset({
     "deploy-timeout",
     # A task the engine cancelled states nothing about the app. It means the
     # work stopped without a verdict -- the worker was killed mid-deploy
-    # (`docker restart core-queue`, a host reboot, an OOM), or a person called
+    # (`docker restart` of core, a host reboot, an OOM), or a person called
     # cancel. Recording it as `deploy-failed` reads as "this app does not work"
     # and hides it from every later run.
     #
@@ -600,7 +600,7 @@ def main():
                          "partition the list, so M instances cover it exactly once")
     ap.add_argument("--parallel", type=int, default=1,
                     help="test up to N apps concurrently (default 1). Keep at or "
-                         "below the queue's Horizon maxProcesses; above it, "
+                         "below the engine's QUEUE_WORKERS; above it, "
                          "apps just wait in the deploy queue")
     ap.add_argument("--email", default=DEFAULT_EMAIL,
                     help="test account email (orphan cleanup deletes only "

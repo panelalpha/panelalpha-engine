@@ -2,7 +2,7 @@ FROM php:8.3
 
 # php extensions
 RUN apt-get update -y && apt-get install -y zip libzip-dev
-# pcntl: laravel/horizon; ftp: league/flysystem-ftp (composer platform check)
+# pcntl: queue:work timeouts; ftp: league/flysystem-ftp (composer platform check)
 RUN docker-php-ext-install zip pcntl ftp
 
 # composer

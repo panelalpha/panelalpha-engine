@@ -9,8 +9,6 @@ services:
     image: ghcr.io/panelalpha/engine-core:20260908
     pull_policy: missing
     restart: always
-    depends_on:
-      - core-redis
     post_start:
       - command: php artisan system:database:test --retries=10
       - command: php artisan system:ip:sync --skip-errors
@@ -26,6 +24,8 @@ services:
       - ./config/core/php.ini:/etc/php/8.3/fpm/conf.d/90-panelalpha.ini
       - ./config/core/php-fpm-pool.conf:/etc/php/8.3/fpm/pool.d/zz-docker.conf
       - ./config/core/supervisord.conf:/etc/supervisor/conf.d/supervisord.conf
+      - ./config/logrotate:/etc/logrotate.d
+      - ./data/logrotate:/var/lib/logrotate
       - ./logs/core/nginx:/var/log/nginx
       - ./logs/core/supervisor:/var/log/supervisor
       - core-storage:/var/www/html/storage
@@ -49,9 +49,10 @@ services:
       - "USERS_DB_PASSWORD=${USERS_MYSQL_ROOT_PASSWORD}"
       - "METRICS_LIMIT_DAYS=${METRICS_LIMIT_DAYS:-90}"
       - "METRICS_LIMIT_ENTRIES=${METRICS_LIMIT_ENTRIES:-1000000}"
-      - "QUEUE_CONNECTION=redis"
-      - "REDIS_HOST=redis.shared-hosting.palocal"
-    mem_limit: ${MEM_LIMIT_CORE:-3G}
+      - "QUEUE_CONNECTION=database"
+      # queue:work processes run by core's supervisord (config/core/supervisord.conf)
+      - "QUEUE_WORKERS=${QUEUE_WORKERS:-8}"
+    mem_limit: ${MEM_LIMIT_CORE:-6G}
     memswap_limit: ${MEMSWAP_LIMIT_CORE:-0}
   mail:
     profiles: ["mail", "full"]
@@ -108,77 +109,6 @@ services:
       - "METRICS_SNAPSHOT_INTERVAL=${METRICS_SNAPSHOT_INTERVAL:-5}"
     mem_limit: ${MEM_LIMIT_METRICS:-1G}
     memswap_limit: ${MEMSWAP_LIMIT_METRICS:-0}
-  core-cron:
-    build:
-      context: ./dockerfiles
-      dockerfile: Dockerfile-core
-      target: php_cron_prod
-    image: ghcr.io/panelalpha/engine-cron:20260908
-    pull_policy: missing
-    depends_on:
-      - core
-    restart: always
-    volumes_from:
-      - core
-    volumes:
-      - ./config/logrotate:/etc/logrotate.d
-      - ./data/logrotate:/var/lib/logrotate
-    environment:
-      - "APP_ENV=cron"
-      - "DB_HOST=database-core.shared-hosting.palocal"
-      - "DB_DATABASE=core"
-      - "DB_USERNAME=core"
-      - "DB_PASSWORD=${CORE_MYSQL_PASSWORD}"
-      - "USERS_DB_HOST=database-users.shared-hosting.palocal"
-      - "USERS_DB_USERNAME=root"
-      - "USERS_DB_PASSWORD=${USERS_MYSQL_ROOT_PASSWORD}"
-      - "QUEUE_CONNECTION=redis"
-      - "REDIS_HOST=redis.shared-hosting.palocal"
-    mem_limit: ${MEM_LIMIT_CORE_CRON:-${MEM_LIMIT_CRON:-3G}}
-    memswap_limit: ${MEMSWAP_LIMIT_CORE_CRON:-${MEMSWAP_LIMIT_CRON:-0}}
-  core-queue:
-    build:
-      context: ./dockerfiles
-      dockerfile: Dockerfile-core
-      target: php_prod
-    image: ghcr.io/panelalpha/engine-queue-worker:20260908
-    pull_policy: missing
-    hostname: queue-worker.shared-hosting.palocal
-    depends_on:
-      - core
-      - core-redis
-    privileged: true
-    pid: host
-    user: "www-data"
-    command: "php artisan horizon"
-    restart: always
-    volumes_from:
-      - core
-    working_dir: /var/www/html
-    environment:
-      - "DB_HOST=database-core.shared-hosting.palocal"
-      - "DB_DATABASE=core"
-      - "DB_USERNAME=core"
-      - "DB_PASSWORD=${CORE_MYSQL_PASSWORD}"
-      - "USERS_DB_HOST=database-users.shared-hosting.palocal"
-      - "USERS_DB_USERNAME=root"
-      - "USERS_DB_PASSWORD=${USERS_MYSQL_ROOT_PASSWORD}"
-      - "QUEUE_CONNECTION=redis"
-      - "REDIS_HOST=redis.shared-hosting.palocal"
-    mem_limit: ${MEM_LIMIT_CORE_QUEUE:-${MEM_LIMIT_QUEUE_WORKER:-3G}}
-    memswap_limit: ${MEMSWAP_LIMIT_CORE_QUEUE:-${MEMSWAP_LIMIT_QUEUE_WORKER:-0}}
-  core-redis:
-    build:
-      context: ./dockerfiles
-      dockerfile: Dockerfile-redis
-    image: ghcr.io/panelalpha/engine-redis:20260908
-    pull_policy: missing
-    restart: always
-    hostname: redis.shared-hosting.palocal
-    volumes:
-      - ./data/redis:/data
-    mem_limit: ${MEM_LIMIT_CORE_REDIS:-${MEM_LIMIT_REDIS:-3G}}
-    memswap_limit: ${MEMSWAP_LIMIT_CORE_REDIS:-${MEMSWAP_LIMIT_REDIS:-0}}
   core-db:
     build:
       context: ./dockerfiles

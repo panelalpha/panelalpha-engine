@@ -2,7 +2,9 @@
 
 ENGINE_DIR=/opt/panelalpha/shared-hosting
 
-CURRENT_WEBSERVER=$(docker compose -f $ENGINE_DIR/docker-compose.yml ps -a sites-http --format json | jq '.Labels' | tr ',' '\n'  | awk -F= '$1=="com.panelalpha.webserver"{print $2}')
+# No jq: this runs from logrotate inside core, whose image does not ship it.
+CURRENT_WEBSERVER=$(docker inspect --format '{{ index .Config.Labels "com.panelalpha.webserver" }}' \
+    $(docker compose -f $ENGINE_DIR/docker-compose.yml ps -aq sites-http) 2>/dev/null)
 
 case $CURRENT_WEBSERVER in
     nginx)

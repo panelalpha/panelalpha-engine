@@ -119,8 +119,8 @@ else
     [ -z "$(tail -c1 .env-core)" ] || echo "" >>.env-core
     echo "APP_URL=https://${PUBLIC_IP}:2011" >>.env-core
 fi
-# Before the stack starts: Horizon keeps whatever APP_KEY it booted with, so a
-# key written after `up` never reaches core-queue until it restarts.
+# Before the stack starts: queue workers keep whatever APP_KEY they booted with, so a
+# key written after `up` never reaches them until core restarts.
 if ! grep -q '^APP_KEY=.\+' .env-core; then
     APP_KEY="base64:$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
     if grep -q '^APP_KEY=' .env-core; then
@@ -132,8 +132,8 @@ if ! grep -q '^APP_KEY=.\+' .env-core; then
 fi
 
 # Optional services sit behind compose profiles; see .env.example for the list.
-# --core-only (empty) leaves just the control plane: core, cron, database-core
-# and nginx. Untouched, .env.example's default of 'full' gives the whole stack.
+# --core-only (empty) leaves just the control plane: core, core-db and
+# core-http. Untouched, .env.example's default of 'full' gives the whole stack.
 if [ "$SET_PROFILES" = 1 ]; then
     if grep -q '^COMPOSE_PROFILES=' .env; then
         sed -i "s#^COMPOSE_PROFILES=.*#COMPOSE_PROFILES=${PROFILES}#" .env
@@ -326,9 +326,8 @@ fi
 # release. `up` does fall back to the build section on a failed pull, but doing it here
 # keeps the "not found" noise out of the startup step. The layer cache makes re-runs cheap.
 step "Ensuring the core images exist"
-# `core-cron`, not `cron`: the compose service carries the prefix. Naming a
-# service that does not exist made `docker compose build` exit "no such
-# service", and under `set -e` that aborted the whole bootstrap here --
+# Only services that exist: naming one that does not made `docker compose
+# build` exit "no such service", and under `set -e` that aborted the whole bootstrap here --
 # skipping the stack start, the migrations and pae-artisan, while the rsync
 # above had already put the new source on the host. An engine left in that
 # state runs new code against an unmigrated database and never rereads
@@ -338,7 +337,7 @@ step "Ensuring the core images exist"
 # a prefetch that keeps "not found" noise out of the startup step, and `up`
 # falls back to the build section on its own. It is not worth the whole
 # deploy.
-for svc in core core-cron; do
+for svc in core; do
     docker compose config --services 2>/dev/null | grep -qx "$svc" || {
         warn "No compose service '$svc' — skipping its image"
         continue

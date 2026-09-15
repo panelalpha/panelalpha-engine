@@ -5,15 +5,39 @@ namespace App\Lib\Deploy\Dind;
 use Illuminate\Support\Facades\Log;
 
 /**
- * One host build at a time: each build is entitled to a third of MemTotal, which
- * Horizon's 8 workers would multiply past the host's RAM. The rest of the deploy
- * runs eight wide. Fails open after WAIT_SECONDS.
+ * One host build at a time, whatever the queue is doing.
+ *
+ * A host build is the one part of a deploy that competes for the *host's* RAM.
+ * {@see \App\Lib\Deploy\Compose\ServiceLimits::hostBuildMemoryMb()} gives each
+ * one a third of MemTotal and hands the runtime a heap cap at 70% of that --
+ * numbers chosen so a single build can be big enough for the ones that need it
+ * (Chamilo 2.x's Encore pass wants ~3.5 GB of heap and OOMs below it).
+ *
+ * That sizing assumed one build at a time, which is what a single
+ * queue worker used to guarantee. It is 8 now (QUEUE_WORKERS), and `DeployLock` does not
+ * help: it is explicitly one deploy per *account*, so eight accounts build
+ * together by design. Eight builds each entitled to a third of the host is 1.4x
+ * to 2.8x its RAM -- and the heap cap is not a ceiling that shrinks demand, it
+ * is an instruction to grow, so they will try. What the kernel does then is
+ * pick a victim by badness, which can be another tenant's container or the
+ * engine's own.
+ *
+ * So the build serialises and the rest of the deploy does not. Cloning,
+ * `compose up`, migrations and health checks still run eight wide, which is
+ * where the batch speedup actually comes from -- a deploy mostly waits on a
+ * container rather than on the host.
+ *
+ * **Fails open.** If the slot cannot be taken within {@see WAIT_SECONDS} the
+ * build runs anyway, with a line in the log saying so. A queued build is better
+ * than an OOM-killed host; a build blocked for ever behind a stuck lock is
+ * worse than either, and that is the failure this refuses to introduce.
  */
 final class HostBuildSlot
 {
     /**
-     * Long enough for a real build ahead of this one (PHP and Node host builds
-     * cap at 1800s and 3600s). Passing it is not fatal.
+     * Long enough for a real build to finish ahead of this one -- the PHP and
+     * Node host builds cap at 1800s and 3600s -- without ever being a deadline
+     * a deploy dies on, because passing it is not fatal.
      */
     private const WAIT_SECONDS = 1800;
 
@@ -26,7 +50,8 @@ final class HostBuildSlot
      *
      * @template T
      * @param callable(): T $build
-     * @param ?callable(): void $onWait called once when the slot is busy
+     * @param ?callable(): void $onWait called once when the slot is busy, so a
+     *        deploy log can say why it is standing still
      * @return T
      */
     public static function run(callable $build, ?callable $onWait = null): mixed

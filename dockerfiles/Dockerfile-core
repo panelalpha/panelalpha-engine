@@ -61,23 +61,6 @@ RUN apt-get clean autoclean \
 
 WORKDIR /var/www/html
 
-FROM php_prod AS php_cron_prod
-
-RUN apt-get update -y && apt-get install -y cron jq logrotate
-RUN apt-get clean autoclean && apt-get autoremove -y
-
-# disable apt-compat cron job (it sleeps up to 30min and blocks /etc/cron.daily)
-RUN chmod -x /etc/cron.daily/apt-compat 2>/dev/null || true \
-  && mkdir -p /etc/apt/apt.conf.d \
-  && echo 'APT::Periodic::RandomSleep "0";' > /etc/apt/apt.conf.d/99disable-random-sleep
-
-RUN echo "* * * * * www-data cd /var/www/html && php artisan schedule:run >> /dev/null 2>&1" >> /etc/crontab
-RUN echo "#!/bin/bash" >> /docker-entrypoint.sh
-RUN echo "printenv > /etc/environment" >> /docker-entrypoint.sh
-RUN echo "cron -f" >> /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
-ENTRYPOINT ["/docker-entrypoint.sh"]
-
 FROM php_prod AS php_debug
 
 RUN apt-get update -y \

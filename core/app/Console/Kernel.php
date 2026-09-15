@@ -42,7 +42,7 @@ class Kernel extends ConsoleKernel
         // of dim lines if that trim is skipped.
         $schedule->command('task:prune')->daily()->withoutOverlapping();
         // A task row outlives its job when the job's process dies mid-run -- a
-        // host reboot, an OOM kill, a horizon restart -- and nothing writes the
+        // host reboot, an OOM kill, a worker restart -- and nothing writes the
         // terminal status that would release a poller, because the writer is
         // what died. `task:prune` cannot help (it skips non-terminal rows by
         // design). Every minute, so a client polling GET /tasks/{id} gets an
