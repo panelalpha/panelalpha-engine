@@ -16,7 +16,9 @@ export class MySqlApi extends PhpApi {
   }
 
   async createMySqlDatabase(username: string, name: string): Promise<ApiResponse<MySqlDatabase>> {
-    const response = await this.api.post(`projects/${username}/mysql/databases`, { data: { name } });
+    const response = await this.api.post(`projects/${username}/mysql/databases`, {
+      data: { name },
+    });
     await this.assertStatus(response, [200, 201]);
     return response.json();
   }

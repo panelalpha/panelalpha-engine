@@ -1,4 +1,4 @@
-import type { APIRequestContext } from '@playwright/test';
+import type { APIRequestContext, APIResponse } from '@playwright/test';
 import { type EngineApi } from '@/clients/engine-api';
 import type { ApiResponse, SystemChangeStatus, SystemInfo } from '@/types';
 import { waitForCondition } from './retry';
@@ -244,6 +244,52 @@ export async function waitForSiteHttpReady(
       message: `Site did not become HTTP-ready within ${timeout}ms: ${siteUrl}`,
     }
   );
+}
+
+/**
+ * Fetches a hosted site, reporting a transport failure as what it means.
+ *
+ * `APIRequestContext.get` throws on a connection error, so a site that is not
+ * being served at all surfaces as `connect ECONNREFUSED <ip>:443` — the raw
+ * transport error, with no hint that the webserver has stopped answering for
+ * that address. On 2026-09-17 six specs failed that way at once from a single
+ * cause, and each one had to be traced back by hand.
+ *
+ * Whatever the caller was asserting, "nothing is listening" is the more
+ * important fact, so it is said plainly and the original error is kept as the
+ * cause.
+ */
+export async function fetchSite(
+  httpClient: APIRequestContext,
+  siteUrl: string,
+  options: Parameters<APIRequestContext['get']>[1] = {}
+): Promise<APIResponse> {
+  try {
+    return await httpClient.get(siteUrl, { ignoreHTTPSErrors: true, ...options });
+  } catch (error) {
+    throw new Error(`${siteUrl} is not being served: ${describeTransportFailure(error)}`, {
+      cause: error,
+    });
+  }
+}
+
+/** Turns a fetch failure into the thing an operator would check next. */
+function describeTransportFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (/ECONNREFUSED/i.test(message)) {
+    return `nothing accepted the connection (${message.trim()}). The webserver is not listening on that address — check the vhost bind addresses and any NAT mapping.`;
+  }
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(message)) {
+    return `the hostname does not resolve (${message.trim()}).`;
+  }
+  if (/ETIMEDOUT|timeout/i.test(message)) {
+    return `the connection timed out (${message.trim()}). Something is listening but not answering, or a firewall is dropping the packets.`;
+  }
+  if (/ECONNRESET|EPIPE/i.test(message)) {
+    return `the connection was reset (${message.trim()}).`;
+  }
+  return message.trim();
 }
 
 /** Webservers where OWASP CRS / ModSecurity HTTP blocking is expected to work. */

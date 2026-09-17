@@ -118,7 +118,9 @@ export class AppUsersApi extends EngineApiBase {
       params.set('attempts', String(options.attempts));
     }
     const query = params.toString();
-    const url = query ? `projects/${username}/app/health?${query}` : `projects/${username}/app/health`;
+    const url = query
+      ? `projects/${username}/app/health?${query}`
+      : `projects/${username}/app/health`;
     const response = await this.api.get(url);
     await this.assertStatus(response, 200);
     return response.json();

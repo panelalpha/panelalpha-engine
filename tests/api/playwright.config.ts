@@ -111,6 +111,9 @@ export default defineConfig({
 
   reporter: [
     ['list'],
+    // Prints what was skipped and why; fails the run when MAX_SKIPPED is set
+    // and exceeded. A green run that executed half the suite is not a pass.
+    ['./reporters/skip-budget.ts'],
     ['html', { outputFolder: reportDir, open: 'never' }],
     ...(process.env.JUNIT_REPORT_FILE
       ? ([['junit', { outputFile: process.env.JUNIT_REPORT_FILE }]] as const)
@@ -140,8 +143,12 @@ export default defineConfig({
     },
     {
       // Pure logic — stub transports only, so it runs without an engine.
+      // Nothing here touches the shared engine, so the suite-wide `workers: 1`
+      // (which exists for that shared state) does not apply.
       name: 'unit',
       testMatch: /tests\/unit\/.*\.spec\.ts/,
+      fullyParallel: true,
+      workers: '50%',
     },
     {
       name: 'api',

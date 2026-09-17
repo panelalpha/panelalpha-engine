@@ -38,7 +38,28 @@ test.describe('IPv4 NAT maps', () => {
     }
   });
 
+  /**
+   * Auto-discovery is a host-wide write, not a read.
+   *
+   * It inspects the host's addressing, writes what it concludes into the NAT
+   * map table, and rebuilds every vhost from it. On 2026-09-17 it ran here
+   * against an engine that holds its public address directly, decided the box
+   * was behind NAT, wrote `172.25.0.1 -> 95.217.155.125`, rebound every vhost
+   * to the Docker gateway and took the public address off the air — for the
+   * live sites too, not just the suite's. It then answered 500.
+   *
+   * So it is gated like its sibling below, and for the same reason: the
+   * default run must not reconfigure the host's networking. The engine bug it
+   * uncovered is a separate matter; this gate is about blast radius.
+   */
   test('auto-discovery returns a list of maps', async ({ api }) => {
+    test.skip(
+      process.env.ALLOW_NETWORK_MUTATION !== '1',
+      'Set ALLOW_NETWORK_MUTATION=1 to run NAT auto-discovery. It rewrites the NAT map table and rebinds every vhost.'
+    );
+
+    const before = (await api.getIpv4NatMaps()).data;
+
     let response;
     try {
       response = await api.rebuildIpv4NatMaps();
@@ -51,6 +72,16 @@ test.describe('IPv4 NAT maps', () => {
 
     const maps = Array.isArray(response.data) ? response.data : response.data.maps;
     expect(Array.isArray(maps)).toBe(true);
+
+    // Whatever it discovered, it must not have invented a mapping for an
+    // address the host already holds: that is the shape that takes the public
+    // address off the air.
+    const after = (await api.getIpv4NatMaps()).data;
+    const invented = after.filter((map) => !before.some((existing) => existing.id === map.id));
+    expect(
+      invented.map((map) => `${map.local_ip} -> ${map.public_ip}`),
+      'auto-discovery added NAT maps that were not there before'
+    ).toEqual([]);
   });
 });
 

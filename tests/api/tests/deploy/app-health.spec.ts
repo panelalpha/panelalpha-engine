@@ -3,11 +3,7 @@ import { expectOneOf } from '@/helpers/expect-one-of';
 import { randomEmail, randomPassword, randomUsername } from '@/helpers/random';
 import { skipUnless } from '@/helpers/test-helpers';
 import { Timeouts } from '@/config/timeouts';
-import {
-  assertDeploymentWarnings,
-  assertMissingEntry,
-  healthFromRaw,
-} from '@/helpers/app-health';
+import { assertDeploymentWarnings, assertMissingEntry, healthFromRaw } from '@/helpers/app-health';
 import { waitForDeploy } from '@/helpers/deploy-helpers';
 
 test.describe('app health and SSO on a deployed app', () => {
@@ -102,7 +98,9 @@ test.describe('app health and SSO on a deployed app', () => {
     expect(health.status).toBe(200);
     const report = healthFromRaw(health.body);
     assertMissingEntry(report);
-    const failed = report.checks.find((check) => check.id === 'entry-served' && check.status === 'fail');
+    const failed = report.checks.find(
+      (check) => check.id === 'entry-served' && check.status === 'fail'
+    );
     expect(failed?.detail ?? '').toMatch(/index\.php|403|Forbidden|front page/i);
 
     const shown = await api.getUser(user.username);

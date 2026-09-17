@@ -33,7 +33,9 @@ export class FtpApi extends MySqlApi {
     ftpUsername: string,
     data: UpdateFtpAccountRequest
   ): Promise<ApiResponse<FtpAccount>> {
-    const response = await this.api.put(`projects/${username}/ftp-accounts/${ftpUsername}`, { data });
+    const response = await this.api.put(`projects/${username}/ftp-accounts/${ftpUsername}`, {
+      data,
+    });
     await this.assertOk(response);
     return response.json();
   }

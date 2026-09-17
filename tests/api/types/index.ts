@@ -24,3 +24,4 @@ export * from './tunnel.types';
 export * from './project-setting.types';
 export * from './task.types';
 export * from './bug-report.types';
+export * from './vault.types';

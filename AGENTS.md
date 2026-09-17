@@ -1,10 +1,12 @@
 # AGENTS.md — agent layer over `docs/`
 
 End-user documentation lives in [`docs/`](docs/README.md). It is written for the
-person who installs a host and deploys apps. This file is for agents changing
-the engine. Never duplicate a user procedure here. Link to the baseline page,
-then add only what an agent needs: how to verify, what numbers to report,
-traps, internals.
+person who installs a host and deploys apps. Developer documentation from
+`development-2.0.0` lives in [`docs/internal/`](docs/internal/README.md). The
+MCP catalogue stays at [`docs/mcp-catalogue.html`](docs/mcp-catalogue.html).
+This file is for agents changing the engine. Never duplicate a user procedure
+here. Link to the baseline page, then add only what an agent needs: how to
+verify, what numbers to report, traps, internals.
 
 `docs/` never links here. A public wiki export of `docs/` stays clean.
 
@@ -15,11 +17,12 @@ apt-get 11.9s, build 2.2s, inside a 53.1s critical path" is.
 | Topic | Baseline (operator) | This file |
 |---|---|---|
 | Install, tokens, TLS | [`docs/02-getting-started/`](docs/02-getting-started/install.md) | `--in-container` for tests; installer prints `pae-artisan` |
-| MCP | [`docs/04-connecting-your-ai/`](docs/04-connecting-your-ai/your-assistant.md) | CatalogueTest; do not invent client UIs |
+| MCP | [`docs/04-connecting-your-ai/`](docs/04-connecting-your-ai/your-assistant.md), [`docs/mcp-catalogue.html`](docs/mcp-catalogue.html) | CatalogueTest; do not invent client UIs |
 | Detection / stacks | [`docs/07-supported-projects/`](docs/07-supported-projects/how-detection-works.md) | §6a Railpack measurements; §11 onboarding an app |
 | Deploy failures | [`docs/02-getting-started/what-happens.md`](docs/02-getting-started/what-happens.md) | Explainer rules vs DinD proof |
 | Telemetry | [`docs/02-getting-started/what-is-collected.md`](docs/02-getting-started/what-is-collected.md) | Field list when changing `DeployReport` |
 | Pipeline speed / caches | (none — operator does not measure this) | §1–§10 below |
+| REST + MCP behaviour | [`tests/api/README.md`](tests/api/README.md) | §1a: what it covers, what a green run does and does not prove |
 
 > **Adding support for a third-party application?** §11 in this file is the
 > playbook: detect without paying for a deploy, when an app needs a manifest,
@@ -51,6 +54,44 @@ away as "probably pre-existing".
 A recipe change must also keep detection stable. The fastest proof is
 differential: extract the pre-change classes into a parallel namespace, run both
 over the same fixtures, and diff every field of the returned decision.
+
+---
+
+## 1a. API tests (Playwright, `tests/api/`)
+
+The unit suite above covers the engine's logic in isolation. `tests/api/` drives
+a **live engine** over its REST API and its MCP endpoint: it creates real
+projects, domains, databases and deploys, and asserts on what comes back.
+Conventions, setup and the project list are in
+[`tests/api/README.md`](tests/api/README.md) — read it before adding a spec.
+
+```bash
+cd tests/api
+npm install
+npm test                  # unit + the API suite against the engine in env/.env
+npm run test:unit         # pure logic, no engine
+npm run check             # typecheck + lint + format — run before pushing
+```
+
+Three things an agent gets wrong here:
+
+**A green run is not full coverage.** A lot of the suite skips for legitimate
+environmental reasons (CSF not installed, IP management absent, `pae-artisan`
+unreachable). Every run now prints what it skipped and why; read that summary
+before reporting a result, and quote the skip count alongside the pass count.
+`MAX_SKIPPED=<n>` turns the budget into a gate.
+
+**MCP is tested separately from REST, on purpose.** `tools/call` answers HTTP
+200 with `result.isError: true` when the tool itself fails, so REST specs
+passing says nothing about the MCP surface on top of them. `tests/mcp/` compares
+`tools/list` against `core/app/Mcp/tool-names.php` and calls every read-only
+tool. **Changing `tool-names.php` or anything under `core/app/Mcp/` means
+running `tests/mcp/`.**
+
+**Only the engine host runs the whole thing.** The `cli`, `deploy`,
+`webserver-change`, `update`, `engine-cert` and `network-mutation` projects
+reconfigure the host or wait on a real deploy, and are excluded from `npm test`.
+Naming them in a result means having run them explicitly.
 
 ---
 

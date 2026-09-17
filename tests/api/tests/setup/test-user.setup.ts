@@ -10,7 +10,11 @@ import {
   waitForSiteHttpReady,
 } from '@/helpers/webserver-helpers';
 import type { SetupTestData, UserCredentials } from '@/types/user.types';
-import { ipv4FromPanelAlphaDirectZone, isThirdPartyIpZone, onlineLabel } from '@/config/site-domain';
+import {
+  ipv4FromPanelAlphaDirectZone,
+  isThirdPartyIpZone,
+  onlineLabel,
+} from '@/config/site-domain';
 
 /**
  * Provisions the one shared test user the whole suite runs against and writes it

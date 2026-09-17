@@ -1,7 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { delay } from '@/helpers/retry';
-import { httpScheme } from '@/helpers/webserver-helpers';
+import { fetchSite, httpScheme } from '@/helpers/webserver-helpers';
 import {
   installLocalIpBlockMuPlugin,
   installWpHttpProbeScript,
@@ -44,8 +44,7 @@ test.describe('private-IP blocking plugins', () => {
     anonymousRequest,
     setupUser,
   }) => {
-    const response = await anonymousRequest.get(setupUser.url, {
-      ignoreHTTPSErrors: true,
+    const response = await fetchSite(anonymousRequest, setupUser.url, {
       maxRedirects: 5,
       timeout: 30_000,
     });
@@ -114,12 +113,15 @@ test.describe('private-IP blocking plugins', () => {
     await delay(MU_PLUGIN_PROPAGATION_MS);
 
     const host = engineIp!.includes(':') ? `[${engineIp!}]` : engineIp!;
-    const response = await anonymousRequest.get(`${httpScheme(settings.apiBaseUrl)}://${host}/`, {
-      headers: { Host: setupUser.domain },
-      ignoreHTTPSErrors: true,
-      maxRedirects: 0,
-      timeout: 30_000,
-    });
+    const response = await fetchSite(
+      anonymousRequest,
+      `${httpScheme(settings.apiBaseUrl)}://${host}/`,
+      {
+        headers: { Host: setupUser.domain },
+        maxRedirects: 0,
+        timeout: 30_000,
+      }
+    );
 
     test.skip(
       response.status() !== 403,
@@ -147,7 +149,17 @@ test.describe('private-IP blocking plugins', () => {
       '--activate',
       wpPath(setupUser),
     ]);
-    test.skip(install.exit_code !== 0, `Wordfence would not install: ${install.stderr}`);
+    // The run was asked for explicitly, so wp-cli failing is a result. Only a
+    // failure to fetch the plugin — this host has no route to wordpress.org —
+    // is environmental.
+    if (install.exit_code !== 0) {
+      const stderr = (install.stderr ?? '').toLowerCase();
+      const unreachable = /could not resolve|connection|timed out|network|download failed|ssl/.test(
+        stderr
+      );
+      expect(unreachable, `Wordfence install failed: ${install.stderr}`).toBe(true);
+      test.skip(true, `Wordfence could not be downloaded on this host: ${install.stderr}`);
+    }
 
     try {
       await delay(WORDFENCE_ACTIVATE_DELAY_MS);

@@ -39,9 +39,12 @@ test(
       const created = await createSymlink(sftp, target, sftpPath);
       test.skip(!created, 'This SFTP server does not expose a symlink operation.');
 
-      const response = await authedRequest.put(`projects/${setupUser.username}/files/put-contents`, {
-        data: { path: apiPath, contents: 'malicious_content' },
-      });
+      const response = await authedRequest.put(
+        `projects/${setupUser.username}/files/put-contents`,
+        {
+          data: { path: apiPath, contents: 'malicious_content' },
+        }
+      );
 
       expectOneOf(
         response.status(),

@@ -79,3 +79,12 @@ export {
   servingWordSchema,
   SERVING_WORDS,
 } from './inspect.schemas';
+export {
+  createdVaultSecretResponseSchema,
+  createdVaultSecretSchema,
+  deletedVaultSecretResponseSchema,
+  vaultSecretEntrySchema,
+  vaultSecretListSchema,
+  vaultSecretResponseSchema,
+  vaultSecretStatusSchema,
+} from './vault.schemas';

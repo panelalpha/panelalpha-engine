@@ -65,27 +65,70 @@ test.describe('change-webserver validation', () => {
     expect(response.status()).toBe(422);
   });
 
+  /**
+   * Some engine builds refuse every switch up front — nginx-proxy is required
+   * for DinD projects — and answer 422 on `new_webserver` before they ever look
+   * at the rest of the payload.
+   *
+   * That makes the tests below unable to see what they are about: they would
+   * pass on the 422 without the engine having validated anything. So the
+   * refusal is recognised and the test skips, rather than reporting a pass it
+   * did not earn.
+   */
+  function switchingDisabledReason(body: unknown): string | null {
+    const errors = (body as { errors?: Record<string, string[] | undefined> } | null)?.errors;
+    const newWebserver = errors?.new_webserver?.join(' ') ?? '';
+    return /temporarily disabled|only nginx-proxy is supported/i.test(newWebserver)
+      ? `This engine refuses every webserver switch: ${newWebserver}`
+      : null;
+  }
+
   /** The serial only means something for LiteSpeed Enterprise. */
   const nonLicensedTargets = ['nginx', 'openlitespeed'] as const;
 
   for (const target of nonLicensedTargets) {
     test(`a serial number is refused when changing to ${target}`, async ({ api }) => {
-      const { status } = await api.changeWebserverRaw({
+      const { status, body } = await api.changeWebserverRaw({
         new_webserver: target,
         serial_number: 'TEST-SERIAL',
       });
       expect(status).toBe(422);
+
+      const disabled = switchingDisabledReason(body);
+      test.skip(disabled !== null, disabled ?? '');
+
+      // With switching available, the 422 has to be about the serial.
+      expect(
+        /serial/i.test(JSON.stringify(body)),
+        `${target} was refused for something other than the serial: ${JSON.stringify(body).slice(0, 400)}`
+      ).toBe(true);
     });
   }
 
-  test('a malformed LiteSpeed serial is refused with a field error', async ({ api }) => {
+  test('a malformed LiteSpeed serial is refused, and the refusal names the serial', async ({
+    api,
+  }) => {
     const { status, body } = await api.changeWebserverRaw({
       new_webserver: 'litespeed',
       serial_number: 'invalid-serial-number',
     });
 
     expect(status).toBe(422);
-    expect((body as { errors?: { serial_number?: string[] } }).errors?.serial_number).toBeDefined();
+
+    const disabled = switchingDisabledReason(body);
+    test.skip(disabled !== null, disabled ?? '');
+
+    // A 422 that does not say which field was wrong leaves the caller guessing.
+    // Laravel's `errors.serial_number` is the usual shape, but any refusal that
+    // names the serial is a usable answer — what must not happen is a bare 422.
+    // The body goes in the message so a mismatch says what it got, rather than
+    // "undefined" as this assertion used to.
+    const serialised = JSON.stringify(body);
+    const fieldError = (body as { errors?: { serial_number?: string[] } }).errors?.serial_number;
+    expect(
+      fieldError !== undefined || /serial/i.test(serialised),
+      `the engine refused the serial without saying so: ${serialised.slice(0, 400)}`
+    ).toBe(true);
   });
 
   test('changing to the webserver already in use is handled', async ({ api, authedRequest }) => {

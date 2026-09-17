@@ -1,5 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { cronJobListSchema } from '@/schemas';
+import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 import { rand } from '@/helpers/random';
 import { waitForCondition } from '@/helpers/retry';
 
@@ -22,7 +24,8 @@ const EVERY_MINUTE = {
 
 test.describe('cron jobs', () => {
   test('the job list is returned', async ({ api, setupUser }) => {
-    expect(Array.isArray((await api.listCronJobs(setupUser.username)).data)).toBe(true);
+    const listing = await api.listCronJobs(setupUser.username);
+    validateParsedApiResponse(listing, cronJobListSchema);
   });
 
   test('a new user has no cron jobs', async ({ api, userFactory }) => {

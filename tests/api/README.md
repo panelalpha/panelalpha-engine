@@ -129,6 +129,19 @@ caller itself requests.
 Setting `DOMAIN` in `env/.env` overrides the derivation when you manage DNS
 yourself. A leftover `*.sslip.io` value is ignored.
 
+### Optional switches
+
+| Variable                    | What it does                                                          |
+| --------------------------- | --------------------------------------------------------------------- |
+| `MAX_SKIPPED`               | Fail the run when more than this many tests skip. Unset: report only. |
+| `MCP_EXPECT_FULL_CATALOGUE` | `false` on an engine with a narrowed `MCP_TOOLSETS` / `MCP_TOOLS`.    |
+| `WP_SECURITY_PLUGIN_TEST`   | `wordfence` opts into the Wordfence lockout test.                     |
+
+Every run prints what it skipped, grouped by reason. That matters here because a
+lot of the suite skips legitimately — CSF may not be installed, IP management is
+optional, `pae-artisan` needs host access — and without the summary a green run
+does not say how much of it executed. `MAX_SKIPPED` turns that into a gate.
+
 ### Webserver profiles
 
 `TEST_ENV=nginx` loads `env/.env.nginx` over the base file and keeps that
@@ -145,6 +158,8 @@ tests/api/
 │   ├── health/ users/ domains/ php/ cron/ ftp/ sftp/ mysql/ files/
 │   ├── wp-cli/ csf/ ip/ modsec/ lighthouse/ system/ exim/
 │   ├── permalinks/ lscache/ integration/ inspect/ ssh/
+│   ├── mcp/          # The MCP endpoint: tokens, catalogue parity, tool smoke
+│   ├── vault/        # Secret vault: the `vault:<ref>` browser handoff
 │   ├── cli/          # pae-artisan (Playwright project `cli`)
 │   └── deploy/       # git deploy + running DinD app (project `deploy`)
 ├── fixtures/
@@ -158,6 +173,7 @@ tests/api/
 │   ├── factories/    # Build real users, domains, databases via the API
 │   └── static/       # Fixed inputs: SSH keys, certificates, upload payloads
 ├── helpers/          # Retry, randomisation, webserver quirks, protocol clients
+├── reporters/        # skip-budget: what a run skipped, and MAX_SKIPPED
 ├── config/           # Settings and timeout constants
 └── env/              # .env.example and your local .env
 ```
@@ -198,6 +214,36 @@ OpenLiteSpeed needs 45s where nginx needs 3s.
 **Reach for `expectOneOf` over `toContain`** when several statuses are valid. It
 reports the value you actually got instead of the list you allowed.
 
+**Validate the shape, not just the status.** When `schemas/` has a schema for
+what an endpoint returns, run the parsed response through
+`validateParsedApiResponse(response, schema)` instead of asserting
+`Array.isArray(data)`. The schema is the field contract; an added or renamed
+field then fails a test instead of passing one.
+
+**An assertion has to be able to fail.** `expect(x.result !== undefined || x.error
+!== undefined).toBe(true)` passes whatever the server did. This bit the MCP
+specs: `tools/call` answers HTTP 200 with `result.isError: true` when the tool
+itself failed, so a broken tool read as a pass. Use `expectMcpToolOk` from
+`@/helpers/mcp-helpers`, which looks at all three failure channels.
+
+**A host-wide write does not belong in the default run.** `npm test` creates and
+deletes its own projects; it must not reconfigure the engine underneath them.
+Anything that rewrites engine-wide state — networking, the active webserver, the
+update path — is gated behind an env switch and a separate Playwright project.
+This is not theoretical: NAT auto-discovery (`POST /system/ipv4-nat-maps/rebuild`)
+ran ungated in the `api` project, concluded a host that holds its public address
+directly was behind NAT, rebound every vhost to the Docker gateway and took the
+public address off the air — for the live sites on that box, not just the
+suite's. It is gated now. When in doubt about a new endpoint, ask what it
+rebuilds.
+
+**Skip for the environment, never for the result.** `test.skip(!hostExec, …)` is
+right: `pae-artisan` really may be unreachable. `test.skip(response.status() ===
+422, …)` is not — that is the bug the test exists to find. When the condition
+could mean either, prove which one it is first (check the refusal message, make
+the traffic that produces the missing log) and skip only on the environmental
+branch.
+
 **Tag sparingly.** `@smoke` marks the handful of tests that prove the engine is
 alive. `@slow` marks host-wide work that takes minutes (CSF disable/enable, the
 full PHP version matrix, DinD create with `git_repo`) and is left out of
@@ -235,6 +281,27 @@ npm run test:cli
 npm run test:deploy
 npm run test:slow
 ```
+
+## The MCP surface
+
+The engine serves the same operations twice: as REST, and as MCP tools over
+`/mcp`. `tests/mcp/` covers the second one, because passing REST tests say
+nothing about it — the translation layer in between is its own code.
+
+- `mcp-tool-catalogue.spec.ts` compares `tools/list` against the engine's own
+  `core/app/Mcp/tool-names.php`. The map is read out of the checkout rather than
+  copied here, so there is one list, not two that can drift. A tool served under
+  a name the map does not define fails; so does a name in the map that is not
+  served, unless `MCP_EXPECT_FULL_CATALOGUE=false`.
+- `mcp-readonly-tools.spec.ts` calls every read-only tool (a GET in the map) and
+  fails on the ones that report an error. Which arguments to pass comes from each
+  tool's advertised `inputSchema`, so a new tool is picked up without editing the
+  spec; one whose arguments the spec cannot supply is reported in the run's
+  annotations rather than dropped silently.
+
+The failure this exists to catch: `tools/call` answers HTTP 200 with
+`result.isError: true` when the tool itself fails. Assert on the status, or only
+on the JSON-RPC `error` member, and a broken tool passes.
 
 ## Toolchain
 

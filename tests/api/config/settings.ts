@@ -43,7 +43,6 @@ export class Settings {
 
   readonly paths: {
     readonly cacheDir: string;
-    readonly logsDir: string;
     readonly staticDataDir: string;
   };
 
@@ -85,7 +84,6 @@ export class Settings {
 
     this.paths = {
       cacheDir: path.join(rootDir, '.playwright/cache'),
-      logsDir: path.join(rootDir, '.playwright/logs'),
       staticDataDir: path.join(rootDir, 'test-data/static'),
     };
   }
@@ -179,17 +177,8 @@ export class Settings {
     return path.join(this.paths.cacheDir, `test-cache${envSuffix}.json`);
   }
 
-  getLogFilePath(): string {
-    const envSuffix = this.testEnv ? `-${this.testEnv}` : '';
-    return path.join(this.paths.logsDir, `test-execution${envSuffix}.log`);
-  }
-
   getSshPublicKeyPath(): string {
     return path.join(this.paths.staticDataDir, 'ssh_test_key.pub');
-  }
-
-  getSshPrivateKeyPath(): string {
-    return path.join(this.paths.staticDataDir, 'ssh_test_key');
   }
 }
 

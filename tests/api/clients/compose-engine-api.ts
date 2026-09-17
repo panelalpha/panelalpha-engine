@@ -26,6 +26,7 @@ import { TasksApi } from './resources/tasks.api';
 import { BugReportsApi } from './resources/bug-reports.api';
 import { SystemApi } from './resources/system.api';
 import { UsersApi } from './resources/users.api';
+import { VaultApi } from './resources/vault.api';
 import { WpCliApi } from './resources/wpcli.api';
 
 /** Domain API clients composed into {@link EngineApi}. */
@@ -58,6 +59,7 @@ export const ENGINE_API_CLIENTS = [
   ProjectSettingsApi,
   TasksApi,
   BugReportsApi,
+  VaultApi,
 ] as const;
 
 export type EngineApiClient = InstanceType<(typeof ENGINE_API_CLIENTS)[number]>;

@@ -1,7 +1,7 @@
 import type { APIRequestContext } from '@playwright/test';
 import type { EngineApi } from '@/clients/engine-api';
 import type { ModSecurityMode, ModSecurityRuleset } from '@/types';
-import { delay } from '@/helpers/retry';
+import { delay, waitForCondition } from '@/helpers/retry';
 import { probeModsecurityHostingCompatible } from '@/helpers/modsec-hosting-probe';
 
 export const VALID_MODES: ModSecurityMode[] = ['off', 'detection_only', 'on'];
@@ -163,4 +163,35 @@ export function isAuthorEnumerationMitigated(probe: AuthorEnumerationProbe): boo
   return (
     isBlockedStatus(probe.status) || isBlockedBody(probe.body) || !isAuthorArchiveExposure(probe)
   );
+}
+
+/** A request the CRS flags, so the engine has an audit entry to serve. */
+const AUDIT_TRIGGER_QUERY = '?pa_probe=%3Cscript%3Ealert(1)%3C/script%3E&f=../../etc/passwd';
+
+/**
+ * The audit log files, after making sure there is something to log.
+ *
+ * Listing nothing is the normal state of an engine where no rule has ever
+ * fired, and skipping on it would also hide a listing endpoint that has stopped
+ * returning files. Firing a request the WAF objects to separates the two.
+ */
+export async function auditLogFiles(
+  api: EngineApi,
+  anonymousRequest: APIRequestContext,
+  siteUrl: string
+): Promise<Awaited<ReturnType<typeof api.listModSecurityAuditLogFiles>>['data']> {
+  let files: Awaited<ReturnType<typeof api.listModSecurityAuditLogFiles>>['data'] = [];
+
+  const read = async () => {
+    files = (await api.listModSecurityAuditLogFiles()).data;
+    return files.length > 0;
+  };
+
+  if (await read()) {
+    return files;
+  }
+
+  await anonymousRequest.get(`${siteUrl}${AUDIT_TRIGGER_QUERY}`).catch(() => undefined);
+  await waitForCondition(read, { timeout: 20_000, interval: 2_000 }).catch(() => undefined);
+  return files;
 }

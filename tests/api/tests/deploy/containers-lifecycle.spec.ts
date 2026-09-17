@@ -20,7 +20,9 @@ test.describe('container lifecycle on a deployed app', () => {
 
     const listed = await api.listContainers(user.username);
     expect(Array.isArray(listed.data)).toBe(true);
-    test.skip(listed.data.length === 0, 'The deployed project has no containers yet.');
+    // createDeployedUser() already waited for the deploy, so an empty compose
+    // listing here is the deploy having failed — not a reason to stand down.
+    expect(listed.data.length, 'the deployed project reports no containers').toBeGreaterThan(0);
 
     const stop = await api.runProjectContainerActionRaw(user.username, 'stop');
     expectOneOf(stop.status, [200, 500]);

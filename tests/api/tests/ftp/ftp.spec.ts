@@ -1,5 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { ftpAccountListSchema } from '@/schemas';
+import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 import {
   CHATTY_BANNER_PATTERN,
   QUOTA_TEST_SIZE_MB,
@@ -15,7 +17,8 @@ import { requireEngineConnectHost } from '@/helpers/engine-host';
 
 test.describe('FTP accounts', () => {
   test('the account list is returned', async ({ api, setupUser }) => {
-    expect(Array.isArray((await api.listFtpAccounts(setupUser.username)).data)).toBe(true);
+    const listing = await api.listFtpAccounts(setupUser.username);
+    validateParsedApiResponse(listing, ftpAccountListSchema);
   });
 
   test('a new user has no FTP accounts', async ({ api, userFactory }) => {

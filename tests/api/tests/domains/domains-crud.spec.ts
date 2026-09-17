@@ -95,9 +95,18 @@ test.describe('subdomain lifecycle', () => {
     const response = await authedRequest.post(`projects/${setupUser.username}/domains`, {
       data: { domain: subdomain, type: 'sub', parent_domain: setupUser.domain },
     });
-    // 422 means the user has hit its subdomain limit, which is not what this test is about.
+    // A 422 is only acceptable for one reason: the account is at its subdomain
+    // limit, which this test is not about. Any other refusal is the bug the
+    // test exists to catch, so the body has to say so before it skips.
     expectOneOf(response.status(), [201, 422]);
-    test.skip(response.status() === 422, 'Subdomain creation was refused by the engine.');
+    if (response.status() === 422) {
+      const refusal = await response.text();
+      expect(
+        refusal.toLowerCase(),
+        `subdomain creation was refused for something other than a limit: ${refusal}`
+      ).toMatch(/limit|maximum|exceed|quota/);
+      test.skip(true, 'The account is at its subdomain limit.');
+    }
 
     const created =
       ((await response.json()) as { data?: { domain?: string } }).data?.domain ?? subdomain;

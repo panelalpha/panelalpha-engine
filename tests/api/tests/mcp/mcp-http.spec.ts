@@ -3,6 +3,7 @@ import { McpHttpClient, parseMcpJsonRpc } from '@/clients/mcp-http';
 import { uniqueId } from '@/helpers/random';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { skipUnless } from '@/helpers/test-helpers';
+import { McpSession, expectMcpToolError } from '@/helpers/mcp-helpers';
 
 test.describe('MCP streamable HTTP', () => {
   test('GET /mcp/check requires a valid MCP token', async ({ api, anonymousRequest, settings }) => {
@@ -92,10 +93,7 @@ test.describe('MCP streamable HTTP', () => {
         },
         token
       );
-      test.skip(
-        !called.ok(),
-        `tools/call project_list_summary returned HTTP ${called.status()}`
-      );
+      test.skip(!called.ok(), `tools/call project_list_summary returned HTTP ${called.status()}`);
       const invocation = parseMcpJsonRpc(await called.text());
       expect(invocation).toBeTruthy();
       expect(invocation?.error).toBeUndefined();
@@ -111,72 +109,25 @@ test.describe('MCP streamable HTTP', () => {
     settings,
     setupUser,
   }) => {
-    const client = new McpHttpClient(anonymousRequest, settings.apiBaseUrl);
     const created = await api.createMcpToken(uniqueId('mcp-tools-'));
     const token = created.data.plain_text_token;
     skipUnless(token, 'createMcpToken did not return a plaintext token.');
 
     try {
-      const handshake = await client.send(
-        {
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'initialize',
-          params: {
-            protocolVersion: '2025-06-18',
-            capabilities: {},
-            clientInfo: { name: 'engine-api-tests', version: '1' },
-          },
-        },
-        token
-      );
-      expect(handshake.ok()).toBe(true);
+      const session = await McpSession.open(anonymousRequest, settings.apiBaseUrl, token);
 
-      let nextId = 2;
-      const call = async (name: string, args: Record<string, unknown> = {}) => {
-        const response = await client.send(
-          {
-            jsonrpc: '2.0',
-            id: nextId++,
-            method: 'tools/call',
-            params: { name, arguments: args },
-          },
-          token
-        );
-        expect(response.ok(), `${name} HTTP ${response.status()}`).toBe(true);
-        const parsed = parseMcpJsonRpc(await response.text());
-        expect(parsed, `${name} produced no JSON-RPC payload`).toBeTruthy();
-        return parsed!;
-      };
+      await session.callOk('metrics_latest');
+      await session.callOk('project_list_summary');
+      await session.callOk('project_get', { name: setupUser.username });
+      await session.callOk('domain_list', { name: setupUser.username });
+      await session.callOk('domain_find', { domain: setupUser.domain });
+      await session.callOk('git_status', { name: setupUser.username });
+      await session.callOk('backup_list', { name: setupUser.username });
 
-      const metrics = await call('metrics_latest');
-      expect(metrics.result !== undefined || metrics.error !== undefined).toBe(true);
-
-      const summary = await call('project_list_summary');
-      expect(summary.error).toBeUndefined();
-      expect(summary.result).toBeTruthy();
-
-      const project = await call('project_get', { name: setupUser.username });
-      expect(project.error).toBeUndefined();
-      expect(project.result).toBeTruthy();
-
-      const domains = await call('domain_list', { name: setupUser.username });
-      expect(domains.error).toBeUndefined();
-      expect(domains.result).toBeTruthy();
-
-      const found = await call('domain_find', { domain: setupUser.domain });
-      expect(found.error).toBeUndefined();
-      expect(found.result).toBeTruthy();
-
-      const git = await call('git_status', { name: setupUser.username });
-      expect(git.error).toBeUndefined();
-      expect(git.result).toBeTruthy();
-
-      const backups = await call('backup_list', { name: setupUser.username });
-      expect(backups.result !== undefined || backups.error !== undefined).toBe(true);
-
-      const missingTask = await call('task_get', { id: 999_999_999 });
-      expect(missingTask.result !== undefined || missingTask.error !== undefined).toBe(true);
+      // A task that does not exist has to come back as a failure. `tools/call`
+      // answers HTTP 200 either way, so this is the case that catches a tool
+      // reporting success over an empty lookup.
+      expectMcpToolError(await session.call('task_get', { id: 999_999_999 }), 'task_get');
     } finally {
       await api.deleteMcpTokenSafe(created.data.id);
     }
