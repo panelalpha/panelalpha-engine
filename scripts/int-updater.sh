@@ -23,9 +23,9 @@ trap die EXIT
 umask 022
 
 PANELALPHA_ENGINE_VERSION='master'
-PACKAGE_HOST='connect.panelalpha.com'
-MONITORING_HOST="${PANELALPHA_MONITORING_HOST:-monitoring.panelalpha.com}"
+PACKAGE_HOST='hub.panelalpha.com'
 BACKGROUND=0
+LICENSE_KEY=''
 DEBUG_MODE=0
 FORCE_MODE=false
 RUN_DIR=''
@@ -33,6 +33,14 @@ CONFIGURE_MODE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+    --key=*)
+        LICENSE_KEY="${1#*=}"
+        shift
+        ;;
+    --key)
+        LICENSE_KEY="$2"
+        shift 2
+        ;;
     --version=*)
         PANELALPHA_ENGINE_VERSION="${1#*=}"
         shift
@@ -55,14 +63,6 @@ while [[ $# -gt 0 ]]; do
         ;;
     --package-host)
         PACKAGE_HOST="$2"
-        shift 2
-        ;;
-    --monitoring-host=*)
-        MONITORING_HOST="${1#*=}"
-        shift
-        ;;
-    --monitoring-host)
-        MONITORING_HOST="$2"
         shift 2
         ;;
     --background)
@@ -124,7 +124,7 @@ define_variables() {
     LOG_FILE="${LOG_DIR}/engine-updater_$(date +"%Y-%m-%d_%H-%M-%S").log"
     ORIGINAL_USERNAME=$(whoami)
     ORIGINAL_HOME_DIR=$(getent passwd "$ORIGINAL_USERNAME" | cut -d: -f6)
-    DOWNLOAD_STATUS=''
+    LICENSE_STATUS=''
     TOKEN=''
     ERROR=''
     MSG=''
@@ -165,21 +165,50 @@ check_version() {
     fi
 }
 
-request_download_token() {
-    # Hub package host resolves the caller by IP and returns a short-lived download token.
-    CURL_RESULTS=$(curl --http1.1 "https://${PACKAGE_HOST}/api/verify/request-download")
+check_license_key() {
 
-    TOKEN=$(echo "$CURL_RESULTS" | jq -r '.["license"].download_token // empty')
-    DOWNLOAD_STATUS=$(echo "$CURL_RESULTS" | jq -r '.["license"].status // empty')
-    ERROR=$(echo "$CURL_RESULTS" | jq -r '.error // empty')
-    MSG=$(echo "$CURL_RESULTS" | jq -r '.msg // empty')
-
-    if [ "$ERROR" == true ]; then
-        echo_error "Could not obtain a download token. $MSG" 102
+    if [ ! -z "$LICENSE_KEY" ]; then
+        return
     fi
 
-    if [ "$DOWNLOAD_STATUS" != "Reissued" ] && [ "$DOWNLOAD_STATUS" != "Created" ] && [ "$DOWNLOAD_STATUS" != "Active" ]; then
-        echo_error "Invalid download status: $DOWNLOAD_STATUS." 103
+    LICENSE_KEY=$(docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:get license_key || true)
+
+    if [ ! -z "$LICENSE_KEY" ]; then
+        return
+    fi
+
+    if [[ "$BACKGROUND" -eq 1 ]]; then
+        echo_error "Cannot detect license key. Manual upgrade required" 106
+    fi
+
+    echo -n "Enter License Key: "
+    read LICENSE_KEY
+
+    if [ ! -z "$LICENSE_KEY" ]; then
+        return
+    fi
+
+    echo_error "License Key is required." 101
+}
+
+license_verify() {
+    # Remove - characters
+    LICENSE_KEY=${LICENSE_KEY//-/}
+
+    # Execute CURL request
+    CURL_RESULTS=$(curl --http1.1 'https://'$PACKAGE_HOST'/api/verify/request-download' --header 'License-Key:'$LICENSE_KEY'')
+
+    TOKEN=$(echo $CURL_RESULTS | jq '.license | .download_token' --raw-output)
+    LICENSE_STATUS=$(echo $CURL_RESULTS | jq '.license | .status' --raw-output)
+    ERROR=$(echo $CURL_RESULTS | jq '.error' --raw-output)
+    MSG=$(echo $CURL_RESULTS | jq '.msg' --raw-output)
+
+    if [ $ERROR == true ]; then
+        echo_error "The license key is invalid. $MSG. Use '--key NEW_LICENSE_KEY' to apply other key'" 102
+    fi
+
+    if [ $LICENSE_STATUS != "Reissued" ] && [ $LICENSE_STATUS != "Created" ] && [ $LICENSE_STATUS != "Active" ]; then
+        echo_error "Invalid license status: $LICENSE_STATUS." 103
     fi
 }
 
@@ -218,9 +247,9 @@ unzip_panelalpha_engine() {
 }
 
 # Every artisan call talks to the core database, and it is not always ready when
-# we ask: MySQL is still running initdb right after 'up -d', and any Docker
-# restart takes the whole stack down with it. Bounded, so a stack that never
-# comes up fails the run instead of hanging on it forever.
+# we ask: the core container is still starting up right after 'up -d', and any
+# Docker restart takes the whole stack down with it. Bounded, so a stack that
+# never comes up fails the run instead of hanging on it forever.
 wait_for_database() {
     local timeout=${1:-600}
     local waited=0
@@ -337,9 +366,86 @@ EOF
     fi
 }
 
+# A host still running core-db predates the sqlite migration and has real
+# data in it; a fresh install never had core-db to begin with. Must run
+# before cp -Rf replaces docker-compose.yml with the new release's copy,
+# which is the last point the old file (and the service it did or didn't
+# define) can still be read. Sets LEGACY_CORE_DB for the rest of
+# update_files(), including backup_database().
+detect_legacy_core_db() {
+    if [ -f /opt/panelalpha/shared-hosting/docker-compose.yml ] &&
+        grep -q '^  core-db:' /opt/panelalpha/shared-hosting/docker-compose.yml; then
+        LEGACY_CORE_DB=1
+    else
+        LEGACY_CORE_DB=0
+    fi
+}
+
+# Backfills what a MySQL-backed core needs: the CORE_DB_* overrides
+# docker-compose.yml's core/metrics services read (config/database.php's
+# mysql connection takes it from there), and the legacy-mysql-core profile
+# so `up -d` actually manages core-db instead of leaving it running
+# unmanaged under its old image. Two ways in: LEGACY_CORE_DB=1 (an existing
+# core-db host, detected above) backfills the profile itself; an operator
+# who has already put legacy-mysql-core in COMPOSE_PROFILES by hand (a
+# fresh install choosing MySQL on purpose) only needs the connection vars --
+# the profile is already exactly what they asked for. Runs after the
+# COMPOSE_PROFILES=full backfill below so it only ever appends to an
+# already-decided list -- never decides between 'full' and this host's own
+# trimmed list itself. See docs/internal/core-db.md.
+keep_legacy_core_db_on_mysql() {
+    local profiles profile_wants_mysql=0
+    profiles=$(grep '^COMPOSE_PROFILES=' /opt/panelalpha/shared-hosting/.env | cut -d '=' -f2-)
+    case ",${profiles}," in
+    *,legacy-mysql-core,*) profile_wants_mysql=1 ;;
+    esac
+
+    [ "$LEGACY_CORE_DB" = "1" ] || [ "$profile_wants_mysql" = "1" ] || return 0
+
+    if ! grep -q '^CORE_DB_CONNECTION=' /opt/panelalpha/shared-hosting/.env; then
+        echo_info "Core database is MySQL; backfilling CORE_DB_* in .env"
+        if [ -n "$(tail -c1 /opt/panelalpha/shared-hosting/.env)" ]; then
+            echo "" >>/opt/panelalpha/shared-hosting/.env
+        fi
+        cat >>/opt/panelalpha/shared-hosting/.env <<'EOF'
+CORE_DB_CONNECTION=mysql
+CORE_DB_HOST=database-core.shared-hosting.palocal
+CORE_DB_DATABASE=core
+CORE_DB_USERNAME=core
+EOF
+    fi
+
+    # A LEGACY_CORE_DB=1 host already has a real CORE_MYSQL_PASSWORD from
+    # its original install -- core-db is already running with it, so this
+    # must never overwrite a non-empty value. Only a host switching to
+    # legacy-mysql-core for the first time (no core-db provisioned yet)
+    # needs one generated.
+    if ! grep -q '^CORE_MYSQL_PASSWORD=.\+' /opt/panelalpha/shared-hosting/.env; then
+        local core_mysql_password
+        core_mysql_password=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+        if grep -q '^CORE_MYSQL_PASSWORD=' /opt/panelalpha/shared-hosting/.env; then
+            sed -i "s/^CORE_MYSQL_PASSWORD=.*/CORE_MYSQL_PASSWORD=${core_mysql_password}/" /opt/panelalpha/shared-hosting/.env
+        else
+            if [ -n "$(tail -c1 /opt/panelalpha/shared-hosting/.env)" ]; then
+                echo "" >>/opt/panelalpha/shared-hosting/.env
+            fi
+            echo "CORE_MYSQL_PASSWORD=${core_mysql_password}" >>/opt/panelalpha/shared-hosting/.env
+        fi
+    fi
+
+    if [ "$profile_wants_mysql" = "0" ]; then
+        if [ -z "$profiles" ]; then
+            sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=legacy-mysql-core/' /opt/panelalpha/shared-hosting/.env
+        else
+            sed -i "s/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=${profiles},legacy-mysql-core/" /opt/panelalpha/shared-hosting/.env
+        fi
+    fi
+}
+
 update_files() {
 
     echo_info "Updating files..."
+    detect_legacy_core_db
 
     # --preserve=mode repairs files a previous install left root-only.
     cp -Rf --preserve=mode /opt/panelalpha/tmp/engine/app/. /opt/panelalpha/shared-hosting/.
@@ -373,9 +479,14 @@ update_files() {
         echo "COMPOSE_PROFILES=full" >>/opt/panelalpha/shared-hosting/.env
     fi
 
+    keep_legacy_core_db_on_mysql
+
     # This also clears the containers left by the compose service rename (nginx ->
     # core-http, webserver -> sites-http, ...): their service key is gone from the
     # file, so compose sees them as project orphans and --remove-orphans drops them.
+    # core-db is not among them for a host keep_legacy_core_db_on_mysql just
+    # opted in above -- its profile makes it a defined-but-filtered service,
+    # not an orphan, so down leaves it running untouched either way.
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml down --remove-orphans
     docker image prune -af || true
     docker builder prune -af || true
@@ -386,6 +497,7 @@ update_files() {
     backup_database
     record_pending_migrations
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan migrate --force
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:set license_key "${LICENSE_KEY}"
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:set package_host "${PACKAGE_HOST}"
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:set package_version "${PANELALPHA_ENGINE_VERSION}"
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:modsec:rebuild || true
@@ -430,19 +542,40 @@ restart_webserver_if_config_loads() {
 # operator's next decision depends on whether it exists.
 backup_database() {
     local target="/opt/panelalpha/backups"
-    local file="$target/core-db-$(date +%Y%m%d-%H%M%S).sql"
 
     mkdir -p "$target"
 
-    # mysqldump is not in the image; the MariaDB client ships `mariadb-dump`,
-    # and the old name fails to a 0-byte file that looks like a backup.
-    if docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core-db \
-        bash -lc 'mariadb-dump -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" --single-transaction --routines "$MYSQL_DATABASE"' \
-        >"$file" 2>/dev/null && [ -s "$file" ]; then
+    # LEGACY_CORE_DB is set by detect_legacy_core_db(), earlier in the same
+    # update_files() call -- a host int-updater.sh kept on MySQL still has
+    # its data in core-db, not in core.sqlite.
+    if [ "$LEGACY_CORE_DB" = "1" ]; then
+        local file="$target/core-db-$(date +%Y%m%d-%H%M%S).sql"
+        # mysqldump is not in the image; the MariaDB client ships `mariadb-dump`,
+        # and the old name fails to a 0-byte file that looks like a backup.
+        if docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core-db \
+            bash -lc 'mariadb-dump -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" --single-transaction --routines "$MYSQL_DATABASE"' \
+            >"$file" 2>/dev/null && [ -s "$file" ]; then
+            echo_info "Database backed up to $file" | log_file_echo
+            ls -1t "$target"/core-db-*.sql 2>/dev/null | tail -n +3 | xargs -r rm -f
+        else
+            rm -f "$file"
+            echo_warning "Could not back up the database; continuing without one" | log_file_echo
+        fi
+        return
+    fi
+
+    local file="$target/core-db-$(date +%Y%m%d-%H%M%S).sqlite"
+    # core's data is core.sqlite on core-storage. `.backup` runs inside the
+    # core container so it snapshots the live WAL-mode file instead of
+    # copying it mid-write, and core mounts /opt/panelalpha 1:1 with the
+    # host, so it can write $file directly.
+    if docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+        sqlite3 /var/www/html/storage/database/core.sqlite ".backup '$file'" \
+        2>/dev/null && [ -s "$file" ]; then
         echo_info "Database backed up to $file" | log_file_echo
         # Two is enough to cover "the last update broke it" without turning
         # /opt into an archive nobody prunes.
-        ls -1t "$target"/core-db-*.sql 2>/dev/null | tail -n +3 | xargs -r rm -f
+        ls -1t "$target"/core-db-*.sqlite 2>/dev/null | tail -n +3 | xargs -r rm -f
     else
         rm -f "$file"
         echo_warning "Could not back up the database; continuing without one" | log_file_echo
@@ -516,7 +649,6 @@ send_update_status() {
     current_webserver=${current_webserver:-unknown}
     {
         jq -n \
-            --arg occurred_at "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")" \
             --arg started_at "$started_at" \
             --arg finished_at "$finished_at" \
             --arg exit_code "$exit_code" \
@@ -531,34 +663,14 @@ send_update_status() {
             --arg virtualization "$virtualization" \
             --arg disk_free "$disk_free" \
             --arg webserver "$current_webserver" \
-            --arg software "engine" \
-            --arg software_op "update" \
-            '{events:[{
-              type:"panel.update",
-              occurred_at:$occurred_at,
-              payload:{
-                started_at:$started_at,
-                finished_at:$finished_at,
-                exit_code:$exit_code,
-                tail_stdout:$tail_stdout,
-                tail_stderr:$tail_stderr,
-                from_version:$from_version,
-                to_version:$to_version,
-                background:$background,
-                total_ram:$total_ram,
-                cpu_cores:$cpu_cores,
-                os_name:$os_name,
-                virtualization:$virtualization,
-                disk_free:$disk_free,
-                webserver:$webserver,
-                software:$software,
-                software_op:$software_op
-              }
-            }]}' \
-        | curl -4 -sS -X POST "https://${MONITORING_HOST}/api/v1/events" \
+            '{started_at:$started_at, finished_at:$finished_at, exit_code:$exit_code, 
+              tail_stdout:$tail_stdout, tail_stderr:$tail_stderr,
+              from_version:$from_version, to_version:$to_version, background:$background,
+              total_ram:$total_ram, cpu_cores:$cpu_cores, os_name:$os_name,
+              virtualization:$virtualization, disk_free:$disk_free, webserver:$webserver}' \
+        | curl -sS -X POST "https://${PACKAGE_HOST}/api/verify/update-status" \
+            -H "License-Key: ${LICENSE_KEY:-none}" \
             -H "Content-Type: application/json" \
-            -H "Accept: application/json" \
-            -H "User-Agent: PanelAlpha-Engine/updater" \
             -d @- >/dev/null 2>&1 || true
     } || true
 }
@@ -629,9 +741,14 @@ update_progress 5 "Checking current version"
 echo_info "Checking current version"
 check_version
 
-update_progress 10 "Requesting the download token"
-echo_info "Requesting the download token"
-request_download_token
+update_progress 10 "Checking license key"
+echo_info "Checking license key"
+check_license_key
+
+update_progress 15 "Verify PanelAlpha license key"
+echo_info "Verify PanelAlpha license key"
+license_verify
+echo_warning "The license key $LICENSE_KEY was correctly loaded"
 
 update_progress 25 "Installing sysbox runtime"
 echo_info "Installing sysbox runtime"

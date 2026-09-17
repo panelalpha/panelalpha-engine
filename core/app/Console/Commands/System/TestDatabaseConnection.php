@@ -12,7 +12,7 @@ class TestDatabaseConnection extends Command
 
     protected $signature = 'system:database:test {--retries=0}';
 
-    protected $description = 'Test if mysql database is ready.';
+    protected $description = 'Test if the database is ready.';
 
     public function handle(): int
     {
@@ -24,7 +24,9 @@ class TestDatabaseConnection extends Command
         }
         do {
             try {
-                DB::statement("SELECT 1 FROM `information_schema`.`tables` LIMIT 1");
+                // information_schema is MySQL-only; a plain SELECT proves the
+                // connection is up on any driver, sqlite included.
+                DB::select('SELECT 1');
                 $this->line("Test successful");
                 return 0;
             } catch (\Exception $e) {

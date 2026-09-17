@@ -11,7 +11,12 @@ return new class extends Migration
         Schema::create('sftp_accounts', function (Blueprint $table) {
             $table->id();
             $table->bigInteger('user_id')->index();
-            $table->string('username');
+            $username = $table->string('username');
+            // Matches SftpAccountController's lookups on this column, which are not
+            // pre-lowercased; MySQL's utf8mb4_unicode_ci already made them ci.
+            if (Schema::getConnection()->getDriverName() === 'sqlite') {
+                $username->collation('NOCASE');
+            }
             $table->string('auth_method');
             $table->text('password')->nullable();
             $table->text('public_key')->nullable();

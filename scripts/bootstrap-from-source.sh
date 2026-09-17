@@ -102,8 +102,6 @@ step "Using host address ${PUBLIC_IP}"
 step "Preparing .env and .env-core"
 cp -n .env.example .env
 cp -n .env-core.example .env-core
-grep -q '^CORE_MYSQL_PASSWORD=.\+' .env ||
-    sed -i "s/^CORE_MYSQL_PASSWORD=.*/CORE_MYSQL_PASSWORD=$(rand)/" .env
 grep -q '^USERS_MYSQL_ROOT_PASSWORD=.\+' .env ||
     sed -i "s/^USERS_MYSQL_ROOT_PASSWORD=.*/USERS_MYSQL_ROOT_PASSWORD=$(rand)/" .env
 # Append when the line is absent rather than only rewriting one that exists:
@@ -132,8 +130,8 @@ if ! grep -q '^APP_KEY=.\+' .env-core; then
 fi
 
 # Optional services sit behind compose profiles; see .env.example for the list.
-# --core-only (empty) leaves just the control plane: core, core-db and
-# core-http. Untouched, .env.example's default of 'full' gives the whole stack.
+# --core-only (empty) leaves just the control plane: core and core-http.
+# Untouched, .env.example's default of 'full' gives the whole stack.
 if [ "$SET_PROFILES" = 1 ]; then
     if grep -q '^COMPOSE_PROFILES=' .env; then
         sed -i "s#^COMPOSE_PROFILES=.*#COMPOSE_PROFILES=${PROFILES}#" .env

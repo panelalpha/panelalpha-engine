@@ -25,7 +25,7 @@ This repository is the engine. A few landmarks:
 
 | Path | What lives here |
 |---|---|
-| [`core/`](core/) | The Laravel application, the engine's brains (PHP 8.3). |
+| [`core/`](core/) | The Laravel application, the engine's brains (PHP 8.4). |
 | [`docs/`](docs/README.md) | Operator documentation (install → deploy → run). |
 | [`scripts/`](scripts/) | Host scripts, benchmarks, and the DinD deploy tester. |
 | [`AGENTS.md`](AGENTS.md) | **Contributor conventions and the testing playbook. Read this before changing the engine.** |
@@ -38,7 +38,7 @@ For anything beyond a docs typo, **[`AGENTS.md`](AGENTS.md) is the source of tru
 
 You'll need:
 
-- A Linux environment with **PHP 8.3** and **Composer**.
+- A Linux environment with **PHP 8.4** and **Composer**.
 - **Docker** (the deploy tests run against Docker-in-Docker).
 - Git.
 

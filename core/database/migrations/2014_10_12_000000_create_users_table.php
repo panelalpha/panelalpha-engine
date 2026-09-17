@@ -15,7 +15,11 @@ return new class extends Migration
     {
         Schema::create('users', function (Blueprint $table) {
             $table->id();
-            $table->string('username')->unique();
+            $username = $table->string('username')->unique();
+            // MySQL's utf8mb4_unicode_ci makes username lookups case-insensitive; match that on sqlite.
+            if (Schema::getConnection()->getDriverName() === 'sqlite') {
+                $username->collation('NOCASE');
+            }
             $table->string('domain')->unique();
             $table->string('name')->nullable();
             $table->string('email')->nullable();

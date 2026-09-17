@@ -13,7 +13,12 @@ return new class extends Migration
             // The opaque short-lived token that goes in the URL handed to the browser.
             $table->string('token', 64)->unique()->index();
             // Which user's project this token is for (for audit purposes).
-            $table->string('username');
+            $username = $table->string('username');
+            // useAppSsoToken() matches this against the raw {username} route param;
+            // MySQL's utf8mb4_unicode_ci already made that comparison ci.
+            if (Schema::getConnection()->getDriverName() === 'sqlite') {
+                $username->collation('NOCASE');
+            }
             // The cookie to set when the token is redeemed.
             $table->string('cookie_name');
             $table->string('cookie_value');

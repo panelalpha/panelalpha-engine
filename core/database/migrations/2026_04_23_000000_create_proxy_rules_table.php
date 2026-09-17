@@ -13,7 +13,11 @@ return new class extends Migration
 
             // Ownership
             $table->enum('owner_scope', ['system', 'user'])->default('system')->index();
-            $table->string('username')->nullable()->index(); // For user-owned rules
+            $username = $table->string('username')->nullable()->index(); // For user-owned rules
+            // MySQL's utf8mb4_unicode_ci makes username lookups case-insensitive; match that on sqlite.
+            if (Schema::getConnection()->getDriverName() === 'sqlite') {
+                $username->collation('NOCASE');
+            }
 
             // Enable/disable
             $table->boolean('enabled')->default(true)->index();

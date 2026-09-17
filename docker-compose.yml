@@ -20,9 +20,9 @@ services:
       - ./.env-core:/var/www/html/.env
       - ./config/core/nginx.conf:/etc/nginx/nginx.conf
       - ./config/core/images.yaml:/var/www/config/core/images.yaml:ro
-      - ./config/core/php.ini:/etc/php/8.3/cli/conf.d/90-panelalpha.ini
-      - ./config/core/php.ini:/etc/php/8.3/fpm/conf.d/90-panelalpha.ini
-      - ./config/core/php-fpm-pool.conf:/etc/php/8.3/fpm/pool.d/zz-docker.conf
+      - ./config/core/php.ini:/etc/php/8.4/cli/conf.d/90-panelalpha.ini
+      - ./config/core/php.ini:/etc/php/8.4/fpm/conf.d/90-panelalpha.ini
+      - ./config/core/php-fpm-pool.conf:/etc/php/8.4/fpm/pool.d/zz-docker.conf
       - ./config/core/supervisord.conf:/etc/supervisor/conf.d/supervisord.conf
       - ./config/logrotate:/etc/logrotate.d
       - ./data/logrotate:/var/lib/logrotate
@@ -40,10 +40,15 @@ services:
       - ./dockerfiles/entrypoint-core.sh:/entrypoint.sh
     command: bash /entrypoint.sh
     environment:
-      - "DB_HOST=database-core.shared-hosting.palocal"
-      - "DB_DATABASE=core"
-      - "DB_USERNAME=core"
-      - "DB_PASSWORD=${CORE_MYSQL_PASSWORD}"
+      # sqlite is the default for every install; int-updater.sh backfills the
+      # CORE_DB_* overrides below into .env only for a host it finds already
+      # running core-db, so it keeps its existing MySQL data instead of
+      # starting against an empty core.sqlite. See docs/internal/core-db.md.
+      - "DB_CONNECTION=${CORE_DB_CONNECTION:-sqlite}"
+      - "DB_DATABASE=${CORE_DB_DATABASE:-/var/www/html/storage/database/core.sqlite}"
+      - "DB_HOST=${CORE_DB_HOST:-}"
+      - "DB_USERNAME=${CORE_DB_USERNAME:-}"
+      - "DB_PASSWORD=${CORE_MYSQL_PASSWORD:-}"
       - "USERS_DB_HOST=database-users.shared-hosting.palocal"
       - "USERS_DB_USERNAME=root"
       - "USERS_DB_PASSWORD=${USERS_MYSQL_ROOT_PASSWORD}"
@@ -102,14 +107,21 @@ services:
     volumes:
       - "./scripts/server_metrics.py:/scripts/server_metrics.py"
     environment:
-      - "DB_HOST=database-core.shared-hosting.palocal"
-      - "DB_DATABASE=core"
-      - "DB_USERNAME=core"
-      - "DB_PASSWORD=${CORE_MYSQL_PASSWORD}"
+      - "DB_CONNECTION=${CORE_DB_CONNECTION:-sqlite}"
+      - "DB_DATABASE=${CORE_DB_DATABASE:-/var/www/html/storage/database/core.sqlite}"
+      - "DB_HOST=${CORE_DB_HOST:-}"
+      - "DB_USERNAME=${CORE_DB_USERNAME:-}"
+      - "DB_PASSWORD=${CORE_MYSQL_PASSWORD:-}"
       - "METRICS_SNAPSHOT_INTERVAL=${METRICS_SNAPSHOT_INTERVAL:-5}"
     mem_limit: ${MEM_LIMIT_METRICS:-1G}
     memswap_limit: ${MEMSWAP_LIMIT_METRICS:-0}
   core-db:
+    # Only for a host int-updater.sh found already running this service --
+    # it backfills CORE_DB_CONNECTION=mysql and this profile into .env so an
+    # existing install keeps its data instead of starting against an empty
+    # core.sqlite. A fresh install never enables this profile and never had
+    # a core-db to detect. See docs/internal/core-db.md.
+    profiles: ["legacy-mysql-core"]
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-database

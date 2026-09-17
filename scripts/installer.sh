@@ -763,12 +763,39 @@ install_panelalpha_engine() {
         echo "COMPOSE_PROFILES=full" >>/opt/panelalpha/shared-hosting/.env
     fi
 
-    # generate core mysql password if not set
-    CORE_MYSQL_PASSWORD=$(grep ^CORE_MYSQL_PASSWORD= /opt/panelalpha/shared-hosting/.env | cut -d '=' -f2-)
-    if [ -z "${CORE_MYSQL_PASSWORD}" ]; then
-        CORE_MYSQL_PASSWORD=$(random-string 12)
-        sed -i 's/CORE_MYSQL_PASSWORD=/CORE_MYSQL_PASSWORD='$CORE_MYSQL_PASSWORD'/' /opt/panelalpha/shared-hosting/.env
-    fi
+    # core's own data lives in core.sqlite by default. An operator who put
+    # legacy-mysql-core in COMPOSE_PROFILES above (hand-edited .env before
+    # running this installer) gets core-db instead -- same profile
+    # int-updater.sh uses to keep an existing host on MySQL, so this is the
+    # one place both paths land the connection vars docker-compose.yml's
+    # core/metrics services read. See docs/internal/core-db.md.
+    CORE_PROFILES=$(grep '^COMPOSE_PROFILES=' /opt/panelalpha/shared-hosting/.env | cut -d '=' -f2-)
+    case ",${CORE_PROFILES}," in
+    *,legacy-mysql-core,*)
+        if ! grep -q '^CORE_DB_CONNECTION=' /opt/panelalpha/shared-hosting/.env; then
+            if [ -n "$(tail -c1 /opt/panelalpha/shared-hosting/.env)" ]; then
+                echo "" >>/opt/panelalpha/shared-hosting/.env
+            fi
+            cat >>/opt/panelalpha/shared-hosting/.env <<'EOF'
+CORE_DB_CONNECTION=mysql
+CORE_DB_HOST=database-core.shared-hosting.palocal
+CORE_DB_DATABASE=core
+CORE_DB_USERNAME=core
+EOF
+        fi
+
+        # core-db's own password (MYSQL_PASSWORD in its compose environment,
+        # unrelated to USERS_MYSQL_ROOT_PASSWORD below). An existing legacy
+        # host already has one from before this profile existed; a fresh
+        # install choosing this profile needs one generated, the same way
+        # this always worked before core.sqlite existed.
+        CORE_MYSQL_PASSWORD=$(grep ^CORE_MYSQL_PASSWORD= /opt/panelalpha/shared-hosting/.env | cut -d '=' -f2-)
+        if [ -z "${CORE_MYSQL_PASSWORD}" ]; then
+            CORE_MYSQL_PASSWORD=$(random-string 12)
+            sed -i 's/CORE_MYSQL_PASSWORD=/CORE_MYSQL_PASSWORD='$CORE_MYSQL_PASSWORD'/' /opt/panelalpha/shared-hosting/.env
+        fi
+        ;;
+    esac
 
     # generate users mysql root password if not set
     USERS_MYSQL_ROOT_PASSWORD=$(grep ^USERS_MYSQL_ROOT_PASSWORD= /opt/panelalpha/shared-hosting/.env | cut -d '=' -f2-)
