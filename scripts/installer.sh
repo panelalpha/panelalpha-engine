@@ -13,6 +13,7 @@ die() {
     if [[ ${exit_code} -ne 0 ]]; then
         echo -e "${yellow_color}${BASH_COMMAND} ${red_color}command failed with exit code ${yellow_color}${exit_code}${default_color}"
     fi
+    send_update_status "$exit_code" || true
 }
 
 set -e
@@ -29,11 +30,13 @@ random-string() {
 
 # Empty means "not passed": resolved from PANELALPHA_ENGINE_VERSION env or defaults.
 PANELALPHA_ENGINE_VERSION="${PANELALPHA_ENGINE_VERSION:-}"
-PACKAGE_HOST='hub.panelalpha.com'
+PACKAGE_HOST='connect.panelalpha.com'
+MONITORING_HOST="${PANELALPHA_MONITORING_HOST:-monitoring.panelalpha.com}"
+STARTED_AT=$(date +%s || echo 0)
 # Installed when the version lookup fails (legacy hub path only). Bump at release.
 FALLBACK_ENGINE_VERSION='2.0.0'
 # Git URL for the engine tree. Default is the public GitHub mirror. Credentials may
-# be embedded (https://user:token@host/...). Empty string forces the legacy hub+license path.
+# be embedded (https://user:token@host/...). Empty string forces the legacy hub package path.
 # "unset" vs empty: get.sh always exports a default; clearing the var opts into hub.
 if [ "${PANELALPHA_ENGINE_REPO+x}" = x ]; then
     ENGINE_REPO="${PANELALPHA_ENGINE_REPO}"
@@ -96,7 +99,8 @@ Usage: bash installer.sh [options]
                            later -- for when DNS is not pointing here yet.
       --cert-email ADDR    Let's Encrypt account email (expiry warnings)
       --email ADDR         Contact/monitoring email (settings:set email)
-  -p, --package-host HOST  license/package host (legacy hub path only)
+  -p, --package-host HOST  package host (legacy hub path only)
+      --monitoring-host H  monitoring host for install status (default: monitoring.panelalpha.com)
   -d, --debug              set -x
       --no-local-ip        resolve the public IP when the default route is private
       --enable-nat         build the NAT mapping after migrating
@@ -106,6 +110,7 @@ Usage: bash installer.sh [options]
 Environment:
   PANELALPHA_ENGINE_REPO      git clone URL (default: https://github.com/panelalpha/engine.git)
   PANELALPHA_ENGINE_VERSION   branch/tag/commit (default: main when using git)
+  PANELALPHA_MONITORING_HOST  monitoring hostname (same as --monitoring-host)
 
 Installing into a container (CI, dev):
 
@@ -148,6 +153,15 @@ while true; do
         ;;
     --package-host=*)
         PACKAGE_HOST="${1#*=}"
+        shift
+        ;;
+    --monitoring-host)
+        MONITORING_HOST="$2"
+        shift
+        shift
+        ;;
+    --monitoring-host=*)
+        MONITORING_HOST="${1#*=}"
         shift
         ;;
     # --cert-domain was the old spelling, from when the name was only about
@@ -284,6 +298,68 @@ echo_error() {
     exit 101
 }
 
+# Report install/update outcome to monitoring (Engine emails / probes).
+send_update_status() {
+    local exit_code=${1:-0}
+    local finished_at started_at software_op email error_msg last_cmd event_type
+    started_at=${STARTED_AT:-$(date +%s || echo 0)}
+    finished_at=$(date +%s || echo 0)
+    software_op="${ENGINE_OP:-install}"
+    if [ "$software_op" != "update" ]; then
+        software_op="install"
+    fi
+    if [ "$software_op" = "update" ]; then
+        event_type="panel.update"
+    else
+        event_type="panel.install"
+    fi
+    email="${INSTALL_EMAIL:-}"
+    error_msg=""
+    if [ "$exit_code" != "0" ]; then
+        last_cmd="${last_command:-${current_command:-}}"
+        if [ -n "$last_cmd" ]; then
+            error_msg="command failed (exit ${exit_code}): ${last_cmd}"
+        else
+            error_msg="installer failed with exit_code=${exit_code}"
+        fi
+        if [ -n "$RUN_DIR" ] && [ -f "$RUN_DIR/stderr" ]; then
+            error_msg="${error_msg}; $(tail -n 5 "$RUN_DIR/stderr" 2>/dev/null | tr '\n' ' ' | head -c 500)"
+        fi
+    fi
+    {
+        jq -n \
+            --arg type "$event_type" \
+            --arg occurred_at "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")" \
+            --arg started_at "$started_at" \
+            --arg finished_at "$finished_at" \
+            --arg exit_code "$exit_code" \
+            --arg software "engine" \
+            --arg software_op "$software_op" \
+            --arg email "$email" \
+            --arg error "$error_msg" \
+            --arg to_version "${PANELALPHA_ENGINE_VERSION:-}" \
+            '{events:[{
+              type:$type,
+              occurred_at:$occurred_at,
+              payload:{
+                started_at:$started_at,
+                finished_at:$finished_at,
+                exit_code:$exit_code,
+                software:$software,
+                software_op:$software_op,
+                email:$email,
+                error:$error,
+                to_version:$to_version
+              }
+            }]}' \
+        | curl -4 -sS -X POST "https://${MONITORING_HOST}/api/v1/events" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -H "User-Agent: PanelAlpha-Engine/installer" \
+            -d @- >/dev/null 2>&1 || true
+    } || true
+}
+
 redact_repo_url() {
     printf '%s' "$1" | sed -E 's#(https?://)[^/@]+@#\1***@#'
 }
@@ -331,7 +407,7 @@ resolve_engine_version() {
 define_variables() {
     LOG_DIR="/opt/panelalpha/log"
     mkdir -p $LOG_DIR
-    LICENSE_STATUS=''
+    DOWNLOAD_STATUS=''
     TOKEN=''
     ERROR=''
     MSG=''
@@ -367,18 +443,69 @@ check_root() {
     fi
 }
 
+# Installed product version (artisan → version file → config/system.php). Empty if unknown.
+detect_installed_engine_version() {
+    local compose="${PANELALPHA_DIR}/shared-hosting/docker-compose.yml"
+    local ver_file="${PANELALPHA_DIR}/shared-hosting/version"
+    local php_cfg="${PANELALPHA_DIR}/shared-hosting/core/config/system.php"
+    local ver=""
+
+    if [[ -f "$compose" ]]; then
+        ver=$(docker compose -f "$compose" exec -T core php artisan system:version 2>/dev/null | tr -d '\r\n' || true)
+    fi
+    if [[ -z "$ver" || "$ver" == "unknown" ]] && [[ -f "$ver_file" ]]; then
+        ver=$(tr -d '\r\n' <"$ver_file" || true)
+    fi
+    if [[ -z "$ver" || "$ver" == "unknown" ]] && [[ -f "$php_cfg" ]]; then
+        ver=$(sed -nE "s/.*'version'[[:space:]]*=>[[:space:]]*'([^']+)'.*/\1/p" "$php_cfg" | head -n1 || true)
+    fi
+    if [[ "$ver" == "unknown" ]]; then
+        ver=""
+    fi
+    printf '%s' "$ver"
+}
+
+# Temporary: get.* / this installer must not in-place upgrade Engine 1.0.x → 2.x.
+refuse_engine_v1_to_v2_upgrade() {
+    if [[ ! -f "${PANELALPHA_DIR}/shared-hosting/docker-compose.yml" ]]; then
+        return 0
+    fi
+
+    local ver major
+    ver=$(detect_installed_engine_version)
+    major="${ver%%.*}"
+
+    if [[ -n "$ver" && "$major" =~ ^[0-9]+$ && "$major" -ge 2 ]]; then
+        return 0
+    fi
+
+    echo -e ">>> ${red_color}In-place upgrade from PanelAlpha Engine 1.0 to 2.0 is not supported.${default_color}"
+    if [[ -n "$ver" ]]; then
+        echo -e ">>> ${red_color}Detected installed version: ${ver}${default_color}"
+    else
+        echo -e ">>> ${red_color}Could not determine the installed Engine version.${default_color}"
+        echo -e ">>> ${red_color}If this host is already on Engine 2.x, start the containers and retry.${default_color}"
+    fi
+    echo -e ">>> ${red_color}Keep Engine 1.0 on the legacy updater from license.panelalpha.com:${default_color}"
+    echo -e ">>> ${yellow_color}  wget -N -P /opt/panelalpha https://license.panelalpha.com/engine-updater.sh${default_color}"
+    echo -e ">>> ${yellow_color}  bash /opt/panelalpha/engine-updater.sh --key 'YOUR_LICENSE_KEY'${default_color}"
+    echo -e ">>> ${red_color}The get.panelalpha.com/engine command is for fresh installs and hosts already on Engine 2.x.${default_color}"
+    echo -e ">>> ${red_color}See product documentation for Engine 1.0 and 2.0 install paths.${default_color}"
+    echo_error "Refusing Engine 1.0 → 2.0 in-place upgrade"
+}
+
 before_install() {
     echo_info "Updating repositories"
 
-    apt-get update -y
+    apt-get -o DPkg::Lock::Timeout=300 update -y
     if [ "$UPGRADE" = 1 ]; then
-        apt-get upgrade -y
-        apt-get autoremove -y
+        apt-get -o DPkg::Lock::Timeout=300 upgrade -y
+        apt-get -o DPkg::Lock::Timeout=300 autoremove -y
     else
         echo_warning "Skipping apt-get upgrade (--no-upgrade)"
     fi
-    apt-get update --fix-missing -y
-    apt-get install jq unzip lsb-release apt-transport-https lsb-release ca-certificates curl ipcalc quota at -y
+    apt-get -o DPkg::Lock::Timeout=300 update --fix-missing -y
+    apt-get -o DPkg::Lock::Timeout=300 install jq unzip lsb-release apt-transport-https lsb-release ca-certificates curl ipcalc quota at -y
 
     detect_distro
 
@@ -437,34 +564,29 @@ get_hostname() {
     fi
 }
 
-license_verify() {
-    # The licence is issued for the server; its only use is the download token.
-    CURL_RESULTS=$(curl --http1.1 "https://$PACKAGE_HOST/api/verify/request-key")
-    LICENSE_KEY=$(echo "$CURL_RESULTS" | jq '.license | .key' --raw-output)
-    LICENSE_KEY=${LICENSE_KEY//-/}
+request_download_token() {
+    # Hub package host resolves the caller by IP and returns a short-lived download token.
+    CURL_RESULTS=$(curl --http1.1 "https://${PACKAGE_HOST}/api/verify/request-download")
 
-    # Execute CURL request
-    CURL_RESULTS=$(curl --http1.1 'https://'$PACKAGE_HOST'/api/verify/request-download' --header 'License-Key:'$LICENSE_KEY'')
+    TOKEN=$(echo "$CURL_RESULTS" | jq -r '.["license"].download_token // empty')
+    DOWNLOAD_STATUS=$(echo "$CURL_RESULTS" | jq -r '.["license"].status // empty')
+    ERROR=$(echo "$CURL_RESULTS" | jq -r '.error // empty')
+    MSG=$(echo "$CURL_RESULTS" | jq -r '.msg // empty')
 
-    TOKEN=$(echo $CURL_RESULTS | jq '.license | .download_token' --raw-output)
-    LICENSE_STATUS=$(echo $CURL_RESULTS | jq '.license | .status' --raw-output)
-    ERROR=$(echo $CURL_RESULTS | jq '.error' --raw-output)
-    MSG=$(echo $CURL_RESULTS | jq '.msg' --raw-output)
-
-    if [ $ERROR == true ]; then
-        echo_error "The license key is invalid. $MSG"
+    if [ "$ERROR" == true ]; then
+        echo_error "Could not obtain a download token. $MSG"
     fi
 
-    if [ $LICENSE_STATUS != "Reissued" ] && [ $LICENSE_STATUS != "Created" ] && [ $LICENSE_STATUS != "Active" ]; then
-        echo_error "Invalid license status: $LICENSE_STATUS."
+    if [ "$DOWNLOAD_STATUS" != "Reissued" ] && [ "$DOWNLOAD_STATUS" != "Created" ] && [ "$DOWNLOAD_STATUS" != "Active" ]; then
+        echo_error "Invalid download status: $DOWNLOAD_STATUS."
     fi
 }
 
 install_docker_engine() {
     # install docker engine
     # https://docs.docker.com/engine/install/debian/#install-docker-engine
-    apt-get update -y
-    apt-get install ca-certificates curl gnupg -y
+    apt-get -o DPkg::Lock::Timeout=300 update -y
+    apt-get -o DPkg::Lock::Timeout=300 install ca-certificates curl gnupg -y
     mkdir -m 0755 -p /etc/apt/keyrings
     curl --http1.1 -fsSL https://download.docker.com/linux/$SYSTEM/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
     # chmod a+r /etc/apt/keyrings/docker.gpg
@@ -472,12 +594,12 @@ install_docker_engine() {
         "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$SYSTEM \
     "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" |
         tee /etc/apt/sources.list.d/docker.list >/dev/null
-    apt-get update -y
-    apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
+    apt-get -o DPkg::Lock::Timeout=300 update -y
+    apt-get -o DPkg::Lock::Timeout=300 install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
 }
 
 # Git URL for the engine tree. Prefer PANELALPHA_ENGINE_REPO (credentials may be
-# embedded). Empty string forces the legacy hub+license path.
+# embedded). Empty string forces the legacy hub package path.
 download_engine_from_repository() {
     local safe
     safe=$(redact_repo_url "$ENGINE_REPO")
@@ -485,7 +607,7 @@ download_engine_from_repository() {
     mkdir -p "$INSTALL_DIR"
     rm -rf "$INSTALL_DIR/src"
 
-    command -v git >/dev/null 2>&1 || apt-get install git -y
+    command -v git >/dev/null 2>&1 || apt-get -o DPkg::Lock::Timeout=300 install git -y
 
     export GIT_TERMINAL_PROMPT=0
     if ! git clone --depth 1 --branch "$PANELALPHA_ENGINE_VERSION" \
@@ -528,7 +650,7 @@ download_panelalpha_engine() {
         fi
         rm -f "$INSTALL_DIR/app.zip"
         echo_warning "Archive download failed (HTTP ${status}); cloning ${REPO_PROJECT} instead"
-        command -v git >/dev/null 2>&1 || apt-get install git -y
+        command -v git >/dev/null 2>&1 || apt-get -o DPkg::Lock::Timeout=300 install git -y
         GIT_TERMINAL_PROMPT=0 \
             GIT_CONFIG_COUNT=1 \
             GIT_CONFIG_KEY_0="http.https://${REPO_HOST}/.extraheader" \
@@ -725,7 +847,7 @@ harden_host() {
 }
 
 remove_renamed_containers() {
-    for old in nginx cron database-core webserver database-users phpmyadmin-users dns-proxy exim pure-ftpd redis core-redis queue-worker core-queue core-cron; do
+    for old in nginx cron database-core webserver database-users phpmyadmin-users dns-proxy exim pure-ftpd redis core-redis queue-worker core-queue core-cron core-http; do
         ids=$(docker ps -aq \
             --filter "label=com.docker.compose.project=shared-hosting" \
             --filter "label=com.docker.compose.service=${old}" 2>/dev/null || true)
@@ -1014,6 +1136,9 @@ post_install_config() {
         docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:set email "$INSTALL_EMAIL" >/dev/null \
             || echo_warning "Could not record the email setting"
     fi
+    # Register notification email + probe URL with monitoring (best-effort).
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan telemetry:enable >/dev/null 2>&1 \
+        || echo_warning "Could not sync telemetry preferences to monitoring"
     # Build the shared PHP base images now, in the background: without this the
     # ~150s per PHP minor is paid by whichever customer deploys that minor first.
     bash /opt/panelalpha/shared-hosting/scripts/prewarm-images.sh || echo_warning "Could not start image prewarm"
@@ -1080,12 +1205,13 @@ finish_installation() {
     echo_info "AI agents connect: pae connect"
     echo_info ""
 
-    # One MCP token for Claude Code, minted now so the last line is a command to paste.
-    # Joined onto one line: a single triple-click then copies all of it.
+    # One MCP token for Claude Code, minted now so the last lines are commands to paste.
+    # Keep each command on its own line: `&&` fails in Windows PowerShell 5.1, and
+    # joining with a space would turn two commands into one broken argv.
     local connect
     connect=$(docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
         php artisan mcp:connect:claude --bare 2>/dev/null \
-        | tr -d '\r' | sed 's/ *\\$//' | tr -s ' \n' ' ' | sed 's/^ //; s/ $//') || connect=''
+        | tr -d '\r' | sed 's/[[:space:]]*$//; /^$/d') || connect=''
 
     if [ -z "$connect" ]; then
         echo_info "Could not create the Claude Code token. Run this on the server to try again:"
@@ -1103,7 +1229,7 @@ finish_installation() {
         echo_info "Self-signed certificate: copy crt/server.cert to your computer and start Claude Code"
         echo_info "with NODE_EXTRA_CA_CERTS=/path/to/server.cert, or it will not connect."
     fi
-    echo -e "$connect"
+    printf '%s\n' "$connect"
     echo_info ""
 
     # Mockup Screen 3 body (INSTALLER-SPEC / installer-ui.sh).
@@ -1149,6 +1275,8 @@ install | update) ;;
     ;;
 esac
 
+refuse_engine_v1_to_v2_upgrade
+
 if [ "$ENGINE_OP" = update ]; then
     update_progress 5 "Preparing update"
     echo_info "Preparing update"
@@ -1164,7 +1292,7 @@ get_hostname
 if [ -z "$ENGINE_REPO" ] && [ -z "$REPO_TOKEN" ]; then
     update_progress 10 "Requesting the download token"
     echo_info "Requesting the download token"
-    license_verify
+    request_download_token
 fi
 
 update_progress 15 "Installing docker engine"

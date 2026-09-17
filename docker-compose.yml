@@ -15,10 +15,15 @@ services:
     hostname: core.shared-hosting.palocal
     privileged: true
     pid: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "2011:2011"
     volumes:
       - ./core:/var/www/html
       - ./.env-core:/var/www/html/.env
       - ./config/core/nginx.conf:/etc/nginx/nginx.conf
+      - ./crt:/root/crt
       - ./config/core/images.yaml:/var/www/config/core/images.yaml:ro
       - ./config/core/php.ini:/etc/php/8.4/cli/conf.d/90-panelalpha.ini
       - ./config/core/php.ini:/etc/php/8.4/fpm/conf.d/90-panelalpha.ini
@@ -141,25 +146,6 @@ services:
       - "MARIADB_AUTO_UPGRADE=1"
     mem_limit: ${MEM_LIMIT_CORE_DB:-${MEM_LIMIT_DATABASE_CORE:-3G}}
     memswap_limit: ${MEMSWAP_LIMIT_CORE_DB:-${MEMSWAP_LIMIT_DATABASE_CORE:-0}}
-  core-http:
-    build:
-      context: ./dockerfiles
-      dockerfile: Dockerfile-nginx
-    image: ghcr.io/panelalpha/app-nginx:20260525
-    pull_policy: missing
-    depends_on:
-      - core
-    restart: always
-    hostname: nginx.shared-hosting.palocal
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    ports:
-      - "2011:2011"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./crt:/root/crt
-    mem_limit: ${MEM_LIMIT_CORE_HTTP:-${MEM_LIMIT_NGINX:-3G}}
-    memswap_limit: ${MEMSWAP_LIMIT_CORE_HTTP:-${MEMSWAP_LIMIT_NGINX:-0}}
   ftp:
     profiles: ["ftp", "full"]
     build:
@@ -262,6 +248,30 @@ services:
       - cache-registry-data:/var/lib/registry
     mem_limit: ${MEM_LIMIT_CACHE_REGISTRY:-1G}
     memswap_limit: ${MEMSWAP_LIMIT_CACHE_REGISTRY:-0}
+  # A pull-through cache for docker.io, not the engine's own image store above
+  # -- registry:2 cannot be both at once: a `proxy.remoteurl` registry only
+  # ever serves from upstream and refuses any push, so this has to be a
+  # second instance, not a second use of cache-registry. The container name
+  # is load-bearing the same way cache-registry's is: every account daemon
+  # lists it by this name in `registry-mirrors`, tried before Docker Hub
+  # itself and falling through to it untouched if this container is not
+  # running (an engine without the profile enabled behaves exactly as before).
+  dockerhub-mirror:
+    profiles: ["dockerhub-mirror", "full"]
+    image: registry:2
+    pull_policy: missing
+    container_name: panelalpha-dockerhub-mirror
+    restart: unless-stopped
+    environment:
+      REGISTRY_PROXY_REMOTEURL: https://registry-1.docker.io
+      REGISTRY_PROXY_USERNAME: ${DOCKERHUB_MIRROR_USERNAME:-}
+      REGISTRY_PROXY_PASSWORD: ${DOCKERHUB_MIRROR_PASSWORD:-}
+    ports:
+      - "127.0.0.1:5001:5000"
+    volumes:
+      - dockerhub-mirror-data:/var/lib/registry
+    mem_limit: ${MEM_LIMIT_DOCKERHUB_MIRROR:-1G}
+    memswap_limit: ${MEMSWAP_LIMIT_DOCKERHUB_MIRROR:-0}
   lighthouse:
     profiles: ["lighthouse", "full"]
     build:
@@ -278,6 +288,7 @@ services:
     memswap_limit: ${MEMSWAP_LIMIT_LIGHTHOUSE:-0}
 volumes:
   cache-registry-data: {}
+  dockerhub-mirror-data: {}
   core-storage: {}
   database-core-data: {}
   database-users-data: {}

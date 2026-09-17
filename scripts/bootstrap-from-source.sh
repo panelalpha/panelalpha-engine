@@ -130,8 +130,8 @@ if ! grep -q '^APP_KEY=.\+' .env-core; then
 fi
 
 # Optional services sit behind compose profiles; see .env.example for the list.
-# --core-only (empty) leaves just the control plane: core and core-http.
-# Untouched, .env.example's default of 'full' gives the whole stack.
+# --core-only (empty) leaves just the control plane: core (which also serves
+# :2011). Untouched, .env.example's default of 'full' gives the whole stack.
 if [ "$SET_PROFILES" = 1 ]; then
     if grep -q '^COMPOSE_PROFILES=' .env; then
         sed -i "s#^COMPOSE_PROFILES=.*#COMPOSE_PROFILES=${PROFILES}#" .env

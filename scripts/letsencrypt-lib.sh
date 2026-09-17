@@ -15,8 +15,8 @@
 #
 # Either can be the served one -- whichever was installed last wins, and
 # le_served_lineage reads crt/server.cert to say which it is. Whatever is
-# served lives in crt/server.cert + crt/server.key, which is what
-# core-http's nginx loads on :2011. Renewal never edits that pair by itself:
+# served lives in crt/server.cert + crt/server.key, which is what core's
+# nginx loads on :2011. Renewal never edits that pair by itself:
 # `certbot renew` runs inside the certbot container, where neither this tree
 # nor docker exist, so a certbot deploy hook cannot copy anything. Instead
 # letsencrypt-renew.sh calls install_lineage after renewing, and that copies
@@ -194,7 +194,7 @@ le_served_lineage() {
 
 # Copy a lineage over the served pair. Nothing happens when the served files
 # already hold that certificate, so cron can call this every run; when they
-# do change, core-http's nginx is reloaded -- it reads the files only at start
+# do change, core's nginx is reloaded -- it reads the files only at start
 # or reload, and the old request script did neither, which left the fresh
 # certificate on disk and the self-signed one on :2011 until the next reboot.
 #
@@ -253,11 +253,13 @@ le_install_lineage() {
 
     le_info "Installed ${name} as crt/${target}.cert"
 
-    # Reload, not restart: :2011 keeps answering. Restart only when nginx is not running to reload.
+    # Reload nginx inside core, not the container: core also runs the queue
+    # workers now, and restarting it would kill every deploy in flight.
+    # `supervisorctl restart nginx` only when the process itself is down.
     if [ "$target" = "server" ]; then
-        docker compose -f "$LE_COMPOSE_FILE" exec -T core-http nginx -s reload >/dev/null 2>&1 \
-            || docker compose -f "$LE_COMPOSE_FILE" restart core-http >/dev/null 2>&1 \
-            || le_warn "Could not reload core-http; the new certificate is served after the next restart"
+        docker compose -f "$LE_COMPOSE_FILE" exec -T core nginx -s reload >/dev/null 2>&1 \
+            || docker compose -f "$LE_COMPOSE_FILE" exec -T core supervisorctl restart nginx >/dev/null 2>&1 \
+            || le_warn "Could not reload core's nginx; the new certificate is served after the next reload"
     fi
     return 0
 }

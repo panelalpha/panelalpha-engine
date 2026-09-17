@@ -20,10 +20,10 @@ namespace App\Lib\Ssl;
  *     server.cert.bak  + server.key.bak  -> MATCH       (CN=2.29.1.58)
  *
  * `le_install_lineage()` copies a lineage's `fullchain.pem` and `privkey.pem`
- * over those two files and restarts `core-http`. It backs the old pair up
+ * over those two files and reloads `core`'s nginx. It backs the old pair up
  * first, and that backup is what made the mismatch recoverable — but nothing
- * between the copy and the restart notices that the new pair does not go
- * together, so the restart is what takes the API down rather than the copy.
+ * between the copy and the reload notices that the new pair does not go
+ * together, so the reload is what takes the API down rather than the copy.
  *
  * Compared by public key rather than by hash of the file: the certificate
  * holds the public half, the key file holds the private half, and the two are
