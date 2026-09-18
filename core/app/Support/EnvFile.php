@@ -5,22 +5,14 @@ namespace App\Support;
 use RuntimeException;
 
 /**
- * Reads and edits the engine's `.env`, one key at a time, leaving the rest of
- * the file exactly as it was.
+ * Reads and edits the engine's `.env` one key at a time, leaving the rest of
+ * the file as it was. Two constraints shape it:
  *
- * Two things about this file are not obvious and both constrain how it is
- * written:
- *
- *  - It is a **single-file bind mount**: `docker-compose.yml` maps the host's
- *    `.env-core` onto `/var/www/html/.env`, and Docker binds that by inode. A
- *    write-to-temp-and-rename — the usual way to make a write atomic — gives
- *    the container a new inode, the mount keeps pointing at the old one, and
- *    the edit reaches neither side. So the file is rewritten **in place**, and
- *    the previous contents are kept beside it instead.
- *  - Its lines are documentation. The shipped `.env-core.example` explains each
- *    MCP setting in comments above a commented-out key, so a key is set by
- *    replacing that placeholder where one exists rather than by appending a
- *    second copy at the end of the file.
+ *  - It is a **single-file bind mount** of the host's `.env-core`, bound by
+ *    inode, so write-to-temp-and-rename would detach the mount and the edit
+ *    would reach neither side. Rewritten in place, previous contents kept beside.
+ *  - Its lines are documentation: a key is set by replacing the commented-out
+ *    placeholder `.env-core.example` ships, not by appending a second copy.
  */
 class EnvFile
 {
@@ -51,11 +43,9 @@ class EnvFile
     }
 
     /**
-     * Whether this is the file the operator knows as `.env-core`.
-     *
-     * `pae` runs inside the core container, so every path it prints is a
-     * container path — and the one it would print for this file is a name the
-     * operator has never seen. Worth saying which file it is.
+     * Whether this is the file the operator knows as `.env-core`. `pae` runs
+     * inside the container, so the path it would otherwise print is one the
+     * operator has never seen.
      */
     public function isCoreMount(): bool
     {
@@ -63,20 +53,15 @@ class EnvFile
     }
 
     /**
-     * Why writing here would probably change nothing, or null when it looks
-     * like the file the engine actually boots from.
+     * Why writing here would probably change nothing, or null when this looks
+     * like the file the engine boots from.
      *
-     * The engine's `.env` is a single-file bind mount of the host's
-     * `.env-core`, and a single-file mount is fragile: delete or replace the
-     * file underneath it and the container quietly falls back to whatever is
-     * at that path inside its other mounts. Nothing breaks loudly — compose
-     * passes the database credentials as container environment variables, so
-     * the engine keeps serving — and every setting that lived only in
-     * `.env-core` silently reverts to its default. `APP_URL` becoming
-     * `http://localhost` is the visible symptom.
-     *
-     * A real engine environment always has `APP_KEY`. Its absence is the
-     * cheapest reliable sign that this file is not the one being read.
+     * Delete the host's `.env-core` and the single-file mount detaches: the
+     * container falls back to whatever is at that path in its other mounts and
+     * nothing breaks loudly, because compose passes the database credentials
+     * as environment variables. `APP_URL` becoming `http://localhost` is the
+     * visible symptom. A real engine environment always has `APP_KEY`, which
+     * makes its absence the cheapest sign this file is not the one being read.
      */
     public function suspicious(): ?string
     {
@@ -91,17 +76,15 @@ class EnvFile
         return sprintf(
             "%s has no APP_KEY, so it is almost certainly not the file this engine boots from.\n"
             . 'Writing here would change nothing. Restart the engine to reattach it: '
-            . 'docker compose restart core core-cron',
+            . 'docker compose restart core',
             $this->path
         );
     }
 
     /**
-     * The value a key is set to, or null when it is absent or commented out.
-     *
-     * Read from the file rather than from `env()` so it reports what is
-     * written down, not what the process was booted with — the difference is
-     * the whole point of a command that edits the file.
+     * The value a key is set to, or null when absent or commented out. Read
+     * from the file, not `env()`: what is written down rather than what the
+     * process booted with.
      */
     public function get(string $key): ?string
     {

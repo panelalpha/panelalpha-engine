@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Auth\TokenAbilities;
 use App\Models\Admin;
 use App\Models\PersonalAccessToken;
 use Illuminate\Http\JsonResponse;
@@ -28,7 +29,7 @@ class McpTokenController extends Controller
         $params = $request->validate(['name' => 'required|string|max:255']);
 
         $root     = Admin::rootAccount();
-        $newToken = $root->createToken($params['name'], ['mcp']);
+        $newToken = $root->createToken($params['name'], TokenAbilities::build(api: false, mcp: true));
         $token    = $newToken->accessToken;
 
         return response()->json([

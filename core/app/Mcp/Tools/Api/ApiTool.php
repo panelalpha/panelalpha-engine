@@ -44,6 +44,9 @@ abstract class ApiTool extends Tool
 
     public const VIA_MCP = 'mcp';
 
+    /** Marks a request as this class's own in-process dispatch. */
+    public const VIA_ATTRIBUTE = 'panelalpha.via_mcp';
+
     /** Largest file a tool returns inline; base64 grows it by a third. */
     public const MAX_DOWNLOAD_BYTES = 1048576;
 
@@ -273,6 +276,12 @@ abstract class ApiTool extends Tool
         }
 
         $sub->headers->set(self::VIA_HEADER, self::VIA_MCP);
+
+        // The same fact where a caller cannot reach it: the header above is
+        // attribution and anyone can set it, while `attributes` is server-side
+        // and never populated from an inbound request. `EnsureTokenMayUseApi`
+        // reads this to tell a tool call from a curl with an assistant's token.
+        $sub->attributes->set(self::VIA_ATTRIBUTE, true);
 
         // Controllers reach for request() as often as the injected instance, so
         // the binding has to point at the sub-request for the duration and be

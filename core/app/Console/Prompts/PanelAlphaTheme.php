@@ -13,29 +13,19 @@ use Laravel\Prompts\Themes\Default\SelectPromptRenderer;
 /**
  * The engine's prompt theme: the default one, in the PanelAlpha orange.
  *
- * This class is both the theme's registrar and its select renderer, because
- * select was the first prompt the engine asked (`pae connect`). The colour
- * itself lives in {@see PaintsOrange}, which every renderer in this namespace
- * shares, so a prompt type is themed by adding six lines rather than by
- * restating the palette.
- *
- * Register every type the CLI uses rather than only the one in front of you: a
- * wizard that asks a themed question and then an unthemed one looks broken,
- * and the prompt types not listed here simply stay as the package drew them.
+ * Both registrar and select renderer, select being the first prompt the engine
+ * asked. Unregistered prompt types stay as the package drew them, which looks
+ * broken next to a themed one — so register every type the CLI uses.
  */
 class PanelAlphaTheme extends SelectPromptRenderer
 {
     use PaintsOrange;
 
-    /** The name it is registered under; `default` is the one name that cannot be taken. */
     public const NAME = 'panelalpha';
 
     /**
-     * Register the theme and make it active.
-     *
      * Must run before a prompt is constructed: the renderer is resolved in the
-     * prompt's constructor, from the exact class being built, so a theme added
-     * afterwards changes nothing about a prompt that already exists.
+     * prompt's constructor, so registering later changes nothing.
      */
     public static function register(): void
     {

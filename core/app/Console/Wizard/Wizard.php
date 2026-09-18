@@ -8,15 +8,10 @@ use App\Console\Wizard\Sections\McpTokensSection;
 use App\Console\Wizard\Sections\TelemetrySection;
 
 /**
- * The areas `pae configure` knows how to configure — the top menu.
+ * The areas `pae configure` offers — the top menu, in menu order.
  *
- * A hand-written list rather than a scan of the directory: the order is the
- * order the menu shows, and a section is on the menu because someone put it
- * there, not because a file happened to be in the right folder.
- *
- * Adding an area is one class implementing {@see Section} and one line here.
- * What that area asks, and in what order, is the section's own business —
- * `pae configure` only gets it started and takes the exit code back.
+ * Hand-written rather than scanned: a section is listed because someone put it
+ * there. Adding one is a class implementing {@see Section} and a line here.
  */
 class Wizard
 {

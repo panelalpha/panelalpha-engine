@@ -7,19 +7,13 @@ use Laravel\Mcp\Server\Tool;
 /**
  * One candidate answer to "which tools would this configuration expose?".
  *
- * `ToolPolicy` answers that for the configuration the process booted with.
- * This wraps it in a value object so a caller can hold several answers at once
- * — what is in force now, what the operator has picked so far, what a mode
- * would cost — and compare them before anything is written down. Every method
- * is a read; `with()` returns a new instance rather than changing this one.
+ * `ToolPolicy` answers that for the configuration the process booted with; this
+ * is a value object, so the wizard can hold and compare several candidates
+ * before anything is written. `with()` returns a new instance.
  */
 class ToolExposure
 {
-    /**
-     * The config key behind each env variable, in the order the wizard asks
-     * about them. Mirrors config/mcp-tools.php, which is the only place these
-     * two spellings are otherwise connected.
-     */
+    /** Env variable => config key, in the order the wizard asks about them. */
     public const ENV_KEYS = [
         'permission_mode' => 'MCP_PERMISSION_MODE',
         'toolsets' => 'MCP_TOOLSETS',
@@ -32,13 +26,9 @@ class ToolExposure
     public const ALL_TOOLSETS = 'all';
 
     /**
-     * No toolset enabled.
-     *
-     * `ToolPolicy` reads an empty `MCP_TOOLSETS` as every group — an absent
-     * setting and a permissive one being the same value is the whole reason
-     * this needs a spelling of its own. Any token that is not a group name
-     * would do; this one says what it means, and `ToolExposureTest` asserts no
-     * real toolset is ever called it.
+     * No toolset enabled. Needs a spelling of its own because `ToolPolicy`
+     * reads an *empty* `MCP_TOOLSETS` as every group. Any non-group name would
+     * do; `ToolExposureTest` asserts no real toolset is ever called this.
      */
     public const NO_TOOLSETS = 'none';
 
@@ -72,12 +62,8 @@ class ToolExposure
     }
 
     /**
-     * The `MCP_*` lines this exposure is, ready to be written to `.env`.
-     *
-     * Every key is written, including the empty ones: an empty value and an
-     * absent key mean the same thing to `ToolPolicy`, and writing the key down
-     * is what lets the next run of the wizard — and the next person to read
-     * the file — see that the question was answered rather than skipped.
+     * The `MCP_*` lines this exposure is. Empty keys are written too, so the
+     * file shows the question was answered rather than skipped.
      *
      * @return array<string, string>
      */
@@ -93,12 +79,11 @@ class ToolExposure
     }
 
     /**
-     * Every tool this configuration selects, whatever the ceiling then does
-     * with it — the tick state behind `pae configure mcp`.
+     * The tick state behind `pae configure mcp` — what is selected, whatever
+     * the ceiling then does with it.
      *
-     * Deliberately not `exposedNames()`: a tool the ceiling is holding back is
-     * still ticked, and reading it as unticked would write the ceiling into
-     * the denylist, where raising the ceiling again would not bring it back.
+     * Not `exposedNames()`: a tool the ceiling holds back is still ticked, and
+     * reading it as unticked would bake the ceiling into the denylist.
      *
      * @return array<int, string>
      */
@@ -110,13 +95,10 @@ class ToolExposure
     /**
      * The same configuration, selecting exactly these tools.
      *
-     * Three settings express one tick state, and which of them to use is a
-     * question of what reads best in `.env` rather than of meaning: a group
-     * with every box ticked is the group's name, a group with none is its
-     * absence, and a group in between is written whichever way is shorter —
-     * the group plus its exceptions, or its ticked tools one by one. The
-     * ceiling and the regex denylist are carried through untouched; neither is
-     * a tick.
+     * Three settings express one tick state; which to use is about what reads
+     * best in `.env`. A fully ticked group is its name, an empty one its
+     * absence, and a partial one whichever is shorter — group plus exceptions,
+     * or its tools one by one. Ceiling and regex denylist pass through.
      *
      * @param array<int, string> $names
      */
@@ -162,10 +144,9 @@ class ToolExposure
     }
 
     /**
-     * The settings whose value differs from another candidate's, by env name.
-     *
-     * What the wizard means by "changed": the comparison is of the lines that
-     * would be written, so a difference that `.env` cannot express is not one.
+     * Settings whose value differs from another candidate's, by env name. The
+     * comparison is of the lines written, so a difference `.env` cannot
+     * express is not one.
      *
      * @return array<int, string>
      */

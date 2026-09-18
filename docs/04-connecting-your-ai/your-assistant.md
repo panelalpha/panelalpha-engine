@@ -44,6 +44,22 @@ What this does: shows the assistant's commands as checkboxes — whole groups, o
 
 Use it instead of editing the file by hand. The rest of this section is the reference for the settings it writes, and how to set the same things yourself.
 
+### Different limits for different assistants
+
+Everything above applies to the whole engine. To give one assistant less than another:
+
+```bash
+pae configure tokens
+```
+
+What this does: lists your assistants' tokens, and lets you tick what each one may use. It can only take away — an assistant cannot be given a command the engine is not offering — and ticking everything means "no limit", so that assistant keeps whatever the engine offers. `pae mcp:token:list` shows the result in its **Commands** column.
+
+An assistant asked for its command list when it connected, so reconnect it to see the change.
+
+A token minted for an assistant is refused if someone tries to use it against the engine's own API directly, so these limits are not one command away from being stepped around. A token minted for your own software (`pae api:token:create`) is refused at the assistant endpoint for the same reason. Tokens made before this distinction existed can still do both; mint a new one of the right kind to narrow that.
+
+Whatever the limits, a token you no longer trust should be revoked — `pae mcp:token:revoke {id}` — which now stops it everywhere at once.
+
 These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit that file by hand, the change does nothing until you restart the engine: [Change a setting](../02-getting-started/install.md#change-a-setting). Either way, an assistant that is already connected keeps the tool list it was given when it connected — reconnect it to see the change.
 
 ### How far it may go

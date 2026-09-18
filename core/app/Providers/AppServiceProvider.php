@@ -16,6 +16,14 @@ class AppServiceProvider extends ServiceProvider
     {
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
 
+        // `revoked_at` is ours and Sanctum's validity check knows only
+        // `expires_at`, so without this a revoked token was refused at /mcp
+        // and kept working against the whole REST API.
+        Sanctum::authenticateAccessTokensUsing(
+            static fn (PersonalAccessToken $token, bool $isValid): bool => $isValid
+                && !$token->isRevoked()
+        );
+
         // One per request, which is one per deploy: the plan a deploy request
         // carried has to be readable from inside the pipeline, and the
         // pipeline builds a fresh project object on every call. See

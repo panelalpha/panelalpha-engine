@@ -19,8 +19,8 @@ Throughout this page, `{project}` means the project's name - the value shown as 
 | Command | What it does |
 |---|---|
 | `pae configure` | Opens the menu: pick what to configure, do it, come back for the next thing. |
-| `pae configure mcp-tokens` | Connect an assistant, or change what assistants may use. |
-| `pae configure api-tokens` | Mint a token for your own software, and limit it to part of the API. |
+| `pae configure mcp` | Skips the menu and goes straight to ticking what a connected AI assistant may use. |
+| `pae configure tokens` | Limits one assistant's token to some of those commands, leaving the others alone. |
 | `pae configure mcp --dry-run` | Shows what it would write, and writes nothing. |
 
 The first menu asks which part of the engine you want to change; today that is the assistant's commands, and the list grows as more of the engine moves in here. Choosing it opens its own menu:

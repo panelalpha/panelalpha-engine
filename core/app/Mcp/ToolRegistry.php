@@ -7,12 +7,10 @@ use Laravel\Mcp\Server\Tool;
 use ReflectionClass;
 
 /**
- * Every tool the engine knows how to expose, before any configuration is
- * applied: the hand-written ones declared on {@see EngineServer}, plus the
- * generated registry it merges in.
+ * Every tool the engine can expose, before any configuration is applied.
  *
- * Read from the server class rather than restated, so a tool added there is a
- * tool `mcp:tool:list` and `pae configure` see without being told.
+ * Read off {@see EngineServer} rather than restated, so a tool added there is
+ * one `mcp:tool:list` and `pae configure` see without being told.
  */
 class ToolRegistry
 {
@@ -38,8 +36,8 @@ class ToolRegistry
     }
 
     /**
-     * Every tool, keyed by the toolset it belongs to and sorted by name inside
-     * each group — the shape both the listing and the wizard want.
+     * Keyed by toolset, sorted by name inside each — what both the listing and
+     * the wizard want.
      *
      * @return array<string, array<int, class-string<Tool>>>
      */

@@ -3,7 +3,7 @@
 namespace Tests\Unit\Console;
 
 use App\Console\Wizard\Section;
-use App\Console\Wizard\Sections\McpSection;
+use App\Console\Wizard\Sections\McpTokensSection;
 use App\Console\Wizard\Wizard;
 use Tests\TestCase;
 
@@ -36,9 +36,31 @@ class WizardTest extends TestCase
 
     public function test_it_finds_a_section_by_name(): void
     {
-        $this->assertSame(McpSection::class, Wizard::find('mcp'));
-        $this->assertSame(McpSection::class, Wizard::find('  MCP '));
+        $this->assertSame(McpTokensSection::class, Wizard::find('mcp-tokens'));
+        $this->assertSame(McpTokensSection::class, Wizard::find('  MCP-Tokens '));
         $this->assertNull(Wizard::find('nothing-like-this'));
+    }
+
+    /**
+     * The two areas are single-purpose on purpose: someone minting a token for
+     * their deploy script is not being asked to have an opinion about
+     * assistants, and a menu that asks anyway is a menu that gets answered
+     * wrong.
+     */
+    public function test_neither_area_talks_about_the_other(): void
+    {
+        foreach (Wizard::sections() as $key => $class) {
+            $words = strtolower($class::label() . ' ' . $class::hint());
+
+            if (str_contains($key, 'api')) {
+                $this->assertStringNotContainsString('mcp', $words, "{$class} mentions MCP");
+                $this->assertStringNotContainsString('assistant', $words, "{$class} mentions assistants");
+            }
+
+            if (str_contains($key, 'mcp')) {
+                $this->assertStringNotContainsString('rest', $words, "{$class} mentions the REST API");
+            }
+        }
     }
 
     public function test_the_labels_are_the_menu(): void

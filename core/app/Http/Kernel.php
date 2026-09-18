@@ -45,6 +45,9 @@ class Kernel extends HttpKernel
             // 'throttle:api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
             'auth:api',
+            // Straight after authentication: who the token is, then what it
+            // was issued to do.
+            \App\Http\Middleware\EnsureTokenMayUseApi::class,
             \App\Http\Middleware\CoverageMiddleware::class,
         ],
     ];

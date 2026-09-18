@@ -6,6 +6,7 @@ use App\Auth\TokenAbilities;
 use App\Console\Prompts\Screen;
 use App\Console\Wizard\ConnectAssistant;
 use App\Console\Wizard\Scopes\CommandScope;
+use App\Console\Wizard\KeepsAReceipt;
 use App\Console\Wizard\Section;
 use App\Console\Wizard\TokenManager;
 use App\Mcp\ToolExposure;
@@ -29,8 +30,7 @@ use function Laravel\Prompts\select;
  */
 class McpTokensSection implements Section
 {
-    /** @var array<int, string> */
-    private array $receipt = [];
+    use KeepsAReceipt;
 
     public static function key(): string
     {
@@ -45,12 +45,6 @@ class McpTokensSection implements Section
     public static function hint(): string
     {
         return "What this engine offers assistants, and each assistant's share of it.";
-    }
-
-    /** @return array<int, string> */
-    public function receipt(): array
-    {
-        return $this->receipt;
     }
 
     public function run(bool $dryRun): int

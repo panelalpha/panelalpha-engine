@@ -3,6 +3,7 @@
 namespace App\Console\Wizard\Sections;
 
 use App\Console\Prompts\Screen;
+use App\Console\Wizard\KeepsAReceipt;
 use App\Console\Wizard\Section;
 use App\Lib\Ssl\EngineCertificateRequest;
 use App\Lib\Ssl\ServedCertificate;
@@ -42,8 +43,7 @@ use function Laravel\Prompts\warning;
  */
 class EngineAddressSection implements Section
 {
-    /** @var array<int, string> */
-    private array $receipt = [];
+    use KeepsAReceipt;
 
     /** Whether the settings table could be read at all this run. */
     private bool $database = true;
@@ -61,12 +61,6 @@ class EngineAddressSection implements Section
     public static function hint(): string
     {
         return 'The address clients connect to, and the certificate it answers with.';
-    }
-
-    /** @return array<int, string> */
-    public function receipt(): array
-    {
-        return $this->receipt;
     }
 
     /**

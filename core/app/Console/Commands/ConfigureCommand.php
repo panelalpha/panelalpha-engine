@@ -14,30 +14,19 @@ use function Laravel\Prompts\outro;
 use function Laravel\Prompts\select;
 
 /**
- * `pae configure` — the engine's settings, asked rather than looked up.
+ * `pae configure` — the engine's settings, asked rather than looked up. Each
+ * choice is shown with its consequence and nothing is written unreviewed.
  *
- * Everything here can be set by hand in `.env`, and the variables are
- * documented where they live. What the wizard adds is the answer: each choice
- * is shown with its consequence, and nothing is written until the whole result
- * has been reviewed.
- *
- * Two levels, both of them loops. This one picks an area — {@see Wizard::SECTIONS},
- * of which MCP tool exposure is the first — and comes back for the next one
- * when that area is done. Each area runs its own menu of the settings it owns,
- * so an operator who came to change one thing changes that one thing. Naming
- * an area on the command line skips the top menu, because naming it is the
- * choice the menu would have asked for.
- *
- * It refuses to run without a terminal on purpose — see {@see canAsk()}.
+ * Two levels, both loops: this picks an area ({@see Wizard::SECTIONS}) and
+ * comes back when it is done; each area runs its own menu. Naming an area on
+ * the command line skips the top menu. Refuses to run without a terminal —
+ * see {@see canAsk()}.
  */
 class ConfigureCommand extends Command
 {
     /**
-     * What the wizard did, in the lines worth keeping.
-     *
-     * Every screen is drawn over the last one, and clearing erases rather than
-     * scrolls, so this is the whole of what the operator still has in their
-     * terminal afterwards. Collected from each section as it finishes.
+     * Collected from each section. Every screen is drawn over the last, so
+     * this is all the operator still has in their terminal afterwards.
      *
      * @var array<int, string>
      */
@@ -74,8 +63,7 @@ class ConfigureCommand extends Command
 
         $named = $this->argument('section');
 
-        // Naming an area means you came for that area: run it, and when it is
-        // done the wizard is done. No menu asked for, none shown.
+        // Naming an area means you came for that area: no menu shown.
         if (is_string($named) && $named !== '') {
             $section = Wizard::find($named);
 
@@ -95,13 +83,7 @@ class ConfigureCommand extends Command
         return $this->menu();
     }
 
-    /**
-     * The top level: pick an area, configure it, come back for the next one.
-     *
-     * A loop rather than a single choice, because configuring one thing is
-     * usually not the whole errand, and the alternative is running the command
-     * again for each of them.
-     */
+    /** The top level: pick an area, configure it, come back for the next. */
     private function menu(): int
     {
         $sections = Wizard::sections();
@@ -127,8 +109,7 @@ class ConfigureCommand extends Command
 
             $code = $this->enter($sections[$key]);
 
-            // A section that failed has said why; carrying on to the menu
-            // would draw over it.
+            // A failed section has said why; the menu would draw over it.
             if ($code !== self::SUCCESS) {
                 return $code;
             }
@@ -153,14 +134,7 @@ class ConfigureCommand extends Command
         }
     }
 
-    /**
-     * The last screen, and the only one nothing is drawn over.
-     *
-     * The wizard runs as one screen redrawn in place, which means everything
-     * it showed along the way is gone by the time it exits. What the operator
-     * should still be able to read off their terminal — what was written, and
-     * where the file it replaced went — is said once more here.
-     */
+    /** The last screen, and the only one nothing is drawn over. */
     private function done(int $code): int
     {
         Screen::wipe();
@@ -179,12 +153,9 @@ class ConfigureCommand extends Command
 
 
     /**
-     * Whether a prompt can be answered here at all.
-     *
-     * `Laravel\Prompts` does not fail without a terminal: it returns each
-     * prompt's default. A piped or `--no-interaction` run would therefore
-     * answer every question in this wizard by itself and write the result,
-     * which is the one outcome worse than refusing.
+     * `Laravel\Prompts` does not fail without a terminal — it returns each
+     * prompt's default, so a piped run would answer every question itself and
+     * write the result. Refusing is the better outcome.
      */
     private function canAsk(): bool
     {

@@ -3,6 +3,7 @@
 namespace App\Console\Commands\Api;
 
 use App\Mcp\ClientRegistration;
+use App\Auth\TokenAbilities;
 use App\Console\Prompts\PanelAlphaTheme;
 use App\Models\Admin;
 use Illuminate\Console\Command;
@@ -55,7 +56,9 @@ class McpConnectCommand extends Command
             return $this->call('mcp:token:create', ['name' => $client, '--client' => $client]);
         }
 
-        $token = Admin::rootAccount()->createToken($client, ['mcp'])->plainTextToken;
+        $token = Admin::rootAccount()
+            ->createToken($client, TokenAbilities::build(api: false, mcp: true))
+            ->plainTextToken;
         $url   = rtrim((string) config('app.url'), '/') . '/mcp';
         foreach (ClientRegistration::for($client, $url, $token)['lines'] as $line) {
             $this->line($line);
