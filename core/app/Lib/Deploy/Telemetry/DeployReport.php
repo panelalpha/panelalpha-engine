@@ -2,9 +2,9 @@
 
 namespace App\Lib\Deploy\Telemetry;
 
-use App\Lib\Apis\System\User\Project\Dind\AppHealth;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\Platform\Metadata\AppPackage;
+use App\System\Project\Dind\AppHealth;
 
 /**
  * Assembles one deploy telemetry report: no username, repository token, host

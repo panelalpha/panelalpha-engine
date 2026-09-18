@@ -32,6 +32,7 @@ use App\System\Project\Dind\PrepareFromSource;
 use App\System\Project\Dind\ProjectEnvironment;
 use App\System\Project\Dind\ProjectFiles;
 use App\System\Project\Dind\ShellOperations;
+use App\System\Project\Dind\Source\Files as SourceFiles;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -255,7 +256,7 @@ class Dind implements DeployableDindProject, Runtime
 
     public function importProjectArchive(string $zipPath): void
     {
-        (new Source\Files($this))->importProjectArchive($zipPath);
+        (new SourceFiles($this))->importProjectArchive($zipPath);
     }
 
     public function applyProjectEnvVars(): void
