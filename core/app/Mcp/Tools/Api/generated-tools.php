@@ -182,6 +182,8 @@ return [
     \App\Mcp\Tools\Api\Tasks\TaskLogListTool::class,
     \App\Mcp\Tools\Api\Tasks\TaskLogStreamTool::class,
     \App\Mcp\Tools\Api\Projects\ProjectCreateSyncTool::class,
+    \App\Mcp\Tools\Api\SecretVault\VaultConfigGetTool::class,
+    \App\Mcp\Tools\Api\SecretVault\VaultConfigSetTool::class,
     \App\Mcp\Tools\Api\SecretVault\VaultSecretListTool::class,
     \App\Mcp\Tools\Api\SecretVault\VaultSecretCreateTool::class,
     \App\Mcp\Tools\Api\SecretVault\VaultSecretDeleteTool::class,

@@ -19,12 +19,23 @@ use Illuminate\Support\Str;
  * the reference are the same string, so one hashed column serves both, and a
  * database dump contains no live form links.
  *
+ * `scope` says how long that answer is good for. A `request` entry is the
+ * original thing: one secret for the call in front of it, gone an hour later.
+ * A `global` entry is the engine's own credential of that type -- one per
+ * type, pasted once, used by every project that does not carry one of its
+ * own, so a solo developer is asked for their Git token once rather than at
+ * every project. Its secret never expires; only the paste link does, which is
+ * why the two clocks are separate columns.
+ *
  * @property int       $id
  * @property string    $ref_hash
  * @property string    $type
+ * @property string    $scope
+ * @property ?string   $purpose
  * @property ?string   $secret_encrypted
  * @property ?Carbon   $filled_at
- * @property Carbon    $expires_at
+ * @property ?Carbon   $link_expires_at
+ * @property ?Carbon   $expires_at
  * @property int       $use_count
  * @property ?Carbon   $last_used_at
  * @property Carbon    $created_at
@@ -58,21 +69,45 @@ class SecretVaultEntry extends Model
         self::TYPE_CLOUDFLARE_API_TOKEN,
     ];
 
-    /** Seconds an entry stays usable, from creation: paste window and reads alike. */
+    /** One secret for the call in front of it: expires with its paste link. */
+    public const SCOPE_REQUEST = 'request';
+
+    /**
+     * The engine's own credential of this type -- one row per type, reused by
+     * every project that has none of its own, and it does not expire.
+     */
+    public const SCOPE_GLOBAL = 'global';
+
+    /** @var list<string> */
+    public const SCOPES = [self::SCOPE_REQUEST, self::SCOPE_GLOBAL];
+
+    /**
+     * Seconds from the mint that the paste form stays open -- and, for a
+     * request entry, that its secret stays readable too. A global entry's
+     * secret has no such clock; only its form does.
+     */
     public const TTL_SECONDS = 3600;
 
     protected $fillable = [
         'ref_hash',
         'type',
+        'scope',
+        'purpose',
         'secret_encrypted',
         'filled_at',
+        'link_expires_at',
         'expires_at',
     ];
 
     protected $casts = [
-        'filled_at'    => 'datetime',
-        'expires_at'   => 'datetime',
-        'last_used_at' => 'datetime',
+        'filled_at'       => 'datetime',
+        'link_expires_at' => 'datetime',
+        'expires_at'      => 'datetime',
+        'last_used_at'    => 'datetime',
+    ];
+
+    protected $attributes = [
+        'scope' => self::SCOPE_REQUEST,
     ];
 
     /**
@@ -127,13 +162,51 @@ class SecretVaultEntry extends Model
         return preg_match('/^[a-z][a-z0-9_]*$/', $type) === 1 ? $type . '.md' : 'default.md';
     }
 
+    public function isGlobal(): bool
+    {
+        return $this->scope === self::SCOPE_GLOBAL;
+    }
+
+    /**
+     * A secret has been pasted, and is therefore final.
+     *
+     * Nothing overwrites a stored secret -- not a second visit to the form,
+     * not a re-mint. Replacing one means deleting the entry and creating
+     * another, which is a decision somebody has to take deliberately rather
+     * than something a re-opened link can do quietly. It also keeps
+     * `use_count` and `last_used_at` meaning one secret instead of however
+     * many happened to pass through this row.
+     */
+    public function isSealed(): bool
+    {
+        return $this->filled_at !== null;
+    }
+
+    /**
+     * The secret is past its life. A global entry has none, so this is only
+     * ever true of a request entry.
+     */
     public function expired(): bool
     {
         return $this->expires_at !== null && $this->expires_at->isPast();
     }
 
     /**
+     * The paste form no longer accepts. Separate from {@see expired()}: a
+     * global entry's link dies after an hour while its secret stays usable,
+     * so a leaked URL cannot be pasted over months later.
+     */
+    public function linkExpired(): bool
+    {
+        return $this->link_expires_at !== null && $this->link_expires_at->isPast();
+    }
+
+    /**
      * `pending` (no paste yet), `filled` (usable), or `expired`.
+     *
+     * A global entry whose link has closed but whose secret is stored is
+     * `filled` -- the thing a caller wants to know is whether the credential
+     * is there, and it is.
      */
     public function status(): string
     {
@@ -142,6 +215,24 @@ class SecretVaultEntry extends Model
         }
 
         return $this->filled_at !== null ? 'filled' : 'pending';
+    }
+
+    /**
+     * The engine's global entry for `$type`, whatever state it is in.
+     *
+     * There is at most one: {@see \App\Http\Controllers\SecretVaultController}
+     * mints a global by updating the existing row rather than adding a second,
+     * so "the engine's Git token" names one secret and re-minting rotates the
+     * paste link instead of forking the answer. Newest first regardless, so a
+     * row that predates that rule cannot shadow the current one.
+     */
+    public static function globalFor(string $type): ?self
+    {
+        return self::query()
+            ->where('scope', self::SCOPE_GLOBAL)
+            ->where('type', $type)
+            ->orderByDesc('id')
+            ->first();
     }
 
     public function setSecret(string $secret): void

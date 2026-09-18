@@ -9,7 +9,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex, nofollow">
     <title>{{ $title ?? 'PanelAlpha Engine' }}</title>
-    <link rel="icon" href="/vault/icons/git.svg">
+    @include('partials.favicons')
     <link rel="stylesheet" href="/vault/vault.css">
 </head>
 <body>

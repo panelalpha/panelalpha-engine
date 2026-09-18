@@ -28,9 +28,11 @@ use App\Lib\Domains\DomainAllocationException;
 use App\Lib\Domains\DomainAllocator;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Domains\PublicUrl;
+use App\Lib\Vault\GlobalVault;
 use App\Lib\Vault\RequestVault;
 use App\Models\Domain;
 use App\Models\ProxyRule;
+use App\Models\SecretVaultEntry;
 use App\Models\Setting;
 use App\Models\Task;
 use App\Models\Tunnel;
@@ -575,7 +577,13 @@ class UserController extends Controller
             $probe = (new GitRemoteProbe())->problem(
                 'git_repo',
                 $params['git_repo'],
-                $params['git_token'] ?? null
+                // The token the clone will actually use, which is not always
+                // the one being stored: a create that sends none inherits the
+                // engine's, and probing without it would refuse a private
+                // repository the deploy would then have read fine. Used here
+                // and dropped -- `git_token` above stays absent, so the
+                // project keeps inheriting and a rotation still reaches it.
+                GlobalVault::effective($params['git_token'] ?? null, SecretVaultEntry::TYPE_GIT_TOKEN)
             );
             if ($probe !== null) {
                 throw ProblemException::of([$probe]);

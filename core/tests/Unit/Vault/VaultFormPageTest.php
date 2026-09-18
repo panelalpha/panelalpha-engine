@@ -124,14 +124,20 @@ class VaultFormPageTest extends VaultTestCase
         $this->assertSame($one, $two);
     }
 
-    public function test_a_filled_entry_says_that_saving_again_replaces_it(): void
+    /**
+     * This used to offer a second paste that replaced the first. A stored
+     * secret is now final -- replacing one means deleting the entry -- so the
+     * page says so instead of showing a field.
+     */
+    public function test_a_filled_entry_refuses_instead_of_offering_to_replace(): void
     {
         [, $ref] = $this->entry(['type' => SecretVaultEntry::TYPE_GIT_TOKEN, 'secret' => 'ghp_first']);
 
         $response = $this->page($ref);
 
-        $this->assertIsPasteForm($response);
-        $response->assertSee('replaces it');
+        $response->assertOk();
+        $response->assertSee('This secret is already set');
+        $response->assertDontSee('name="secret"', false);
         $response->assertDontSee('ghp_first');
     }
 
@@ -180,6 +186,23 @@ class VaultFormPageTest extends VaultTestCase
         foreach ($matches[1] as $url) {
             $this->assertStringStartsWith('/', $url, "asset URL is not root-relative: {$url}");
         }
+    }
+
+    /**
+     * The tab icon shipped as the Git logo, so the vault looked like GitHub's.
+     * `git.svg` still labels the title tile -- it is only the favicon that is ours.
+     */
+    public function test_the_tab_icon_is_the_engine_mark_not_a_provider_logo(): void
+    {
+        [, $ref] = $this->entry(['type' => SecretVaultEntry::TYPE_GIT_TOKEN]);
+
+        $content = (string) $this->page($ref)->getContent();
+
+        $this->assertStringContainsString('<link rel="icon" href="/favicon.svg" type="image/svg+xml">', $content);
+        $this->assertStringContainsString('href="/favicon.ico"', $content);
+        $this->assertStringContainsString('href="/apple-touch-icon.png"', $content);
+        $this->assertStringContainsString('href="/site.webmanifest"', $content);
+        $this->assertStringNotContainsString('rel="icon" href="/vault/icons/', $content);
     }
 
     /** `url()->current()` shipped a dead Save button: it posts to port 80 behind the proxy. */

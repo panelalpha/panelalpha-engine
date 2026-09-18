@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     List vault entries
 
-    Every live or recently expired entry, newest first. The secret is never included; `status` is pending (no paste yet), filled (usable) or expired.
+    Every live or recently expired entry, newest first. **The secret is never included** and cannot be read back by any endpoint -- this is the inventory, not the values. Each row carries `id` (pass as `id:<n>` to status or delete), `type`, `purpose`, `scope`, `status` (pending, filled or expired) and the dates. `purpose` is what tells two entries of the same type apart when deciding which to delete.
 
     Calls GET /api/vault/secrets.
     MARKDOWN)]

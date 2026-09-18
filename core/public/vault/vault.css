@@ -113,6 +113,30 @@ body {
     text-wrap: pretty;
 }
 
+/* Why this link exists. Set off from the page's own copy, because it is the
+   one line on the screen that came from the person who asked for the secret
+   rather than from the engine. */
+.purpose {
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--accent);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, .03);
+    font: 400 14px/1.55 var(--font-sans);
+    color: var(--body);
+    text-wrap: pretty;
+}
+
+.purpose-label {
+    display: block;
+    margin-bottom: 2px;
+    font: 600 11px/1.2 var(--font-sans);
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--faint);
+}
+
 .field-label,
 .steps-title {
     font: 600 15px/1.2 var(--font-sans);

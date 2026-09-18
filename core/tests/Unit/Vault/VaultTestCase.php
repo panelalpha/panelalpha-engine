@@ -2,7 +2,9 @@
 
 namespace Tests\Unit\Vault;
 
+use App\Lib\Vault\GlobalVault;
 use App\Models\SecretVaultEntry;
+use App\Models\Setting;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -38,19 +40,57 @@ abstract class VaultTestCase extends TestCase
             $table->id();
             $table->char('ref_hash', 64)->unique()->index();
             $table->string('type');
+            $table->string('scope', 16)->default(SecretVaultEntry::SCOPE_REQUEST);
+            $table->string('purpose', 255)->nullable();
             $table->text('secret_encrypted')->nullable();
             $table->timestamp('filled_at')->nullable();
-            $table->timestamp('expires_at');
+            $table->timestamp('link_expires_at')->nullable();
+            $table->timestamp('expires_at')->nullable();
             $table->unsignedInteger('use_count')->default(0);
             $table->timestamp('last_used_at')->nullable();
             $table->timestamps();
+            $table->index(['scope', 'type']);
         });
+
+        // Whether tokens are shared engine-wide is a Setting, and the vault
+        // reads it on every fallback. The table is here so that read is a real
+        // one -- a runtime override would hide a query that production makes.
+        Schema::connection('sqlite')->create('settings', function (Blueprint $table) {
+            $table->id();
+            $table->string('name')->unique();
+            $table->text('value')->nullable();
+            $table->timestamps();
+        });
+        Setting::clearRuntimeSettings();
     }
 
     protected function tearDown(): void
     {
+        Setting::clearRuntimeSettings();
+        Schema::connection('sqlite')->dropIfExists('settings');
         Schema::connection('sqlite')->dropIfExists('secret_vault_entries');
         parent::tearDown();
+    }
+
+    /**
+     * The engine-wide entry for a type, optionally already pasted into.
+     *
+     * @return array{0: SecretVaultEntry, 1: string}
+     */
+    protected function globalEntry(string $type = SecretVaultEntry::TYPE_GIT_TOKEN, ?string $secret = null): array
+    {
+        return $this->entry([
+            'type' => $type,
+            'scope' => SecretVaultEntry::SCOPE_GLOBAL,
+            'expires_at' => null,
+            'secret' => $secret,
+        ]);
+    }
+
+    /** Turn engine-wide sharing off, the way an operator would. */
+    protected function keepTokensPerProject(): void
+    {
+        GlobalVault::setProjectScoped(true);
     }
 
     /**
@@ -66,8 +106,10 @@ abstract class VaultTestCase extends TestCase
         $params = array_merge([
             'ref_hash' => SecretVaultEntry::hashRef($ref),
             'type' => SecretVaultEntry::TYPE_GIT_TOKEN,
+            'link_expires_at' => now()->addSeconds(SecretVaultEntry::TTL_SECONDS),
             'expires_at' => now()->addSeconds(SecretVaultEntry::TTL_SECONDS),
         ], $overrides);
+        unset($params['secret']);
 
         /** @var SecretVaultEntry */
         $entry = SecretVaultEntry::create($params);

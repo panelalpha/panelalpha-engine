@@ -22,7 +22,7 @@
 // `php artisan mcp:tool:generate` reads this file and fails loudly on an
 // operation that is missing from it or on an entry that no longer matches a
 // route, so adding an endpoint is a deliberate naming decision rather than an
-// accident. Render the catalogue with `php artisan mcp:catalogue`.
+// accident. See docs/mcp-catalogue.html.
 
 return [
     // Projects -- one hosting account with its container, domains, databases and
@@ -214,10 +214,17 @@ return [
     // ref gets the plaintext. `status` is what an agent polls to wait for the
     // paste; `delete` is cleanup. The secret itself is never returned by any
     // of these.
+    //
+    // `create` with `scope: global` stores the engine's own secret of a type
+    // instead -- pasted once, used by every project that has none of its own,
+    // so an agent stops asking for the same Git token at every project. The
+    // `config` pair is the switch that governs whether projects inherit it.
     'POST /vault/secrets' => 'vault_secret_create',
     'GET /vault/secrets' => 'vault_secret_list',
     'GET /vault/secrets/{ref}' => 'vault_secret_status',
     'DELETE /vault/secrets/{ref}' => 'vault_secret_delete',
+    'GET /vault/config' => 'vault_config_get',
+    'PUT /vault/config' => 'vault_config_set',
 
     // System
     // Files a bug against the engine over the telemetry channel. `create`

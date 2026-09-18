@@ -72,9 +72,16 @@ Route::post('/mcp-activity-logs', [McpActivityLogController::class, 'store']);
  * from API calls as `vault:<ref>` in the field that would otherwise carry it
  * (git_token, env_vars values). The secret never passes through the API
  * caller -- see SecretVaultController.
+ *
+ * `/vault/config` is the other half: whether a project without a credential
+ * of its own falls back to the engine's `global` entry of that type.
  */
+Route::get('/vault/config', [SecretVaultController::class, 'config']);
+Route::put('/vault/config', [SecretVaultController::class, 'updateConfig']);
 Route::get('/vault/secrets', [SecretVaultController::class, 'index']);
 Route::post('/vault/secrets', [SecretVaultController::class, 'store']);
+// `{ref}` is the minted reference, or `global:<type>` for an engine-wide
+// secret, whose paste link is rotated and so cannot name it.
 Route::get('/vault/secrets/{ref}', [SecretVaultController::class, 'show']);
 Route::delete('/vault/secrets/{ref}', [SecretVaultController::class, 'destroy']);
 

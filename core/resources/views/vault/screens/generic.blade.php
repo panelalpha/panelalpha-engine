@@ -17,6 +17,8 @@
             <p class="lede">You were sent here by an assistant that needs this value to finish what you asked for. Paste it below.</p>
         @endif
 
+        @include('vault.partials.purpose', ['purpose' => $entry->purpose])
+
         @include('vault.partials.paste', [
             'label' => 'Secret',
             'placeholder' => 'paste the value here',

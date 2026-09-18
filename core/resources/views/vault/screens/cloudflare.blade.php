@@ -9,6 +9,8 @@
 
         <p class="lede">To connect Cloudflare, Engine needs an API token that can manage tunnels and DNS on your domain.</p>
 
+        @include('vault.partials.purpose', ['purpose' => $entry->purpose])
+
         @include('vault.steps.cloudflare')
 
         @include('vault.partials.paste', [

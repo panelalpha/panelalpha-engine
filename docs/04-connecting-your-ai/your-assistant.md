@@ -697,6 +697,44 @@ Used when a private repository or a Cloudflare tunnel needs a token. You paste t
 | `vault_secret_delete` | Deletes a paste slot |
 | `vault_secret_list` | Lists paste slots. The secret itself is never included |
 | `vault_secret_status` | Whether a paste slot has a secret yet |
+| `vault_config_get` | Whether projects share the engine's secrets, and which ones are stored |
+| `vault_config_set` | Turn that sharing on or off |
+
+### What you can see, and what you cannot
+
+A secret is never readable again — not by your assistant, not by you, not by any command. What you can always see is the **inventory**: each entry's id, what kind of secret it is, what it is for, whether it has been filled in yet, and the dates.
+
+Give a **purpose** when you ask for a link ("deploy key for the shop repo"). It is shown on the paste page, so whoever hands over a credential can see why it is wanted, and it appears in the listing afterwards. Since the value itself can never be read back, the purpose is usually the only thing that tells two entries of the same kind apart when you come to tidy up.
+
+### A secret cannot be edited, only replaced
+
+Once a value has been pasted it is final. Opening the link again will not change it, and neither will asking for a new link for the same engine-wide secret. To replace one, delete the entry and create a fresh link. This is deliberate: an overwrite would be invisible afterwards, because nothing can read the value back to check.
+
+### From the server
+
+```bash
+php artisan vault:secret:create git_token --purpose="Deploy key for the shop repo"
+php artisan vault:secret:list
+php artisan vault:secret:delete <id>
+```
+
+`vault:secret:list` prints the inventory and never a secret. `--scope=global` on create stores the engine-wide one.
+
+### Pasting a token once
+
+By default a paste page is for the calls your assistant is about to make, and it expires in an hour. Ask for a **global** one instead and the engine keeps that secret as its own: every project you create afterwards without a token of its own uses it, so you are asked for your Git or Cloudflare token once rather than at every project.
+
+There is one global secret per kind. Asking for a new global paste page reopens the form so you can replace what is stored; the old value keeps working until you actually paste. The page itself still expires in an hour, so a link that ends up in an old chat cannot be used to overwrite your token later.
+
+A project that was given its own token keeps using that one. Nothing is copied at creation time, so replacing the global reaches every project that never had one.
+
+If you run projects for other people and want the old behaviour — each project strictly on its own credentials — turn sharing off with `vault_config_set`, or on the server:
+
+```bash
+php artisan vault:config --project-scoped=true
+```
+
+Your stored globals are not deleted by that, and turning sharing back on restores them.
 
 ## From the server
 

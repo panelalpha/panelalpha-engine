@@ -1,0 +1,19 @@
+{
+  "name": "PanelAlpha Engine",
+  "short_name": "Engine",
+  "icons": [
+    {
+      "src": "/vault/favicons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/vault/favicons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#0A0A0B",
+  "background_color": "#0A0A0B",
+  "display": "standalone"
+}
