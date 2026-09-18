@@ -1,10 +1,15 @@
 <?php
 
-namespace Tests\Unit\Mcp;
+namespace Tests\Unit\Console;
 
-use App\Mcp\PanelAlphaTheme;
+use App\Console\Prompts\PanelAlphaTheme;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Laravel\Prompts\ConfirmPrompt;
+use Laravel\Prompts\MultiSelectPrompt;
 use Laravel\Prompts\Prompt;
 use Laravel\Prompts\SelectPrompt;
+use Laravel\Prompts\TextPrompt;
+use ReflectionMethod;
 use Tests\TestCase;
 
 /**
@@ -105,15 +110,45 @@ class PanelAlphaThemeTest extends TestCase
     }
 
     /**
-     * The settled frame - what is left on screen after Enter - is the same
-     * orange, because submit shares the default branch's gray.
+     * Nothing is left on screen after Enter.
+     *
+     * The package settles an answered prompt into a one-line frame and leaves
+     * it there. `pae configure` is a menu an operator comes back to, so those
+     * settle into a transcript of how they navigated — a twenty-five row group
+     * list scrolling the menu off the top on every visit. `Prompt::render()`
+     * erases the previous frame before writing the new one, so an empty submit
+     * frame means the prompt vanishes and the next one draws in its place.
      */
-    public function test_the_submitted_frame_stays_orange(): void
+    public function test_an_answered_prompt_leaves_nothing_behind(): void
     {
         $submitted = $this->prompt();
         $submitted->state = 'submit';
 
-        $this->assertStringContainsString(self::ORANGE . ' ┌', $this->render($submitted));
+        $this->assertSame('', $this->render($submitted));
+    }
+
+    /**
+     * ...for every prompt type, or a wizard that erased one question and kept
+     * the next would look worse than one that kept them all.
+     */
+    #[DataProvider('everyPromptTypeTheWizardAsks')]
+    public function test_no_prompt_type_leaves_anything_behind(callable $make): void
+    {
+        $prompt = $make();
+        $prompt->state = 'submit';
+
+        $render = new ReflectionMethod($prompt, 'renderTheme');
+
+        $this->assertSame('', $render->invoke($prompt), $prompt::class . ' left a settled frame behind');
+    }
+
+    /** Cancelling still says so: only a successful answer is erased. */
+    public function test_a_cancelled_prompt_still_shows(): void
+    {
+        $cancelled = $this->prompt();
+        $cancelled->state = 'cancel';
+
+        $this->assertStringContainsString(self::RED . ' ┌', $this->render($cancelled));
     }
 
     /** Registering twice is not an error: the command registers on every run. */
@@ -139,6 +174,38 @@ class PanelAlphaThemeTest extends TestCase
         Prompt::theme('default'); // what the next prompt would see
 
         $this->assertStringContainsString(self::ORANGE . ' ┌', $this->render($prompt));
+    }
+
+    /**
+     * The wizard asks more than one kind of question, and a run that framed
+     * one prompt in orange and the next in cyan would look broken. Rendered
+     * through the theme the way a prompt resolves its own renderer, so a type
+     * dropped from `register()` fails here.
+     */
+    #[DataProvider('everyPromptTypeTheWizardAsks')]
+    public function test_every_prompt_type_the_wizard_asks_is_framed_in_orange(callable $make): void
+    {
+        $prompt = $make();
+
+        // Rendered the way the prompt itself renders: `renderTheme()` looks
+        // the renderer up in the active theme, which is the registration this
+        // is here to check.
+        $render = new ReflectionMethod($prompt, 'renderTheme');
+        $frame = $render->invoke($prompt);
+
+        $this->assertStringContainsString(self::ORANGE . ' ┌', $frame, $prompt::class . ' must be framed in orange');
+        $this->assertStringNotContainsString(self::CYAN, $frame, $prompt::class . ' has something left cyan');
+    }
+
+    /** @return array<string, array{0: callable}> */
+    public static function everyPromptTypeTheWizardAsks(): array
+    {
+        return [
+            'select' => [fn (): SelectPrompt => new SelectPrompt('Ceiling', ['a' => 'A', 'b' => 'B'])],
+            'multiselect' => [fn (): MultiSelectPrompt => new MultiSelectPrompt('Groups', ['a' => 'A', 'b' => 'B'])],
+            'confirm' => [fn (): ConfirmPrompt => new ConfirmPrompt('Write this?')],
+            'text' => [fn (): TextPrompt => new TextPrompt('Tools to deny')],
+        ];
     }
 
     private function prompt(): SelectPrompt

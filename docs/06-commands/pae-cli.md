@@ -14,6 +14,47 @@ pae <command> --help
 
 Throughout this page, `{project}` means the project's name - the value shown as `username` in the engine's output.
 
+## Configuring the engine
+
+| Command | What it does |
+|---|---|
+| `pae configure` | Opens the menu: pick what to configure, do it, come back for the next thing. |
+| `pae configure mcp-tokens` | Connect an assistant, or change what assistants may use. |
+| `pae configure api-tokens` | Mint a token for your own software, and limit it to part of the API. |
+| `pae configure mcp --dry-run` | Shows what it would write, and writes nothing. |
+
+The first menu asks which part of the engine you want to change; today that is the assistant's commands, and the list grows as more of the engine moves in here. Choosing it opens its own menu:
+
+```text
+ Groups      37 of 37 groups on
+ Commands    182 of 182 commands on
+ Ceiling     full — they may do anything, including delete
+ Review and save
+ Back
+```
+
+**Groups** and **Commands** are checkboxes. Groups ticks whole groups on and off at once; Commands asks which group you want, then lists that group's commands with a box each and what each one does to the server:
+
+```text
+ ◼ app_info                     read
+ ◼ app_install                  write
+ ◻ app_user_delete              write
+```
+
+Tick what the assistant may use and untick what it may not. You never have to think about which settings file line carries which decision — the wizard works that out when it saves.
+
+`pae configure tokens` asks the same thing one token at a time: pick an assistant's token, tick what that one may use. It can only narrow — an assistant cannot be given a command the engine is not offering — and ticking everything means "no limit", so that token keeps following the engine. `pae mcp:token:list` shows the result in its **Commands** column, as `all` or `40 of 182`.
+
+This limits what an assistant may call. It does not limit the token itself: anyone holding it can still reach the engine's REST API in full.
+
+**Ceiling** is the one thing that is not a tick, and it is worth setting first. It is a ceiling on what a ticked command may *do*: at `readonly` the assistant can look and change nothing, whatever you have ticked. Nothing below it can raise it.
+
+Nothing is written until you pick **Review and save** and confirm it, and the settings it replaces are printed so you can put them back. When you save, you land back on the first menu.
+
+The wizard takes over the terminal while it runs — each step is drawn over the last, so you always see the current one and nothing else. What it wrote is printed once more as it exits, and that is what stays on your screen afterwards.
+
+The settings themselves are ordinary lines in `.env-core` and you can still edit them by hand: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+
 ## Projects and deploys
 
 | Command | What it does |
@@ -139,14 +180,15 @@ Context: [Domains and HTTPS](../05-capabilities/domains-and-ssl.md) · [Cloudfla
 | Command | What it does |
 |---|---|
 | `pae connect` | Same command as `pae mcp:connect`. Shows the assistants; pick one with the arrow keys. Pass a name (`claude`, `claude-desktop`, `codex`, `chatgpt-desktop`, `gemini`, `grok`, `opencode`, `vscode`, `cursor`, `windsurf`, `pi`, `hermes`, `openclaw`) to create a token and print that assistant's command. |
-| `pae mcp:token:create {name}` | Creates a token for an AI assistant, and prints a setup command for every assistant. Shown once. `--client=claude` prints only one. |
+| `pae mcp:token:create {name}` | Creates a token for an AI assistant, and prints a setup command for every assistant. Shown once. `--client=claude` prints only one. `--expires=90d` makes it temporary; `--api` also lets it call the API directly. |
 | `pae mcp:token:list` | Lists assistant tokens. |
 | `pae mcp:token:revoke {id}` | Stops a token working immediately. |
 | `pae mcp:token:delete {id}` | Removes a token from the list. |
 | `pae mcp:check {token}` | Checks HTTPS, the token, and that an assistant can connect. |
 | `pae mcp:tool:list` | Lists what a connected assistant is currently allowed to do. |
+| `pae configure mcp` | Changes that, by asking. See [Configuring the engine](#configuring-the-engine). |
 | `pae mcp:log:list` | Lists recent assistant requests. |
-| `pae api:token:create {name}` | Creates a token for your own software. Not for assistants. |
+| `pae api:token:create {name}` | Creates a token for your own software. Not for assistants — it is refused at the assistant endpoint unless you pass `--mcp`. `--expires=90d` makes it temporary. |
 | `pae api:token:list` | Lists those software tokens. |
 | `pae api:token:delete {id}` | Removes a software token. |
 

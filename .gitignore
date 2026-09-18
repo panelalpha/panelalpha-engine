@@ -1,6 +1,7 @@
 .vscode
 .env
 .env-core
+.env-core.pae-backup
 scripts/monit.conf
 scripts/monit-script.sh
 core/tests/sessions/*/.env
@@ -46,9 +47,6 @@ scripts/dind-test/vendor
 # is stale within minutes and differs per operator). scripts/app-support-batch.py
 # takes it as --apps; the token it is fetched with is not committed either.
 scripts/apps.json
-
-# Generated locally; not published with operator docs.
-docs/mcp-catalogue.html
 
 # local editor / assistant state
 .idea/

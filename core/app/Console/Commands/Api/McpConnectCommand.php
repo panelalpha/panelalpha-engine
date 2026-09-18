@@ -3,7 +3,7 @@
 namespace App\Console\Commands\Api;
 
 use App\Mcp\ClientRegistration;
-use App\Mcp\PanelAlphaTheme;
+use App\Console\Prompts\PanelAlphaTheme;
 use App\Models\Admin;
 use Illuminate\Console\Command;
 

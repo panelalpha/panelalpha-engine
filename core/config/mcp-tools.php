@@ -45,6 +45,13 @@ return [
     | `php artisan mcp:tool:list` prints the toolset each tool belongs to, and
     | the current exposed/withheld/total split.
     |
+    | An empty value means every group, not none: a setting nobody has touched
+    | and a setting that permits everything are the same value here. "No group
+    | at all" therefore needs a spelling of its own, and it is any token that
+    | is not a group name -- `pae configure mcp` writes `none`, which is what
+    | that line means when you find it in the file. Individual tools named in
+    | MCP_TOOLS still apply on top of it.
+    |
     | MCP_TOOLSETS=engine,servermetrics,domainlogfiles
     */
     'toolsets' => env('MCP_TOOLSETS', 'all'),

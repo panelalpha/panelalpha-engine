@@ -2,11 +2,9 @@
 
 namespace App\Console\Commands\Mcp;
 
-use App\Mcp\Servers\EngineServer;
 use App\Mcp\ToolPolicy;
+use App\Mcp\ToolRegistry;
 use Illuminate\Console\Command;
-use Laravel\Mcp\Server\Transport\FakeTransporter;
-use ReflectionClass;
 
 /**
  * Shows which tools the current configuration actually exposes.
@@ -29,7 +27,7 @@ class ToolsListCommand extends Command
     {
         $policy = new ToolPolicy();
 
-        $all = $this->allTools();
+        $all = ToolRegistry::all();
         $exposed = $policy->filter($all);
         $excluded = array_values(array_diff($all, $exposed));
 
@@ -77,21 +75,5 @@ class ToolsListCommand extends Command
         $this->line('');
 
         return self::SUCCESS;
-    }
-
-    /**
-     * The unfiltered set: what the server would register with no config at all.
-     *
-     * @return array<int, class-string<\Laravel\Mcp\Server\Tool>>
-     */
-    private function allTools(): array
-    {
-        $defaults = (new ReflectionClass(EngineServer::class))
-            ->getProperty('tools')
-            ->getDefaultValue();
-
-        $generated = app_path('Mcp/Tools/Api/generated-tools.php');
-
-        return array_merge($defaults, is_file($generated) ? require $generated : []);
     }
 }

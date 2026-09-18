@@ -32,7 +32,19 @@ Read this before you paste a token anywhere.
 
 **A token with default permissions can permanently delete an entire project and everything in it**, including its files, databases and websites. That is what the engine's own interface can do, and the token grants access to all of it.
 
-These settings live in `/opt/panelalpha/shared-hosting/.env-core`. Changing any of them does nothing until you restart the engine: [Change a setting](../02-getting-started/install.md#change-a-setting).
+### The quick way: let the engine ask
+
+```bash
+pae configure mcp
+```
+
+What this does: shows the assistant's commands as checkboxes — whole groups, or one group's commands at a time — and one setting for how far a ticked command may go. Tick what the assistant may use, untick what it may not, and the wizard works out which of the four settings below carries each decision. Nothing is written until you pick **Review and save** and say yes, and what it replaces is printed so you can put it back. Add `--dry-run` to see what it would write and write nothing.
+
+`pae configure` on its own starts one level up, with the list of things the engine can walk you through.
+
+Use it instead of editing the file by hand. The rest of this section is the reference for the settings it writes, and how to set the same things yourself.
+
+These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit that file by hand, the change does nothing until you restart the engine: [Change a setting](../02-getting-started/install.md#change-a-setting). Either way, an assistant that is already connected keeps the tool list it was given when it connected — reconnect it to see the change.
 
 ### How far it may go
 
@@ -55,6 +67,8 @@ MCP_TOOLSETS=all
 ```
 
 To limit the assistant to some groups, replace `all` with a comma-separated list of those names. Do not add one name on top of `all`: `all` already includes every group.
+
+**An empty value means every group, not none.** A setting nobody has touched and one that permits everything are the same thing here, so if you want no group at all, write `MCP_TOOLSETS=none`. Single tools named in `MCP_TOOLS` still work on top of that.
 
 If this engine was installed earlier and you never set `MCP_TOOLSETS`, the assistant now sees every group, including ones it could not see before. Narrow the list if that is more than you want.
 
@@ -697,44 +711,6 @@ Used when a private repository or a Cloudflare tunnel needs a token. You paste t
 | `vault_secret_delete` | Deletes a paste slot |
 | `vault_secret_list` | Lists paste slots. The secret itself is never included |
 | `vault_secret_status` | Whether a paste slot has a secret yet |
-| `vault_config_get` | Whether projects share the engine's secrets, and which ones are stored |
-| `vault_config_set` | Turn that sharing on or off |
-
-### What you can see, and what you cannot
-
-A secret is never readable again — not by your assistant, not by you, not by any command. What you can always see is the **inventory**: each entry's id, what kind of secret it is, what it is for, whether it has been filled in yet, and the dates.
-
-Give a **purpose** when you ask for a link ("deploy key for the shop repo"). It is shown on the paste page, so whoever hands over a credential can see why it is wanted, and it appears in the listing afterwards. Since the value itself can never be read back, the purpose is usually the only thing that tells two entries of the same kind apart when you come to tidy up.
-
-### A secret cannot be edited, only replaced
-
-Once a value has been pasted it is final. Opening the link again will not change it, and neither will asking for a new link for the same engine-wide secret. To replace one, delete the entry and create a fresh link. This is deliberate: an overwrite would be invisible afterwards, because nothing can read the value back to check.
-
-### From the server
-
-```bash
-php artisan vault:secret:create git_token --purpose="Deploy key for the shop repo"
-php artisan vault:secret:list
-php artisan vault:secret:delete <id>
-```
-
-`vault:secret:list` prints the inventory and never a secret. `--scope=global` on create stores the engine-wide one.
-
-### Pasting a token once
-
-By default a paste page is for the calls your assistant is about to make, and it expires in an hour. Ask for a **global** one instead and the engine keeps that secret as its own: every project you create afterwards without a token of its own uses it, so you are asked for your Git or Cloudflare token once rather than at every project.
-
-There is one global secret per kind. Asking for a new global paste page reopens the form so you can replace what is stored; the old value keeps working until you actually paste. The page itself still expires in an hour, so a link that ends up in an old chat cannot be used to overwrite your token later.
-
-A project that was given its own token keeps using that one. Nothing is copied at creation time, so replacing the global reaches every project that never had one.
-
-If you run projects for other people and want the old behaviour — each project strictly on its own credentials — turn sharing off with `vault_config_set`, or on the server:
-
-```bash
-php artisan vault:config --project-scoped=true
-```
-
-Your stored globals are not deleted by that, and turning sharing back on restores them.
 
 ## From the server
 
