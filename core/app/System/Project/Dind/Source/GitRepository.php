@@ -725,7 +725,8 @@ class GitRepository
         $askPassPath = null;
 
         try {
-            $cmd = $gitCommand;
+            // Guarded either way: the tokenless case is the one that prompts.
+            $cmd = GitUrl::withoutPrompts($gitCommand);
             if ($token !== null && $token !== '') {
                 [$askPassTemp, $askPassPath] = $this->installAskPass($system, $token, $gitCommand);
                 $cmd = GitUrl::withAskPass($gitCommand, $askPassPath);

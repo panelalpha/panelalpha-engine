@@ -80,4 +80,59 @@ class GitUrlTest extends TestCase
             GitUrl::isHttpsWithoutCredentials('https://git.example.com/org/repo.git')
         );
     }
+
+    // ---- git may never stop and ask a human ----------------------------
+
+    /**
+     * The guard the tokenless clone was missing.
+     *
+     * It used to live only inside withAskPass(), so it applied exactly when a
+     * credential had already been supplied and was skipped in the one case
+     * that prompts: a private repository with no token.
+     */
+    public function test_a_command_without_a_token_still_cannot_prompt(): void
+    {
+        $command = GitUrl::withoutPrompts(['git', 'clone', '--depth=1', 'https://h/o/r.git', '/p']);
+
+        $this->assertSame('env', $command[0]);
+        $this->assertContains('GIT_TERMINAL_PROMPT=0', $command);
+        $this->assertContains('GIT_ASKPASS=/bin/false', $command);
+        $this->assertContains('SSH_ASKPASS=/bin/false', $command);
+        // The command itself is untouched and still last.
+        $this->assertSame(
+            ['git', 'clone', '--depth=1', 'https://h/o/r.git', '/p'],
+            array_slice($command, -5)
+        );
+    }
+
+    /**
+     * GIT_TERMINAL_PROMPT alone only closes the terminal -- an askpass helper
+     * still launches and can sit there waiting, which is the hang this guards.
+     */
+    public function test_closing_the_terminal_is_not_enough_on_its_own(): void
+    {
+        $command = GitUrl::withoutPrompts(['git', 'fetch']);
+
+        $this->assertNotContains(
+            'GIT_ASKPASS=',
+            $command,
+            'an unset GIT_ASKPASS lets a configured helper run'
+        );
+        $this->assertContains('GIT_ASKPASS=/bin/false', $command);
+    }
+
+    /** `env` applies assignments left to right, so the real helper must be last. */
+    public function test_the_token_askpass_overrides_the_tokenless_placeholder(): void
+    {
+        $command = GitUrl::withAskPass(['git', 'fetch'], '/home/u/.pa-askpass');
+
+        $this->assertContains('GIT_TERMINAL_PROMPT=0', $command);
+        $this->assertContains('GIT_ASKPASS=/home/u/.pa-askpass', $command);
+
+        $askPass = array_values(array_filter(
+            $command,
+            static fn (string $arg): bool => str_starts_with($arg, 'GIT_ASKPASS=')
+        ));
+        $this->assertSame(['GIT_ASKPASS=/home/u/.pa-askpass'], $askPass, 'only the real helper');
+    }
 }

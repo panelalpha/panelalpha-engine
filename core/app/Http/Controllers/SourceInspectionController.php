@@ -6,6 +6,7 @@ use App\Http\Requests\DeployPlanInput;
 use App\Http\Requests\RecipeChoiceInput;
 use App\Http\Requests\ProjectSourceInspectRequest;
 use App\Http\Requests\SourceInspectRequest;
+use App\Exceptions\ProblemException;
 use App\Lib\Deploy\Inspect\AppInspector;
 use App\Lib\Deploy\Inspect\DeploymentSnapshot;
 use App\Lib\Deploy\Inspect\InspectException;
@@ -127,9 +128,11 @@ class SourceInspectionController extends Controller
         $recipe = RecipeChoiceInput::parse($params['recipe'] ?? null);
         $type = $params['type'] ?? SourceResolver::classify($source);
         if ($type === null) {
-            return new JsonResponse([
-                'message' => 'Could not tell what this source is. Pass "type" as git, path or project.',
-            ], 422);
+            throw ProblemException::one(
+                'source',
+                'source_unrecognised',
+                'Could not tell what this source is. Pass `type` as git, path or project.'
+            );
         }
 
         if ($type === SourceResolver::TYPE_PROJECT) {
@@ -144,13 +147,13 @@ class SourceInspectionController extends Controller
                 ? $this->resolver()->fromGit($source, $params['branch'] ?? null, RequestVault::get('git_token'))
                 : $this->resolver()->fromDirectory(SourceResolver::TYPE_PATH, $source, $source);
         } catch (InspectException $e) {
-            return new JsonResponse(['message' => $e->getMessage()], 422);
+            throw ProblemException::of([$e->toProblem()]);
         }
 
         try {
             return $this->report($resolved, $params['subdirectory'] ?? null, null, $plan, $recipe);
         } catch (InspectException $e) {
-            return new JsonResponse(['message' => $e->getMessage()], 422);
+            throw ProblemException::of([$e->toProblem()]);
         } finally {
             // A git source is a real clone on disk. Nothing below this line
             // gets to decide whether to keep it.
@@ -230,7 +233,8 @@ class SourceInspectionController extends Controller
                 $recipe
             );
         } catch (InspectException $e) {
-            return new JsonResponse(['message' => $e->getMessage()], 422);
+            // `project`, not `source`: this endpoint is addressed by username.
+            throw ProblemException::of([$e->toProblem('project')]);
         }
     }
 

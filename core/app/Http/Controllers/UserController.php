@@ -21,6 +21,7 @@ use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\PlatformStage;
+use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Integrations\Tunnels\PanelAlphaHub;
 use App\Lib\Domains\DomainAllocationException;
@@ -183,7 +184,16 @@ class UserController extends Controller
                         . 'which can only be set once the project exists -- create it, PUT '
                         . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.'
                 ),
-                new OA\Property(property: 'git_repo', type: 'string', nullable: true),
+                new OA\Property(
+                    property: 'git_repo',
+                    type: 'string',
+                    nullable: true,
+                    example: 'https://github.com/owner/repo.git',
+                    description: 'HTTPS clone URL. SSH remotes (git@host:owner/repo.git, ssh://...) are '
+                        . 'not supported: the engine clones anonymously or with `git_token` and holds no '
+                        . 'SSH keys -- a 422 names the HTTPS spelling to use instead. A schemeless '
+                        . 'github.com/owner/repo is accepted and has the scheme filled in.'
+                ),
                 new OA\Property(property: 'git_branch', type: 'string', nullable: true),
                 new OA\Property(
                     property: 'git_token',
@@ -334,7 +344,16 @@ class UserController extends Controller
                         . 'which can only be set once the project exists -- create it, PUT '
                         . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.'
                 ),
-                new OA\Property(property: 'git_repo', type: 'string', nullable: true),
+                new OA\Property(
+                    property: 'git_repo',
+                    type: 'string',
+                    nullable: true,
+                    example: 'https://github.com/owner/repo.git',
+                    description: 'HTTPS clone URL. SSH remotes (git@host:owner/repo.git, ssh://...) are '
+                        . 'not supported: the engine clones anonymously or with `git_token` and holds no '
+                        . 'SSH keys -- a 422 names the HTTPS spelling to use instead. A schemeless '
+                        . 'github.com/owner/repo is accepted and has the scheme filled in.'
+                ),
                 new OA\Property(property: 'git_branch', type: 'string', nullable: true),
                 new OA\Property(
                     property: 'git_token',
@@ -547,6 +566,20 @@ class UserController extends Controller
 
         if ($problems !== []) {
             throw ProblemException::of($problems);
+        }
+
+        // After the local checks because it is the only one that leaves the
+        // machine; before the allocator because everything past it spends a
+        // panelalpha.online label, and those are never released.
+        if (!empty($params['git_repo'])) {
+            $probe = (new GitRemoteProbe())->problem(
+                'git_repo',
+                $params['git_repo'],
+                $params['git_token'] ?? null
+            );
+            if ($probe !== null) {
+                throw ProblemException::of([$probe]);
+            }
         }
 
         // The name, and everything about it worth reporting. Chosen before
