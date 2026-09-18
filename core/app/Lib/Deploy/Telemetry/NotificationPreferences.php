@@ -17,6 +17,9 @@ final class NotificationPreferences
 
     public const SETTING_NOTIFY_EMAIL = 'email';
 
+    /** Last successfully synced prefs fingerprint (skip no-op ship posts). */
+    public const SETTING_PREFS_HASH = 'telemetry_prefs_hash';
+
     public static function isTelemetryEnabled(): bool
     {
         $override = Setting::get(self::SETTING_TELEMETRY_ENABLED);
@@ -76,9 +79,30 @@ final class NotificationPreferences
     }
 
     /**
+     * Stable fingerprint of the prefs body (excludes occurred_at).
+     *
+     * @param  array{enabled: bool, notify_email: ?string, server_probe_url: ?string, app_probe_urls: list<string>}  $prefs
+     */
+    public static function payloadFingerprint(array $prefs): string
+    {
+        $normalized = [
+            'enabled' => (bool) ($prefs['enabled'] ?? false),
+            'notify_email' => $prefs['notify_email'] ?? null,
+            'server_probe_url' => $prefs['server_probe_url'] ?? null,
+            'app_probe_urls' => array_values($prefs['app_probe_urls'] ?? []),
+        ];
+        sort($normalized['app_probe_urls']);
+
+        return hash(
+            'sha256',
+            json_encode($normalized, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        );
+    }
+
+    /**
      * @return array{ok: bool, message: string}
      */
-    public static function sync(?bool $enabled = null): array
+    public static function sync(?bool $enabled = null, bool $force = false): array
     {
         $endpoint = Telemetry::endpoint();
         if ($endpoint === '') {
@@ -88,18 +112,24 @@ final class NotificationPreferences
         $enabled ??= self::isTelemetryEnabled();
         $email = self::notifyEmail();
         $serverUrl = self::serverProbeUrl();
+        $prefs = [
+            'enabled' => $enabled,
+            'notify_email' => $email,
+            'server_probe_url' => $serverUrl,
+            'app_probe_urls' => $enabled ? self::appProbeUrls() : [],
+        ];
+        $fingerprint = self::payloadFingerprint($prefs);
+
+        if (! $force && Setting::get(self::SETTING_PREFS_HASH) === $fingerprint) {
+            return ['ok' => true, 'message' => 'Preferences unchanged, skipped'];
+        }
 
         $payload = [
             'events' => [[
                 'type' => 'notification.preferences',
                 'occurred_at' => now()->toIso8601String(),
                 'panel_url' => $serverUrl,
-                'payload' => [
-                    'enabled' => $enabled,
-                    'notify_email' => $email,
-                    'server_probe_url' => $serverUrl,
-                    'app_probe_urls' => $enabled ? self::appProbeUrls() : [],
-                ],
+                'payload' => $prefs,
             ]],
         ];
 
@@ -127,6 +157,8 @@ final class NotificationPreferences
                     'message' => 'HTTP '.$response->status().': '.$response->body(),
                 ];
             }
+
+            Setting::set(self::SETTING_PREFS_HASH, $fingerprint);
 
             return ['ok' => true, 'message' => 'Preferences synced to monitoring'];
         } catch (Throwable $e) {

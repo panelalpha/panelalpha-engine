@@ -41,7 +41,7 @@ class TelemetryEmailCommand extends Command
         Setting::set(NotificationPreferences::SETTING_NOTIFY_EMAIL, $address);
         $this->info("Notification email set to {$address}");
 
-        $sync = NotificationPreferences::sync();
+        $sync = NotificationPreferences::sync(force: true);
         $this->line($sync['ok'] ? $sync['message'] : '<error>'.$sync['message'].'</error>');
 
         return $sync['ok'] ? self::SUCCESS : self::FAILURE;

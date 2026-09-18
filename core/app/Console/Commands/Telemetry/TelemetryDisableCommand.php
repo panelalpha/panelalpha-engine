@@ -17,7 +17,7 @@ class TelemetryDisableCommand extends Command
         Setting::set(NotificationPreferences::SETTING_TELEMETRY_ENABLED, '0');
         $this->info('Telemetry sending disabled.');
 
-        $sync = NotificationPreferences::sync(false);
+        $sync = NotificationPreferences::sync(false, force: true);
         $this->line($sync['ok'] ? $sync['message'] : '<comment>'.$sync['message'].' (local disable still applied)</comment>');
 
         return self::SUCCESS;
