@@ -314,7 +314,7 @@ Found a vulnerability? Please disclose it **privately**, never in a public issue
 
 ## License
 
-PanelAlpha Engine is open source under the Apache 2.0 license.
+PanelAlpha Engine is open source under the [Apache License 2.0](LICENSE).
 
 ## Come build with us
 
