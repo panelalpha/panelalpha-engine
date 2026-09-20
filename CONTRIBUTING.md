@@ -5,7 +5,6 @@ Whether it's a bug report, a docs fix, a new supported project type, or a core c
 
 This guide gets you from a clean checkout to a pull request that's easy to review.
 
----
 
 ## Ways to contribute
 
@@ -17,7 +16,6 @@ This guide gets you from a clean checkout to a pull request that's easy to revie
 
 > 🔒 **Found a security issue?** Do **not** open a public issue. Follow [`SECURITY.md`](SECURITY.md) and report it privately.
 
----
 
 ## Contributing code and documentation
 
@@ -40,7 +38,6 @@ chore: bump dev dependencies
 
 Common types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`. Reference an issue where relevant (e.g. `#123`).
 
----
 
 ## Contributor License Agreement
 
@@ -56,7 +53,6 @@ You only need to accept the CLA once.
 
 When you open your first pull request, our CLA check will guide you through the process. Pull requests cannot be merged until the CLA has been accepted.
 
----
 
 ## Opening a pull request
 
@@ -67,7 +63,6 @@ When you open your first pull request, our CLA check will guide you through the 
 
 We'll review as soon as we can. Expect a bit of back-and-forth; it's how we keep the engine dependable for the thousands of sites it runs.
 
----
 
 ## Project layout
 
@@ -82,7 +77,6 @@ This repository is the engine. A few landmarks:
 
 For anything beyond a docs typo, **[`AGENTS.md`](AGENTS.md) is the source of truth.** It explains how to verify a change, what numbers to report, and the traps to avoid.
 
----
 
 ## Before you start
 
@@ -99,7 +93,6 @@ cd core
 composer install
 ```
 
----
 
 ## Running the tests
 
@@ -139,8 +132,6 @@ Handy variants (anything after `--` is passed straight to `playwright test`):
 
 Before pushing changes to this suite, run `npm run check` (typecheck + lint + format). Full setup, conventions (fixtures, cleanup, no `waitForTimeout`), the project list, and how DNS uses panelalpha.direct / panelalpha.online are all in its own [`tests/api/README.md`](tests/api/README.md). Read it before adding a spec.
 
-
----
 
 ## Questions?
 
