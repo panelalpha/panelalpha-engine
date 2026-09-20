@@ -19,6 +19,56 @@ This guide gets you from a clean checkout to a pull request that's easy to revie
 
 ---
 
+## Contributing code and documentation
+
+Please follow the workflow below. It's pretty basic but keeps things in check:
+1. **Branch** off the default branch with a descriptive name (e.g. `fix/archive-deploy-port`, `feat/detect-deno`).
+2. **Keep it focused.** Small, single-purpose pull requests are far easier to review and land faster.
+3. **Write a test** where it makes sense, and run the suite.
+4. **Update the docs** if behaviour changed: [`docs/`](docs/README.md) for operators, [`AGENTS.md`](AGENTS.md) for engine internals.
+
+### Commit messages
+
+Use [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+feat: add Deno detection to the strategy chain
+fix: re-render proxy vhosts after archive deploy
+docs: clarify MCP token creation
+chore: bump dev dependencies
+```
+
+Common types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`. Reference an issue where relevant (e.g. `#123`).
+
+---
+
+## Contributor License Agreement
+
+Before we can accept your first contribution, you must agree to the [PanelAlpha Contributor License Agreement](CLA.md).
+
+The CLA confirms that:
+- you have the right to submit your contribution;
+- you retain ownership of your contribution;
+- you grant PanelAlpha the rights needed to use, modify, distribute and sublicense it;
+- your contribution may be used as part of both open-source and commercial PanelAlpha products.
+
+You only need to accept the CLA once.
+
+When you open your first pull request, our CLA check will guide you through the process. Pull requests cannot be merged until the CLA has been accepted.
+
+---
+
+## Opening a pull request
+
+- Give it a clear title and describe **what** changed and **why**.
+- Link the related issue.
+- Say how you verified it. For engine changes, **report the measurements** (see [`AGENTS.md` §3](AGENTS.md)): a status code alone is not a result.
+- Keep the pull request description up to date if behaviour changes during review.
+
+We'll review as soon as we can. Expect a bit of back-and-forth; it's how we keep the engine dependable for the thousands of sites it runs.
+
+---
+
 ## Project layout
 
 This repository is the engine. A few landmarks:
@@ -89,55 +139,6 @@ Handy variants (anything after `--` is passed straight to `playwright test`):
 
 Before pushing changes to this suite, run `npm run check` (typecheck + lint + format). Full setup, conventions (fixtures, cleanup, no `waitForTimeout`), the project list, and how DNS uses panelalpha.direct / panelalpha.online are all in its own [`tests/api/README.md`](tests/api/README.md). Read it before adding a spec.
 
----
-
-## Making your change
-
-1. **Branch** off the default branch with a descriptive name (e.g. `fix/archive-deploy-port`, `feat/detect-deno`).
-2. **Keep it focused.** Small, single-purpose pull requests are far easier to review and land faster.
-3. **Write a test** where it makes sense, and run the suite.
-4. **Update the docs** if behaviour changed: [`docs/`](docs/README.md) for operators, [`AGENTS.md`](AGENTS.md) for engine internals.
-
-### Commit messages
-
-Use [Conventional Commits](https://www.conventionalcommits.org/):
-
-```
-feat: add Deno detection to the strategy chain
-fix: re-render proxy vhosts after archive deploy
-docs: clarify MCP token creation
-chore: bump dev dependencies
-```
-
-Common types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`. Reference an issue where relevant (e.g. `#123`).
-
----
-
-## Contributor License Agreement
-
-Before we can accept your first contribution, you must agree to the [PanelAlpha Contributor License Agreement](CLA.md).
-
-The CLA confirms that:
-
-- you have the right to submit your contribution;
-- you retain ownership of your contribution;
-- you grant PanelAlpha the rights needed to use, modify, distribute and sublicense it;
-- your contribution may be used as part of both open-source and commercial PanelAlpha products.
-
-You only need to accept the CLA once.
-
-When you open your first pull request, our CLA check will guide you through the process. Pull requests cannot be merged until the CLA has been accepted.
-
----
-
-## Opening a pull request
-
-- Give it a clear title and describe **what** changed and **why**.
-- Link the related issue.
-- Say how you verified it. For engine changes, **report the measurements** (see [`AGENTS.md` §3](AGENTS.md)): a status code alone is not a result.
-- Keep the pull request description up to date if behaviour changes during review.
-
-We'll review as soon as we can. Expect a bit of back-and-forth; it's how we keep the engine dependable for the thousands of sites it runs.
 
 ---
 
