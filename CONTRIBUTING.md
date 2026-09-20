@@ -43,15 +43,19 @@ Common types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`. Reference an i
 
 Before we can accept your first contribution, you must agree to the [PanelAlpha Contributor License Agreement](CLA.md).
 
-The CLA confirms that:
+You only need to accept the CLA once.
+
+When you open your first pull request, our CLA check will guide you through the process. Pull requests cannot be merged until the CLA has been accepted.
+
+### Why CLA?
+
+We are a company building commercial products on top of the PanelAlpha Engine and we want to be clear about it. Our CLA confirms that:
 - you have the right to submit your contribution;
 - you retain ownership of your contribution;
 - you grant PanelAlpha the rights needed to use, modify, distribute and sublicense it;
 - your contribution may be used as part of both open-source and commercial PanelAlpha products.
 
-You only need to accept the CLA once.
-
-When you open your first pull request, our CLA check will guide you through the process. Pull requests cannot be merged until the CLA has been accepted.
+**Will your code get closed?** No. The Engine is Apache 2.0 and your merged contribution stays Apache 2.0. The CLA lets us also ship it in paid products, which is something Apache 2.0 already lets anyone do, including you.
 
 
 ## Opening a pull request
