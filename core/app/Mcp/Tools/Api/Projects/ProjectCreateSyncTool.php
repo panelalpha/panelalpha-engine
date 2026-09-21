@@ -92,10 +92,10 @@ class ProjectCreateSyncTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Example: johndoe. Sent to the API as `username`.'),
+            'name' => $schema->string()->description('The project account name. Generated when omitted: from the repository name, else the domain, else the recipe, else "app" -- with a random numeric suffix when that name is taken. 3-15 lowercase letters and digits, starting with a letter. Example: johndoe. Sent to the API as `username`.'),
             'domain' => $schema->string()->description('The main domain. Omitted, it becomes <username>.<sites_base_domain>, which resolves nowhere while that setting is unset. Prefer a label under panelalpha.online and a matching tunnel -- see the description above. Example: shop-4f2a.panelalpha.online.'),
             'domain_redirect_url' => $schema->string(),
-            'email' => $schema->string()->description('Example: john@example.com.')->required(),
+            'email' => $schema->string()->description('Example: john@example.com.'),
             'disk_space_limit' => $schema->integer()->description('MB, -1 for unlimited Example: 10240.'),
             'memory_limit' => $schema->integer()->description('Example: 512.'),
             'cpu_limit' => $schema->number()->description('Example: 1.'),

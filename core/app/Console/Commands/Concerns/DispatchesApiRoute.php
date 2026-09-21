@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
+use Laravel\Sanctum\HasApiTokens;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -35,6 +36,13 @@ trait DispatchesApiRoute
         // default guard is 'api', so setting the user here satisfies the
         // auth:api middleware the route still runs under.
         $admin = (new class extends User {
+            // Sanctum's accessor comes with it: `EnsureTokenMayUseApi` asks
+            // every authenticated user which token it came in on, and a plain
+            // Authenticatable has no such method -- so without this every
+            // command that dispatches a route died on a BadMethodCallException
+            // surfaced as `HTTP 500: Server Error`.
+            use HasApiTokens;
+
             protected $table = 'admins';
         })->first();
         assert($admin instanceof Authenticatable);

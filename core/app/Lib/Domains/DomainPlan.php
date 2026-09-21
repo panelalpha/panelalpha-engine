@@ -162,9 +162,16 @@ final class DomainPlan
             return null;
         }
 
-        return 'no public name: the host has no public IPv4 address, so neither '
+        // Short on purpose: this rides inside the warning sentence, which
+        // already says what the name does answer.
+        if (self::ipv4($settings) !== null) {
+            return 'no public IPv4: the host\'s address is private, so ' . self::PANELALPHA_ONLINE
+                . ' could not serve it';
+        }
+
+        return 'no public IPv4: the host has no IPv4 address on record, so neither '
             . self::PANELALPHA_ONLINE . ' nor ' . self::PANELALPHA_DIRECT
-            . ' could give it a name that resolves from outside';
+            . ' could give it a name at all';
     }
 
     /**
@@ -199,7 +206,16 @@ final class DomainPlan
             return $username . '.' . $certDomain;
         }
 
-        $ipv4 = self::publicIpv4($settings);
+        // Any address, public or private. This rung is DNS and nothing else:
+        // the zone resolves whatever address the label spells, at any depth,
+        // so `shop.10-0-0-4.panelalpha.direct` answers 10.0.0.4 for every
+        // resolver on that LAN. `.local` answers for nobody -- the engine
+        // registers no mDNS -- so on a private host the dashed name is the
+        // better of the two, and the only one a second VM can open.
+        //
+        // panelalpha.online is the rung that genuinely needs a public
+        // address: the proxy has to reach the host from the internet.
+        $ipv4 = self::ipv4($settings);
         if ($ipv4 === null) {
             return null;
         }
@@ -243,13 +259,33 @@ final class DomainPlan
     {
         $ipv4 = trim((string) ($settings['default_ipv4'] ?? ''));
 
-        // Public ranges only. `10-0-0-4.panelalpha.direct` resolves faithfully
-        // to 10.0.0.4 and is useless from anywhere but the same LAN, and the
-        // WithoutDNS proxy cannot forward to an address it cannot reach --
-        // so on a host with no public address both rungs are pretence, and
-        // the ladder is honest about ending at `.local`.
+        // Public ranges only: the WithoutDNS proxy cannot forward to an
+        // address it cannot reach, so panelalpha.online on a private host
+        // would be pretence. What a private address can still have is the
+        // panelalpha.direct name -- see directDomain(), which asks ipv4().
         $flags = FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE;
         if ($ipv4 === '' || filter_var($ipv4, FILTER_VALIDATE_IP, $flags) === false) {
+            return null;
+        }
+
+        return $ipv4;
+    }
+
+    /**
+     * Whether the address this engine records is one the internet can reach.
+     *
+     * @param array{default_ipv4?: ?string} $settings
+     */
+    public static function hasPublicIpv4(array $settings): bool
+    {
+        return self::publicIpv4($settings) !== null;
+    }
+
+    /** Any syntactically valid IPv4 on record, private ranges included. */
+    private static function ipv4(array $settings): ?string
+    {
+        $ipv4 = trim((string) ($settings['default_ipv4'] ?? ''));
+        if ($ipv4 === '' || filter_var($ipv4, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
             return null;
         }
 

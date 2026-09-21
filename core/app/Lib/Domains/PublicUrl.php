@@ -92,8 +92,15 @@ final class PublicUrl
             return null;
         }
 
-        $message = "The application is deployed but not reachable from the internet: {$domain}"
-            . ' resolves on this host only.';
+        // A `.direct` name on a private address is not the same claim as a
+        // `.local` one: it resolves for every machine on that network, and
+        // saying "this host only" would send an operator looking for a fault
+        // in a name that works from the next VM along.
+        $message = ($allocation['source'] ?? null) === DomainPlan::SOURCE_PANELALPHA_DIRECT
+            ? "The application is deployed but not reachable from the internet: {$domain}"
+                . " resolves to this host's private address, so it answers on this network only."
+            : "The application is deployed but not reachable from the internet: {$domain}"
+                . ' resolves on this host only.';
 
         // Why the better name was not had. This is the field that names the
         // licensing failure, and it is the whole reason an operator can tell

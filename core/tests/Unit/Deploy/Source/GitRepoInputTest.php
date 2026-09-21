@@ -151,6 +151,62 @@ class GitRepoInputTest extends TestCase
         ];
     }
 
+    // ---- expandShorthand() ----------------------------------------------
+
+    #[DataProvider('shorthandProvider')]
+    public function test_expand_shorthand_only_touches_owner_repo(string $input, string $expected): void
+    {
+        $this->assertSame($expected, GitRepoInput::expandShorthand($input));
+    }
+
+    public static function shorthandProvider(): array
+    {
+        return [
+            'owner/repo is GitHub' => ['n8n-io/n8n', 'https://github.com/n8n-io/n8n'],
+            'a dotted repo name still expands' => ['calcom/cal.com', 'https://github.com/calcom/cal.com'],
+            // A host carries a dot; normalise() is what fills in its scheme.
+            'a host is left for normalise' => ['gitea.com/repo', 'gitea.com/repo'],
+            'schemeless forge path is left alone' => ['github.com/o/r', 'github.com/o/r'],
+            'a URL is left alone' => ['https://github.com/o/r', 'https://github.com/o/r'],
+            'scp-style is left alone' => ['git@github.com:o/r.git', 'git@github.com:o/r.git'],
+            'a bare word is not a repository' => ['n8n', 'n8n'],
+            'empty stays empty' => ['', ''],
+        ];
+    }
+
+    #[DataProvider('shorthandHostProvider')]
+    public function test_the_shorthand_forge_is_configurable(?string $host, string $expected): void
+    {
+        $this->assertSame($expected, GitRepoInput::expandShorthand('o/r', $host));
+    }
+
+    public static function shorthandHostProvider(): array
+    {
+        return [
+            'unset means GitHub' => [null, 'https://github.com/o/r'],
+            'empty means GitHub' => ['', 'https://github.com/o/r'],
+            'blank means GitHub' => ['   ', 'https://github.com/o/r'],
+            'a host' => ['gitlab.com', 'https://gitlab.com/o/r'],
+            // Set through `settings:set`, so it arrives however it was typed.
+            'a host with a scheme' => ['https://gitlab.com', 'https://gitlab.com/o/r'],
+            'a host with a trailing slash' => ['gitlab.com/', 'https://gitlab.com/o/r'],
+            'a self-hosted forge' => ['git.internal', 'https://git.internal/o/r'],
+            'a group prefix is kept' => ['gitlab.com/team', 'https://gitlab.com/team/o/r'],
+        ];
+    }
+
+    public function test_a_full_url_never_consults_the_configured_forge(): void
+    {
+        $this->assertSame(
+            'https://github.com/o/r',
+            GitRepoInput::expandShorthand('https://github.com/o/r', 'gitlab.com')
+        );
+        $this->assertSame(
+            'github.com/o/r',
+            GitRepoInput::expandShorthand('github.com/o/r', 'gitlab.com')
+        );
+    }
+
     #[DataProvider('sshProvider')]
     public function test_recognises_both_spellings_of_ssh(string $input, bool $isSsh): void
     {

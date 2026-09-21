@@ -184,7 +184,11 @@ final class DindDeployMechanics implements DeployMechanics
 
     public function publicUrlWarnings(DomainModel $domain): array
     {
-        return PublicUrl::warnings($domain, $this->user()->getDetails());
+        // The name, not the model: `warnings()` takes a string, and a model
+        // coerced into one is its whole JSON -- which is how every partial
+        // deploy's log line came to carry the domain, the account details and
+        // the encrypted env_vars blob inside the sentence.
+        return PublicUrl::warnings((string) $domain->domain, $this->user()->getDetails());
     }
 
     public function customEnvFailureHint(): ?string

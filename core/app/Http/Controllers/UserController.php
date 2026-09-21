@@ -23,6 +23,7 @@ use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Deploy\Source\GitUrl;
+use App\Lib\Deploy\ProjectName;
 use App\Integrations\Tunnels\PanelAlphaHub;
 use App\Lib\Domains\DomainAllocationException;
 use App\Lib\Domains\DomainAllocator;
@@ -135,9 +136,19 @@ class UserController extends Controller
         summary: 'Create a new hosting project (async)',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
-            required: ['email'],
+            // Nothing is required: validation has never demanded an email, and
+            // a create whose every detail is generated has nothing to demand.
             properties: [
-                new OA\Property(property: 'username', type: 'string', example: 'johndoe', nullable: true),
+                new OA\Property(
+                    property: 'username',
+                    type: 'string',
+                    example: 'johndoe',
+                    nullable: true,
+                    description: 'The project account name. Generated when omitted: from the repository '
+                        . 'name, else the domain, else the recipe, else "app" -- with a random numeric '
+                        . 'suffix when that name is taken. 3-15 lowercase letters and digits, starting '
+                        . 'with a letter.'
+                ),
                 new OA\Property(
                     property: 'domain',
                     type: 'string',
@@ -295,9 +306,19 @@ class UserController extends Controller
         summary: 'Create a new hosting user (synchronous)',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
-            required: ['email'],
+            // Nothing is required: validation has never demanded an email, and
+            // a create whose every detail is generated has nothing to demand.
             properties: [
-                new OA\Property(property: 'username', type: 'string', example: 'johndoe', nullable: true),
+                new OA\Property(
+                    property: 'username',
+                    type: 'string',
+                    example: 'johndoe',
+                    nullable: true,
+                    description: 'The project account name. Generated when omitted: from the repository '
+                        . 'name, else the domain, else the recipe, else "app" -- with a random numeric '
+                        . 'suffix when that name is taken. 3-15 lowercase letters and digits, starting '
+                        . 'with a letter.'
+                ),
                 new OA\Property(
                     property: 'domain',
                     type: 'string',
@@ -497,17 +518,23 @@ class UserController extends Controller
             $params['domain'] = Str::after($params['domain'], 'www.');
         }
 
-        if (
-            empty($params['username'])
-            && !empty($params['git_repo'])
-        ) {
-            $params['username'] = Helper::generateUsername($params['git_repo']);
+        // Nothing here is required of the caller: a create with no body at all
+        // names itself after whatever the request does carry -- the repository,
+        // the domain, the recipe -- and takes a plain "app" when it carries
+        // nothing. The one-line installer (`--repo`) relies on it, and so does
+        // every agent that has a repository and no opinion about the name.
+        if (empty($params['username'])) {
+            $params['username'] = Helper::generateUsernameFrom(ProjectName::base(
+                $params['git_repo'] ?? null,
+                $params['domain'] ?? null,
+                $params['recipe'] ?? null,
+            ));
         }
         if (empty($params['username'])) {
             throw ProblemException::one(
                 'username',
                 'username_required',
-                'The username field is required.'
+                'No username was given and none could be generated; pass `username`.'
             );
         }
 
@@ -1200,7 +1227,6 @@ class UserController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'User rebuilt', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'User not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'Rebuild failed', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
@@ -1241,62 +1267,23 @@ class UserController extends Controller
             $deployLogger = DeployLogger::resumeRunningOrStartSafely($user->username);
         }
 
-        // One closure for both shapes, so the streamed and the plain response
-        // cannot drift -- which is how this endpoint came to be the only
-        // deploy entry point with no handler at all. A rebuild whose compose
-        // dependency failed answered `500 {"message":"Server Error"}`: no
-        // problem code, no stage, no offset, and nothing to tell a client
-        // "your compose file is wrong" from "the engine is broken". The deploy
-        // log for the same run already had the real error in it.
-        $rebuild = function () use ($user, $deployLogger, $zipPath): void {
-            try {
-                $this->runProjectRebuild($user->project(), $deployLogger, $zipPath);
-                $user->project()->system()->webserver()->rebuildDomains();
-                $this->recordRebuildSucceeded($user);
-            } catch (DeployCancelledException $e) {
-                $stage = $deployLogger?->currentStage();
-                $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
-                throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
-            } catch (ValidationException $e) {
-                // ProblemException is one of these, so anything already in the
-                // documented shape passes through rather than being re-wrapped.
-                throw $e;
-            } catch (\Exception $e) {
-                throw $this->rebuildFailure($e, $deployLogger);
-            }
-        };
-
         if ($deployLogger !== null) {
             return $this->respondWithDeployStream(
-                $rebuild,
+                function () use ($user, $deployLogger, $zipPath) {
+                    $this->runProjectRebuild($user->project(), $deployLogger, $zipPath);
+                    $user->project()->system()->webserver()->rebuildDomains();
+                    $this->recordRebuildSucceeded($user);
+                },
                 $deployLogger,
                 static fn () => ['username' => $user->username, 'domain' => $user->domain]
             );
         }
 
-        $rebuild();
+        $this->runProjectRebuild($user->project(), null, $zipPath);
+        $user->project()->system()->webserver()->rebuildDomains();
+        $this->recordRebuildSucceeded($user);
 
         return new UserResource($user);
-    }
-
-    /**
-     * A failed rebuild, in the shape every other deploy endpoint answers in.
-     *
-     * Its own method so it can be exercised without a request: the defect was
-     * that this translation did not exist here at all, and a test that has to
-     * stand up a controller to see it would not have caught that either.
-     */
-    private function rebuildFailure(\Exception $e, ?DeployLogger $deployLogger): ProblemException
-    {
-        $deployLogger?->recordFailureOutput($e->getMessage());
-        // The same slug deploy telemetry reports, so a client and a dashboard
-        // name one failure the same way.
-        $match = DeployFailureExplainer::match($e->getMessage());
-        $message = $match['message'] ?? $e->getMessage();
-        $stage = $deployLogger?->currentStage();
-        $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
-
-        return self::deployProblem($match['rule'] ?? 'rebuild_failed', $message, $stage);
     }
 
     /**

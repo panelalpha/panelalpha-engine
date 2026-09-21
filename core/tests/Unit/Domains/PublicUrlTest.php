@@ -79,6 +79,28 @@ class PublicUrlTest extends TestCase
         $this->assertStringContainsString('self_signed', $warnings[1]);
     }
 
+    /**
+     * A LAN name and a name nobody can resolve are different situations, and
+     * the sentence has to tell them apart: `.direct` on a private address
+     * answers for every machine on that network.
+     */
+    public function test_a_direct_name_on_a_private_address_says_this_network_rather_than_this_host(): void
+    {
+        $warnings = PublicUrl::warnings('shop.10-0-0-4.panelalpha.direct', $this->details(
+            [
+                'source' => DomainPlan::SOURCE_PANELALPHA_DIRECT,
+                'publicly_resolvable' => false,
+                'tls_terminated_at' => 'engine',
+                'fallback_reason' => "no public IPv4: the host's address is private",
+            ],
+            ['status' => CertificateStatus::TRUSTED, 'self_signed' => false],
+        ));
+
+        $this->assertCount(1, $warnings);
+        $this->assertStringContainsString('answers on this network only', $warnings[0]);
+        $this->assertStringNotContainsString('resolves on this host only', $warnings[0]);
+    }
+
     public function test_an_unresolvable_name_warns_even_without_a_recorded_reason(): void
     {
         $warnings = PublicUrl::warnings('shop.local', $this->details(

@@ -33,6 +33,48 @@ final class GitRepoInput
         'github.com', 'gitlab.com', 'bitbucket.org', 'codeberg.org', 'gitea.com', 'sr.ht',
     ];
 
+    /**
+     * The forge a bare `owner/repo` means when nothing says otherwise. The
+     * engine's own `system:example:create` has always assumed the same one.
+     */
+    public const DEFAULT_SHORTHAND_HOST = 'github.com';
+
+    /**
+     * `owner/repo` as it is typed on a command line, spelled out as the URL it
+     * means. Only the bare two-segment form: anything carrying a scheme, a host
+     * or an SSH shape is already a URL and is left alone.
+     *
+     * `$host` is the forge to assume -- the `default_git_host` setting, where
+     * an operator set one. Null or empty means {@see DEFAULT_SHORTHAND_HOST}.
+     */
+    public static function expandShorthand(string $raw, ?string $host = null): string
+    {
+        $value = trim($raw);
+        if ($value === '' || self::isSsh($value) || preg_match('#^[a-z][a-z0-9+.-]*://#i', $value) === 1) {
+            return $value;
+        }
+
+        // A host carries a dot and an owner does not, so `gitea.com/repo` is a
+        // URL with its scheme left off -- normalise()'s job -- and only a
+        // dotless `owner/repo` is the shorthand.
+        return preg_match('#^[^/\s.]+/[^/\s]+$#', $value) === 1
+            ? 'https://' . self::shorthandHost($host) . '/' . $value
+            : $value;
+    }
+
+    /**
+     * A configured host as it was typed: `https://gitlab.com/` and
+     * `gitlab.com` are the same answer, and an empty one is no answer.
+     */
+    private static function shorthandHost(?string $host): string
+    {
+        $host = trim($host ?? '');
+        $host = (string) preg_replace('#^[a-z][a-z0-9+.-]*://#i', '', $host);
+        $host = trim($host, '/');
+
+        return $host === '' ? self::DEFAULT_SHORTHAND_HOST : $host;
+    }
+
     /** Supply the scheme a caller left off `github.com/owner/repo`. */
     public static function normalise(string $raw): string
     {

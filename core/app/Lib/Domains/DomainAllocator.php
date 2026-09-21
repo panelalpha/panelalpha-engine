@@ -78,7 +78,7 @@ class DomainAllocator
             return new AllocatedDomain(
                 domain: $domain,
                 source: $candidate['source'],
-                publiclyResolvable: self::resolvability($candidate['source']),
+                publiclyResolvable: self::resolvability($candidate['source'], $settings),
                 fallbackReason: $skipped === [] ? null : implode(' | ', $skipped),
             );
         }
@@ -214,10 +214,18 @@ class DomainAllocator
      * serve. Guessing `true` there is how a caller ends up reporting a URL
      * that answers for nobody.
      */
-    private static function resolvability(string $source): ?bool
+    /**
+     * @param array{sites_base_domain: ?string, cert_domain: ?string, default_ipv4: ?string} $settings
+     */
+    private static function resolvability(string $source, array $settings): ?bool
     {
         return match ($source) {
-            DomainPlan::SOURCE_PANELALPHA_ONLINE, DomainPlan::SOURCE_PANELALPHA_DIRECT => true,
+            DomainPlan::SOURCE_PANELALPHA_ONLINE => true,
+            // A `.direct` name is the address it spells. Publicly resolvable
+            // is about the address, not the zone: on a host whose address is
+            // private, the name resolves everywhere and answers on that LAN
+            // alone -- which is exactly what the warning has to say.
+            DomainPlan::SOURCE_PANELALPHA_DIRECT => DomainPlan::hasPublicIpv4($settings),
             DomainPlan::SOURCE_LOCAL => false,
             default => null,
         };
