@@ -66,7 +66,7 @@ Most VPS installs never need this. Come here to change the address your assistan
 
 All settings live in `/opt/panelalpha/shared-hosting/.env-core`. There is a second file next to it called `.env`. That one holds internal passwords. **Do not edit it** unless PanelAlpha support asks you to.
 
-**Editing the file does nothing on its own.** The engine reads its settings when it starts, so your change sits there doing nothing until you restart it.
+**Editing the file does nothing on its own.** The engine reads its settings when it starts, so your change sits there doing nothing until you tell it to reload.
 
 **1. Open the file.**
 
@@ -76,13 +76,13 @@ nano /opt/panelalpha/shared-hosting/.env-core
 
 Find the line with the setting name on it and change the value after the `=`. If there is no such line, add it at the end. Save with `Ctrl+O`, then close with `Ctrl+X`.
 
-**2. Restart the engine.**
+**2. Tell the engine to reload.**
 
 ```bash
-docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml restart core core-cron
+docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec core php artisan queue:restart
 ```
 
-Copy that line exactly. It takes a few seconds. The websites you host are not affected, but your AI assistant will briefly disconnect and reconnect.
+Copy that line exactly. The API picks up the change on its next request. Background workers pick it up once the job they are running finishes, so a deploy already in progress is not interrupted. The websites you host are not affected.
 
 **3. Check it worked.** For telemetry, `pae telemetry:status`. For what the assistant is allowed to do, `pae mcp:tool:list`. If it still shows the old value, the restart did not take. Run step 2 again.
 

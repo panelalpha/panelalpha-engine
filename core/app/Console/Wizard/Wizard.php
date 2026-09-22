@@ -5,6 +5,7 @@ namespace App\Console\Wizard;
 use App\Console\Wizard\Sections\ApiTokensSection;
 use App\Console\Wizard\Sections\EngineAddressSection;
 use App\Console\Wizard\Sections\McpTokensSection;
+use App\Console\Wizard\Sections\QueueSection;
 use App\Console\Wizard\Sections\TelemetrySection;
 
 /**
@@ -20,6 +21,7 @@ class Wizard
         EngineAddressSection::class,
         McpTokensSection::class,
         ApiTokensSection::class,
+        QueueSection::class,
         TelemetrySection::class,
     ];
 

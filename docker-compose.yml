@@ -2,17 +2,11 @@ include:
   - docker-compose.yml-webserver
 services:
   core:
-    # Versioned, not date-tagged, because this image runs core/vendor and so is
-    # pinned to core/composer.json's PHP. A date tag kept resolving to a real,
-    # pullable 8.3 image after core moved to ^8.4, and core crash-looped on
-    # vendor/composer/platform_check.php. A version tag the registry does not
-    # carry yet is built from Dockerfile-core instead, which is always current.
-    # The rest of the stack stays on date tags -- it has no such coupling.
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-core
       target: php_nginx_prod
-    image: ghcr.io/panelalpha/engine-core:v2.0.1
+    image: ghcr.io/panelalpha/engine-core:20260908
     pull_policy: missing
     restart: always
     post_start:

@@ -16,6 +16,10 @@ chown -R www-data:www-data /var/www/html/storage
 mkdir -p /var/tmp/panelalpha-backup
 chown www-data:www-data /var/tmp/panelalpha-backup
 chmod 1777 /var/tmp/panelalpha-backup
-# supervisord.conf reads it, and refuses to start at all without it.
-export QUEUE_WORKERS="${QUEUE_WORKERS:-8}"
+# Writes /etc/supervisor/conf.d/queue.generated.conf with the worker count
+# baked in as a literal; supervisord.conf [include]s it. See
+# App\Support\QueueWorkers: a plain %(ENV_QUEUE_WORKERS)s could not be changed
+# live, since Docker freezes a running container's environment -- a generated
+# file supervisorctl reread/update can pick up without one.
+php /var/www/html/artisan system:queue-workers:sync
 exec supervisord -c /etc/supervisor/conf.d/supervisord.conf

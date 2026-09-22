@@ -14,18 +14,20 @@ use Illuminate\Support\Facades\Log;
  * (Chamilo 2.x's Encore pass wants ~3.5 GB of heap and OOMs below it).
  *
  * That sizing assumed one build at a time, which is what a single
- * queue worker used to guarantee. It is 8 now (QUEUE_WORKERS), and `DeployLock` does not
- * help: it is explicitly one deploy per *account*, so eight accounts build
- * together by design. Eight builds each entitled to a third of the host is 1.4x
- * to 2.8x its RAM -- and the heap cap is not a ceiling that shrinks demand, it
- * is an instruction to grow, so they will try. What the kernel does then is
- * pick a victim by badness, which can be another tenant's container or the
- * engine's own.
+ * queue worker used to guarantee. It is QUEUE_WORKERS now -- 2 by default and
+ * up to 32 -- and `DeployLock` does not help: it is explicitly one deploy per
+ * *account*, so that many accounts build together by design. Even three builds
+ * each entitled to a third of the host exhaust it, and the heap cap is not a
+ * ceiling that shrinks demand, it is an instruction to grow, so they will try.
+ * What the kernel does then is pick a victim by badness, which can be another
+ * tenant's container or the engine's own.
  *
  * So the build serialises and the rest of the deploy does not. Cloning,
- * `compose up`, migrations and health checks still run eight wide, which is
- * where the batch speedup actually comes from -- a deploy mostly waits on a
- * container rather than on the host.
+ * `compose up`, migrations and health checks still run QUEUE_WORKERS wide,
+ * which is where the batch speedup actually comes from -- a deploy mostly
+ * waits on a container rather than on the host. Raising the count trades RAM
+ * for batch throughput and costs nothing at the build itself, which this lock
+ * holds at one regardless.
  *
  * **Fails open.** If the slot cannot be taken within {@see WAIT_SECONDS} the
  * build runs anyway, with a line in the log saying so. A queued build is better
@@ -35,9 +37,8 @@ use Illuminate\Support\Facades\Log;
 final class HostBuildSlot
 {
     /**
-     * Long enough for a real build to finish ahead of this one -- the PHP and
-     * Node host builds cap at 1800s and 3600s -- without ever being a deadline
-     * a deploy dies on, because passing it is not fatal.
+     * Long enough for a real build ahead of this one (PHP and Node host builds
+     * cap at 1800s and 3600s). Passing it is not fatal.
      */
     private const WAIT_SECONDS = 1800;
 
@@ -50,8 +51,7 @@ final class HostBuildSlot
      *
      * @template T
      * @param callable(): T $build
-     * @param ?callable(): void $onWait called once when the slot is busy, so a
-     *        deploy log can say why it is standing still
+     * @param ?callable(): void $onWait called once when the slot is busy
      * @return T
      */
     public static function run(callable $build, ?callable $onWait = null): mixed
