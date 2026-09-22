@@ -123,6 +123,10 @@ $projectRoutes = function (): void {
     Route::delete('/{username}', [UserController::class, 'destroy']);
 
     Route::get('/{username}/usage', [UsageController::class, 'getUsage']);
+    Route::get('/{username}/bandwidth', [UsageController::class, 'getBandwidth']);
+    Route::get('/{username}/domains/{domain}/bandwidth', [UsageController::class, 'getDomainBandwidth']);
+    Route::get('/{username}/domains/{domain}/visitors', [UsageController::class, 'getDomainVisitors']);
+    Route::get('/{username}/domains/{domain}/visitors/{dimension}', [UsageController::class, 'getDomainVisitorBreakdown']);
 
     Route::get('/{username}/domains', [UserDomainController::class, 'index']);
     Route::get('/{username}/domains/installed-ssl-certs', [UserDomainController::class, 'indexInstalledSslCerts']);
@@ -296,6 +300,8 @@ Route::post('/source/inspect', [SourceInspectionController::class, 'inspect']);
 Route::get('/php/available-versions', [PhpController::class, 'listAvailableVersions']);
 Route::get('/domains/{domain}/php-version', [DomainController::class, 'getPhpVersion']);
 Route::put('/domains/{domain}/php-version', [DomainController::class, 'setPhpVersion']);
+Route::get('/domains/{domain}/php-directives', [DomainController::class, 'getPhpDirectives']);
+Route::put('/domains/{domain}/php-directives', [DomainController::class, 'setPhpDirectives']);
 
 Route::get('/domains/{domain}/http-acme-challenges', [HttpAcmeChallengeController::class, 'index']);
 Route::post('/domains/{domain}/http-acme-challenges', [HttpAcmeChallengeController::class, 'store']);

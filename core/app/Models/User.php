@@ -540,9 +540,9 @@ class User extends Authenticatable
         return $names;
     }
 
-    public function project(): AppSystemProject
+    public function project(?\App\System $system = null): AppSystemProject
     {
-        return (new \App\System())->project($this);
+        return ($system ?? new \App\System())->project($this);
     }
 
     public function getDiskSpaceLimit(): ?int

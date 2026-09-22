@@ -58,3 +58,4 @@ data/redis/
 .agents/
 .aider*
 scripts/__pycache__/
+.scratch

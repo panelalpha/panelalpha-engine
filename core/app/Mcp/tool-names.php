@@ -92,6 +92,8 @@ return [
     'GET /domains/{domain}' => 'domain_find',
     'GET /domains/{domain}/php-version' => 'domain_php_version_get',
     'PUT /domains/{domain}/php-version' => 'domain_php_version_set',
+    'GET /domains/{domain}/php-directives' => 'domain_php_directives_get',
+    'PUT /domains/{domain}/php-directives' => 'domain_php_directives_set',
     'GET /projects/{username}/domains/{domain}/log-files' => 'domain_log_list',
     'GET /projects/{username}/domains/{domain}/log-files/{filename}' => 'domain_log_download',
 
@@ -218,10 +220,17 @@ return [
     // ref gets the plaintext. `status` is what an agent polls to wait for the
     // paste; `delete` is cleanup. The secret itself is never returned by any
     // of these.
+    //
+    // `create` with `scope: global` stores the engine's own secret of a type
+    // instead -- pasted once, used by every project that has none of its own,
+    // so an agent stops asking for the same Git token at every project. The
+    // `config` pair is the switch that governs whether projects inherit it.
     'POST /vault/secrets' => 'vault_secret_create',
     'GET /vault/secrets' => 'vault_secret_list',
     'GET /vault/secrets/{ref}' => 'vault_secret_status',
     'DELETE /vault/secrets/{ref}' => 'vault_secret_delete',
+    'GET /vault/config' => 'vault_config_get',
+    'PUT /vault/config' => 'vault_config_set',
 
     // System
     // Files a bug against the engine over the telemetry channel. `create`

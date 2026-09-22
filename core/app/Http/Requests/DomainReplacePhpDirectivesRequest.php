@@ -4,7 +4,7 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class UserPhpUpdateCustomIniSettingsRequest extends FormRequest
+class DomainReplacePhpDirectivesRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -14,7 +14,6 @@ class UserPhpUpdateCustomIniSettingsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'php_version' => 'string|required',
             'settings' => 'array|present',
             'settings.*' => 'string',
         ];

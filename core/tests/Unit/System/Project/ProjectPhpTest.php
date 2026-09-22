@@ -108,20 +108,14 @@ class ProjectPhpTest extends TestCase
 
         $project = new Project($system, $this->phpHostingModel());
 
-        set_error_handler(static function (int $severity, string $message): bool {
-            throw new \ErrorException($message, 0, $severity);
-        });
-
         $thrown = null;
         try {
             $project->php()->updateCustomIniSettings('8.3', ['foo' => "\"unclosed"]);
-        } catch (\ErrorException $e) {
+        } catch (\InvalidArgumentException $e) {
             $thrown = $e;
-        } finally {
-            restore_error_handler();
         }
 
-        $this->assertInstanceOf(\ErrorException::class, $thrown);
+        $this->assertInstanceOf(\InvalidArgumentException::class, $thrown);
         $this->assertSame("display_errors=0\n", file_get_contents($iniPath));
         $this->assertSame([], $system->processJournal);
     }
