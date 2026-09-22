@@ -15,6 +15,8 @@ use App\Http\Controllers\User\DeployHookController;
 use App\Http\Controllers\User\Domain\LogFileController;
 use App\Http\Controllers\User\DomainController as UserDomainController;
 use App\Http\Controllers\User\ProjectSettingController;
+use App\Http\Controllers\User\ProjectPasswordController;
+use App\Http\Controllers\SitePasswordGateController;
 use App\Http\Controllers\User\TunnelController;
 use App\Http\Controllers\User\FileController;
 use App\Http\Controllers\User\GitController;
@@ -59,6 +61,14 @@ Route::fallback(function () {
 Route::get('/test-connection', function (Request $request) {
     return new JsonResponse(['success' => true]);
 });
+
+// nginx-proxy auth_request + custom password form (no API bearer).
+Route::get('/internal/site-password/{username}/check', [SitePasswordGateController::class, 'check'])
+    ->withoutMiddleware('auth:api');
+Route::get('/internal/site-password/{username}/gate', [SitePasswordGateController::class, 'gate'])
+    ->withoutMiddleware('auth:api');
+Route::post('/internal/site-password/{username}/login', [SitePasswordGateController::class, 'login'])
+    ->withoutMiddleware('auth:api');
 
 Route::get('/mcp-tokens', [McpTokenController::class, 'index']);
 Route::post('/mcp-tokens', [McpTokenController::class, 'store']);
@@ -121,6 +131,8 @@ $projectRoutes = function (): void {
     Route::put('/{username}', [UserController::class, 'update']);
     Route::put('/{username}/suspend', [UserController::class, 'suspend']);
     Route::put('/{username}/unsuspend', [UserController::class, 'unsuspend']);
+    Route::put('/{username}/password', [ProjectPasswordController::class, 'update']);
+    Route::delete('/{username}/password', [ProjectPasswordController::class, 'destroy']);
     Route::delete('/{username}', [UserController::class, 'destroy']);
 
     Route::get('/{username}/usage', [UsageController::class, 'getUsage']);

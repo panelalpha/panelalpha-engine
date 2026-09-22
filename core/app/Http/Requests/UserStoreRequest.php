@@ -103,6 +103,7 @@ class UserStoreRequest extends FormRequest
             ],
             'env_vars' => 'array|nullable|max:200',
             'env_vars.*' => 'string|nullable|max:8192',
+            'password' => 'string|nullable|min:1|max:255',
             // Shape only. What makes a stage's commands legal is the manifest
             // grammar, checked by DeployPlanInput -- see the note there.
             'stages' => 'array|nullable',

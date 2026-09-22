@@ -29,4 +29,7 @@ return [
     'APP_LITE_CA_DOMAIN' => env('APP_LITE_CA_DOMAIN'),
     'APP_LITE_AA_PORT' => env('APP_LITE_AA_PORT', 8443),
     'APP_LITE_AA_DOMAIN' => env('APP_LITE_AA_DOMAIN'),
+    // Site password gate UX for nginx-proxy: custom HTML form (default) or
+    // browser Basic Auth popup. Password verify is always password-only.
+    'SITE_PASSWORD_AUTH_MODE' => env('SITE_PASSWORD_AUTH_MODE', 'custom'),
 ];

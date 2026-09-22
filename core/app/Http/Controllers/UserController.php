@@ -695,6 +695,14 @@ class UserController extends Controller
             ],
         ]);
 
+        if (!empty($params['password']) && is_string($params['password'])) {
+            $details = $user->getDetails();
+            $details['site_password_enabled'] = true;
+            $details['site_password_hash'] = password_hash($params['password'], PASSWORD_BCRYPT);
+            $details['site_password_version'] = 1;
+            $user->details = $details;
+        }
+
         // Asked again with the username on the model, which the check above
         // cannot see: that one builds a fresh `System` from `$params` while
         // this row is only in memory, so a username that already has a home

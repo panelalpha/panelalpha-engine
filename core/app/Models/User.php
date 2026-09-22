@@ -286,6 +286,9 @@ class User extends Authenticatable
         if (isset($details['cloudflare_tunnel_token']) && is_string($details['cloudflare_tunnel_token'])) {
             $details['cloudflare_tunnel_token'] = $this->decryptSecretString($details['cloudflare_tunnel_token']);
         }
+        if (isset($details['site_password_hash']) && is_string($details['site_password_hash'])) {
+            $details['site_password_hash'] = $this->decryptSecretString($details['site_password_hash']);
+        }
         if (isset($details['site_git']) && is_array($details['site_git'])) {
             foreach ($details['site_git'] as $key => $entry) {
                 if (!is_array($entry)) {
@@ -325,6 +328,9 @@ class User extends Authenticatable
         }
         if (isset($details['cloudflare_tunnel_token']) && is_string($details['cloudflare_tunnel_token']) && $details['cloudflare_tunnel_token'] !== '') {
             $details['cloudflare_tunnel_token'] = $this->encryptSecretString($details['cloudflare_tunnel_token']);
+        }
+        if (isset($details['site_password_hash']) && is_string($details['site_password_hash']) && $details['site_password_hash'] !== '') {
+            $details['site_password_hash'] = $this->encryptSecretString($details['site_password_hash']);
         }
         if (isset($details['site_git']) && is_array($details['site_git'])) {
             foreach ($details['site_git'] as $key => $entry) {

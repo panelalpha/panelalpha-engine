@@ -29,6 +29,9 @@ server {
         @elseif (!empty($force_https_redirect))
             return 301 https://$host$request_uri;
         @else
+@if (!empty($site_password_enabled))
+            {!! $site_password_auth_request !!}
+@endif
             resolver 127.0.0.54 valid=30s;
             proxy_http_version 1.1;
             proxy_set_header Host $host;
@@ -45,6 +48,9 @@ server {
             proxy_pass http://$userhost:{{ $app_port }};
         @endif
     }
+@if (!empty($site_password_enabled))
+{!! $site_password_locations !!}
+@endif
     location /{{ $user }}-error-pages/ {
         alias /opt/panelalpha/shared-hosting/webserver-config/error-pages/;
         internal;
@@ -113,6 +119,9 @@ server {
             @elseif (!empty($redirect_url))
                 return 301 "{!! $redirect_url !!}";
             @else
+@if (!empty($site_password_enabled))
+                {!! $site_password_auth_request !!}
+@endif
                 resolver 127.0.0.54 valid=30s;
                 proxy_http_version 1.1;
                 proxy_set_header Host $host;
@@ -135,6 +144,9 @@ server {
                 @endif
             @endif
         }
+@if (!empty($site_password_enabled))
+{!! $site_password_locations !!}
+@endif
         location /{{ $user }}-error-pages/ {
             alias /opt/panelalpha/shared-hosting/webserver-config/error-pages/;
             internal;

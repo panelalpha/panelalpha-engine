@@ -226,9 +226,32 @@ class Cloudflare
             throw new CloudflareException('Upstream port must be 1-65535.');
         }
 
-        $origin = CloudflareApi::originServiceUrl($upstreamPort);
+        $passwordOn = \App\System\Project\SitePasswordProtection::isEnabled($user);
+        if ($passwordOn) {
+            // Hairpin through host nginx-proxy so the site password gate applies.
+            // DinD compose already maps host.docker.internal → host-gateway.
+            $sslOn = $domain->sslEnabled();
+            $origin = $sslOn
+                ? 'https://host.docker.internal:443'
+                : 'http://host.docker.internal:80';
+            $originRequest = [
+                'httpHostHeader' => $domain->domain,
+            ];
+            if ($sslOn) {
+                $originRequest['noTLSVerify'] = true;
+            }
+        } else {
+            $origin = CloudflareApi::originServiceUrl($upstreamPort);
+            $originRequest = new \stdClass();
+        }
+
         foreach ($cloudflare as $tunnel) {
-            $ingress = CloudflareApi::upsertHostnameIngress($ingress, $tunnel->hostname, $origin);
+            $ingress = CloudflareApi::upsertHostnameIngress(
+                $ingress,
+                $tunnel->hostname,
+                $origin,
+                $originRequest
+            );
 
             $details = $tunnel->getDetails();
             $zoneId = is_string($details['cloudflare_zone_id'] ?? null) ? $details['cloudflare_zone_id'] : null;

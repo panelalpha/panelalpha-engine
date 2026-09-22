@@ -58,7 +58,7 @@ PanelAlpha Engine is software you install on your VPS to host AI-built and vibe-
 Out of the box, PanelAlpha Engine gives you and your AI everything you need to run real projects in production:
 
 - Deploy any stack from Git or files
-- Instant preview URLs with optional password protection
+- Instant preview URLs with optional password protection (`project:set-password` / API + MCP; `SITE_PASSWORD_AUTH_MODE=custom|basic` on nginx-proxy). Uptime monitors need Basic Auth credentials or they see 401 as down.
 - Staging & Git workflows with separate live and staging environments
 - Automatic backups & restore
 - External monitoring & built-in visitor statistics

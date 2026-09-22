@@ -49,6 +49,8 @@ return [
     'POST /projects/{username}/rebuild' => 'project_rebuild',
     'PUT /projects/{username}/suspend' => 'project_suspend',
     'PUT /projects/{username}/unsuspend' => 'project_unsuspend',
+    'PUT /projects/{username}/password' => 'project_password_set',
+    'DELETE /projects/{username}/password' => 'project_password_unset',
     'GET /projects/{username}/usage' => 'project_usage',
     'GET /projects/{username}/bandwidth' => 'project_bandwidth',
     'GET /projects/{username}/domains/{domain}/bandwidth' => 'domain_bandwidth',

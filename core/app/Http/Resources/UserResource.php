@@ -53,13 +53,22 @@ class UserResource extends JsonResource
     private function publicDetails(User $user): array
     {
         $details = $user->getDetails();
+        $passwordProtected = !empty($details['site_password_enabled'])
+            && is_string($details['site_password_hash'] ?? null)
+            && $details['site_password_hash'] !== '';
+
         unset(
             $details['git_token'],
             $details['env_vars'],
             $details['site_git'],
             $details['cloudflare_api_token'],
             $details['cloudflare_tunnel_token'],
+            $details['site_password_hash'],
+            $details['site_password_enabled'],
+            $details['site_password_version'],
         );
+
+        $details['password_protection'] = $passwordProtected;
 
         return $details;
     }

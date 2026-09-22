@@ -171,6 +171,8 @@ return [
     \App\Mcp\Tools\Api\Usage\DomainBandwidthTool::class,
     \App\Mcp\Tools\Api\Usage\DomainVisitorsTool::class,
     \App\Mcp\Tools\Api\Usage\DomainVisitorsBreakdownTool::class,
+    \App\Mcp\Tools\Api\Projects\ProjectPasswordSetTool::class,
+    \App\Mcp\Tools\Api\Projects\ProjectPasswordUnsetTool::class,
     \App\Mcp\Tools\Api\Usage\ProjectUsageTool::class,
     \App\Mcp\Tools\Api\WPCLI\WpCliRunTool::class,
     \App\Mcp\Tools\Api\ProxyRules\ProxyRuleListTool::class,
