@@ -1,0 +1,66 @@
+# Layers over the compose file the dockerfile strategy generates. That file is
+# right about the app -- it builds the Dockerfile the recipe named, publishes
+# the EXPOSEd 9091 and reads env_file: .env -- and it has no volume, because
+# the Dockerfile declares none and the repository ships no compose file at its
+# root for the engine's sidecar reader to learn one from.
+#
+# An override rather than a replacement compose file: the repository is built
+# from a Dockerfile, and a docker-compose.yml written here would take the
+# generated file's place and lose the build, the published port and the
+# account's public-URL environment with it.
+services:
+  app:
+    # In front of the image's own /app/entrypoint.sh, which the script execs
+    # once it has written the configuration and the admin account. See
+    # files/panelalpha-bootstrap.sh -- it is a file rather than a command line
+    # because it is a page of reasons.
+    entrypoint: ["/bin/sh", "/panelalpha-bootstrap.sh"]
+
+    volumes:
+      # Everything Authelia keeps: configuration.yml, users_database.yml, the
+      # SQLite database behind storage.local, and the notification file that
+      # stands in for SMTP. The image sets X_AUTHELIA_CONFIG=/config/…, the
+      # Dockerfile declares no VOLUME, and without a named volume here every
+      # TOTP registration and every password change would be lost on the next
+      # `up`.
+      - authelia-config:/config
+      - ./panelalpha-bootstrap.sh:/panelalpha-bootstrap.sh:ro
+
+    # The image's own HEALTHCHECK is /app/healthcheck.sh, which sources
+    # /app/.healthcheck.env and `exit 0`s when X_AUTHELIA_HEALTHCHECK is empty
+    # -- so a container that never got as far as writing that file reports
+    # healthy. `ready` below is gated on this condition, so it has to be a
+    # check that fails while the app is still starting. wget is busybox's, from
+    # the Alpine authelia/base the final stage is built on.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9091/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+    # Replaces the hardener's 384m default for an app-role service. One Go
+    # process with the frontend embedded and a SQLite file; the peak is the
+    # first boot, where the bootstrap script hashes the admin password with
+    # argon2id at Authelia's defaults (64 MiB, 4 lanes) before the server
+    # starts. The rest of the account's 2500m is wanted by the build.
+    mem_limit: 512m
+
+  # Does nothing and exits 0. It is the service `up -d` actually waits on: the
+  # engine runs compose without `--wait` and takes the deploy to be finished
+  # when it returns, which without this is the moment the container was
+  # *started* -- before the first-boot argon2 hash, the storage migrations and
+  # the listener. A service_healthy dependency blocks compose until the app's
+  # own healthcheck passes, and a clean exit 0 is explicitly not a crash loop
+  # as far as AppHealth is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  authelia-config:

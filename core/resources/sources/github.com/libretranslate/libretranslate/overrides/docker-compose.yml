@@ -1,0 +1,148 @@
+# Compose-replace: the repo ships only an 8-line example compose with every
+# persistence/security line commented out; upstream publishes the whole app as
+# libretranslate/libretranslate on Docker Hub as a SINGLE container (Flask +
+# gunicorn + Argos Translate). This runs that official image directly (pulled,
+# not built), pinned to the current stable release v1.9.6. Seeding a Docker Hub
+# image also sidesteps engine#229 (image-seed NotFound is the GHCR case, not Hub).
+#
+# WHY COMPOSE-REPLACE. A hosted deploy needs four things bare detection cannot
+# give: the large Argos models on a volume (first download is minutes), the API
+# key SQLite DB on a volume, the /translate compute endpoint gated so the account
+# is not an open translation relay, and a Redis-backed shared secret so that gate
+# holds across gunicorn's 4 workers. This override is the upstream single-image
+# shape with persistence, the abuse gate and a managed key wired in.
+#
+# ACCESS MODEL. LibreTranslate keeps NO user data (stateless translation), so
+# there is no login. The security posture is: don't leak files, and gate the
+# compute. LT_API_KEYS + LT_REQUIRE_API_KEY_SECRET require a key for scripted API
+# calls while the web UI keeps working (its JS sends the rotating `secret`);
+# LT_SHARED_STORAGE=redis makes that secret consistent across workers. /languages
+# and /health stay public; only /translate and /detect are gated.
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Shared store for the rotating API secret (and flood counters) so all four
+    # gunicorn workers agree; no persistence needed -- the UI re-fetches the
+    # secret on load, so losing it on restart is harmless. No published port.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 96m
+
+  # One-shot: provision the account's managed API key into the key DB before the
+  # app starts. Uses the same image but overrides the entrypoint to just insert
+  # the key via the app's own Database class (creates db/api_keys.db + table if
+  # absent; idempotent -- add() does remove-then-insert). The key value comes from
+  # ~/.panelalpha/libretranslate/api-key.env, generated once by hooks/prepare.sh.
+  keyinit:
+    image: libretranslate/libretranslate:v1.9.6
+    restart: "no"
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/libretranslate/api-key.env
+    volumes:
+      - lt-db:/app/db
+    entrypoint:
+      - /app/venv/bin/python
+      - -c
+      - |
+        import os
+        from libretranslate.api_keys import Database
+        key = os.environ["LT_MANAGED_API_KEY"]
+        Database("/app/db/api_keys.db").add(1000, key, 0)
+        print("libretranslate: managed API key provisioned")
+    mem_limit: 256m
+
+  libretranslate:
+    image: libretranslate/libretranslate:v1.9.6
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      keyinit:
+        condition: service_completed_successfully
+    # .env is the platform-merged account env (touched by the prepare hook so
+    # `up` never aborts on a missing file). Paths are relative to ~/project.
+    env_file:
+      - .env
+    environment:
+      # Bind on all interfaces inside the container (engine proxies :5000).
+      LT_HOST: "0.0.0.0"
+      LT_PORT: "5000"
+      TZ: UTC
+      # Limit the Argos model download to these pairs to keep first boot
+      # manageable; widen this to add languages. Models persist on lt-models.
+      LT_LOAD_ONLY: "en,es,fr"
+      # Fetch/refresh models at boot; init.py only downloads blobs that are
+      # missing or out-of-date, so a redeploy reusing the volume re-fetches only
+      # the tiny package index, not the models.
+      LT_UPDATE_MODELS: "true"
+      # --- abuse gate (no user data; this only protects the compute endpoint) ---
+      # Turn on the key system; the key DB lives on the lt-db volume.
+      LT_API_KEYS: "true"
+      LT_API_KEYS_DB_PATH: "/app/db/api_keys.db"
+      # Require a key for scripted API access. The web UI keeps working because
+      # its JS sends the server's rotating `secret`; a raw client with neither a
+      # key nor the secret is rejected (HTTP 400). /languages + /health stay open.
+      LT_REQUIRE_API_KEY_SECRET: "true"
+      # Share that secret (and flood state) across all gunicorn workers, or each
+      # worker would mint a different secret and the UI would break.
+      LT_SHARED_STORAGE: "redis://redis:6379"
+      # Sane per-request character cap and a keyless per-minute rate limit as
+      # defence in depth; the managed key is provisioned at 1000 req/min.
+      LT_CHAR_LIMIT: "5000"
+      LT_REQ_LIMIT: "120"
+    volumes:
+      # Argos language models (downloaded on first boot). MUST survive redeploy.
+      - lt-models:/home/libretranslate/.local
+      # SQLite API-key DB (and the recreated-each-boot prometheus dir).
+      - lt-db:/app/db
+    # Flask/gunicorn listens on 5000; publish it so the engine's port scan takes
+    # it as the primary (engine#234). No other service publishes a port.
+    ports:
+      - "5000:5000"
+    mem_limit: 4096m
+
+  # Polls LibreTranslate's public /health on :5000 until it answers, then exits 0.
+  # The first boot downloads language models before gunicorn serves, so this can
+  # take several minutes; a wide window covers it. curlimages/curl (Docker Hub).
+  healthgate:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      libretranslate:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 150); do
+          curl -fsS -o /dev/null "http://libretranslate:5000/health" && exit 0
+          sleep 6
+        done
+        echo "libretranslate did not become ready in time" >&2
+        exit 1
+    mem_limit: 64m
+
+  # Starts nothing, exits 0, waits on the health probe. `docker compose up -d`
+  # blocks on a depends_on completion condition, so `up` returns -- and the engine
+  # reports the deploy finished -- only after LibreTranslate actually answers
+  # (engine#204: up -d returns before the app is up).
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      healthgate:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  lt-models: {}
+  lt-db: {}

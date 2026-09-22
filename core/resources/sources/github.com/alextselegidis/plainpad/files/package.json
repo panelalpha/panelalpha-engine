@@ -1,0 +1,11 @@
+{
+  "name": "plainpad-panelalpha-build",
+  "private": true,
+  "description": "Written by PanelAlpha. The repository root carries no package.json; this one exists so HostCompile::runForPhp() finds a frontend build to run, because a recipe's own build-stage commands never reach the PHP host build.",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "build": "sh panelalpha/build-client.sh"
+  }
+}

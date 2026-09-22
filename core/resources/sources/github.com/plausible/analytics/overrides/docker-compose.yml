@@ -1,0 +1,186 @@
+# The stack for the repository, which ships none at all: plausible/analytics is
+# the Elixir source tree, and the compose file that runs it lives in a second
+# repository (plausible/community-edition). This is that file, rewritten for a
+# single hosting account.
+#
+# Plausible runs from ghcr.io/plausible/community-edition rather than from this
+# checkout because building it per account costs eight and a half minutes and
+# gigabytes of layers: `mix deps.get --only ce && mix deps.compile` alone is 398
+# seconds, then an npm install for two frontends, an esbuild/tailwind asset
+# pipeline and `mix release`. The measured dockerfile-strategy build of this
+# repository was 502.8s with a zero cache hit ratio, to arrive at an image the
+# project publishes on every release.
+services:
+  plausible_db:
+    # The name upstream's compose uses, which is also what the recipe's
+    # DATABASE_URL points at. postgres:16-alpine is upstream's pin.
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      # Upstream keeps the image's default `postgres` role and lets
+      # `plausible db createdb` create the database; only the password is this
+      # account's own.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    # Sized for one account rather than for a dedicated host: this Postgres
+    # holds users, sites and goals, not the event stream — that is ClickHouse.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - effective_cache_size=128MB
+      - -c
+      - max_connections=30
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    shm_size: 64mb
+    mem_limit: 256m
+
+  plausible_events_db:
+    # Not a choice: Plausible has no single-database mode. config/runtime.exs
+    # starts four ClickHouse repos (ClickhouseRepo, IngestRepo, AsyncInsertRepo,
+    # DeletionRepo) unconditionally, CLICKHOUSE_DATABASE_URL only defaults to a
+    # host named plausible_events_db, and the readiness endpoint fails until
+    # `SELECT 1` answers there. Every pageview is written to it.
+    image: clickhouse/clickhouse-server:24.12-alpine
+    restart: unless-stopped
+    environment:
+      # Skips the entrypoint's default-user password provisioning, which would
+      # otherwise overwrite the users.d override mounted below.
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    volumes:
+      - event-data:/var/lib/clickhouse
+      # Installed by the recipe as files/clickhouse/*.xml, so they are in the
+      # checkout before this file is read. Upstream's four drop-ins, with the
+      # memory ones taken further down — see files/clickhouse/low-resources.xml.
+      - ./clickhouse/logs.xml:/etc/clickhouse-server/config.d/logs.xml:ro
+      - ./clickhouse/ipv4-only.xml:/etc/clickhouse-server/config.d/ipv4-only.xml:ro
+      - ./clickhouse/low-resources.xml:/etc/clickhouse-server/config.d/low-resources.xml:ro
+      - ./clickhouse/default-profile-low-resources-overrides.xml:/etc/clickhouse-server/users.d/default-profile-low-resources-overrides.xml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 -O - http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
+    mem_limit: 768m
+    # ServiceHardener's default is 256, and ClickHouse does not start under it:
+    # BackgroundSchedulePool allocates its threads eagerly and the default pool
+    # is 512, so the server aborts with "Couldn't get 512 threads from global
+    # thread pool". files/clickhouse/low-resources.xml cuts that pool to 32;
+    # this leaves room for the rest (merges, fetches, the HTTP handlers) without
+    # letting the container off a limit entirely.
+    pids_limit: 1024
+
+  plausible:
+    # Tag written by hooks/prepare.sh from the checkout's own CHANGELOG.
+    image: ${PLAUSIBLE_IMAGE:-ghcr.io/plausible/community-edition:v3}
+    restart: unless-stopped
+    # The image's entrypoint understands `run` and `db <script>` and nothing
+    # else: `run` is only `bin/plausible start`, with no migration step. So the
+    # database work is spelled out, exactly as upstream's compose spells it.
+    # interweave_migrate (what `db migrate` calls) migrates PostgreSQL and
+    # ClickHouse in one pass. mkdir -p is for TMPDIR below: the named volume
+    # starts as the image's /var/lib/plausible, which has no tmp/ in it.
+    command:
+      - sh
+      - -c
+      - mkdir -p /var/lib/plausible/tmp && /entrypoint.sh db createdb && /entrypoint.sh db migrate && /entrypoint.sh run
+    ports:
+      - "8000:8000"
+    environment:
+      # Not a real address, and not meant to survive: ComposePlaceholders
+      # rewrites a bare http://localhost under a *_URL-shaped key to the
+      # account's public https URL before the stack starts. BASE_URL is
+      # required — runtime.exs raises without it — and it is the one value the
+      # recipe cannot generate, because the domain does not exist yet when the
+      # prepare hook runs. DATABASE_URL and CLICKHOUSE_DATABASE_URL match the
+      # same key pattern but their values are not localhost, so they are left
+      # alone.
+      BASE_URL: http://localhost
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      TOTP_VAULT_KEY: ${TOTP_VAULT_KEY}
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@plausible_db:5432/plausible_db
+      CLICKHOUSE_DATABASE_URL: http://plausible_events_db:8123/plausible_events_db
+      # Exports and the certbot helper write here; /tmp in the container's
+      # writable layer would do, but upstream puts it on the data volume and
+      # there is no reason to differ.
+      TMPDIR: /var/lib/plausible/tmp
+      # A BEAM release starts epmd, which binds 0.0.0.0:4369 the instant the VM
+      # comes up — while this container is still running createdb and the
+      # ClickHouse migrations, so :8000 does not exist yet. That is what the
+      # first, unassisted deploy of this repository tripped over: the engine
+      # logged "Application is listening on port 4369, not 8000; forwarding
+      # there instead" and republished the account onto the Erlang port mapper,
+      # which answers HTTP with an empty reply forever. AppPortAlignment only
+      # runs against a compose file the engine generated, so a recipe with its
+      # own compose file is already out of that path — but Plausible CE has no
+      # use for distribution either (libcluster is started `on_ee` only, and
+      # the release sets no node name), so there is no reason to leave a second
+      # listening socket in the container.
+      RELEASE_DISTRIBUTION: none
+      # Not set on purpose: HTTPS_PORT. Community Edition starts its endpoint
+      # under site_encrypt when that is present, which means certbot, an ACME
+      # challenge listener and a second port — all of it duplicating the
+      # account's own certificate. Left unset, the app serves plain HTTP on
+      # 8000 and the engine's proxy terminates TLS.
+      #
+      # DISABLE_REGISTRATION is left at the CE default (`invite_only`), which
+      # still allows the very first account: Plausible.Auth.check_registration
+      # short-circuits while should_be_first_launch? is true. So the site comes
+      # up on a registration form that works exactly once, and is invite-only
+      # afterwards.
+      LOG_FAILED_LOGIN_ATTEMPTS: "true"
+    volumes:
+      - plausible-data:/var/lib/plausible
+    depends_on:
+      plausible_db:
+        condition: service_healthy
+      plausible_events_db:
+        condition: service_healthy
+    # /api/health is the readiness endpoint: it runs `SELECT 1` against both
+    # Postgres and ClickHouse and checks the critical caches, so it answers 200
+    # only once the app is genuinely usable. The start period covers the first
+    # boot — createdb, the Ecto migrations and the ClickHouse schema, which is
+    # some forty tables and materialised views.
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 -O - http://127.0.0.1:8000/api/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 300s
+    mem_limit: 1024m
+    # The BEAM sizes its scheduler and async thread pools off the *host's* core
+    # count, not the account's cpus share, and the migrations run their own
+    # tasks on top. 256 is close enough to that to be worth not finding out.
+    pids_limit: 512
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be finished
+  # when that returns — at which point Plausible's container has been *started*,
+  # not yet *answered*: its first boot creates the database and runs the
+  # PostgreSQL and ClickHouse migrations. Compose does block on a depends_on
+  # health condition, so a service that waits on Plausible's healthcheck is what
+  # makes `up -d` return only once the site actually answers. A clean exit 0 is
+  # explicitly not a crash loop as far as AppHealth is concerned. The Postgres
+  # image, not Plausible's, so nothing extra is pulled.
+  ready:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      plausible:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  db-data: {}
+  event-data: {}
+  plausible-data: {}

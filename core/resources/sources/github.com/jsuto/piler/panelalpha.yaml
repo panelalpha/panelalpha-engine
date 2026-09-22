@@ -1,0 +1,146 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Piler is an email archive: C daemons in src/ that receive, encrypt, store and
+  index messages, and a PHP web interface in webui/ that searches them.
+  Detection read the tree correctly as far as it goes -- webui/index.php,
+  webui/controller/, webui/model/, a composer-less PHP application -- and
+  settled on strategy php, which served a 403 because there is no index.php at
+  the repository root and the front page lives one directory down. That is the
+  smaller half of the problem. The larger half is that the PHP interface is a
+  console over three things it does not contain: the piler daemon that decrypts
+  message bodies through /usr/bin/pilerget, the MySQL schema in util/db-mysql.sql
+  that holds the metadata, and a Manticore instance that holds the only
+  searchable copy of every subject and body. Served on its own it is a search
+  page over nothing, wired to a database that does not exist.
+
+  It does not need to be built here. docker/Dockerfile's payload is
+  `COPY ${PACKAGE}_${TARGETARCH}.deb /` -- a release .deb produced elsewhere and
+  absent from the checkout -- so the tree cannot build its own image even with
+  the Dockerfile in hand, and upstream publishes sutoj/piler on Docker Hub
+  instead, 1.4.9 pushed 2026-06-17 against this VERSION file.
+  overrides/docker-compose.yml is docker/docker-compose.yaml adapted for one
+  account, keeping all four of upstream's services: piler, MariaDB, Manticore
+  and memcached.
+
+  Port 25 is the reason this was nearly Rejected, and the reason it is not.
+  Piler's headline feature is a built-in SMTP receiver, and upstream's compose
+  file publishes `25:25`. A tenant application does not own inbound SMTP for the
+  account's domain on shared hosting, so that publish is dropped. It is not
+  fatal because Piler's pull paths are upstream's own first-class code, not a
+  workaround: src/import_imap.c, src/import_pop3.c, src/imap.c, src/pop3.c and
+  util/imapfetch.py, with contrib/imap, contrib/pop3 and contrib/o365 alongside,
+  and an Import page in the web interface that stores mailbox jobs which
+  util/import.sh runs from the container's cron every five minutes. An archive
+  that pulls from the mailboxes it archives is a complete product, and that is
+  what was tested: a message imported and then found by searching for a word in
+  its body. Unlike Sympa, Piler does not have to *be* the domain's mail
+  destination to work.
+
+  Four things the engine cannot infer.
+
+  The hostname. start.sh's pre_flight_check refuses to start without
+  PILER_HOSTNAME, which is not a URL but a bare hostname -- it becomes `hostid=`
+  in piler.conf, `server_name` in the nginx vhost and SITE_NAME_CONST in
+  config-site.php. It does not match ComposePlaceholders' PUBLIC_URL_KEY_PATTERN
+  (`/(^|_)(URL|ORIGIN|ENDPOINT|DOMAIN)$/i`, ComposePlaceholders.php:82), so the
+  compose file carries PA_PUBLIC_URL, which does match and is rewritten to the
+  account's https address, and files/piler-entrypoint.sh splits the hostname out
+  of it before exec'ing the image's own /start.sh -- the same split the Seafile
+  recipe makes for SEAFILE_SERVER_HOSTNAME.
+
+  SITE_URL, which is the same value one layer up and still wrong once the
+  hostname is right. etc/config-site.dist.php hardcodes
+  `$config['SITE_URL'] = 'http://' . SITE_NAME . PATH_PREFIX`, and every
+  redirect Piler issues is an absolute Location built from it
+  (controller/login/login.php:89, index.php:102, and twenty more), so an account
+  whose TLS is terminated at the engine's proxy sends its users to http:// after
+  every sign-in, save and logout. The file is generated on the first boot inside
+  the piler_etc volume, not in the checkout, so files/panelalpha-setup.sh
+  asserts it there once the schema exists.
+
+  The credentials. util/db-mysql.sql:229-230 inserts admin@local with the
+  md5-crypt hash of `pilerrocks` and auditor@local with the hash of `auditor`,
+  and webui/model/user/auth.php:97 authenticates against them with a plain
+  crypt() comparison before it tries LDAP or IMAP. Both are constants in a
+  public GPL repository. Piler has no sign-up page and no first-run wizard, so
+  there is nothing for an unauthenticated caller to *claim* -- what there is, is
+  a working administrator login on a public HTTPS name for anyone who has read
+  the repository. files/panelalpha-setup.sh replaces the admin row with a
+  password generated per account and the auditor row with one that is kept
+  nowhere, each conditioned on the hash still being exactly the shipped one, so
+  a redeploy never overwrites a password the customer has since chosen. It then
+  signs in with the generated password and checks for the administrator's
+  redirect, because a rendered login page proves nothing about the row behind
+  it. Upstream's own `MYSQL_PASSWORD=piler123` is replaced the same way.
+
+  And the sizes. Upstream's compose file reserves 512M each for Piler and
+  Manticore and sets `rt_mem_limit = 512M` on the piler1 index, with a
+  docker/piler.cnf that gives MariaDB a 256M buffer pool -- numbers for a
+  dedicated archive host, not for four containers sharing 2000 MB. Measured idle
+  on a deployed account: piler 39-51 MiB, MariaDB 104-106 MiB, Manticore 23-30
+  MiB, memcached 3.5 MiB, about 190 MiB for the stack. Manticore, the service
+  the triage note said to size against, is the most over-provisioned of the four
+  and is not the largest: MariaDB is. files/manticore.conf brings rt_mem_limit
+  to 128M and the caps here total 1568m, 1728m counting the two one-shots that
+  exist only during `up -d`.
+
+  One upstream defect found while testing, which changes nothing here but is
+  worth knowing before pointing anyone at the CLI: `pilerimport -i`, the C IMAP
+  client, connects, authenticates, lists folders and fetches a message body and
+  then stores nothing, failing at src/import_imap.c:364 with "Cannot find ... in
+  the message" against both Dovecot 2.x and GreenMail -- download_email()
+  searches the body buffer for the header buffer's contents and expects a
+  `* 1 FETCH (UID 1 BODY[] {n}` shape neither server returns. The path this
+  recipe documents is not that one: the Import page and the cron job run
+  util/imapfetch.py, which pulled a message from a Dovecot mailbox over IMAPS
+  and archived it. `pilerimport -e` for EML and mbox works too, from a writable
+  working directory -- run from the image's default one it exits "cannot write
+  current directory!".
+
+  Every generated value lives in ~/.panelalpha/piler.env (0600, in a 0700
+  directory that prepare.sh creates, because an account's home is root-owned
+  0755) and nowhere else, and that file is also the stack's env_file --
+  compose reads it at ../.panelalpha/piler.env, relative to the
+  --project-directory. ~/project/.env holds four image tags and nothing else.
+  Two engine behaviours make that the shape rather than a preference: every
+  deploy empties ~/project before the clone (engine#173), so a guard on a file
+  in there never fires on a redeploy and a regenerated MYSQL_PASSWORD would lock
+  Piler out of an archive it can no longer decrypt; and .env is republished as
+  .env.default at mode 644 inside a world-traversable home, which makes anything
+  written there readable by every other account on the host.
+
+  Nothing here is derived from the account's filesystem path (engine#175): the
+  checkout is not bind-mounted into any container, and the one value that would
+  otherwise collide across tenants -- /etc/piler/piler.key, the 56 random bytes
+  every archived message body is encrypted with -- is generated by the image on
+  each account's first boot into that account's own named volume. It is also
+  the one thing in this stack with no recovery path: lose piler.key and the
+  archive is unreadable. db_data, piler_etc, piler_manticore and piler_store
+  have to survive together or not at all.
+
+  One service is a no-op that exits 0, for the usual reason: the engine runs
+  `docker compose up -d` without `--wait` (engine#90) and calls the deploy
+  finished when that returns. `ready` waits for `setup`, which waits for the
+  piler healthcheck, which greps the login form's own body id out of
+  http://127.0.0.1/ rather than trusting upstream's `curl -s smtp://localhost/`
+  -- a probe of the SMTP receiver this deployment does not publish, which says
+  nothing about whether the web UI answers.
+
+  Outbound mail is left unconfigured. Daily reports, automated searches and
+  "restore to mailbox" need an SMTP server the engine does not provide. Two
+  upstream exposures are documented rather than fixed. Image attachments are
+  decrypted into /var/piler/www/tmp/i.<attachment_id> -- inside the nginx
+  document root, under a sequential integer, served with no authentication;
+  confirmed by fetching one over the public domain with no session. Piler's own
+  cron reaps them every five minutes, and the only mitigation available at the
+  nginx layer would break inline images in the message viewer, which is the
+  product's main screen. And mailbox passwords for IMAP import jobs are stored
+  in the clear in the `import` table, because that is how the feature is built.
+  See README.md.
+
+  One behaviour a customer meets in the first five minutes and should not be
+  surprised by: the built-in administrator can search but cannot open a message.
+  check_your_permission_by_id() (webui/model/search/search.php:691) grants read
+  access by email address or by the auditor role, and admin@local is the address
+  of nothing. Reading the archive means creating a user whose addresses are the
+  archived mailbox's, or an auditor. ~/.panelalpha/piler-credentials.txt says so.

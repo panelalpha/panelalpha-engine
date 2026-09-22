@@ -1,0 +1,223 @@
+# The stack for github.com/zabbix/zabbix, which ships no compose file and no
+# Dockerfile. This is upstream's own docker-compose_v3_alpine_mysql_latest.yml
+# reduced to one hosting account: the server, the nginx frontend and MariaDB,
+# with the agent, the proxy, the java gateway, the web service, snmptraps and
+# the second frontend dropped. The images are Zabbix SIA's published ones; see
+# panelalpha.yaml for why nothing is built from the checkout.
+services:
+  db:
+    # Not optional and not swappable: Zabbix has no SQLite mode, the server
+    # links against libmariadb and the frontend reads the same schema.
+    # utf8mb4/utf8mb4_bin is a hard requirement -- the frontend's own
+    # "database" pre-flight check fails on anything else, and the server logs
+    # "unsupported character set or collation" and exits.
+    image: ${ZABBIX_DB_IMAGE:-mariadb:11.4}
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_bin
+      # A default MariaDB sizes itself for a dedicated host. Zabbix's own
+      # working set here is small: one account's history, trends and a few
+      # hundred items.
+      - --innodb-buffer-pool-size=96M
+      - --max-connections=60
+      - --performance-schema=0
+    environment:
+      MARIADB_ROOT_PASSWORD: ${ZBX_DB_ROOT_PASSWORD}
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      # The only thing in the stack that must survive: hosts, items, history,
+      # triggers and the admin password all live here.
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 512m
+
+  zabbix-server:
+    # The poller and trigger engine. Nothing is published from it: :10051 is
+    # the trapper port, which agents on the customer's own machines would
+    # connect *in* to for active checks -- a second published port the engine's
+    # proxy has no way to express, so active agents are out of scope and
+    # passive polling (server -> agent, outbound) is what works.
+    image: ${ZABBIX_SERVER_IMAGE:-zabbix/zabbix-server-mysql:alpine-7.0-latest}
+    restart: unless-stopped
+    environment:
+      DB_SERVER_HOST: db
+      DB_SERVER_PORT: "3306"
+      MYSQL_DATABASE: zabbix
+      MYSQL_USER: zabbix
+      MYSQL_PASSWORD: ${ZBX_DB_PASSWORD}
+      # Present only so the image's entrypoint can CREATE DATABASE, CREATE USER
+      # and import create.sql.gz on the first boot; it is not used afterwards.
+      MYSQL_ROOT_PASSWORD: ${ZBX_DB_ROOT_PASSWORD}
+      # Inert in the image (nothing under /usr/lib/docker-entrypoint reads it)
+      # and true: this service is a *client* of MySQL, not a MySQL. It is here
+      # for the engine, which decides that from the environment -- see the
+      # longer note on zabbix-web, where getting it wrong costs the site.
+      MYSQL_HOST: db
+      # Sized for one account rather than a NOC. The defaults (8M config cache,
+      # 5 pollers, 16M history cache) are already modest; these trim the two
+      # caches that are allocated up front and leave enough pollers to keep a
+      # few dozen items current.
+      ZBX_CACHESIZE: 32M
+      ZBX_HISTORYCACHESIZE: 16M
+      ZBX_HISTORYINDEXCACHESIZE: 8M
+      ZBX_TRENDCACHESIZE: 8M
+      ZBX_VALUECACHESIZE: 16M
+      ZBX_STARTPOLLERS: "3"
+      ZBX_STARTPREPROCESSORS: "2"
+      # The ICMP pinger. fping in this image is setuid root, so icmpping[] and
+      # icmppingsec[] work from inside the account without any added capability.
+      ZBX_STARTPINGERS: "1"
+      ZBX_STARTHTTPPOLLERS: "1"
+      ZBX_STARTDISCOVERERS: "1"
+      ZBX_STARTTRAPPERS: "3"
+      ZBX_TIMEOUT: "10"
+      # Housekeeping every hour in small bites: the default 500-row delete
+      # limit leaves a busy install permanently behind, and a big one stalls
+      # the server on a 0.75-CPU share.
+      ZBX_HOUSEKEEPINGFREQUENCY: "1"
+      ZBX_MAXHOUSEKEEPERDELETE: "5000"
+    depends_on:
+      db:
+        condition: service_healthy
+    # First boot imports a ~170-table schema before the trapper port opens, so
+    # the grace period is minutes, not seconds. nc rather than curl: :10051
+    # speaks Zabbix's own protocol, not HTTP.
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10051 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 90
+      start_period: 180s
+    mem_limit: 512m
+
+  # The one agent that belongs here. Every other Zabbix agent a customer runs
+  # is on their own machine; this one exists so that the "Zabbix server" host
+  # the schema creates has something to answer it.
+  #
+  # Without it a fresh account opens on a permanent red "Zabbix agent is not
+  # available" problem and eleven unsupported items, because that host's
+  # interface points at 127.0.0.1:10050 and nothing there listens. Measured on
+  # the first build of this recipe: 11 unsupported items, one Average-severity
+  # problem, on an account nobody had configured yet. With the agent, the stock
+  # "Linux by Zabbix agent" template collects CPU, memory, filesystem and
+  # network from minute one -- of this container, which is the account's own
+  # view and not the host's. A tenant cannot see the machine underneath, and
+  # this does not pretend otherwise.
+  zabbix-agent:
+    image: ${ZABBIX_AGENT_IMAGE:-zabbix/zabbix-agent:alpine-7.0-latest}
+    restart: unless-stopped
+    environment:
+      # For active checks, which the stock template also uses. The name must
+      # match the host in Zabbix exactly, and the schema calls it "Zabbix server".
+      ZBX_HOSTNAME: Zabbix server
+      ZBX_SERVER_HOST: zabbix-server
+      ZBX_SERVER_PORT: "10051"
+    depends_on:
+      zabbix-server:
+        condition: service_healthy
+    mem_limit: 128m
+
+  # Runs once, exits 0, and is the reason the frontend may be published at all.
+  #
+  # Zabbix's schema ships Admin with the bcrypt hash of "zabbix" and guest with
+  # the hash of "" -- both public, both identical in every installation, and
+  # neither settable from the environment. files/panelalpha-credentials.sh
+  # replaces them with per-account hashes generated by hooks/prepare.sh and
+  # then checks that no row is left on a shipped hash, exiting 1 if one is.
+  # zabbix-web waits on this completing successfully, so there is no window in
+  # which the published port serves a login form that "Admin"/"zabbix" opens.
+  #
+  # The server image, not a second one: it carries the mariadb client already.
+  credentials:
+    image: ${ZABBIX_SERVER_IMAGE:-zabbix/zabbix-server-mysql:alpine-7.0-latest}
+    restart: "no"
+    entrypoint: ["/bin/bash", "/panelalpha-credentials.sh"]
+    environment:
+      ZBX_DB_HOST: db
+      ZBX_DB_NAME: zabbix
+      ZBX_DB_ROOT_PASSWORD: ${ZBX_DB_ROOT_PASSWORD}
+    volumes:
+      - ./panelalpha-credentials.sh:/panelalpha-credentials.sh:ro
+      - ./.panelalpha-admin-hashes:/panelalpha-admin-hashes:ro
+    # Not on db: on the server, because the rows to rewrite do not exist until
+    # the server has imported the schema, and :10051 opening is what says it has.
+    depends_on:
+      zabbix-server:
+        condition: service_healthy
+    mem_limit: 128m
+
+  zabbix-web:
+    # nginx + php-fpm 8.5 serving ui/ on :8080. The only published port in the
+    # stack, and what the engine's port detection reads.
+    image: ${ZABBIX_WEB_IMAGE:-zabbix/zabbix-web-nginx-mysql:alpine-7.0-latest}
+    restart: unless-stopped
+    ports:
+      - "8000:8080"
+    environment:
+      ZBX_SERVER_HOST: zabbix-server
+      ZBX_SERVER_PORT: "10051"
+      ZBX_SERVER_NAME: ${ZBX_SERVER_NAME:-Zabbix}
+      DB_SERVER_HOST: db
+      DB_SERVER_PORT: "3306"
+      MYSQL_DATABASE: zabbix
+      MYSQL_USER: zabbix
+      # The frontend connects as the unprivileged user only; no root password
+      # reaches this container, which is the one an HTTP request can touch.
+      MYSQL_PASSWORD: ${ZBX_DB_PASSWORD}
+      # Not optional, and not for Zabbix: nothing in the image reads MYSQL_HOST
+      # (DB_SERVER_HOST above is what the entrypoint uses). It is here because
+      # without it this service is classified as a database and the site 502s.
+      #
+      # ComposePortScan drops a published binding when
+      # InternalPorts::isDatastore() says the service is a datastore, and that
+      # asks SidecarEngine::resolve(), which matches on the image name: the
+      # official frontend image is called zabbix-web-nginx-**mysql**, so the
+      # only published port in the stack was filtered out, ComposePortScan
+      # returned no ports at all, and Networking::detectAndCreateProxyRules()
+      # fell back to its 8080 default -- a proxy rule pointing at a port
+      # nothing in the account listens on. Measured: `Detected application
+      # port: 8080` in the deploy log, HTTP 200 on 127.0.0.1:8000 inside the
+      # account, HTTP 502 on the public name.
+      #
+      # A MYSQL_HOST makes CredentialNames::isClientPrefix() true, which is
+      # what the classifier means by "this service talks to a MySQL rather than
+      # being one" -- so the statement is both true and the fix.
+      MYSQL_HOST: db
+      PHP_TZ: ${TZ:-Etc/UTC}
+      ZBX_MAXEXECUTIONTIME: "300"
+      ZBX_MEMORYLIMIT: 256M
+    depends_on:
+      credentials:
+        condition: service_completed_successfully
+    # The image's own probe is /ping every 90s; this is the same endpoint at a
+    # tighter interval so `ready` below does not sit through a 90s cycle.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null --max-time 10 http://127.0.0.1:8080/ping || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 40
+      start_period: 30s
+    mem_limit: 384m
+
+  # Does nothing and exits 0. `docker compose up -d` runs without --wait
+  # (engine#204), so the deploy would otherwise be called finished when the
+  # containers had been created. Compose *does* block on a depends_on health
+  # condition, so waiting here makes `up -d` return only once Zabbix answers.
+  # A clean exit 0 is explicitly not a crash loop to AppHealth::isCrashing().
+  ready:
+    image: ${ZABBIX_SERVER_IMAGE:-zabbix/zabbix-server-mysql:alpine-7.0-latest}
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      zabbix-web:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  db_data: {}

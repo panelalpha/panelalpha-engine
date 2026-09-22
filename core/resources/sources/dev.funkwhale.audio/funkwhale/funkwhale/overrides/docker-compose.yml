@@ -1,0 +1,247 @@
+# Funkwhale, as a self-contained stack of named volumes and upstream's own
+# published images. This REPLACES the repository's compose files, both of which
+# are written for a specific operator's machine: the root compose.yml builds
+# ../api and bind-mounts it for live reload (a build+source-bind service, which
+# ComposeFileInspector reads as a workstation file and the engine then ignores),
+# and deploy/docker-compose.yml bind-mounts host directories under ./data and
+# wants a hand-edited .env. Neither can run untouched here.
+#
+# Images are pulled, not built: funkwhale/api and funkwhale/front are what
+# upstream's install docs deploy, and a pull avoids a yarn+poetry build the
+# account would pay for on every redeploy. Pinned to a release rather than
+# `latest`: an image that floats forward under a running database is a migration
+# nobody asked for. Override FUNKWHALE_VERSION in the account env_vars to move it.
+#
+# Every value is literal or uses compose's ${VAR:-default} form; a bare ${VAR}
+# interpolates to an empty string (engine#212), which for a password means a
+# database that trusts everyone.
+
+x-fw-env: &fw-env
+  # Sourced by every Django process. Static values the image cannot default to
+  # this account; the dynamic ones (hostname, protocol, allowed hosts) are
+  # derived from PA_PUBLIC_URL by files/panelalpha/funkwhale/env.sh at boot.
+  DJANGO_SETTINGS_MODULE: config.settings.production
+  # gunicorn binds this and the front proxies to it; one number, both ends.
+  FUNKWHALE_API_PORT: "5000"
+  FUNKWHALE_WEB_WORKERS: "1"
+  # config/settings/common.py:404-434 assembles DATABASE_URL from these when
+  # DATABASE_URL itself is unset, so the password appears in exactly one file
+  # (the store env_file below), never in a URL string.
+  DATABASE_HOST: postgres
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: funkwhale
+  DATABASE_USER: funkwhale
+  # common.py:842 defaults CACHE_URL to 127.0.0.1; point it at the redis service.
+  # CELERY_BROKER_URL defaults to CACHE_URL (common.py:899) but is set explicitly
+  # so the two cannot drift.
+  CACHE_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  MEDIA_ROOT: /data/media
+  STATIC_ROOT: /data/static
+  # Django emits X-Accel-Redirect to /_protected/media so nginx streams the
+  # authorised file (common.py:1259). apache2 is the only other accepted value.
+  REVERSE_PROXY_TYPE: nginx
+  # Read the SPA index from the front container rather than fetching the public
+  # URL back through the internet for server-side meta-tag injection.
+  FUNKWHALE_SPA_HTML_ROOT: http://front/
+  # The account's public name. Not a real address here: ComposePlaceholders
+  # rewrites a bare http://localhost under a key ending in _URL to the account's
+  # public https address before the stack starts (PUBLIC_URL_KEY_PATTERN).
+  # common.py:174 reads it and derives FUNKWHALE_HOSTNAME and FUNKWHALE_PROTOCOL
+  # from it -- a plain container env, so it is set for `docker compose exec`
+  # management commands too, not just the entrypoint process.
+  FUNKWHALE_URL: http://localhost
+  # common.py:222 sets ALLOWED_HOSTS = these + FUNKWHALE_HOSTNAME. The public
+  # host is covered by the line above; localhost/127.0.0.1 are added so the
+  # front's internal healthcheck is not answered 400 DisallowedHost.
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+  PYTHONUNBUFFERED: "1"
+
+x-fw-depends: &fw-depends
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+
+services:
+  postgres:
+    image: docker.io/library/postgres:15-alpine
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, from the store the prepare hook wrote. Pinned to
+    # the major (upstream runs 15): Postgres does not downgrade a data
+    # directory, so a floating tag is a one-way door.
+    env_file:
+      - ../.panelalpha/funkwhale/funkwhale.env
+    environment:
+      POSTGRES_DB: funkwhale
+      POSTGRES_USER: funkwhale
+      # Postgres refuses to initialise into a non-empty directory and a mounted
+      # volume is not always empty (lost+found).
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U funkwhale -d funkwhale -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    mem_limit: 192m
+
+  # One-shot: migrate, publish the collected static, create this account's
+  # superuser, then exit 0. `api` waits on it (service_completed_successfully),
+  # so a failed migration or a missing owner stops the stack instead of
+  # publishing an unowned pod. `up -d` runs without --wait (engine#204), so a
+  # one-shot that failed would otherwise leave the deploy green.
+  init:
+    image: docker.io/funkwhale/api:${FUNKWHALE_VERSION:-2.0.11}
+    restart: "no"
+    depends_on: *fw-depends
+    env_file:
+      - ../.panelalpha/funkwhale/funkwhale.env
+    environment: *fw-env
+    volumes:
+      - media:/data/media
+      - static:/data/static
+      - ./panelalpha/funkwhale:/srv/pa:ro
+    entrypoint: ["/bin/sh", "/srv/pa/init.sh"]
+    mem_limit: 640m
+
+  api:
+    image: docker.io/funkwhale/api:${FUNKWHALE_VERSION:-2.0.11}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - ../.panelalpha/funkwhale/funkwhale.env
+    environment: *fw-env
+    volumes:
+      - media:/data/media
+      - ./panelalpha/funkwhale:/srv/pa:ro
+    entrypoint: ["/bin/sh", "/srv/pa/api.sh"]
+    mem_limit: 900m
+
+  # Celery worker. Not optional: an uploaded track's import runs as a Celery
+  # task, so without this a POST /api/v2/uploads/ stays import_status=pending
+  # forever and never becomes streamable.
+  worker:
+    image: docker.io/funkwhale/api:${FUNKWHALE_VERSION:-2.0.11}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - ../.panelalpha/funkwhale/funkwhale.env
+    environment:
+      <<: *fw-env
+      C_FORCE_ROOT: "true"
+    volumes:
+      - media:/data/media
+      - ./panelalpha/funkwhale:/srv/pa:ro
+    entrypoint: ["/bin/sh", "/srv/pa/worker.sh"]
+    mem_limit: 640m
+
+  # Celery beat, the periodic scheduler (federation refresh, cleanup). A single
+  # beat only -- two would double every scheduled task, and there is exactly one
+  # of each process in an account.
+  beat:
+    image: docker.io/funkwhale/api:${FUNKWHALE_VERSION:-2.0.11}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - ../.panelalpha/funkwhale/funkwhale.env
+    environment:
+      <<: *fw-env
+      C_FORCE_ROOT: "true"
+    volumes:
+      - ./panelalpha/funkwhale:/srv/pa:ro
+    entrypoint: ["/bin/sh", "/srv/pa/beat.sh"]
+    mem_limit: 384m
+
+  # Upstream's own nginx image: serves the Vue SPA, proxies /api/ to gunicorn,
+  # serves the whitelisted /media/ subtrees and answers the /_protected/media
+  # internal redirect Django uses to stream a track. A bare front nginx is not
+  # mistaken for the host's reverse proxy (HostIngress::PROXY_REPOSITORIES is
+  # owner-qualified). front.sh derives FUNKWHALE_HOSTNAME/PROTOCOL from
+  # PA_PUBLIC_URL, then hands off to the image's own nginx entrypoint so its
+  # template substitution runs.
+  front:
+    image: docker.io/funkwhale/front:${FUNKWHALE_VERSION:-2.0.11}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      FUNKWHALE_API_HOST: api
+      FUNKWHALE_API_PORT: "5000"
+      MEDIA_ROOT: /data/media
+      MUSIC_DIRECTORY_PATH: /music
+      NGINX_MAX_BODY_SIZE: 100M
+      # Rewritten to the public https URL (key ends in _URL); front.sh splits it
+      # into the FUNKWHALE_HOSTNAME/FUNKWHALE_PROTOCOL the nginx template needs.
+      FUNKWHALE_URL: http://localhost
+    ports:
+      - "8080:80"
+    volumes:
+      - media:/data/media:ro
+      - static:/usr/share/nginx/html/staticfiles:ro
+      - ./panelalpha/funkwhale:/srv/pa:ro
+    entrypoint: ["/bin/sh", "/srv/pa/front.sh"]
+    healthcheck:
+      # Through nginx to the API on purpose: proves the whole chain answers, not
+      # just that nginx started. nodeinfo is public, so no auth and no
+      # DisallowedHost (127.0.0.1 is in DJANGO_ALLOWED_HOSTS).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/api/v1/instance/nodeinfo/2.0/ || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
+    mem_limit: 96m
+
+  # Does nothing and exits 0, but only once the front's healthcheck passes.
+  # `up -d` runs without --wait (engine#204); compose does block on a
+  # depends_on health condition, so this is what makes the deploy finish only
+  # after the API truly answers. A clean exit 0 is not a crash loop to AppHealth.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    depends_on:
+      front:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  redisdata: {}
+  media: {}
+  static: {}

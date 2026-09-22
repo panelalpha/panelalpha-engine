@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Budibase is a low-code platform for building internal tools: a builder UI and
+  a client runtime over CouchDB, with Redis for queues and MinIO for app
+  bundles and attachments. The repository is a 13-package yarn-1 Lerna
+  workspace whose root package.json has no start script, and whose compose
+  files all live under hosting/ rather than at the project root, so detection
+  found no compose file and no recognisable platform and fell through to
+  Railpack. Railpack installed the workspace, reported "No start command
+  detected", and the deploy ended with a generated nginx:alpine compose serving
+  PanelAlpha's placeholder page on 8080 -- a successful deploy of nothing.
+
+  Building the checkout is not the alternative, and here that is not a
+  judgement call either. The repository does contain Dockerfiles, unlike
+  NocoDB's, but none of them builds this tree: hosting/single/Dockerfile,
+  packages/server/Dockerfile and packages/worker/Dockerfile all begin from
+  artifacts that are not in a clone -- COPY packages/server/dist,
+  packages/server/builder, packages/server/client, packages/worker/dist.
+  packages/server/.gitignore ignores dist, and builder/ and client/ do not
+  exist in the tree at all. Each of those Dockerfiles also ends with
+  RUN test -n "$BUDIBASE_VERSION", a build-arg nothing in a deploy supplies.
+  They are packaging steps run after a full `lerna run build`, not builds of
+  the checkout, so overrides/docker-compose.yml runs upstream's published
+  images instead.
+
+  Which published images is the real decision, and it was settled by
+  measurement rather than by argument. Upstream also ships an all-in-one
+  budibase/budibase image, which bundles CouchDB, Clouseau (a JVM), Redis,
+  MinIO, nginx, a PostgreSQL 15 server and a LiteLLM Python proxy under pm2 in
+  one container; hosting/single/runner.sh has no flag to leave LiteLLM out, as
+  it mints LITELLM_MASTER_KEY itself when unset, initdb's a cluster under
+  ${DATA_DIR}/litellm/postgres and starts the proxy unconditionally. Run in a
+  2000 MB container with no swap it reached 1.952 GiB of 1.953 GiB inside three
+  and a half minutes, was OOM-killed repeatedly -- four node processes and the
+  LiteLLM python at 434 MB anon-rss -- and after ten minutes was still
+  unhealthy and still answering 502 on its own loopback. It does not fit, so
+  this recipe uses the shape of upstream's own hosting/docker-compose.yaml
+  instead -- proxy, app, worker, CouchDB, Redis, MinIO -- minus the LiteLLM
+  pair, which measures 1441 MiB steady state on the same 2000 MB account.
+  waitForLiteLLMReadiness() in server/src/startup/index.ts returns immediately
+  when LITELLM_MASTER_KEY is unset, so leaving it out costs a clean 30 seconds
+  off every boot rather than an error; what it costs the customer is Budibase's
+  AI features, which need an LLM provider key nobody has configured anyway.
+
+  Two values the recipe supplies that the app cannot. PLATFORM_URL has to be
+  the account's public address -- getPlatformUrl() in backend-core falls back
+  to http://localhost:10000, and that value ends up in password-reset links,
+  invitation emails and OAuth callbacks -- and the address is not known until
+  the domain exists, so the compose file ships PLATFORM_URL: http://localhost,
+  exactly the shape ComposePlaceholders rewrites. And BB_ADMIN_USER_EMAIL /
+  BB_ADMIN_USER_PASSWORD, because Budibase has no installer: until a first
+  global user exists, POST /api/global/users/init is unauthenticated and makes
+  an admin out of whoever calls it, which on a public HTTPS name is the first
+  stranger to find the site. The server creates the admin from those two on
+  first boot instead, which closes that window by itself -- there is no
+  separate setup service here, and no open self-signup afterwards. The password
+  is generated per account into ~/project/.panelalpha-admin-password (0600),
+  never a default.
+
+  One service in the compose file is a no-op that exits 0. The engine runs
+  `docker compose up -d` without --wait and calls the deploy finished when that
+  returns, which is when the containers have been started rather than when they
+  answer -- and the gap is large here: CouchDB brings up a JVM and an Erlang VM
+  and creates _users/_replicator, then the server runs its workspace migrations
+  and creates the admin. `ready` waits for the proxy's healthcheck, which waits
+  for app and worker, which wait for CouchDB, Redis and MinIO, so `up -d`
+  returns only once the site really answers. A clean exit 0 is explicitly not a
+  crash loop to AppHealth.
+
+  Two lines in the compose file are there because the first attempt at this
+  recipe failed the deploy outright. DISABLE_SOURCE_MAPS is one: the server is
+  not one process -- threads/index.ts forks a worker-farm child for queries and
+  another for automations, each loading the whole server bundle, and
+  docker_run.sh adds --enable-source-maps to all three, which its own comment
+  prices at ~150 MB of retained source map per process. At 640m the container
+  was OOM-killed mid-boot, compose saw the dependency restart and aborted
+  `up -d`, and the deploy came back failed with an image-pull progress dump as
+  its error. NODE_OPTIONS is the other: the images bake
+  ENV NODE_OPTIONS="--no-node-snapshot", which isolated-vm requires on Node 20+
+  to run any JS binding in an app, and ServiceHardener replaces NODE_OPTIONS
+  unless compose already declares it -- so the heap cap and that flag have to be
+  set together or the JS runner breaks. pids_limit is raised past the hardener's
+  256 for the same reason on the same containers: it counts threads, and a JVM
+  plus an Erlang VM, or three Node processes with their libuv pools, exceed it.
+
+  Mail is left unconfigured. Budibase boots, the admin signs in and workspaces
+  can be built without it, but invitations and password resets need an SMTP
+  server the engine does not provide; configure one in Settings -> Email.

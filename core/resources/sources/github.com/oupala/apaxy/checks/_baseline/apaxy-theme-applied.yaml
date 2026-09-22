@@ -1,0 +1,32 @@
+# The schema lives with the shipped checks: this file is under
+# resources/sources/<host>/<owner>/<repo>/checks/<group>/.
+# yaml-language-server: $schema=../../../../../../checks/_schema.json
+#
+# The listing is being rendered by Apaxy, over the owner's own directory.
+#
+# This application's output IS a directory listing, so the one shipped check
+# that would otherwise speak for it -- `_baseline/no-directory-listing` -- has
+# its premise inverted here, and a recipe may not shadow or guard a shipped
+# check (CheckRegistry::allWithDirectory() refuses it). What is left is to ask
+# the positive question that check cannot: is this Apaxy's listing, or is it
+# Apache's bare one because the theme never installed?
+#
+# The two strings are the two halves of that. `/theme/style.css` comes from
+# header.html, which only exists because the prepare hook wrote it and
+# mod_autoindex only reaches for because `HeaderName` in .htaccess told it to;
+# a missing or unreadable theme directory leaves an unstyled listing without
+# it. `id="breadcrumb"` is the element apaxy.js fills in, so it also says the
+# header is the themed one rather than some other page that happens to link a
+# stylesheet.
+#
+# Deliberately not asserting on `<title>`: it is set by the same header.html
+# and would only repeat what the first string already proves.
+id: apaxy-theme-applied
+severity: error
+serving: unthemed_listing
+expect:
+  body:
+    - '/theme/style.css'
+    - 'id="breadcrumb"'
+message: 'The directory listing is Apache''s own, not Apaxy''s: the theme is not in effect.'
+fix: 'The theme lives in ~/.panelalpha/apaxy/files/theme and is installed by the recipe''s prepare hook. Check that ~/files/theme/style.css and ~/.panelalpha/apaxy/files/.htaccess exist and are world-readable — the container serves as uid 1000, which is not the account''s uid.'

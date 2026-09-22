@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Crafty Controller is a self-hosted Minecraft-server launcher and manager: a
+  Python (Tornado) web panel that creates, starts and administers Minecraft
+  servers, backed by SQLite and bundling a Java runtime. Upstream publishes an
+  official image, registry.gitlab.com/crafty-controller/crafty-4:latest (~2.5 GB
+  - it bakes in five OpenJDK versions plus the Python venv), so the recipe runs
+  that image instead of the heavy source build (the repo's own Dockerfile
+  installs the JREs and compiles the venv from scratch). No Java build runs here.
+
+  Why a Dockerfile at all. The image only listens HTTPS on :8443 with a
+  self-signed cert (Tornado is constructed with ssl_options and has no plain-HTTP
+  mode); there is no http_port. The engine's reverse proxy terminates TLS and
+  forwards plain HTTP to the container's published port, and the generated domain
+  rule is hardcoded to upstream_protocol http (RoutingCompiler), so there is no
+  way to point it at :8443 over TLS. The recipe therefore ships a Dockerfile that
+  starts FROM the official image and adds a tiny stunnel TLS bridge: the engine's
+  plain HTTP hits stunnel on :8000, stunnel wraps it in TLS to Crafty on
+  127.0.0.1:8443. Crafty's redirects are relative and its cookies are secured by
+  its own TLS socket, so the account's public HTTPS reaches the login page
+  cleanly. That is configuration around the untouched upstream image, not a repair
+  of it. A compose strategy cannot do this from a source recipe (compose_path is
+  never filled without probe data, so DeployabilityCheck fails "compose file is
+  missing"); the dockerfile strategy has no such gap.
+
+  Admin credential. On a fresh install Crafty generates a strong random admin
+  password (app/classes/helpers create_pass, 64-char mixed) and writes it to
+  app/config/default-creds.txt (0600). The baked default.json ships username
+  admin / password "crafty", but that is 6 chars and Crafty's minimum is 8, so it
+  is rejected (main_models default_settings) and the random password is what the
+  admin row and default-creds.txt both hold - the default is never left at a
+  well-known value. Because the config dir is the persistent bind mount, that file
+  lands directly in the owner's ~/.panelalpha/crafty store (0600); the entrypoint
+  also drops a clearly named copy beside it. The password is never echoed to the
+  deploy log.
+
+  Persistence. Crafty keeps EVERYTHING under its data dirs - app/config (the
+  SQLite db, keys, config.json, generated creds), servers/ (each Minecraft world),
+  backups/, logs/, import/ - and ~/project is wiped every redeploy (engine#173).
+  All five are bind-mounted onto ~/.panelalpha/crafty, the only writable dir the
+  wipe never touches, so the admin login and any created server definition survive
+  a rebuild.
+
+  The recipe states dockerfile/port_hint because a source recipe is applied before
+  the probes run and neither would otherwise be known.
+extends: dockerfile
+port: 8000
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe's dockerfile/port_hint would be null/80 even though the recipe
+  # ships a Dockerfile - and the deployability check would then fail with
+  # "Dockerfile strategy selected but Dockerfile is missing." State what the probe
+  # would have found: the Dockerfile this recipe ships (files/Dockerfile) and the
+  # port the stunnel bridge publishes (8000, plain HTTP in front of Crafty's 8443).
+  dockerfile: Dockerfile
+  port_hint: 8000
+env:
+  # Crafty/Tornado log to stdout; keep them unbuffered so the deploy log and
+  # `docker logs` show boot progress in real time.
+  PYTHONUNBUFFERED: '1'

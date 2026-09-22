@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  grocy is a household ERP -- groceries, stock, chores, recipes -- and it is
+  the rare self-hosted app that needs nothing but PHP: Slim 4 over SQLite in
+  data/grocy.db, no database server, no queue, no cache. Detection reads it
+  correctly as `php` (composer.json, no artisan) and serves the checkout from
+  the shared PHP base image with public/ as the document root, which is right.
+  It still answered 500 on every request, because grocy refuses to start until
+  two things exist that a clone does not contain.
+
+  The first is data/config.php. public/index.php runs PrerequisiteChecker
+  before anything else and it stops on `config.php in data directory not
+  found. Have you copied config-dist.php to the data directory and renamed it
+  to config.php?` -- and app.php would fatal on the same require_once a moment
+  later. Upstream's answer is to copy config-dist.php; this recipe ships
+  files/data/config.php as an almost empty file instead, because app.php loads
+  config-dist.php immediately afterwards for every setting the account's own
+  file does not define. A copy would freeze today's defaults into the
+  account's data directory where no future grocy version could reach them.
+
+  The second is public/packages. grocy's stylesheets and JavaScript are yarn
+  dependencies -- .yarnrc pins --modules-folder to public/packages, and
+  views/layout/default.blade.php loads bootstrap, jquery, datatables and
+  fontawesome from exactly there -- so upstream's whole install is `composer
+  install` then `yarn install` (.devtools/install_dependencies.bat). The
+  engine runs Composer for every PHP deploy, but it compiles a PHP project's
+  frontend only when package.json declares a `build` script
+  (HostCompile::runForPhp), and grocy's package.json declares no scripts at
+  all. Nothing ever ran yarn, so even with config.php in place the site would
+  have served an unstyled, scriptless page. hooks/prepare.sh gives package.json
+  a build script, which is what switches that pass on; `yarn install` is the
+  entire build.
+
+  That pass then needs one thing more. @danielfarrell/bootstrap-combobox is a
+  repository, not a registry release -- yarn.lock resolves it to
+  github.com/berrnd/bootstrap-combobox.git#master-fork -- so yarn 1 shells out
+  to git, and the host compile runs a stock node:*-bookworm-slim image that has
+  none: `error Couldn't find the binary git`, a failed deploy after a
+  successful composer install. NodeRuntime::needsGitBinary() swaps in the full
+  bookworm image when it sees a literal git invocation among package.json's
+  scripts, so the prepare hook writes a second, never-executed script whose
+  only job is to be read. It looks at scripts and at a list of build plugins,
+  never at dependency URLs; if it learns to, that script can go.
+
+  No secret is generated here and none is needed: grocy has no SECRET_KEY, no
+  APP_KEY and no external service. BASE_URL is deliberately left at its `/`
+  default -- UrlManager then builds every link from the request's own Host and
+  X-Forwarded-Proto, so one checkout serves correctly on the account's domain
+  and on AppHealth's loopback probe without the recipe having to know either.
+
+  What the recipe cannot fix is grocy's first user. migrations/0027.php
+  creates `admin` with the password `admin`, migrations are the only way to
+  get a user, and grocy ships no CLI to change one -- so the account is open
+  to anyone who has read the repository until an operator logs in and changes
+  it. Do that first. See the README.
+
+  The schema is built by the first HTTP request rather than at boot
+  (SystemController::Root runs DatabaseMigrationService over 258 migrations),
+  so overrides/docker-compose.override.yml adds a healthcheck and a no-op
+  `ready` service gated on it: `docker compose up -d` then returns only once
+  grocy has migrated and answered, instead of handing the health probe a
+  request that is still creating tables.
+
+  The healthcheck is three requests because one is a trap. The first request
+  after any deploy does not reach the root route at all -- app.php sees the
+  version hash change, empties data/viewcache and answers 302 -- so a
+  healthcheck satisfied by that 302 passed in two seconds, the gate opened, and
+  AppHealth's probe landed in the middle of the migration the *next* request
+  had just started: a single HTTP 500 from a half-built database on a site that
+  answered 302 a second later and served its login page to the public domain.
+  So the check absorbs that boot request, makes the migrating one, and finally
+  asks for /login -- a page that only renders once the schema exists.
+extends: php
+# What PhpDocroot would have worked out anyway -- public/index.php is grocy's
+# front controller and public/.htaccess its rewrite rule -- said out loud
+# because the probe order (`public web public_html webroot`) is not something
+# a recipe should be relying on silently.
+docroot: public

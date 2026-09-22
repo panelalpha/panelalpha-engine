@@ -1,0 +1,85 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Cannery is a self-hosted firearm/ammunition inventory tracker: an
+  Elixir/Phoenix (LiveView) app backed by PostgreSQL, delivered as one official
+  image. This recipe is the compose-REPLACE pattern (calcom/n8n/Typebot): no
+  platform block is declared, so detection runs via fromWalk and engine#221
+  does not bite; ComposePlaceholders rewrites the one *_URL value below to the
+  account's public https address.
+
+  IMAGE, MATCHES HEAD. The tracker Repository URL resolves to the repo's
+  default branch `dev` (HEAD 6281bdc7, 2026-08-30). Upstream publishes an
+  official prebuilt image and the recipe pulls it rather than building the
+  clone. It pins `shibaobun/cannery:dev`, which Docker Hub rebuilt 2026-08-30
+  21:11 -- ~20 minutes after that HEAD commit and alongside the two-factor
+  migration (20260830063212) on the same branch -- so the image matches the
+  source the engine clones. `latest` (0.9.20, 2026-03-18) predates the CLOAK_KEY
+  requirement and two-factor entirely and would not match this runtime.exs. The
+  tag is overridable with CANNERY_IMAGE.
+
+  WHAT THE RECIPE SUPPLIES. Cannery's own docker-compose.yml is an operator
+  template with the secrets commented out (HOST, SECRET_KEY_BASE, CLOAK_KEY) and
+  a postgres:17 sidecar bind-mounted to ./cannery/data. Deployed verbatim it
+  cannot start: config/runtime.exs raises without HOST, SECRET_KEY_BASE and
+  CLOAK_KEY. This override replaces it with a working stack: a postgres:16-alpine
+  sidecar on a NAMED volume (survives project_rebuild and storage reclaim; only
+  account deletion / failed-deploy rollback wipe it), the official app image,
+  and a `ready` gate so `docker compose up -d` returns only once the site
+  actually answers on :4000. Migrations are not a separate step: prod
+  runtime.exs sets automigrate:true and Cannery.Repo.Migrator runs them in the
+  app's supervision tree on boot, gated behind the db healthcheck.
+
+  SECRETS, PERSISTED ONCE. hooks/prepare.sh generates and stores SECRET_KEY_BASE
+  (64 bytes), CLOAK_KEY (exactly 32 random bytes, base64 -- rotating it makes
+  existing 2FA authenticator pairings unreadable) and the database password
+  under ~/.panelalpha/cannery/ (0600 in 0700), the only writable place a deploy
+  does not delete. A rebuild reuses them: a new SECRET_KEY_BASE logs everyone
+  out, a new CLOAK_KEY breaks stored 2FA secrets, a new DB password locks the
+  app out of the pgdata volume that still holds the old one. HOST cannot be
+  baked in -- it is the account domain, unknown until deploy -- so the app
+  entrypoint derives it from PA_PUBLIC_URL (rewritten by the engine to the
+  account's public https URL) by stripping the scheme, because Phoenix's HOST
+  is a bare hostname, not a URL.
+
+  DATA IS RELATIONAL, NO FILESYSTEM UPLOADS. Cannery stores everything --
+  containers, ammo types, packs, shot records, tags -- in Postgres; it has no
+  waffle/arc image uploads and writes no user files to disk, so the Postgres
+  named volume is the whole persistence surface. No bind mount is needed.
+
+  FIRST RUN IS SELF-REGISTRATION, NOT A SEEDED ADMIN. Cannery makes the first
+  registered user an admin (accounts.ex: "if no registered users, make first
+  user an admin"), and allow_registration? returns true whenever no admin
+  exists even in invite mode, so registration is open exactly until the owner
+  registers and then closes to the public. The recipe therefore seeds no user
+  and defaults REGISTRATION=invite (overridable to `public`): the owner opens
+  the account URL, registers, and becomes admin; further public sign-up is off.
+
+  ONBOARDING NEEDS EMAIL CONFIRMATION -- THE ONE OPERATOR STEP. Cannery
+  (user_auth.ex:36) refuses to log a user in until their email is confirmed,
+  and registration confirms by emailing a one-time link. This is the single
+  thing a recipe cannot do for the owner, and it is not repairable without
+  patching upstream (out of scope). The recipe defaults DISABLE_EMAIL=true, so
+  with no SMTP configured Cannery writes the confirmation link to the app
+  container log instead of sending it -- nothing is half-configured and no
+  mail leaves the box. Two supported paths, documented in credentials.txt:
+  (a) the operator sets DISABLE_EMAIL=false and the SMTP_* vars (SMTP_HOST,
+  SMTP_USERNAME, SMTP_PASSWORD, optional SMTP_PORT/SMTP_SSL) in the project's
+  environment, and the owner receives the confirmation link by email like any
+  user; or (b) for a one-person instance the operator reads the link once from
+  the container log (`docker compose logs cannery | grep users/confirm`) and
+  opens it. After confirming, login and the whole app work; password reset is
+  the same story (needs SMTP to deliver). Inbound mail is not configured and is
+  out of scope. VERIFIED end to end on this engine: deploy, register-as-admin,
+  confirm, log in, create a container and an ammo type, read them back, and
+  survive a rebuild -- all over the real public HTTPS domain.
+
+  ENGINE CAVEAT (NOT A RECIPE FAULT). Cannery's UI is Phoenix LiveView, which
+  needs a WebSocket. Verified: the app upgrades /live/websocket to 101 directly
+  and through the engine's own openresty (178.104.84.45:443 -> 101), so
+  check_origin and HOST are correct; but the shared panelalpha.online
+  (WithoutDNS) tunnel does not carry the upgrade and the socket loops. Reads
+  (login, dead-render pages) work through the tunnel; live create/edit does not,
+  purely through that tunnel. On an account with its own domain pointed straight
+  at the engine, or any non-tunnel address, the LiveView UI works. This is the
+  WebSocket analogue of the engine#170 tunnel-multipart caveat, an engine/tunnel
+  limitation to report, not a recipe or app failure.

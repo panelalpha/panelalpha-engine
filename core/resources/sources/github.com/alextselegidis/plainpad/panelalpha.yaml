@@ -1,0 +1,138 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Plainpad is a self-hosted note-taking application, and the repository is not
+  the application: it is a two-part source tree that a release script turns
+  into one. `server/` is a Laravel 12 JSON API whose front controller is
+  `public/api.php`, `client/` is a Create React App SPA, and `build.sh` is what
+  joins them -- it installs Composer dependencies in a copy of `server/`, runs
+  `npm run build` in `client/`, and copies the bundle over `server/public/`, so
+  the released Plainpad is one directory with `index.html` and `api.php` side by
+  side. Nothing in the checkout is in that shape.
+
+  Detection therefore had nothing to find. The repository root carries no
+  `composer.json` and no `artisan`, so `php.yaml` and the laravel manifest both
+  declined; it carries a `docker-compose.yml`, but that is the maintainer's
+  laptop stack and the compose probe passed on it; what claimed the project in
+  the end was `php-plain.yaml`, whose `php-sources` probe walks two levels down
+  and found `server/server.php`. That is the `php` strategy with the repository
+  root as the application root, and `PhpDocroot::detect()` then looked for an
+  index in `public/`, `web/`, `public_html/`, `webroot/`, the root and `src/`
+  and found none -- because `server/public/` holds `api.php`, not `index.php`,
+  and the SPA that would have supplied `index.html` had not been built. With no
+  `PA_DOCROOT`, `panelalpha-serve.sh` falls back to `/app`, Apache has no
+  DirectoryIndex to serve there, and every request is 403: the
+  `serving-missing_entry` verdict this recipe exists to fix.
+
+  Three keys answer the shape. `app_root: server` makes the Laravel application
+  the thing that is mounted at /app -- which also leaves `.git/`,
+  `docker-compose.yml`, `client/` and `docs/` outside the container entirely
+  rather than one directory above the document root. `docroot: public` names
+  `server/public/`, stated rather than detected because the directory has no
+  index until the frontend build has run and a recipe should not depend on the
+  order of two steps. `database: mysql` gives the account a database on its own
+  MySQL server: Plainpad's `.env.example` asks for MySQL, ships no compose file
+  the engine would take one from, and -- the part that decides it -- every
+  deploy wipes and re-clones ~/project, so a SQLite file under `server/database/`
+  would be destroyed by the next redeploy while the notes in it were the whole
+  point of the application.
+
+  The frontend is the awkward part. A recipe's `stage: build` commands never
+  reach a PHP project: `HostCompile::runPhpBuild()` reads only
+  `install_command` and `build_command`, and those are projected from the
+  *manifest's* build stage, while an app config's commands are applied
+  separately and only for the entrypoint stages. What does run for a PHP
+  project is `HostCompile::runForPhp()`, which looks for a `package.json` with a
+  `build` script at the repository root and runs it in a Node container with
+  ~/project bind-mounted. The repository root has no `package.json`, so
+  `files/package.json` supplies one whose `build` script is
+  `files/panelalpha/build-client.sh` -- `npm install` and `npm run build` in
+  `client/`, then `cp -R client/build/. server/public/`, which is exactly what
+  build.sh does. Two things in it are not optional: `npm install` rather than
+  `npm ci`, because the committed `package-lock.json` is out of sync with
+  `package.json` upstream and `npm ci` stops on `Missing: yaml@2.9.1 from lock
+  file`; and `CI=false` around the build, because the host build exports
+  `CI=true` and react-scripts turns its three eslint warnings into errors when
+  it sees that.
+
+  The rest is security, and there are three separate holes in a stock Plainpad.
+  `server/public/setup.php` is a public installer that guards itself only on
+  `.env` not existing -- whoever reaches it first picks the database and gets
+  the admin account -- so the prepare hook deletes it; the engine installs the
+  application itself and there is nothing for it to do. `POST /api.php/v1` is
+  the unauthenticated endpoint that installer calls, and it runs
+  `migrate:fresh --seed` whenever no `migrations` table exists; the install
+  stage migrates before Apache ever binds, so by the time anything can reach it
+  the table is there and it answers 401. And `UsersSeeder` creates
+  admin@example.org with the password `12345678`, which is printed in the
+  repository's README, so the prepare hook generates one per account into
+  ~/.panelalpha/plainpad-admin (0600) and `panelalpha/install.php` puts it on
+  the account -- only while the stored hash still verifies `12345678`, so a
+  password the operator later chooses is never reset under them. ~/.panelalpha
+  rather than the checkout because the checkout does not survive a redeploy and
+  the MySQL account in it does.
+
+  `install.php` also does the seeding, and that is not a convenience either:
+  `migrate` creates four empty tables, and every row Plainpad needs to run --
+  the admin account and the nine `settings` rows -- lives in DatabaseSeeder,
+  which upstream runs only from that unauthenticated install endpoint. Without
+  it the site serves a login page with no account behind it.
+
+  APP_KEY is the third thing the engine cannot supply here, and it is a
+  consequence of `app_root`. `ProjectEnvironment::apply()` runs
+  `withGeneratedSecrets()` over a `.env.example` at the *repository root* and
+  replaces whatever APP_KEY it names with a real key;
+  `materializeNestedEnvExamples()` copies a nested one verbatim, and Plainpad's
+  is `server/.env.example`, so `server/.env` arrives saying
+  `APP_KEY={KEY}`. The laravel manifest's `key:generate` repairs that on the
+  first deploy and only then -- deliberately, since rotating the key later
+  would throw away every encrypted value -- but every deploy re-clones
+  ~/project, so the *second* deploy gets `{KEY}` again with nothing left to
+  replace it. Measured on a redeploy of this recipe: the application went on
+  serving, because Plainpad's API routes never resolve the encrypter, but it
+  was running on a string that is not a key. So hooks/prepare.sh generates one
+  into ~/.panelalpha/plainpad-app-key (0600) and `panelalpha/install.php`
+  writes it into `.env` in the install *and* upgrade stages, before `optimize`
+  compiles the config cache. One key, from the first boot onwards. Teaching
+  `materializeNestedEnvExamples()` the same two passes the root path takes
+  would retire this half of the recipe.
+
+  `APP_REPOSITORY` is restated in `env:` because `php artisan optimize` runs on
+  every start and caches the config, and a cached config means Laravel never
+  loads `.env` at runtime -- while `AutoUpdateServiceProvider` reads
+  `env('APP_REPOSITORY')` directly, outside any config file. Left in `.env`
+  alone it becomes null after the first `optimize`, and the admin's `GET
+  /api.php/v1` then throws a DownloadException on `file_get_contents('/update.json')`
+  for every request. As a compose environment variable it survives the cache.
+extends: laravel
+# server/ is the Laravel application; client/, docs/ and build.sh are the
+# release machinery around it.
+app_root: server
+# server/public/. Stated rather than left to PhpDocroot's probe, which would
+# find nothing until the frontend build has written index.html into it.
+docroot: public
+# .env.example asks for MySQL, the repository ships no compose file to take one
+# from, and a redeploy re-clones ~/project -- so a database inside the checkout
+# would not survive one.
+database: mysql
+env:
+  # Read by AutoUpdateServiceProvider through env(), not through a config file,
+  # so it has to be a real environment variable to survive `artisan optimize`.
+  # See the description.
+  APP_REPOSITORY: https://cdn.alextselegidis.com/plainpad/updates/stable
+commands:
+  - id: plainpad-install
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Three things the checkout cannot do for itself. Puts this account's
+      APP_KEY into .env, because a nested .env.example is copied with its
+      placeholder intact and `key:generate` only runs on the first deploy.
+      Seeds the admin account and the settings rows on an empty database --
+      `migrate` alone leaves Plainpad with no account to sign in with, because
+      upstream seeds only from its unauthenticated install endpoint. And
+      replaces the published `12345678` admin password with the one the prepare
+      hook generated for this account. All three are guarded, so a redeploy
+      over an existing database changes nothing.
+    run: 'php panelalpha/install.php'
+    timeout: 300

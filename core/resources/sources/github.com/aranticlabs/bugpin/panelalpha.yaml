@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  BugPin (Bun + Hono + SQLite visual bug-reporting tool) on its own official
+  image, replacing the repository's single-service compose with a named-volume
+  stack. All state — the SQLite database, screenshots and attachments — lives
+  under /data on the bugpin_data volume, so it survives project_rebuild. The
+  app self-generates and persists its signing secret in /data/.secret, so no
+  secret is injected. BugPin ships a hardcoded default admin
+  (admin@example.com / changeme123) it seeds on first boot with no env override;
+  a one-shot init service pre-seeds the first admin with a strong password
+  generated once into ~/.panelalpha/bugpin/ before the server runs, so that
+  documented default is never written to the database. There is no public
+  registration — accounts are created only by the admin — so closing the
+  default credential closes the only account-takeover path.

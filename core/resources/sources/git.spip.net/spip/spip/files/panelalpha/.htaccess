@@ -1,0 +1,9 @@
+# The setup tooling is deploy machinery, not site content. Deny it outright.
+# (The root .htaccess also 403s /panelalpha; this is defence in depth for hosts
+# that apply the nearest .htaccess only.)
+<IfModule authz_core_module>
+  Require all denied
+</IfModule>
+<IfModule !authz_core_module>
+  Deny from all
+</IfModule>

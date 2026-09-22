@@ -1,0 +1,72 @@
+services:
+  # The builder is the one service the engine's reverse proxy fronts on the
+  # account's public domain — the editor the owner logs into. It is listed
+  # first and is the only application service the proxy should pick up.
+  typebot-builder:
+    image: baptistearno/typebot-builder:3.19.0
+    restart: always
+    # A Next.js standalone server boots past ~400 MB; the engine's default cap
+    # for an app-role service (384m, V8 sized to ~268 MB) exits it with
+    # "Ineffective mark-compacts near heap limit" before it ever listens. An
+    # override's mem_limit reaches Docker as written.
+    mem_limit: 1g
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      # http://localhost:3000 is rewritten to the account's public https URL by
+      # the engine (ComposePlaceholders: a URL-suffixed key holding a localhost
+      # value on an allow-listed port). NEXTAUTH_URL then matches the domain a
+      # visitor typed; env_file cannot be rewritten this way, so these live here.
+      NEXTAUTH_URL: http://localhost:3000
+      # The viewer's own public origin. On one domain there is none, so it falls
+      # back to the builder domain (published bots will not resolve there) — set
+      # NEXT_PUBLIC_VIEWER_URL to a second public hostname to publish for real.
+      NEXT_PUBLIC_VIEWER_URL: http://localhost:3000
+      NODE_OPTIONS: --no-node-snapshot
+    depends_on:
+      typebot-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const n=require('net');const s=n.connect(3000,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),4000)\""]
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 120s
+
+  # The public bot runtime. Not fronted by the engine's proxy on a single-domain
+  # account; published to :3001 so a second public hostname can be pointed at it.
+  typebot-viewer:
+    image: baptistearno/typebot-viewer:3.19.0
+    restart: always
+    mem_limit: 768m
+    ports:
+      - "3001:3000"
+    env_file: .env
+    environment:
+      NEXTAUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_VIEWER_URL: http://localhost:3000
+      NODE_OPTIONS: --no-node-snapshot
+    depends_on:
+      typebot-db:
+        condition: service_healthy
+
+  typebot-db:
+    image: postgres:16
+    restart: always
+    mem_limit: 512m
+    environment:
+      - POSTGRES_DB=typebot
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      # Bind to the rebuild-surviving dir, not a named volume (named volumes are
+      # recreated on a rebuild; ~/.panelalpha is not). PGDATA_DIR is written into
+      # .env by the prepare hook.
+      - ${PGDATA_DIR}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d typebot"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s

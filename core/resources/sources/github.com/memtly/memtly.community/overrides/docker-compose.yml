@@ -1,0 +1,71 @@
+# Full replacement: run Memtly from its official Docker Hub image. No sidecar --
+# storage is SQLite (the image default), and the app runs its own EF Core
+# migrations on start. Secrets are interpolated from ~/project/.env, written by
+# hooks/prepare.sh from the values persisted under ~/.panelalpha/memtly/.
+#
+# Building the checkout was rejected: the repository Dockerfile is a full
+# multi-stage `dotnet publish` that installs Node 22 and compiles the app plus
+# its Memtly.Core git submodule from source -- minutes and well over the memory
+# budget, per account, to reach the image already published at memtly/memtly.
+services:
+  app:
+    image: memtly/memtly:latest
+    restart: unless-stopped
+    # Kestrel binds :5000 (hard-coded UseUrls in Program.cs). The published host
+    # port must be explicit for the engine to see it (engine#234); 8080 is a
+    # preferred proxy port and the engine forwards to it.
+    ports:
+      - "8080:5000"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      TITLE: Memtly
+      # Rotate the shipped default admin (admin@example.com / "admin"). The
+      # uppercase env names are Memtly's documented config interface (verified:
+      # TITLE above changes the rendered page title, so these bind too).
+      ACCOUNT_ADMIN_EMAIL: admin@example.com
+      ACCOUNT_ADMIN_PASSWORD: ${MEMTLY_ADMIN_PASSWORD}
+      # Replace the literal "ChangeMe" the image ships for gallery-secret
+      # encryption. Generated once and persisted, so data encrypted on the
+      # config volume stays decryptable across a redeploy.
+      ENCRYPTION_KEY: ${MEMTLY_ENCRYPTION_KEY}
+      ENCRYPTION_SALT: ${MEMTLY_ENCRYPTION_SALT}
+      # Ask for self-registration off. It defaults on but needs email validation
+      # the engine cannot send (no SMTP), so it is inert either way; registration
+      # only ever creates non-admin users.
+      Memtly__Account__Registration__Enabled: "false"
+    volumes:
+      # Named volumes, not ~/project paths: a redeploy wipes ~/project
+      # (engine#173). /app/config holds BOTH the SQLite database and the ASP.NET
+      # DataProtection keyring the app writes there -- persisting it is what
+      # keeps galleries, accounts and auth cookies alive across a redeploy.
+      - memtly_config:/app/config
+      - memtly_uploads:/app/uploads
+      - memtly_thumbnails:/app/thumbnails
+      - memtly_custom_resources:/app/custom_resources
+    # The image has no curl/wget; bash is present, so probe the port with
+    # /dev/tcp. Nothing serves until Kestrel binds :5000 after migrations.
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/5000' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # Does nothing and exits 0. `docker compose up -d` without --wait returns
+  # before the app answers (engine#90); a depends_on condition still blocks, so
+  # this makes up -d return only once Memtly is really healthy. alpine, so
+  # nothing large is pulled for a container that exits immediately.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  memtly_config: {}
+  memtly_uploads: {}
+  memtly_thumbnails: {}
+  memtly_custom_resources: {}

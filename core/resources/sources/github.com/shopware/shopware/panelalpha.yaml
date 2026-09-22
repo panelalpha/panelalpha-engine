@@ -1,0 +1,141 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Shopware 6.7 Community Edition from the platform monorepo. This repository is
+  `shopware/platform` -- composer.json says `"type": "library"` and it
+  `replace`s shopware/core, shopware/storefront, shopware/administration and
+  shopware/elasticsearch -- so it is the source those packages are cut from
+  rather than the `shopware/production` template a shop is normally started
+  from. It is nonetheless a complete, runnable Shopware: public/index.php,
+  bin/console, config/bundles.php and Kernel are all here, and upstream's own
+  `composer setup` script installs it in place. What it is not is
+  self-installing, and every one of the five things below had to be supplied.
+
+  **Detection read it as `compose`, and that is the serving-error_page.** The
+  root compose.yaml is upstream's workstation: `ghcr.io/shopware/docker-dev:
+  php8.4-node24-caddy` with the checkout bind-mounted at /var/www/html, a
+  MariaDB whose root password is `root`, an Adminer published on 9080, a
+  Mailpit, a Valkey and an OpenSearch. Nothing in it installs Shopware -- that
+  is what the developer types afterwards -- so Caddy served public/index.php
+  against an empty vendor/ and every request was an error page. The
+  compose-usable probe claims it at priority 980 against php's 930, and
+  PlatformSelector::fromSource() resolves this file ahead of the detection
+  walk, which is what pins `php` instead. hooks/prepare.sh still moves
+  compose.yaml out of the project root, because engine defect #166 mines a
+  root compose file's services as runtime sidecars whichever strategy runs --
+  and those sidecars are a root/root database and a public Adminer.
+
+  **No composer.lock, so symfony/runtime never ran** -- engine defect #168.
+  `/composer.lock` is in this repository's .gitignore. The php manifest
+  installs with `--no-plugins` and PhpHostBuild::mayRunPlugins() lifts that
+  only for a project whose lock pins nothing but installer plugins, so with no
+  lock the exemption cannot fire. symfony/runtime -- which composer.json's
+  config.allow-plugins explicitly trusts -- is installed and never activated,
+  and it is the plugin that writes vendor/autoload_runtime.php on
+  POST_AUTOLOAD_DUMP. That file is line 11 of public/index.php and line 18 of
+  bin/console, so without it there is no request and no console command.
+  Measured here: a plain `composer install --no-dev --no-scripts --no-plugins
+  --optimize-autoloader` of this repository leaves no autoload_runtime.php.
+  files/panelalpha/shopware-setup.sh runs one `composer dump-autoload` in the
+  account's own container, which re-fires that event.
+
+  **The frontends are not in the repository and there is no root
+  package.json.** src/Storefront/Resources/.gitignore excludes
+  `app/storefront/dist/*` and `public/`, and src/Administration/Resources/
+  .gitignore excludes its `public/`, so a clone has neither the storefront
+  bundle nor the administration SPA -- and the two npm projects are nested at
+  src/{Storefront,Administration}/Resources/app/*, where
+  HostCompile::runForPhp() does not look: it compiles a PHP project's frontend
+  only when the *root* package.json declares a build script. files/package.json
+  and files/package-lock.json are a dependency-free bridge that makes the
+  engine's own Node stage run, and files/panelalpha/build-assets.sh is what it
+  runs. The storefront half is mandatory, not cosmetic: theme.json resolves
+  its SCSS `vendor` alias to a directory copy-to-vendor.js fills from
+  node_modules/bootstrap, and lists `app/storefront/dist/storefront/
+  storefront.js` under `script`, which ThemeFileResolver::processDirectFile()
+  throws on when it is absent -- so `theme:change` fails outright and the
+  sales channel has no theme at all.
+
+  That Node stage needed two more things the engine could not know. Its image
+  is chosen from `engines.node`, then .nvmrc -- and this repository's .nvmrc
+  says `lts/*`, which resolves to nothing, so the default (Node 20) was used
+  and npm 10.8.2 is below the `npm: >=11.8.0` the storefront's own workspace
+  declares; files/package.json pins `engines.node: "24"`, which is what
+  upstream's own dev image runs. And the storefront's webpack.config.js:61-64
+  *throws* when $PROJECT_ROOT/var/plugins.json is absent, a file only
+  `bin/console bundle:dump` writes -- with no PHP in the Node container and no
+  hook between the composer stage and this one. build-assets.sh writes `{}`,
+  which is not a stub: everything webpack reads that file for is third-party
+  plugin entries (the filter excludes technicalName `storefront`, whose config
+  is inline), and a fresh clone has no plugins.
+
+  **The administration build is bounded by the engine host, not by the
+  account.** `VITE_MODE=production ts-node -T build.ts` is a Rollup pass over
+  the whole administration; measured three times at the same commit, each at
+  the heap ServiceLimits::nodeHeapMbFor() derives from the cgroup: 2000MB ->
+  "Ineffective mark-compacts near heap limit"; 2400MB -> exit 137; 2800MB ->
+  success in 52s with RSS peaking near 2.5GB. The cgroup in question is *not*
+  the account's `--memory-limit`: DindHostBuilder takes it from
+  DindEngine::resolveBuildMemory(), i.e. DEPLOY_BUILD_MEMORY or
+  ServiceLimits::hostBuildMemoryMb() = max(2048, min(8192, hostRAM/3)). On the
+  15GB host this was proven on that is 5202MB and the build runs; on an engine
+  under ~8GB it is at or near the 2048MB floor and it cannot, whatever the
+  account is sized at. build-assets.sh reads the cgroup and skips the
+  administration below 2700MB deliberately, saying so in the deploy log, rather
+  than spending 51s and 1.2GB of node_modules to arrive at a kill that
+  runContainer() would turn into a failed deploy -- taking a storefront that
+  does work down with it. Skipped, the shop is still a shop: storefront,
+  customer account area and checkout are server-rendered Twig. The storefront's
+  own build is cheap either way: npm ci 37s, 845MB of node_modules, the
+  production build about 6s.
+
+  **Two published credentials had to be closed.** `system:install
+  --basic-setup` is the documented one-shot install and
+  SystemInstallCommand.php:130-137 hard-codes what it creates: `user:create
+  admin --admin --password shopware`. This recipe never passes that flag; it
+  runs user:create itself with a password generated per account into
+  ~/project/.panelalpha-admin-password (0600). And public/index.php:26-35
+  redirects every request to /installer and boots InstallerKernel whenever
+  install.lock is absent -- an installer that asks for a database and then
+  creates an administrator, i.e. first-visitor-wins control of the shop.
+  SystemLocker writes install.lock on a first install, but install.lock is in
+  .gitignore and ~/project is re-cloned on every redeploy, so the setup script
+  re-writes it on the upgrade path too, over a shop that is already live.
+
+  Database: MySQL 8.0.22 or MariaDB 10.11 and up
+  (DatabaseConnectionFactory::checkVersion()); the account's own server is
+  MariaDB 12.2.2. Elasticsearch/OpenSearch is off -- unlike Magento, Shopware
+  only uses it when SHOPWARE_ES_ENABLED says so, and the DAL serves the
+  catalogue from MySQL otherwise.
+extends: php
+# public/index.php is the front controller and public/.htaccess.dist carries
+# the rewrite. PhpDocroot probes `public` first so it would reach the same
+# answer, but the answer decides which files are web-reachable -- with the
+# checkout root served, .env, .env.local with the account's MySQL password,
+# .panelalpha-admin-password, composer.json and .git would all be one request
+# away -- and that is not something to leave to a probe order.
+docroot: public
+# Shopware is MySQL or nothing: DatabaseConnectionInformation::fromEnv() wants
+# a single `mysql://` DATABASE_URL and DatabaseConnectionFactory refuses a
+# server below MySQL 8.0.22 / MariaDB 10.11. The checkout ships no .env and
+# the only DATABASE_URL in the tree is the root/root one in upstream's
+# workstation compose file, which hooks/prepare.sh moves away.
+database: mysql
+commands:
+  - id: shopware-setup
+    stage:
+      - install
+      - upgrade
+    # The first install is the autoloader dump, the base schema, every core
+    # migration, a DAL index, an administrator, a sales channel and a theme
+    # compile. On a shared host that is minutes, not seconds.
+    timeout: 2400
+    description: >-
+      Writes back what Composer's plugins were not allowed to write, restores
+      public/.htaccess, points .env.local at the database the engine
+      provisioned, and then either installs Shopware with a generated
+      administrator password and this account's own URL, or migrates the shop
+      that is already there and re-points its sales channel domain.
+      Idempotent, which is what the upgrade stage replays on every redeploy --
+      including re-writing install.lock, which the re-clone removes and which
+      is the only thing standing between a live shop and an open web installer.
+    run: 'bash panelalpha/shopware-setup.sh'

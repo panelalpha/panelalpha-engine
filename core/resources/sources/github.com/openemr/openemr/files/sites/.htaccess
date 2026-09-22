@@ -1,0 +1,34 @@
+# Installed by PanelAlpha.
+#
+# OpenEMR serves from its own root, so sites/ is inside the document root.
+# It holds:
+#
+#   sqlconf.php          the account's MySQL host, user and password
+#   config.php           per-site settings
+#   documents/           every uploaded patient document, generated PDF,
+#                        EDI batch and remittance OpenEMR ever files
+#   LBF/, letter_templates/, faxcache/
+#
+# The .php files execute rather than disclose themselves, and documents/ is
+# empty on a fresh deploy -- which is exactly why this is easy to miss.
+# Nothing otherwise stops `GET /sites/default/documents/<pid>/<file>` once the
+# practice is in use, and on an electronic health record that is the whole
+# ballgame.
+#
+# Upstream makes the same two cuts from the server config
+# (docker/release/openemr.conf: `<Directory .../sites> AllowOverride None`
+# plus a denied `<Directory .../sites/*/documents>`). A bind-mounted checkout
+# cannot edit the vhost, so it is made here instead -- and made wider, because
+# the deny below covers the whole tree rather than documents/ alone.
+#
+# sites/default/images/.htaccess re-opens the one part of this the application
+# links to over HTTP: interface/globals.php builds practice and login logos as
+# OE_SITE_WEBROOT . "/images/...". A deeper .htaccess's Require directives
+# replace the parent's, which is what makes that work.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order Allow,Deny
+    Deny from all
+</IfModule>

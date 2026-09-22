@@ -1,0 +1,70 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Plausible Analytics is a privacy-friendly web analytics service: an
+  Elixir/Phoenix release serving its dashboard on :8000, with PostgreSQL for
+  users, sites and goals and ClickHouse for the event stream. The repository is
+  the Elixir source and ships no compose file — the stack that runs it lives in
+  a second repository, plausible/community-edition — so detection found the
+  root Dockerfile and built it: 502.8 seconds, zero cache hits, and then it
+  started the image alone with an empty .env.
+
+  That container never serves. config/runtime.exs raises without BASE_URL and
+  again without SECRET_KEY_BASE, and the image's entrypoint `run` is only
+  `bin/plausible start`, with no migration step and no database to migrate.
+  What the engine saw instead was epmd: a BEAM release binds 0.0.0.0:4369 the
+  moment the VM comes up, AppPortAlignment polled for 24 seconds, found a
+  reachable port that was not 8000, and republished the account onto the Erlang
+  port mapper — which answers HTTP with an empty reply. That is the
+  serving-unknown verdict this recipe exists to turn into a served page.
+
+  overrides/docker-compose.yml is plausible/community-edition's compose.yml
+  rewritten for a single hosting account, running the published
+  ghcr.io/plausible/community-edition image rather than building this checkout
+  per account. The tag comes from the checkout all the same:
+  hooks/prepare.sh reads the first released heading in CHANGELOG.md and uses
+  the matching major tag when ghcr.io has it.
+
+  Both databases are required. Plausible has no single-database mode: runtime.exs
+  starts four ClickHouse repos unconditionally and the readiness endpoint runs
+  `SELECT 1` against both engines. Inside a 2.5 GB account that is 768 MB of
+  ClickHouse, 256 MB of PostgreSQL and 1 GB of BEAM — 2112 MB with the readiness
+  service, which fits with room to spare: an idle deploy just after the
+  migrations measured 381 MiB, 89 MiB and 62 MiB. ClickHouse does need tuning to
+  get there. files/clickhouse/ carries upstream's four config drop-ins with the
+  mark cache at 128 MB, an explicit max_server_memory_usage, single-threaded
+  queries and every system log table removed.
+
+  Two of those settings are not economies but conditions of starting at all, and
+  both cost a failed deploy to find. ClickHouse validates
+  number_of_free_entries_in_pool_to_execute_mutation (20) against
+  background_pool_size * background_merges_mutations_concurrency_ratio, so the
+  obvious background_pool_size: 4 aborts with BAD_ARGUMENTS. And
+  BackgroundSchedulePool allocates its 512 threads eagerly, which is more than
+  the 256 pids ServiceHardener gives a service: the server died on "Couldn't get
+  512 threads from global thread pool" until the pool was cut to 32 and the
+  service given a pids_limit of its own.
+
+  The secrets are generated once by the prepare hook into .env — SECRET_KEY_BASE,
+  TOTP_VAULT_KEY (base64 of exactly 32 bytes, rejected at boot in any other
+  shape) and the Postgres password — and never regenerated, because the volumes
+  outlive the checkout. The one value the recipe cannot generate is BASE_URL,
+  which has to be the account's public address: the compose file ships
+  http://localhost, the shape ComposePlaceholders rewrites to the account's
+  https URL before the stack starts.
+
+  The command is spelled out because the image's entrypoint does not migrate:
+  `db createdb && db migrate && run`, exactly as upstream's compose spells it.
+  That is also why one service in the file is a no-op that exits 0 — `docker
+  compose up -d` runs without --wait, so the deploy would otherwise finish while
+  the ClickHouse schema was still being created. `ready` waits on Plausible's
+  own /api/health and nothing else. With the images on the host the whole deploy
+  is 75 seconds, after which / 302s to /register and /api/health reports
+  postgres, clickhouse, sessions and the site cache all ok.
+
+  HTTPS_PORT is deliberately unset: Community Edition starts its endpoint under
+  site_encrypt when it is present, which means certbot and an ACME listener
+  duplicating the certificate the account already has. Registration is left at
+  the CE default (invite_only), which still allows the first account — the site
+  comes up on a registration form that works exactly once. Mail is not
+  configured, so the invitations and email reports that need SMTP do not work
+  until MAILER_ADAPTER and friends are set through the account's env vars.

@@ -1,0 +1,77 @@
+# REPLACE compose. The official prebuilt Ziit image (Nuxt/Nitro on :3000) runs
+# instead of building the clone; a TimescaleDB sidecar on a named volume holds
+# all state. Secrets come from ~/.panelalpha/ziit/ziit.env (generated once by
+# hooks/prepare.sh, reused across redeploys). NUXT_BASE_URL is rewritten from
+# http://localhost to the account's public https URL by ComposePlaceholders.
+services:
+  app:
+    image: ${ZIIT_IMAGE:-ghcr.io/0pandadev/ziit:v1.1.2}
+    restart: unless-stopped
+    ports:
+      # Published so ComposePortScan routes the public domain to 3000; the DB's
+      # 5432 stays internal and is never exposed.
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # NUXT_DATABASE_URL + NUXT_PASETO_KEY + NUXT_ADMIN_KEY: real values, kept out
+    # of the environment block so ComposePlaceholders cannot reshape them.
+    env_file:
+      - ../.panelalpha/ziit/ziit.env
+    environment:
+      # Rewritten to the account's public https URL (ends in _URL, localhost
+      # value). runtimeConfig.baseUrl reads this for OAuth redirect URLs + CORS.
+      NUXT_BASE_URL: http://localhost
+      # Open self-registration is the app's design; set true after registering
+      # the owner to close public sign-up.
+      NUXT_DISABLE_REGISTRATION: "false"
+    healthcheck:
+      # /login is a public page (auth middleware allowlist) and returns 200.
+      # busybox wget ships in the node:22-alpine base image.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/login || exit 1"]
+      interval: 10s
+      timeout: 8s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1024m
+
+  postgres:
+    # Non-HA TimescaleDB: the ha image cannot initdb onto a root-owned named
+    # volume. pg17 matches the major the app's upstream compose targets.
+    image: ${ZIIT_DB_IMAGE:-timescale/timescaledb:2.22.1-pg17}
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, the same value NUXT_DATABASE_URL embeds.
+    env_file:
+      - ../.panelalpha/ziit/db.env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: ziit
+      # A named volume is not always empty (lost+found); postgres refuses to
+      # init into a non-empty dir, so give it a clean subdir.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - ziit-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ziit -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  # Starts nothing, exits 0, waits on the app's healthcheck. The engine runs
+  # `docker compose up -d` with no --wait, so without this gate the deploy is
+  # "done" the moment containers start and the probe lands while Nuxt is still
+  # booting and migrating. depends_on a health condition makes up -d block until
+  # the site actually answers on :3000.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  ziit-pgdata: {}

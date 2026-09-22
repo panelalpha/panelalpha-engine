@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Ech0 is a lightweight self-hosted microblog ("thoughts"/idea-sharing) app: a
+  single Go binary that serves its own web frontend and JSON API on one port
+  (6277), with an embedded SQLite database. Reading the timeline is public by
+  design -- that is the point of a microblog -- while publishing, editing and
+  all admin actions require a logged-in privileged account. Anonymous requests
+  to the public read routes (/api/echo/page, /api/echo/today, ...) return data;
+  anonymous requests to the write routes (POST /api/echo needs the echo:write
+  scope) return 401. There is exactly one privileged identity to protect: the
+  Owner (IsOwner+IsAdmin), created once through the first-run init flow.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. The repository's docker/Dockerfile
+  builds from a cross-compiled Go artifact and the shipped docker/docker-compose
+  .yml pulls sn0wl1n/ech0:latest with a hard-coded JWT_SECRET="Hello Echos" and
+  a bind mount. This recipe runs the official Docker Hub image directly via a
+  compose-replace, pinned to the current stable release v5.7.0 (Hub `latest` at
+  time of writing, published 2026-08-28). Seeding a Hub image also sidesteps
+  engine#229 (image-seed NotFound on a from-registry seed).
+
+  WHY COMPOSE-REPLACE. There is no datastore sidecar to add -- SQLite is
+  embedded -- but the app needs three things bare detection cannot give it: a
+  stable JWT signing secret, a data directory that outlives a redeploy, and a
+  pre-claimed Owner so a random first visitor cannot seize the instance (see
+  OWNER SEED below). config defaults (internal/config/config.go) already write
+  the SQLite file, uploads and logs under data/ relative to the image WORKDIR
+  /app, i.e. /app/data, so a single named volume at /app/data captures the whole
+  state; no path overrides are needed.
+
+  SECRET. getJWTSecret() reads JWT_SECRET from the environment and, when it is
+  empty, generates a RANDOM secret on every boot -- which would silently
+  invalidate every session on each restart/redeploy. hooks/prepare.sh generates
+  a real 64-hex JWT_SECRET once into ~/.panelalpha/ech0/ech0.env (0600 in 0700)
+  -- the only writable, rebuild-surviving place, since ~/project is wiped on
+  every deploy (engine#173) -- and never regenerates it.
+
+  OWNER SEED (the security-critical step). Ech0's first-run Owner is created by
+  the PUBLIC, single-shot endpoint POST /api/init/owner (internal/router/init.go
+  registers it with public(); InitOwner refuses once the site is initialized).
+  If left unclaimed, the first visitor to POST that endpoint becomes Owner with
+  full admin. This recipe claims it at deploy time: hooks/prepare.sh generates a
+  random owner username + 48-hex password once into the same store file, and a
+  one-shot `init-owner` service (curlimages/curl -- the app's busybox wget
+  cannot POST application/json, it forces form-urlencoded and huma 400s) waits
+  for the app to be healthy, checks /api/init/status, and if no Owner exists
+  POSTs /api/init/owner with those creds, then re-reads status to confirm. It is
+  idempotent: on redeploy the Owner already exists (state is on the volume) and
+  the seeder is a no-op. A failed seed exits non-zero and, via the `ready` gate
+  (depends_on service_completed_successfully), fails the whole deploy rather than
+  leaving an unclaimed instance. The generated owner login is written only to
+  ~/.panelalpha/ech0/credentials.txt (0600), never surfaced elsewhere.
+
+  REGISTRATION POSTURE. ECH0_SETTING_ALLOW_REGISTER seeds the system default to
+  false so the public POST /api/register (internal/service/user Register) is
+  closed; the Owner is the only account and is created out-of-band via the init
+  flow. Even were self-registration re-enabled by the Owner, a registrant is
+  created IsAdmin=false/IsOwner=false and cannot publish (echo:write is not
+  granted to unprivileged users), so the exposure is bounded to the Owner plane.
+
+  PUBLIC URL. ECH0_SETTING_SERVER_URL seeds the site's absolute base URL (used
+  for RSS/federation links); it is left as the http://localhost placeholder that
+  ComposePlaceholders rewrites to the account's public https URL (key ends in
+  _URL, localhost value).
+
+  PORT + READY GATE. Only the app publishes a port, 6277, so the port scan takes
+  it as the primary (engine#231/#234). A busybox-wget healthcheck on the public
+  /api/init/status endpoint gates init-owner (depends_on service_healthy), and a
+  no-op `ready` service gates on init-owner completing successfully, so
+  `docker compose up -d` blocks until Ech0 answers and the Owner is seeded and
+  the engine's "deploy finished" is honest (engine#204: up -d returns before the
+  app is up).

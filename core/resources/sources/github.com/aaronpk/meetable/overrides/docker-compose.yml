@@ -1,0 +1,138 @@
+# Full replacement: run Meetable from its official image plus mariadb + redis
+# sidecars. Secrets are interpolated from ~/project/.env, written by the prepare
+# hook from the values persisted under ~/.panelalpha/meetable/. APP_URL is left
+# local on purpose — the platform rewrites it to the public https URL before
+# start (engine#221 avoided).
+x-app-env: &app-env
+  APP_NAME: Meetable
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_KEY: ${APP_KEY}
+  APP_URL: http://localhost
+  DB_CONNECTION: mysql
+  DB_HOST: db
+  DB_PORT: "3306"
+  DB_DATABASE: meetable
+  DB_USERNAME: meetable
+  DB_PASSWORD: ${DB_PASSWORD}
+  DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+  CACHE_DRIVER: redis
+  QUEUE_CONNECTION: redis
+  SESSION_DRIVER: redis
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  AUTH_METHOD: session
+  ALLOW_MANAGE_EVENTS: users
+  ALLOW_MANAGE_SITE: admins
+  FILESYSTEM_DRIVER: local
+
+services:
+  # One-shot: bring the schema up and link storage before app/worker boot, so
+  # nothing serves or works a half-built database. Must exit 0 on a redeploy
+  # too (migrate is idempotent) or the deploy gate fails it.
+  init:
+    image: ghcr.io/aaronpk/meetable:latest
+    environment: *app-env
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        cd /var/www/html
+        php artisan migrate --force
+        php artisan storage:link || true
+        chown -R www-data:www-data storage bootstrap/cache || true
+        echo "meetable init complete"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - meetable
+
+  app:
+    image: ghcr.io/aaronpk/meetable:latest
+    mem_limit: 1g
+    restart: unless-stopped
+    # Default image entrypoint waits for the DB, runs migrate --force and serves
+    # apache on :80.
+    environment: *app-env
+    ports:
+      - "8080:80"
+    volumes:
+      - meetable_storage:/var/www/html/storage/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    networks:
+      - meetable
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:80/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  worker:
+    image: ghcr.io/aaronpk/meetable:latest
+    mem_limit: 512m
+    restart: unless-stopped
+    environment: *app-env
+    command: ["php", "artisan", "queue:work", "--sleep=3", "--tries=3"]
+    volumes:
+      - meetable_storage:/var/www/html/storage/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    networks:
+      - meetable
+
+  db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: meetable
+      MYSQL_USER: meetable
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes:
+      - meetable_db:/var/lib/mysql
+    networks:
+      - meetable
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - meetable_redis:/data
+    networks:
+      - meetable
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+networks:
+  meetable:
+    driver: bridge
+
+volumes:
+  meetable_db: {}
+  meetable_redis: {}
+  meetable_storage: {}

@@ -1,0 +1,71 @@
+# Layers over the compose file the laravel strategy generates. That file is
+# right about everything it says -- the shared PHP base image, ~/project/server
+# bind-mounted at /app, the account's own uid, PA_DOCROOT=/app/public, Apache on
+# 8000, the account's MySQL credentials and its public https URL in APP_URL --
+# and says nothing about when Plainpad is ready, because nothing in a Laravel
+# checkout can.
+#
+# An override rather than a replacement compose file, and here that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# *before* detection runs, so a compose file in the project root would make
+# Plainpad look like a compose project and take the laravel strategy -- with it
+# the app_root, the document root, the Composer pass, the host Node build and
+# the staged entrypoint -- off the table entirely.
+services:
+  app:
+    # Two requests, and the second is the one that proves anything.
+    #
+    # The entrypoint's install stage runs before Apache binds: `key:generate`,
+    # `storage:link`, `migrate`, then panelalpha/install.php, which seeds the
+    # admin account and the nine settings rows and rotates the published
+    # password. The engine runs `docker compose up -d` without --wait and
+    # probes as soon as it returns, which is while all of that is still going:
+    # nothing is listening and the probe reads `Failed to connect to 127.0.0.1
+    # port 8000`.
+    #
+    #   1. GET /                    the SPA's index.html, which the host Node
+    #                               build merged into the document root. A 200
+    #                               says Apache is up and serving the right
+    #                               directory -- and nothing more, because it
+    #                               is a static file.
+    #   2. GET /api.php/v1/notes    no token, so the custom-token guard in
+    #                               AuthServiceProvider queries the `sessions`
+    #                               table and answers 401. That 401 is the
+    #                               proof: it cannot be reached unless the
+    #                               autoloader, APP_KEY, the MySQL credentials
+    #                               and the migration all worked. A half-built
+    #                               database answers 500 here.
+    #
+    # Read-only and idempotent, so a retry replays it harmlessly, and outside
+    # the login throttle, so the check can never lock the operator out. curl is
+    # in the base image. No `$` anywhere in the command: compose interpolates
+    # the healthcheck string before the shell sees it.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null --max-time 20 http://127.0.0.1:8000/ &&
+          curl -sS -o /dev/null --max-time 20 -w '%{http_code}\n'
+          http://127.0.0.1:8000/api.php/v1/notes | grep -qx 401
+      interval: 10s
+      timeout: 30s
+      retries: 24
+      # The install stage on a 2-core host: key:generate, migrate over the
+      # account's MySQL, five migrations, both seeders and `php artisan
+      # optimize`. A failing check inside this window neither counts against
+      # retries nor marks the container unhealthy.
+      start_period: 180s
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once Plainpad has
+  # migrated, seeded and answered, and what the health probe then meets. A clean
+  # exit 0 is not a crash loop as far as AppHealth is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

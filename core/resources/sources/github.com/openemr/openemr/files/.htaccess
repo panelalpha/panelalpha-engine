@@ -1,0 +1,59 @@
+# Installed by PanelAlpha. Access rules only -- no rewrites.
+#
+# This is NOT `.htaccess.example` renamed. That file is the opt-in switch for
+# OpenEMR's experimental front controller and says so in its own header: it
+# only works if every other .htaccess in the tree is deleted at the same time.
+# Half of that migration is worse than neither half, so the checkout keeps
+# apis/.htaccess, oauth2/.htaccess and bin/.htaccess, and the front controller
+# at public/index.php stays unused.
+#
+# The generated vhost sets AllowOverride All for the document root, so this
+# file is read -- and it is the only place a bind-mounted checkout can make
+# these cuts, since nothing here can edit the vhost.
+
+# Three maintenance scripts in the document root that do not authenticate.
+# sql_upgrade.php and acl_upgrade.php both open with
+# `$ignoreAuth = true; // no login required` before including globals.php: on a
+# health-records site, anyone who can reach the domain can run schema
+# migrations. ippf_upgrade.php is the same shape.
+#
+# setup.php is the web installer. It refuses to run once sqlconf.php holds
+# `$config = 1`, which is from the moment panelalpha-install.php finishes -- but
+# between the container starting and that script returning, and on any deploy
+# where the install failed, it is an open door onto an empty EHR: whoever
+# reaches it first becomes the superuser. The install runs from the install
+# stage precisely so that this file never has to be used.
+#
+# RedirectMatch and not <Files>, because the pattern must be anchored to the
+# URL path. A <Files "setup.php"> here would also deny
+# interface/modules/custom_modules/oe-module-faxsms/setup.php, which is a
+# module's own page and has nothing to do with installation.
+#
+# To run the web upgrader after a version bump, comment the line out, do the
+# upgrade, put it back. `php sql_upgrade.php --from=<version>` over SSH does
+# the same thing and leaves nothing open.
+RedirectMatch 404 "^/(setup|sql_upgrade|acl_upgrade|ippf_upgrade)\.php$"
+
+# The experimental front controller, which this deployment does not use and
+# which cannot work as shipped.
+#
+# `public/index.php` requires `bootstrap.php`, which calls
+# `Firehed\Container\AutoDetect::instance('config')` -- and that throws
+# `UnexpectedValueException: Could not detect environment name. Searched
+# envvars: ENVIRONMENT, ENV`. Neither variable is in `.env.example`, nothing in
+# the checkout sets them, and the exception is uncaught, so the request dies as
+# a PHP fatal with an empty body and HTTP 500.
+#
+# **This was the original `serving-error_page` verdict.** With Apache pointed at
+# `/app/public` -- which is where PhpDocroot's probe lands, see
+# overrides/docker-compose.override.yml -- every single request in the account
+# went through this file and got that 500. An empty body is also why the health
+# report's whole `php` group passed while the site was completely dead:
+# no-fatal-error, no-database-error and no-diagnostics-in-output all inspect the
+# response body, and there was nothing in it to match.
+#
+# With the document root corrected the file is no longer the entry point, but it
+# is still inside the document root and still a permanent 500 on a URL anyone can
+# reach. Denied by path so the rest of `public/` -- assets/, images/, certs/,
+# smart-styles/ and the themes webpack builds into it -- keeps serving.
+RedirectMatch 404 "^/public/index\.php$"

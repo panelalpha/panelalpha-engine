@@ -1,0 +1,36 @@
+# Written by PanelAlpha.
+#
+# cb_install/ is the web installer, and it is inside the document root
+# (upload/). Upstream gates it on one file -- upload/files/temp/install.me,
+# which hooks/prepare.sh deletes and which this deployment never creates -- and
+# that gate is enough on its own: with the file absent, cb_install/index.php
+# redirects to the site root (cb_install/functions_install.php:2-11) and
+# cb_install/ajax.php returns without doing anything (ajax.php:11).
+#
+# This file is the second lock, because of what is behind the first one:
+#
+#   ajax.php `create_files` writes upload/includes/config.php -- a PHP file the
+#   application includes on every request -- by substituting $_POST['dbhost'],
+#   ['dbname'], ['dbuser'], ['dbpass'], ['dbport'] and ['dbprefix'] into
+#   cb_install/config.php's single-quoted PHP strings with no escaping of any
+#   kind (ajax.php:183-195). A password containing `' . <expression> . '` is
+#   arbitrary PHP in that file. Unauthenticated, from the network.
+#
+#   ajax.php also opens a mysqli connection to whatever host and port it is
+#   posted and reports the outcome (ajax.php:29-56), which is a connect probe
+#   for anything the container can reach.
+#
+#   index.php's `adminsettings` and `finish` modes set the administrator's
+#   username, password and email from POST (modes/finish.php:2-10).
+#
+# One deleted file between a public URL and that is not a margin worth keeping,
+# and nothing in a deployed ClipBucket ever fetches a URL under cb_install/:
+# the directory's other use is the SQL that AdminTool and Update read off the
+# filesystem. Denying it also stops cb_install/sql/*.sql being served as plain
+# text, which Apache would otherwise happily do with the schema and the whole
+# of the English translation table.
+#
+# An account that genuinely wants upstream's wizard back has to delete this
+# file *and* create upload/files/temp/install.me, which is a deliberate act
+# rather than an accident.
+Require all denied

@@ -1,0 +1,128 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the app -- the shared PHP base image, ~/project bind-mounted at /app,
+# the account's own uid, Apache on 8000, DB_* from the database the engine
+# provisioned -- and wrong about exactly one thing, the document root, which is
+# the first block below. It also says nothing about when OpenEMR is ready,
+# because nothing in a PHP checkout can.
+#
+# An override rather than a replacement compose file, and here that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# *before* detection runs, so a compose file in the project root would make
+# OpenEMR look like a compose project and take the php strategy -- and with it
+# the bind mount, the docroot, the Composer pass and the staged entrypoint --
+# off the table entirely.
+#
+# There is no database service here on purpose. `database: mysql` in
+# panelalpha.yaml gets one on the account's own MySQL server: visible in the
+# panel, openable in phpMyAdmin, inside the account's backup, and costing this
+# 3.7 GB host neither a container nor a volume. OpenEMR's own compose files --
+# docker/development-easy/docker-compose.yml and the seven others under
+# docker/ -- are development stacks that build their own image from
+# docker/release/Dockerfile and are not used by any of this.
+services:
+  app:
+    environment:
+      # OpenEMR serves from its own root, and this is the only way a recipe can
+      # say so. `docroot:` cannot: PlatformManifest::readDocroot() normalises
+      # both '' and '.' to '', and PhpDocroot::environment() reads '' as "not
+      # declared" and runs detect() -- which probes `public web public_html
+      # webroot` before the root and stops at OpenEMR's public/index.php. So
+      # `docroot: .` in panelalpha.yaml is a no-op that reads like a decision,
+      # and the recipe would silently get /app/public anyway. (Measured: with
+      # `docroot: .` set, the generated compose file still said
+      # `PA_DOCROOT: /app/public`.) Leaving PA_DOCROOT unset is no better --
+      # panelalpha-serve.sh's own fallback is `[ -d /app/public ] &&
+      # PA_DOCROOT=/app/public`, the same wrong answer from the other side.
+      #
+      # `public/` is not a document root. It holds assets/, images/, certs/,
+      # smart-styles/ and an *experimental* front controller: .htaccess.example
+      # says "EXAMPLE ONLY -- if you move this file from `.htaccess.example` to
+      # `.htaccess` AND delete the other `.htaccess` files throughout, you'll
+      # use the front controller. This is still an experimental/opt-in
+      # process." Served, /interface/login/login.php and /library/js/... are
+      # Apache 404s, and interface/globals.php's $web_root -- computed by
+      # subtracting DOCUMENT_ROOT from the application directory -- comes out
+      # as "/public" and prefixes every generated URL with it.
+      #
+      # Compose merges `environment` maps and the override wins, and
+      # panelalpha-serve.sh takes a non-empty PA_DOCROOT as given, so this
+      # reaches Apache's DocumentRoot and the vhost's <Directory> block both.
+      # /app, not /app/., because it is used as a literal string in both.
+      #
+      # If PlatformManifest::readDocroot() ever learns to keep '.' as "the
+      # application root" instead of folding it into "absent", this block goes
+      # and `docroot: .` goes back into panelalpha.yaml.
+      PA_DOCROOT: /app
+
+    # The install stage does all of OpenEMR's setup before Apache binds --
+    # sites/default/sqlconf.php, the 700-table schema, the globals, the ACL
+    # tree, the language pack and the first administrator -- which on this host
+    # is about 30 seconds on top of a boot. The engine runs `docker compose up
+    # -d` without --wait and probes as soon as it returns, which is while that
+    # is still going: nothing is listening and the probe reads `Failed to
+    # connect to 127.0.0.1 port 8000`.
+    #
+    #   1. GET /  index.php: reads sites/default/sqlconf.php and redirects.
+    #             Cheap, and true the instant Apache binds -- so it is the
+    #             liveness half, not the readiness half. `-f` accepts the 302
+    #             and there is nothing to follow.
+    #   2. GET /interface/login/login.php  grepped, not trusted for its status
+    #             code, and this is the whole point of the check. Before the
+    #             install, `/` answers 302 to setup.php and setup.php answers
+    #             200: a status check on either would call an *uninstalled*
+    #             EHR healthy and publish the wizard on which the first
+    #             stranger becomes the superuser. The login form's password
+    #             input (templates/login/partials/input/password.html.twig,
+    #             `name="clearPass"`) renders only once globals.php has
+    #             connected with the credentials the installer wrote, read the
+    #             globals table and rendered Twig -- so matching it means the
+    #             schema exists, the config file is right and the view stack
+    #             works.
+    #
+    # Host is `127.0.0.1:8000` for both, as it is for AppHealth's own probe.
+    # OpenEMR accepts it: interface/globals.php takes HTTP_HOST as a candidate
+    # site id, finds no `sites/127.0.0.1:8000` directory and falls back to
+    # `default` before the character check that would 400 on the colon.
+    #
+    # Idempotent, so a retry replays it harmlessly. curl is in the base image.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null --max-time 30 http://127.0.0.1:8000/ &&
+          curl -fsS --max-time 60 http://127.0.0.1:8000/interface/login/login.php
+          | grep -q 'name="clearPass"'
+      interval: 20s
+      timeout: 90s
+      retries: 20
+      # The install, before Apache binds. Measured on mariusz2 (2 cores,
+      # 3.7 GB, --memory-limit=1800): quick_install() returns in about 30s,
+      # of which the dump files -- 6,408 schema statements plus the 23.6 MB
+      # language pack's 237,511 single-row INSERTs, one mysqli_query each --
+      # are roughly 20s. That is much faster than the shape of the code
+      # suggests, because `database-users.shared-hosting.palocal` is one
+      # bridge away rather than a real network hop and the whole load runs in
+      # one transaction with autocommit off.
+      #
+      # 600s is therefore ~20x the measured figure, and it costs nothing: a
+      # check that passes inside the start period marks the container healthy
+      # immediately, and a check that fails inside it neither counts against
+      # retries nor marks the container unhealthy. The margin is for a host
+      # running someone else's webpack build at the same time, which is the
+      # normal state of this one.
+      start_period: 600s
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once OpenEMR has
+  # built its schema, created its administrator and rendered a login form, and
+  # what the health probe then meets. A clean exit 0 is not a crash loop as far
+  # as AppHealth is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

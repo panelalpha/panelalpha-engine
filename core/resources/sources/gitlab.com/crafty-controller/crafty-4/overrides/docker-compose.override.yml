@@ -1,0 +1,21 @@
+# Layers over the compose the dockerfile strategy generates for the `app`
+# service (build = files/Dockerfile: the official Crafty image + stunnel bridge;
+# it already publishes 8000 and loads env_file .env). This adds Crafty's
+# persistent state and a memory ceiling for the JRE-capable image.
+#
+# Crafty keeps EVERYTHING under its data dirs and ~/project is wiped every
+# redeploy (engine#173), so all five live on ~/.panelalpha/crafty, which the
+# wipe never touches. ${CRAFTY_DATA} is interpolated from ~/project/.env, which
+# hooks/prepare.sh writes before the build. config/ holds the SQLite db, keys,
+# config.json and the generated admin creds; servers/ each Minecraft world.
+services:
+  app:
+    volumes:
+      - "${CRAFTY_DATA}/config:/crafty/app/config"
+      - "${CRAFTY_DATA}/servers:/crafty/servers"
+      - "${CRAFTY_DATA}/backups:/crafty/backups"
+      - "${CRAFTY_DATA}/logs:/crafty/logs"
+      - "${CRAFTY_DATA}/import:/crafty/import"
+    # Idle Crafty (panel only, no world running) sits in a few hundred MB; the
+    # ceiling leaves room to start a small test server without starving the host.
+    mem_limit: 2g

@@ -1,0 +1,76 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mattermost is a self-hosted team chat server: a Go binary that serves the
+  REST API, the websocket and the React webapp on :8065, over PostgreSQL. The
+  repository is the Mattermost monorepo — server/ (Go), webapp/ (a 4000-package
+  npm workspace), e2e-tests/, api/, i18n/, tools/ — with no compose file, no
+  Dockerfile and no package.json at its root. Detection found nothing to match,
+  the deploy fell through to the fallback strategy, and the account ended up
+  serving PanelAlpha's placeholder page out of nginx:alpine on :8080: the
+  serving-placeholder verdict, strategy fallback, platform null.
+
+  Building the checkout is not the alternative, and the repository says so
+  itself. Its only production image recipe, server/build/Dockerfile, has a
+  build stage whose entire job is `curl -L $MM_PACKAGE | tar -xvz`, with
+  MM_PACKAGE defaulting to https://latest.mattermost.com/mattermost-enterprise-linux
+  — it downloads a finished release and copies it into a distroless final
+  stage. Nothing in it compiles the tree it lives in. Compiling that tree
+  properly means a Go toolchain, the webapp's npm workspace and `make dist`,
+  minutes of build for a binary that is already published. So
+  overrides/docker-compose.yml runs the published image,
+  mattermost/mattermost-team-edition, which is what upstream's own deployment
+  repository (mattermost/docker) runs.
+
+  The tag is taken from the checkout rather than from a constant, but not
+  naively: server/public/model/version.go lists releases newest-first, and
+  master's first entry is the version being worked towards, which usually has
+  no general release yet. Today it says 12.0.0 and Docker Hub has only
+  12.0.0-rc1 and a release-12 tag pointing at it. hooks/prepare.sh therefore
+  uses release-<major> only when a plain <major>.<minor>.<patch> tag exists for
+  that major, and otherwise falls back to :latest — a released server rather
+  than a release candidate. A master checkout therefore deployed 11.11.0.
+
+  PostgreSQL is not optional and not substitutable: MySQL support was removed
+  in v10, there is no embedded database, and with no MM_SQLSETTINGS_DATASOURCE
+  the server exits on boot. The sidecar is postgres:16-alpine with credentials
+  generated into .env by the prepare hook — 16 rather than the 18-alpine
+  upstream moved to, because 18 relocated PGDATA and the conventional
+  /var/lib/postgresql/data mount stops being the data directory.
+
+  Two things the recipe has to supply that the engine cannot infer, both in
+  files/panelalpha-setup.sh, run by a one-shot service once the server answers.
+
+  The first is the system admin. Mattermost has no installer and no admin
+  environment variables. With zero rows in Users, POST /api/v4/users takes no
+  token and the account it creates is made system_admin — so on a public HTTPS
+  name the instance belongs to whoever opens it first. The recipe makes that
+  request itself, with a password generated per account into
+  ~/project/.panelalpha-admin-password (0600), never a default. Doing so also
+  closes the door: from the second account on, the endpoint is refused, because
+  TeamSettings.EnableOpenServer is false by default.
+
+  The second is SiteURL, which every permalink, invitation, password reset and
+  OAuth redirect is built from and which is not known until the account's
+  domain exists. Its environment variable, MM_SERVICESETTINGS_SITEURL, is not a
+  name ComposePlaceholders recognises — the pattern wants a key ending in _URL
+  and this one ends in SITEURL — and the image is distroless, so no shell
+  wrapper can copy one name to another at boot. Instead the setup service
+  carries PA_PUBLIC_URL: http://localhost, which is exactly the shape the
+  engine rewrites to the account's https URL, and sets SiteURL through PUT
+  /api/v4/config/patch after signing in. Through the API rather than the
+  environment on purpose: a setting supplied by an env var is locked read-only
+  in the System Console.
+
+  One service in the compose file is a no-op that exits 0, for the reason it is
+  in most of these recipes — the engine runs `docker compose up -d` without
+  --wait, so the deploy is "finished" when containers have started rather than
+  when the site answers. Here it also waits for the setup service, so a deploy
+  is not done until Mattermost has answered, an admin exists and has
+  successfully signed in, and SiteURL is set. It runs the curl image rather
+  than Mattermost's own: that image is distroless and has no /bin/sh to exit
+  from.
+
+  Mail is left unconfigured. The admin signs in, teams and channels work, but
+  invitations, password resets and notification emails need an SMTP server the
+  engine does not provide; set MM_EMAILSETTINGS_SMTPSERVER and its companions
+  through the account's env vars, or from the System Console.

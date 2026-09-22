@@ -1,0 +1,29 @@
+# Written by PanelAlpha. This is the file LexikJWTAuthenticationBundle's own
+# Symfony Flex recipe writes, and it is missing from a clone for the same
+# reason as everything else in this recipe: the php manifest installs with
+# `--no-plugins`, so symfony/flex is never activated and no recipe is ever
+# applied. thelia/thelia's .gitignore lists `/config/`, so what is in the
+# repository is only what someone chose to `git add -f` -- bundles.php,
+# api_platform.yaml, liip_imagine.yaml, monolog.yaml -- and this file is not
+# among them.
+#
+# Nothing else supplies it. TheliaKernel::prependExtensionConfig() writes the
+# framework, security and api_platform configuration in PHP, and it says
+# nothing about lexik_jwt_authentication, so the bundle received no
+# configuration at all and LexikJWTAuthenticationExtension::load() threw on its
+# own guard -- `You must either configure a "public_key" or a "secret_key"` --
+# while bin/install was compiling the container. Every deploy stopped there.
+#
+# The values are the repository's own: .env already ships JWT_SECRET_KEY,
+# JWT_PUBLIC_KEY and JWT_PASSPHRASE, with the two paths written as
+# `%kernel.project_dir%/config/jwt/*.pem`, which is what `resolve:` expands.
+# bin/install generates the key pair into those paths with
+# `lexik:jwt:generate-keypair` before it boots the kernel that needs them.
+#
+# Lazy env placeholders, not literals, so the extension's emptiness check sees
+# a value at compile time and the real path is read at runtime.
+lexik_jwt_authentication:
+    secret_key: '%env(resolve:JWT_SECRET_KEY)%'
+    public_key: '%env(resolve:JWT_PUBLIC_KEY)%'
+    pass_phrase: '%env(JWT_PASSPHRASE)%'
+    token_ttl: '%env(int:JWT_TOKEN_TTL)%'

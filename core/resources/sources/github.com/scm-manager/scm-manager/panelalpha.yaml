@@ -1,0 +1,66 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SCM-Manager is a self-hosted web application for hosting and managing Git,
+  Mercurial and Subversion repositories over HTTP. It is a Java (Jetty) server
+  and is fully self-contained: an embedded H2 database and a single data
+  directory, no external database, no Redis. Upstream publishes an official
+  image, scmmanager/scm-manager (Docker Hub, by Cloudogu), so the recipe runs
+  that image instead of building the Gradle/Java project from source (which is
+  heavy). No Java build runs here. The image serves on :8080 and keeps ALL
+  state - the H2 database, every hosted repository, the config and installed
+  plugins - under /var/lib/scm, running as uid 1000 in group 0.
+
+  Why a Dockerfile at all. Two things must be configured for the app to work
+  behind the engine's reverse proxy, and both live in its config file
+  (/etc/scm/config.yml, the only file on the server's config classpath):
+  contextPath, which upstream ships as /scm so the bare public domain would 404,
+  is set to / so the app serves at the account's root; and forwardHeadersEnabled,
+  which upstream ships false, is set to true so the app honours the
+  X-Forwarded-Proto/Host the engine's nginx sends (NginxProxy.php) and builds its
+  links and redirects against the account's public HTTPS domain. The recipe ships
+  a Dockerfile that starts FROM the pinned official image and COPYs that one
+  config file plus a small entrypoint wrapper - configuration around the
+  untouched server, no source change and no Java build. (A compose strategy
+  cannot do this from a source recipe: PlatformSelector::fromSource() describes a
+  recipe with no probe data, so a compose strategy's compose_path is never filled
+  and DeployabilityCheck fails "compose file is missing"; the dockerfile strategy
+  resolves extra.dockerfile against the project dir and has no such gap.)
+
+  Security - the first admin. This image (3.x) has no default scmadmin account.
+  On the first boot of an empty data dir it prints a one-time startup token to
+  its own log (AdminAccountStartupAction) and the first caller that presents that
+  token to POST /api/v2/initialization/adminAccount becomes the sole admin; a
+  caller without the token is refused. A random visitor never sees the token
+  (it is only in the container log), so the window is not anonymously
+  exploitable - but the recipe still closes it: the entrypoint wrapper reads the
+  token from the boot log on a fresh volume and creates the admin
+  non-interactively with a strong password the prepare hook generated once into
+  ~/.panelalpha/scm-manager/ (0600, reused across redeploys, surfaced only into
+  the owner's store), then completes the plugin wizard installing nothing so the
+  site opens in normal state. Verified past the probe: the admin logs in over the
+  public HTTPS domain and creates a Git repository that then lists; anonymous
+  cannot create a repository or administer (401); the legacy scmadmin/scmadmin is
+  refused.
+
+  Persistence. /var/lib/scm holds everything and ~/project is wiped every
+  redeploy (engine#173), so it is bind-mounted to ~/.panelalpha/scm-manager/data,
+  which the wipe never touches, and the container runs as the account uid in
+  group 0 (${CONTAINER_UID}:0) so both that mount and the image's group-writable
+  work volume are writable and the 0600 admin-password file is readable. A
+  redeploy rebuilds the image and reuses the data dir: the admin still logs in
+  and a created repository persists.
+
+  The recipe states dockerfile/port_hint because a source recipe is applied
+  before the probes run and neither would otherwise be known.
+extends: dockerfile
+port: 8080
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe's dockerfile/port_hint would be null/80 even though the
+  # recipe ships a Dockerfile - and the deployability check would then fail with
+  # "Dockerfile strategy selected but Dockerfile is missing." State what the
+  # probe would have found: the Dockerfile this recipe ships (files/Dockerfile)
+  # and the port the image EXPOSEs (8080).
+  dockerfile: Dockerfile
+  port_hint: 8080

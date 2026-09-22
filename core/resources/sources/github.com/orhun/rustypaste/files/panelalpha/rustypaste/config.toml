@@ -1,0 +1,51 @@
+# Rustypaste configuration, bind-mounted read-only at /app/config.toml.
+# main.rs REQUIRES a config file (it panics with "config.toml is not found"
+# otherwise), and the FROM-scratch image ships none, so this recipe provides it.
+# It carries NO secret: the auth/delete tokens come from the AUTH_TOKEN /
+# DELETE_TOKEN env vars (config.rs reads them and merges them into the token
+# set), which live in a redeploy-surviving store, not in this file. The public
+# origin (server.url) and bind address are set via SERVER__URL / SERVER__ADDRESS
+# env vars (config::Environment separator "__"), which override the values here.
+[config]
+refresh_rate = "1s"
+
+[server]
+# Overridden to 0.0.0.0:8000 by the SERVER__ADDRESS env var so the app listens
+# on all interfaces inside the container; kept here as a sane file default.
+address = "0.0.0.0:8000"
+# server.url is supplied at deploy time via the SERVER__URL env var (rewritten
+# to the account's public https origin by the engine), so returned paste links
+# use the real domain. Left unset here on purpose.
+max_content_length = "10MB"
+upload_path = "./upload"
+timeout = "30s"
+# Do NOT leak the running version or list the stored files to the public.
+expose_version = false
+expose_list = false
+handle_spaces = "replace"
+
+[landing_page]
+text = """
+rustypaste
+
+Submit files via HTTP POST (authenticated):
+    curl -H "Authorization: <token>" -F 'file=@example.txt' <server>
+This returns the URL of the uploaded file, which is then public to read.
+
+Uploads require the owner's token; retrieval of a paste by its URL is public.
+"""
+content_type = "text/plain; charset=utf-8"
+
+[paste]
+random_url = { type = "petname", words = 2, separator = "-" }
+default_extension = "txt"
+mime_blacklist = [
+  "application/x-dosexec",
+  "application/java-archive",
+  "application/java-vm",
+]
+# No default_expiry: pastes persist until deleted, so they survive on the named
+# volume across redeploys. delete_expired_files only removes pastes that were
+# given an explicit expiry by the uploader.
+duplicate_files = true
+delete_expired_files = { enabled = true, interval = "1h" }

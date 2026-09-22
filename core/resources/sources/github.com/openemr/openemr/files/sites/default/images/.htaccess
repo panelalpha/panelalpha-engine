@@ -1,0 +1,35 @@
+# Installed by PanelAlpha.
+#
+# sites/.htaccess denies the whole site tree. This is the one directory in it
+# the application links to over HTTP: interface/globals.php sets
+# OE_SITE_WEBROOT to `<webroot>/sites/<site_id>` and builds the login logo,
+# the practice logo and the two tiny header logos as
+# OE_SITE_WEBROOT . "/images/..."; library/options.inc.php does the same for
+# image-typed layout fields. Denied, an installed site renders with broken
+# images on the login page and in every printed report.
+#
+# A deeper .htaccess's Require directives replace the parent's rather than
+# adding to them, so this re-opens the directory without touching the deny
+# above it.
+<IfModule mod_authz_core.c>
+    Require all granted
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order Allow,Deny
+    Allow from all
+</IfModule>
+
+# Nothing here is ever executed, and this directory is writable by the
+# application: the practice logo is an upload
+# (interface/super/edit_globals.php files it here). An image directory that
+# also runs PHP is the classic upload-to-shell path, so the interpreter is
+# taken off it.
+<FilesMatch "\.(?:php|phtml|phar|php[0-9]?)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order Allow,Deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

@@ -1,0 +1,131 @@
+# Layers over the compose file DockerfileStrategy generates. That file is
+# right about everything it can see -- `build: .`, port 80 published as the
+# account's app port, `env_file: - .env`, the account's URL in APP_URL and
+# friends, and a named volume for each of the two paths the Dockerfile
+# declares as VOLUME -- and it cannot know two things: where this account's
+# generated secrets are kept, and when Part-DB is ready to answer.
+#
+# An override rather than a replacement compose file, and here that matters:
+# an `overrides/docker-compose.yml` is written into the checkout before
+# detection runs, so a compose file in the project root would make Part-DB
+# look like a compose project and take the Dockerfile strategy -- and with it
+# the image, the named volumes and the published port -- off the table.
+#
+# One service, and no second one, on purpose. This file's own name matches
+# the `docker-compose.*.yml` glob in RuntimeSidecars::exampleComposeFilenames()
+# and is not in COMPOSE_FILE_CANDIDATES, so the engine reads it back as a
+# stack template and mines it for backing services. `app` has no `image:`
+# here, so ServiceRole::isBacking() answers false on it and nothing is
+# extracted; a gate service of the kind bolt/core ships -- an alpine that
+# exits 0 behind `depends_on: service_healthy` -- would have an image, and
+# would be at risk of coming back as a sidecar in the generated compose.
+services:
+  app:
+    # The second env_file is the whole reason this file has one at all. Both
+    # APP_SECRET and INITIAL_ADMIN_PW are generated once per account by
+    # hooks/prepare.sh, so they cannot live in ~/project -- re-cloned every
+    # deploy -- and must not live in .env, which
+    # ProjectEnvironment::apply() copies to a world-readable .env.default
+    # (engine#173) and which the Dockerfile's `COPY .env* ./` bakes into an
+    # image layer.
+    #
+    # `.env` is restated rather than left to be inherited: Compose merges
+    # some sequences across files and replaces others, and naming both is
+    # correct under either rule -- what matters is that this one is last,
+    # because a later env_file wins. Measured on the deployed account:
+    # `printenv APP_SECRET` prints the generated value, not the
+    # a03498528f5a5fc089273ec9ae5b2849 that .env commits.
+    #
+    # The path is relative to the compose project directory, which is
+    # ~/project, so `..` is the account's home. The file always exists by the
+    # time this is read: hooks/prepare.sh runs before the compose file is
+    # written, and a missing env_file is a hard failure for `docker compose`.
+    env_file:
+      - .env
+      - ../.panelalpha/partdb/partdb.env
+
+    # The Dockerfile declares no HEALTHCHECK, so `docker ps` and the panel
+    # have nothing to report and AppHealth has only its own HTTP probe.
+    #
+    # Close the instance to the public, once, on the first boot.
+    #
+    # Part-DB has no installer and no sign-up page, but migration Version1
+    # creates a second row in `users` beside `admin`: `anonymous`, id 1, in
+    # the `readonly` group. That row is what an unauthenticated visitor is
+    # treated as, and on a fresh account it is not read-only enough to leave
+    # on a public domain. Measured on this recipe's own deploy, against
+    # https://<account>/ with no cookie at all:
+    #
+    #   GET  /en/part/1        200 -- every part, its stock and its storage
+    #                              location, to anyone who asks
+    #   GET  /en/statistics    200
+    #   GET  /en/category/1/edit 200
+    #   POST /en/category/new  302 -> /en/category/2/edit -- a row inserted
+    #                              into the database by a stranger, no login,
+    #                              repeatable
+    #
+    # (Editing an existing element and creating a part are both refused, so
+    # this is unauthenticated *insert*, not full write. It is still a public
+    # inventory and an open row-insert endpoint.)
+    #
+    # Dropping the anonymous user's group leaves every one of its permissions
+    # on "inherit" with nothing to inherit from, which resolves to denied: the
+    # site asks for a login and nothing else changes. It is done in the
+    # product's own data rather than in a config file so that an operator who
+    # *wants* a public catalogue can put it back in one place they can see --
+    # Tools -> Users -> anonymous -> group -- and the marker beside the
+    # database stops this from ever undoing their choice.
+    #
+    # Why `command:` and not a `commands:` entry in the manifest: install and
+    # upgrade stage commands are run by the entrypoint the engine generates,
+    # and DockerfileStrategy::apply() generates none -- the image has its own.
+    # The image's ENTRYPOINT ends in `exec "$@"`, and its CMD is
+    # apache2-foreground, so replacing CMD wraps the last step and nothing
+    # else. It runs after partdb-entrypoint.sh has migrated (DB_AUTOMIGRATE),
+    # as root, which is why the console call is sudo'd to www-data -- a
+    # var/cache entry owned by root is what the entrypoint's own warning is
+    # about.
+    #
+    # No `set -e`: a failure here must leave Apache starting anyway. The
+    # marker is only written if the UPDATE succeeded.
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        if [ ! -e /var/www/html/uploads/.panelalpha-anonymous-closed ]; then
+        sudo -E -u www-data php bin/console dbal:run-sql -n -q "UPDATE users SET
+        group_id = NULL WHERE name = 'anonymous' AND group_id IS NOT NULL" &&
+        sudo -u www-data touch
+        /var/www/html/uploads/.panelalpha-anonymous-closed && echo
+        "[panelalpha] anonymous access closed; see ~/.panelalpha/partdb/README.txt";
+        fi; exec /usr/local/bin/apache2-foreground
+
+    # `/en/login` and not `/`, and without `-L`. RedirectController::addLocalePart
+    # builds the locale redirect with Request::getUriForPath(), and the
+    # generated compose sets `HTTPS: 'on'` into a php-fpm pool configured
+    # `clear_env = no` -- so `$_SERVER['HTTPS']` is set, `isSecure()` is true,
+    # and `GET http://127.0.0.1/` answers `302 https://127.0.0.1/en/`. A
+    # following curl then tries port 443, where nothing listens, and exits 7.
+    # Measured: that is exactly what the first version of this file did.
+    #
+    # `/en/login` answers 200 in one request whether or not anonymous access
+    # is open, and a 200 there is worth having: it means the schema exists (an
+    # empty one is the 500 this recipe fixes), Twig compiled and the Encore
+    # manifest resolved. curl is installed in the image's base stage.
+    #
+    # The window is generous. `docker compose up -d` runs without `--wait`
+    # (engine#204), and the entrypoint waits for the database, backs it up and
+    # migrates before Apache binds -- 47 revisions in 626ms on a fresh SQLite
+    # file, about five seconds end to end, but a slower host or a long
+    # migration on an upgrade deserves room. A check that fails inside
+    # start_period neither counts against retries nor marks the container
+    # unhealthy.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null --max-time 20 http://127.0.0.1/en/login
+      interval: 10s
+      timeout: 25s
+      retries: 10
+      start_period: 240s

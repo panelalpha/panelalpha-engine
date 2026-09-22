@@ -1,0 +1,65 @@
+# Compose-replace: the repository ships a from-source docker-compose.yaml, but
+# upstream publishes the same app as donetick/donetick on Docker Hub, so this
+# runs the official image directly rather than building Go + Vite on a small
+# host. Pinned to the current stable release v0.1.79 (Hub `latest` at time of
+# writing). Single service -- Donetick is one Go binary with the frontend
+# embedded and SQLite in-process, no datastore sidecar.
+services:
+  app:
+    image: donetick/donetick:v0.1.79
+    restart: unless-stopped
+    # .env is the platform-merged account env (touched by the prepare hook so
+    # `up` never aborts on a missing file); donetick.env carries the JWT secret
+    # the hook generated once and keeps stable across redeploys. The path is
+    # relative to ~/project, where the engine writes and runs this file.
+    env_file:
+      - .env
+      - ../.panelalpha/donetick/donetick.env
+    environment:
+      # DT_ENV selects /config/selfhosted.yaml (sqlite + port 2021); every value
+      # below overrides that file via viper AutomaticEnv (DT_ + "."->"_").
+      DT_ENV: selfhosted
+      DT_DATABASE_TYPE: sqlite
+      DT_DATABASE_MIGRATION: "true"
+      # SQLite file and uploads on the named volume so they survive a redeploy;
+      # the default path is relative to / and would be lost on every deploy.
+      DT_SQLITE_PATH: /data/donetick.db
+      DT_STORAGE_BASE_PATH: /data/uploads
+      DT_SERVER_PORT: "2021"
+      # Open signup, bounded by per-user/circle isolation; there is no admin
+      # seed, so the owner needs to be able to register. Flip to "true" after
+      # the owner has signed up to close the instance.
+      DT_IS_USER_CREATION_DISABLED: "false"
+      TZ: UTC
+    volumes:
+      - donetick-data:/data
+    # The binary EXPOSEs and listens on 2021; publish it so the port scan takes
+    # it as the primary (engine#231/#234). No other service publishes a port.
+    ports:
+      - "2021:2021"
+    healthcheck:
+      # /health is Donetick's own unauthenticated liveness endpoint (the image's
+      # own HEALTHCHECK hits it). The alpine-based image has busybox wget but no
+      # curl. A 200 means the binary is serving and the SQLite file opened.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2021/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+    mem_limit: 512m
+
+  # Starts nothing, exits 0, waits on the app's healthcheck. `docker compose
+  # up -d` blocks on a depends_on health condition, so this makes `up` return
+  # only once Donetick actually answers rather than the moment the container
+  # starts (engine#204). Reuses the already-pulled image, no extra download.
+  ready:
+    image: donetick/donetick:v0.1.79
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  donetick-data: {}

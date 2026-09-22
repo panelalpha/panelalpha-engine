@@ -1,0 +1,11 @@
+# Persist Galette's config/ (config.inc.php, holding the DB password) and data/
+# (member photos, attachments, exports, logs) across the redeploy that empties
+# ~/project (engine#173). The account home survives, so mount ~/.panelalpha
+# (../.panelalpha relative to this file, which sits in ~/project) into the app
+# container; galette-setup.sh seeds /pa-data and symlinks /app/config + /app/data
+# onto it. The volume list merges into the engine-generated `app` service, whose
+# base mount is ./galette:/app (app_root: galette).
+services:
+  app:
+    volumes:
+      - '../.panelalpha:/pa-data'

@@ -1,0 +1,89 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about everything it knows: the shared PHP base image at 8.3, ~/project bind
+# mounted at /app, the account's own uid, Apache on 8000, the staged
+# entrypoint, PA_DOCROOT=/app/htdocs from the manifest's `docroot:`, and the
+# DB_* variables for the database `database: mysql` provisioned on the
+# account's own MySQL server. What it cannot know is that this application
+# keeps its configuration, its documents and its modules inside the directory
+# the next deploy deletes.
+#
+# An override rather than a replacement compose file, and not as a preference:
+# an `overrides/docker-compose.yml` is written into the checkout before
+# detection runs, so a compose file in the project root would make Dolibarr
+# look like a compose project and take the php strategy — the bind mount, the
+# document root, the account database, the staged install — off the table.
+services:
+  app:
+    # Compose merges `environment` maps across files, so this adds to what the
+    # strategy wrote rather than replacing it.
+    environment:
+      # The one way to give this container a php.ini. The base image loads
+      # none at all — `php --ini` answers "Loaded Configuration File: (none)",
+      # measured on a deployed account — and scans a directory inside the
+      # image that the account uid cannot write to (engine #185). PHP reads
+      # PHP_INI_SCAN_DIR from its own environment at startup whatever the
+      # SAPI, so this reaches the Apache module and the CLI both, and both
+      # need it: the CLI runs Dolibarr's installer on the install stage, the
+      # Apache module serves every page.
+      #
+      # The image's own directory is listed first and explicitly:
+      # PHP_INI_SCAN_DIR *replaces* the compiled-in path rather than adding to
+      # it, and dropping it would unload every docker-php-ext-*.ini — mysqli
+      # among them, which is the only database driver this application has.
+      PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/panelalpha/php
+
+    # The administrator login, by a path that climbs out of the checkout.
+    # ~/.panelalpha survives the clone; ~/project does not (engine #173), and
+    # hooks/prepare.sh writes this file before compose runs. `env_file` rather
+    # than `environment:` because compose then lets the generated file's own
+    # `env_file: .env` and this one sit side by side, and because .env is
+    # copied to .env.default at mode 644 (engine #173) — which is no place for
+    # the password to an ERP.
+    env_file:
+      - ../.panelalpha/dolibarr-app.env
+
+    # The account's data, outside the checkout: conf.php, documents/ (which is
+    # DOL_DATA_ROOT, so every attachment, every generated PDF and
+    # install.lock) and custom/ (external modules).
+    #
+    # A bind mount and not a named volume, deliberately: these are the files an
+    # owner has to be able to copy, and a named volume would hide them behind
+    # the Docker daemon. hooks/prepare.sh creates the source directory first,
+    # because compose would otherwise create it as root and this container runs
+    # as the account uid.
+    volumes:
+      - ../.panelalpha/dolibarr:/data
+
+    # Apache with mod_php, one process per request, and an application whose
+    # peak is TCPDF rendering an invoice or PhpSpreadsheet building an export.
+    # ServiceLimits would cap an app-role service it did not write at 384m,
+    # which is below the 256M php.ini memory_limit a single request may take.
+    # Measured at rest on a deployed account: ~120 MiB.
+    mem_limit: 768m
+
+    # Two requests, because the two things that can be wrong here fail
+    # independently and neither is visible in a status code alone.
+    #
+    #   1. `/` followed to the end must render the login form. Dolibarr's
+    #      front controller answers 200 either way: with the login page when
+    #      it is installed, and — this is the whole point — with the install
+    #      wizard when conf.php is missing, which is what an unconfigured
+    #      deploy serves to the internet. `name="password"` is on the login
+    #      form; the wizard's first page has a language selector and no
+    #      password field. So this distinguishes "installed" from "open", not
+    #      "up" from "down".
+    #
+    #   2. /install/index.php must answer 403. That is the recipe's own
+    #      .htaccess plus upstream's install.lock, and if either has gone
+    #      missing the account is an unclaimed ERP with a public address.
+    #      curl -f is not used for it, because a refusal is the pass.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsSL --max-time 20 http://127.0.0.1:8000/ | grep -q 'name="password"' &&
+          [ "$$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 http://127.0.0.1:8000/install/index.php)" = "403" ]
+      interval: 15s
+      timeout: 30s
+      retries: 10
+      start_period: 60s

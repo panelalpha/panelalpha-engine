@@ -1,0 +1,100 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tiny Tiny RSS is a self-hosted feed reader: flat PHP served from its own
+  repository root, a Dojo front end, PostgreSQL underneath, and an update
+  daemon that does all the fetching. Detection read the checkout correctly --
+  composer.json and no artisan, so the `php` strategy on the shared
+  php:8.2-apache base image with ~/project bind-mounted and `composer install`
+  run on the host. It deployed, it served, and every page was a database
+  error: the `serving-database_error` verdict this recipe exists to fix.
+
+  **Nothing in the checkout says a database is wanted, and that alone is the
+  error.** classes/Config.php's defaults are DB_HOST=`db`, DB_USER=``,
+  DB_NAME=``, DB_PASS=``, and every entry point -- index.php, public.php,
+  backend.php, prefs.php -- reaches Db::pdo() before it renders anything.
+  With no config.php (the repository .gitignore's it and ships only a
+  comment-only config.php-dist), no .env (.gitignore's that too, shipping
+  .env-dist), and no compose file the engine runs, there is nothing for the
+  engine to infer from. The connection is therefore supplied as TTRSS_*
+  environment in overrides/docker-compose.override.yml, which is exactly how
+  upstream's own container is configured: Config reads every setting through
+  `getenv("TTRSS_" . $name)`.
+
+  **The database cannot be the account's own.** `database: mysql` is the
+  manifest key that provisions one on the account's MySQL server -- visible in
+  the panel, openable in phpMyAdmin, inside the account's backup, costing no
+  container -- and PlatformManifest::DATABASES is `['mysql']`, the only value
+  the engine accepts. tt-rss has no MySQL port to point it at: sql/ contains
+  pgsql/ and nothing else, classes/Config.php marks DB_TYPE @deprecated with
+  "default (and only) value: pgsql", and `update.php --gen-search-idx` emits
+  Postgres full-text SQL. So this recipe ships a postgres sidecar in the
+  compose override and pays for it: a second container, and a volume the panel
+  does not manage or back up. That is a real downgrade against an
+  account-provisioned database, and it is not avoidable here.
+
+  **The repository ships a compose file, and the php strategy mines it.**
+  docker-compose.yml at the root -- "simplified compose FOR LOCAL DEVELOPMENT",
+  its own header says -- declares `db`, `app`, `updater` and `web-nginx`
+  against ghcr.io images, with POSTGRES_PASSWORD taken from .env-dist's
+  `TTRSS_DB_PASS=password`. Services in it that are not recognised as the app
+  are kept as runtime sidecars (engine #166), so left in place it contributes a
+  postgres whose password is published in the repository. hooks/prepare.sh
+  moves it, and anything matching docker-compose.*.yml, to
+  ~/.panelalpha/upstream-compose/ before detection can see it.
+
+  **The document root is the repository root**, which is unusual enough to be
+  worth saying: index.php, public.php, backend.php and prefs.php are all at the
+  top and there is no public/, web/ or webroot/, so PhpDocroot's probe falls
+  through to /app. `docroot: .` would be the honest way to write that and is
+  folded away rather than honoured (engine #172), so PA_DOCROOT is set in the
+  compose override instead. The consequence is that cache/ is inside the
+  document root, and cache/ is where tt-rss puts downloaded article media,
+  user uploads and generated exports. Upstream's nginx marks that whole prefix
+  `internal`; the repository ships no .htaccess to carry the same rule onto
+  Apache, so hooks/prepare.sh installs one in cache/ and lock/. The generated
+  vhost already denies dotfiles, .git, docker-compose.y{,a}ml and panelalpha*,
+  which covers .env, .env.default and this recipe's own scripts; cache/ is what
+  it does not know about.
+
+  **There is no installer to leave open, and one credential to rotate.**
+  tt-rss has no /install wizard -- no install/ directory, no route -- and
+  `update.php --update-schema=force-yes` is the whole installation, which is
+  what upstream's own container runs on every start. What it leaves behind is
+  the `admin` account sql/pgsql/schema.sql seeds with the SHA1 of `password`,
+  which tt-rss itself puts a red banner about on every page. files/
+  panelalpha-ttrss-setup.sh replaces it on the install stage, before Apache
+  binds, with a password generated per account into ~/.panelalpha (0600) --
+  guarded by `--user-check-password admin:password`, so a redeploy never
+  overwrites a password the owner has since chosen. SINGLE_USER_MODE is set
+  false explicitly: it would skip authentication entirely and log every visitor
+  in as the administrator. There is no ENABLE_REGISTRATION to close -- this
+  version has no registration at all; include/login_form.php still links to
+  register.php but no such file exists in the tree.
+
+  **Feeds do not update by themselves.** Nothing in the web interface fetches
+  one: Feeds::subscribe_to_feed reads the feed once to resolve its title, and
+  every headline after that comes from `update.php --daemon`, which upstream
+  runs as a container of its own. The php strategy generates one service and a
+  recipe cannot name the image compose gave it, so files/
+  panelalpha-ttrss-updater.sh starts the daemon beside Apache from the start
+  stage, under a restart loop. Without it the account gets a reader that
+  renders, accepts a subscription, and never shows an article.
+extends: php
+commands:
+  - id: ttrss-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Waits for the sidecar, loads sql/pgsql/schema.sql (or replays the
+      migrations between the database's version and Config::SCHEMA_VERSION),
+      and rotates the seeded admin password. Idempotent: the upgrade stage
+      replays it on every redeploy, and a schema already at the current
+      version costs one SELECT.
+    run: 'sh panelalpha-ttrss-setup.sh'
+  - id: ttrss-updater
+    stage: start
+    description: >-
+      Starts update.php --daemon in the background before the entrypoint execs
+      Apache. It is the only thing that fetches a feed.
+    run: 'sh panelalpha-ttrss-updater.sh'

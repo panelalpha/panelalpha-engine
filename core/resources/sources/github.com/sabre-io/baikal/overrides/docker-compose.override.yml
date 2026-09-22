@@ -1,0 +1,124 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about everything it knows: the shared PHP base image at 8.2 (PhpRuntime read
+# `"php": "^8.2"` out of composer.json), ~/project bind-mounted at /app, the
+# account's own uid, Apache on 8000, the staged entrypoint, and
+# PA_DOCROOT=/app/html from the manifest's `docroot:`. What it cannot know is
+# that this application keeps state, and where.
+#
+# An override rather than a replacement compose file, and that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# before detection runs, so a compose file in the project root would make
+# Baikal look like a compose project and take the php strategy -- the bind
+# mount, the host Composer resolve, the staged install command, the document
+# root -- off the table entirely.
+#
+# There is no second service here. Baikal's own installer picks SQLite when
+# pdo_sqlite is available (BaikalAdmin/Controller/Install/Initialize.php:85),
+# pdo_sqlite is in PhpBaseImage::EXTENSIONS, and the account's calendars are
+# then one file it can copy. A `postgres:` or `mysql:` sidecar would cost a
+# second container and a volume the panel does not show or back up; a
+# `database: mysql` key would cost a MySQL wait and gain nothing an account
+# asked for.
+services:
+  app:
+    # Compose merges `environment` maps across files, so this adds to what the
+    # strategy wrote rather than replacing it.
+    environment:
+      # Where the state lives, in upstream's own words.
+      #
+      # Flake\Framework::bootstrap() reads exactly these two variables and only
+      # falls back to config/ and Specific/ inside the repository when they are
+      # unset (Core/Frameworks/Flake/Framework.php:180-195). The fallback is
+      # fatal here: the engine empties ~/project before every clone (engine
+      # #173), so the in-repository default would take config/baikal.yaml and
+      # Specific/db/db.sqlite -- the account's users, calendars and contacts --
+      # with it on every redeploy.
+      #
+      # Trailing slashes are required, not tidy: every use in the application
+      # concatenates a bare filename onto the constant
+      # (PROJECT_PATH_CONFIG . "baikal.yaml"), so without one the path lands on
+      # a sibling file. panelalpha-baikal-setup.php refuses to run if either is
+      # missing its slash.
+      BAIKAL_PATH_CONFIG: /data/config/
+      BAIKAL_PATH_SPECIFIC: /data/Specific/
+
+      # The one way to give this container a php.ini. The base image loads none
+      # at all -- `php --ini` says "Loaded Configuration File: (none)",
+      # measured -- and scans /usr/local/etc/php/conf.d, a directory inside the
+      # image that the account uid cannot write to (engine #185). PHP reads
+      # PHP_INI_SCAN_DIR from its own environment at startup whatever the SAPI,
+      # so naming a second directory here reaches the Apache module and the CLI
+      # both, and both need it: the CLI runs the install stage, the Apache
+      # module serves every CalDAV request.
+      #
+      # The image's own directory is listed first and explicitly:
+      # PHP_INI_SCAN_DIR *replaces* the compiled-in path rather than adding to
+      # it, and dropping it would unload every docker-php-ext-*.ini --
+      # pdo_sqlite among them, which is the database driver.
+      PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/panelalpha/php
+
+    # The admin password, by a path that climbs out of the checkout.
+    # ~/.panelalpha survives the clone; ~/project does not (engine #173), and
+    # hooks/prepare.sh writes this file before compose runs. env_file rather
+    # than `environment:` because nothing else sets this key, so nothing
+    # outranks the file -- and because .env would put a login credential into
+    # .env.default at mode 644 (engine #173).
+    env_file:
+      - ../.panelalpha/baikal-app.env
+
+    # The account's data, outside the checkout.
+    #
+    # A bind mount and not a named volume, deliberately: the whole state of a
+    # Baikal account is config/baikal.yaml plus one SQLite file, and on a bind
+    # mount the owner can see them, copy them and restore them with sftp. A
+    # named volume would hide the same two files behind the Docker daemon.
+    #
+    # hooks/prepare.sh creates the source directory first. Compose would
+    # otherwise create it itself, owned by root and mode 755, and this container
+    # runs as the account uid -- which could then neither write db.sqlite nor
+    # create the -journal file beside it.
+    volumes:
+      - ../.panelalpha/baikal:/data
+
+    # Apache with mod_php, one PHP process per request, and an application
+    # whose peak is sabre/dav holding one calendar's objects in memory for a
+    # REPORT. ServiceLimits would cap an app-role service it did not write at
+    # 384m; measured at rest this container sits under 40 MiB, and 512 leaves
+    # room for concurrent clients inside the 2000 MB this was tested at.
+    mem_limit: 512m
+
+    # Two requests, because the two halves of this application fail
+    # independently and an admin page proves nothing about CalDAV.
+    #
+    #   1. /admin/ grepped, not trusted for its status. It answers 200 with the
+    #      login form; it would also answer 200 with an error page, and
+    #      `type="password"` is on the form and not on the error page.
+    #      Rendering it means vendor/autoload.php resolved, BAIKAL_PATH_CONFIG
+    #      pointed at a real baikal.yaml, and Flake opened the SQLite file --
+    #      admin/index.php is not an install context, so initDbSqlite() runs
+    #      for it.
+    #
+    #   2. OPTIONS /dav.php/ must answer 401. It is the CalDAV entry point and
+    #      the only thing that proves the part of Baikal the admin UI cannot: a
+    #      401 means dav.php built the sabre server and its auth backend asked
+    #      for credentials, where a 500 would mean it died in the bootstrap and
+    #      a 404 would mean PATH_INFO is not reaching it. curl -f is not used
+    #      for this one, because 401 is the pass.
+    #
+    # No `ready` service gating on this. The engine #90 workaround is for a
+    # deploy whose install stage is still loading a schema into a starting
+    # datastore when the probe fires; here the install stage is 20 CREATE
+    # TABLE and CREATE INDEX statements into a local file, measured at well
+    # under a second, and the
+    # probe found the site already answering. Adding a gate service would cost
+    # an image pull and a container for a race that does not exist.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS --max-time 20 http://127.0.0.1:8000/admin/ | grep -q 'type="password"' &&
+          [ "$$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X OPTIONS http://127.0.0.1:8000/dav.php/)" = "401" ]
+      interval: 15s
+      timeout: 30s
+      retries: 10
+      start_period: 60s

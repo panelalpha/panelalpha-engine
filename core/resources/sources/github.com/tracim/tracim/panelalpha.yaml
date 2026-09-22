@@ -1,0 +1,80 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tracim is a shared-workspace and collaboration server: a Python (Pyramid)
+  backend served by uwsgi behind Apache on :80, a React frontend built from an
+  18-package yarn workspace, redis and pushpin for live messages, and either
+  SQLite or PostgreSQL underneath. The repository root is that yarn workspace,
+  which is all detection could see: it read package.json, picked Railpack, and
+  Railpack built the Node half of an application whose server is Python before
+  giving up with "No start command detected". With no start command and no
+  compose file at the root the engine generated a basic compose, started
+  nginx:alpine on :8080 and served its own placeholder page — a 200, and
+  nothing of Tracim.
+
+  Building the checkout is not the alternative, and the repository says so
+  itself: tools_docker/Debian_Uwsgi/Dockerfile's first build stage is a
+  `git clone` of tracim back out of GitHub (ARG REPO/BRANCH/TAG), after which
+  it compiles the yarn workspace and installs the Python backend on Debian.
+  It does not build the tree it sits in, and doing it properly is a
+  multi-hundred-megabyte, many-minute image per account for something already
+  published. So overrides/docker-compose.yml runs the published image,
+  algoo/tracim, which is what upstream's own tools_docker/docker-compose.yml
+  runs.
+
+  The tag is a constant, `latest`, and that is the one thing about this recipe
+  worth arguing with. Upstream's README states that "Docker images for the
+  latest Tracim versions are only available to our paying customers", and
+  Docker Hub bears it out: the newest public release tag on algoo/tracim is
+  2025-04.00, which `latest` points at, while this checkout's CHANGELOG.md is
+  already on 2026.10.00. There is no public tag that matches the tree, so
+  deriving one from the checkout the way the Ghost and Mattermost recipes do
+  would only produce a 404 at `up -d`. The daily-rebuilt `unstable` tag does
+  track develop, and is named what it is.
+
+  SQLite rather than PostgreSQL: DATABASE_TYPE=sqlite is a first-class option
+  in the image's own entrypoint, one team's document store is not what a
+  database server is for, and the memory a Postgres sidecar wants is memory the
+  uwsgi workers want more. WebDAV and CalDAV are both switched off — each is a
+  further uwsgi application holding a full copy of the Python backend, and
+  START_CALDAV=0 is also what keeps the enabled-app list consistent, since the
+  entrypoint only adds `agenda` when caldav is on.
+
+  Two things the recipe has to supply that the engine cannot infer. The first
+  is the public address. TRACIM_WEBSITE__BASE_URL ships as a bare
+  http://localhost, the shape ComposePlaceholders rewrites to the account's
+  https URL, and Tracim reads TRACIM_<SECTION>__<KEY> ahead of its ini file. It
+  is not what makes the page render — checked on a running deploy, every
+  script tag carries that response's CSP nonce and the frontend calls the API
+  on relative paths — it is what every link Tracim puts in an email is built
+  from, and the CSP entry covering the assets the rich-text editor injects at
+  runtime, which have no nonce.
+
+  The second is the administrator. Tracim's first boot always creates the same
+  one — tracim_backend/command/database.py seeds user 1 as
+  admin@admin.admin with the password admin@admin.admin, hard-coded — which on
+  a public HTTPS name is an open door with the key printed in the repository.
+  files/panelalpha-setup.sh, run by a one-shot service once the API answers,
+  replaces it over Tracim's REST API with a password generated per account, and
+  then signs in with the new password to prove it worked. It leaves alone a
+  password an operator has since changed from inside Tracim, and it fails the
+  deploy rather than leave the shipped one in place. The generated value lives
+  in ~/.panelalpha/tracim.env rather than only in ~/project, because
+  ProjectTree::clearContents() empties ~/project before every clone while the
+  volume holding the database does not go with it.
+
+  One more thing the image does not size for a hosting account: four uwsgi
+  workers, each holding its own copy of the Python backend, came to 1.16 GiB of
+  a 1.375 GiB limit at idle. files/panelalpha-uwsgi-web.ini is mounted over
+  /etc/tracim/tracim_web.ini — which common.sh only writes when absent — with
+  two workers of four threads, which measures 691 MiB for the same eight
+  concurrent requests.
+
+  One further service in the compose file is a no-op that exits 0: the engine
+  runs `docker compose up -d` without --wait, so without it the deploy is
+  "finished" when the containers have started rather than when Tracim answers
+  and the admin password has actually been changed.
+
+  Mail is left unconfigured. Notifications, invitations and password resets
+  need an SMTP server the engine does not provide; set
+  TRACIM_EMAIL__NOTIFICATION__SMTP__SERVER and its companions through the
+  account's env vars.

@@ -1,0 +1,119 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Dolibarr is an ERP and CRM: third parties, products, stock, orders,
+  invoices, accounting, roughly sixty modules over one MySQL schema. Detection
+  reads the checkout correctly and gets there fast — there is no `composer.json`
+  at the root, only `composer.json.disabled` with `vendor-dir` pointed at
+  `htdocs/includes`, so `php.yaml`'s `none: [file: composer.json]` holds, the
+  `php-plain` manifest claims it, and nothing resolves a dependency tree
+  because the dependencies are committed. A deploy takes 45 s. Four things
+  still have to be said, and only the first is the document root.
+
+  **The document root is `htdocs/`.** As committed,
+  `PhpDocroot::CANDIDATES` is `['public', 'web', 'public_html', 'webroot']` and
+  `LATE_CANDIDATES` is `['src']` (PhpDocroot.php:25,45). The repository root
+  holds `COPYING`, `ChangeLog`, `dev/`, `doc/`, `htdocs/`, `scripts/`,
+  `test/` and no index file at all, so `detect()` falls through everything,
+  emits no `PA_DOCROOT`, the base image serves `/app`, and Apache answers 403 —
+  which `resources/checks/php/entry-served.yaml` reports as
+  `serving: missing_entry`. `docroot: htdocs` states it; being a plain relative
+  path it survives `PlatformManifest::readDocroot()`, where `.` would not
+  (engine #172).
+
+  **Serving `htdocs/` is also most of what makes this safe to host.** `dev/`
+  (which ships a development compose file and a Dockerfile), `doc/`,
+  `scripts/` (three dozen CLI jobs meant for cron), `test/`,
+  `composer.json.disabled`, `.git/` and the engine's own generated
+  `docker-compose.yml` and `.env` are all *siblings* of the document root and
+  unreachable by construction rather than by a rule.
+
+  **The install wizard is first-visitor-wins, and that is the real finding
+  here.** `htdocs/filefunc.inc.php:222` sends every request to
+  `install/index.php` when `conf/conf.php` is missing, and that wizard takes
+  the database credentials, the data directory and the administrator password
+  from whoever asks first, with no authentication of any kind. Measured
+  without this recipe on a public HTTPS domain: `/` answers `302` to
+  `install/index.php`, which answers `200` with the wizard — and the engine
+  scores that account `deploy-ok`, `serving: ok`, because a redirect to a 200
+  is indistinguishable from a working site. The window is however long it
+  takes the owner to open a browser.
+
+  `files/panelalpha-dolibarr-setup.php` closes it on the install stage, before
+  Apache binds, by driving Dolibarr's own wizard rather than reimplementing
+  it: every install page reads `$argv` when `GETPOST` comes back empty
+  (`step1.php:60-84`, `step2.php:62`, `step5.php:84-153`,
+  `upgrade.php:88-91`), and `install/inc.php:140` carries a `getopt()` block
+  and an `install_usage()` for exactly this. So `step1.php` writes `conf.php`,
+  `step2.php` loads the schema, `step5.php` creates the administrator with a
+  per-account password and writes `install.lock`, and the version-specific
+  migrations stay upstream's. `hooks/prepare.sh` then denies `/install/`
+  outright in an `.htaccess`, because `install/upgrade.php` and
+  `install/upgrade2.php` run schema migrations with no authentication of their
+  own — upstream gates them on an `upgrade.unlock` file instead — and
+  `install/phpinfo.php` is `phpinfo()`.
+
+  **`documents/` is Dolibarr's data directory and its default is inside the
+  checkout.** `install/inc.php:224` defaults `$dolibarr_main_data_root` to
+  `DOL_DOCUMENT_ROOT.'/../documents'`, which here is `/app/documents` — and
+  `ProjectTree::clearContents()` empties `~/project` before every clone
+  (engine #173). Left alone, every attachment, every generated invoice PDF and
+  `install.lock` itself would be deleted on each redeploy. The compose override
+  bind-mounts `~/.panelalpha/dolibarr` at `/data`, and `conf.php`,
+  `documents/` and `custom/` (external modules) all live there. `conf.php`
+  reaches the checkout as a symlink because `htdocs/filefunc.inc.php:125` and
+  `install/inc.php:73` name it as a literal relative path and read no
+  environment variable for it.
+
+  **`database: mysql`, not a sidecar.** Dolibarr speaks `mysqli` and nothing
+  else that is shipped here; `mysqli` is in `PhpBaseImage::EXTENSIONS`. The key
+  gets a database on the account's own MySQL server (`AppDatabase::provision`)
+  with a password that is generated once and kept — which matters more than
+  usual, because Dolibarr writes that password into `conf.php` and a rotated
+  one would bring the site back up unable to reach a database that was working
+  a minute earlier. It is also a database the panel lists, phpMyAdmin opens and
+  the account's backup includes, where a `mariadb:11` sidecar would be a second
+  container holding the company's books where none of those can see them.
+
+  Licence: GPL-3.0-or-later (`COPYING`). No network-service condition and no
+  badgeware clause; hosting for third parties is unambiguously permitted and
+  the application is shipped unmodified. Note that the repository's default
+  branch is `develop`, whose `htdocs/version.inc.php` reads `25.0.0-alpha`: a
+  deploy from the default branch is a pre-release, and an account meant to
+  hold real books should be deployed from a release branch.
+extends: php-plain
+# Dolibarr serves from htdocs/. See the note above: this key is the only thing
+# in the recipe that can say so, and `htdocs` (unlike `.`) survives
+# readDocroot().
+docroot: htdocs
+# A database on the account's own MySQL server. PhpStrategy.php:64-67 also
+# reads this key to skip sidecar mining entirely, which is what keeps the
+# development stack under dev/build/docker out of the account even if it ever
+# moves to the root.
+database: mysql
+commands:
+  # No `id:`, deliberately. A stale detection cache drops every stage command
+  # from a recipe that carries one while the log still reports "Recipe named
+  # by ..." (engine #169); omitting it and extending a shipped manifest is the
+  # mitigation.
+  #
+  # Declaring `commands:` replaces what php-plain.yaml declared, which is
+  # `commands: {}` — there is nothing to lose. Nothing runs on the `build`
+  # stage: it would be inert for a source recipe anyway (engine #171), and
+  # there is no dependency tree to resolve.
+  - stage:
+      - install
+      - upgrade
+    description: >-
+      Finishes Dolibarr's own install wizard from the command line, before
+      Apache binds: writes conf.php through step1.php, loads the schema
+      through step2.php, creates the administrator and install.lock through
+      step5.php, and on a later deploy whose checkout has moved past the
+      database runs upgrade.php, upgrade2.php and step5.php again. Idempotent:
+      each phase is guarded by a question asked of the database or the
+      filesystem, so the upgrade stage over a live account costs three SELECTs
+      and nothing else. Registered on both stages because a first deploy that
+      failed leaves the account `partial`, and `PlatformStage::phaseFor()`
+      sends the next one down the upgrade branch — an install-only command
+      would then never run at all.
+    run: 'php /app/panelalpha-dolibarr-setup.php'
+    timeout: 900

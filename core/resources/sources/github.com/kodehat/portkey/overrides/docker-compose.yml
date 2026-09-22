@@ -1,0 +1,54 @@
+# Replaces the compose the engine would generate for the detected `dockerfile`
+# strategy (which would build the repo's Node+Go multi-stage image). portkey
+# publishes that build as codehat/portkey on Docker Hub, so this runs the
+# published image and the checkout contributes nothing to the container. A
+# Docker Hub image `docker save`s as a real manifest and the engine's DinD
+# seeding delivers it intact — this is not engine#229.
+services:
+  app:
+    # Pinned, not `latest`, so a redeploy is reproducible. amd64 + arm64.
+    image: codehat/portkey:v4.0.0
+    restart: unless-stopped
+    # portkey EXPOSEs 3000; the proxy reads this published port from the compose.
+    ports:
+      - "3000:3000"
+    # The image's default CMD is `--config-path=/opt/` (the baked config). Point
+    # it at the mounted directory instead so the operator's own config.yml —
+    # host 0.0.0.0, no third-party tracker, their links — is what loads. The
+    # ENTRYPOINT (/opt/portkey) is unchanged.
+    command: ["--config-path=/pa"]
+    volumes:
+      # The directory, not the single file: a file bind-mount is bound by inode,
+      # so an editor's new-inode write would leave the container reading the old
+      # config until it was recreated (the engine's .env-core lesson). Read-only
+      # because portkey never writes its config; favicon cache and metrics are
+      # off, so the container writes nothing at all. Resolves against
+      # --project-directory (~/project), so ../ reaches ~/.panelalpha.
+      - ../.panelalpha/portkey:/pa:ro
+    healthcheck:
+      # curl is in the image (added for healthchecks). Going through :3000 means
+      # a config that made portkey refuse to start shows up as a failed deploy
+      # rather than a silent 502.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    # A Go binary serving a static page. It idles in the tens of MB; 128 MB is
+    # generous headroom on a 3.7 GB host.
+    mem_limit: 128m
+
+  # `docker compose up -d` runs without --wait (engine#204) and the deploy is
+  # declared finished the moment it returns (DeploymentWorkflow.php:73), so
+  # without a gate the deploy could end while portkey was still binding. Compose
+  # does block on a depends_on health condition, so this one-shot makes `up -d`
+  # return only once portkey answers. alpine, clean exit 0 (not a crash loop to
+  # AppHealth::isCrashing()).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

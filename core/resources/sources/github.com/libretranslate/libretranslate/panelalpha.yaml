@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LibreTranslate is a self-hosted machine-translation API (Python/Flask +
+  gunicorn) powered by Argos Translate, with a minimal built-in web UI. It keeps
+  NO user data -- translation is stateless compute -- so there is no login or
+  private-data model to protect; the security question is only (a) not leaking
+  files and (b) keeping the public compute endpoint from being an open-abuse
+  relay. This is the "public-by-design API, gate the compute" case, not the
+  auth/private-data case.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes the whole app as a
+  SINGLE container on Docker Hub (libretranslate/libretranslate) and tags every
+  release; this recipe runs that official image with a compose-replace, pinned to
+  the current stable release v1.9.6. Building from source would compile a Python
+  venv, download the Argos model index and install language models into the image
+  for no gain -- the official image already does exactly that at boot. A Docker
+  Hub seed also sidesteps engine#229 (the image-seed NotFound is the GHCR/
+  registry-save case, not Hub).
+
+  WHY COMPOSE-REPLACE. The repo's own docker-compose.yml is an 8-line example with
+  every persistence/security line commented out. A hosted deploy needs four things
+  bare detection cannot give: the large Argos models on a volume that outlives a
+  redeploy (first download is minutes; re-downloading every deploy is unacceptable),
+  the API-key SQLite DB on a volume, the compute endpoint gated so the account is
+  not an open translation relay, and a shared secret store so that gate works
+  across gunicorn workers. The schema's `database:` is MySQL-only and LibreTranslate
+  uses embedded SQLite + on-disk models, so a plain override is the right shape.
+
+  MODELS ON A VOLUME. Argos downloads language packs to /home/libretranslate/.local
+  on first boot; that whole dir is on the lt-models named volume, so a redeploy
+  reuses them (LT_UPDATE_MODELS only re-fetches the tiny package index, never the
+  model blobs, when the same version is already installed -- see init.py). LT_LOAD_
+  ONLY=en,es,fr limits the download to those pairs to keep first boot manageable;
+  an operator can widen it.
+
+  ACCESS CONTROL (gate the compute, keep the UI usable). LibreTranslate's /translate
+  is open by default. This recipe turns on the API-key system (LT_API_KEYS=true)
+  and requires a key for scripted API access (LT_REQUIRE_API_KEY_SECRET=true): the
+  built-in web UI keeps working because its JS sends the rotating obfuscated
+  `secret` the server expects, while a raw client with no key and no secret is
+  rejected (HTTP 400). Because that secret is shared through Redis
+  (LT_SHARED_STORAGE), the gate holds across all four gunicorn workers -- with the
+  default in-memory store each worker would have a different secret and the UI
+  would break. A known managed API key is provisioned once into the key DB (the
+  keyinit one-shot) and recorded under ~/.panelalpha/libretranslate/ so the account
+  owner can call the API programmatically. /languages and /health stay public
+  (the UI needs them); only /translate and /detect are gated. This is casual/
+  scripted-abuse deterrence plus a rate limit, NOT strong auth -- there is no
+  private data behind it.
+
+  ONE PUBLISHED PORT. Only the libretranslate service publishes a port (:5000,
+  Flask/gunicorn), so the engine's port scan takes it as primary (engine#231/#234);
+  Redis and the key-init one-shot publish nothing. The app needs no knowledge of
+  its own public URL (relative UI, path-based API), so there is no *_URL to rewrite.
+  A curl health sidecar plus a `ready` gate make `docker compose up` block until
+  LibreTranslate actually answers after the model download (engine#204), with a long
+  window because that first boot is slow.

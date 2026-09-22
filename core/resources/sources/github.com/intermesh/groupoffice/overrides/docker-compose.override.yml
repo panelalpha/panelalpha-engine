@@ -1,0 +1,135 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the application -- the shared PHP 8.2 base image (resolved from
+# www/composer.json's `config.platform.php`, because `app_root: www` is what
+# tells PhpStrategy::build() where the manifest is), ~/project/www bind-mounted
+# at /app, the account's own uid, Apache on 8000, PA_DOCROOT=/app from the
+# probe finding www/index.php, APP_URL from the account's main domain and DB_*
+# from the database the engine provisioned -- and says nothing about where
+# groupware keeps its attachments or when Group Office is ready, because
+# nothing in a PHP checkout can.
+#
+# An override rather than a replacement compose file, and here that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# *before* detection runs, so a compose file in the project root would make
+# Group Office look like a compose project and take the php strategy -- and
+# with it the bind mount, the app_root, the Composer pass, the host frontend
+# build and the staged entrypoint -- off the table entirely.
+#
+# There is no database service here on purpose. `database: mysql` in
+# panelalpha.yaml gets one on the account's own MySQL server: visible in the
+# panel, openable in phpMyAdmin, inside the account's backup, and costing this
+# 3.7 GB host neither a container nor a volume. It is also what keeps the
+# checkout from being mined for sidecars (#166), and it is why #189 -- the
+# harvested MySQL sidecar handed the literal password `app` for user and root
+# -- is not reachable from here.
+services:
+  app:
+    volumes:
+      # ~/.panelalpha/groupoffice. Everything this account accumulates is here,
+      # and none of it is in the checkout:
+      #
+      #   /data/files   file_storage_path. Every uploaded file, mail
+      #                 attachment, contact photo and blob:
+      #                 Blob::buildPath() is
+      #                 `<file_storage_path>/data/<xx>/<yy>/<id>`
+      #                 (go/core/fs/Blob.php:380-384). Group Office reads the
+      #                 path out of config.php, so unlike ZenTao or Chyrp there
+      #                 is nothing to symlink and nothing to mount *over* a
+      #                 directory inside the document root -- the application
+      #                 simply keeps its data somewhere else and serves it
+      #                 through api/download.php.
+      #   /data/tmp     tmpdir. Sessions, the disk cache and upload staging.
+      #
+      # A redeploy clears and re-clones ~/project (engine#173), so a groupware
+      # site that kept attachments under the document root would lose every one
+      # of them while the database rows pointing at them survived. ~ itself is
+      # root-owned 0755 and nothing can be created in it; ~/.panelalpha is
+      # created with the account. hooks/prepare.sh creates the subdirectory
+      # before this mount is made, so Docker never gets to create it as root.
+      - ../.panelalpha/groupoffice:/data
+
+    environment:
+      # The one way to give this container a php.ini. The base image loads none
+      # at all -- `Loaded Configuration File => (none)`, measured -- and scans
+      # /usr/local/etc/php/conf.d, a directory inside the image the account uid
+      # cannot write to (engine#185). PHP reads PHP_INI_SCAN_DIR from its own
+      # environment at startup whatever the SAPI, so naming a second directory
+      # here reaches the Apache module and the CLI both -- and both need it:
+      # the CLI runs the install, the Apache module takes the attachment.
+      #
+      # The image's own directory is listed first and explicitly:
+      # PHP_INI_SCAN_DIR *replaces* the compiled-in path rather than adding to
+      # it, and dropping it would unload every docker-php-ext-*.ini -- intl,
+      # imagick, gd, soap, pdo_mysql, the lot -- which is a container with no
+      # PHP extensions and no database driver.
+      #
+      # What the file says and why is in
+      # files/www/.panelalpha/php/zz-groupoffice.ini; the short version is that
+      # the compiled-in post_max_size is 8M and upload_max_filesize is 2M, and
+      # Group Office reports both to its client as maxSizeRequest and
+      # maxSizeUpload -- so without this the browser refuses a 3 MB attachment
+      # before it is even sent.
+      PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/.panelalpha/php
+
+    # ServiceLimits caps an app-role service it did not write at 384m, and PHP
+    # with a 256M memory_limit does not fit in that: imagick resizing a photo
+    # and PhpSpreadsheet building an export are the peaks, and prefork runs
+    # several of them at once. In an override file this reaches Docker as
+    # written -- the hardener never sees it -- which is the point.
+    mem_limit: 768m
+
+    # The install stage does all of Group Office's setup before Apache binds:
+    # go/core/install/install.sql, the three groups, the administrator, the
+    # core module, the entity registration and every auto-install community
+    # module. Measured at ~8s on this host; the engine runs `docker compose up
+    # -d` without --wait and probes as soon as it returns, which is while that
+    # is still going -- nothing is listening yet and the probe reads `Failed to
+    # connect to 127.0.0.1 port 8000`.
+    #
+    # The check asks for the thing only a working installation produces, and
+    # `curl -f` alone would not: an uninstalled or broken Group Office answers
+    # `/` with a 302 to install/ (index.php's error handler), and 3xx is not a
+    # failure for -f. Nor is the status code enough with -L, because this
+    # recipe denies install/ and the redirect then lands on a 404 -- which -f
+    # does catch, but only by accident of the deny rule.
+    #
+    # So it greps for `GO.settings`, the JSON blob Extjs3::drawScripts() emits
+    # into the page. That is present only once the schema is there, the
+    # database is reachable, the settings row exists and the client shell could
+    # be built -- and it is emitted from the compiled client bundle path, so it
+    # also fails if the frontend build did not produce a theme.
+    #
+    # Host is 127.0.0.1:8000, as it is for AppHealth's own probe (#190). Group
+    # Office accepts it: it selects no site by Host header, and findConfigFile()
+    # only consults HTTP_HOST for /etc/groupoffice/multi_instance/, which does
+    # not exist here.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS --max-time 25 http://127.0.0.1:8000/ | grep -q 'GO.settings'
+      interval: 5s
+      timeout: 30s
+      retries: 40
+      # Generous for two slow cores running an install; a check that fails
+      # inside this window neither counts against retries nor marks the
+      # container unhealthy.
+      start_period: 300s
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once Group Office
+  # has built its schema, created its administrator and rendered a page, and
+  # what the health probe then meets (engine#90).
+  #
+  # alpine:3 and not a datastore image: anything the sidecar miner recognises
+  # as a backing service here produces `dependency cycle detected: app -> ready
+  # -> app`. A clean exit 0 is not a crash loop as far as AppHealth is
+  # concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

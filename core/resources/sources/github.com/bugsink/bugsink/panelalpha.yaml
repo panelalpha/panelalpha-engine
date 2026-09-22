@@ -1,0 +1,54 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bugsink is a self-hosted, Sentry-compatible error tracker: a Django app
+  (gunicorn) that both serves the human dashboard and accepts events on the
+  Sentry envelope/store endpoints. Two access planes, on purpose. The
+  dashboard, projects and every issue view are behind a login
+  (LoginRequiredMiddleware); anonymous requests 302 to /accounts/login/, so
+  this is the access-controlled case, not public data. The event ingest
+  endpoints (/api/<project>/envelope/, /store/) are meant to accept events
+  authenticated only by a project's DSN key -- that is how SDKs report errors
+  and is not an auth hole. There is no open self-registration: USER_REGISTRATION
+  is pinned to CB_ADMINS here, so only the admin can create further users.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes bugsink/bugsink on
+  Docker Hub and tags every release; this recipe pins the current release 2.6.0.
+  The repo's own Dockerfile is provided "as-is" and the Bugsink team does not use
+  it themselves, so building from source would be repairing something upstream
+  does not ship as its product -- the Hub image is the product. Seeding a Hub
+  image also sidesteps engine#229 (image-seed NotFound). The image is a single
+  container: monofy runs `check --deploy` + migrate + prestart (which seeds the
+  admin), then gunicorn on :8000, alongside the snappea in-process task workers
+  (SNAPPEA is hard-coded on in the docker config), so there is no Redis and no
+  separate worker service.
+
+  WHY COMPOSE-REPLACE. The repository ships docker-compose-sample.yaml as a
+  template a human is meant to edit: a Postgres sidecar, an inline
+  `django-insecure-` SECRET_KEY, CREATE_SUPERUSER left as `email:password`, and
+  a bind volume. This override supplies the real stack instead: the official
+  image on SQLite (Bugsink's first-class default -- DATABASE_PATH=/data/db.sqlite3)
+  kept on a named volume so the whole datastore (users, projects, issues, events)
+  survives redeploy, secrets seeded from ~/.panelalpha, and only the web service
+  publishes a port. Postgres is available upstream via DATABASE_URL but SQLite is
+  the simplest durable choice for a single-tenant account and is what Bugsink is
+  built to run on.
+
+  DOMAIN + HTTPS + CSRF. BASE_URL is given as http://localhost:8000 and the
+  engine rewrites it to the account's public https address before the stack
+  starts (ComposePlaceholders: the key ends in _URL and the value is a localhost
+  URL). Bugsink derives ALLOWED_HOSTS from BASE_URL and constructs its DSNs and
+  self-links from it. BEHIND_HTTPS_PROXY=true turns on
+  SECURE_PROXY_SSL_HEADER (X-Forwarded-Proto) and secure cookies, and Bugsink's
+  CSRF check passes because the engine's app vhost forwards Host as the public
+  domain and X-Forwarded-Proto=https, so request.get_host() matches the browser
+  Origin over the tunnel (verified: admin login and project creation work).
+  DEBUG is forced false.
+
+  SECRETS + ADMIN. The Django SECRET_KEY (rotating it logs everyone out) and a
+  generated admin password (CREATE_SUPERUSER, applied only on first boot when no
+  user exists) are written once into ~/.panelalpha/bugsink/ (0600 in 0700) --
+  the only writable place a redeploy does not delete (engine#173) -- and reused
+  on every rebuild. The shipped `email:password` default never reaches a running
+  container. Onboarding notes, including the admin login, go in credentials.txt.
+  A `ready` gate waits on the app's healthcheck (engine#204/#90) so the deploy
+  turns green only once the site actually answers.

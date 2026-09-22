@@ -1,0 +1,205 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ClipBucket V5 is a self-hosted video-sharing platform -- channels,
+  collections, playlists, photos, an admin area and an ffmpeg transcoding
+  pipeline -- written in flat PHP with MySQL underneath. Detection read the
+  repository correctly (no composer.json at the root, so the `php-plain`
+  platform on the `php` strategy, PHP 8.3) and the deploy finished, and every
+  request answered 403: `serving-missing_entry`, which is what this recipe
+  fixes.
+
+  **The document root is `upload/`, and the probe cannot reach it.**
+  `PhpDocroot::CANDIDATES` is `['public', 'web', 'public_html', 'webroot']`
+  (app/Lib/Deploy/Platform/Runtime/Php/PhpDocroot.php:25), then the repository
+  root, then `src/` as a late candidate (PhpDocroot.php:45). ClipBucket serves
+  from `upload/`, which is on none of those lists, and the repository root
+  holds `README.md`, `LICENSE`, `dockerfile`, `package.json`, `docker/` and
+  `utils/` and no index file -- so `detect()` falls through every candidate and
+  returns `''`, no PA_DOCROOT is emitted, and `panelalpha-serve.sh` falls back
+  to `/app` because there is no `/app/public`. Apache answers 403 and the
+  report says the entry point is missing. `docroot: upload` is the fix and it
+  is enough on its own: `upload` is a plain relative path, so unlike `.` it
+  survives `PlatformManifest::readDocroot()` (PlatformManifest.php:297-318),
+  which folds both `''` and `'.'` to "undeclared" -- engine#172 does not bite
+  here. This is the case the manifest key exists for, and the schema names
+  `upload` in its own example, for OpenCart.
+
+  Serving `upload/` is also what keeps the deploy's own files off the web: the
+  repository root, with `.git/`, `.env.default`, the generated
+  `docker-compose.yml`, `docker-compose.override.yml` and the `panelalpha-*`
+  scripts, is the *parent* of the document root, so none of it is reachable by
+  construction rather than by an `.htaccess` rule. engine#181 does not apply.
+
+  **The web installer ships unlocked, and what is behind it is remote code
+  execution.** `upload/cb_install/` is gated on one thing: the existence of
+  `upload/files/temp/install.me` (cb_install/functions_install.php:2-11,
+  cb_install/ajax.php:11). That file is *committed to the repository* --
+  `upload/files/temp/.gitignore` ignores the whole directory and then
+  whitelists `install.me` by name -- so every clone arrives with the installer
+  open. Behind it, `ajax.php`'s `create_files` step writes
+  `upload/includes/config.php`, which the application includes on every
+  request, by substituting `$_POST['dbhost']`, `['dbname']`, `['dbuser']`,
+  `['dbpass']`, `['dbport']` and `['dbprefix']` into `cb_install/config.php`'s
+  single-quoted PHP strings with no escaping of any kind (ajax.php:183-195). A
+  posted password containing `' . <expression> . '` is arbitrary PHP in that
+  file. The same endpoint will also open a MySQL connection to any host and
+  port it is given and report the result (ajax.php:29-56), and the wizard's
+  `adminsettings`/`finish` path sets the administrator's username, password and
+  email from POST with the password field defaulting to the literal string
+  `admin` (modes/adminsettings.php:31, modes/finish.php:2-10). All of it
+  unauthenticated, all of it live from the first request a fresh deploy
+  answers.
+
+  hooks/prepare.sh deletes the lock file on the account, after the clone and
+  before anything is built, so there is no window at all; and
+  files/upload/cb_install/.htaccess denies the directory outright, because one
+  deleted file between a public URL and unauthenticated RCE is not a margin
+  worth keeping. `install.me.not` is deliberately *not* created as a
+  substitute: read the gate carefully and with `install.me` absent but
+  `install.me.not` present the installer is fully open again
+  (functions_install.php:2-11). The only safe state is neither file.
+
+  **The installation itself therefore runs from the deploy.**
+  files/panelalpha-install.php imports upstream's own SQL in upstream's own
+  order -- exactly the `$files` list `cb_install/ajax.php` walks
+  (ajax.php:68-83) -- writes the version row from `changelog/latest.json` as
+  ajax.php:158-166 does, and then bootstraps ClipBucket the way its own CLI
+  worker `actions/video_convert.php` does and finishes the administrator with
+  upstream's `pass_code()` and `Migration::updateConfig()`, which is what
+  `modes/finish.php` and `modes/adminsettings.php` do. Nothing here
+  reimplements the schema or the password hashing. The password is generated
+  per account into `~/.panelalpha/clipbucket/admin-credentials`, 0600 inside a
+  0700 directory, because account homes are root-owned 0755 and an account
+  cannot create a file directly in its own home.
+
+  **ffmpeg is the question this application turns on, and the platform does not
+  answer it.** The shared PHP base image has no ffmpeg, no ffprobe and no
+  mediainfo, and there is no manifest key that can add one: `requires` names
+  toolchains the engine knows, and PhpBaseImage's `extras` are php extension
+  names handed to install-php-extensions
+  (app/Lib/Deploy/CacheManager/PhpBaseImage.php:254-270), not apt packages --
+  resources/deploy/templates/dockerfile/php-base.stub installs a fixed
+  `git unzip` and nothing a recipe can reach. This is not a degraded feature
+  for ClipBucket: `cb_install/functions_install.php:95-104` lists FFmpeg,
+  FFprobe and MediaInfo as *required software* and `:127-132` makes only MySQL
+  Client and Git skippable, so upstream's own installer will not let a human
+  past the precheck without them; and at runtime an upload becomes a
+  `cb_video` row in status `Processing` and a background
+  `php actions/video_convert.php` whose entire body is FFMpeg::ClipBucket()
+  (ffmpeg.class.php:1345-1369). Without ffmpeg the file is accepted, moved into
+  the conversion queue and never becomes a playable video.
+
+  So hooks/prepare.sh fetches static builds -- johnvansickle's ffmpeg/ffprobe
+  and MediaArea's self-contained MediaInfo CLI -- once per account into
+  `~/.panelalpha/clipbucket/bin`, which the compose override mounts at
+  `/data/bin`, and the install writes those paths into the `ffmpegpath`,
+  `ffprobe_path` and `media_info` config rows that `System::get_binaries()`
+  reads before it ever falls back to `which`
+  (includes/classes/system.class.php:547-620). Once, not per deploy: the
+  directory outlives the re-clone. A failed ffmpeg download fails the deploy,
+  because a video site that cannot accept a video should not be reported as a
+  success. **Putting ffmpeg in the base image is the right fix and it is not a
+  recipe's to make; see README.md.**
+
+  **Where the media lives, and what a redeploy does to it.** The database is
+  the account's own MySQL, provisioned by `database: mysql`, and it survives a
+  redeploy untouched. The files would not: `DirPath::get()`
+  (includes/constants.php:33-47) puts videos, original uploads, thumbnails,
+  posters, photos, avatars, subtitles, the conversion queue and the per-video
+  conversion logs under `upload/files/<name>/`, inside the checkout that every
+  deploy re-clones (engine#173) -- so without this recipe a redeploy would
+  delete every video while the `cb_video` rows naming them survived, leaving a
+  catalogue of files that are no longer there. The compose override bind-mounts
+  `~/.panelalpha/clipbucket/files` over `upload/files`; a mount over the
+  directory rather than a symlink out of it, because ClipBucket serves
+  thumbnails and the video files themselves as static URLs under `files/...`
+  and upstream's own `upload/.htaccess` rules are written against that prefix.
+
+  **And a video is a large file.** The base image loads no php.ini at all
+  (engine#185), so what is in force is PHP's compiled-in
+  `upload_max_filesize = 2M`, `post_max_size = 8M` and
+  `max_execution_time = 30`. ClipBucket V5 does chunk by default
+  (`enable_chunk_upload` = yes at 2 MB in cb_install/sql/configs.sql), so the
+  bytes would get up -- but `FileUpload::getMaxUploadSize()` advertises and
+  enforces `min(post_max_size, upload_max_filesize)`, which caps an account at
+  2 MB the moment an administrator turns chunking off, and
+  `System::check_global_configs()` (includes/classes/system.class.php:661-679)
+  rejects both a `max_execution_time` between 1 and 7199 and an admin
+  `max_upload_size` larger than those limits -- which puts a permanent "your
+  server is misconfigured" banner across every admin page
+  (includes/admin_config.php:45-51). Measured both ways. The compose override
+  sets PHP_INI_SCAN_DIR to the image's own conf.d plus a directory in the
+  checkout, and files/panelalpha/php/zz-clipbucket.ini raises the limits, turns
+  `display_errors` off and sets a timezone. That file is also the only place
+  `expose_php` can be turned off, since it is PHP_INI_SYSTEM and no `.htaccess`
+  can reach it -- verified: no `X-Powered-By` on any response.
+
+  **What is in the document root without a session.** `upload/` is not only the
+  front controller, and an audit here has to compare bodies rather than status
+  codes: upstream's `.htaccess` answers a missing path with `ErrorDocument 404
+  /404`, which renders ClipBucket's own 404 page, and 302-redirects several
+  families of path to `/403`, which renders its own 403 page -- so "200" and
+  "302" both mean less than they look. With bodies compared against those two
+  baselines, three things were reachable on a first deploy and are closed here:
+  `cb_install/` (see above); the whole of `vendor/`, including
+  `composer/installed.json` -- the exact installed version of every dependency
+  -- and library PHP files that Apache *executed* rather than served
+  (`vendor/filp/whoops/src/Whoops/Run.php` answered 500 with an empty body);
+  and `files/logs/<date>/<file_name>.log`, the per-video conversion log, which
+  is enumerable because `file_name` is in the page HTML of every video.
+  `files/upload/vendor/.htaccess` replaces the first with an allow-list of
+  asset extensions -- ClipBucket links jQuery, select2 and font-awesome
+  straight out of `vendor/`, so denying the directory outright would strip the
+  site -- and hooks/prepare.sh writes a deny into the logs directory on the
+  mount and appends a `composer.json`/`package.json` deny to upstream's own
+  `.htaccess`. What upstream already gets right is worth saying too:
+  `includes/`, `changelog/` and `files/temp/` are bounced to `/403`,
+  `admin_area/` redirects to the login, `files/*.php` is bounced before Apache
+  can run it, and directory listings are off.
+
+  Two things upstream does that are worth knowing and are not this recipe's to
+  fix. Passwords are `hash('sha512', $password . $userid . $salt)` with no
+  iterations (includes/functions.php:21-25) -- the salt is at least generated
+  per install, by `configs.sql` -- and the supported deployment is nginx, so
+  `System::is_nginx()` and the admin area's vhost-version banner describe a
+  server this platform does not run. Neither affects whether the application
+  works.
+
+  Licensing: ClipBucket is under the Attribution Assurance License, an
+  OSI-approved BSD variant whose whole distinguishing clause is that the
+  author's attribution stays displayed when the program runs. Hosting for third
+  parties is permitted and the application is shipped unmodified with its
+  branding untouched, which is the posture the couchcms and zentaopms recipes
+  took with CPAL and the ZPL.
+extends: php-plain
+# ClipBucket serves from upload/. See the note above: this key is the only
+# thing that can say so, the probe cannot reach it, and `upload` (unlike `.`)
+# survives readDocroot().
+docroot: upload
+# MySQL or nothing. cb_install/sql/structure.sql is MySQL DDL, every data file
+# beside it is a MySQL dump, and the application speaks mysqli directly through
+# Clipbucket_db -- there is no other driver. The checkout ships no .env and no
+# compose file at its root to point itself at a server, so without this the
+# engine has nothing to hand it. Declaring it also keeps PhpStrategy from
+# mining the checkout for sidecars (engine#166), which matters here because
+# docker/docker-compose.yml is upstream's own nginx + php-fpm + MariaDB
+# development stack.
+database: mysql
+commands:
+  - id: clipbucket-setup
+    stage:
+      - install
+      - upgrade
+    # The five language files alone are 1.7 MB of INSERTs, and this host is
+    # shared. On the build stage it would not run at all (engine#171).
+    timeout: 1800
+    description: >-
+      Writes upload/includes/config.php from the database the engine
+      provisioned, then runs ClipBucket's own installer in a CLI process on the
+      first deploy -- schema, reference data, the external tool paths and an
+      administrator with a generated password -- so that the first visitor to
+      /cb_install/ cannot. Idempotent: on an account that is already installed
+      it re-points the site settings at the current URL and tool paths, runs
+      ClipBucket's own database migrations when the checkout is newer than the
+      schema, and leaves the data alone.
+    run: 'sh panelalpha-setup.sh'

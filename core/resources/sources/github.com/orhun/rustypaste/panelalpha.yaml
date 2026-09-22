@@ -1,0 +1,54 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Rustypaste is a minimal self-hosted pastebin / file-upload server written in
+  Rust (Actix), with no database -- pastes live on the filesystem. Retrieving a
+  paste by its URL is public by design (a pastebin's links are meant to be
+  shared); the write plane (uploading) is gated behind an owner token. This is
+  the public-by-design-content, private-write case, not a no-auth-private-data
+  reject: the security boundary is the upload gate, and this recipe sets it.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes the app as
+  orhunp/rustypaste on Docker Hub and tags every release; this recipe runs that
+  official image with a compose-replace, pinned to the current stable release
+  0.18.1. Building from source would compile a Rust binary on the host for no
+  gain, and a Docker Hub seed also sidesteps engine#229 (image-seed NotFound is
+  the GHCR/registry-save case, not Hub). The image is FROM scratch (no shell),
+  so all health probing is done by an external curl sidecar.
+
+  WHY COMPOSE-REPLACE. The repo's own docker-compose.yml is the bare
+  image+build+two-bind-mounts example. A hosted deploy needs four things bare
+  detection cannot give: (1) a config file -- main.rs panics with "config.toml is
+  not found" and the scratch image ships none, so this recipe bind-mounts one
+  read-only at /app/config.toml; (2) the upload auth token, generated once and
+  fed in; (3) the public origin filled in at deploy time; (4) the upload dir on a
+  named volume so pastes outlive a redeploy.
+
+  SECURITY: NO TOKEN == WORLD-WRITABLE UPLOADS. config.rs: "If neither AUTH_TOKEN
+  ... nor [server].auth_tokens are set, the server will not require any
+  authentication" -- meaning anyone on the internet could POST files and fill the
+  account's disk. hooks/prepare.sh generates a strong AUTH_TOKEN (and a
+  DELETE_TOKEN for the delete endpoint, which is 404 until a delete token exists)
+  once into ~/.panelalpha/rustypaste/ (0600 in 0700, the only writable place a
+  redeploy does not wipe) and feeds them via env_file; config.rs merges the
+  AUTH_TOKEN/DELETE_TOKEN env vars into the server token set. So every upload
+  needs the Authorization header while GET of a paste URL stays public. The
+  config sets expose_version=false and expose_list=false so neither the running
+  version nor the stored-file list leaks, and the config file (which carries no
+  secret anyway -- the tokens come from env, not the file) is never web-served
+  because rustypaste only serves the upload dir.
+
+  PUBLIC ORIGIN. server.url is the base the app stamps onto returned paste links.
+  It is unknown at deploy time, so it is set via the SERVER__URL env var
+  (config::Environment separator "__" -> server.url) to the localhost
+  placeholder, which the engine rewrites to the account's public https origin
+  (the key ends in _URL). SERVER__ADDRESS pins the bind to 0.0.0.0:8000.
+
+  PERSISTENCE. Uploaded pastes live in /app/upload on a named Docker volume, so
+  they survive redeploy and storage reclaim. The image runs as uid 1000 and a
+  fresh named volume is root-owned, so a one-shot init service chowns the volume
+  to 1000:1000 before the app starts -- keeping the app itself non-root.
+
+  PORT. The app serves the landing page, uploads and retrieval on 8000; published
+  as 8000:8000, the only service that publishes a port (engine#234). A curl
+  health sidecar plus a `ready` gate make `docker compose up` block until
+  rustypaste actually answers (engine#204).

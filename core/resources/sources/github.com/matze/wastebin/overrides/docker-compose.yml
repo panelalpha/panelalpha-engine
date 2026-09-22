@@ -1,0 +1,106 @@
+# Compose-replace on the official Docker Hub image quxfoo/wastebin, pinned to the
+# current stable release. The bare image runs an in-memory pastebin with no
+# public origin; this override is that same single container plus what a hosted,
+# secured deploy needs: the SQLite db on a named volume (WITHOUT it every paste
+# vanishes on restart -- WASTEBIN_DATABASE_PATH defaults to :memory:), the
+# long-lived signing key + password salt fed in from a redeploy-surviving store,
+# the public origin filled in at deploy time, and a bounded body size + short
+# default expiry. Pulling a Docker Hub image (not building) keeps detection on
+# `compose` and sidesteps engine#229 (image-seed NotFound is the GHCR case).
+#
+# SECURITY POSTURE: wastebin is public-by-design. Reading a paste by its link is
+# public and creating a paste is open -- upstream offers no instance auth / basic
+# auth, so creation cannot be gated without breaking public reads. Abuse surface
+# is bounded by WASTEBIN_MAX_BODY_SIZE and a short default WASTEBIN_PASTE_EXPIRATIONS
+# default. The signing key (delete/edit cookies) and a non-default password salt
+# come from env_file, never the recipe. See panelalpha.yaml.
+services:
+  # The final image is FROM scratch and runs as uid 10001; a fresh named volume
+  # is root-owned, so uid 10001 could not create /data/state.db. This one-shot
+  # fixes the volume's ownership before the app starts, keeping the app itself as
+  # the non-root uid the image ships. Harmless if already owned.
+  data-init:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "mkdir -p /data && chown -R 10001:10001 /data"]
+    volumes:
+      - wastebin_data:/data
+    mem_limit: 64m
+
+  app:
+    # Latest published stable release, pinned (not :latest) so a redeploy is
+    # reproducible. Official Docker Hub image, pulled not built.
+    image: docker.io/quxfoo/wastebin:3.7.2
+    restart: unless-stopped
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+    env_file:
+      # Account env_vars merged in by the platform (touched by prepare.sh so `up`
+      # never aborts on a missing file), then the generated secrets. SIGNING_KEY
+      # and PASSWORD_SALT come from here, NOT from `environment:`, so they never
+      # appear in the recipe and are never rewritten across redeploys.
+      - .env
+      - ../.panelalpha/wastebin/app.env
+    environment:
+      # Bind on all interfaces inside the container. Only this service publishes
+      # a port.
+      WASTEBIN_ADDRESS_PORT: "0.0.0.0:8088"
+      # SQLite db on the named volume, so pastes survive redeploy/storage reclaim.
+      # Default is :memory: -- without this every paste is lost on restart.
+      WASTEBIN_DATABASE_PATH: /data/state.db
+      # Origin the app stamps onto paste links and QR codes. Unknown at deploy
+      # time; left as the localhost placeholder, which ComposePlaceholders
+      # rewrites to the account's public https origin (key ends in _URL). Kept
+      # unquoted on its own line so the rewrite fires.
+      WASTEBIN_BASE_URL: http://localhost
+      # Bound the abuse surface of an open-creation pastebin: 512 KiB per paste
+      # (upstream default is 1 MiB) is generous for text and caps disk abuse.
+      WASTEBIN_MAX_BODY_SIZE: "524288"
+      # Offer short expirations and DEFAULT to one day (=d) so open-created pastes
+      # do not accumulate forever. Users can still pick a longer window.
+      WASTEBIN_PASTE_EXPIRATIONS: "10m,1h,1d=d,1w,1M"
+    volumes:
+      # Pastes live under /data on a named volume. A fresh volume is chowned to
+      # uid 10001 by data-init above so the non-root app can create state.db.
+      - wastebin_data:/data
+    # The app (UI + create + retrieve) listens on 8088; publish it so the
+    # engine's port scan takes it as the primary (engine#234).
+    ports:
+      - "8088:8088"
+    mem_limit: 256m
+
+  # Polls the public UI on :8088 until it answers, then exits 0. wastebin is FROM
+  # scratch (no shell/curl), so an external curl image probes it. GET / is public.
+  healthgate:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 60); do
+          curl -fsS -o /dev/null "http://app:8088/" && exit 0
+          sleep 2
+        done
+        echo "wastebin did not become ready in time" >&2
+        exit 1
+    mem_limit: 64m
+
+  # Starts nothing, exits 0, waits on the health probe. `docker compose up -d`
+  # blocks on a depends_on completion condition, so the engine reports the deploy
+  # finished only after wastebin actually answers (engine#204).
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      healthgate:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  wastebin_data: {}

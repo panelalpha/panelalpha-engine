@@ -1,0 +1,101 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Koillection is a self-hosted collection manager: a Symfony 8 application on
+  PHP 8.5, served by FrankenPHP (Caddy + a PHP worker) out of public/, with
+  PostgreSQL or MySQL underneath and no first-run wizard beyond a public
+  "create the first account" form.
+
+  The repository ships a root Dockerfile -- the one its own release workflow
+  builds and publishes -- and detection did not pick it. That is not a bug:
+  the dockerfile probe rejects a Dockerfile that maps the host's uid through
+  build variables, and Koillection's declares `ENV PUID=1001` / `ENV PGID=1001`
+  and then `addgroup --gid "$PGID"`. isHostUidMappedDockerfile() accepts such a
+  file only when an `ARG PGID=<digits>` gives the variable a build-time
+  default; an ENV is not that, so the file reads as a workstation Dockerfile
+  and the probe returns false. Detection fell through to `php` (composer.json,
+  no artisan, priority 930) and served the checkout from the shared
+  php:8.5-apache image. The deploy then ended `serving-unknown`, with the
+  published port answering `Recv failure: Connection reset by peer` and the
+  domain 502.
+
+  The reason is one line in a file nobody runs. The repository ships
+  docker-compose.dist.yml, commented "provided for dev purposes"; the php
+  strategy does not run it but does mine it for backing services
+  (RuntimeSidecars), and it took both, postgresql *and* mysql, verbatim --
+  including `image: postgres:18` mounted at
+  `./docker/volumes/postgresql:/var/lib/postgresql/data`. Postgres 18 moved
+  PGDATA to /var/lib/postgresql/18/docker and its entrypoint now refuses to
+  start at all when /var/lib/postgresql/data is a mount point:
+
+      Error: in 18+, these Docker images are configured to store database data
+             in a format which is compatible with "pg_ctlcluster" ...
+
+  (reproduced directly with `docker run -v .../data:/var/lib/postgresql/data
+  postgres:18`; see docker-library/postgres#1259). So postgresql restart-looped
+  on exit 1, and because the generated app service inherited the dist file's
+  `depends_on: postgresql`, compose refused to start the app container at
+  all -- the deploy log shows `Container project-app-1 Created` and never
+  `Started`. Nothing was ever listening on 8000. The health report's
+  `app-restart-looping` check named postgresql exactly right.
+
+  This recipe replaces the stack rather than patching that mount, and runs
+  Koillection's own published image (docker.io/koillection/koillection, built
+  by .github/workflows/docker-release.yml from the root Dockerfile) instead of
+  serving the checkout. Three reasons, in order of weight:
+
+    * The checkout is not servable by the php strategy as it stands. The
+      frontend is a Vite bundle whose package.json lives in assets/, not at the
+      root, so HostCompile::runForPhp -- which reads the root package.json for
+      a `build` script -- never sees it and public/build/ is never produced.
+      Worse, that build consumes assets/js/translations, which only exists
+      after `php bin/console app:translations:dump` has run against a built
+      container. A recipe can fake the first (grocy does) but not the ordering.
+    * The image's entrypoint is the install procedure. docker/entrypoint.sh
+      runs doctrine:migration:migrate, app:refresh-cached-values and
+      lexik:jwt:generate-keypair before it ever starts the server, so the
+      container is listening only once the database is migrated -- which is
+      exactly the readiness property a php checkout would have to be taught.
+    * Building that Dockerfile here instead would install chromium, run
+      composer, run a node:26 yarn build and download curl-impersonate in one
+      account capped at 2500 MB. The published image is 602 MB to pull.
+
+  PostgreSQL rather than MySQL: migrations/ has a Postgresql and a Mysql
+  directory and DB_DRIVER chooses between them, so both work, but the dist
+  file's own app service points at postgresql and upstream's wiki documents
+  Postgres first. There is no SQLite option -- no migration set for it -- so a
+  database sidecar is not optional here.
+
+  Two secrets are pinned by hooks/prepare.sh rather than left to the image, and
+  the second one is a bug rather than a preference. The entrypoint writes
+  .env.local on every boot with `APP_SECRET=${APP_SECRET:-$(openssl rand ...)}`
+  and `JWT_PASSPHRASE=${JWT_PASSPHRASE:-$(openssl rand ...)}`. Left unset,
+  APP_SECRET rotates on each restart, which invalidates every session and every
+  remember-me cookie (security.yaml uses APP_SECRET as the remember_me secret).
+  JWT_PASSPHRASE is worse: it is regenerated the same way, but
+  `lexik:jwt:generate-keypair --skip-if-exists` keeps the *existing* keypair, so
+  after the first `docker restart` the passphrase no longer matches the private
+  key and the /api token endpoint breaks. Both are written once into .env and
+  never regenerated.
+
+  Symfony's trusted proxies are set explicitly. config/reference.php shows
+  framework.trusted_proxies defaulting to `%env(default::SYMFONY_TRUSTED_
+  PROXIES)%`, and framework.yaml sets `session.cookie_secure: auto` with
+  `cookie_samesite: strict`. The engine's proxy does send Host, X-Forwarded-For,
+  X-Forwarded-Proto, X-Forwarded-Host and X-Forwarded-Port
+  (templates/dind/virtualHost-nginx-proxy.blade.php), so telling Symfony to
+  trust the Docker bridge ranges is what makes `auto` resolve to https and
+  absolute URLs come out on the account's own scheme. Without it the app still
+  serves -- it is a correctness fix, not the reason it was down.
+
+  **There is no shipped default login, and that is not the same as being
+  closed.** Koillection has no seeded admin: SecurityController::login sends a
+  visitor to /first-connection while `userRepository->count([]) === 0`, and
+  that route is PUBLIC_ACCESS. A fresh deploy is therefore an open form on
+  which the first person to arrive becomes ROLE_ADMIN, and it stays open until
+  someone submits it. Create the account immediately after the deploy; see the
+  README.
+
+  Mail is left unconfigured -- Koillection does not need SMTP to run, and
+  nothing in the first-connection flow sends a message. The scraper feature
+  (LD_PRELOAD curl-impersonate, chromium) is in the image and works; it makes
+  outbound requests only.

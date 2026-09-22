@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Dotclear 2.40-dev, a self-contained PHP blogging platform. The tree is served
+  from its own root: index.php is the public blog's front controller (it defines
+  DC_BLOG_ID and hands off to src/App.php), and admin/index.php is the backend.
+  There is no vendor/ to install -- composer.json requires only "php": ">=8.2"
+  and everything else is require-dev; Dotclear autoloads its own src/ tree. So
+  detection reads it as the plain `php` strategy (composer.json, no artisan) and
+  it builds and boots with nothing added.
+
+  What the bare deploy gets wrong is three things, none of which is a code fix:
+
+  1. **Where the document root is.** Dotclear serves from its root; older
+     releases shipped an empty public/ that the base image's `-d /app/public`
+     probe would serve as a 403 (see PhpDocroot's own note). This HEAD ships no
+     public/ at all, so detection already resolves the root -- `docroot: "."`
+     just says it out loud and pins it against the media symlink below creating
+     a public/ later. Measured against stock mariusz2
+     (LATE_CANDIDATES = ['src']); src/ has no index.php so it never wins.
+
+  2. **The installer is first-visitor-wins.** admin/install/ is a web wizard
+     that lets whoever reaches it first create the super-admin. The setup script
+     drives Dotclear's own CLI installer (admin/install/index.php) before Apache
+     binds, seeding inc/config.php (DB DSN + a per-account DC_MASTER_KEY that
+     `md5(uniqid())` generates) and the super-admin, with a password generated
+     per account and written to ~/.panelalpha/dotclear/admin-credentials.txt.
+     After that inc/config.php exists, so the wizard reports "already installed"
+     and creates nobody. Note: the installer's own `-n` non-interactive mode is
+     broken at HEAD (Install\Utility::init() forces argv[1] as DC_RC_PATH, and
+     PHP getopt then stops at that leading positional and parses none of the
+     --db* flags), so the script feeds the interactive prompts over stdin
+     instead -- upstream is left untouched.
+
+  3. **~/project is emptied every deploy (engine#173).** Dotclear keeps its
+     config, its master key and all uploaded media inside the tree, so they must
+     move out. inc/config.php, public/ (media), cache/ and var/ live under
+     ~/.panelalpha/dotclear/ and are symlinked back in on every boot; the
+     account's MySQL database (provisioned by `database: mysql`) holds the posts
+     and survives on its own. Redeploy survival is the acceptance test.
+
+  database: mysql provisions a DB + user on the account's own MySQL server (no
+  sidecar, no memory budget) and hands DB_HOST/DB_PORT/DB_DATABASE/DB_USERNAME/
+  DB_PASSWORD to the container; the setup script picks the best available
+  MySQL driver (mysqlimb4 for full utf8mb4, else pdomysqlmb4). blog_url and
+  admin_url are seeded from APP_URL, the public https origin, so Dotclear's
+  stored absolute URLs are the ones a visitor uses -- not Apache's http://…:8000.
+
+  SOURCE: this recipe is keyed to github.com/dotclear/dotclear, Dotclear's
+  official public GitHub mirror. The canonical git.dotclear.org returns a
+  bare nginx 403 to anonymous clones, so a project must be created from the
+  mirror URL; supported-apps#1351 (canonical) is Rejected and points here.
+extends: php
+docroot: "."
+database: mysql
+env:
+  # The base image loads no php.ini (engine#185): turn display_errors off and
+  # give media uploads room. The LEADING COLON is load-bearing -- it keeps PHP's
+  # compiled-in scan dir (which is what enables mysqli/pdo_mysql via conf.d) and
+  # only adds ours. A bare "/app/.pa-php" replaces that dir and silently drops
+  # every DB extension, which no PHP+MySQL app can survive.
+  PHP_INI_SCAN_DIR: ":/app/.pa-php"
+commands:
+  - id: dotclear-setup
+    stage:
+      - start
+    before: true
+    timeout: 300
+    description: Persist config and media under ~/.panelalpha and, on first boot, seed inc/config.php and the super-admin over the CLI installer so the web wizard never opens to a visitor.
+    run: 'sh panelalpha/dotclear-setup.sh'

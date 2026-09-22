@@ -1,0 +1,8 @@
+# Replaces the repo's own .dockerignore, which is `**` (ignore everything except
+# the Gradle build's scm-server tarball) and would filter our COPY sources out of
+# the build context. We do not build from source, so the context only needs the
+# two config files our Dockerfile COPYs; everything else (the whole checkout) is
+# excluded to keep the context tiny.
+**
+!panelalpha-config.yml
+!panelalpha-entrypoint.sh

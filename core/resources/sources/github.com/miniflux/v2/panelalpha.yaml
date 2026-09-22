@@ -1,0 +1,80 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Miniflux is a minimalist feed reader: one Go binary that serves the whole UI
+  and API from embedded assets, with PostgreSQL as its only dependency. The
+  repository has no root Dockerfile and no root compose file, so detection read
+  go.mod and picked the `go` strategy, cross-compiled `./app` on the host in
+  twenty-four seconds and started it alone against an empty .env. The container
+  then restart-looped — `app (Restarting (1) 17 seconds ago)`, nothing ever
+  listening on 8080 — which is the `serving-unknown` this recipe exists to turn
+  into a served page.
+
+  The build was never the problem and this recipe keeps it: `go build -o app .`
+  is the whole of it, the UI is `//go:embed`ed, and a host compile in a
+  golang:1.26-alpine the account already has is cheaper in both time and memory
+  than the two-stage image in packaging/docker/alpine/Dockerfile, which pulls a
+  second toolchain to produce the same binary. What the checkout cannot state
+  is everything around it.
+
+  Miniflux exits before it opens a socket. DATABASE_URL defaults to
+  `user=postgres password=postgres dbname=miniflux2 sslmode=disable` — a
+  developer's local server — and internal/cli calls printfAndExit on
+  NewConnectionPool and again on store.Ping(), so a Miniflux with no database
+  cannot boot however right everything else is. That is the exit 1 behind the
+  restart loop, and the reason this recipe ships a PostgreSQL: there is no
+  SQLite mode to fall back to, and the repository has no root compose file for
+  the engine's sidecar reader to learn a database from. The only compose files
+  it does ship are `.devcontainer/docker-compose.yml` and
+  `contrib/docker-compose/*.yml`, neither of which the reader looks at — and
+  neither of which should be used if it did: the devcontainer one runs the app
+  as `sleep infinity` on `postgres:latest` with `POSTGRES_HOST_AUTH_METHOD=trust`,
+  and the three contrib files all carry the published password `secret` and the
+  published admin `admin` / `test123`.
+
+  Three more environment variables, all in hooks/prepare.sh's .env because a
+  generated password cannot live in a file that is committed. RUN_MIGRATIONS
+  makes the binary create its own schema; without it, `database.IsSchemaUpToDate`
+  exits on the first boot against an empty database. CREATE_ADMIN with
+  ADMIN_USERNAME/ADMIN_PASSWORD makes the first account, because Miniflux has no
+  sign-up page, no first-run wizard and no other way in — its own documented
+  alternative is an interactive terminal. The password is generated per account
+  and recorded in ~/project/.panelalpha-admin-password (0600); every Miniflux
+  compose file published upstream would have installed `test123`.
+  createAdminUser() skips an existing username, so a redeploy neither fails nor
+  resets anyone.
+
+  Two things the engine already supplies, which is why they are not here. The
+  default LISTEN_ADDR is `127.0.0.1:8080` — inside a container that is nothing
+  the published port can reach — but the framework compose writer sets
+  `PORT=8080` on the app service, and configParser's postParsing() rewrites
+  LISTEN_ADDR to `:8080` when PORT is set. And BASE_URL, which Miniflux uses for
+  absolute links and for its route prefix, arrives as one of the seven public-URL
+  aliases the same writer sets from the account's own domain; `environment:`
+  outranks `env_file:`, so the account's URL wins over anything .env could say
+  and nothing has to read it out of the generated compose the way Vikunja does.
+
+  One value the override has to restate rather than leave to .env, and the
+  reason is the override itself: the engine globs `docker-compose.*.yml` for
+  stack templates to mine sidecars from, which matches
+  `docker-compose.override.yml`, so it reads this recipe's own file, copies
+  `database` into the generated compose and writes its own DATABASE_URL onto the
+  app service — with the fallback password `app` for a bare
+  `${POSTGRES_PASSWORD}` and no query string, so lib/pq defaulted to
+  `sslmode=require` and the first run of this recipe died in `pq: SSL is not
+  enabled on the server`. `environment:` outranks `env_file:`, so .env cannot
+  win that; a later compose file outranks an earlier one, so the override says
+  `DATABASE_URL: ${DATABASE_URL}` and compose interpolates it from .env.
+
+  The `ready` service is what makes `docker compose up -d` return at the right
+  moment. The engine runs `up` without `--wait` and treats the deploy as
+  finished when it returns, at which point Miniflux has been started and is
+  still running its 135 migrations and generating its stylesheet and javascript
+  bundles. `ready` waits on the app's own healthcheck — GET /healthcheck, the
+  readiness probe in internal/http/server/routes.go — so `up -d` blocks until
+  the site actually answers.
+
+  No Redis: Miniflux keeps sessions in PostgreSQL and has no cache tier. No
+  Apprise sidecar (the devcontainer's third service): notifications are opt-in
+  per user and need a service the engine does not provide. Mail is left
+  unconfigured for the same reason — nothing in Miniflux needs it to run.
+extends: go

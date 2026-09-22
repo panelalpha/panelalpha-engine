@@ -1,0 +1,205 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Drupal 11, from the `drupal/recommended-project` Composer template. The
+  checkout is four files -- LICENSE.txt, composer.json, composer.lock and
+  .git -- and every byte of the application, including the front controller,
+  is produced by `composer install`. That is what the recipe is about.
+
+  **The 403 was not a document root problem.** `web` is already in
+  `PhpDocroot::CANDIDATES` (app/Lib/Deploy/Platform/Runtime/Php/PhpDocroot.php:25)
+  and `PhpStrategy::documentRoot()` runs *after* the host Composer build
+  (PhpStrategy.php:113 then :118), so a `web/index.php` would have been found.
+  There was none: the host build resolved 69 packages into `vendor/` and
+  created no `web/` at all, because it ran with `--no-plugins`. Composer said
+  so, five times, in the deploy log of the control deploy:
+
+      The "composer/installers" plugin was not loaded as plugins are disabled.
+      The "drupal/core-composer-scaffold" plugin was not loaded as plugins are disabled.
+      The "drupal/core-project-message" plugin was not loaded as plugins are disabled.
+      The "drupal/core-recipe-unpack" plugin was not loaded as plugins are disabled.
+      The "symfony/runtime" plugin was not loaded as plugins are disabled.
+
+  For Drupal the plugin *is* the installer. `composer/installers` reads
+  `extra.installer-paths` and is the only thing that puts `drupal/core` in
+  `web/core` instead of `vendor/drupal/core`; `drupal/core-composer-scaffold`
+  is the only thing that writes `web/index.php`, `web/.htaccess` and
+  `web/sites/default/default.settings.php`, none of which exist in any
+  package. With both disabled the tree has no document root, no front
+  controller and no index file anywhere, `PhpDocroot::detect()` returns `''`,
+  no `PA_DOCROOT` is emitted, `panelalpha-serve` serves `/app`, and Apache
+  answers 403 on a directory with no `DirectoryIndex` match. That is exactly
+  the `serving-missing_entry` the tracker recorded, and the control deploy
+  reproduced it (44 s, HTTP 403, `entry-served` failing with "There is no
+  index.php anywhere in ~/project").
+
+  The engine already knows this. `PhpHostBuild::INSTALLER_PLUGINS`
+  (PhpHostBuild.php:63) lists precisely the five plugins this lock pins, and
+  `PhpHostBuild::mayRunPlugins()` exists to drop `--no-plugins` when a lock
+  pins nothing else -- its docblock is written about Drupal by name. It never
+  fires, because `HostCompile::runPhpBuild()` calls `PhpHostBuild::script()`
+  with three of its six arguments (HostCompile.php:407) and never passes
+  `$composerLock`, so `mayRunPlugins(null)` is always false.
+
+  A recipe cannot reach that command either. `AppConfig::readManifest()`
+  deliberately strips `commands` out of the manifest a source recipe produces
+  (AppConfig.php:459-463, "`commands` and `env` this class applies itself"),
+  and the app config's own commands are only ever consumed for the host stages
+  and for the entrypoint -- nothing reads `$appConfig->commands('build')`. So a
+  source recipe's build-stage commands are inert (engine #171), `install_command`
+  stays php.yaml's, and `--no-plugins` cannot be removed from it. Confirmed on
+  this host: with the recipe's `commands:` declared for the build stage, the
+  resolved manifest still reported
+  `role='dependencies' run=composer install ... --no-plugins ...`.
+
+  So the second half of the build runs where a recipe *can* speak: the install
+  and upgrade stages, in the application container, which has the same Composer
+  and the same PHP. `composer install` there is not a repeat of the host's --
+  Composer's `LibraryInstaller::isInstalled()` tests the path the installer
+  plugin computes, finds `web/core` missing, and reinstalls `drupal/core` into
+  it, regenerating the autoloader against the new location
+  (`vendor/composer/installed.json` then reads `"install-path": "../../web/core"`).
+  Measured on this host: 8 s, and `COMPOSER_CACHE_DIR` is already baked into the
+  base image pointing at the account's own `~/.cache/composer`, so a redeploy
+  does not download again. What the host build left behind at
+  `vendor/drupal/core` is then 164 MB of nothing, and the stage removes it.
+
+  That is the cost of the defect, stated plainly: one wasted download of Drupal
+  core per first deploy. Fix `HostCompile.php:407` and this recipe's first two
+  install-stage commands become a no-op that can be deleted.
+
+  **Drupal needs a database, and the account already has one.** `database:
+  mysql` provisions `<prefix>_app` on the account's own MySQL server through
+  `AppDatabase::provision()` -- panel-visible, phpMyAdmin-openable, included in
+  the account backup, with a password generated once and kept in the account's
+  encrypted details so a redeploy hands the site the same credentials. The
+  alternative, an `EnvSidecars`-mined container, has nothing to mine here
+  (the repository ships no compose file and no `.env.example`) and would cost
+  a MariaDB container and a volume the panel cannot see.
+
+  **The installer is first-visitor-wins.** An installed-code, empty-database
+  Drupal sends every request to `core/install.php`, which takes a site name, a
+  database and an administrator password from whoever asks first, with no
+  authentication. On an account with a public HTTPS domain that window opens
+  the moment the container binds. `files/panelalpha-drupal.php` closes it on
+  the install stage, *before* Apache binds: it writes `settings.php` and then
+  drives Drupal's own `install_drupal()` non-interactively -- the same call
+  `Drupal\Core\Command\InstallCommand` makes, with the MySQL driver namespace
+  in place of SQLite -- with an administrator password generated per account by
+  `hooks/prepare.sh`. Once that has run, `core/install.php` answers "Drupal
+  already installed" to everyone.
+
+  **On Drupal 11 the `standard` profile is no longer a standard site.** This
+  cost a deploy and is the second failure this recipe fixes.
+  `core/profiles/standard/standard.info.yml` at 11.4-dev installs a module list
+  and `themes: [default_admin]`, and nothing more. Installed from it the site
+  bootstrapped, served `/user/login` correctly, and answered **403 Access
+  denied** to every anonymous visitor on `/` -- a Drupal-rendered 403, not
+  Apache's -- because nothing had granted the anonymous role `access content`.
+  From the outside that is indistinguishable from the original bug.
+
+  What used to be in the profile is now in `core/recipes/standard/recipe.yml`:
+  `access content` for anonymous and authenticated, the default theme, the
+  administrator and content_editor roles, the CKEditor text formats and ten
+  further recipes. `install_drupal()` takes it as
+  `parameters.recipe` with an empty `parameters.profile`
+  (install.core.inc:321 and :823), which is exactly what core's own
+  `dr install core/recipes/standard` does. The profile is kept as a fallback
+  for a Drupal that predates the split.
+
+  The node types went the same way and are not in the site recipe either, so
+  `core/recipes/page_content_type` and `core/recipes/article_content_type` are
+  applied afterwards through `dr recipe:apply`. Without them Drupal comes up
+  with the node module installed and no bundles: a CMS with nowhere to put
+  content until its owner builds a content type by hand. Article and Basic page
+  are what every Drupal before 11.2 shipped.
+
+  **What survives a redeploy, and how.** `~/project` is emptied before every
+  clone (`ProjectTree::clearContents()`, engine #173), which takes
+  `web/sites/default/settings.php` and `web/sites/default/files` with it.
+  Three things therefore live in `~/.panelalpha/drupal/` instead:
+  `app.env` (the hash salt and the administrator credentials, 0600 in a 0700
+  directory, delivered by a second `env_file:` entry), `files/` (the public
+  file system, bind-mounted back over `web/sites/default/files`) and
+  `private/` (private files and the config sync directory). `settings.php`
+  itself is not persisted -- it is *regenerated* from the container
+  environment on both the install and the upgrade stage, so it cannot drift
+  from the credentials the engine actually provisioned. The hash salt has to
+  persist because it keys every session cookie and every one-time login link;
+  the database password does not, because `AppDatabase` already guarantees it
+  is stable.
+
+  **No php.ini reaches this image** (engine #185): `php --ini` answers "Loaded
+  Configuration File: (none)", so `memory_limit` is 128M and `display_errors`
+  is On. 128M is below what a standard-profile install needs, and
+  `display_errors` on a CMS prints account paths into the page.
+  `files/panelalpha/php/zz-drupal.ini` fixes both, and the override names its
+  directory with `PHP_INI_SCAN_DIR`.
+
+  Licence: GPL-2.0-or-later, for the template and for `drupal/core`. No network
+  -service clause, no badgeware. Hosting for third parties is permitted and the
+  application is shipped unmodified.
+extends: php
+# `web/`, stated rather than detected. Detection would find it too -- the
+# document root is resolved after the host build -- but only once the build
+# has been fixed, and stating it means the answer no longer depends on which
+# Composer flags won. A plain relative path, so engine #172 (readDocroot()
+# folding '' and '.' together) does not apply.
+docroot: web
+# The account's own MySQL, not a sidecar. See the note above.
+database: mysql
+commands:
+  # No `id:` on any of these, deliberately: a stale detection cache drops every
+  # stage command from a recipe that carries one while the log still reports
+  # "Recipe named by ..." (engine #169). Extending a shipped manifest and
+  # omitting the ids is the mitigation.
+  #
+  # Every one of them is on install+upgrade rather than build. Not a style
+  # choice: a source recipe's build-stage commands never reach the pipeline
+  # (engine #171, see the note above), so `build` here would be four commands
+  # that silently never run.
+  - stage:
+      - install
+      - upgrade
+    description: >-
+      The half of the build the host could not do. Runs with Composer plugins
+      enabled, which is what puts drupal/core in web/core (composer/installers)
+      and writes web/index.php, web/.htaccess and
+      web/sites/default/default.settings.php (drupal/core-composer-scaffold).
+      Without it the project has a vendor/ and no document root at all, which
+      is the 403 this recipe exists for. `--no-scripts` is kept: the repository
+      defines no scripts block, and Composer 2 still runs plugin event
+      subscribers under it -- measured, the scaffold ran.
+    run: 'composer install --no-dev --no-interaction --no-scripts --optimize-autoloader'
+    timeout: 900
+  - stage:
+      - install
+      - upgrade
+    description: >-
+      The scaffold again, by name, because the command above only fires it
+      while it has packages to install. On a container restart Composer has
+      nothing to do and the scaffold would not run; naming it means the
+      document root is repaired whatever state the tree was in. Roughly a
+      second when there is nothing to write.
+    run: 'composer drupal:scaffold --no-interaction'
+  - stage:
+      - install
+      - upgrade
+    description: >-
+      164 MB the host build downloaded into the wrong place. Composer moved
+      drupal/core to web/core and recorded "install-path": "../../web/core" in
+      vendor/composer/installed.json, but it does not delete the directory its
+      own previous, plugin-less run created. Guarded on web/core actually
+      holding a Drupal: this is an rm -rf and it must not fire on a tree where
+      the step above failed.
+    run: '[ -f /app/web/core/lib/Drupal/Core/DrupalKernel.php ] && rm -rf /app/vendor/drupal/core || true'
+  - stage:
+      - install
+      - upgrade
+    description: >-
+      Writes web/sites/default/settings.php from the container environment and,
+      on an empty database, runs Drupal's own non-interactive installer before
+      Apache binds -- so nobody can reach the install wizard and claim the
+      site. Idempotent: on the upgrade stage an installed database costs one
+      SELECT, and settings.php is rewritten because the clone deleted it.
+    run: 'php /app/panelalpha-drupal.php'
+    timeout: 900

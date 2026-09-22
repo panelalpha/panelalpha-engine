@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Genealogy (MGeurts) is a Laravel 13 / Livewire 4 family-tree manager built on
+  Jetstream Teams — every account holds one family's private people, photos and
+  documents behind login, with per-team isolation and an optional developer
+  role. The shipped `laravel` recipe already gets docroot (public), the account
+  MySQL, the host-side composer + Vite build, key:generate, migrate,
+  storage:link and optimize right; this recipe adds only what the app itself
+  needs on top and what the engine's redeploy model (~/project wiped, engine#173)
+  would otherwise lose.
+
+  Three things it adds:
+
+  1. `database: mysql`. Without it a Laravel app falls back to the SQLite the
+     PHP runtime writes into /app/database, which lives in ~/project and does
+     not survive a redeploy. The account's own MySQL does, and is what
+     .env.example already asks for (SESSION/CACHE/QUEUE are all `database` too).
+
+  2. Persistence + a stable APP_KEY (files/panelalpha/persist.sh, run before
+     every stage). storage/app holds the only user files that are not in the
+     database — profile photos, person photos, GEDCOM imports, backups — and
+     is symlinked onto a bind mount at ~/.panelalpha/genealogy (the one
+     rebuild-surviving writable dir) that overrides/docker-compose.override.yml
+     provides. The same mount holds a generated APP_KEY, restored into .env on
+     every boot so the install-only key:generate is never lost on a redeploy
+     (which would invalidate 2FA secrets and every session).
+
+  3. First-boot seeding (files/panelalpha/seed.sh, install only). The app ships
+     production seeders for its Settings and Gender lists (a person cannot be
+     created without genders) and a demo seeder full of known-password accounts
+     that must never run in production. This calls only SettingSeeder and
+     GenderSeeder, then creates ONE owner account (is_developer=true, its own
+     personal team) with a generated password stored 0600 on the mount.
+     Registration is left open by Jetstream's design: new sign-ups get an
+     isolated personal team and zero privileges (is_developer defaults false,
+     set only in the database), so open registration exposes no existing data —
+     it is the standard Jetstream multi-tenant model, noted here rather than
+     disabled.
+extends: laravel
+database: mysql
+env:
+  # .env.example ships APP_DEBUG=true and APP_ENV=local; force production so a
+  # leaked stack trace can never carry APP_KEY or the DB password. Compose
+  # environment outranks the .env the checkout brings.
+  APP_DEBUG: false
+  APP_ENV: production
+  LOG_CHANNEL: stderr
+commands:
+  # Runs ahead of the laravel recipe's own commands in every phase. The start
+  # run is what makes APP_KEY durable: the base key-generate (install-only)
+  # writes a fresh key into .env after this command's install run, so this
+  # re-asserts the persisted key on start, before optimize caches config and
+  # before the app serves. The transient install-phase key encrypts nothing
+  # durable (passwords are bcrypt), so no data is lost by overriding it.
+  - id: genealogy-persist
+    stage:
+      - install
+      - upgrade
+      - start
+    before: true
+    description: >-
+      Points storage/app at the ~/.panelalpha/genealogy bind mount (uploads,
+      GEDCOM, backups), recreates the public/storage symlink (storage:link is
+      install-only and public/ is wiped each deploy), and restores a generated
+      APP_KEY from the mount into .env so it is stable across redeploys.
+      Idempotent.
+    run: 'bash /app/panelalpha/persist.sh'
+    timeout: 120
+  # Install only: the production seeders use insert() and are not idempotent,
+  # and the owner must be created once. Runs after the laravel recipe's migrate.
+  - id: genealogy-seed
+    stage: install
+    description: >-
+      Seeds the Settings and Gender reference data the app needs (SettingSeeder,
+      GenderSeeder only — never the demo seeder) and creates the owner account
+      (is_developer=true, personal team) with a password generated once into
+      ~/.panelalpha/genealogy/owner-password (0600).
+    run: 'bash /app/panelalpha/seed.sh'
+    timeout: 300

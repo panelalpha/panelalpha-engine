@@ -1,0 +1,15 @@
+services:
+  app:
+    # .env first so the engine's own file still wins where it says anything;
+    # the second file carries the signing key and the generated admin password
+    # and lives outside ~/project, which every deploy empties. env_file is read
+    # when the container is created, and the prepare hook has written it by then.
+    env_file:
+      - .env
+      - ../.panelalpha/b1gmail/b1gmail.env
+    # Every message body b1gMail stores is a file under prefs.datafolder. Left
+    # where the setup wizard puts it (src/data/) a redeploy would delete the
+    # lot, so it is mounted from the account's state directory instead and
+    # prefs.datafolder is pointed here.
+    volumes:
+      - ../.panelalpha/b1gmail/data:/var/lib/b1gmail/data

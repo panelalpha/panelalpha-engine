@@ -1,0 +1,13 @@
+# Every file here is included by b1gMail's plugin loader; none is an entry
+# point (no file in plugins/ includes serverlib/init.inc.php). Fetched
+# directly they answer 200 with an uncaught PHP fatal that names classes and
+# absolute paths - /plugins/fax.plugin.php is the shortest example. The css/,
+# js/ and templates/ assets beside them stay reachable.
+<FilesMatch "\.(php|inc)$">
+	<IfModule mod_authz_core.c>
+		Require all denied
+	</IfModule>
+	<IfModule !mod_authz_core.c>
+		Deny from all
+	</IfModule>
+</FilesMatch>

@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  JARR (Just Another RSS Reader) is a multi-user web news aggregator: every
+  visitor logs into their own account and sees only their own feeds, categories
+  and clustered articles. A Celery worker crawls the subscribed feeds in the
+  background and TF-IDF-clusters similar articles. This is the access-controlled
+  case (real per-user auth, JWT-protected API), not no-auth private data.
+
+  TWO OFFICIAL IMAGES, ONE SOURCE BUILD. Upstream publishes jaesivsm/jarr-server
+  and jaesivsm/jarr-worker on Docker Hub (latest tracks master, pushed the same
+  day as HEAD); this recipe pulls both from Docker Hub, which sidesteps engine#229
+  (the GHCR/quay docker-save seeding stub) because Docker Hub is pulled normally.
+  Only the React frontend is built from the repository's own Dockerfiles/front:
+  the official jaesivsm/jarr-front image bakes app.jarr.info as its API URL at
+  build time (INSTALL.md) and is useless anywhere else, so the SPA must be rebuilt
+  with this instance's API URL. The frontend lives in-tree under jsclient/ (the
+  .gitmodules file is empty on master), so no git submodule fetch is needed and
+  engine#229 never applies to a locally built image.
+
+  WHY COMPOSE-REPLACE. JARR is a split front+API app: the SPA (served by `serve`)
+  and the gunicorn API are two processes on two ports, and it needs PostgreSQL
+  (SQLAlchemy), Redis (Celery broker+backend and JARR's own cache) and a Celery
+  worker beside them. The schema's `database:` is MySQL-only and the app speaks
+  PostgreSQL, and the repo's own compose files are dev/CI stacks (host-published
+  ports, trust-auth Postgres, no init) not usable as-is. This override supplies
+  the real stack and, crucially, an nginx that folds the two ports onto one
+  public origin.
+
+  ONE ORIGIN, BUILD-TIME API URL. A create-react-app bakes REACT_APP_API_URL into
+  the JS bundle at build time, and every request the SPA makes is `${apiUrl}/<ep>`
+  (jsclient/src/const.js). Because the per-account public domain is unknown at
+  build time, the front is built with REACT_APP_API_URL=/api -- a relative,
+  domain-independent value. nginx (the only service that publishes a host port,
+  so the engine's port scan takes it as primary, engine#231) then serves the SPA
+  at / and proxies /api/ to the API server with the /api prefix stripped, so the
+  flask-restx API (mounted at root) receives clean paths and the SPA and API
+  never collide on one domain, whatever that domain turns out to be.
+
+  SECRETS AND ADMIN. The Flask SECRET_KEY (JWT signing -- rotating it logs
+  everyone out), the Postgres password (baked into the pgdata volume) and a
+  generated admin password are written once into ~/.panelalpha/jarr/ (0600 in
+  0700), the only writable place a redeploy does not delete, and reused on every
+  rebuild. hooks/prepare.sh materialises /etc/jarr/jarr.json from them each deploy
+  (~/project is wiped every deploy). The admin is seeded once by the init one-shot
+  with the generated password -- upstream's bootstrap-database defaults to
+  admin/admin, which this recipe never uses. log level is forced to WARNING so the
+  Flask app never runs in debug mode. Onboarding notes go in credentials.txt.
+
+  OPEN REGISTRATION, BY DESIGN. JARR's account signup (POST /user) is open and is
+  not gated by any config (auth.allow_signup is only checked for OAuth), so anyone
+  who reaches the instance can create their own account. This is acceptable here:
+  every feed, category and article endpoint is @jwt_required and scoped to the
+  calling user, so a new account exposes none of an existing user's data. An
+  operator who wants a closed instance should front it with their own access
+  control; this recipe does not patch upstream to add a signup gate.

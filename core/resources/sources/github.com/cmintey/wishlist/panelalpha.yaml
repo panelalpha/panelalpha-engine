@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Wishlist is a sharable gift list for friends and family: SvelteKit on
+  adapter-node behind a bundled Caddy, Prisma over SQLite, published as
+  ghcr.io/cmintey/wishlist. The repository ships a docker-compose.yaml that is
+  a real deployment rather than a workstation stack -- one service, no build,
+  the published image, and the file the README tells every operator to write --
+  so detection read it, the compose strategy ran it, and the deploy finished
+  successfully in 60.2s. Nothing answered. The proxy returned 502 and the
+  verdict was serving-error_page.
+
+  The cause is one empty value. `.env.example` ships `ORIGIN=` with nothing
+  after it, ProjectEnvironment::apply() copies .env.example to .env unchanged
+  apart from secret placeholders, and upstream's compose loads that file
+  through `env_file:` -- so ORIGIN reaches the container set and empty.
+  @sveltejs/adapter-node validates it and throws
+  `Invalid ORIGIN: ''. ORIGIN must be a valid URL with http:// or https://
+  protocol`, `node build` exits 1, and the container restart-loops. Caddy is
+  started first and in the background, so :3280 kept answering throughout --
+  with a 502 of its own, proxying to a :3000 that was never there. Unset works
+  fine; empty does not, and empty is what the repository ships.
+
+  The engine had no way to supply it. ORIGIN is the account's public address,
+  which is not known until the domain exists, and for a compose project the
+  only path that value has into an application is
+  ComposePlaceholders::isLocalPublicUrl() -- a `*_URL`/`ORIGIN`-shaped key in a
+  compose `environment:` block whose value is a bare localhost. There is no
+  equivalent for a .env copied out of .env.example, and no
+  ComposeHarden::urlEnvironment() injection the way DockerfileStrategy and
+  RubyStrategy get one. So overrides/docker-compose.yml carries
+  `ORIGIN: http://localhost` in the environment block, where the rewrite
+  reaches it, and hooks/prepare.sh writes a .env with no ORIGIN line at all so
+  nothing stale can shadow it.
+
+  Same image, same port, same two volumes as upstream: the published image is
+  the artifact this project ships, and building the checkout would compile
+  sharp and better-sqlite3 from source per account to arrive at it. What
+  changes is where the volumes point. Upstream bind-mounts ./data and ./uploads
+  inside the project directory; a redeploy clears and re-clones ~/project
+  (engine#173), so every list, item, claim and uploaded image would be
+  destroyed by the next deploy -- measured on the stock deploy, both
+  directories were created inside ~/project, root-owned, with prod.db in one of
+  them. They are ~/.panelalpha/wishlist/data and .../uploads instead.
+
+  And the installation is given an owner. Wishlist has no installer and no CLI:
+  routes/setup-wizard/+page.server.ts serves its wizard to anybody while the
+  user table is empty, routes/signup/+page.server.ts gives the first account
+  Role.ADMIN, and getDefaultConfig() in lib/server/config.ts has
+  `enableSignup: true` -- so a stock deploy on a public HTTPS name is
+  first-visitor-wins twice over. hooks/prepare.sh generates a 20-character
+  password into ~/.panelalpha/wishlist/credentials (0600, in a 0700 directory),
+  and files/panelalpha/install.mjs creates the account and turns public signup
+  off in one transaction, from the entrypoint, before the server binds -- not
+  from a one-shot service beside the app, which could only run once the app was
+  already answering. It is guarded by a marker on the data mount, so a redeploy
+  never creates a second account and never overrides an operator who later
+  re-opened signup.
+
+  A `ready` service gates the deploy. Caddy binds :3280 before the migrations
+  run, so the port answers 502 for the whole of the first boot -- 45 Prisma
+  migrations, the seed, three patches and the install step -- and `docker
+  compose up -d` without `--wait` returns into that window (engine#90). `ready`
+  is a no-op on alpine:3 that waits for the app's healthcheck, so `up -d`
+  returns only once /login really serves.
+
+  Mail is left unconfigured. Wishlist works without it -- invite links and
+  password-reset links can be generated and copied by hand from the admin panel
+  -- but emailed invitations need an SMTP server the engine does not provide;
+  it is configured in the admin panel rather than through the environment.

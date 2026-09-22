@@ -1,0 +1,118 @@
+# Replaces the repo's docker-compose.prod.yml (which bind-mounts ./media and
+# ./postgres_data into the project dir a redeploy wipes, and leaves URL and the
+# passwords blank). Same stack, made durable and self-configuring:
+#   - the official image eitchtee/wygiwyh, pinned to release 0.23.2
+#   - postgres:15 on a named volume
+#   - uploads on a named volume
+#   - secrets from ~/.panelalpha/wygiwyh (../.panelalpha from ~/project)
+#   - only the web service publishes a port
+# The image is a single container: its supervisord runs the web process (migrate
+# -> seed admin -> gunicorn) and the procrastinate task workers (in-DB queue, no
+# Redis).
+services:
+  db:
+    # Match upstream's Postgres major. A major cannot migrate its datadir
+    # backwards, so pin it: a floating tag would break the named volume the
+    # first time the major moves.
+    image: docker.io/library/postgres:15-bookworm
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, written once by hooks/prepare.sh and baked into the
+    # data volume; never regenerated.
+    env_file:
+      - ../.panelalpha/wygiwyh/db.env
+    environment:
+      POSTGRES_DB: wygiwyh
+      POSTGRES_USER: wygiwyh
+      # A named volume is not always empty (lost+found); postgres refuses to
+      # init into a non-empty dir, so give it a clean subdir.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wygiwyh -d wygiwyh -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  # One-shot: the attachments dir is a named volume that Docker creates
+  # root-owned, but the app runs as the unprivileged `app` user, so give it
+  # ownership before the app starts. Configuration only -- no change to the app.
+  init-media:
+    image: eitchtee/wygiwyh:0.23.2
+    user: root
+    entrypoint: ["/bin/sh", "-c", "mkdir -p /usr/src/app/attachments && chown -R app:app /usr/src/app/attachments"]
+    restart: "no"
+    volumes:
+      - media:/usr/src/app/attachments
+    mem_limit: 128m
+
+  web:
+    # Official release image (amd64 digest
+    # sha256:18dee9255de2893417f060906ff7bdf3e39ac13a9922235fff3d438a5c61512c).
+    image: eitchtee/wygiwyh:0.23.2
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      init-media:
+        condition: service_completed_successfully
+    env_file:
+      # Platform-merged account env first, then this account's seeded secrets so
+      # they are not clobbered by an empty default.
+      - .env
+      - ../.panelalpha/wygiwyh/app.env
+    environment:
+      DEBUG: "false"
+      HTTPS_ENABLED: "true"
+      # Rewritten to the account's public https address before the stack starts
+      # (ComposePlaceholders rewrites a local value whose key is exactly URL).
+      # settings.py turns it into CSRF_TRUSTED_ORIGINS. Left http://localhost on
+      # an account with no domain yet.
+      URL: "http://localhost"
+      # Behind the engine's single-tenant reverse proxy; the origin check (URL,
+      # above) is the real CSRF control.
+      DJANGO_ALLOWED_HOSTS: "*"
+      SQL_DATABASE: wygiwyh
+      SQL_USER: wygiwyh
+      SQL_HOST: db
+      SQL_PORT: "5432"
+      INTERNAL_PORT: "8000"
+      TASK_WORKERS: "1"
+      WEB_CONCURRENCY: "4"
+      ENABLE_SOFT_DELETE: "false"
+      TZ: "UTC"
+    volumes:
+      - media:/usr/src/app/attachments
+    # gunicorn binds :8000; publish it on 8080 so the port scan takes it as the
+    # primary (engine#231). No other service publishes a port.
+    ports:
+      - "8080:8000"
+    healthcheck:
+      # python is on PATH (/app/.venv/bin); the slim image has no curl/wget.
+      # /login/ renders through the DB and returns 200 without auth, so a 200
+      # proves the app, its static pipeline and the database.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/login/',timeout=5).status==200 else 1)\""]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
+    mem_limit: 1536m
+
+  # Starts nothing, exits 0, waits on web's healthcheck. `docker compose up -d`
+  # blocks on a depends_on health condition, so this makes `up` return only once
+  # the site actually answers rather than the moment containers start
+  # (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}
+  media: {}

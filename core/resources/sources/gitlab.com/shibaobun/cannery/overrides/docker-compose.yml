@@ -1,0 +1,83 @@
+# Replaces Cannery's operator-template compose (secrets commented out, a
+# postgres:17 bind-mounted to ./cannery/data) with a working stack. The app is
+# the official prebuilt image; nothing is built from the clone.
+services:
+  db:
+    # Pinned major: Postgres cannot migrate a datadir backwards, so a floating
+    # tag would break the named volume the first time the major moves.
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, written once by hooks/prepare.sh into
+    # ~/.panelalpha/cannery/. The database never sees SECRET_KEY_BASE/CLOAK_KEY.
+    env_file:
+      - ../.panelalpha/cannery/db.env
+    environment:
+      POSTGRES_DB: cannery
+      POSTGRES_USER: cannery
+      # A named volume is not always empty (lost+found); postgres refuses to
+      # init into a non-empty dir, so give it a clean subdir.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cannery -d cannery -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  cannery:
+    image: ${CANNERY_IMAGE:-docker.io/shibaobun/cannery:dev}
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+    # .env carries the account-overridable defaults (DISABLE_EMAIL, REGISTRATION,
+    # LOCALE) seeded by prepare.sh; app.env carries the persisted secrets and the
+    # DATABASE_URL that embeds the db password.
+    env_file:
+      - .env
+      - ../.panelalpha/cannery/app.env
+    environment:
+      # runtime.exs binds PORT (default 4000); named so the published port and
+      # the healthcheck cannot drift from it.
+      PORT: "4000"
+      # Rewritten to the account's public https address before the stack starts
+      # (ComposePlaceholders rewrites a localhost value whose key ends in _URL).
+      # /pa/entrypoint.sh strips the scheme into HOST, which runtime.exs requires
+      # as a bare hostname for URL/redirect generation and LiveView check_origin.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      - ./panelalpha/cannery:/pa:ro
+    entrypoint: ["/bin/sh", "/pa/entrypoint.sh"]
+    healthcheck:
+      # HomeLive at "/" is public (mount_current_user) and returns 200 for an
+      # anonymous visitor. The alpine app image ships busybox wget; it has no
+      # curl. 127.0.0.1 reaches the release's IPv6-any listener via v4-mapped
+      # sockets, the same path upstream's cross-container reverse proxy uses.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4000/ || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1024m
+
+  # Starts nothing, exits 0, waits on the app's healthcheck. The engine runs
+  # `docker compose up -d` with no --wait, so without this gate the deploy is
+  # "done" the moment containers start and the probe lands while the Elixir
+  # release is still booting and migrating. depends_on a health condition makes
+  # `up -d` block until the site actually answers.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      cannery:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}

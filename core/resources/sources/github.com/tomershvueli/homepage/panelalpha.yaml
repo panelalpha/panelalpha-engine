@@ -1,0 +1,126 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Homepage is a single-page browser start page: one index.php, one JSON
+  configuration file, a jQuery/Bootstrap/Font-Awesome asset bundle and one
+  AJAX endpoint that fetches a background image. No framework, no Composer
+  manifest, no database, no accounts, 25 files in the repository. Everything
+  it shows comes out of `src/config.json`.
+
+  Detection was already right in both of the things it had to decide. There is
+  no composer.json anywhere in the tree, so `php-plain` on the `php` strategy;
+  and the document root is `src/`, which PhpDocroot reaches on its own --
+  there is no index at the repository root, so the root candidate misses and
+  `src` is picked up from LATE_CANDIDATES (PhpDocroot.php:45). It is stated
+  here anyway, because a recipe that names its platform should name where the
+  application is served from rather than leave it to a probe that upstream
+  could invalidate by adding a README-rendered index.html.
+
+  **The PHP error is one missing file and one unguarded return value.**
+  `src/.gitignore` lists `config.json`, so a fresh clone does not have one --
+  upstream's install instruction is "copy config.sample.json and rename it".
+  index.php reads it unconditionally on line 12:
+
+      Warning: file_get_contents(config.json): Failed to open stream:
+      No such file or directory in /app/src/index.php on line 12
+      Fatal error: Uncaught TypeError: array_merge(): Argument #2 must be of
+      type array, null given in /app/src/index.php:13
+
+  `file_get_contents()` returns `false`, `json_decode(false, true)` returns
+  `null`, and `array_merge($default_config, null)` is fatal on PHP 8. The
+  request still answers **HTTP 200**, and that is engine#185 rather than
+  anything upstream did: the shared PHP base image loads no php.ini at all
+  (`php -i` says `Loaded Configuration File => (none)`), so `display_errors`
+  is on, the warning is written into the response body, and printing a body
+  *sends the headers* -- with the 200 that was already on them. Turn
+  display_errors off and the same checkout answers a clean, empty 500. Both
+  copies of the fix are here: hooks/prepare.sh writes the config.json that
+  was missing, and appends `php_flag display_errors off` to the document
+  root's .htaccess so a deploy in which that hook's work is somehow absent
+  fails visibly instead of publishing a stack trace.
+
+  **A config.json without every key is the same defect one notice smaller.**
+  index.php reads `$item['icon']`, `$item['img']`, `$item['link']`,
+  `$item['alt']` and `$item['new_tab']` for every entry with no isset()
+  anywhere, and upstream's own config.sample.json omits `new_tab` on three of
+  its six items -- which on this image is three `Undefined array key
+  "new_tab"` warnings printed into the middle of the `<main>` element. The
+  config written here spells all five keys on all six items for that reason,
+  and keeps the `protected` block (with empty values) because
+  hp_assets/lib/ajax_get_image.php reads `$config['protected'][...]` the same
+  unguarded way.
+
+  **Nothing the customer configures survives a redeploy without this.** Both
+  of the application's mutable things are inside the checkout and both are
+  gitignored -- `src/config.json` and `src/hp_assets/img/*` -- and a redeploy
+  clears and re-clones ~/project (engine#173), so the account's entire
+  configuration is deleted by the next deploy. overrides/docker-compose.override.yml
+  bind-mounts `~/.panelalpha/homepage` at /data and
+  `~/.panelalpha/homepage/img` over `/app/src/hp_assets/img`, and prepare.sh
+  symlinks `src/config.json` to `/data/config.json`. The symlink is what the
+  application reads, so `config.json` still exists at the path upstream's
+  README names; the file it points at is outside ~/project and outside the
+  document root, 0600 in a 0700 directory, because `protected.unsplash_client_id`
+  and `protected.custom_url_headers` are credentials.
+
+  **There is no authentication of any kind, and an operator should be told
+  so.** There is no login, no session, no user record and no admin page --
+  Homepage is a public HTML page that happens to be rendered by PHP. Given a
+  public HTTPS name, every link on it is readable by anyone who finds the
+  name. That is upstream's design (it is a personal start page, normally on a
+  LAN) and not something a recipe can fix without inventing an auth layer the
+  application has no notion of; what it can do is keep the configuration file
+  itself unreadable. Upstream's `src/.htaccess` already denies `config.json`
+  in Apache 2.2 syntax, which works on this image only because
+  mod_access_compat happens to be loaded; prepare.sh adds the 2.4 spelling
+  next to it and extends it to `config.sample.json`, which upstream leaves
+  served and which is the file that documents the `protected` key names. The
+  one endpoint reachable without a session is
+  `hp_assets/lib/ajax_get_image.php`; it is the background fetcher, it takes
+  no parameters, and with no background source configured it answers 200 with
+  an empty body. When an operator does set `protected.custom_url` it becomes
+  a server-side fetch of a URL only that operator can choose -- worth knowing
+  about, not reachable by a visitor.
+
+  **`{{cur}}` is https here by accident, and this recipe makes it deliberate.**
+  Items may write `{{cur}}` for "this site", and `get_current_url()`
+  (index.php:16) decides the scheme from `$_SERVER['HTTPS']` or
+  `SERVER_PORT == 443`. Apache in this image listens on plain 8000 behind the
+  TLS-terminating proxy, so neither should be true -- yet the links come out
+  https, because with no php.ini loaded `variables_order` keeps its compiled
+  default of `EGPCS`, which merges the process environment into `$_SERVER`,
+  and the generated compose file sets `HTTPS: 'on'`. So the correct scheme
+  here is a side effect of engine#185: the day a php.ini appears,
+  php.ini-production's `variables_order = "GPCS"` would silently turn every
+  `{{cur}}` link on every hosted Homepage into `http://`. prepare.sh
+  adds `SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on` to the .htaccess so the
+  scheme comes from the header the engine's proxy actually sends
+  (templates/dind/virtualHost-nginx-proxy.blade.php:39) rather than from that
+  coincidence.
+
+  No stage commands, on purpose. Everything this recipe does is host-side
+  work on the checkout and on ~/.panelalpha, which is exactly what the
+  after-clone hook is for, and a hook runs unconditionally -- so engine#169,
+  which drops every stage command while the log still says the recipe was
+  named, has nothing here to drop. No readiness gate either (engine#90):
+  measured on this host over three cycles, `docker compose up -d` returned in
+  0.9-1.0s and Apache answered HTTP 200 between 68ms and 84ms later, once
+  with no retry at all. There is nothing to wait for -- no database, no
+  migration, no build at boot.
+
+  Two things this recipe deliberately does not do. It does not patch
+  index.php to guard the missing file, because the file not being missing is
+  the actual fix and a patched checkout diverges from upstream for no gain.
+  And it does not configure a background image source: both of upstream's
+  options (an Unsplash client id, or a custom JSON URL and selector) need a
+  credential or an endpoint that belongs to the customer, so the `protected`
+  block is written with empty values and the page uses the tiled
+  `sayagata-400px.png` the repository ships. That file is `src/hp_assets/img`'s
+  only tracked member and main.css:2 is the only thing that references it, so
+  prepare.sh copies it into the persistent image directory before that
+  directory is mounted over it.
+extends: php-plain
+# index.php lives in src/, and there is no index at the repository root.
+# PhpDocroot's late `src` candidate would find it anyway; said here so the
+# answer does not depend on a probe. Not `.`: PlatformManifest::readDocroot() (PlatformManifest.php:305)
+# folds '.' to '' and it would mean "undeclared" (engine#172).
+docroot: src

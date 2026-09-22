@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Ziit is a self-hosted, privacy-first WakaTime alternative: a Nuxt 4 / Nitro
+  (node-server) coding-time tracker. Editor plugins POST "heartbeats" to
+  /api/external/* with a per-user API key; the dashboard renders coding stats.
+  Its database is TimescaleDB (a PostgreSQL extension), not plain Postgres --
+  several migrations run CREATE EXTENSION timescaledb and create_hypertable() on
+  the Heartbeats/Summaries tables, so a stock postgres image fails migrate.
+
+  This is the compose-REPLACE pattern (calcom/cannery/hive-pal): no platform
+  block is declared, so detection runs via fromWalk and engine#221 does not
+  bite. overrides/docker-compose.yml becomes the project's compose. The official
+  prebuilt image ghcr.io/0pandadev/ziit is pulled and run instead of building
+  the clone; a timescale/timescaledb sidecar on a NAMED volume holds all state
+  (users, API keys, heartbeats, summaries); a one-shot `ready` gate makes
+  `docker compose up -d` return only once the app answers (engine#204).
+
+  IMAGE PIN. ZIIT_IMAGE defaults to ghcr.io/0pandadev/ziit:v1.1.2 -- the tag the
+  repo's own docker-compose.yml pins at this HEAD, choosing the published
+  artifact (like Cannery/Hive-Pal), not a source patch. The image entrypoint
+  already runs `npx prisma migrate deploy` before starting node, so migrations
+  are not a separate step; the DB sidecar's healthcheck gates them. The DB image
+  ZIIT_DB_IMAGE defaults to timescale/timescaledb:2.22.1-pg17 (the lighter,
+  non-HA image -- the timescaledb-ha image cannot initdb onto a root-owned named
+  volume, "could not change permissions"; the standard entrypoint here handles
+  ownership and pg17 matches the major the app's own compose targets).
+
+  URL. NUXT_BASE_URL is set to http://localhost and rewritten by
+  ComposePlaceholders to the account's public https URL (key ends in _URL, value
+  matches the localhost pattern). The code reads runtimeConfig.baseUrl =
+  NUXT_BASE_URL to build OAuth redirect URLs and the CORS origin; a bare
+  hostname is not needed (unlike Phoenix), the full URL is used verbatim.
+
+  SECRETS, PERSISTED ONCE. hooks/prepare.sh generates, once, into
+  ~/.panelalpha/ziit/ (0600 in 0700, the only writable place a redeploy does not
+  wipe -- engine#173): the DB password (embedded in NUXT_DATABASE_URL), the
+  PASETO local session key in the exact k4.local.<base64-32> form paseto-ts
+  requires (rotating it logs everyone out), and NUXT_ADMIN_KEY (valid base64 for
+  the z.base64() check on /api/admin -- left empty the admin API would accept an
+  empty key). These live in an env_file, never in the environment block, so
+  ComposePlaceholders never rewrites the PASETO/admin values into a wrong shape.
+  Reused across redeploys so a rebuild neither logs users out nor locks the app
+  out of the pgdata volume.
+
+  AUTH / ONBOARDING. Registration is open self-registration by app design
+  (NUXT_DISABLE_REGISTRATION defaults false); there is no first-user-admin and
+  no email confirmation on register/login (register.post.ts creates the account
+  and sets the session cookie immediately -- SMTP is only needed for the GitHub/
+  Epilogue OAuth flows, left disabled). Data is strictly per-user: every
+  heartbeat is keyed to the API key's user, /api/external/* rejects a missing or
+  malformed Bearer key with 401, and session-only endpoints (/api/user/*,
+  /api/stats) 401 without the cookie. The operator registers the owner account
+  at the site and may set NUXT_DISABLE_REGISTRATION=true afterwards to close
+  public sign-up; credentials for a suggested owner account are written to
+  ~/.panelalpha/ziit/credentials.txt. NUXT_ADMIN_KEY is a separate global admin
+  API secret, not tied to any user.
+
+  PERSISTENCE. TimescaleDB is the whole persistence surface (no filesystem
+  uploads); it lives on the named volume ziit-pgdata, which survives
+  project_rebuild and storage reclaim. Verified end to end on the engine over
+  the real public https domain: deploy, register, read/regenerate the API key,
+  POST a heartbeat with it, read the coding stat back, anonymous access refused
+  (401), and survival of a redeploy (login + heartbeat + API key persist).

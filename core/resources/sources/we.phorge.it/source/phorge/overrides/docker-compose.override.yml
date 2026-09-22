@@ -1,0 +1,234 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the app -- the shared PHP base image, ~/project bind-mounted at /app,
+# the account's own uid, PA_DOCROOT=/app/webroot, Apache on 8000 and APP_URL
+# from the account's own address -- and is missing the three things Phorge
+# cannot be run without: a sibling arcanist checkout, a MySQL server it is
+# allowed to create databases on, and a php.ini.
+#
+# An override rather than a replacement compose file. `overrides/docker-compose.yml`
+# is written into the checkout *before* detection runs, so a compose file in
+# the project root would make Phorge look like a compose project and take the
+# php strategy -- and with it the bind mount, the document root and the staged
+# entrypoint -- off the table entirely.
+services:
+  app:
+    # ----------------------------------------------------------------------
+    # The sibling arcanist checkout, which is Phorge's load path and not a
+    # convenience.
+    #
+    # support/startup/PhabricatorStartup.php:195-212 computes
+    # `$libraries_root = dirname($phabricator_root)`, prepends it to
+    # include_path, and then `@include_once 'arcanist/src/init/init-library.php'`.
+    # $phabricator_root is /app, so the directory it searches is /app's parent:
+    # `/`. hooks/prepare.sh clones arcanist into the checkout and this line
+    # puts it exactly there. scripts/init/lib.php does the same thing for every
+    # `bin/*` command, so one mount serves the web SAPI and the CLI both.
+    #
+    # Read-only: nothing in Phorge writes to the library, and the same files
+    # are already writable at /app/arcanist for whoever needs to update them.
+    #
+    # PHUTIL_LIBRARY_ROOT would be the other way to point at it, and it does
+    # not work here: both call sites read it from $_SERVER, which under mod_php
+    # carries Apache's subprocess environment rather than the container's, so
+    # it would satisfy `bin/storage` and leave every web request fataling on
+    # "Unable to load the Arcanist library".
+    #
+    # Compose merges `volumes` by container path, so the generated /app mount
+    # is kept and this is added to it.
+    volumes:
+      - ./arcanist:/arcanist:ro
+      # The account's secrets, which live outside ~/project because ~/project
+      # is wiped and re-cloned on every deploy (engine defect #173) while the
+      # database volume is not. Read-only, and 0700/0600 on the host side.
+      - ../.panelalpha/phorge:/panelalpha:ro
+
+    environment:
+      # The one way to give this container a php.ini. The base image loads none
+      # at all -- `php --ini` says "Loaded Configuration File: (none)" -- and
+      # scans /usr/local/etc/php/conf.d, a directory inside the image that the
+      # account uid cannot write to. PHP reads PHP_INI_SCAN_DIR from its own
+      # environment at startup whatever the SAPI, so naming a second directory
+      # here reaches the Apache module and the CLI both.
+      #
+      # The image's own directory is listed first and explicitly: this variable
+      # REPLACES the compiled-in path rather than adding to it, and dropping it
+      # would unload every docker-php-ext-*.ini -- mysqli, gd, opcache, the lot
+      # -- which for Phorge is an immediate fatal setup issue
+      # (PhabricatorExtensionsSetupCheck requires mysqli, mbstring, ctype and
+      # curl and marks their absence fatal).
+      #
+      # It also keeps panelalpha-proxy.ini, whose auto_prepend_file sets
+      # $_SERVER['HTTPS'] from the forwarded headers. Phorge needs that:
+      # `phabricator.base-uri` is an https:// URI, and without it every
+      # generated link, every form action and every CSRF check would be built
+      # against the http:// the container actually saw.
+      PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/panelalpha/php
+
+    # ServiceLimits caps an app-role service it did not write at 384m. The
+    # install stage does not fit in it: `bin/storage upgrade` applies ~900
+    # patches across 54 schemas in one process. In an override file this
+    # reaches Docker as written -- the hardener never sees it.
+    mem_limit: 768m
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    # Engine defect #90. The install stage does all of Phorge's setup before
+    # Apache serves anything useful: 54 databases, ~900 storage patches, the
+    # first administrator and the password auth provider. The engine runs
+    # `docker compose up -d` without --wait and probes as soon as it returns,
+    # which is while all of that is still going.
+    #
+    #   1. GET /            logged out, Phorge 302s to /auth/start/. Cheap, and
+    #                       true as soon as Apache binds AND the library loaded
+    #                       -- a missing /arcanist mount is a 500 here, not a
+    #                       redirect -- so it is the liveness half.
+    #   2. GET /auth/start/ grepped, not trusted for its status code, and this
+    #                       is the whole point of the check. Before
+    #                       panelalpha/phorge-bootstrap.php has run, an install
+    #                       with no users and no auth providers answers this URL
+    #                       200 with the first-time-setup page, on which the
+    #                       first stranger to arrive becomes an administrator
+    #                       (PhabricatorAuthController::isFirstTimeSetup, line
+    #                       27). A status check would call that healthy.
+    #                       `name="password"` is on the username/password login
+    #                       form, which only renders once a
+    #                       PhabricatorAuthProviderConfig row exists -- so
+    #                       matching it means the schema is upgraded, the
+    #                       administrator exists and the open door is shut.
+    #
+    # The Host header is not optional, twice over. PhabricatorBaseURISetupCheck
+    # raises a FATAL setup issue on a Host header with no dot in it, which is
+    # an error page rather than the app; and Phorge compares the request host
+    # to `phabricator.base-uri`. APP_URL is the account's own address; `$$` is
+    # an escaped `$`, because Compose interpolates this file itself.
+    #
+    # X-Forwarded-Proto is what the base image's auto_prepend_file turns into
+    # $_SERVER['HTTPS'], so the probe looks like the request a real visitor
+    # makes through the engine's TLS proxy rather than a plain-HTTP one Phorge
+    # would answer with a redirect to its canonical https:// base URI.
+    #
+    # Idempotent, so a retry replays it harmlessly. curl is in the base image.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          H=$$(printf '%s' "$$APP_URL" | sed -e 's#^[a-z][a-z]*://##' -e 's#/.*##') &&
+          curl -fsS -o /dev/null --max-time 30 -H "Host: $$H" -H 'X-Forwarded-Proto: https'
+          http://127.0.0.1:8000/ &&
+          curl -fsS --max-time 60 -H "Host: $$H" -H 'X-Forwarded-Proto: https'
+          http://127.0.0.1:8000/auth/start/ | grep -q 'name="password"'
+      interval: 15s
+      timeout: 90s
+      retries: 40
+      # The storage upgrade, before Apache is useful. A check that fails inside
+      # the start period neither counts against retries nor marks the container
+      # unhealthy, so this is generous on purpose: the host is usually building
+      # something else at the same time.
+      start_period: 900s
+
+  # ------------------------------------------------------------------------
+  # Phorge's database, and the reason this recipe has one at all.
+  #
+  # `database: mysql` in panelalpha.yaml -- what OpenEMR, Matomo and every PHP
+  # CMS shaped like them use -- provisions ONE database on the account's own
+  # MySQL server and grants the account user `ALL PRIVILEGES` on that one name
+  # (app/System/Project/Dind/AppDatabase.php:62). Phorge needs 54. Its DAO
+  # layer computes the schema per application --
+  # `$database = $namespace.'_'.$this->getApplicationName()` in
+  # PhabricatorLiskDAO::establishLiveConnection() -- and
+  # resources/sql/quickstart.sql opens with 54 `CREATE DATABASE
+  # {$NAMESPACE}_<app>` statements. There is no single-schema mode and no
+  # configuration that folds them together. A grant on one name cannot create
+  # the other 53, so the engine's own MySQL is not a server Phorge can be
+  # installed on at all, by anyone, with or without a recipe.
+  #
+  # Hence a sidecar, which costs a container and a volume holding data the
+  # panel cannot list, phpMyAdmin cannot open and the account's backup does not
+  # include. That is a real loss and it is written down in the README. It is
+  # also the only shape in which this application runs.
+  #
+  # Its credentials are NOT set here, and not for want of trying. The engine
+  # harvests this file for backing services and replaces the `environment` of
+  # anything it recognises as a datastore with values of its own -- for a
+  # non-Laravel app those are all the literal string `app`, root password
+  # included (MysqlSidecar::FALLBACK_PASSWORD). `environment:` outranks
+  # `env_file:`, and the only other channel is `.env`, which the engine copies
+  # to a 644 `.env.default`. So the engine wins here and
+  # panelalpha/phorge-db-secure.php replaces the credentials from inside the
+  # app container, once the database is up, on every deploy.
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    volumes:
+      - phorge_db:/var/lib/mysql
+    command:
+      # PhabricatorMySQLSetupCheck:52 wants STRICT_ALL_TABLES and says why: the
+      # software is developed and tested in it, and without it MySQL truncates
+      # oversized values instead of refusing them. MySQL 8's own default has
+      # STRICT_TRANS_TABLES (InnoDB only) and ONLY_FULL_GROUP_BY, which Phorge's
+      # queries do not satisfy.
+      - --sql-mode=STRICT_ALL_TABLES
+      # PhabricatorMySQLSetupCheck:23 wants at least 32 MB. Phorge stores file
+      # data in 8 MB chunks and a single INSERT carries one.
+      - --max-allowed-packet=64M
+      # The setup check asks for 1600M on a dedicated host. This is a tenant's
+      # tracker on a shared box; 256M is the honest number for it, and that
+      # check is an advisory rather than a fatal.
+      - --innodb-buffer-pool-size=256M
+      # Phorge connects as root over the container network. LOCAL INFILE turns
+      # that connection into a file read on the server; nothing in Phorge uses
+      # it (PhabricatorMySQLSetupCheck:327 flags it when it is on).
+      - --local-infile=0
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      # InnoDB full-text, which is what Phorge's search indexes are. The default
+      # is already 3; pinned so a future image default cannot silently stop
+      # three-letter terms matching.
+      - --innodb-ft-min-token-size=3
+
+    # Credential-free on purpose, and it replaces the one the engine generates.
+    #
+    # The generated healthcheck is
+    # `mariadb-admin ping -uroot -p"$$MYSQL_ROOT_PASSWORD"`, and
+    # panelalpha/phorge-db-secure.php changes root's password on the first
+    # deploy -- after which the engine's own check authenticates with a password
+    # the server no longer has and the container goes unhealthy forever.
+    #
+    # `mysqladmin ping` answers "Access denied" rather than a connection error
+    # for a live server with bad credentials, so the grep is what makes "the
+    # server is up" the thing this check actually means. Compose merges
+    # `healthcheck` key by key, so every key the generated file sets is restated
+    # here; leaving one out would keep the engine's value for it.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mysqladmin ping -h 127.0.0.1 --silent ||
+          mysqladmin ping -h 127.0.0.1 2>&1 | grep -q 'Access denied'
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+    mem_limit: 640m
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once Phorge has
+  # built its 54 schemas, created its administrator and rendered a login form,
+  # and what the health probe then meets. A clean exit 0 is not a crash loop as
+  # far as AppHealth is concerned.
+  #
+  # alpine:3, never a datastore image (engine defect #90).
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  phorge_db: {}

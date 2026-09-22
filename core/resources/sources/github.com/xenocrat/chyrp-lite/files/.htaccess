@@ -1,0 +1,93 @@
+# Written by PanelAlpha. Chyrp Lite is served from the root of the checkout,
+# so this file is the site's only per-directory configuration -- and the first
+# block is load-bearing. Replacing this file wholesale, for instance with the
+# URL_rewrite_files.zip that Controls -> Settings -> Routes offers, takes
+# CHYRP_STORAGE_DIR with it and the site answers 503 until the next deploy
+# puts this back. The rewrites from that download are already at the bottom.
+
+# --------------------------------------------------------------- where data lives
+#
+# Chyrp reads STORAGE_DIR from $_SERVER['CHYRP_STORAGE_DIR'] and falls back to
+# includes/ (includes/common.php:101). includes/ is inside the checkout, and a
+# redeploy clears and re-clones ~/project (engine#173) -- so config.json.php,
+# which holds the database password and every setting, would be destroyed by
+# every deploy and the site would reinstall itself each time.
+#
+# /data is ~/.panelalpha/chyrp-lite, bind-mounted by the compose override.
+# It has to be said here rather than in the compose file's environment:
+# upstream's own image needs `PassEnv CHYRP_STORAGE_DIR` for the same reason,
+# because mod_php does not publish the container environment as $_SERVER.
+SetEnv CHYRP_STORAGE_DIR /data
+
+# ------------------------------------------------------------------ uploads
+#
+# The shared PHP base image loads no php.ini at all (engine#185), so PHP's
+# built-in defaults apply: 2M per upload and an 8M POST. Chyrp's own default
+# upload limit is 10M and upstream's Dockerfile raises PHP's to 100M; this is
+# the same thing said in the one place a hosting account can say it. Lower it
+# if you would rather your visitors could not spend the disk.
+php_value upload_max_filesize 100M
+php_value post_max_size 100M
+
+# ------------------------------------------------------------ error output
+#
+# The same missing php.ini leaves display_errors on for every account on the
+# platform (engine#185). Chyrp turns it off itself in includes/error.php, but
+# only for a request that reached a file which includes it: asking Apache for
+# includes/class/SQL.php directly answered 200 with
+#
+#   Fatal error: Uncaught Error: Undefined constant "INCLUDES_DIR" in
+#   /app/includes/class/SQL.php:11
+#
+# measured on a deployed account. Nothing should be printing PHP's diagnostics
+# to the public. The site's own errors still go to error_log.txt, which
+# includes/error.php:8 sets and the block below denies.
+php_flag display_errors Off
+
+# ---------------------------------------------------------------- not pages
+#
+# The generated vhost already denies dotfiles, `docker-compose.ya?ml` and
+# `panelalpha-*`. Two things it does not:
+#
+#   docker-compose.override.yml  the engine writes this recipe's overrides/
+#                                into the project root under that name, and the
+#                                vhost's FilesMatch does not reach it
+#                                (engine#181). Served as text it publishes the
+#                                deploy's arrangement.
+#   error_log.txt                includes/error.php:8 points PHP's error_log at
+#                                MAIN_DIR/error_log.txt -- the document root.
+#                                It is the site's own stack traces and SQL.
+#
+# config.json.php is named too. It should be in /data and out of reach
+# entirely, and it guards itself with a `header("Status: 403"); exit;` first
+# line, but a file holding the database password deserves both.
+<FilesMatch "^(?:docker-compose\.|error_log\.txt$|config\.json\.php$)">
+    Require all denied
+</FilesMatch>
+
+# includes/ and tools/ have .htaccess files of their own beside this one,
+# because a <Directory> rule cannot be written here and a RedirectMatch would
+# race mod_rewrite's rules below for the same request.
+
+# ------------------------------------------------------------- clean URLs
+#
+# This is upstream's own includes/htaccess.conf.php, rendered for a site at the
+# root of its domain -- the file Controls -> Settings -> Routes hands you when
+# you switch Clean URLs on. It is shipped enabled so that the switch works
+# rather than turning every page into a 404, and it is inert while Clean URLs
+# is off: index.php and every real file and directory match the -f/-d
+# conditions and are served directly. Its one visible effect either way is that
+# a request for a file that does not exist gets Chyrp's 404 page instead of
+# Apache's.
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+RewriteRule ^.+\.twig$ index.php [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_URI} ^/admin/.+
+ReWriteRule ^.+$ /admin/index.php [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^.+$ index.php [L]
+</IfModule>

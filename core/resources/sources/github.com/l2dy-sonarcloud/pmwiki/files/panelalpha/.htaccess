@@ -1,0 +1,7 @@
+# The setup script is deploy tooling, not site content. Deny it.
+<IfModule mod_authz_core.c>
+  Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+  Deny from all
+</IfModule>

@@ -1,0 +1,47 @@
+# Layers over the compose the `dockerfile` strategy generates. That file is
+# right about the app -- it builds files/Dockerfile.panelalpha, publishes 9042
+# and injects the public-URL aliases the entrypoint maps to LIWAN_BASE_URL --
+# and it is missing only the three things a stateful app needs: somewhere for
+# its database to live across redeploys, the admin secret, and a gate so
+# `up -d` returns once the site actually answers.
+services:
+  app:
+    # The embedded database (users, entities, settings, every analytics event)
+    # is all the state Liwan has, and ~/project is wiped and re-cloned on every
+    # deploy (engine#173). A named volume survives rebuilds; a bind mount into
+    # ~/project would not. /pa carries the generated admin password, read-only,
+    # from the one account directory a redeploy keeps.
+    volumes:
+      - liwan-data:/data
+      - ../.panelalpha/liwan:/pa:ro
+    # busybox wget is in the wrapper image. GET / is the SPA shell, served only
+    # once the listener is bound, so a build or config that stopped Liwan
+    # starting shows up as a failed deploy rather than a silent 502. 8080 is the
+    # port the entrypoint binds LIWAN_PORT to.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    # One Rust binary with an embedded DuckDB, capped in the entrypoint. Plenty
+    # of headroom on a 3.7 GB host, one deploy at a time.
+    mem_limit: 768m
+
+  # Starts nothing and exits 0. The engine runs `docker compose up -d` without
+  # --wait and treats the deploy as finished when it returns, which without a
+  # gate is the moment the container was started -- before Liwan has run its
+  # migrations and bound the port. A service_healthy dependency blocks `up -d`
+  # until the app's own healthcheck passes; a clean exit 0 is not a crash loop
+  # to AppHealth.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  liwan-data: {}

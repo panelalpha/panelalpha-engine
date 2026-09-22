@@ -1,0 +1,106 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Fusio is a self-hosted API management platform: a PSX/Symfony-DI application
+  over Doctrine DBAL, whose routes, operations, schemas and users all live in
+  its database, with a downloadable administration app served from
+  public/apps/fusio. Detection read the repository correctly -- composer.json
+  and no artisan, so the `php` strategy, PHP 8.4 (composer.json pins
+  `config.platform.php` to 8.4 beside `require.php >=8.4`), the shared Apache
+  base image with ~/project bind-mounted and `composer install` on the host.
+  The deploy finished successfully and every request answered HTTP 500, which
+  is the `serving-error_page` verdict this recipe exists to fix.
+
+  **The database was the committed one, and that alone is the 500.** Unlike
+  most PHP applications, Fusio does not lack a configuration file -- it ships
+  one, filled in, and pointed at a laptop:
+
+      APP_CONNECTION="pdo-mysql://root:test1234@localhost/fusio"
+
+  `configuration.php` reads `psx_connection` from that name, every request
+  opens a DBAL connection with it, and there is no MySQL on the container's
+  own loopback, so the connection refusal comes out of PSX's error handler as
+  a 500 on every path. `database: mysql` is the manifest key that fixes it
+  (the same one Matomo and Omeka S need): the engine provisions a database and
+  user on the account's own MySQL server and hands the container DB_HOST,
+  DB_PORT, DB_DATABASE, DB_USERNAME and DB_PASSWORD, and
+  files/panelalpha/fusio-setup.sh turns those five into the one DSN Fusio
+  wants, on the install and upgrade stages, before Apache binds.
+
+  **The committed value has to be deleted before the container starts, not
+  corrected after.** The generated compose file carries `env_file: - .env`, so
+  every line of the repository's .env becomes a real process environment
+  variable -- and Symfony's `Dotenv::populate()` skips any name that is
+  already set, which is how bolt/core's `!ChangeMe!` secret survived being
+  written to .env.local. A DSN corrected from the install stage would be
+  shadowed by the committed one for the life of the container. So
+  hooks/prepare.sh deletes the line outright while the setup script writes the
+  real one back, and the name is then defined in exactly one place for both
+  Apache and the CLI.
+
+  **APP_DEBUG=true is also committed**, and `psx_debug` is read straight from
+  it. With it on, PSX renders the exception message, the file, the line and
+  the whole stack trace into the response body of every failed request, on a
+  public URL. The prepare hook turns it off, along with APP_ENV=dev.
+
+  **APP_PROJECT_KEY is a published secret.** The repository commits a real
+  32-character key, identical on every clone, and configuration.php says in
+  capitals what it is for: it encrypts the connection credentials stored in
+  the database, and changing it later makes the existing ones unreadable. It
+  is generated per account, and kept in the account's home rather than beside
+  the code, because a rebuild re-clones over ~/project while the database it
+  encrypted stays exactly where it was.
+
+  **Nobody can log in to an installation that installed itself.** Fusio's
+  migrations are the installation -- they create the tables, the categories,
+  the scopes, the roles and every default operation -- and they seed one
+  internal `Administrator` row whose password is generated and told to nobody,
+  which is why Fusio's own readiness check asks for *more than one* user. The
+  setup script creates the human account with `system:user_add`, entirely
+  non-interactively, using a password generated per account into
+  ~/project/.panelalpha-admin-password (0600).
+
+  **And Fusio ships no user interface.** The administration app at
+  /apps/fusio is a separate bundle fetched from api.fusio-project.org by
+  `marketplace:install fusio`, which also creates the OAuth2 app row it
+  authenticates as and rewrites the API URL into its index.html -- from
+  `psx_url`, which is why the setup script writes APP_URL into .env before
+  calling it. That step needs outbound HTTPS and is the only one here that
+  can fail for a reason outside the host, so it is not fatal: the command
+  catches its own errors, and the script reports what is missing and how to
+  retry.
+
+  **public/install.php is a web installer inside the document root.** It is
+  not an open door -- a POST needs a lock file whose name comes from the
+  visitor's own session -- but README.md says to delete it once the install is
+  done, and the install is done from the install stage here. The prepare hook
+  removes it.
+
+  Two things this repository does *not* need, which most of its neighbours do:
+  it commits a composer.lock, so `--no-plugins` costs it nothing (its only
+  composer-plugin, php-http/discovery, is disallowed in composer.json anyway),
+  and it requires no symfony/framework-bundle at the root, so nothing here
+  wants `APP_ENV=prod` from the engine.
+extends: php
+# What PhpDocroot would have worked out anyway -- it probes `public` first and
+# public/index.php is Fusio's front controller -- said out loud because the
+# probe order is not something a recipe should rely on silently, and because
+# it is what keeps .env, configuration.php, provider.php and the setup script
+# out of the web.
+docroot: public
+# Fusio is a database or nothing: `psx_connection` is a DBAL DSN with no
+# default, and the committed one points at a MySQL on localhost that a
+# container has none of. MySQL rather than the SQLite the DSN also accepts,
+# because that is what the account already has, backs up and can open in
+# phpMyAdmin.
+database: mysql
+commands:
+  - id: fusio-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Writes APP_CONNECTION and APP_URL from what the engine provisioned, runs
+      the migrations that are Fusio's installation, creates the first
+      administrator if there is none, and installs the administration app.
+      Idempotent: the upgrade stage replays it on every redeploy.
+    run: 'sh panelalpha/fusio-setup.sh'

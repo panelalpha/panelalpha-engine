@@ -1,0 +1,11 @@
+{
+  "name": "panelalpha-groupoffice-build",
+  "private": true,
+  "description": "Not upstream's. See files/panelalpha-build.sh and the note in panelalpha.yaml: the engine's frontend pass looks for package.json at the checkout root, and Group Office's own is under www/ and has no build script.",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "bash panelalpha-build.sh"
+  }
+}

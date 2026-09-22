@@ -1,0 +1,133 @@
+# Compose stack for Receipt Wrangler. The repository ships no root compose file
+# the engine may run, so this is authored on the project's own official all-in-one
+# image (Docker Hub noah231515/receipt-wrangler). Secrets are interpolated from
+# ~/project/.env, written by hooks/prepare.sh from the values it persists in
+# ~/.panelalpha/receipt-wrangler. No *_URL is set: the SPA calls its API on the
+# same origin with a relative /api base, so any hosting domain just works.
+services:
+  # Redis — the API embeds an asynq task queue and exits fatally without it.
+  # Its data is background jobs (OCR/AI), not primary state, but kept on a small
+  # named volume for durability across restarts.
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+    volumes:
+      - rw-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 128m
+
+  # The official all-in-one image: internal nginx :80 serves the SPA and proxies
+  # /api,/mcp to the Go API on :8081. Does not publish a port — the web front
+  # does, after init secures the admin. SECRET_KEY / ENCRYPTION_KEY are required
+  # (the API exits fatally if either is unset). SQLite keeps the whole DB in the
+  # rw-sqlite volume; uploaded receipt images live in rw-data.
+  app:
+    image: noah231515/receipt-wrangler:latest
+    restart: unless-stopped
+    environment:
+      ENV: prod
+      SECRET_KEY: "${RW_SECRET_KEY}"
+      ENCRYPTION_KEY: "${RW_ENCRYPTION_KEY}"
+      DB_ENGINE: sqlite
+      DB_FILENAME: receipt-wrangler.db
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    volumes:
+      - rw-sqlite:/app/receipt-wrangler-api/sqlite
+      - rw-data:/app/receipt-wrangler-api/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    # bash is present (the image entrypoint uses it); /dev/tcp to :8081 is up only
+    # after DB migrations, redis connect and the bootstrap admin have all run.
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+    mem_limit: 1024m
+
+  # One-shot: while the site is still private, rotate the bootstrap admin's public
+  # default password (admin/admin) to the generated one. Idempotent — on a
+  # redeploy the admin/admin login fails (already rotated) and this exits clean.
+  init:
+    image: alpine:3
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      RW_ADMIN_PASSWORD: "${RW_ADMIN_PASSWORD}"
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        ok=0
+        for i in $$(seq 1 60); do
+          if wget -qO- http://app/api/featureConfig >/dev/null 2>&1; then ok=1; break; fi
+          sleep 2
+        done
+        [ "$$ok" = 1 ] || { echo "rw-init: API never became reachable"; exit 1; }
+
+        resp=$$(wget -qO- --header='Content-Type: application/json' \
+          --post-data='{"username":"admin","password":"admin"}' \
+          "http://app/api/login?tokensInBody=true" 2>/dev/null || true)
+        case "$$resp" in
+          *'"jwt"'*) : ;;
+          *) echo "rw-init: bootstrap admin/admin login failed - already secured"; exit 0 ;;
+        esac
+
+        jwt=$$(printf '%s' "$$resp" | sed -n 's/.*"jwt":"\([^"]*\)".*/\1/p')
+        uid=$$(printf '%s' "$$resp" | sed -n 's/.*"userId":\([0-9]\{1,\}\).*/\1/p')
+        [ -n "$$jwt" ] && [ -n "$$uid" ] || { echo "rw-init: could not parse jwt/userId"; exit 1; }
+
+        wget -qO- --header="Authorization: Bearer $$jwt" \
+          --header='Content-Type: application/json' \
+          --post-data="{\"password\":\"$$RW_ADMIN_PASSWORD\"}" \
+          "http://app/api/user/$$uid/resetPassword" >/dev/null 2>&1 || true
+
+        v=$$(wget -qO- --header='Content-Type: application/json' \
+          --post-data="{\"username\":\"admin\",\"password\":\"$$RW_ADMIN_PASSWORD\"}" \
+          "http://app/api/login?tokensInBody=true" 2>/dev/null || true)
+        case "$$v" in
+          *'"jwt"'*) echo "rw-init: admin password rotated"; exit 0 ;;
+          *) echo "rw-init: admin password rotation failed"; exit 1 ;;
+        esac
+    mem_limit: 128m
+
+  # Single-origin front. Publishes 8080 so the engine's port detection routes the
+  # hosting domain here, and only starts once init has secured the admin.
+  web:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./proxy/default.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      app:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/api/featureConfig >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 128m
+
+volumes:
+  rw-redis:
+  rw-sqlite:
+  rw-data:
+
+networks:
+  default:
+    name: receipt-wrangler-network

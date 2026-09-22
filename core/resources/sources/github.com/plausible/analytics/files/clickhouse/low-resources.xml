@@ -1,0 +1,35 @@
+<!--
+  Upstream's clickhouse/low-resources.xml, sized down further. Upstream targets
+  a machine with a few gigabytes to spare and caps the mark cache at 500 MB;
+  this ClickHouse has a 768 MB mem_limit inside a 2.5 GB account shared with
+  Plausible and PostgreSQL.
+
+  max_server_memory_usage is stated rather than left to the default ratio of
+  the *host's* RAM: ClickHouse does read the cgroup limit, but saying the
+  number leaves nothing to a kernel interface that has changed shape between
+  cgroup v1 and v2.
+
+  The schedule pools are sized down because they are allocated eagerly and the
+  account's containers have a pids limit. BackgroundSchedulePool's constructor
+  starts all of its threads at once, and the default is 512 of them — more than
+  the 256 pids ServiceHardener gives a service, so ClickHouse aborted at
+  startup with "Couldn't get 512 threads from global thread pool". The compose
+  file raises this container's pids_limit as well; both are needed, because a
+  container that may create a thousand threads still should not.
+
+  background_pool_size is deliberately left at its default. Cutting it to 4 is
+  the obvious next saving and it refuses to start the other way:
+  `number_of_free_entries_in_pool_to_execute_mutation` defaults to 20 and is
+  validated against background_pool_size *
+  background_merges_mutations_concurrency_ratio, so a pool of 4 fails with
+  BAD_ARGUMENTS before the server ever listens.
+-->
+<clickhouse>
+    <max_server_memory_usage>536870912</max_server_memory_usage>
+    <mark_cache_size>134217728</mark_cache_size>
+    <max_concurrent_queries>16</max_concurrent_queries>
+    <background_schedule_pool_size>32</background_schedule_pool_size>
+    <background_distributed_schedule_pool_size>8</background_distributed_schedule_pool_size>
+    <background_message_broker_schedule_pool_size>8</background_message_broker_schedule_pool_size>
+    <mlock_executable>false</mlock_executable>
+</clickhouse>

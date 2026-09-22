@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Traggo is a self-hosted, tag-based time tracker: a single Go binary that
+  serves its own bundled web UI and GraphQL API on one port (3030) with an
+  embedded SQLite database behind it (dialect sqlite3, the only dialect the
+  binary ships). There are no projects or tasks -- you record tagged time spans
+  -- and everything sits behind a login. This is the closed single-owner model:
+  Traggo has no public self-registration, users are created by an admin from the
+  UI, and every data route (the GraphQL API) needs a valid session, so an
+  anonymous request gets no data.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes the app as
+  traggo/server on Docker Hub and tags every release; this recipe runs that
+  official image with a compose-replace, pinned to the current stable release
+  0.8.3 (Hub `latest` at time of writing). Building from source would compile
+  Go + a web UI on a small host for no gain. Seeding a Docker Hub image also
+  sidesteps engine#229 (image-seed NotFound on a from-registry seed, which is
+  the GHCR case, not Hub).
+
+  WHY COMPOSE-REPLACE. There is no datastore sidecar to add -- SQLite is
+  embedded -- but a hosted deploy needs two things bare detection cannot give:
+  a database file that outlives a redeploy, and a first admin whose password is
+  not the shipped default. The repo's own docker-compose is the bare
+  `image + one bind-mount + admin env` example; this override is that same shape
+  with the DB on a named volume and the admin password generated once instead of
+  hardcoded. The scratch-based image has no shell, curl or wget, so it carries
+  no internal healthcheck; a curl sidecar polls the public UI and a `ready` gate
+  waits on it, so `compose up` returns only once Traggo actually answers
+  (engine#204: up -d returns before the app is up).
+
+  ADMIN BOOTSTRAP, NO LIVE DEFAULT CREDENTIALS. On first boot, when no users
+  exist, Traggo creates one admin from TRAGGO_DEFAULT_USER_NAME /
+  TRAGGO_DEFAULT_USER_PASS (both default to `admin`, which would leave a live
+  admin/admin). hooks/prepare.sh generates a strong password once and passes it
+  as TRAGGO_DEFAULT_USER_PASS, so the default admin/admin is never valid. Once
+  the admin row exists, that env is ignored on every later boot -- the user
+  lives in the SQLite file on the named volume, so the seed only ever runs when
+  the volume is empty, and the same generated password is reused. There is no
+  open signup in Traggo, so no registration toggle is needed.
+
+  PERSISTENCE. TRAGGO_DATABASE_CONNECTION points the SQLite file at
+  /opt/traggo/data/traggo.db and a named volume is mounted at
+  /opt/traggo/data, so the admin user and every time span / tag / dashboard
+  survives project_rebuild and storage reclaim. The generated admin password is
+  written once into ~/.panelalpha/traggo/ (0600 in 0700), the only writable,
+  rebuild-surviving place, since ~/project is wiped on every deploy
+  (engine#173), and reused on every redeploy.
+
+  COOKIES / HTTPS. Traggo's session cookie is set with only name/value/max-age
+  (auth/middleware.go) -- no Secure or SameSite flag and no config knob for it
+  -- so login works unchanged when the proxy terminates TLS and the app sees
+  plain HTTP; there is nothing cookie-related to configure.
+
+  PORT. The binary EXPOSEs and listens on 3030; only the app publishes a port
+  (3030:3030) so the engine's port scan takes it as the primary (engine#234).
+  The curl and ready helpers publish nothing.

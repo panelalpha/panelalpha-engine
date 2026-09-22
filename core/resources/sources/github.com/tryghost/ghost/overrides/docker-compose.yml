@@ -1,0 +1,102 @@
+# The stack for the repository, which ships none Docker would load: its
+# compose.dev.*.yaml files are a laptop dev environment (source bind mounts, a
+# Caddy gateway, mailpit, a stripe CLI) under names compose never auto-loads.
+#
+# Ghost runs from its published image rather than from this checkout because
+# the repository's Dockerfile.production cannot build a self-hosting image on
+# its own: the `full` target copies ghost/core/core/built/admin, which CI
+# injects from a separate admin build job and a fresh clone does not have.
+services:
+  mysql:
+    # Ghost has no sqlite fallback in production: env/config.production.json
+    # pins database.client to mysql. 8.4 is the version Ghost's own
+    # compose.dev.yaml develops against.
+    image: mysql:8.4
+    restart: unless-stopped
+    # A default MySQL sizes its buffer pool for a dedicated host. This one
+    # shares an account with Ghost, whose Node heap is the memory that matters.
+    command:
+      - --innodb-buffer-pool-size=128M
+      - --max-connections=64
+      - --performance-schema=OFF
+    environment:
+      MYSQL_DATABASE: ghost
+      MYSQL_USER: ghost
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
+    mem_limit: 768m
+
+  ghost:
+    # Tag written by hooks/prepare.sh from the checkout's own major version.
+    image: ${GHOST_IMAGE:-ghost:6-alpine}
+    restart: unless-stopped
+    ports:
+      - "2368:2368"
+    environment:
+      # Not a real address, and not meant to survive: ComposePlaceholders
+      # rewrites a bare http://localhost under a *_URL-shaped key to the
+      # account's public https URL before the stack starts. Ghost reads this
+      # key lowercase (nconf takes env keys verbatim), so the engine's own
+      # URL/APP_URL/SITE_URL aliases would not have reached it.
+      url: http://localhost
+      NODE_ENV: production
+      database__client: mysql
+      database__connection__host: mysql
+      database__connection__port: "3306"
+      database__connection__user: ghost
+      database__connection__password: ${MYSQL_PASSWORD}
+      database__connection__database: ghost
+      # Production defaults to file-only logging, which leaves `docker logs`
+      # empty and a failed boot invisible.
+      logging__transports: '["stdout"]'
+      NODE_OPTIONS: --max-old-space-size=768
+    volumes:
+      - ghost_content:/var/lib/ghost/content
+    depends_on:
+      mysql:
+        condition: service_healthy
+    # Ghost's own dev healthcheck, verbatim: a manual-redirect fetch that
+    # passes on anything under 500, so the 301 to the canonical https origin
+    # counts as answering. Node 22 in the image has a global fetch; the image
+    # has no curl.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:2368/',{redirect:'manual'}).then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1024m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be finished
+  # when that returns — at which point Ghost's container has been *started*,
+  # not yet *answered*: its first boot runs knex-migrator against an empty
+  # database, which takes about a minute, and the health probe that runs
+  # immediately afterwards saw a 503. Compose does block on a depends_on
+  # health condition, so a service that waits on Ghost's healthcheck is what
+  # makes `up -d` return only once the site actually answers. A clean exit 0 is
+  # explicitly not a crash loop as far as AppHealth is concerned.
+  ready:
+    image: ${GHOST_IMAGE:-ghost:6-alpine}
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      ghost:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  mysql_data: {}
+  ghost_content: {}

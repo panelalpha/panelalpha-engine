@@ -1,0 +1,16 @@
+# Written by PanelAlpha. Symfony UX Live Component's own Flex recipe file,
+# missing from a clone for the same reason as config/routes/api_platform.yaml:
+# `/config/` is gitignored, only a few files under it were added by hand, and
+# `--no-plugins` means symfony/flex never wrote the rest.
+#
+# The bundle ships the route and does not import it; the import is the recipe's
+# job. Without it `path('ux_live_component')` has nothing to generate from, and
+# Flexy's header component calls it on line 19 of
+# components/Organisms/HeaderNav/Base.html.twig -- so every front-office page
+# answered HTTP 500 with `Unable to generate a URL for the named route
+# "ux_live_component" as such route does not exist.`
+#
+# The resource is the bundle's own config/routes.php, addressed through the
+# bundle name, which is the wording the recipe uses.
+live_component:
+    resource: '@LiveComponentBundle/config/routes.php'

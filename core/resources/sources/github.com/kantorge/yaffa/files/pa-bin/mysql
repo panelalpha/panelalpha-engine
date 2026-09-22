@@ -1,0 +1,13 @@
+#!/bin/sh
+# `mysql` client shim for Laravel's schema loader.
+#
+# YAFFA ships a squashed schema dump (database/schema/mysql-schema.sql), and
+# `php artisan migrate` on a fresh database replays it by piping the file into
+# the `mysql` CLI. The engine's PHP runtime image has pdo_mysql and mysqli but
+# no mysql/mariadb client, so migrate would die on `sh: 1: mysql: not found`
+# and the container crash-loops. This shim sits first on PATH (see the recipe's
+# env: PATH) and feeds the dump on stdin into the database through PDO instead.
+# Laravel passes the credentials as LARAVEL_LOAD_* environment variables, which
+# pa-mysql-load.php reads. It is reached only when migrate loads the stored
+# schema, i.e. only on a fresh database.
+exec php /app/pa-bin/pa-mysql-load.php "$@"

@@ -1,0 +1,51 @@
+# Written by PanelAlpha. Thelia runs behind a TLS-terminating reverse proxy.
+#
+# Nothing in the repository configures trusted_proxies -- config/packages holds
+# api_platform, liip_imagine and monolog, and none of the core bundle's own
+# package files set it -- so Symfony trusts no X-Forwarded-* header and reads
+# the scheme and port off the Apache it is actually listening on. Every
+# absolute URL Thelia generates then comes out as `http://<domain>:8000/`: the
+# canonical link and the hreflang alternates on every page, the sitemap, the
+# redirect after a login POST, the URLs in order confirmation mails -- an
+# unencrypted URL on a port nothing publishes, inside an https document.
+#
+# The engine's proxy sends what is needed. templates/dind/virtualHost-nginx-
+# proxy.blade.php sets Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto,
+# X-Forwarded-Host and X-Forwarded-Port on both the http and the https server
+# block; X-Forwarded-Port is $server_port, so 443 on the TLS one, which is why
+# the port disappears from the URL rather than becoming an explicit :443.
+#
+# Loaded because App\Kernel::configureContainer() imports
+# `../config/{packages}/*.yaml`, and TheliaKernel applies the resulting
+# `kernel.trusted_proxies` / `kernel.trusted_headers` parameters to the Request
+# class on boot.
+framework:
+  # The application secret, which nothing else in a clone supplies. Symfony's
+  # framework-bundle recipe writes `secret: '%env(APP_SECRET)%'` into
+  # config/packages/framework.yaml, and that file is a Flex recipe's output:
+  # thelia/thelia's .gitignore lists `/config/`, and what the repository tracks
+  # under it is only bundles.php and three package files someone added by
+  # hand. With `--no-plugins` symfony/flex never runs and no recipe is ever
+  # applied, so framework.secret is never set and the container fails to
+  # compile: `You have requested a non-existent parameter "kernel.secret"`.
+  # Thelia's own core/lib/Thelia/Config/Resources/packages/framework.php
+  # configures sessions, caching and rate limiting, and says nothing about the
+  # secret.
+  #
+  # hooks/prepare.sh writes APP_SECRET into .env, per account, replacing the
+  # empty value the repository ships.
+  secret: '%env(APP_SECRET)%'
+  # Symfony's own name for "the RFC 1918 ranges plus loopback"
+  # (Request::setTrustedProxies). The proxy is a container on the account's own
+  # bridge network, so its address is always in one of them, and naming the
+  # ranges rather than an address survives the bridge being renumbered.
+  trusted_proxies: 'private_ranges'
+  # Named rather than left to the default, which is for-, port- and proto-
+  # only: without x-forwarded-host a request whose Host the proxy rewrote would
+  # build the wrong absolute URL. FrameworkExtension applies trusted_proxies
+  # only when trusted_headers is also non-empty, so the two belong together.
+  trusted_headers:
+    - x-forwarded-for
+    - x-forwarded-host
+    - x-forwarded-proto
+    - x-forwarded-port

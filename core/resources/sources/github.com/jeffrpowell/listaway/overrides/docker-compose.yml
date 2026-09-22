@@ -1,0 +1,55 @@
+# REPLACE compose: this becomes the project's docker-compose.yml, so the
+# compose strategy runs it and ComposePlaceholders rewrites APP_URL below.
+# The repo's own root Dockerfile is left unused — the published release image
+# is what the README's compose runs too.
+services:
+  app:
+    image: ghcr.io/jeffrpowell/listaway:v1.18.2
+    restart: unless-stopped
+    ports:
+      # Published so ComposePortScan routes the public domain here (8080); the
+      # postgres 5432 is recognised as internal and never exposed.
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: listaway
+      POSTGRES_DB: listaway
+      # localhost value is rewritten to the account's public https URL by
+      # ComposePlaceholders (matches *_URL + local-host pattern, port 8080 is
+      # in its allow-list). Drives password-reset links and share URLs.
+      APP_URL: http://localhost:8080
+    env_file:
+      # Generated once by the prepare hook and reused across rebuilds:
+      # POSTGRES_PASSWORD + LISTAWAY_AUTH_KEY. ~/project/../.panelalpha.
+      - ../.panelalpha/listaway/secrets.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 384m
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: listaway
+      POSTGRES_DB: listaway
+      PGDATA: /var/lib/postgresql/data/pgdata
+    env_file:
+      # POSTGRES_PASSWORD, same file the app reads, so both agree.
+      - ../.panelalpha/listaway/secrets.env
+    volumes:
+      # Named volume survives project_rebuild / storage-reclaim (only account
+      # deletion or a failed-deploy rollback wipes it).
+      - listaway-pgdata:/var/lib/postgresql/data
+      # First-init only (empty data dir): creates the `listaway` schema the
+      # app's own init.sql assumes already exists.
+      - ./pa-initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U listaway -d listaway"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    mem_limit: 256m
+volumes:
+  listaway-pgdata:

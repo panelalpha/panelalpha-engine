@@ -1,0 +1,16 @@
+# Written by PanelAlpha.
+#
+# The inner half of the rule in ../.htaccess. Group Office's installer is
+# unauthenticated from end to end -- configfile.php rewrites ../config.php from
+# POST fields (configfile.php:103-112), install.php makes whoever posts it the
+# System Administrator (install.php:71-85), and upgrade.php runs schema
+# migrations for the life of the installation, not only before it is installed.
+#
+# The install and the upgrade both run from ../panelalpha-install.php in a CLI
+# process on the install and upgrade stages, before Apache binds, with an
+# administrator password generated per account into
+# ~/.panelalpha/groupoffice-admin-password.
+#
+# If you need the web upgrader for a migration this recipe will not do, delete
+# this file and the RedirectMatch in ../.htaccess, run it, and put them back.
+Require all denied

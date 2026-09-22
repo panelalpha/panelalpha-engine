@@ -1,0 +1,9 @@
+# The image is mod_php with display_errors on, and b1gMail keeps E_WARNING
+# reporting even outside DEBUG (serverlib/init.inc.php:314). Its first render
+# on a cold template cache prints "Undefined array key 7" from
+# serverlib/common.inc.php:3035 straight into the page, absolute path and all -
+# which is also what fails the engine's no-diagnostics-in-output check on the
+# probe right after a deploy. Diagnostics belong in the log, where ErrorLog
+# /dev/stderr puts them in `docker logs`.
+php_flag display_errors off
+php_flag log_errors on

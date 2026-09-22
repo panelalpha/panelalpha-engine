@@ -1,0 +1,38 @@
+# Phorge's front controller rules. The repository ships no .htaccess at all --
+# `ls -a webroot/` is index.php and rsrc/ -- because upstream documents these as
+# a <VirtualHost> block the administrator writes by hand. On this engine the
+# vhost is generated and shared by every PHP application, and its
+# <Directory "${PA_DOCROOT}"> sets `AllowOverride All` precisely so an
+# application can bring its own; this is that file.
+#
+# Without it Phorge answers every URL with
+# "Request parameter '__path__' is not set. Your rewrite rules are not
+# configured correctly." -- support/startup/PhabricatorStartup.php:604 fatals on
+# a request that reached index.php without it. Phorge has exactly one PHP entry
+# point and derives the route from that parameter alone; there is no
+# PATH_INFO fallback outside the PHP built-in server.
+RewriteEngine On
+
+# The loop guard, and the one line that differs from upstream's vhost. In a
+# per-directory context mod_rewrite strips the directory prefix and then runs
+# the whole ruleset again over the substituted URI -- so the catch-all below
+# would match its own output, `index.php`, forever. In a <VirtualHost> the
+# rules run once and upstream needs no such rule.
+RewriteRule ^index\.php$ - [L]
+
+# Served from disk rather than through PHP, exactly as upstream's vhost does
+# (`RewriteRule ^/rsrc/(.*) - [L,QSA]`). webroot/rsrc/ is ~3,000 static files:
+# the stylesheets, scripts, images and fonts of the interface. Phorge's own
+# CelerityResourceController serves the hashed /res/<hash>/... URLs through
+# index.php; these are the unhashed ones and are ordinary files.
+RewriteRule ^rsrc/ - [L,QSA]
+RewriteRule ^favicon\.ico$ - [L,QSA]
+
+# Everything else. The leading slash is written here rather than captured
+# because the per-directory context has already removed it, and
+# PhabricatorStartup.php:610 fatals on a __path__ that does not begin with one.
+#
+# [B] escapes the backreference before it is substituted into the query string,
+# so a path containing %, & or + reaches Phorge as the bytes the client sent.
+# [QSA] keeps the client's own query parameters alongside __path__.
+RewriteRule ^(.*)$ index.php?__path__=/$1 [B,L,QSA]

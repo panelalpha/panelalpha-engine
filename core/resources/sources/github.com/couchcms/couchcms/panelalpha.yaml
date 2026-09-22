@@ -1,0 +1,111 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  CouchCMS is a small PHP content management system of the older school: no
+  Composer, no framework, no front controller. You write the pages of your site
+  yourself, mark the parts that should be editable with its own `<cms:...>`
+  tags, and `couch/` supplies the database, the parser and the admin panel
+  behind them. The repository is exactly that -- `README.md`, `CHANGELOG.md`,
+  `INSTALL.md`, `UPGRADE.md` and `couch/`, with nothing at the root that
+  answers HTTP. Detection read it correctly (no composer.json, so the
+  `php-plain` platform on the `php` strategy) and the deploy finished in 30s
+  with every request answering 403: `serving-missing_entry`, which is the whole
+  of what this recipe fixes.
+
+  **The mysql_* calls are not the problem they look like.** `couch/db.php`
+  calls `mysql_connect`, `mysql_query` and `mysql_fetch_row` -- the extension
+  removed in PHP 7.0 -- across ~150 call sites. The tree ships its own shim for
+  them, `couch/includes/mysql2i/`, reimplementing the whole API on mysqli, and
+  `couch/header.php:194` includes it whenever `extension_loaded('mysql')` is
+  false, which on PHP 8.4 is always. CouchCMS runs unmodified on the shared
+  base image.
+
+  **The document root is the repository root, not `couch/`.** Serving `couch/`
+  would put the admin at `/` and cost one line, and it is wrong: CouchCMS
+  derives `K_ADMIN_URL` as `K_SITE_URL . basename(K_COUCH_DIR) . '/'`
+  (couch/header.php:283) and `K_SITE_DIR` as the *parent* of `couch/`
+  (header.php:197), so an installation whose document root is `couch/` has its
+  admin panel advertising a URL one level above what Apache will serve, and its
+  uploads directory addressed as `/couch/uploads/` inside a document root that
+  is already `couch/`. Upstream's own model is the other one -- your pages at
+  the root, `couch/` beside them -- so the recipe lays down the page that was
+  missing rather than moving the server to where the code happens to be.
+  files/index.php is that page: a working CouchCMS template with one editable
+  region, which is the smallest honest example of what this CMS is for. The
+  document root then also holds README.md and the rest of the checkout's
+  documentation, which is public text in a public repository.
+
+  **The engine's own files are inside that document root, which is why two of
+  them are named the way they are.** The generated vhost denies dotfiles and
+  `<FilesMatch "^(?:docker-compose\.ya?ml|panelalpha[-.])">`
+  (resources/deploy/templates/apache-vhost.stub), so `panelalpha-setup.sh` and
+  `panelalpha-install.php` at the root are denied, where the `panelalpha/`
+  *directory* other recipes use -- they serve from `public/` and it is not
+  web content there -- would have been served as plain text.
+
+  **couch/install.php is first-visitor-wins.** It creates every table and the
+  super-admin account from whatever it is posted, and header.php hands any
+  request to it whenever the `k_couch_version` row is missing -- no token, no
+  lock file, no gate. Published on a public URL that is the hole found in
+  Koillection, Outline, NocoDB and Mattermost. files/panelalpha-install.php
+  runs upstream's own installer from the install stage in a CLI process,
+  assembling the request in `$_SERVER` and `$_POST` rather than over a socket,
+  with a password generated per account into `~/.panelalpha/` by
+  hooks/prepare.sh. Once it has run the window is shut for good: the version
+  row is the only thing header.php checks, and it is now there. The install is
+  fatal to the deploy if it fails, which is the point -- a CouchCMS that
+  answered 200 with an open installer would be worse than one that did not
+  deploy.
+
+  **A registered template is the difference between a home page and a login
+  redirect.** CouchCMS inserts a template's row and creates its master page
+  only for a logged-in super-admin (couch/page.php:181, page.php:684); an
+  anonymous visitor who gets there first is bounced to the admin login. So the
+  same install stage makes that first super-admin visit itself, in-process,
+  after the install. It is also where `couch/upgrade.php` runs -- header.php
+  invokes it inline whenever the checkout is newer than the schema, so without
+  this a version bump would be migrated by whichever visitor happened to
+  arrive first.
+
+  **Licensing: the attribution must stay.** couch/LICENSE.txt is the Common
+  Public Attribution License 1.0, which permits hosting for third parties and
+  requires, in Exhibit B, that the Original Developer's attribution be
+  displayed each time the software is run. Sections 99 and 100 of
+  config.example.php are that mechanism -- `K_PAID_LICENSE` and
+  `K_REMOVE_FOOTER_LINK`, both 0 -- and CouchCMS uses them to add "Powered by
+  CouchCMS" to every front-end page (couch/cms.php:295) and to keep its own
+  name and logo in the admin panel. The recipe writes config.php from upstream's
+  example and leaves both constants exactly as they ship. Turning either on is
+  what CouchCMS sells a commercial licence for; it is the customer's to buy and
+  not PanelAlpha's to switch on, and nothing here presents the admin panel as
+  PanelAlpha's own.
+
+  Two things worth knowing about a hosted CouchCMS. Uploads land in
+  `couch/uploads/` inside the checkout, and a redeploy re-clones over
+  ~/project, so they do not survive one while the database rows pointing at
+  them do. And the per-installation secrets (`secret_key`, `nonce_secret_key`)
+  are generated with `rand()` rather than a CSPRNG (couch/functions.php:2133) --
+  weak, but per-installation and stored in the account's own database, so
+  nothing about them is shared between tenants.
+extends: php-plain
+# MySQL or nothing: db.php opens a mysql connection from four K_DB_*
+# constants, install.php builds ~20 InnoDB tables, and there is no SQLite path
+# anywhere in the tree. The checkout has no compose file and nothing to point
+# the engine at a database of its own.
+database: mysql
+# `docroot` is deliberately absent rather than `docroot: .`: the manifest
+# reader folds '.' to '' (PlatformManifest.php:305), which means "undeclared",
+# so it cannot say "the repository root" at all. The probe reaches the root on
+# its own once files/index.php is there, and the compose override pins
+# PA_DOCROOT=/app so the answer does not depend on that.
+commands:
+  - id: couchcms-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Writes couch/config.php from the database the engine provisioned and the
+      account's own URL, runs CouchCMS's installer if the schema is not there,
+      and makes the first super-admin visit that registers the starter template
+      and migrates the schema. Idempotent: the upgrade stage replays it on
+      every redeploy.
+    run: 'sh panelalpha-setup.sh'

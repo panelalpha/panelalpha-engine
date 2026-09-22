@@ -1,0 +1,120 @@
+# Full replacement: MixpostApp ships only Laravel source and no compose file,
+# so the stack is built from the official standalone image. Secrets are
+# interpolated from ~/project/.env, which the prepare hook writes from the
+# values persisted under ~/.panelalpha/mixpost/. APP_URL is left local on
+# purpose — the platform rewrites it to the public https URL before start.
+services:
+  init:
+    image: inovector/mixpost:v2.6.0
+    environment:
+      APP_NAME: Mixpost
+      APP_ENV: production
+      APP_KEY: ${APP_KEY}
+      APP_URL: http://localhost
+      APP_DEBUG: "false"
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_DATABASE: mixpost
+      DB_USERNAME: mixpost
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      QUEUE_CONNECTION: redis
+      MIXPOST_DISK: public
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    entrypoint: ["/bin/sh"]
+    command: ["/panelalpha/seed.sh"]
+    volumes:
+      - mixpost_storage:/var/www/html/storage/app
+      - ./panelalpha:/panelalpha:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mixpost
+
+  mixpost:
+    image: inovector/mixpost:v2.6.0
+    mem_limit: 1g
+    restart: unless-stopped
+    environment:
+      APP_NAME: Mixpost
+      APP_ENV: production
+      APP_KEY: ${APP_KEY}
+      APP_URL: http://localhost
+      APP_DEBUG: "false"
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_DATABASE: mixpost
+      DB_USERNAME: mixpost
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      QUEUE_CONNECTION: redis
+      MIXPOST_DISK: public
+    ports:
+      - "8080:80"
+    volumes:
+      - mixpost_storage:/var/www/html/storage/app
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    networks:
+      - mixpost
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:80/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: mixpost
+      MYSQL_USER: mixpost
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mixpost_db:/var/lib/mysql
+    networks:
+      - mixpost
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - mixpost_redis:/data
+    networks:
+      - mixpost
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+networks:
+  mixpost:
+    driver: bridge
+
+volumes:
+  mixpost_db: {}
+  mixpost_redis: {}
+  mixpost_storage: {}

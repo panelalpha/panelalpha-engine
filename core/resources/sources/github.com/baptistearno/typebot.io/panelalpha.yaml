@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Typebot is a two-app conversational-form builder: the builder (the editor,
+  baptistearno/typebot-builder) and the viewer (the public bot runtime,
+  baptistearno/typebot-viewer), both Next.js standalone servers on :3000,
+  backed by one Postgres. Redis in the repository's compose is optional — it
+  only backs rate limiting (packages/auth reads REDIS_URL and skips it when
+  unset) — so it is dropped to save memory.
+
+  The repository ships a docker-compose.yml that runs both apps plus Postgres
+  and Redis, but its env_file (.env) does not exist in a clone (only
+  .env.example does), its ENCRYPTION_SECRET is a value committed to the public
+  repo, and NEXTAUTH_URL / NEXT_PUBLIC_VIEWER_URL are empty — @typebot.io/env
+  validates ENCRYPTION_SECRET as exactly 32 chars and NEXTAUTH_URL as a URL,
+  so a verbatim deploy boots into a 500 on every path. This override replaces
+  that compose: the builder is the one service the engine's proxy fronts, the
+  viewer and Postgres sit beside it, and the prepare hook generates the secrets
+  the apps refuse to start without.
+
+  ONE-DOMAIN LIMITATION. The viewer's Next.js route is a root catch-all
+  (apps/viewer/src/pages/[[...publicId]].tsx), so it owns the whole path
+  namespace of its origin and cannot share the builder's domain by path
+  routing: a published bot is served from the viewer as https://VIEWER/<id>.
+  A PanelAlpha account with a single public domain therefore gets a working
+  editor (build, design, preview and manage bots) but cannot publicly serve
+  published bots — that needs a second public hostname for the viewer, set as
+  NEXT_PUBLIC_VIEWER_URL. This is a partial/limited deployment by design; the
+  builder is fully usable, publishing to the internet is not, on one domain.
+
+  LOGIN. Typebot auth is passwordless: packages/auth/src/lib/providers.ts
+  registers only the providers whose env is set (email magic-link via SMTP, or
+  GitHub/Google/GitLab/Azure/Keycloak/OIDC OAuth) and there is no credentials
+  provider. With neither SMTP nor an OAuth app configured the providers array
+  is empty and nobody can sign in. ADMIN_EMAIL grants the owner role to the
+  first account that signs in with that address; the owner must supply SMTP
+  (client-side sending, for the magic-link code) or an OAuth app. The prepare
+  hook generates ADMIN_EMAIL per account; SMTP/OAuth is the operator's to add.

@@ -1,0 +1,139 @@
+# Replaces the repository's compose with the upstream all-in-one image
+# (weblate/weblate: nginx + uWSGI web + Celery under supervisor) plus external
+# Postgres and Redis sidecars. Only the app publishes a port (8080), so the port
+# scan takes it as the primary. Secrets come from env_files hooks/prepare.sh
+# writes into ~/.panelalpha/weblate (../.panelalpha resolves from ~/project).
+services:
+  database:
+    # Pin the major: a datadir cannot migrate backwards, so a floating tag would
+    # break the named volume the first time the major moves.
+    image: docker.io/library/postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/weblate/db.env
+    environment:
+      POSTGRES_DB: weblate
+      POSTGRES_USER: weblate
+      # A named volume is not always empty (lost+found); give postgres a clean
+      # subdir so it does not refuse to init.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U weblate -d weblate -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  cache:
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/weblate/redis.env
+    # requirepass from the env_file; appendonly so the cache/queue survives a
+    # restart. $$ escapes compose interpolation so the shell expands it.
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 256m
+
+  app:
+    image: weblate/weblate:2026.9.1.2
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    # POSTGRES_PASSWORD, REDIS_PASSWORD, WEBLATE_SECRET_KEY and
+    # WEBLATE_ADMIN_PASSWORD come from here.
+    env_file:
+      - ../.panelalpha/weblate/app.env
+    # Weblate has no SITE_URL env; it builds SITE_URL from WEBLATE_SITE_DOMAIN, a
+    # bare host. Derive that host from PA_PUBLIC_URL (a _URL placeholder the
+    # engine rewrites to the real https origin) by stripping the scheme, then run
+    # the image's real entrypoint. If PA_PUBLIC_URL was not rewritten it stays
+    # localhost:8080 and the environment fallback below applies. $$ -> $ so the
+    # shell, not compose, expands these; CMD (runserver) arrives as "$@".
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        d="$${PA_PUBLIC_URL#*://}"; d="$${d%%/*}"
+        [ -n "$$d" ] && export WEBLATE_SITE_DOMAIN="$$d"
+        exec /app/bin/start "$$@"
+      - --
+    # Overriding entrypoint clears the image CMD, so restate it: it reaches the
+    # wrapper as "$@" and becomes `/app/bin/start runserver`.
+    command: ["runserver"]
+    environment:
+      POSTGRES_HOST: database
+      POSTGRES_USER: weblate
+      POSTGRES_DB: weblate
+      REDIS_HOST: cache
+      REDIS_PORT: "6379"
+      REDIS_DB: "1"
+      # Fallback host if the placeholder was not rewritten; the entrypoint
+      # overrides it with the real domain when PA_PUBLIC_URL is present.
+      WEBLATE_SITE_DOMAIN: "localhost:8080"
+      # Rewritten to the real https origin at deploy (key ends in _URL, value is
+      # a localhost placeholder); the entrypoint turns it into the bare host.
+      PA_PUBLIC_URL: "http://localhost:8080"
+      WEBLATE_SITE_TITLE: "Weblate"
+      WEBLATE_ALLOWED_HOSTS: "*"
+      # Engine terminates TLS and forwards X-Forwarded-Proto: secure cookies,
+      # https links, and CSRF/redirect logic that treats the tunnel as https.
+      WEBLATE_ENABLE_HTTPS: "1"
+      WEBLATE_SECURE_PROXY_SSL_HEADER: "HTTP_X_FORWARDED_PROTO,https"
+      WEBLATE_IP_PROXY_HEADER: "HTTP_X_FORWARDED_FOR"
+      # Single-owner instance: no public sign-up, and every page needs a login.
+      WEBLATE_REGISTRATION_OPEN: "0"
+      WEBLATE_REQUIRE_LOGIN: "1"
+      WEBLATE_ADMIN_NAME: "Weblate Admin"
+      WEBLATE_ADMIN_EMAIL: "admin@example.com"
+      WEBLATE_DEBUG: "0"
+    volumes:
+      # /app/data holds VCS checkouts, uploads, the search index and the on-disk
+      # SECRET_KEY -- lose it and all translation data and sessions are gone.
+      - weblate-data:/app/data
+      - weblate-cache:/app/cache
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # /healthz/ is SSL-redirect-exempt, so plain http works internally even
+      # with ENABLE_HTTPS; a 200 proves web + DB + Redis are up. Long
+      # start_period: first boot runs migrations and builds the search index.
+      test: ["CMD-SHELL", "curl -fsS --max-time 10 http://127.0.0.1:8080/healthz/ >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 15s
+      retries: 40
+      start_period: 300s
+    # The image sizes its uWSGI/Celery workers from the cgroup memory limit, so
+    # this cap also throttles worker count -- generous for a heavy runtime.
+    mem_limit: 6g
+
+  # Starts nothing, exits 0, waits on app's healthcheck so `docker compose up -d`
+  # returns only once the site actually answers, not the moment supervisor
+  # launches (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}
+  redis-data: {}
+  weblate-data: {}
+  weblate-cache: {}

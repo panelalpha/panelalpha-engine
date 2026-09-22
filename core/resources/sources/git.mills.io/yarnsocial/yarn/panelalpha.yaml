@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  yarnd is a self-hosted Yarn.social pod: a decentralised twtxt microblogging
+  platform in Go. It is a single static binary with an embedded bitcask store
+  (no external database) that listens on :8000 and keeps ALL of its state — the
+  bitcask db, every user's twtxt feed, avatars and uploaded media, the search
+  index and the instance config — under one data dir (-d /data). HEAD is 0.16.0.
+
+  Nothing from the checkout is built or run. The repository's own Dockerfile
+  compiles the Go binary from source (golang:alpine, ffmpeg-dev, `make server`);
+  the project publishes that exact release as an official multi-arch image
+  (prologic/yarnd:0.16.0 on Docker Hub, 2026-07-12), so the recipe runs the
+  image instead of rebuilding it. A source recipe cannot use the compose
+  strategy (PlatformSelector::fromSource() describes without probe data, so
+  DeployabilityCheck fails "Compose strategy selected but compose file is
+  missing" even though bootstrap already wrote the compose file — measured on
+  the gancio recipe), so it ships a one-line `FROM` Dockerfile through the
+  dockerfile strategy: no build steps run, the published image is pulled, and
+  the hosting shape it needs is layered through the compose override. The only
+  addition to the image is `apk add curl`, used once at boot to seed the admin
+  through yarnd's own gated setup wizard — provisioning an ops tool, not a
+  source patch.
+
+  Public URL. yarnd builds every feed URL, actor and absolute link from
+  --base-url; behind the reverse proxy it would otherwise emit http://0.0.0.0
+  links. The dockerfile strategy injects the account's public https URL as
+  BASE_URL (PublicUrlEnvironment), and yarnd maps env→flag by lowercasing
+  (BASE_URL -> --base-url), so feeds carry the account domain with no rewrite.
+
+  Persistence. -d /data holds EVERYTHING and ~/project is wiped every redeploy
+  (engine#173), so /data is bind-mounted to the account's persistent
+  ~/.panelalpha/yarn (the only writable, rebuild-surviving dir). The image runs
+  as root via its /init entrypoint, chowns /data and drops privileges with
+  su-exec; the prepare hook records the account uid/gid and the override passes
+  them as PUID/PGID so the process runs as — and /data stays owned by — the
+  account that wrote the bind mount. A posted twt and the admin account survive
+  a rebuild (verified).
+
+  Secrets. A production pod MUST set COOKIE_SECRET, API_SIGNING_KEY and
+  MAGICLINK_SECRET; the image's entrypoint otherwise generates fresh random
+  ones every boot, logging everyone out on restart. The prepare hook generates
+  the three 64-char secrets ONCE into ~/.panelalpha/yarn/secrets.env (0600,
+  never in ~/project) and the boot command sources them from the /data mount so
+  they are reused across redeploys and sessions/tokens stay valid.
+
+  Admin + registration. yarnd ships a first-run setup wizard that gates the
+  whole site (every route 302s to /setup until an admin exists) — a
+  first-visitor-wins window (engine#200) if left for a stranger. The boot
+  command closes it: it starts yarnd, waits for it to listen, and POSTs /setup
+  on localhost with the owner admin username and a password generated once into
+  ~/.panelalpha/yarn (0600) BEFORE the port is publicly reachable, so the admin
+  is seeded non-interactively and the window never opens. Registration is left
+  OPEN (OPEN_REGISTRATIONS/OPEN_PROFILES=true) because a Yarn.social pod is a
+  social platform meant for sign-ups; registration and login are password-based
+  so no SMTP is required. SMTP is unconfigured, so magic-link password reset and
+  the /support and /abuse email endpoints are inert until the owner sets SMTP_*
+  — documented, not a blocker. Anonymous posting is refused (the post handler
+  requires an authenticated user).
+
+  The recipe states dockerfile/port_hint because a source recipe is applied
+  before the probes run and neither would otherwise be known.
+extends: dockerfile
+extra:
+  # A source recipe is applied without probe data (PlatformSelector::fromSource()
+  # calls describe() with none), so the dockerfile probe's dockerfile/port_hint
+  # would be null/80 and DeployabilityCheck would fail "Dockerfile strategy
+  # selected but Dockerfile is missing." Name what the probe would have found:
+  # the FROM-image Dockerfile this recipe ships, and the port yarnd listens on.
+  dockerfile: Dockerfile
+  port_hint: 8000
+env:
+  # Non-secret pod config, written into the generated compose environment. The
+  # three pod secrets are NOT here — they live in ~/.panelalpha/yarn/secrets.env
+  # (0600) and are sourced from the /data mount at boot, never in ~/project.
+  OPEN_REGISTRATIONS: 'true'
+  OPEN_PROFILES: 'true'
+  ADMIN_USER: 'admin'

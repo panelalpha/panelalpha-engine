@@ -1,0 +1,109 @@
+# Compose-replace: run the official ignisda/ryot image (pulled, not built)
+# instead of compiling the Rust backend + the React-Router frontend from the
+# clone. Pinned to the current stable release v10.5.0. The published image
+# bundles Caddy, the Node frontend and the compiled Rust backend and runs all
+# three with `concurrently`; Caddy listens on 8000 and reverse-proxies the
+# frontend (:3000) and backend (:5000) internally, so the app is a single
+# origin on one port. PostgreSQL is the one external datastore.
+#
+# Seeding a Docker Hub image also sidesteps engine#229 (image-seed NotFound on
+# a from-registry seed, which is the GHCR case, not Hub).
+services:
+  db:
+    # Ryot needs Postgres >= 15; upstream's own compose pins 18-alpine. Ryot
+    # cannot downgrade its schema, so the major is pinned, not floated.
+    image: postgres:18-alpine
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only -- written once into ~/.panelalpha/ryot/ by
+    # hooks/prepare.sh, because ~/project is emptied before every deploy and a
+    # regenerated password would lock the app out of this volume for good.
+    env_file:
+      - ../.panelalpha/ryot/ryot.env
+    environment:
+      POSTGRES_DB: ryot
+      POSTGRES_USER: ryot
+    volumes:
+      # Mount the parent (matches upstream's own compose) so it works whatever
+      # subdir this postgres major initialises into; a named volume so the whole
+      # database survives redeploy and storage reclaim.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ryot -d ryot -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  app:
+    image: ignisda/ryot:v10.5.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # DATABASE_URL (with the DB password) and SERVER_ADMIN_ACCESS_TOKEN come
+    # from the persisted env file; the owner creds in it are ignored here and
+    # read by the init one-shot.
+    env_file:
+      - ../.panelalpha/ryot/ryot.env
+    environment:
+      TZ: "UTC"
+      # Disable Umami telemetry for a hosted account.
+      DISABLE_TELEMETRY: "true"
+      # Close public sign-up. With this false, the sign-up page is disabled and
+      # registerUser is refused for any caller without the admin access token,
+      # so only the init one-shot can create a user (and it makes the first user
+      # an admin). Each Ryot user's data is isolated to that user regardless.
+      USERS_ALLOW_REGISTRATION: "false"
+      # A `_URL` key: ComposePlaceholders rewrites this localhost placeholder to
+      # the account's real https origin at deploy. Ryot uses it for absolute
+      # links, sharing and OIDC redirects; it is not a host allowlist, so an
+      # un-rewritten localhost fallback does not 400 the site.
+      FRONTEND_URL: "http://localhost:8000"
+    # Only the app publishes a port; the engine's port scan takes 8000 as the
+    # primary (engine#231/#234).
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # /backend/config reverse-proxies to the Rust backend and returns 200 JSON
+      # only once the backend is up (Caddy answers 502 before that). The image
+      # ships curl.
+      test: ["CMD-SHELL", "curl -fsS --max-time 10 http://127.0.0.1:8000/backend/config >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 12s
+      retries: 40
+      start_period: 60s
+    mem_limit: 2g
+
+  # Claims the workspace owner over Ryot's GraphQL API the instant the backend
+  # is healthy -- on the internal network, before the public proxy is wired --
+  # using the admin access token and the password prepare.sh generated.
+  # Idempotent: on a redeploy it logs in with the stored password and exits.
+  init:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/ryot/ryot.env
+    volumes:
+      - ./panelalpha/ryot:/pa:ro
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    mem_limit: 64m
+
+  # Starts nothing, exits 0, and gates on the owner having been claimed, so
+  # `docker compose up -d` returns -- and the deploy reports finished -- only
+  # once Ryot answers AND its owner exists, not the moment a container launches
+  # (engine#204).
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}

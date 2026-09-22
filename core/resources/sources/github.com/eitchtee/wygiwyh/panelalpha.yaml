@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  WYGIWYH is a Django/HTMX personal finance tracker: accounts, transactions,
+  currencies, budgets and reports, all behind a login. There is no public
+  self-registration -- the first admin is seeded from the environment and any
+  further users are created from inside the app -- and every finance view
+  requires authentication (anonymous requests 302 to /login/), so this is the
+  access-controlled case, not public data. Email/password login is the default;
+  OIDC and API tokens are optional and left off here.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes eitchtee/wygiwyh on
+  Docker Hub and tags every release; this recipe pins the current release
+  0.23.2 (amd64 digest sha256:18dee9255de2893417f060906ff7bdf3e39ac13a9922235f
+  ff3d438a5c61512c). Seeding a Hub image also sidesteps engine#229 (image-seed
+  NotFound). The prod image is a single container: its supervisord runs the web
+  process (which migrates, then seeds the admin, then execs gunicorn) alongside
+  the procrastinate task workers. The task queue lives in Postgres
+  (procrastinate), so there is no Redis.
+
+  WHY COMPOSE-REPLACE. The app needs Postgres beside it (settings.py speaks
+  only psycopg -- no MySQL driver), which the schema's MySQL-only `database:`
+  cannot provide, so the datastore is a compose concern. The repo's own
+  docker-compose.prod.yml is close but bind-mounts ./media and ./postgres_data
+  into the project dir, which a redeploy wipes (engine#173), and leaves URL and
+  the passwords blank for a human to fill. This override supplies the real
+  stack: postgres:15 on a named volume, uploads on a named volume, secrets from
+  ~/.panelalpha, and only the web service publishes a port.
+
+  MIGRATIONS + ADMIN. The image migrates to completion inside its web start
+  script before gunicorn binds, and `python manage.py setup_users` seeds the
+  admin from ADMIN_EMAIL/ADMIN_PASSWORD only when it does not already exist (it
+  never resets an existing password), so a redeploy neither re-runs migrations
+  destructively nor changes the owner's credentials. A `ready` gate waits on the
+  app's healthcheck (engine#204) so the deploy turns green only once the site
+  actually answers, which is also what fails the deploy if a migration fails
+  instead of publishing a 500 site.
+
+  CONFIG + URL. settings.py reads ALLOWED_HOSTS from DJANGO_ALLOWED_HOSTS and
+  CSRF_TRUSTED_ORIGINS from URL. URL is given as http://localhost and the engine
+  rewrites it to the account's public https address (ComposePlaceholders: the
+  key is exactly URL), so every HTMX POST over the proxy carries a trusted
+  origin instead of a 403. HTTPS_ENABLED=true turns on SECURE_PROXY_SSL_HEADER
+  and secure cookies behind the proxy. DJANGO_ALLOWED_HOSTS is left * because
+  the app sits behind the engine's single-tenant reverse proxy and the real
+  CSRF control is the origin check, which is pinned to the account's https URL.
+  DEBUG is forced false.
+
+  SECRETS + ADMIN STORE. The Django SECRET_KEY (rotating it logs everyone out),
+  the Postgres password (baked into the data volume) and a generated admin
+  password are written once into ~/.panelalpha/wygiwyh/ (0600 in 0700) -- the
+  only writable place a redeploy does not delete -- and reused on every
+  rebuild. Onboarding notes, including the admin login, go in credentials.txt.

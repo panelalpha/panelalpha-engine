@@ -1,0 +1,123 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SilverStripe CMS from its own installer project. `composer.json` says
+  `"type": "silverstripe-recipe"`, so this repository is the runnable product
+  rather than one of the modules under it.
+
+  The whole of this recipe exists because of one Composer flag. The repository
+  ships no `public/index.php`: `silverstripe/recipe-core` declares it under
+  `extra.public-files`, and `silverstripe/recipe-plugin` and
+  `silverstripe/vendor-plugin` are what copy it, the `public/.htaccess` rewrite
+  rules and every module's `client/dist` bundle into `public/` as each package
+  is installed. `platforms/php.yaml` installs with `--no-plugins` because a
+  plugin is arbitrary PHP out of a customer repository, so none of them ran:
+  the deploy logged `The "silverstripe/vendor-plugin" plugin was not loaded as
+  plugins are disabled`, `public/` held only `assets/` and `favicon.ico`,
+  `PhpDocroot::detect()` found no index file anywhere and emitted no
+  PA_DOCROOT, and `panelalpha-serve` fell back to its own `-d /app/public` test
+  and pointed Apache at an empty directory. That is the 403.
+
+  A source recipe cannot replace php.yaml's build command -- `commands:` is an
+  AppConfig key, not a manifest key, so a recipe's build-stage commands are
+  appended to the manifest's and never reach `install_command` (engine#171).
+  So the host build stays as it is, resolving and locking the tree with plugins
+  off, and the install stage throws that vendor/ away and installs it again
+  inside the container with the plugins on. It resolves nothing -- the host
+  build left a composer.lock -- and it is the only formulation that works: a
+  plain `composer install` over the existing tree performs no package
+  operation, so the events these plugins subscribe to never fire; `composer
+  reinstall "*/*"` fires them but reinstalls each package into the path already
+  recorded in installed.json, which leaves the theme under vendor/ where
+  nothing looks for it. The cost is that the dependency tree is downloaded
+  twice per deploy, once into each cache; that is a consequence of engine#171,
+  not a choice.
+
+  `docroot: public` is declared rather than detected, so the document root is
+  settled when the compose file is written and does not depend on whether the
+  build happened to leave an index file behind.
+
+  `database: mysql` for the account's own MySQL server: SilverStripe has no
+  SQLite driver in recipe-cms, and the repository ships neither a compose file
+  nor a usable `.env` to point itself at one.
+  `files/.panelalpha/env.sh` maps the engine's DB_* onto SilverStripe's
+  SS_DATABASE_*; it is sourced into the entrypoint's own shell, the one Apache
+  inherits, so no database password is ever written into ~/project.
+
+  The administrator is a real Member row with a per-account password, not
+  SS_DEFAULT_ADMIN_*: those are compared on every login attempt for as long as
+  they are set, and `findOrCreateDefaultAdmin()` leaves the Member with no
+  password of its own, so an install that used them and then unset them would
+  lock everybody out. The password is generated once by the prepare hook into
+  `~/.panelalpha/silverstripe/admin.env` -- outside ~/project, which a redeploy
+  empties -- and reaches the container as a second `env_file`.
+extends: php
+strategy: php
+runtime: php
+label: SilverStripe
+priority: 940
+port: 8000
+docroot: public
+database: mysql
+requires:
+  php: runtime
+env:
+  # `dev` is what .env.example ships and it prints the database password into
+  # the browser on any error. Stated here so it is true before the first
+  # request, whatever happens to .env.
+  SS_ENVIRONMENT_TYPE: live
+  SS_DATABASE_CLASS: MySQLDatabase
+commands:
+  - id: silverstripe-composer-install
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Re-does the dependency install with this project's own Composer plugins
+      enabled: composer/installers, silverstripe/recipe-plugin and
+      silverstripe/vendor-plugin, all three pinned by the project's own
+      config.allow-plugins, are this framework's installer. composer/installers
+      is what puts a `silverstripe-theme` package in themes/ rather than
+      vendor/, and the other two copy public/index.php, public/.htaccess,
+      app/src/Page.php and each module's client/dist into place from
+      post-package-install. The host build ran with --no-plugins, so what it
+      produced has the theme in the wrong directory and an empty document root;
+      that vendor/ is thrown away rather than patched, and the composer.lock the
+      host build left behind means this resolves nothing. Not `composer install`
+      over the existing tree -- it performs no package operation, so no plugin
+      event fires -- and not `composer reinstall "*/*"`, which fires the events
+      but reinstalls each package into the path already recorded in
+      vendor/composer/installed.json, leaving the theme under vendor/ where
+      nothing looks for it. Keep this description one paragraph: the generated
+      entrypoint comments only the first line of it (CommandScript.php:44).
+    run: 'rm -rf vendor && composer install --no-dev --no-interaction --no-scripts --optimize-autoloader'
+    timeout: 900
+  - id: silverstripe-env
+    stage: start
+    description: >-
+      Sourced, not run in a subshell, so the SS_DATABASE_* it exports are in
+      the entrypoint's own shell -- the one `exec panelalpha-serve` becomes.
+      No `timeout:` on this one for the same reason: a timeout wraps the
+      command in `sh -c` and the exports would die with it.
+    run: '. /app/.panelalpha/env.sh'
+  - id: silverstripe-db-build
+    stage:
+      - install
+      - upgrade
+    description: >-
+      `sake db:build` is SilverStripe 6's `dev/build`: it creates and migrates
+      every table and calls requireDefaultRecords, which writes the Security
+      groups, the error pages and the initial SiteTree. Idempotent by design --
+      it is what SilverStripe's own docs tell an operator to run after any code
+      change -- so it is right on a redeploy over existing data too. After the
+      re-install, because it needs app/src/Page.php, which recipe-cms copies.
+    run: '. /app/.panelalpha/env.sh && php vendor/bin/sake db:build --no-interaction'
+    timeout: 900
+  - id: silverstripe-admin
+    stage: install
+    description: >-
+      Creates the administrator Member and gives it the password the prepare
+      hook generated. Install only: on a redeploy the row is already in a
+      database that survived, and rewriting the password there would silently
+      revoke one the customer had since changed.
+    run: '. /app/.panelalpha/env.sh && php /app/.panelalpha/pa-admin.php'
+    timeout: 300

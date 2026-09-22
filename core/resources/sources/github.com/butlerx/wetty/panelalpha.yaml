@@ -1,0 +1,186 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  WeTTY is a terminal in a browser: an Express app that serves one page, and a
+  socket.io connection that opens a pty running `ssh` on the server side. MIT,
+  5.4k stars, a real runnable application. What it is not is a thing you can
+  deploy without deciding something, because it puts a shell on a public
+  domain, so the scope question comes before the recipe.
+
+  == What the stock deploy does ==
+
+  Control deploy on mariusz2, commit 9c87b46c, no recipe: deploy-ok in 105.8s,
+  then serving-error_page, HTTP 500. The 500 is not WeTTY. The repository's
+  compose file puts an nginx in front whose only server_name is `wetty.com`
+  and whose `root /var/www/wetty.com/public` does not exist in the nginx
+  image, so conf/nginx.template:20 -- `try_files $uri $uri/ /index.html;` --
+  has nowhere to land:
+
+      [error] rewrite or internal redirection cycle while internally
+      redirecting to "/index.html", server: wetty.com, request: "GET / HTTP/1.1"
+
+  The engine detects port 80, which is that nginx, so the public name is a 500
+  on `/` and a 404 on `/wetty` (the template proxies /wetty, WeTTY's BASE is
+  `/`). Nothing reachable, and nothing exposed.
+
+  One port-detection decision away, though, is the real shape of the stock
+  deploy. WeTTY itself answers 200 on the account's own :3000, and it has no
+  authentication of any kind: `/`, `/ssh/:user`, `/client/*`, `/sw.js` and
+  `/metrics` are all ungated (src/server/socketServer.ts:30-50). An anonymous
+  socket.io client against that port, measured:
+
+      Enter your username: term
+      term@wetty-ssh's password:
+      uid=1000(term) gid=1000(term) groups=1000(term)
+
+  `term` / `term` is containers/ssh/Dockerfile:3, a password published in the
+  repository. So the stock stack does authenticate -- with a credential
+  anyone who has read the README already has.
+
+  == The three questions, answered by measurement ==
+
+  **1. Does it authenticate?** On this recipe, yes, twice, and there is no
+  configuration here in which a stranger reaches a shell. Measured on the
+  finished deploy over the public HTTPS name:
+
+      anonymous  GET /                          200   (WeTTY's page + a banner)
+      anonymous  GET /socket.io/?EIO=4&...      401   -- no session, ever
+      anonymous  GET /metrics                   404
+      anonymous  GET /panelalpha-login          401
+      wrong Basic password                      401
+      unknown Basic user, right password        401
+      right Basic, wrong ssh password           "Permission denied, please try again."
+      right Basic, empty ssh password           denied
+      right Basic, ssh as root                  denied (PermitRootLogin no, AllowUsers)
+      right Basic, right ssh password           uid=1002(<account>) ... /account
+
+  In a real browser an anonymous visitor gets a black terminal, three 401s in
+  the console, and the injected line "You are not signed in, so this terminal
+  will not connect."
+
+  WeTTY brings two request-controlled inputs that decide what the ssh is, and
+  both had to be taken away:
+
+    * `remote-user`. src/server/command/address.ts:13 reads that header and
+      uses it as the ssh username, ahead of SSHUSER, unchecked. Measured
+      through the proxy with `Remote-User: root` set: the prompt was still
+      `<account>@shell's password:`.
+    * the Referer's query string. src/server/command.ts:22-26 always honours
+      `pass`, whatever allowRemoteHosts and allowRemoteCommand say, and hands
+      it to `sshpass -p` (src/server/command/ssh.ts:21). The negative control
+      is the clearest measurement in this recipe -- the same request, twice:
+
+          straight at app:3000, Referer: https://<domain>/?pass=<real password>
+            -> shell, no prompt at all
+          identical request through `auth`
+            -> "<account>@shell's password:"
+
+      which is why `proxy_set_header Referer ""` is load-bearing and why the
+      app service publishes no port of its own.
+
+    SSHPASS and SSHKEY are not set and must not be: either makes the far end
+    log in unauthenticated. Upstream prints a six-line warning about the second
+    (src/server.ts:54).
+
+  **2. Whose shell is it?** The account's own, and nothing else. There is no
+  shell anywhere in this product to reuse: the platform's sshd is SFTP-only --
+  `ForceCommand internal-sftp` and `ChrootDirectory %h` in the shared-hosting
+  sftp container -- so the recipe brings its own sshd rather than fronting one.
+  It is a container in the account's own docker, one login, the account's name
+  at the account's uid, with the account's home bind-mounted at /account and
+  nothing else. Measured in the live terminal over public HTTPS:
+
+      uid=1002(wettyqh0v) gid=1002(wettyqh0v) groups=1002(wettyqh0v)
+      /account
+      .docker  .panelalpha  docker  project  wettyqh0v-842d.panelalpha.online
+
+  and a file written from the terminal appeared on the host as
+  `-rw-r--r-- wettyqh0v wettyqh0v`.
+
+  The boundary is where this gets interesting, and it is why the shell is on an
+  `internal: true` network. Measured from an *ordinary* container inside an
+  account -- which is what every deployed app already is:
+
+      172.18.0.11:8000   OPEN   (another account's application, and it served
+                                 its own homepage to a wget from here)
+      2.29.1.58:22       OPEN   (the host's sshd)
+      2.29.1.58:2011     OPEN   (the engine API)
+
+  None of that is created by WeTTY and none of it is new -- any customer's
+  deployed code can do it today, and it is worth reporting on its own. But it
+  is not something to hand to whoever guesses one password. From inside the
+  finished `shell` container the same probes, measured, are:
+
+      ip route -> 172.20.0.0/16 dev eth0 scope link      (no default route)
+      every target above: shut;  DNS: no answer
+
+  and from the live browser terminal, `HOST-SSH-UNREACHABLE` / `DNS-DEAD`.
+  The docker socket is not mounted, and would be stripped anyway
+  (ServiceHardener.php:160-173), as `privileged` would be (:21). The price is
+  a terminal with no internet -- no `git clone`, no `curl` -- which the README
+  left in the account states plainly, with the one-line change to opt out.
+
+  **3. Were credentials weakened?** No. One secret per account, 24 bytes of
+  openssl randomness, generated on first deploy into
+  ~/.panelalpha/wetty/terminal-password at 0600, never regenerated. Nothing is
+  shared, nothing is derived from the account name, there is no passwordless
+  key and no world-readable file: the sshd container reads the password from
+  that 0600 file at start as root, so it is never in a layer, an environment
+  variable, a compose file or `docker inspect`. `PermitEmptyPasswords no`.
+  The same secret backs the nginx Basic gate as an apr1 hash -- one factor
+  enforced twice, not two factors, which is written down rather than implied.
+  The Basic layer exists for what the ssh password cannot cover: every
+  socket.io connection spawns a pty and an ssh process (src/server/spawn.ts:17)
+  before anything is proved, so without it a stranger can exhaust pids_limit
+  and take the customer's terminal down without guessing anything.
+
+  == The recipe ==
+
+  `auth` (nginx-unprivileged, run as the account so a 0600 htpasswd stays
+  0600) is the only thing on port 3000; `app` publishes nothing; `shell` is the
+  sshd, alone on an internal bridge. hooks/prepare.sh writes the password, the
+  htpasswd, the account.map nginx pins the username from, identity.env for the
+  sshd container, a two-line /etc/passwd for the app container, the compose
+  override carrying the uid, and a .dockerignore.
+
+  Two things that had to be found by running it:
+
+    * the app container runs as the account, and the account is nobody inside
+      the wetty image. OpenSSH calls getpwuid() on its own uid first and
+      refuses: every session died at `No user exists for uid 1002` before a
+      password was asked for. Two lines of /etc/passwd, mounted, rather than
+      running a web-facing Node process as root.
+    * `*.panelalpha.online` strips the `Upgrade` header. Isolated cleanly by
+      dumping the raw request inside the account: through the public name the
+      request arrives with `Connection: upgrade` and no `Upgrade:` at all,
+      while the identical request with --resolve to the engine host arrives
+      with `Upgrade: websocket` intact. That is the edge, not the engine and
+      not this recipe. socket.io falls back to long polling and the terminal
+      works either way, a little less immediately.
+
+  == Numbers ==
+
+  Recipe deploy 105.8s on a fresh account, deploy-ok, serving: ok, HTTP 200,
+  `healthy: true`, all seven baseline checks passing, application port detected
+  as 3000. Control, same host, same commit, no recipe: 105.8s,
+  serving-error_page, HTTP 500. Rebuild via POST /projects/<user>/rebuild:
+  success; the password, the htpasswd, identity.env and a file written from
+  inside the terminal all came back byte-identical by md5, and the whole auth
+  matrix above was unchanged afterwards. Memory: app 35.7 MiB, auth 3.4 MiB of
+  a 48 MiB cap, shell 1.5 MiB of 256 MiB, whole account container 225 MiB.
+
+  == Things worth knowing ==
+
+  * `/metrics` is prom-client's default metrics, unauthenticated, in upstream.
+    The proxy answers 404 there.
+  * Closing the tab ends the session -- the pty is killed on disconnect
+    (src/server/spawn.ts:57). There is no tmux in the image.
+  * Nothing in ~/project is web-reachable: /.git/config, /.env,
+    /docker-compose.yml, /docker-compose.override.yml, /package.json,
+    /node_modules/..., /panelalpha/wetty-auth.conf,
+    /panelalpha/wetty-sshd.Dockerfile and /src/server/command/address.ts all
+    return WeTTY's own Express 404, byte-identical to the reference 404 once
+    the echoed path is substituted.
+  * KNOWNHOSTS is left at its default, so ssh runs with
+    StrictHostKeyChecking=no. That is safe only because the far end is one hop
+    across a bridge with no gateway; it would not be if `shell` were ever put
+    on a routable network.

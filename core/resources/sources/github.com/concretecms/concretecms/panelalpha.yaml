@@ -1,0 +1,100 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Concrete CMS 9: a PHP CMS with in-context editing, served from the
+  repository root by a single front controller (index.php -> concrete/
+  dispatcher.php), over MySQL. Detection reads it correctly on its own --
+  composer.json and no artisan, so the `php` strategy -- and the deploy then
+  finishes green while every request answers with a PHP fatal.
+
+  **The fatal is Composer's `--no-plugins`, not Concrete's.** concretecms/
+  concretecms keeps its real package manifest in `concrete/composer.json` and
+  the root `composer.json` merges it in at runtime with
+  wikimedia/composer-merge-plugin: the root file declares one requirement (the
+  plugin itself) and **no `autoload` block at all**. The php platform installs
+  with `--no-plugins` (resources/platforms/php.yaml `composer-install`, from
+  PhpHostBuild::SAFE_INSTALL_FLAGS) because a plugin is arbitrary PHP out of a
+  customer repository running on the host daemon, and PhpHostBuild::
+  mayRunPlugins() only drops the flag when every plugin the lock pins is a
+  known installer -- these three (merge-plugin, mlocati/composer-patcher,
+  composer/package-versions-deprecated) are not. So the merge never happens.
+  The 158 packages the lock names are still installed, but Composer's
+  autoload dump walks the *root package's* requirements, and the root requires
+  nothing but the plugin: the generated `concrete/vendor/composer/
+  autoload_psr4.php` held one entry and the classmap nine classes. Measured on
+  this host, 2026-09-20:
+
+      GET /  ->  200, 358 bytes
+      Fatal error: Uncaught Error: Class "Concrete\Core\Foundation\
+      ClassAutoloader" not found in /app/concrete/bootstrap/autoload.php:11
+
+  hooks/prepare.sh does the merge itself, before the build, in twelve lines of
+  PHP: it copies `concrete/composer.json`'s package requirements and its
+  `autoload` block into the root `composer.json` with the paths rebased. The
+  engine's own `--no-plugins` install then dumps 9627 classes instead of 9,
+  and **no Composer plugin ever runs** -- on the host or anywhere else. That
+  is the whole difference between a recipe here and the plugin exception in
+  PhpHostBuild: the exception would have to trust three plugins; this trusts
+  none. See README.md for the one visible cost (a lock-file warning).
+
+  **The document root is the repository root.** There is no `public/` in this
+  repository -- `index.php` is at the top level next to `.git`, `composer.json`
+  and `concrete/vendor/` -- so PhpDocroot falls through its candidates to the
+  root, which is correct and is why the app answered 200 at all. It also means
+  Composer's 452 KB `installed.json` and every file under `concrete/vendor/`
+  were one request away. The engine's vhost already denies dotfiles,
+  `docker-compose.*` and `panelalpha*`; files/.htaccess closes the rest and
+  adds the pretty-URL rewrite Concrete has no .htaccess of its own for.
+
+  **The installer must not be left for a visitor.** An uninstalled Concrete
+  redirects every request to /install and hands the site to whoever gets there
+  first. `concrete/bin/concrete c5:install` is the supported non-interactive
+  path; it runs from the install stage with a password generated per account
+  into ~/.panelalpha/concrete/concrete.env, before Apache binds.
+
+  **And the site's configuration is not code.** Concrete writes everything it
+  is told from the dashboard into `application/config/` -- the database
+  credentials, `generated_overrides/`, the Doctrine proxies -- and every
+  uploaded file into `application/files/`. Both live inside ~/project, which
+  GitRepository::cloneConfiguredRepository() empties before every deploy
+  (engine#173), so both are bind-mounted out to ~/.panelalpha/concrete/ by
+  overrides/docker-compose.override.yml, along with `packages/` for
+  marketplace add-ons.
+extends: php
+# No `docroot:`. There is no public/, web/, public_html/ or webroot/ in this
+# repository, so PhpDocroot::readDocroot() falls through CANDIDATES to the
+# repository root on its own -- which is where index.php is. Saying `.` here
+# would be worse than saying nothing (engine#172).
+#
+# No `requires:` either. The php manifest's `node: {role: build, optional:
+# true}` costs nothing: there is no package.json anywhere in this repository,
+# so HostCompile::runForPhp() has nothing to run. Restating `php: runtime`
+# alone would replace that map for no gain and one more thing to be wrong.
+#
+# Not a preference. Concrete\Core\Database supports MySQL only -- c5:install's
+# preconditions check for the MySQL PDO driver and the InnoDB engine by name
+# and there is no SQLite path -- so an account with no database is a Concrete
+# that cannot install. It is also what keeps this recipe's own compose file
+# from being mined for sidecars: PhpStrategy skips RuntimeSidecars entirely
+# when the manifest declares a database.
+database: mysql
+env:
+  # Restated because `env` replaces the php manifest's map rather than merging
+  # into it. Concrete's own logging is configured from the database once it is
+  # installed; this is PHP's error_log, which is the only thing that can speak
+  # before that.
+  LOG_CHANNEL: stderr
+commands:
+  - id: concrete-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Waits for the database, installs Concrete with a generated administrator
+      on a first deploy, and runs migrations and re-syncs the site URL on
+      every one after. Idempotent -- it decides which by asking the database
+      whether Concrete's own tables are there.
+    run: 'sh panelalpha/concrete-setup.sh'
+    # The install builds ~250 tables and imports the starting point; 43s
+    # measured on this host with nothing else running, and this host is not
+    # the slow case.
+    timeout: 900

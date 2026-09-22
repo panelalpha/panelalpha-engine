@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Authelia is an authentication and authorization server: one Go binary serving
+  a React login portal and an API on :9091, with SQLite behind it and a YAML
+  file or LDAP as its user directory. It is normally deployed as the companion
+  of a reverse proxy — nginx, Traefik or Caddy ask it about every request
+  through auth_request / forward-auth, and it answers 200 or sends the browser
+  to the portal — so the first question this recipe had to answer is whether it
+  is worth deploying on its own domain at all. It is, with a limit worth
+  stating: what an account gets is a working identity provider (portal,
+  password reset, TOTP and WebAuthn enrolment, and the OpenID Connect 1.0
+  provider once clients are configured), and what it does not get is any way
+  to protect *another* PanelAlpha app with it, because each account is served
+  by the engine's own proxy and cannot insert an auth_request into it. Useful
+  standalone; not a way to put a login in front of the account next door.
+
+  The repository ships three Dockerfiles and no compose file, so detection read
+  it as `dockerfile` and the container restart-looped — `app (Restarting (1) 9
+  seconds ago)`, nothing ever listening on 9091, which is the `serving-unknown`
+  this recipe exists to turn into a served portal. Authelia will not start
+  without a configuration file: `session.secret`, `storage.encryption_key` and
+  `identity_validation.reset_password.jwt_secret` have no defaults and each
+  missing one is a fatal validation error, and `session.cookies` needs a domain
+  plus an `authelia_url` that has to be https and inside that domain
+  (utils.IsURISecure, utils.HasURIDomainSuffix). None of that is knowable from
+  the checkout, and the last of it is not knowable until the container starts.
+
+  Which Dockerfile is the first thing the recipe settles. The root `Dockerfile`
+  is the release image: it copies a binary CI built and takes its base image
+  from an `ARG TAG`/`ARG SHA` it never sets, so DockerfileFinder rejects it —
+  correctly — and falls through to the next `dockerfile.*` in the root listing,
+  which is `Dockerfile.coverage`. That is upstream's CI image: `pnpm coverage`
+  (VITE_COVERAGE=true) for the frontend and `go build -tags dev -cover
+  -covermode=atomic` for the backend, i.e. an instrumented portal. So
+  hooks/prepare.sh derives `Dockerfile.panelalpha` from `Dockerfile.dev` with
+  two substitutions — `pnpm build` for `pnpm coverage`, and the `dev` build tag
+  dropped, which is not cosmetic: internal/utils/version_dev.go declares
+  `Dev = true`, and server/template.go reads it to send a deliberately looser
+  development Content-Security-Policy on every page of the login portal, while
+  handlers.go builds the Duo client with `duoapi.SetInsecure()` — and copies
+  `Dockerfile.dev.dockerignore` alongside it, because BuildKit looks for
+  `<dockerfile>.dockerignore` first and this repository has no root
+  `.dockerignore` at all. Deriving it with sed rather than shipping a file
+  keeps the pinned base-image digests whatever the checkout pins today.
+
+  The rest is done at container start, by a script the override puts in front
+  of the image's own entrypoint. authelia/base is an Alpine with a shell, so
+  unlike the Vikunja recipe nothing has to be read back out of the generated
+  compose file: SITE_URL and SERVER_NAME are already in the app container's
+  environment. The script writes /config/configuration.yml with the account's
+  host as the cookie domain, `https://<host>` as authelia_url, the three
+  secrets hooks/prepare.sh generated into .env, SQLite at /config/db.sqlite3
+  and a filesystem notifier, because no SMTP server comes with the account. It
+  regenerates that file when the domain it was written for is not the domain
+  the container is answering on, and never touches one whose marker line has
+  been removed.
+
+  Then it creates the admin account, which is the other thing Authelia has no
+  answer for: there is no sign-up page, no first-run wizard and no bootstrap
+  user, and the file backend's own fallback (checkDatabase → userYAMLTemplate)
+  is the published pair `authelia` / `authelia`, disabled. The password is
+  generated per account in hooks/prepare.sh, recorded in
+  ~/project/.panelalpha-admin-password (0600), and hashed by the `authelia`
+  binary itself — `authelia crypto hash generate argon2`, which is the only
+  thing that reliably produces a digest Authelia's own decoder accepts.
+
+  `access_control.default_policy` is `two_factor`, which matters only once
+  something forwards requests here; the portal itself is reachable either way.
+  The OpenID Connect provider is left off: it needs an HMAC secret, an issuer
+  private key and a client registration, and a client that does not exist yet
+  cannot be registered at deploy time. Redis is left out too — Authelia keeps
+  sessions in memory by default and Redis only matters across several
+  instances — and so is LDAP, which is a server the engine does not provide.
+extends: dockerfile
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe's dockerfile/port_hint would be null/80 even though the
+  # repository ships several — and the deployability check then fails with
+  # "Dockerfile strategy selected but Dockerfile is missing." State what the
+  # probe would have found, except that the file named here is the one
+  # hooks/prepare.sh writes: the probe's own answer would be
+  # Dockerfile.coverage. The hook runs before detection
+  # (PrepareFromSource::prepare() bootstraps the app config first), so the file
+  # exists by the time anything looks for it. 9091 is what every one of the
+  # repository's Dockerfiles EXPOSEs and what server.address defaults to.
+  dockerfile: Dockerfile.panelalpha
+  port_hint: 9091

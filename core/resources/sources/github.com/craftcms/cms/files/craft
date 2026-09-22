@@ -1,0 +1,32 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Craft's console entry point, written by PanelAlpha. See web/index.php for
+ * why this repository has neither this file nor a web root of its own.
+ *
+ * Invoked as `php craft ...` rather than `./craft`, because a file snippet the
+ * engine installs is written 0644.
+ */
+
+define('CRAFT_BASE_PATH', __DIR__);
+define('CRAFT_VENDOR_PATH', CRAFT_BASE_PATH . '/vendor');
+
+// Craft reads its licence-key path from a PHP *constant*, not from the
+// environment: Path::getLicenseKeyPath() is
+// `defined('CRAFT_LICENSE_KEY_PATH') ? CRAFT_LICENSE_KEY_PATH : config/license.key`,
+// while bootstrap/bootstrap.php checks the directory named by the *env var* of
+// the same name. Setting only the variable therefore moves the writability
+// probe and leaves the real key in the checkout, which a redeploy deletes. So
+// the value arrives as an environment variable (panelalpha.yaml) and is
+// promoted to the constant here, before the bootstrap runs. App::env() falls
+// back to constants, so the probe still agrees.
+$licensePath = getenv('CRAFT_LICENSE_KEY_PATH');
+if (is_string($licensePath) && $licensePath !== '') {
+    define('CRAFT_LICENSE_KEY_PATH', $licensePath);
+}
+
+require_once CRAFT_VENDOR_PATH . '/autoload.php';
+
+/** @var craft\console\Application $app */
+$app = require CRAFT_BASE_PATH . '/bootstrap/console.php';
+exit($app->run());

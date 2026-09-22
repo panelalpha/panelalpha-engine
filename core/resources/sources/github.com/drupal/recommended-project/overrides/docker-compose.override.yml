@@ -1,0 +1,112 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about everything it knows: the shared PHP base image at 8.3 (PhpRuntime read
+# `"php": ">=8.3.0"` out of drupal/core's lock entry), ~/project bind-mounted
+# at /app, the account's own uid, Apache on 8000, the staged entrypoint,
+# PA_DOCROOT=/app/web from the manifest's `docroot:`, DB_* from
+# AppDatabase::provision() and an `extra_hosts` pin for the account's MySQL
+# server. What it cannot know is that this application keeps state, and where.
+#
+# An override rather than a replacement compose file, and that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# *before* detection runs, so a compose file in the project root would make
+# Drupal look like a compose project and take the php strategy -- the bind
+# mount, the host Composer resolve, the staged install command, the document
+# root, the account database -- off the table entirely.
+#
+# There is no second service here. `database: mysql` in the manifest is
+# answered by AppDatabase on the account's own MySQL server, so there is no
+# sidecar to gate on and no `ready` service to write.
+services:
+  app:
+    # Compose merges `environment` maps across files, so this adds to what the
+    # strategy wrote rather than replacing it.
+    environment:
+      # The only way to give this container a php.ini. The base image loads
+      # none at all -- `php --ini` says "Loaded Configuration File: (none)",
+      # measured -- and scans /usr/local/etc/php/conf.d, a directory inside the
+      # image the account uid cannot write to (engine #185). PHP reads
+      # PHP_INI_SCAN_DIR from its own environment at startup whatever the SAPI,
+      # so naming a second directory here reaches the Apache module and the CLI
+      # both, and both need it: the CLI runs the install stage, the Apache
+      # module serves every request.
+      #
+      # The image's own directory is listed first and explicitly:
+      # PHP_INI_SCAN_DIR *replaces* the compiled-in path rather than adding to
+      # it, and dropping it would unload every docker-php-ext-*.ini --
+      # pdo_mysql and gd among them, which are Drupal's database driver and its
+      # image toolkit.
+      PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/panelalpha/php
+
+    # The hash salt and the administrator credentials, by a path that climbs
+    # out of the checkout. ~/.panelalpha survives the clone; ~/project does not
+    # (engine #173), and hooks/prepare.sh writes this file before compose runs.
+    #
+    # env_file rather than `environment:` because nothing else sets these keys,
+    # so nothing outranks the file -- and because .env would put the
+    # administrator password into .env.default at mode 644 (engine #173).
+    #
+    # Compose appends the override's env_file entries to the generated file's
+    # `- .env`, so both are read and `environment:` still outranks both.
+    env_file:
+      - ../.panelalpha/drupal/app.env
+
+    # The account's own data, outside the checkout.
+    #
+    # Everything else in ~/project is rebuilt from the repository and from
+    # Composer on every deploy, and `ProjectTree::clearContents()` deletes the
+    # lot before the clone (engine #173). These two directories are what a
+    # Drupal site holds that is not in the database:
+    #
+    #   files/    the public file system. Every uploaded image and document,
+    #             plus the aggregated CSS/JS and the Twig cache. Served
+    #             directly by Apache out of the document root, which is why it
+    #             is mounted at its canonical place rather than somewhere
+    #             neutral -- Drupal builds URLs for it as
+    #             /sites/default/files/<path> and a relocated public file
+    #             system would have to be reflected in file_public_path, in
+    #             .htaccess and in every already-stored URL.
+    #
+    #   private/  private files and the config sync directory. Outside the
+    #             document root by construction, not by an .htaccess rule.
+    #
+    # hooks/prepare.sh creates both source directories, and the mount point
+    # web/sites/default/files inside the checkout, first. Compose would
+    # otherwise create whichever is missing itself, owned by root and mode 755,
+    # and this container runs as the account uid.
+    volumes:
+      - ../.panelalpha/drupal/files:/app/web/sites/default/files
+      - ../.panelalpha/drupal/private:/app/private
+
+    # Two requests, because a 200 on / proves nothing here on its own and a
+    # 200 on /user/login proves nothing about the front page.
+    #
+    #   1. /user/login must render the login form. An installed-code,
+    #      uninstalled Drupal redirects every path to core/install.php, and a
+    #      Drupal whose database is unreachable answers 500, so `name="pass"`
+    #      on a 2xx is the one string that means "bootstrapped, connected, and
+    #      past the installer". It also exercises the hash salt: the form token
+    #      on that page is minted from settings.php's hash_salt on every
+    #      request, uncached.
+    #
+    #   2. / must be a 200. Measured, this is the check that would have caught
+    #      the second bug in this recipe's history: installed from the bare
+    #      `standard` *profile* the site bootstrapped, served /user/login
+    #      perfectly, and answered 403 Access denied on the front page to every
+    #      anonymous visitor, because no recipe had granted `access content`.
+    #      curl -f turns that into a failure.
+    #
+    # start_period is 120s, not 300. Measured on this host: the install stage
+    # is ~25 s of Composer plus a 6 s install_drupal(), and Apache bound 11 s
+    # after the container started on the deploy that was timed. 120 leaves room
+    # for a cold Composer cache without letting a genuinely broken install sit
+    # unreported for five minutes.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS --max-time 20 http://127.0.0.1:8000/user/login | grep -q 'name="pass"' &&
+          curl -fsS --max-time 20 -o /dev/null http://127.0.0.1:8000/
+      interval: 15s
+      timeout: 30s
+      retries: 10
+      start_period: 120s

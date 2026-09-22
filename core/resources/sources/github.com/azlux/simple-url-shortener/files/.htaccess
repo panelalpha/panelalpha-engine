@@ -1,0 +1,92 @@
+##############################################################################
+# Written by PanelAlpha. The repository ships no .htaccess at all.
+#
+# Simple-URL-Shortener is served from the root of the checkout, and its README
+# gives the server configuration as something you are expected to write by
+# hand -- an nginx block and a three-line Apache rewrite. Neither is in the
+# repository, so a deploy that only clones gets an application whose short
+# links all 404. This file is that configuration, for the Apache the shared
+# PHP base image runs.
+##############################################################################
+
+# ---------------------------------------------------------------- the router
+#
+# The whole product. index.php resolves a short code out of $_GET['site'] and
+# sends a 302 to the target; nothing routes a request to it, because upstream
+# expects the web server to. This is upstream's own rule from README.md with
+# the character class widened: the form's `custom` field is maxlength=30 and
+# accepts anything, so a custom code with a dash or an underscore in it would
+# be created and then be unreachable under upstream's `[a-zA-Z0-9]+`. Dots and
+# slashes stay out, so no real file or directory can be shadowed by a code.
+#
+# The two conditions come first for the same reason they do upstream: an
+# existing file or directory is served as itself. /favicon.ico, /assets/... and
+# every .php in the tree are matched by them, not by the rule.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^([A-Za-z0-9_-]{1,30})/?$ index.php?site=$1 [L,QSA]
+</IfModule>
+
+# -------------------------------------------------------------- display_errors
+#
+# Not cosmetic on this image. The shared PHP base image loads no php.ini at all
+# -- `php -i` reports `Loaded Configuration File => (none)` -- so display_errors
+# is on and error_reporting is E_ALL, and every diagnostic PHP raises is written
+# into the response body. That is engine#185, and it is the whole of the
+# `serving-php_error` verdict this recipe was opened for: a checkout with no
+# inc/config.php answers HTTP 200 with `Warning: require(config.php)` and an
+# uncaught Error in the body, because printing the warning sends the headers
+# before the fatal is reached. Measured on the control deploy: with this block
+# and nothing else changed, the same checkout answers a clean, empty 500.
+#
+# It stays after the config file is in place because this application reads
+# unset array keys in three files ($_SESSION['admin'] in list.php:6 is reachable
+# by anyone who requests list.php?UNKNOWN while logged out) and a notice in the
+# body is a defect published to the visitor.
+#
+# <IfModule> because these directives exist only under mod_php, which is what
+# this image runs; a server without it skips them rather than refusing to boot.
+<IfModule mod_php.c>
+    php_flag display_errors off
+    php_flag log_errors on
+</IfModule>
+
+# ------------------------------------------------------------------ exposure
+#
+# The document root is the repository root, so every file the deploy leaves
+# beside the application is a URL. The generated vhost
+# (resources/deploy/templates/apache-vhost.stub) already denies dotfiles and
+# `^(?:docker-compose\.ya?ml|panelalpha[-.])`, which covers .git, .env,
+# docker-compose.yml, .panelalpha-admin-password and this recipe's own
+# panelalpha-* files. Two things it does not cover:
+#
+#   docker-compose.override.yml -- engine#181. Its rule is anchored on
+#   `docker-compose.ya?ml` and does not match the `.override.` spelling. This
+#   recipe ships no overrides/, so there is no such file here today; the block
+#   is two lines and means a later override cannot be published by accident.
+#
+#   *.sqlite3 -- this deploy uses the account's MySQL server, so there is no
+#   SQLite file. Upstream's default config points SQLITE3_FILE at
+#   `./database.sqlite3`, inside the document root, and upstream's own nginx
+#   snippet denies `\.(sqlite3|ht)$` while its Apache snippet does not. An
+#   operator who switches DATABASE_TYPE without reading this far would publish
+#   every short link, every target URL and every bcrypt hash as a downloadable
+#   file. Anchored on the name so a page called `compose-guide.yml` is still
+#   the site's to serve.
+<FilesMatch "^docker-compose\.">
+    Require all denied
+</FilesMatch>
+<FilesMatch "\.(sqlite3|sqlite|db)$">
+    Require all denied
+</FilesMatch>
+
+# The cookies this application sets are Secure and HttpOnly already
+# (index.php:30, shorten.php:4, login.php:4, list.php:2 all pass cookie_secure)
+# but PHP's session cookie carries no SameSite attribute without a php.ini, and
+# there is none (engine#185). SameSite=Lax is what stops a third-party page
+# from POSTing to shorten.php or login.php?signin with the visitor's session.
+<IfModule mod_php.c>
+    php_value session.cookie_samesite "Lax"
+</IfModule>

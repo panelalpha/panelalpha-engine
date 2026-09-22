@@ -1,0 +1,103 @@
+# Layers over the compose file the dockerfile strategy generates. That file is
+# right about the app -- it builds the repository's own Dockerfile, publishes
+# the EXPOSEd 3456 and reads env_file: .env -- and it has no volumes, because
+# the Dockerfile declares none and there is no sibling compose file for the
+# engine's sidecar reader to learn any from. A `FROM scratch` Vikunja with
+# nowhere to write is the restart loop this recipe fixes.
+#
+# An override rather than a replacement compose file: the repository ships a
+# root Dockerfile, so detection picks the dockerfile strategy either way, and a
+# docker-compose.yml written here would be read only for runtime sidecars --
+# the app service's volumes, depends_on and limits would be silently dropped.
+services:
+  app:
+    # The two paths upstream's own documented compose binds. /db is where the
+    # image's VIKUNJA_DATABASE_PATH points and /app/vikunja/files is what
+    # files.basepath ("files") resolves against service.rootpath; neither
+    # exists in a scratch image, and both are written to on the first boot --
+    # db.initSqliteEngine and files.InitFileHandler are fatal when they cannot.
+    volumes:
+      - vikunja-db:/db
+      - vikunja-files:/app/vikunja/files
+      # Read-only as far as Vikunja is concerned: one config file, written by
+      # `init`, in the second directory viper.AddConfigPath() looks in.
+      - vikunja-config:/etc/vikunja
+
+    # Not a startup order but an ownership one, and the public URL: see `init`.
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+    # Replaces the hardener's 384m default for an app-role service. One Go
+    # process with an embedded frontend and a SQLite file: 512m is already
+    # generous, and the account's 2500m is mostly wanted by the build, which
+    # cross-compiles the API and builds the frontend with pnpm.
+    mem_limit: 512m
+
+  # Everything the app container would do for itself if it had a shell: it
+  # makes the two data volumes writable by uid 1000, and writes Vikunja's
+  # config file with the account's public URL, which it reads out of the
+  # generated compose file mounted here. See files/panelalpha-init.sh — it is a
+  # file rather than a command line because it is a page of reasons.
+  #
+  # Runs to completion before the app starts, and is never up again afterwards.
+  init:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "/panelalpha-init.sh"]
+    restart: "no"
+    volumes:
+      - vikunja-db:/db
+      - vikunja-files:/files
+      - vikunja-config:/config
+      - ./panelalpha-init.sh:/panelalpha-init.sh:ro
+      # The compose file the dockerfile strategy generated, which is where the
+      # engine wrote the account's public URL (SITE_URL, among six other
+      # aliases). Read-only, and never the override: this is the file compose
+      # itself is running from.
+      - ./docker-compose.yml:/compose.yml:ro
+    mem_limit: 32m
+
+  # Waits for the site to answer. The engine runs `docker compose up -d`
+  # without `--wait` and takes the deploy to be finished when that returns --
+  # at which point Vikunja has been *started*, not yet *answered*: its first
+  # boot runs ~200 migrations against an empty SQLite file before anything
+  # binds 3456. Compose blocks on a depends_on condition, so `ready` below is
+  # what makes `up -d` return only once this poll has succeeded.
+  #
+  # Two services where the other recipes need one, because the usual shape --
+  # a healthcheck on the app and `ready` waiting on service_healthy -- needs a
+  # program inside the app container to run the check with, and a scratch image
+  # has exactly one executable: `vikunja` itself. `vikunja healthcheck` is not
+  # it either: its PreRun is FullInitWithoutAsync(), which runs the migrations
+  # and opens a second connection to the same SQLite file, every interval.
+  #
+  # `timeout` rather than a counter so the script needs no `$` -- compose would
+  # read one as its own interpolation. Exits 0 even when the wait runs out, so
+  # that a broken app is reported by the health probe rather than as a failed
+  # deploy stage.
+  probe:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["timeout 300 sh -c 'until wget -q -T 5 -O /dev/null http://app:3456/api/v1/info; do sleep 2; done'; exit 0"]
+    restart: "no"
+    depends_on:
+      - app
+    mem_limit: 64m
+
+  # Does nothing and exits 0. It is the service `up -d` actually waits on: a
+  # `service_completed_successfully` dependency blocks compose until `probe`
+  # has exited, and nothing else in the file would. A clean exit 0 is
+  # explicitly not a crash loop as far as AppHealth is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      probe:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  vikunja-db:
+  vikunja-files:
+  vikunja-config:

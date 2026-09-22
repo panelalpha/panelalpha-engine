@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Weblate is a libre continuous-localization platform: a Python/Django web app
+  with Celery workers that manages translation strings against Git repositories,
+  with review, machine/AI suggestions and a REST API. The official
+  weblate/weblate image bundles nginx, the uWSGI web app and the Celery
+  workers/beat under supervisor in one container listening on 8080, so this is
+  one product on one origin behind a login. Registration is disabled and
+  WEBLATE_REQUIRE_LOGIN forces authentication, so anonymous visitors get the
+  login page, not the projects (managing projects/components is admin-only
+  anyway).
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes weblate/weblate on
+  Docker Hub and tags every release; this recipe pins the current stable
+  2026.9.1.2. Building from the clone would compile the Django app plus its
+  large native/VCS toolchain, which is slow and fragile; the published image
+  already contains everything, so nothing is built from the clone. Seeding a Hub
+  image also sidesteps engine#229 (image-seed NotFound).
+
+  WHY COMPOSE-REPLACE. Weblate needs PostgreSQL and Redis, which the schema's
+  MySQL-only `database:` cannot provide. This override runs the all-in-one app
+  image against a postgres:17-alpine sidecar (SPRING-less: POSTGRES_* env) and a
+  password-protected redis:7-alpine sidecar, each on a named volume. Only the
+  app publishes a port (8080), taken as the primary by the port scan; the DB and
+  cache have no host port. Weblate runs its own migrations and builds its search
+  index on start, so no migrate stage is needed.
+
+  DOMAIN + TLS. The engine terminates TLS and its proxy sends
+  X-Forwarded-Proto, so WEBLATE_ENABLE_HTTPS=1 with
+  WEBLATE_SECURE_PROXY_SSL_HEADER makes Django treat requests as secure (correct
+  cookies, and CSRF that accepts the real https origin). WEBLATE_ALLOWED_HOSTS=*
+  accepts the per-account host, which is unknown at build time. Weblate has no
+  bare SITE_URL env and derives it from WEBLATE_SITE_DOMAIN (a host, not a URL),
+  so the entrypoint derives that host from PA_PUBLIC_URL -- a `_URL` placeholder
+  ComposePlaceholders rewrites to the real https origin at deploy -- so links in
+  e-mails, the API schema and the config self-check are correct without the
+  domain being known when the recipe is written.
+
+  SECRETS + PERSISTENCE. hooks/prepare.sh generates four secrets once and keeps
+  them in ~/.panelalpha/weblate/ (0600 in 0700), the only writable place a
+  redeploy does not delete, then re-writes the env_files the compose reads: the
+  Postgres password (baked into the pgdata volume), the Redis password, the
+  Django SECRET_KEY (rotating it logs everyone out and breaks stored tokens) and
+  the initial admin password (set explicitly so Weblate never prints a random
+  one to a log the operator may miss). The admin login is written to
+  credentials.txt. Weblate's /app/data (VCS checkouts, uploaded files, the
+  search index and the on-disk SECRET_KEY) and /app/cache live on named volumes,
+  so all translation data and the login survive a redeploy.

@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LinkAce is a self-hosted bookmark manager: Laravel 11 behind Caddy and
+  php-fpm, a MariaDB schema, and a four-step web wizard that migrates the
+  database and creates the first admin. Detection read it correctly as
+  `laravel` -- composer.json and artisan are both there -- and that was the
+  problem. The repository's only compose file is `name: linkace_dev`: a php
+  service built from resources/docker/dockerfiles/development.Dockerfile with
+  the source bind-mounted at /app, a Caddy dev gateway, MariaDB and Postgres
+  and Meilisearch side by side, and buggregator (a debug-event collector) on
+  :8000. ComposeUsableProbe calls that isLocalDevCompose and skips it, so the
+  compose platform never claimed the project; the laravel strategy took it
+  instead, served the checkout from the shared PHP base image and kept all six
+  dev services as sidecars. The app and redis containers restart-looped, port
+  8000 belonged to buggregator rather than to LinkAce, and nothing answered:
+  the serving-unknown verdict.
+
+  There is no Laravel deploy to rescue, either. The checkout is not a runnable
+  LinkAce -- public/build does not exist until Vite has run, and both release
+  Dockerfiles build FROM docker.io/linkace/base-image:2.x-php-8.5, an image
+  upstream publishes whose own Dockerfile is not in this repository. So the
+  recipe supplies upstream's published image as the stack, the way its own
+  docker-compose.production.yml and its Helm chart do, and
+  overrides/docker-compose.yml is a replacement rather than an override
+  because the file it replaces is the thing that misled detection in the first
+  place.
+
+  Configuration goes in as environment variables and not as a mounted .env.
+  That is upstream-supported rather than clever: deploy/linkace/templates/
+  deployment.yaml feeds the container `envFrom: secretRef` and mounts no .env
+  at all, and Laravel's environment repository is immutable, so a real process
+  variable wins over the .env.sqlite.production the image bakes in at
+  /app/.env. It also keeps that file writable by www-data inside the image,
+  which the wizard needs: Setup\DatabaseController writes the database
+  credentials back into it after migrating, and a file bind-mounted from the
+  account's home would be owned by the wrong uid.
+
+  Two of those variables are not optional and neither can be inferred.
+
+  APP_KEY, because SetupCheckMiddleware compares config('app.key') against its
+  own GENERIC_APP_KEY constant and, on a match, rewrites /app/.env and answers
+  redirect()->refresh(). With the key coming from the environment the rewrite
+  changes nothing, the next request compares equal again, and the site is an
+  infinite redirect. Upstream's .env.k8s ships exactly that value. The prepare
+  hook generates a real base64:<32 bytes> instead, once, and keeps it: it
+  encrypts the sessions and the stored OIDC secrets.
+
+  TRUSTED_HOSTS, because LinkAce registers TrustHosts in its global middleware
+  (stock Laravel ships it disabled) and its hosts() falls back to
+  allSubdomainsOfApplicationUrl(). Every probe the engine makes of the
+  application goes to http://127.0.0.1:<port>/ with no Host header
+  (AppHealth::probeScript), so the account's own health check would have been
+  answered with a 400 from Symfony's SuspiciousOperation -- a site that is
+  working perfectly through its domain and reports as broken. `.*` restores
+  the framework default; nothing can deliver a poisoned Host here, because the
+  only route in is the account's nginx vhost, which selects on server_name and
+  then sets `proxy_set_header Host $host`.
+
+  APP_URL is the third value that has to be the account's public address, and
+  the prepare hook cannot know it -- hooks run before the domain directory
+  exists. The compose file ships `APP_URL: http://localhost`, which is the
+  shape ComposePlaceholders rewrites: URL-suffixed key, bare localhost on port
+  80, replaced with the account's https URL before the stack starts. TrustHosts
+  reads it, so the two settings are one decision.
+
+  The first admin account is created by the visitor, in the browser, through
+  the wizard LinkAce already has -- no credential is generated, printed or
+  shipped, and there is nothing publicly known to rotate. That is the reason
+  the recipe deliberately does *not* run `artisan migrate` at boot: a migrated
+  database makes Setup\DatabaseController::databaseHasData() true, and the
+  wizard then refuses to continue without an explicit "overwrite existing
+  data" confirmation on a database that is in fact empty. The form it presents
+  is prefilled from these environment variables (the Blade template reads
+  env('DB_HOST') and friends directly), so the database step is a click.
+
+  One service in the compose file is a no-op that exits 0: `docker compose up
+  -d` runs without --wait, so a service gated on the app's healthcheck is what
+  makes it return only once LinkAce answers rather than once its container has
+  been started.

@@ -1,0 +1,83 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Liwan is a privacy-first web-analytics service (explodingcamera/liwan,
+  Apache-2.0): one Rust binary that serves a Svelte dashboard, a collection
+  endpoint (POST /api/event) and the tracking script (/script.js),
+  with its whole state in an embedded database under LIWAN_DATA_DIR --
+  liwan-app.sqlite for users, entities and settings, liwan-events.duckdb for
+  the events. There is no external service: no Postgres, no Redis, no queue.
+  Upstream publishes ghcr.io/explodingcamera/liwan, so the Rust build is never
+  run here; the recipe reuses the published binary and only supplies the
+  configuration a checkout cannot carry.
+
+  == Why a FROM-official wrapper rather than compose-replace of the image ==
+
+  The published image is distroless (gcr.io/distroless/static-debian13:nonroot):
+  it contains exactly /liwan and nothing else -- no shell, no wget, no curl.
+  Three things this deploy needs cannot be done against that image directly.
+  First, the first administrator is created only by the CLI
+  (`liwan add-user <user> <pass> --admin true`); that insert is a plain
+  `insert into users` (src/app/core/users.rs:65), so a second run dies on
+  `UNIQUE constraint failed: users.username` -- measured. A one-shot that seeds
+  on every deploy would therefore fail every redeploy, so the seed has to be
+  guarded by reading the current user list, which needs a shell. Second, the
+  container has no tool to answer a compose healthcheck, so `up -d` could not be
+  gated on the site actually answering. Third, Liwan reads its public address
+  from LIWAN_BASE_URL (config.rs), which is none of the seven public-URL aliases
+  the framework injects, so it has to be mapped from BASE_URL at start.
+
+  files/Dockerfile.panelalpha is a two-line multi-stage build: `FROM
+  ghcr.io/explodingcamera/liwan` for the prebuilt binary, `FROM alpine` for a
+  shell and busybox wget, copy the one static musl binary across (verified to
+  run under alpine), add files/entrypoint.sh. No Rust is compiled and no
+  upstream source is touched -- this is configuration in a Dockerfile, the same
+  shape as the Authelia recipe. Building locally also means the image is never
+  delivered through the engine's host `docker save` image-seeding, so
+  engine#229 (the containerd-store manifest-only-stub bug that blocked Flink)
+  cannot apply to it.
+
+  == What the entrypoint sets ==
+
+  LIWAN_BASE_URL := BASE_URL, the account's public https origin
+  (PublicUrlEnvironment injects it). Liwan builds the tracking snippet and the
+  dashboard's absolute links from it, and marks the session cookie Secure when
+  it is https (config.rs secure()); the engine terminates TLS at the edge and
+  proxies plain http, so the value, not the request scheme, is what has to say
+  https. LIWAN_DATA_DIR=/data (a named volume, see the override).
+  LIWAN_DISABLE_NTP_CHECK, because the container has no business reaching an NTP
+  server on boot. LIWAN_PORT=8080, because Liwan's own default 9042 is a
+  non-standard port the deploy's port detection does not recognise -- it falls
+  back to 8080 and 502s, and the realignment pass that would fix that is
+  skipped whenever a compose override is present (AppPortAlignment bails when
+  composeFileToRun differs from the generated file). LIWAN_TRUSTED_PROXIES=* so the account's own reverse proxy
+  (which reaches the container from a bridge IP, not 127.0.0.1) is trusted to
+  set X-Forwarded-For and the visitor's real IP is used for geo/visitor
+  hashing rather than the proxy's -- the container is only reachable through
+  that one proxy inside the account's isolated network. DuckDB is capped
+  (LIWAN_DUCKDB_MEMORY_LIMIT=256MB, threads 2) for a shared 3.7 GB host.
+
+  == Admin, persistence, exposure ==
+
+  The administrator password is generated once in hooks/prepare.sh into
+  ~/.panelalpha/liwan/admin.env (0600) -- the only account directory a redeploy
+  does not wipe (engine#173 re-clones ~/project) -- recorded for the owner in
+  credentials.txt, and mounted read-only into the container, which seeds it on
+  the first boot and skips it on every later one. Liwan has an onboarding-token
+  first-run flow (a /setup?t=<token> URL printed only to the container log); by
+  seeding the admin before serving, the instance is never published in that
+  open pre-onboarding state. Anonymous requests reach the SPA and the public
+  collection endpoint by design (that is how a tracking script works), but the
+  dashboard API and all stats are behind the session login (cookie scoped to
+  /api/dashboard). Persistence is the named volume: both embedded DB files live
+  in /data, which survives rebuilds; there is no separate signing key to keep,
+  because sessions are rows in liwan-app.sqlite.
+extends: dockerfile
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe would report a null dockerfile and port 80. State what it
+  # would have found: the wrapper Dockerfile files/ drops into the project root,
+  # and 8080, the port the entrypoint binds Liwan to (its own default 9042 is a
+  # non-standard port the engine's port detection does not recognise).
+  dockerfile: Dockerfile.panelalpha
+  port_hint: 8080

@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  CloudBeaver is the web version of DBeaver: a Java/Jetty server that serves its
+  own bundled web console and a GraphQL API on one port (8978) and lets a user
+  browse and query databases (PostgreSQL, MySQL, SQLite, and many more) from the
+  browser. Its own metadata -- the admin user, teams/roles, saved connections
+  and user settings -- lives in an embedded H2 database under
+  /opt/cloudbeaver/workspace/.data, so a default deploy needs no external
+  datastore. After the server is configured every request is behind a login;
+  this recipe also turns off the default anonymous access, so an anonymous
+  visitor gets the login screen, never the database manager.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes the app as
+  dbeaver/cloudbeaver on Docker Hub and tags every release; this recipe runs
+  that official image with a compose-replace, pinned to the current stable
+  release 26.2.1. Building from the clone would compile a Java/Eclipse product
+  plus a TypeScript/React frontend on the host for no gain -- the published image
+  already bundles the compiled frontend, the server and the JDBC drivers.
+  Seeding a Docker Hub image also sidesteps engine#229 (image-seed NotFound on a
+  from-registry seed, which is the GHCR case, not Hub).
+
+  WHY COMPOSE-REPLACE. There is no datastore sidecar to add -- H2 is embedded
+  and managed by the server under the workspace -- but a hosted deploy needs two
+  things bare detection cannot give: a workspace directory that outlives a
+  redeploy, and the first-run admin claimed non-interactively so the setup
+  wizard never opens to the public. The image's entrypoint (launch-product.sh)
+  runs as root, chowns the workspace to the dbeaver uid, then drops privileges,
+  so a named volume mounted at the workspace works even when it starts empty.
+
+  ADMIN IS SEEDED, NOT FIRST-VISITOR-WINS. A fresh CloudBeaver boots into
+  "configuration mode": the FIRST visitor sets the admin login and server
+  settings. That window is closed here without any patching, using CloudBeaver's
+  own built-in automatic configuration: the server reads CB_SERVER_NAME,
+  CB_ADMIN_NAME and CB_ADMIN_PASSWORD from the environment on first boot, creates
+  the admin, marks itself configured and writes its runtime config into the
+  workspace (workspace/.data/.cloudbeaver.runtime.conf). hooks/prepare.sh
+  generates the admin password once into ~/.panelalpha/cloudbeaver/admin.env
+  (0600 in 0700, login cbadmin) and records it in credentials.txt. It is
+  idempotent: on a redeploy the workspace volume already has a server name, so
+  the server is no longer in configuration mode, the CB_* variables are ignored
+  and the existing admin and workspace are kept untouched.
+
+  ANONYMOUS ACCESS OFF. CloudBeaver ships with anonymousAccessEnabled=true by
+  default (an anonymous visitor could open the database manager as the "user"
+  team). This recipe sets CLOUDBEAVER_APP_ANONYMOUS_ACCESS_ENABLED=false so the
+  whole console and GraphQL API sit behind the login. Verified live over the
+  public domain: the GraphQL serverConfig reports anonymousAccessEnabled=false
+  and configurationMode=false, and an unauthenticated request gets no data.
+
+  PERSISTENCE. /opt/cloudbeaver/workspace (the embedded H2 metadata database
+  with the admin user, teams, saved connections and settings, plus the runtime
+  config that marks the server configured) is a named volume, so it survives
+  project_rebuild and storage reclaim; ~/project is wiped every deploy
+  (engine#173). The generated admin password is kept in ~/.panelalpha, which
+  also survives a redeploy, and never written into ~/project.
+
+  PORT + READINESS. The server listens on 8978 and only the app publishes a port
+  (8978:8978), so the engine's port scan takes it as the primary (engine#231/
+  #234). The Ubuntu-based image has no curl/wget but does have bash, so the
+  internal healthcheck is a raw HTTP GET over bash's /dev/tcp; a `ready` one-shot
+  (its own curl image, on the internal network) then waits until the GraphQL
+  serverConfig reports configurationMode=false, so `docker compose up` returns --
+  and the deploy reports finished -- only once CloudBeaver answers AND its admin
+  is claimed and the wizard is closed, not the moment the container starts
+  (engine#204). JVM boot is slow, hence the long start_period.

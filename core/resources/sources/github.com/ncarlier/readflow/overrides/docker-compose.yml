@@ -1,0 +1,102 @@
+# Replaces the repo's demo compose (hard-coded `secret`, checked-in demo/demo
+# htpasswd, :edge tag) with a real single-tenant stack. readflow (one official
+# Docker Hub image) serves the React UI and the GraphQL/REST API on one port;
+# Postgres runs as a sidecar on a named volume. Only readflow publishes a host
+# port, so the engine's port scan takes it as the primary app (engine#231).
+# ComposePortScan reads only compose-level `ports:`/`expose:`, so the image's
+# baked EXPOSE 9090 (disabled Prometheus endpoint) is invisible and never
+# competes with 8080. No service both `build:`s and bind-mounts a `./` path, so
+# detection keeps resolving this to `compose`.
+services:
+  db:
+    # Pinned major (upstream demo uses postgres:17): a datadir cannot be
+    # migrated backwards, so a floating latest would strand the named volume the
+    # first time the major moves.
+    image: docker.io/library/postgres:17-alpine
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, written once by prepare.sh and baked into pgdata.
+    env_file:
+      - ../.panelalpha/readflow/db.env
+    environment:
+      POSTGRES_DB: readflow
+      POSTGRES_USER: readflow
+      # A named volume is not always empty (lost+found); postgres refuses to
+      # init into a non-empty dir, so give it a clean subdir.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U readflow -d readflow -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    mem_limit: 512m
+
+  # The app: single distroless binary serving the React UI + GraphQL/REST API on
+  # 8080. Auto-migrates the schema on start, so no init one-shot is needed.
+  readflow:
+    image: docker.io/ncarlier/readflow:1.2.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    # Secrets (DB DSN, hash key/salt) come from an env_file so they are never
+    # in the compose text; non-secret config is `environment:` (which compose
+    # ranks above env_file, and which the account's own env_vars can still
+    # override -- none of these keys are PA_-reserved).
+    env_file:
+      - ../.panelalpha/readflow/app.env
+    environment:
+      READFLOW_LOG_LEVEL: warn
+      READFLOW_LOG_FORMAT: json
+      READFLOW_HTTP_LISTEN_ADDR: ":8080"
+      READFLOW_AUTHN_METHOD: basic
+      READFLOW_AUTHN_ADMINS: admin
+      READFLOW_AUTHN_BASIC_HTPASSWD_FILE: "file:///var/local/readflow.htpasswd"
+    volumes:
+      # Generated htpasswd (persisted, secret) -> the file basic auth reads.
+      - ../.panelalpha/readflow/htpasswd:/var/local/readflow.htpasswd:ro
+      # Upstream's own default config.js (apiBaseUrl:'' -> same-origin,
+      # authority:'' -> basic-auth mode), read-only. readflow's boot-time
+      # regeneration of this file fails harmlessly on the ro mount (logged
+      # warning, non-fatal) so the SPA keeps calling the API on the current
+      # origin instead of the forced http://localhost:8080 default.
+      - ./panelalpha/readflow/config.js:/var/local/html/config.js:ro
+    mem_limit: 1024m
+
+  # readflow's image is distroless (no shell, no curl) so it cannot healthcheck
+  # itself. This tiny sidecar stays up only to host a healthcheck that probes
+  # readflow's public /healthz (204 when serving) over the network.
+  probe:
+    image: docker.io/library/alpine:3
+    restart: unless-stopped
+    depends_on:
+      readflow:
+        condition: service_started
+    command: ["/bin/sh", "-c", "exec tail -f /dev/null"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://readflow:8080/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 15s
+    mem_limit: 64m
+
+  # Starts nothing, exits 0, waits on the probe's healthcheck. The engine runs
+  # `docker compose up -d` without --wait (engine#204), but it still honours
+  # depends_on conditions, so this gate holds the deploy "done" until readflow
+  # actually answers HTTP. A clean exit 0 is not a crash loop to AppHealth.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    depends_on:
+      probe:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}

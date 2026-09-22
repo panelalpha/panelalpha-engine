@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Shynet is a Django web-analytics service: a dashboard, an ingress that
+  records page views from a script tag or a tracking pixel, and PostgreSQL
+  under both. The repository ships a root docker-compose.yml, so detection
+  reads it as `compose` and deploys it verbatim. That is the whole of the
+  502 on this tracker row, and it is not a boot race.
+
+  docker-compose.yml interpolates the database credentials out of a `.env`
+  the repository does not contain -- POSTGRES_USER=${DB_USER},
+  POSTGRES_PASSWORD=${DB_PASSWORD}, POSTGRES_DB=${DB_NAME} -- and TEMPLATE.env
+  is the file the operator is told to copy and fill in. The engine creates
+  `.env` empty when a compose file names one in env_file (measured:
+  "Created empty .env (required by compose env_file)"), so all three resolve
+  to the empty string. postgres:latest then refuses to initialise -- "You
+  must specify POSTGRES_PASSWORD to a non-empty value" -- and restarts
+  forever; Shynet cannot reach a database that never came up and restarts
+  forever too; the bundled nginx is the only container that stays up and
+  answers 502 to everything. Measured on this host: the control deploy
+  reported success in 78 s and served 502 continuously, with
+  shynet_database in `Restarting (1)` and shynet_main under a second old on
+  every look. ComposePlaceholders does not fill these in: it rewrites
+  `${VAR:?message}` (REQUIRED_VAR_PATTERN, ComposePlaceholders.php:87), not
+  a bare `${VAR}`.
+
+  The image is `milesmcc/shynet:edge`, not the `:latest` the repository's own
+  compose names, and the difference is a security fix. Docker Hub's `latest`
+  is v0.13.1, pushed 2023-07-28; the repository's master is v0.14.0
+  (2026-03-15). v0.13.1 reads `ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS",
+  "*")` -- Host validation off, which upstream replaced in v0.14.0 with a
+  comment naming what it costs: "Do not default to '*': it disables Host
+  header validation, allowing password reset poisoning". `edge` is built
+  from master by .github/workflows/build-docker-edge.yml and its
+  org.opencontainers.image.revision label is
+  ca35caba3af2b888acc990b99152c500a1c44461, the exact commit a plain clone of
+  this repository lands on -- verified with docker image inspect. There is no
+  v0.14.0 tag on Docker Hub at all.
+
+  Running the code the checkout actually contains means shynet/settings.py:43
+  defaults ALLOWED_HOSTS to `localhost,127.0.0.1`, so every request arriving
+  on the account's public name would be answered 400 DisallowedHost. Nothing
+  in the engine would notice: the baseline check keeps 4xx healthy on
+  purpose (resources/checks/_baseline/no-server-error.yaml,
+  `status_not: ['5xx']`), and the check that does catch this,
+  resources/checks/command/django-allowed-hosts.yaml, belongs to the
+  `command` group, which a `compose` project never runs. So entrypoint.sh
+  derives ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS from PA_PUBLIC_URL, which
+  ComposePlaceholders rewrites to the account's public https address because
+  the key ends in _URL.
+
+  PostgreSQL, not MySQL: settings.py:111-129 offers exactly SQLite and
+  postgresql_psycopg2, and the image carries psycopg2 and no MySQL driver,
+  so `database: mysql` could not work even where it were honoured. SQLite is
+  supported upstream but stores an account's whole hit history in one file on
+  a bind mount that is emptied on every deploy, so postgres:16-alpine runs
+  beside the app with its own named volume.
+
+  No queue and no scheduler. settings.py:274 defaults
+  CELERY_TASK_ALWAYS_EAGER to True, so `ingress_request.delay(...)`
+  (analytics/views/ingress.py:35) runs inside the request that collected the
+  hit; celeryworker.sh exists but is only for a deployment that sets
+  CELERY_BROKER_URL, and there is no beat schedule anywhere in the tree.
+  Redis is likewise optional -- settings.py:233 only builds a Redis cache
+  when REDIS_CACHE_LOCATION is set -- so this stack is two long-running
+  containers, not five.
+
+  Secrets live in ~/.panelalpha/shynet/, which is the only writable place in
+  the account a deploy does not delete. DJANGO_SECRET_KEY matters more here
+  than usual: settings.py:36 falls back to the literal "onlyusethisindev",
+  which is in every copy of the repository, and it signs session cookies and
+  password-reset tokens.

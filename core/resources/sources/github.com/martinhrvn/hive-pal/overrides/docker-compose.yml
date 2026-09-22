@@ -1,0 +1,67 @@
+# REPLACE compose: this becomes the project's docker-compose.yml. The published
+# all-in-one image (NestJS API + React SPA on port 3000) runs instead of the
+# repo's source build. ComposePlaceholders rewrites BETTER_AUTH_URL and
+# FRONTEND_URL from http://localhost to the account's public https URL (both end
+# in _URL, the value matches the local-host pattern, port 80 is in the allow
+# list). Secrets come from ~/.panelalpha/hive-pal/secrets.env (generated once by
+# the prepare hook, reused across redeploys). The entrypoint waits for postgres,
+# runs `prisma migrate deploy`, then seeds/promotes the admin from ADMIN_EMAIL /
+# ADMIN_PASSWORD — no open-registration window.
+services:
+  app:
+    image: ghcr.io/martinhrvn/hive-pal:0.19.0
+    restart: unless-stopped
+    ports:
+      # Published so ComposePortScan routes the public domain to 3000; postgres
+      # 5432 is recognised as internal and never exposed.
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      ADMIN_EMAIL: admin@hive-pal.local
+      # Local-host values, rewritten to the public https URL by
+      # ComposePlaceholders. BETTER_AUTH_URL is where /api/auth/* is served and
+      # the trusted origin for session cookies; FRONTEND_URL is used in emails.
+      BETTER_AUTH_URL: http://localhost
+      FRONTEND_URL: http://localhost
+      # Uploaded hive / inspection images on a named volume (not S3, not ~/project).
+      STORAGE_TYPE: local
+      STORAGE_LOCAL_PATH: /data/uploads
+    env_file:
+      # POSTGRES_PASSWORD + DATABASE_URL + BETTER_AUTH_SECRET + ADMIN_PASSWORD.
+      # ~/project/../.panelalpha -> ~/.panelalpha.
+      - ../.panelalpha/hive-pal/secrets.env
+    volumes:
+      - hivepal-uploads:/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 8s
+      retries: 10
+      start_period: 60s
+    mem_limit: 768m
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: beekeeper
+      PGDATA: /var/lib/postgresql/data/pgdata
+    env_file:
+      # POSTGRES_PASSWORD, the same value the app's DATABASE_URL embeds.
+      - ../.panelalpha/hive-pal/secrets.env
+    volumes:
+      # Named volume survives project_rebuild / storage reclaim.
+      - hivepal-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d beekeeper"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    mem_limit: 256m
+volumes:
+  hivepal-pgdata:
+  hivepal-uploads:

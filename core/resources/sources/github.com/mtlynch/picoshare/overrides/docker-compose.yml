@@ -1,0 +1,86 @@
+# Compose-replace on the official Docker Hub image mtlynch/picoshare, pinned to
+# the current stable release. PicoShare ships no compose file of its own (only a
+# Dockerfile), and upstream's docker-compose example is the bare
+# `image + one bind-mount + a plaintext PS_SHARED_SECRET` snippet. This override
+# is that same single container plus what a hosted, secured deploy needs: the
+# admin passphrase generated once and fed from a redeploy-surviving store (never
+# a hardcoded dummy), the SQLite DB + uploaded bytes on a named volume, and the
+# port published. Pulling a Docker Hub image (not building) keeps detection on
+# `compose` and sidesteps engine#229 (image-seed NotFound is the GHCR case, not
+# Hub).
+#
+# SECURITY: PS_SHARED_SECRET is the admin passphrase. main.go log.Fatal's if it
+# is unset, so the container never boots into an open-admin state. It is
+# generated once by hooks/prepare.sh and kept in ~/.panelalpha (0600), fed here
+# via env_file so it never appears in the recipe and is never rewritten across
+# redeploys. Every write route (/api/entry/*, /files, /guest-links, /settings)
+# needs the resulting session cookie; downloading a share link (/-{id}) stays
+# public by design.
+services:
+  app:
+    # Latest published stable release, pinned (not :latest) so a redeploy is
+    # reproducible. Official Docker Hub image, pulled not built.
+    image: mtlynch/picoshare:v1.5.4
+    restart: unless-stopped
+    # .env is the platform-merged account env (touched by the prepare hook so
+    # `up` never aborts on a missing file); app.env carries the admin passphrase
+    # the hook generated once and keeps stable across redeploys. Paths are
+    # relative to ~/project, where the engine writes and runs this file.
+    env_file:
+      - .env
+      - ../.panelalpha/picoshare/app.env
+    environment:
+      # Default is 4001 anyway; set explicitly. Only this service publishes it.
+      PORT: "4001"
+      # Log the real client IP the engine proxy forwards, not the proxy's.
+      PS_BEHIND_PROXY: "true"
+    # Keep upstream's CMD: the entrypoint parses -db to place the SQLite file
+    # (and the uploaded bytes) under the /data named volume below.
+    command: ["-db", "/data/store.db"]
+    volumes:
+      # SQLite db + uploaded file bytes. Storing files is the whole point of the
+      # app, so this MUST survive a redeploy. The image runs as root, so the
+      # fresh named volume is writable with no chown.
+      - picoshare_data:/data
+    # The app listens on 4001; publish it so the port scan takes it as the
+    # primary (engine#234). No other service publishes a port.
+    ports:
+      - "4001:4001"
+    mem_limit: 512m
+
+  # Polls PicoShare's public landing page ("/" returns 200, no auth) until it
+  # answers, then exits 0. curlimages/curl is on Docker Hub (seeds fine) and has
+  # busybox /bin/sh. This is the readiness probe that backs the `ready` gate.
+  healthgate:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 60); do
+          curl -fsS -o /dev/null "http://app:4001/" && exit 0
+          sleep 3
+        done
+        echo "picoshare did not become ready in time" >&2
+        exit 1
+    mem_limit: 64m
+
+  # Starts nothing, exits 0, waits on the health probe. `docker compose up -d`
+  # blocks on a depends_on completion condition, so `up` returns -- and the
+  # engine reports the deploy finished -- only after PicoShare actually answers
+  # (engine#204).
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      healthgate:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  picoshare_data: {}

@@ -1,0 +1,90 @@
+# Compose-replace: run the official dbeaver/cloudbeaver image (pulled, not built)
+# instead of compiling the Java product + React frontend from the clone. Pinned
+# to the current stable release 26.2.1. CloudBeaver is a single Java/Jetty server
+# with the web console embedded and its metadata in an embedded H2 database under
+# the workspace, so there is no sidecar datastore -- the extra `ready` service
+# here only gates the deploy on the server being configured.
+services:
+  app:
+    image: dbeaver/cloudbeaver:26.2.1
+    init: true
+    restart: unless-stopped
+    # CB_SERVER_NAME/CB_ADMIN_NAME/CB_ADMIN_PASSWORD (generated once by
+    # hooks/prepare.sh) drive CloudBeaver's built-in automatic configuration on
+    # the FIRST boot: the server creates the admin, marks itself configured and
+    # writes its runtime config into the workspace. On a redeploy the workspace
+    # volume already carries that config, so the server is not in configuration
+    # mode and ignores these -- the existing admin is kept.
+    env_file:
+      - ../.panelalpha/cloudbeaver/admin.env
+    environment:
+      # CloudBeaver defaults anonymousAccessEnabled to true (an anonymous visitor
+      # could open the database manager as the "user" team). Turn it off so the
+      # whole console and GraphQL API sit behind the login.
+      CLOUDBEAVER_APP_ANONYMOUS_ACCESS_ENABLED: "false"
+    volumes:
+      # The embedded H2 database and all workspace metadata (admin user, teams,
+      # saved connections, settings) plus the runtime config that marks the
+      # server configured live here. Named volume so it survives redeploy and
+      # storage reclaim. The entrypoint chowns it to the dbeaver uid on start, so
+      # an empty volume is fine; lost+found at the mount root is harmless.
+      - cloudbeaver-workspace:/opt/cloudbeaver/workspace
+    # Only the app publishes a port; the port scan takes 8978 as the primary
+    # (engine#231/#234).
+    ports:
+      - "8978:8978"
+    healthcheck:
+      # The Ubuntu-based image has no curl/wget, but it has bash. Do a raw HTTP
+      # GET over bash's /dev/tcp and require a 2xx/3xx status line, so "healthy"
+      # means the web server actually answers, not just that the port is open.
+      # sh (dash) has no /dev/tcp, so invoke bash explicitly.
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/8978 && printf "GET / HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && grep -qm1 "HTTP/1.. \(200\|30\)" <&3'
+      interval: 10s
+      timeout: 12s
+      retries: 40
+      # First boot starts a JVM, inits the embedded H2 database and runs the
+      # automatic configuration, so give it plenty of time.
+      start_period: 180s
+    mem_limit: 2g
+
+  # Waits until CloudBeaver reports it is out of configuration mode -- i.e. the
+  # admin has been claimed and the setup wizard is closed -- then exits. Runs on
+  # the internal network with its own curl image (the app image has no curl).
+  # The `ready` gate makes `docker compose up -d` return, and the deploy report
+  # finished, only once that is true (engine#204). If it never configures (the
+  # wizard would be left open to the public) this fails the deploy on purpose.
+  ready:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -u
+        API="http://app:8978/api/gql"
+        Q='{"query":"query{serverConfig{configurationMode anonymousAccessEnabled}}"}'
+        i=0
+        while [ $$i -lt 60 ]; do
+          i=$$((i+1))
+          body=$$(curl -s --max-time 10 -X POST "$$API" \
+            -H 'Content-Type: application/json' -d "$$Q" 2>/dev/null)
+          # the GraphQL JSON is pretty-printed, so strip whitespace before matching
+          norm=$$(printf '%s' "$$body" | tr -d ' \t\r\n')
+          case "$$norm" in
+            *'"configurationMode":false'*)
+              echo "[ready] configured, wizard closed: $$norm"; exit 0 ;;
+          esac
+          echo "[ready] waiting ($$i): $${norm:-<no response>}"; sleep 5
+        done
+        echo "[ready] TIMEOUT: server never left configuration mode"; exit 1
+    mem_limit: 64m
+
+volumes:
+  cloudbeaver-workspace: {}

@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Slink is a self-hosted image-sharing platform (Symfony API + SvelteKit client)
+  where every share is private by default -- an uploaded image is reachable only
+  by whoever holds its share link, and the upload and admin planes sit behind a
+  login. This is the access-controlled case (real email/password auth, per-user
+  ownership, JWT-protected API and deliberate anonymous share links), not the
+  no-auth-private-data reject case.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes the whole app as a
+  SINGLE container on Docker Hub (anirdev/slink) and tags every release; this
+  recipe runs that official image with a compose-replace, pinned to the current
+  stable release v1.13.1 (Hub `latest` at time of writing). The one image
+  supervises FrankenPHP/Symfony, the SvelteKit server, Redis and a scheduler
+  with s6-overlay, so there is no front/API split to fold together and no
+  datastore sidecar to add. Building from source would compile PHP + a SvelteKit
+  bundle on the host for no gain. A Docker Hub seed also sidesteps engine#229
+  (the image-seed NotFound is the GHCR/registry-save case, not Hub).
+
+  WHY COMPOSE-REPLACE. The repo ships only a bare eight-line example compose; a
+  hosted deploy needs three things bare detection cannot give: the SQLite
+  databases and uploaded images on volumes that outlive a redeploy, a first admin
+  whose password is not a shipped default, and registration closed so a stranger
+  cannot self-register on a single-owner instance. The schema's `database:` is
+  MySQL-only and Slink uses embedded SQLite, another reason a plain override is
+  the right shape.
+
+  SECRETS ARE SELF-MANAGED. The image's init-secrets script generates the JWT
+  keypair + passphrase, the Mercure JWT secret and APP_SECRET (derived from the
+  JWT key) into /app/var/data/keys on first boot and reuses them thereafter.
+  Because /app/var/data is on a named volume, those secrets -- and the admin user
+  row in the SQLite DB beside them -- are stable across redeploy with no seeding
+  on the recipe's side. The only credential the recipe manages is the admin
+  password: hooks/prepare.sh generates it once into ~/.panelalpha/slink/ (0600 in
+  0700, the only writable place a redeploy does not delete) and the app reads it
+  only on the very first boot to seed the admin (AdminUserStep). Onboarding notes,
+  including the admin email to log in with, go in credentials.txt.
+
+  ONE ORIGIN. The browser only ever talks to :3000 (the SvelteKit server, the one
+  published port, so the port scan takes it as primary, engine#234); the client
+  reaches the Symfony API in-container. ORIGIN is the single public-facing value
+  SvelteKit needs -- its origin check on POST and every absolute/share link -- and
+  is left http://localhost:3000, which the engine rewrites to the account's public
+  https address (ComposePlaceholders: a key ending in ORIGIN with a localhost
+  value on an allowed port). A `curl` health sidecar plus a `ready` gate make
+  `docker compose up` block until Slink actually answers (engine#204).
+
+  SECURITY POSTURE. Registration is closed (USER_ALLOW_REGISTRATION=false) with
+  approval-required left on as defence in depth; anonymous uploads are off
+  (IMAGE_ALLOW_GUEST_UPLOADS=false); EXIF (incl. GPS) is stripped from uploads.
+  Share links stay anonymously reachable by design (USER_REQUIRE_AUTH_FOR_MEDIA_
+  SHARES=false) while the upload and admin UI require a login regardless. An
+  operator who wants a fully closed instance can also set
+  USER_ALLOW_UNAUTHENTICATED_ACCESS=false; this recipe leaves the public Explore
+  feed reachable, matching the app's default model.

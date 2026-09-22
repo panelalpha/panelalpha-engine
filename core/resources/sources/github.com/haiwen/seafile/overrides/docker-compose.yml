@@ -1,0 +1,160 @@
+# The stack for the repository, which ships no compose file, no Dockerfile and
+# nothing that serves HTTP: github.com/haiwen/seafile is the *desktop sync
+# client daemon* -- an autotools C/Vala tree that builds libseafile, seaf-daemon
+# and seaf-cli. There is no server in it. Seafile's own README says so ("Sync
+# client daemon (this repository)") and points at seafile-server, seahub and
+# ccnet for the parts that make a server, while also calling this repository
+# "the front page for Seafile project on Github" and using its issue tracker for
+# the server. So this URL means Seafile the product, and the only thing that can
+# be deployed from it is the server Seafile Ltd publishes as an image.
+#
+# This is manual.seafile.com's 13.0 ce/seafile-server.yml rewritten for a single
+# hosting account: same images, no Caddy (the engine is the reverse proxy), no
+# SeaDoc, no notification server, no metadata server, no AI.
+services:
+  db:
+    # Not optional and not swappable: Seafile has no SQLite mode. seaf-server
+    # links against libmysqlclient and setup-seafile-mysql.py creates three
+    # schemas (ccnet_db, seafile_db, seahub_db) before anything starts.
+    image: ${SEAFILE_DB_IMAGE:-mariadb:10.11}
+    restart: unless-stopped
+    # A default MariaDB sizes itself for a dedicated host. This one shares a
+    # 2 GB account with a six-process Python application that matters more.
+    command:
+      - --innodb-buffer-pool-size=64M
+      - --max-connections=60
+      - --performance-schema=0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${INIT_SEAFILE_MYSQL_ROOT_PASSWORD}
+      MYSQL_LOG_CONSOLE: "true"
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 384m
+
+  cache:
+    # Seahub's Django cache. Since Seafile 13 the default CACHE_PROVIDER is
+    # redis and seahub/settings.py raises ValueError on anything that is not
+    # redis or memcached, so there is no "no cache" option. Named `cache`
+    # rather than `redis` and pointed at by REDIS_HOST, because the engine
+    # gives a service called `redis` the sidecar catalogue's memory figure.
+    image: ${SEAFILE_REDIS_IMAGE:-redis:8-alpine}
+    restart: unless-stopped
+    # No persistence: everything in here is a cache Seahub can rebuild, and an
+    # RDB dump on a 2 GB account is disk and fork memory spent on nothing.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "48mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    mem_limit: 96m
+
+  seafile:
+    # The published server image. Tag written by hooks/prepare.sh, which pins
+    # the 13.0 series rather than reading a version out of the checkout: this
+    # checkout's configure.ac says 9.0.21, and that is the *sync client*
+    # version. It has no relationship to the server's.
+    image: ${SEAFILE_IMAGE:-seafileltd/seafile-mc:13.0-latest}
+    restart: unless-stopped
+    # nginx inside the image listens on 80 and proxies seahub (gunicorn, :8000)
+    # and the file server (:8082). 8000 on the host is what the engine's port
+    # detection reads and what the proxy rules point at.
+    ports:
+      - "8000:80"
+    # In front of the image's own CMD. See files/panelalpha-seafile-init.sh:
+    # the account's public hostname arrives as a URL and Seafile wants it split
+    # into host and scheme, and seahub's gunicorn defaults to five workers.
+    entrypoint: ["/bin/bash", "/panelalpha-seafile-init.sh"]
+    volumes:
+      - ./panelalpha-seafile-init.sh:/panelalpha-seafile-init.sh:ro
+      # Everything the server keeps: conf/, ccnet/, seafile-data/ (the block
+      # store), seahub-data/ and logs. A named volume, not the host bind mount
+      # upstream uses -- the container runs as root and chowns what it finds.
+      - seafile_data:/shared
+    environment:
+      # Not a real address, and not meant to survive. ComposePlaceholders
+      # rewrites a bare http://localhost under a *_URL-shaped key to the
+      # account's public https URL before the stack starts, and the init script
+      # splits it into SEAFILE_SERVER_HOSTNAME + SEAFILE_SERVER_PROTOCOL --
+      # which is what Seafile actually wants and what the engine cannot write,
+      # because neither key matches its public-URL pattern.
+      PA_PUBLIC_URL: http://localhost
+      SEAFILE_MYSQL_DB_HOST: db
+      SEAFILE_MYSQL_DB_PORT: "3306"
+      SEAFILE_MYSQL_DB_USER: seafile
+      SEAFILE_MYSQL_DB_PASSWORD: ${SEAFILE_MYSQL_DB_PASSWORD}
+      INIT_SEAFILE_MYSQL_ROOT_PASSWORD: ${INIT_SEAFILE_MYSQL_ROOT_PASSWORD}
+      SEAFILE_MYSQL_DB_CCNET_DB_NAME: ccnet_db
+      SEAFILE_MYSQL_DB_SEAFILE_DB_NAME: seafile_db
+      SEAFILE_MYSQL_DB_SEAHUB_DB_NAME: seahub_db
+      TIME_ZONE: ${TIME_ZONE:-Etc/UTC}
+      # Signs the tokens seahub hands the file server and seadoc. Seahub starts
+      # without it and then fails every upload and download.
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+      # There is no sign-up page and no installer. start.py writes these to
+      # conf/admin.txt on first boot, seahub.sh consumes it creating the
+      # superuser, and start.py deletes the file again.
+      INIT_SEAFILE_ADMIN_EMAIL: ${INIT_SEAFILE_ADMIN_EMAIL}
+      INIT_SEAFILE_ADMIN_PASSWORD: ${INIT_SEAFILE_ADMIN_PASSWORD}
+      SITE_ROOT: /
+      NON_ROOT: "false"
+      SEAFILE_LOG_TO_STDOUT: "true"
+      ENABLE_GO_FILESERVER: "true"
+      CACHE_PROVIDER: redis
+      REDIS_HOST: cache
+      REDIS_PORT: "6379"
+      # Every extension upstream's .env turns on by default, off. Each one is
+      # another container and another few hundred megabytes: sdoc-server (the
+      # collaborative editor) is a ~500 MB image on its own, and the
+      # notification and metadata servers want the same again. A stack that
+      # serves files beats one that tries to bring up everything and OOMs.
+      ENABLE_SEADOC: "false"
+      ENABLE_NOTIFICATION_SERVER: "false"
+      ENABLE_SEAFILE_AI: "false"
+      ENABLE_FACE_RECOGNITION: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    # The image's own check (30s/3 retries/10s start period) restated at a
+    # tighter interval and a much longer grace: a first boot creates three
+    # schemas, runs every Django migration and builds the admin account, which
+    # takes minutes and would otherwise be declared unhealthy and fail `up`.
+    # nginx answers long before seahub does, so this probes through it -- a
+    # dead gunicorn is a 502, which `curl -f` fails on.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null --max-time 10 http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 15s
+      retries: 60
+      start_period: 420s
+    mem_limit: 1280m
+
+  # Does nothing and exits 0. The engine runs `docker compose up -d` without
+  # `--wait` and calls the deploy finished when that returns -- at which point
+  # the containers have been *started*, not answered. Compose does block on a
+  # depends_on health condition, so waiting on seafile's healthcheck makes
+  # `up -d` return only once the site is really up. A clean exit 0 is
+  # explicitly not a crash loop to AppHealth::isCrashing(). The cache's image,
+  # so nothing extra is pulled.
+  ready:
+    image: ${SEAFILE_REDIS_IMAGE:-redis:8-alpine}
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      seafile:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  db_data: {}
+  seafile_data: {}

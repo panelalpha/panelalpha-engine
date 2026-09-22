@@ -1,0 +1,151 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ZenTao is a project/ALM management system -- products, projects, stories,
+  tasks, bugs and releases -- written in its own PHP framework with no
+  Composer at the repository root, vendored libraries under `lib/`, and MySQL
+  underneath. Detection read it correctly (no composer.json, so the
+  `php-plain` platform on the `php` strategy, PHP 8.3) and the deploy finished,
+  and every request answered 403: `serving-missing_entry`, which is what this
+  recipe fixes.
+
+  **The document root is `www/`, and the probe cannot reach it.**
+  `PhpDocroot::CANDIDATES` is `['public', 'web', 'public_html', 'webroot']`
+  (app/Lib/Deploy/Platform/Runtime/Php/PhpDocroot.php:25), then the repository
+  root, then `src/` as a late candidate. ZenTao serves from `www/`, which is on
+  none of those lists, and it has no index file at the root -- so `detect()`
+  falls through every candidate and returns `''`, no PA_DOCROOT is emitted, and
+  `panelalpha-serve.sh` falls back to `/app` because there is no `/app/public`.
+  `/app` holds `README.md`, `Makefile`, `config/`, `module/` and no index, so
+  Apache answers 403 and the report says the entry point is missing. Adding
+  `www` to the probe list would be wrong -- `www/` is also the conventional
+  name for a whole *site* directory -- so this is exactly the case the manifest
+  key exists for. `docroot: www` is a plain relative path, so unlike `.` it
+  survives `PlatformManifest::readDocroot()` (PlatformManifest.php:297-318),
+  which folds both `''` and `'.'` to "undeclared". #172 does not bite here and
+  no PA_DOCROOT override is needed.
+
+  **Serving `www/` is also what makes this application safe to host.** Every
+  directory that matters is a *sibling* of the document root, not inside it:
+  `config/` (including the database configuration), `module/`, `framework/`,
+  `lib/`, `db/` (the 645 KB schema and every migration), `tmp/` and the
+  engine's own `docker-compose.override.yml`, `.git/` and `panelalpha-*` files
+  at the repository root are all unreachable over HTTP by construction rather
+  than by an `.htaccess` rule. That is a better position than CouchCMS or
+  OpenEMR, which serve from the repository root and need `files/.htaccess` to
+  claw it back (#181).
+
+  **There is no web installer in a git checkout, and that is not luck.**
+  `.gitignore` lists `www/install.php` and `www/upgrade.php`; the repository
+  ships `www/install.php.tmp` and `www/upgrade.php.tmp`, and the Makefile
+  renames them when it builds a release tarball (Makefile:85-86). A deploy that
+  clones the repository therefore has no installer to expose -- the
+  first-visitor-wins hole found in CouchCMS, Koillection, Outline, NocoDB and
+  Mattermost simply is not reachable here. This recipe never creates
+  `install.php`, so the window is closed for the same reason upstream's own
+  release build is not: the file does not exist. `www/index.php` redirects to
+  `install.php` when the application is not installed, so a failed install
+  would be a 404 rather than an open wizard; the compose healthcheck fails the
+  deploy before that can be served.
+
+  **`config/my.php` holds no secret.** ZenTao has a first-class container mode:
+  `config/config.php:191` reads `IS_CONTAINER`/`IN_CONTAINER` and
+  `config/config.php:225-245` then takes the whole database configuration from
+  `ZT_*` environment variables. This recipe writes a `config/my.php` that does
+  the same thing directly from the engine's own `DB_*` variables -- the file is
+  a list of `getenv()` calls, so the database password is never written to
+  disk. `my.php` is included last (config.php:253), after the env block and
+  after `config/db.php`, so it wins.
+
+  Setting `$config->inContainer` in that file rather than passing
+  `IN_CONTAINER` as an environment variable is deliberate, and buys two things.
+  `router::checkInstalled()` (framework/base/router.class.php:3677-3686) then
+  stops trusting the `installed` flag on its own and requires the version row
+  in the database as well (via `getInstalledVersion()`, router.class.php:1038),
+  which makes "is this installed?" a property of the database -- the thing that
+  survives a redeploy -- rather than of a file in the checkout, which does not.
+  And `commonModel::checkSafeFile()` (module/common/model.php:1168) returns
+  early, which disables upstream's "safe mode": otherwise ZenTao demands that
+  somebody periodically create `www/data/ok.txt` on the filesystem to prove
+  they still own the server, and nags on every page until they do. That is
+  reasonable for a self-hosted install and unworkable for a hosted one.
+
+  **The first administrator is created from the deploy, never over HTTP.**
+  files/panelalpha-install.php bootstraps ZenTao's own framework in a CLI
+  process -- `router::createApp('pms', '/app', 'router', 'installing')`, the
+  same call `www/install.php.tmp` makes -- imports `db/zentao.sql` and
+  `db/dbviews.sql` through upstream's own `replaceContantsInSQL()` and
+  `appendMySQLTableOptions()`, and then calls upstream's own
+  `installModel::grantPriv()`, `updateLang()`, `execPostInstallSQL()` and
+  `enableCache()` and the settings writes that `install/control.php::step5()`
+  makes. Nothing here reimplements the schema or the password hashing. The
+  password is generated per account by hooks/prepare.sh into
+  `~/.panelalpha/zentao-admin-password` (0600 inside a 0700 directory, because
+  account homes are root-owned 0755 and an account cannot create a file
+  directly in its own home) and is never a default.
+
+  **Where the data lives, and what a redeploy does to it.** The database is the
+  account's own MySQL, provisioned by `database: mysql`, and it survives a
+  redeploy untouched -- every product, project, story, task and bug is in
+  there. Attachments are not: `fileModel::setSavePath()` (module/file/model.php:533)
+  puts them in `www/data/upload/<companyID>/<YYYYMM>/`, which is inside the
+  checkout, and every clone wipes `~/project` (#173). So a redeploy destroys
+  every uploaded file while the `zt_file` rows that point at them survive, and
+  the application then shows attachments it cannot serve. `www/data/` is also
+  inside the document root; upstream protects it with nothing, and the recipe
+  adds `files/www/data/.htaccess` to stop the directory being browsed and to
+  deny PHP execution there, but it cannot make the files outlive a redeploy.
+  This is the honest limitation of hosting ZenTao today and it is upstream's
+  layout, not the engine's fault -- though #173 is what turns it from "files in
+  the checkout" into "files that disappear".
+
+  **Licensing: hosting for third parties is permitted, and this recipe's
+  deployments are taken to be under AGPL-3.0.** `COPYING` states the choice
+  plainly -- the source is covered by ZPL 1.2 and AGPL-3.0, and "You can choose
+  ZPL or AGPL to use zentao". AGPL-3.0 is OSI-approved, FSF-free and
+  SPDX-listed, where ZenTao's Z Public License is none of those; under AGPL the
+  badgeware condition the ZPL imposes on the running interface does not apply,
+  and section 13 is satisfied for an unmodified deployment by pointing at the
+  upstream repository. Either way hosting is allowed: ZPL section 4 is titled
+  "Online service" and grants it directly, for any number of users, subject to
+  telling users the service is based on ZenTao (4.4) and leaving its branding
+  intact (4.5-4.7).
+
+  Branding is left exactly as upstream ships it under either licence -- the
+  posture the couchcms recipe took with CPAL -- and the application is shipped
+  unmodified, so it stays inside ZPL section 5 rather than becoming a derived
+  work under section 6. Two honest caveats: the AGPL election is genuinely
+  available but its use here is *unconfirmed*, no instance of anyone exercising
+  it having been found; and GitHub reports NOASSERTION for the repository while
+  SPDX has no `ZPL-1.2` identifier at all (its `ZPL-*` identifiers are the
+  unrelated Zope Public License), so automated tooling will not see the AGPL
+  half. See README.md beside this file.
+
+  Two upstream weaknesses worth knowing and not this recipe's to fix: ZenTao
+  hashes passwords as bare `md5($password)` (module/install/model.php:294 and
+  the user model), and PHP's own `display_errors` is turned back on by
+  upstream's `www/.htaccess` under `<IfModule php_module>` -- which the shared
+  base image's mod_php matches. hooks/prepare.sh appends an override that turns
+  it off, because #185 leaves the platform with `display_errors=1` and no
+  php.ini to fix it centrally.
+extends: php-plain
+# ZenTao serves from www/. See the note above: this key is the only thing that
+# can say so, the probe cannot reach it, and `www` (unlike `.`) survives
+# readDocroot().
+docroot: www
+# MySQL or nothing. db/zentao.sql is 645 KB of MyISAM/InnoDB DDL, the driver
+# list in config/config.php offers mysql, pgsql and dm, and there is no SQLite
+# path. The checkout ships no .env and no compose file to point itself at a
+# server, so without this the engine has nothing to hand it. Declaring it also
+# keeps PhpStrategy from mining the checkout for sidecars (#166).
+database: mysql
+commands:
+  - id: zentao-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Writes config/my.php from the database the engine provisioned, then runs
+      ZenTao's own installer in a CLI process on the first deploy, or its own
+      upgrade path when the checkout is newer than the schema. Idempotent: the
+      upgrade stage replays it on every redeploy.
+    run: 'sh panelalpha-setup.sh'

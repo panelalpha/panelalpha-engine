@@ -1,0 +1,45 @@
+# Compose-replace: the repository ships a from-source Dockerfile and no compose
+# file, but upstream publishes the same app as pbogre/jetlog on Docker Hub, so
+# this runs the official image directly rather than building it on a small host.
+services:
+  jetlog:
+    image: pbogre/jetlog:latest
+    restart: unless-stopped
+    # SECRET_KEY, PUID and PGID come from ~/.panelalpha/jetlog/jetlog.env, which
+    # the prepare hook generates once and keeps stable across redeploys. The
+    # path is relative to ~/project, where the engine writes and runs this file.
+    env_file:
+      - ../.panelalpha/jetlog/jetlog.env
+    environment:
+      JETLOG_PORT: "8080"
+      DATA_PATH: /data
+      TOKEN_DURATION: "7"
+      ENABLE_EXTERNAL_APIS: "true"
+    volumes:
+      # The SQLite DB (users + flights) is the whole state; keep it on the
+      # rebuild-surviving bind mount the prepare hook pre-seeds.
+      - ../.panelalpha/jetlog/data:/data
+    ports:
+      - "8080:8080"
+    expose:
+      - "8080"
+    mem_limit: 512m
+    healthcheck:
+      # /config is jetlog's one unauthenticated endpoint; a 200 means uvicorn is
+      # serving and the SQLite DB opened.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/config >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  # No-op gate: `up` waits for jetlog to be healthy before starting this, and
+  # the engine calls the deploy finished when `up` returns (engine#90). Reuses
+  # the already-pulled image so it needs no extra download.
+  ready:
+    image: pbogre/jetlog:latest
+    restart: "no"
+    entrypoint: ["/bin/true"]
+    depends_on:
+      jetlog:
+        condition: service_healthy

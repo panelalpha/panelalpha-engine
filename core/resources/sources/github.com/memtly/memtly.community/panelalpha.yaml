@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Memtly (the Community edition, formerly WeddingShare) is a self-hosted event
+  photo-sharing platform: an admin creates galleries and guests view, upload and
+  share photos and videos through a shareable link or QR code, with a slideshow
+  view. It is ASP.NET Core 10 on Kestrel (listening on :5000), published by the
+  project at `memtly/memtly:latest` on Docker Hub. This recipe runs that
+  published image rather than building the checkout: the repository's own
+  Dockerfile is a full multi-stage `dotnet publish` that also installs Node 22
+  and compiles the app plus its `Memtly.Core` git submodule from source, minutes
+  and well over the account's memory budget per account to arrive at the image
+  that is already published -- and the published image dodges engine#229's
+  docker-save stub because it lives on Docker Hub, not GHCR.
+
+  Storage is SQLite, the image's default: `appsettings.json` ships
+  `Data Source=./config/memtly.db`, and the app runs its EF Core migrations on
+  start (measured: "Initialization complete", schema created, no separate init
+  step needed). SQLite plus four data directories all live under /app; a
+  redeploy wipes and re-clones ~/project (engine#173) but never touches a named
+  volume, so config (the database AND the ASP.NET DataProtection keyring the
+  app writes there), uploads, thumbnails and custom_resources are each on their
+  own named volume. That keyring on the config volume is what keeps auth cookies
+  valid across a redeploy; the app warns it is not encrypted at rest, which is
+  expected for a keyring on a private per-account volume.
+
+  Only the app publishes a port -- `8080:5000`, explicit so the engine sees it
+  (engine#234) and 5000 is the container port Kestrel actually binds. There is
+  no datastore sidecar and nothing else listens.
+
+  The installation is given a real owner instead of the shipped default. The
+  image seeds one admin (email admin@example.com) with password `admin` and sets
+  the gallery-secret encryption key/salt to the literal `ChangeMe`; both are
+  overridden here. hooks/prepare.sh generates a 24-character admin password and
+  a random ENCRYPTION_KEY/ENCRYPTION_SALT once into ~/.panelalpha/memtly/
+  (0600 in a 0700 dir, the only writable place a rebuild cannot reach) and
+  reuses them on every later deploy, so the key keeps matching data encrypted on
+  the persisted volume and the admin password keeps matching the database. The
+  documented uppercase env convention is what carries them (verified: setting
+  TITLE changed the rendered page title, so ACCOUNT_ADMIN_PASSWORD / ENCRYPTION_*
+  bind the same way). ASPNETCORE_ENVIRONMENT is Production, so there is no
+  developer exception page.
+
+  The auth model is a single seeded admin plus optional self-registration.
+  Registration defaults on but requires email validation, and the engine
+  configures no SMTP, so a self-registered account can never activate; the
+  compose file also asks for it to be off. Registration only ever creates
+  non-admin users -- the admin is the security boundary and it is the account
+  whose password this recipe rotates. Guests upload to a gallery through its
+  link/QR code without an account (guest gallery creation stays off). SMTP,
+  notification back-ends (Ntfy/Gotify) and analytics are left unconfigured and
+  are set from the admin UI.

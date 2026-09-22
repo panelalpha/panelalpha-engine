@@ -1,0 +1,59 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Passit is an end-to-end-encrypted password manager: a Django/DRF API
+  (passit-backend) that also serves the compiled Angular single-page app
+  (passit-frontend) as static files through whitenoise, backed by PostgreSQL
+  and a Valkey/Redis cache. It is one product delivered as one official image.
+
+  ONE SOURCE, NO GRAFTING. The tracker Repository URL is the GitLab *group*
+  gitlab.com/passit, which is split into passit-backend, passit-frontend and
+  passit (the deployment meta-repo). This recipe does not clone two repos and
+  stitch them: upstream publishes a single self-contained image, passit/passit,
+  that bundles the backend and the *already-built* Angular SPA -- verified by
+  `docker run ... ls`: /code/dist/index.html and /code/static/main.*.js are
+  baked in and collectstatic has already run. The deploy meta-repo
+  gitlab.com/passit/passit is exactly what upstream tells users to run (its
+  README's DigitalOcean button and its own Dockerfile are `FROM
+  passit/passit:latest`), so the recipe is anchored here and pulls the official
+  prebuilt image -- which is not grafting.
+
+  IMAGE: passit/passit:stable, not :latest. Docker Hub's `latest` is from
+  2019-01-11 (109 MB); `stable` is 2026-04-10 (128 MB), Python 3.14 + granian,
+  and is what the backend's current master builds. `latest` predates the Valkey
+  cache/task backend, the granian server and the current settings entirely, so
+  the recipe pins `stable`. The tag is overridable with PASSIT_IMAGE.
+
+  WHAT THE RECIPE SUPPLIES. The meta-repo has only a Dockerfile and a
+  DigitalOcean app spec, no runnable compose, so a bare deploy builds
+  `FROM passit/passit:latest` and runs one container with no database, no
+  cache, no SECRET_KEY and no migrations -- it cannot serve. This override
+  replaces that with the real stack: postgres:16-alpine, valkey:8, a one-shot
+  `init` that migrates before the app is allowed to answer, the app on :8080,
+  and a `ready` gate so the deploy finishes only when the site answers. It
+  generates and persists SECRET_KEY and the database password under
+  ~/.panelalpha/passit/ (0600 in 0700), the only writable place a deploy does
+  not delete, and derives EMAIL_CONFIRMATION_HOST from the account's public URL
+  so confirmation and reset links point at the right host.
+
+  FIRST RUN IS SELF-REGISTRATION, NOT A SEEDED SUPERUSER. Passit is
+  end-to-end encrypted: apps/access/models.py builds each user's RSA keypair
+  from the *client-side-hashed* password and the client encrypts every secret
+  under keys only it can derive (passit_sdk/sdk.py). `createsuperuser` makes
+  the keypair from the *raw* password -- the code says so in a comment: "The
+  password won't be usable to login with the client due to lack of hashing" --
+  so a seeded Django admin is a broken vault account that the SPA can never
+  decrypt. Registration is open (UserViewSet -> AllowAny), which is Passit's
+  designed onboarding, so the recipe seeds no product user; the owner registers
+  in the SPA, which performs the crypto correctly.
+
+  SMTP LIMITATION, STATED PLAINLY. A registered user cannot open a vault until
+  their email is confirmed (HasVerifiedEmail on SecretViewSet); the confirmation
+  code is delivered by email, which upstream requires the operator to configure
+  (EMAIL_URL / DEFAULT_FROM_EMAIL are "Required settings" in Passit's own
+  install docs and in the DigitalOcean spec). With no SMTP the code is written
+  to the app container log instead of sent, so the account cannot be confirmed
+  from outside. This is not repairable in a recipe and is not grafting; it is an
+  operator responsibility, surfaced as env vars and documented in
+  credentials.txt. The deploy itself -- SPA, API, registration, persistence --
+  is fully working without SMTP; email confirmation is the one piece that needs
+  it.

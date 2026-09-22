@@ -1,0 +1,118 @@
+# The stack for the repository, which ships none Docker would load: its compose
+# files live in docker/compose/ under names (docker-compose.sqlite.yml,
+# docker-compose.postgres-tika.yml, ...) that neither Docker nor the engine's
+# compose probe ever looks at, and their own header tells the operator to copy
+# one out. This is docker-compose.sqlite.yml rewritten for a single hosting
+# account: the same published image and broker, SQLite, no host bind mounts.
+#
+# Paperless runs from ghcr.io/paperless-ngx/paperless-ngx rather than from this
+# checkout because the repository's Dockerfile is not a thing an account can
+# build: it is a multi-stage build that compiles the Angular frontend with
+# pnpm, installs the OCR toolchain (tesseract, ghostscript, unpaper, qpdf,
+# jbig2enc) and resolves a uv lock of ~250 wheels including torch. The django
+# strategy that detection picked instead installed that lock (dev extras and
+# all) into a plain python:3.11-slim, found no frontend, no OCR binaries and no
+# s6 supervision tree, and restart-looped on a Django management command that
+# does not exist in a bare checkout.
+services:
+  broker:
+    # Paperless has no in-process queue: celery talks to this for every task,
+    # and src/paperless/checks.py fails the startup system check when it is not
+    # reachable, so the app does not boot without it.
+    image: docker.io/valkey/valkey:9-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    mem_limit: 128m
+
+  webserver:
+    # Tag written by hooks/prepare.sh from the checkout's own version.py.
+    image: ${PAPERLESS_IMAGE:-ghcr.io/paperless-ngx/paperless-ngx:latest}
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      broker:
+        condition: service_healthy
+    environment:
+      PAPERLESS_REDIS: redis://broker:6379
+      # No database sidecar: unset PAPERLESS_DBHOST already means SQLite, and
+      # this states it. One account's document archive is not what Postgres is
+      # for, and the memory it wants is memory the OCR worker needs more.
+      PAPERLESS_DBENGINE: sqlite
+      PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY}
+      # Not a real address, and not meant to survive: ComposePlaceholders
+      # rewrites a bare http://localhost under a *_URL-shaped key to the
+      # account's public https URL before the stack starts. Paperless needs it
+      # for CSRF_TRUSTED_ORIGINS -- ALLOWED_HOSTS already defaults to ["*"], so
+      # the app answers without it but every form POST, including the login,
+      # is rejected with a CSRF failure.
+      PAPERLESS_URL: http://localhost
+      PAPERLESS_TIME_ZONE: ${PAPERLESS_TIME_ZONE:-UTC}
+      PAPERLESS_OCR_LANGUAGE: ${PAPERLESS_OCR_LANGUAGE:-eng}
+      # There is no sign-up page: without these the site comes up on a login
+      # form nobody holds an account for. init-superuser creates this one on
+      # first boot and never touches it again.
+      PAPERLESS_ADMIN_USER: ${PAPERLESS_ADMIN_USER:-admin}
+      PAPERLESS_ADMIN_PASSWORD: ${PAPERLESS_ADMIN_PASSWORD}
+      PAPERLESS_ADMIN_MAIL: ${PAPERLESS_ADMIN_MAIL:-admin@localhost}
+      # One of everything. The container runs six processes under s6 (gunicorn,
+      # celery worker, beat, the consumer, ...) and the defaults size the
+      # worker counts off the host's core count, which here is the whole
+      # machine rather than the account's slice.
+      PAPERLESS_WEBSERVER_WORKERS: "1"
+      PAPERLESS_TASK_WORKERS: "1"
+      PAPERLESS_THREADS_PER_WORKER: "1"
+    # Named volumes throughout, including consume and export, which the
+    # upstream file binds to host directories. The container starts as root and
+    # chowns these to its own paperless user (init-folders), which is the wrong
+    # uid for a directory inside the account.
+    volumes:
+      - data:/usr/src/paperless/data
+      - media:/usr/src/paperless/media
+      - export:/usr/src/paperless/export
+      - consume:/usr/src/paperless/consume
+    # The image ships this check already, at 30s intervals with no start
+    # period; restated here because `ready` below waits on it and a first boot
+    # -- migrations, the whoosh index, the superuser -- takes longer than the
+    # image's five retries allow, which would make compose call the service
+    # unhealthy and fail the deploy.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-L", "--max-time", "5", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 300s
+    mem_limit: 1536m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be finished
+  # when that returns -- at which point paperless has been *started*, not yet
+  # *answered*: its first boot runs Django migrations against an empty SQLite
+  # file and builds the search index. Compose does block on a depends_on health
+  # condition, so a service that waits on the webserver's healthcheck is what
+  # makes `up -d` return only once the site actually answers. A clean exit 0 is
+  # explicitly not a crash loop as far as AppHealth is concerned. The broker's
+  # image, not paperless's, so nothing extra is pulled and nothing large starts.
+  ready:
+    image: docker.io/valkey/valkey:9-alpine
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      webserver:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  data: {}
+  media: {}
+  export: {}
+  consume: {}
+  redisdata: {}

@@ -1,0 +1,181 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  S-Cart is a Laravel e-commerce platform. The repository is a thin Laravel 13
+  skeleton -- `routes/web.php` is six lines and returns a welcome view -- and
+  the shop itself is three Composer packages, gp247/core, gp247/front and
+  gp247/shop, that register their own routes, migrations, seeders and admin.
+  Detection reads it as `laravel` and is right about all of that: PHP 8.3
+  against `"php": "^8.3"`, `public/` as the document root, Composer and Vite on
+  the host. Three other things were wrong, and together they are the
+  `serving-unknown` verdict this recipe fixes.
+
+  The first is that the repository ships a workstation compose file and the
+  deploy adopted half of it. docker-compose.yml describes a laptop stack --
+  php-fpm built from docker/php, an nginx `webserver` publishing 8000:80 and
+  speaking FastCGI to app:9000, a `queue`, a `scheduler`, a profile-gated
+  `mysql-local`, and a `node` that runs `npm install` and holds a Vite dev
+  server open. App, queue and scheduler are recognised as the application and
+  dropped; `webserver` and `node` are not, and were kept as runtime sidecars:
+  "Keeping runtime services from compose: webserver, node". What came up was
+  `scart-nginx` and `scart-node`, the port probe on 8000 read `Recv failure:
+  Connection reset by peer` -- nginx alive, proxying to an app:9000 that does
+  not exist in the generated stack, where the application is Apache on 8000 --
+  and the domain answered 502. hooks/prepare.sh moves docker-compose.yml *and*
+  docker-compose.prod.yml, which the fallback glob would otherwise find next,
+  out of the project root before detection runs.
+
+  The second is that nothing installs the shop. `php artisan migrate --force`
+  creates the three tables of the Laravel skeleton and stops; every gp247 table,
+  every seeded row, the published template and the admin account come from
+  `php artisan gp247:install`, which the platform has no way to know about. It
+  is not idempotent either -- with `--force=1` it re-runs `gp247:front-install`
+  and `gp247:shop-install`, and both call their uninstall first, so a second run
+  drops and recreates the storefront and the shop. panelalpha/install.sh runs it
+  exactly once, guarded on the `gp247-installed.txt` marker GP247 writes on the
+  local disk.
+
+  The third is the admin account, and it is a security fix.
+  GP247\Core\Database\Seeders\DataDefaultSeeder creates user `admin` with a
+  hardcoded bcrypt hash of the password `admin` (verified:
+  password_verify('admin', $2y$10$JcmAHe5eUZ2rS0jU1GWr/...) is true) and the
+  install command prints "User/password: admin/admin" to the deploy log. On an
+  account that has just been given a public HTTPS name, that is a shop whose
+  administration is open to whoever reads the manual.
+  panelalpha/set-admin-password.php generates one, writes it to
+  ~/project/.panelalpha-admin-password (0600) and sets it -- only while the
+  password is still literally `admin`, so a password an operator later chooses
+  is never reset under them by a redeploy.
+
+  The database is MariaDB, not SQLite, and that was measured rather than
+  assumed. config/database.php takes DB_DATABASE verbatim (no `database_path()`
+  wrapper, so engine#167 does not apply here), `gp247:install` migrates and
+  seeds onto SQLite in a second, and the storefront serves. The admin dashboard
+  does not: GP247\Shop\Admin\Models\AdminOrder's four statistics queries are raw
+  MySQL -- DATE_FORMAT(), DATE_SUB(), CURRENT_DATE() -- and the page every admin
+  login lands on answers
+
+      SQLSTATE[HY000]: General error: 1 near "(": syntax error
+      (View: vendor/gp247/shop/src/Views/admin/component/order_month.blade.php)
+
+  HTTP 500, for every administrator, behind a storefront that looks healthy. So
+  the prepare hook writes DB_HOST=127.0.0.1 into .env, which is what asks
+  EnvSidecars for the mariadb:11 companion (512 MB, its own volume), and the
+  same three DB_ lines give that container its user, password and database.
+
+  A fourth thing, found on the first deploy of this recipe rather than read out
+  of the source: none of the three install commands passes --force to the
+  migrations it runs, and ConfirmableTrait cancels an unforced migration under
+  APP_ENV=production. The log showed three "APPLICATION IN PRODUCTION / Command
+  cancelled" migrations each reported as done, and then the seeders failing on
+  `Table 'scart.gp247_admin_menu' doesn't exist`. panelalpha/install.sh runs
+  that one process as APP_ENV=local; every request the account serves is still
+  APP_ENV=production.
+
+  APP_KEY is generated in the prepare hook, on the host, and this file states
+  the whole manifest rather than `extends: laravel` so that the platform's
+  `key-generate` command is not inherited with everything else: `env_file:` is
+  read when the container is *created*, so an empty `APP_KEY=` line becomes a
+  real empty environment variable that Laravel's immutable Dotenv will not
+  overwrite, and a key written into .env afterwards is never seen.
+id: scart
+label: S-Cart
+strategy: laravel
+runtime: php
+port: 8000
+# public/index.php, unchanged from the Laravel skeleton.
+docroot: public
+requires:
+  php: runtime
+  node:
+    role: build
+    optional: true
+env:
+  APP_ENV: production
+  LOG_CHANNEL: stderr
+  # .env is carried into the container by `env_file:`, which `environment:`
+  # outranks -- so a value that must hold has to be stated here as well.
+  APP_DEBUG: 'false'
+  # The one hop in front of this container is the account's own web server,
+  # which is what `REMOTE_ADDR` means to Illuminate\Http\Middleware\TrustProxies:
+  # trust the immediate peer and nobody further. config/trustedproxy.php feeds
+  # it to the middleware, and without it X-Forwarded-Proto is ignored and every
+  # generated URL on an https page is http://. Upstream leaves it unset because
+  # its own default target is a bare host talking FastCGI, where there is no hop
+  # to trust and trusting one would let a client spoof its own IP.
+  TRUSTED_PROXIES: REMOTE_ADDR
+# No build-stage commands, and no `commands_from`. An app config's `commands:`
+# are applied by the app-config layer and are deliberately left out of the
+# manifest it describes (AppConfig::readManifest drops the key, "copying them
+# into the manifest would run every command twice"), and `install_command` /
+# `build_command` -- the only two things the host PHP build reads -- are
+# projections of the *manifest's* staged commands. So a build-stage command
+# written here never reaches the host build. Measured: with `composer-install`,
+# `package-discover` and `asset-publish` declared, the deploy logged
+# `[panelalpha] build: dependencies` and the composer run underneath it, and
+# neither `package:discover` nor `vendor:publish` appeared anywhere. What ran
+# was PhpHostBuild::DEFAULT_INSTALL -- `composer install --no-dev
+# --no-interaction --no-scripts --no-plugins --optimize-autoloader`, the same
+# line laravel.yaml spells out -- so the tree is resolved either way, and
+# declaring the rest here would only have claimed something that does not
+# happen. Package discovery is done in the install stage below instead, inside
+# the container, where an app config's commands do run.
+commands:
+  - id: package-discover
+    stage:
+      - install
+      - upgrade
+    description: >-
+      The host build resolves vendor/ with --no-scripts, so nothing writes
+      bootstrap/cache/packages.php. Laravel's PackageManifest would build it
+      lazily on the first artisan call, which works; doing it once, here, means
+      gp247/core, gp247/front and gp247/shop -- whose providers are what
+      register the shop's routes, commands and migrations -- are discovered
+      before anything depends on them rather than as a side effect of the first
+      thing that does.
+    run: 'php artisan package:discover --ansi'
+    optional: true
+  # No `key-generate`. APP_KEY is generated by hooks/prepare.sh, on the host,
+  # before the container exists. See the description.
+  - id: migrate
+    stage:
+      - install
+      - upgrade
+    description: 'The Laravel skeleton''s own three migrations (users, cache, jobs). gp247:core-install runs `migrate` again as its first step, which is idempotent; doing it here as well means an upgrade that adds a migration to the application still gets it.'
+    run: 'php artisan migrate --force --no-interaction'
+    timeout: 600
+  - id: gp247-install
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Installs the platform -- core, then front, then shop: migrations, the
+      seeded menus, roles, languages, store and admin user, the published
+      template under app/GP247, and storage:link. Wrapped in a script because
+      `gp247:install --force=1` is destructive on a second run (front-install
+      and shop-install each call their own uninstall first) and because none of
+      the three install commands passes --force to the migrations it runs, so
+      ConfirmableTrait cancels every one of them under APP_ENV=production and
+      the seeders then fail on tables that were never created. The script runs
+      that one process as APP_ENV=local, and does nothing at all once GP247's
+      `gp247-installed.txt` marker exists.
+    run: 'sh panelalpha/install.sh'
+    timeout: 900
+  - id: scart-admin-password
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Replaces the seeded `admin`/`admin` credential -- a hash hardcoded in
+      DataDefaultSeeder and a password the install command prints to the deploy
+      log -- with one generated here and recorded in
+      ~/project/.panelalpha-admin-password (0600). Does nothing once the
+      password is no longer `admin`.
+    run: 'php panelalpha/set-admin-password.php'
+    # A site that would otherwise serve is never held back by this step; the
+    # script already exits 0 on every unexpected state, and this is the belt.
+    optional: true
+  - id: optimize
+    stage: start
+    description: 'Config, route and view caches are keyed on the environment, which is only fully known at boot. Runs after the install stage, so the gp247 config it caches is the installed one.'
+    run: 'php artisan optimize'
+    optional: true

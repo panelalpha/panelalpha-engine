@@ -1,0 +1,43 @@
+# Replaces BugPin's upstream single-service compose. The upstream file bind
+# mounts ./data on the host and hardcodes the default admin; this stack puts
+# all state on a named volume that survives project_rebuild and pre-seeds a
+# strong admin credential before the server boots.
+services:
+  # One-shot: pre-seed the first admin with the password generated into
+  # ~/.panelalpha/bugpin/admin.env, so BugPin's own bootstrap never writes its
+  # documented default (admin@example.com / changeme123). Idempotent — a no-op
+  # once the account exists. Runs on the same /data volume as the app.
+  bugpin-init:
+    image: registry.arantic.cloud/bugpin/bugpin:latest
+    restart: "no"
+    environment:
+      - NODE_ENV=production
+      - DATA_DIR=/data
+    env_file:
+      - ../.panelalpha/bugpin/admin.env
+    volumes:
+      - bugpin_data:/data
+      - ./docker/pa-seed.ts:/app/pa-seed.ts:ro
+    entrypoint: ["bun", "/app/pa-seed.ts"]
+
+  bugpin:
+    image: registry.arantic.cloud/bugpin/bugpin:latest
+    restart: unless-stopped
+    depends_on:
+      bugpin-init:
+        condition: service_completed_successfully
+    environment:
+      - LOG_LEVEL=info
+    volumes:
+      - bugpin_data:/data
+    ports:
+      - "7300:7300"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:7300/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  bugpin_data: {}

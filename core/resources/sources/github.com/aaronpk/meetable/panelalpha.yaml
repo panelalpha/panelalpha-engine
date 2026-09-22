@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Meetable — a self-hosted community events website (list, view and RSVP to
+  events) — run from the project's own official image
+  `ghcr.io/aaronpk/meetable:latest` rather than built from source. The full
+  replacement compose stands up the app (apache + php, migrations run by the
+  image's own entrypoint), a dedicated queue `worker`, a `mariadb` sidecar and
+  a `redis` sidecar, each on a named volume so a redeploy — which wipes
+  `~/project` — keeps the database, the Redis data and any uploaded event
+  images. A one-shot `init` runs the migrations and links storage before the
+  app and worker start, so nothing serves a half-built schema.
+
+  Meetable is a public events site by design: anonymous visitors can VIEW every
+  listed event, but creating, editing and deleting events is gated behind the
+  `create-event`/`manage-event` gates and the `auth` middleware. The default
+  `AUTH_METHOD=session` is passkey (WebAuthn) login: the first person to open
+  `/login` when no admin exists is walked through creating the single admin
+  account and enrolling a passkey, and from then on no further accounts can be
+  created from the web UI. Enrolling a passkey needs a real browser with an
+  authenticator, so that admin bootstrap is an operator step (like OAuth/SMTP
+  setup) — it cannot be scripted from the deploy. Existing users can be handed a
+  fresh enrolment link with `php artisan user:passkey-link <email>`, and a
+  token-only API account (for the `/api/add-event` REST endpoint) can be minted
+  with `php artisan user:create <url>`. The app also ships GitHub/OIDC/Discord/
+  Vouch auth methods, all of which need operator-supplied provider credentials
+  and are left unconfigured here.
+
+  Secrets (APP_KEY, the database password and root password) are generated once
+  by the prepare hook into `~/.panelalpha/meetable/` (0600, the only writable
+  dir that survives a rebuild) and reused on every later deploy, so the DB
+  password keeps matching the persisted MariaDB volume. `APP_URL` is left as
+  `http://localhost` in the compose environment on purpose: the platform
+  rewrites it to the project's public https URL before the stack starts
+  (engine#221 avoided), so Meetable builds its links against the address a
+  visitor actually typed. `APP_DEBUG` is false.

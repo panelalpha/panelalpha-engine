@@ -1,0 +1,194 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Homarr is a dashboard for self-hosted services: boards of draggable tiles,
+  widgets that poll other applications, and integrations that hold API keys for
+  them. Apache-2.0, a real runnable application with its own account system --
+  nothing here is a scope question.
+
+  It is a pnpm/turbo monorepo that builds one Next.js standalone server, and it
+  publishes that build as ghcr.io/homarr-labs/homarr. The recipe runs the
+  published image; the only thing it takes from the checkout is the version
+  number in package.json, which it turns into the image tag. That is stated
+  plainly rather than hidden: after hooks/prepare.sh has read one field out of
+  one file, this checkout contributes nothing -- not the compose file (there
+  isn't one), not the runtime, not a single byte of the image. The same choice
+  the Seafile and Zabbix recipes make, for a different reason.
+
+  The reason is the build, and it is measured. Stock, the engine detects
+  `dockerfile` and builds the monorepo. On the batch host that took 427.3s of a
+  486.2s deploy with a 0 cache-hit ratio, 260.9s of it in one `pnpm turbo
+  build` layer. On the host this recipe was written on -- 8 cores, an account
+  capped at 7.5 GB -- that layer does not finish at all:
+
+      failed to solve: ResourceExhausted: process "/bin/sh -c
+      TURBO_PLATFORM=... pnpm turbo build --filter=@homarr/nextjs...
+      --filter=@homarr/cli" did not complete successfully:
+      cannot allocate memory
+
+  reproduced at a 3 GB account limit and again at 7.5 GB. And because the
+  engine's generated docker-compose.yml sits in the build context and changes
+  every redeploy (engine#208), a `dockerfile` project pays that build again on
+  every rebuild. An image pull is ~30s once and ~0s after.
+
+  == The 502, and what it actually was ==
+
+  Not a boot race. `docker compose up -d` does run without `--wait`
+  (engine#204) and the deploy is finished the moment it returns
+  (DeploymentWorkflow.php:73), so the window is real -- and here it is about
+  three seconds wide: on the reproduced control the app container started at
+  05:49:24, nginx bound :7575 at 05:49:25 and the deploy declared success at
+  05:49:27. But the 502 never closes. Measured on that control: still 502,
+  identical 157-byte body, eleven minutes later and after more than three
+  hundred restarts of the Next.js process.
+
+  The cause is not in Homarr. It is the engine, and it is worth stating
+  precisely, because nothing in the application's own logs points at it.
+
+  `DeployCompose::dockerfile()` writes `env_file: ['.env']` into every
+  generated compose file (DeployCompose.php:107), and `EnvExampleCopies`
+  creates that `.env` by copying the repository's `.env.example`
+  (EnvExampleCopies.php:12-18,73). Homarr's `.env.example` is a template for a
+  developer, and it says so on every line -- but it is a valid env file, and a
+  compose `env_file` beats an image's own `ENV`. Measured on the control, the
+  copy was byte-identical to the repository's and the running container had:
+
+      DB_URL=FULL_PATH_TO_YOUR_SQLITE_DB_FILE
+      SECRET_ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
+
+  overriding the image's `ENV DB_URL='/appdata/db/db.sqlite'`. So the database
+  path became a relative filename. run.sh runs the migrations from /app and
+  they succeed -- "Migration complete", the seeded board, the seeded groups --
+  writing `/app/FULL_PATH_TO_YOUR_SQLITE_DB_FILE` (364544 bytes, measured).
+  Next.js's standalone server.js then does `process.chdir(__dirname)`, so the
+  server opens the same relative name from /app/apps/nextjs and gets
+  `/app/apps/nextjs/FULL_PATH_TO_YOUR_SQLITE_DB_FILE` -- 0 bytes, measured,
+  an empty database:
+
+      SqliteError: no such table: session
+      SqliteError: no such table: cron_job_configuration
+      Next.js exited with code 1, restarting in 1s...
+
+  run.sh starts nginx before node and then restarts node in a `while true`
+  loop, so the port answers within a second of the container starting and
+  answers 502 for as long as the container lives. That is the whole verdict:
+  `serving-error_page`, port 7575 HTTP 502, and an engine that reports the
+  deploy as a success.
+
+  The second line of that `.env` is the quieter half. `0000...0` is 64 valid
+  hex characters, so it passes `SECRET_ENCRYPTION_KEY`'s validation
+  (packages/common/env.ts:13-25) and the server would have started with it: a
+  control deploy that worked would encrypt every integration API key under a
+  key published in upstream's repository.
+
+  The recipe does not carry `env_file` at all, generates a real key once into
+  ~/.panelalpha/homarr/secrets/ and hands it over as SECRET_ENCRYPTION_KEY_FILE,
+  which the image's entrypoint expands. The key has to be stable: it is the
+  AES key for every integration secret in the database
+  (packages/common/src/encryption.ts:9), so rotating it is not a new password,
+  it is unreadable credentials.
+
+  == The security question ==
+
+  Homarr does authenticate. AUTH_PROVIDERS defaults to `credentials`, there is
+  a real user table with hashed passwords and group permissions, and no
+  provider trusts any proxy-supplied identity header -- there is no
+  Remote-User, X-Forwarded-User or forward-auth code path anywhere in the tree
+  (`trustHost: true` in packages/auth/configuration.ts:61 is NextAuth's
+  callback-URL host, not an identity). This is not Hubleys.
+
+  What it has instead is engine#200's first-visitor problem, and it has it in
+  the strongest form. Onboarding is a public tRPC router gated on nothing but
+  the current step (packages/api/src/trpc.ts:169-183 -- `onboardingProcedure`
+  is `publicProcedure` plus `if (currentStep !== step) FORBIDDEN`), and
+  `user.initUser` at packages/api/src/router/user.ts:50 creates a user, creates
+  the `credentials-admin` group, grants it `admin` and puts the user in it. The
+  database is seeded with `step: 'start'` by the migrations, so on a stock
+  deploy the first person to load the site owns it. There is no window here at
+  all once the app is reachable -- the proxy redirects every path to /init
+  until onboarding is finished (apps/nextjs/src/proxy.ts:45-51).
+
+  So the recipe closes the installer before the application is ever started,
+  which is Tandoor's shape: `init` runs the migrations, creates the account
+  owner's administrator with a generated password, and writes `step: 'finish'`;
+  `app` declares `init: service_completed_successfully`, so a failed init is a
+  failed `up` and a failed deploy rather than an open site; `ready` waits on
+  app's healthcheck so `up -d` does not return before the site answers.
+
+  == What an anonymous visitor gets ==
+
+  A login page, and nothing else. The migrations seed a board called
+  `dashboard` with seven widgets and make it the home board of the `everyone`
+  group, but they leave the *server* setting `board.homeBoardId` null --
+  and getHomeIdBoardAsync (packages/api/src/router/board.ts:1574-1586) reads
+  the everyone group only for a signed-in user; for `!user` it reads the server
+  setting. Null means NOT_FOUND, which
+  apps/nextjs/src/app/[locale]/boards/_layout-creator.tsx:69-73 turns into
+  `redirect("/auth/login")` for an anonymous request and `notFound()` for a
+  signed-in one. The recipe deliberately leaves that setting null: a Homarr
+  board can hold internal URLs and the widgets on it can be bound to
+  integrations holding API keys, so the default has to be that a stranger sees
+  none of it. The owner, who is in a group with `admin`, gets `board-full-all`
+  through groupPermissionParents and so sees the seeded board on `/`.
+
+  A customer who wants a public dashboard sets a home board under Manage ->
+  Settings -> Board and marks that board public; the README left in the account
+  says so, and says what that means.
+
+  == Where the data lives ==
+
+  Upstream's Dockerfile declares `VOLUME /appdata`, so a stock deploy gets a
+  named volume the customer can never reach into -- and a Homarr board is the
+  whole product. It is replaced by-target with ~/.panelalpha/homarr/appdata,
+  which is the only directory that both survives a redeploy and belongs to the
+  account: ~ is chown root:root on every rebuild (Project.php:813) and ~/project
+  is deleted and re-cloned (engine#173). db.sqlite, the redis dump and
+  uploaded media are all under it.
+
+  The image is built for this: entrypoint.sh chowns /appdata to $PUID:$PGID and
+  `su-exec`s the server, so hooks/prepare.sh writes the account's uid and gid
+  into a generated docker-compose.override.yml -- generated rather than
+  shipped, because the uid is not knowable when a recipe is written, and safe
+  because AppConfigBootstrap lays the recipe's own compose down *before* the
+  prepare hook and the engine never writes an override of its own for a compose
+  project.
+
+  == Numbers ==
+
+  Recipe, two fresh accounts: 46s and 51s, `deploy-ok`, `serving: ok`, HTTP
+  200, `healthy: true`, zero failing baseline checks. Redeploy: 21s and 28s,
+  of which init is one second. Control, same host, same commit: 484s,
+  `serving: error_page`, HTTP 502, `healthy: false`, one failing check --
+  and only after the account was given 12 GB, because at 3 GB and again at
+  7.5 GB the stock build ran out of memory and the deploy failed outright.
+  The recipe accounts were given 2 GB and used 805 MiB of it, the app
+  container 285 MiB of a 1 GiB cap.
+
+  == Things worth knowing ==
+
+  * `homarr recreate-admin` and `homarr users update-password` do their work and
+    then never exit -- the CLI leaves a handle open and the process hangs after
+    printing its result, with or without a reachable redis. Measured: the user,
+    the group, the permission and the membership were all committed by a run
+    that had to be killed. panelalpha/homarr/bootstrap.mjs therefore starts each
+    command, watches the database for the row it was supposed to write, kills it
+    the moment the row is there, and fails loudly if it never arrives. An exit
+    code is never waited for, because one never comes.
+  * The CLI is invoked as `node ./cli.cjs`, never as `/usr/bin/homarr`. That is
+    a shell wrapper, so killing it leaves node holding the pipes -- measured,
+    the init container hung at "closing the installer" until the deploy timed
+    out and the whole deploy failed.
+  * The gate was tested by breaking it. With bootstrap.mjs forced to
+    `process.exit(1)`, `init` exited 1, `app` never started, `docker compose up
+    -d` failed, `POST /projects/<user>/rebuild` answered HTTP 500 and the deploy
+    log said `failed`. The account served 502 -- nothing -- rather than an
+    unclaimed Homarr. That is the intended failure mode.
+  * The app container keeps running its own redis (REDIS_IS_EXTERNAL=false).
+    An external one would be a second container for nothing: nothing outside
+    the app needs it, and the migrations and the CLI run without it.
+  * `/api/health/live` is the healthcheck. It is a real check -- it queries the
+    database and does a redis handshake, and answers 500 when either is down
+    -- so `wget -q` on it distinguishes a live server from nginx's 502.
+  * `/api/health/live` and `/api/health/ready` are unauthenticated. `ready`
+    returns an empty 200; `live` returns a JSON body naming `database` and
+    `redis` and their latencies. That is the only thing on the site an
+    anonymous visitor can read, and it discloses no data.

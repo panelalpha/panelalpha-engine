@@ -1,0 +1,126 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  XBackBone is a self-hosted file and screenshot host -- the thing a ShareX or
+  Flameshot key binds to. This repository is a monorepo of two halves, and
+  neither is deployable on its own: `app/` is the skeleton (public/index.php,
+  bootstrap/, storage/, the `xbb` console, and a composer.json whose whole
+  content is `require: xbackbone/core`) and `core/` is the Laravel 13 package
+  that holds the application -- XBB\, the routes, the views, the migrations,
+  the guided installer and the compiled public/build bundle. The repository
+  root has no index.php and no composer.json at all, which is exactly the
+  `serving-missing_entry` verdict this recipe exists to fix: detection read the
+  tree correctly.
+
+  Note that this is not the Slim application the 3.x tags are. `master` is a
+  rewrite onto Laravel 13, Fortify, Livewire 4 and PHP 8.4, and it has no tag
+  yet -- the newest, 3.8.2, is the old codebase. What an account cloning this
+  URL gets is the rewrite, so that is what this recipe deploys.
+
+  hooks/prepare.sh promotes `app/` to the project root and wires `core/` in as
+  a Composer *path* repository, so the core that serves requests is the one the
+  account cloned. Upstream's own install is `composer create-project
+  xbackbone/app`, which resolves `xbackbone/core: dev-master` from Packagist --
+  the split of this same directory. Doing that here would be worse than it
+  looks: `app/composer.json` has no lock file (.gitignore excludes it) and asks
+  for a dev branch, so the account would run whatever the split repository's
+  master happened to be at deploy time rather than the commit it cloned, and a
+  different one again on the next redeploy.
+
+  Two lines are patched into that composer.json and nothing else is touched.
+  `require.php: ^8.4`, because core/composer.json declares it, app/composer.json
+  declares no PHP at all, and PhpRuntime reads only the root manifest -- without
+  it the account gets the engine default of 8.3 and Composer refuses the
+  resolve before anything is installed. And the path repository, with an
+  explicit `dev-master` version so the resolve does not depend on the shape of
+  the engine's clone. The hook runs before detection
+  (AppConfigBootstrap::runScripts), so the patched manifest is what picks the
+  image, which is the whole reason this can be done in a hook at all.
+
+  Nothing else about the build needed saying. `composer install --no-scripts
+  --no-plugins` resolves 84 packages, and the php manifest's `post-autoload-dump`
+  step then runs the skeleton's own scripts -- `xbb package:discover` and the
+  two `vendor:publish` lines that copy the core's compiled `public/build` and
+  its images into `public/`. There is no Node build: the monorepo commits the
+  production bundle. engine#168 does not bite here either -- the only plugin in
+  the graph is php-http/discovery, which nothing depends on at runtime.
+
+  What the engine cannot infer is where an upload host keeps its data, and for
+  this application that is the whole question. XBackBone's local disk root is
+  `storage_path('app')`, hard-coded in config/filesystems.php with no
+  environment variable in front of it -- and that config directory belongs to
+  the core *package*, so there is nothing in the skeleton to override. Its
+  SQLite database defaults to `APP_ROOT/xbb.db`. Both are inside the checkout,
+  and a redeploy re-clones ~/project after clearing it (engine#173), so an
+  account would lose every uploaded file and its entire database on the next
+  deploy. overrides/docker-compose.override.yml bind-mounts
+  ~/.panelalpha/xbackbone at /data; the prepare hook points DB_DATABASE there
+  and replaces storage/app with a symlink to /data/uploads, which is the only
+  lever the hard-coded root leaves. ~ is root-owned 0755 and nothing can be
+  created in it, so the data directory is a child of ~/.panelalpha, which is
+  created with the account and belongs to it.
+
+  The .env is written by the hook rather than derived, because mod_php does not
+  publish the container environment as $_SERVER and Laravel's env() reads
+  $_SERVER and $_ENV -- a value that lives only in the compose file reaches
+  `php xbb` on the install stage and never reaches a web request.
+
+  Security. XBackBone's installer is first-visitor-wins: EnsureInstalled
+  redirects every request to /install until setup is complete, and whoever
+  loads that page picks the database, the storage backend and the first
+  administrator. On an account that has just been given a public HTTPS name
+  that window is open to anyone who knows the address, so
+  files/panelalpha/xbb-install.php closes it on the install stage, before
+  Apache binds, by calling FinalizeInstallation -- the same action the wizard's
+  last step calls, with the same payload. Afterwards /install answers a
+  redirect to /login and the marker (storage/installed) is what enforces it.
+  The administrator password is generated once per account into
+  ~/.panelalpha/xbackbone/admin-credentials (0600), outside the checkout and
+  outside the document root.
+
+  The application key is the other half. This repository's app/.env.example
+  ships a *committed* APP_KEY --
+  `base64:88Nwiwz8SgR2v7Spx27RDdj7uCYidIwKCmzQCs4l0V4=` -- so a deployment that
+  copied it, which is what the engine does with a .env.example when no .env is
+  present, would sign its cookies and encrypt its columns with a key printed in
+  a public repository. The hook writes a fresh .env instead and generates a key
+  into ~/.panelalpha/xbackbone/app.key; the install script is what puts it into
+  .env, after the engine has taken its world-readable .env.default copy of
+  whatever the hook left (engine#173).
+
+  Self-registration is *off* by default and nothing here had to close it:
+  XBB\Features\SignUp resolves to false, and XBB\Actions\Fortify\CreateNewUser
+  aborts 404 unless it is active. Measured on a deployed account, /register is
+  404. An administrator can open it under Settings.
+
+  Two things are left as upstream has them. There is no queue worker on a
+  hosting account, and previews are generated by a queued job, so the installer
+  is told to use the synchronous queue -- an upload generates its own thumbnail
+  inline, which is slower per upload and the only arrangement that produces one
+  at all here. And the base image has no ffmpeg, so video thumbnails do not
+  render; images, PDFs and SVGs do, through gd and imagick.
+extends: php
+id: xbackbone
+label: XBackBone
+runtime: php
+port: 8000
+# The skeleton's public/ after the prepare hook has promoted it to the root.
+# Stated rather than left to PhpDocroot's probe, since a recipe that names its
+# platform should name that too.
+docroot: public
+requires:
+  php: runtime
+commands:
+  - id: xbackbone-install
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Puts the account's persistent APP_KEY into .env and runs XBackBone's own
+      installer without a browser, before Apache binds. Without it the account
+      serves /install to whoever reaches it first, and that visitor becomes the
+      administrator. A no-op once the application reports itself installed, so
+      the upgrade stage re-running it over a database that survived the
+      redeploy changes nothing. On the build stage it would not run at all
+      (engine#171).
+    run: 'php /app/panelalpha/xbb-install.php'
+    timeout: 300

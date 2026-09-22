@@ -1,0 +1,23 @@
+# Written by PanelAlpha. Chyrp Lite is served from the root of its checkout,
+# so every .php file in this directory is a URL -- and none of them is a page.
+# They are libraries, included by index.php and admin/index.php, and asking
+# Apache for one directly runs it with none of the constants it needs. That is
+# a fatal error, and the shared base image loads no php.ini, so PHP prints it
+# with the file path in it (engine#185):
+#
+#   GET /includes/class/SQL.php
+#   -> 200  Fatal error: Uncaught Error: Undefined constant "INCLUDES_DIR"
+#           in /app/includes/class/SQL.php:11
+#
+# `require` is not a request, so nothing Chyrp does is affected by this.
+<FilesMatch "\.php$">
+    Require all denied
+</FilesMatch>
+
+# The two that really are endpoints: an upload behind the view_upload
+# permission, and the thumbnailer the themes point <img> tags at. Both are
+# linked from rendered pages (grep for "includes/" under themes/ finds these
+# and nothing else).
+<FilesMatch "^(?:download|thumbnail)\.php$">
+    Require all granted
+</FilesMatch>

@@ -1,0 +1,16 @@
+# Written by PanelAlpha.
+#
+# inc/ is the application's include directory -- config.php, bdd.php, header.php
+# and footer.php. Nothing in it is ever requested directly: index.php, list.php,
+# login.php and shorten.php include them. Requesting them is harmless today
+# (config.php only calls define(), bdd.php opens a connection and prints
+# nothing, header.php renders a fragment) but only because PHP is running.
+#
+# A document root is the repository root here, so inc/config.php is one request
+# away from being plain text the moment mod_php is not the handler -- a broken
+# upgrade, a `.phps` handler, anything. This recipe's config.php reads the
+# database password from the environment rather than writing it into the file,
+# so there is nothing in it to publish; that is a property of this recipe and
+# not of the application, and an operator who edits the file back to literal
+# credentials should still be covered.
+Require all denied

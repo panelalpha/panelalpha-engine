@@ -1,0 +1,97 @@
+# Full compose replacement: the repository ships only a development-flavoured
+# compose file (a bind mount to ./2fauth, env_file settings.env, no admin
+# bootstrap), so this runs the official Docker Hub image 2fauth/2fauth the way
+# the upstream install docs do. Written into the checkout before the prepare
+# hook, so by detection time it is simply "the repository's compose file" and
+# the compose strategy claims the project. Secrets are interpolated from
+# ~/project/.env, which the prepare hook writes from the values persisted under
+# ~/.panelalpha/2fauth/. APP_URL is left local on purpose -- ComposePlaceholders
+# rewrites it to the public https origin before the stack starts.
+services:
+  # One-shot installer. Prepares the /2fauth volume and seeds the owner admin
+  # BEFORE the app serves, so the first-user-becomes-admin window is never open.
+  init:
+    image: 2fauth/2fauth:8.0.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "/panelalpha/init.sh"]
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY}
+      APP_URL: http://localhost
+      DB_CONNECTION: sqlite
+      LOG_CHANNEL: stderr
+      IS_DEMO_APP: "false"
+      SITE_OWNER: ${SITE_OWNER}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
+      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME}
+    volumes:
+      - twofauth_data:/2fauth
+      - ./panelalpha:/panelalpha:ro
+    mem_limit: 512m
+
+  app:
+    image: 2fauth/2fauth:8.0.2
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      APP_NAME: 2FAuth
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY}
+      # Rewritten to the account's public https URL before start (a *_URL key
+      # holding a bare localhost). Laravel builds redirects, secure cookies and
+      # the WebAuthn relying-party origin from it.
+      APP_URL: http://localhost
+      # SQLite on the /2fauth volume (baked default path, symlinked by the image
+      # entrypoint). Stated here so a future image default cannot move it.
+      DB_CONNECTION: sqlite
+      # Trust the engine tunnel so HTTPS scheme, secure cookies and CSRF work.
+      TRUSTED_PROXIES: "*"
+      # Demo mode resets content hourly and weakens auth -- keep it off.
+      IS_DEMO_APP: "false"
+      SITE_OWNER: ${SITE_OWNER}
+      # Send framework logs to the container output so a boot failure is
+      # readable via the service logs instead of vanishing into storage/logs.
+      LOG_CHANNEL: stderr
+    volumes:
+      - twofauth_data:/2fauth
+    # 8000 inside (docker/nginx.conf), published so the port scan takes it as
+    # the primary (engine#231/#234). No other service publishes a port.
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # /api/v1/user/name is an unauthenticated 200 route -- proves nginx,
+      # php-fpm and Laravel booted. The schema and admin are guaranteed by the
+      # init service having completed before this container started.
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null http://127.0.0.1:8000/api/v1/user/name ||
+          wget -q -O /dev/null http://127.0.0.1:8000/api/v1/user/name
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    pids_limit: 512
+    mem_limit: 768m
+
+  # Does nothing and exits 0. `docker compose up -d` runs without --wait and
+  # takes the deploy to be finished when it returns; a depends_on health gate
+  # makes it return only once 2FAuth actually answers (engine#204).
+  ready:
+    image: 2fauth/2fauth:8.0.2
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  # The whole app state: SQLite database, storage (Passport keys, file cache,
+  # uploaded icons) and the install marker. Losing it loses every 2FA account.
+  twofauth_data: {}

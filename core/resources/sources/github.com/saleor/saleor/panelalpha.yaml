@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Saleor is a headless e-commerce backend: a Django application whose entire
+  public surface is one GraphQL endpoint at /graphql/. The storefront and the
+  admin dashboard are different repositories and are not in this stack. What
+  an account owner gets here is the API and its built-in GraphQL playground,
+  which is a real administration surface -- every dashboard operation is a
+  mutation and the playground can send all of them -- but it is a query
+  console, not a shop UI.
+
+  The repository ships a root Dockerfile and no compose file, so detection
+  reads it as `dockerfile` and builds it. The build succeeds and the result
+  is genuinely Saleor: unlike most Python repositories this Dockerfile is the
+  same file CI publishes ghcr.io/saleor/saleor from
+  (.github/workflows/publish-containers.yml delegates to a shared
+  build-push-image action over this context), so building the checkout and
+  pulling the published image produce the same application. That is why this
+  recipe builds rather than pins a tag -- a fork or a branch then gets its own
+  code, which a tag could not give it.
+
+  What the bare build produces is not servable, for four reasons that all
+  live in saleor/settings.py.
+
+  1. settings.py:516 reads ALLOWED_HOSTS with the default "localhost,127.0.0.1",
+  so Django answers 400 DisallowedHost on the account's own domain, on every
+  path. Measured on the control deploy: 400 on /, /graphql/,
+  /.well-known/jwks.json, /static/ and /media/ alike.
+
+  2. settings.py:86 defaults DEBUG to True. That is the unusual part and it is
+  worse than the 400: the 400 page is Django's debug page, 182 KB of it,
+  publishing all 406 settings rows, the installed-app list, the Django version
+  and a traceback with local variables to anyone who asks. Passwords are
+  scrubbed by Django's own filter; nothing else is.
+
+  3. settings.py:258 reads SECRET_KEY from the environment with no default. With
+  DEBUG on, an unset key becomes a random one *per process* -- so the two
+  uvicorn workers the image's CMD starts sign with different keys, and every
+  restart invalidates everything signed before it.
+
+  4. jwt_manager.py:79 requires RSA_PRIVATE_KEY once DEBUG is off and raises
+  ImproperlyConfigured without it. It is the key that signs every access token
+  Saleor issues and is published at /.well-known/jwks.json, so it has to be
+  generated once and kept.
+
+  Turning DEBUG off is therefore not a one-line change: settings.py:109 raises
+  ImproperlyConfigured unless ALLOWED_CLIENT_HOSTS is also set, and
+  jwt_manager.py:84 raises unless RSA_PRIVATE_KEY is. All four values are
+  derived here -- the two host lists from PA_PUBLIC_URL at container start, the
+  two keys generated once into ~/.panelalpha/saleor/.
+
+  With DEBUG off, saleor/urls.py stops routing /, /static/ and /media/
+  entirely: urls.py:55 adds them only `if settings.DEBUG`. Product images are
+  reached through /thumbnail/<id>/<size>/, which
+  saleor/thumbnail/views.py:164 answers with a redirect to a /media/ URL, so
+  with nothing serving /media/ every product image in the shop is a 404. The
+  stack therefore puts nginx in front, which is what upstream's own docs assume
+  a deployment does; it serves /static/ and /media/ off the shared volumes,
+  redirects / to /graphql/ so the endpoint is discoverable, and proxies the
+  rest.
+
+  PostgreSQL is not a choice: settings.py builds DATABASES through
+  dj_database_url and the image carries psycopg only, so `database: mysql`
+  could not be used even if it were not inert outside runtime: php
+  (engine#210). postgres:15-alpine and valkey:8.1-alpine are the versions
+  upstream's own .devcontainer/docker-compose.yml runs.
+
+  Redis is a choice, and it is the expensive one. settings.py:643 sets
+  CELERY_TASK_ALWAYS_EAGER whenever CELERY_BROKER_URL is empty, so Saleor does
+  start with no broker -- and then the twenty-odd entries in
+  CELERY_BEAT_SCHEDULE never run, because eager mode only inlines tasks a
+  request dispatches and has nothing to do with the beat schedule. Two of them
+  are not housekeeping: update-products-search-vectors is the only thing that
+  populates a product's search vector, and recalculate-discounted-price-for-
+  products is the only thing that applies a promotion to a price. Without a
+  worker a product is unsearchable and a discount never lands, so the broker,
+  a worker and beat are part of the application rather than an optimisation.
+
+  Secrets live in ~/.panelalpha/saleor/, 0600 in a 0700 directory: every deploy
+  re-clones and ProjectTree::clearContents (GitRepository.php:89) empties
+  ~/project first (engine#173), so SECRET_KEY or the RSA key written there
+  would be regenerated on every rebuild and invalidate every token in
+  circulation.

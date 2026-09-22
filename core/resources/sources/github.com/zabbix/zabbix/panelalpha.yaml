@@ -1,0 +1,109 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Zabbix is three programs, not one: zabbix_server (C, the poller and the
+  trigger engine, :10051), a PHP frontend (the repository's ui/ directory), and
+  zabbix_agent, which is installed on the machines being watched rather than
+  here. An account runs the first two and a database; the agents are the
+  customer's, on their own hosts.
+
+  What a tenant can monitor is the question this recipe exists to answer, and
+  the answer is measured rather than assumed. Everything the server polls with
+  goes outbound, and outbound works from inside an account's inner containers:
+  a direct UDP query to 1.1.1.1:53 answered, TCP 443 connected, and
+  `fping -c2 1.1.1.1` returned 0% loss at 14 ms -- ICMP included, because the
+  official image ships /usr/sbin/fping setuid root (`-rwsr-xr-x`), so the
+  server's uid 1997 gets raw sockets without the account needing CAP_NET_RAW of
+  its own. `ldd /usr/sbin/zabbix_server` lists libnetsnmp, libssh, libcurl,
+  libldap and libodbc, so SNMP, SSH, HTTP-agent, LDAP and ODBC checks are all
+  compiled in. A customer pointing this at their own routers, switches and
+  servers -- over SNMP, ICMP, HTTP or the agent protocol on :10050 -- is what
+  the app is for here. What it cannot be is a monitor of *this* host: an
+  account sees its own containers and the internet, not the machine underneath.
+
+  Detection had no chance on the checkout, and the 403 says why. There is no
+  compose file, no Dockerfile and no composer.json at the repository root, so
+  the `php` strategy won on the PHP under ui/ and Apache was pointed at the
+  autotools source tree -- a directory with no index, hence Forbidden. The
+  frontend it wanted is one directory down; the server it needs is 400 MB of C
+  that nothing in the deploy would have compiled; and the schema the frontend
+  reads is a .sql under database/ that nothing would have loaded.
+
+  So the recipe runs the images Zabbix SIA publishes -- the same choice the
+  Seafile and Mattermost recipes make, and for the same reason. Be plain about
+  it: **the checkout contributes nothing.** Not the compose file, not the
+  Dockerfile, not the frontend, not the schema, and not the version either.
+  master is on 8.0.0rc1 (configure.ac), a release candidate; the recipe pins
+  the 7.0 LTS series, whose images are 157 MB (server) and 243 MB (web) and
+  whose support runs to 2029. ZABBIX_SERIES in the account's env vars moves it.
+
+  Four services plus two one-shots. MariaDB is not optional and not
+  substitutable: Zabbix has no SQLite mode, the server links against
+  libmariadb, and the frontend reads the same schema. It needs
+  utf8mb4/utf8mb4_bin specifically, which is why the collation is on the
+  command line. `database: mysql` in this manifest would have been the obvious
+  way to ask for one and is silently inert outside `runtime: php` (engine#210),
+  so the sidecar is declared here in full.
+
+  **The credentials are the reason this recipe is more than a compose file.**
+  Zabbix's schema ships `Admin` with the bcrypt hash of the password `zabbix`,
+  which is in every copy of create.sql on the internet, and there is no
+  installer, no first-run wizard and no environment variable that changes it.
+  A stock deployment on a public HTTPS name belongs to whoever opens it first.
+  Here, hooks/prepare.sh generates a password per account and bcrypt-hashes it
+  with the account's own PHP; a one-shot `credentials` service applies it
+  directly to the users table and then *verifies* that no row is left on the
+  shipped hash, exiting non-zero if one is; and zabbix-web -- the only service
+  with a published port -- has `depends_on: credentials:
+  service_completed_successfully`. The frontend cannot be started until the
+  default password is gone. The UPDATE is keyed on the shipped hash, so it
+  fires once and a password the customer later sets is never reverted by a
+  redeploy. `guest` gets the same treatment with a second password nobody is
+  told; it is disabled by group membership in the shipped data
+  (users_groups 3 puts userid 2 in usrgrp 9, "Disabled"), and this closes the
+  published hash as well.
+
+  Secrets live in ~/.panelalpha/zabbix/ and are copied into ~/project/.env on
+  every deploy, not generated there. A git-project rebuild clears ~/project and
+  re-clones it (DindDeployMechanics::ingestForWipeRebuild -> clearContents), so
+  a `[ ! -f .env ]` guard inside the checkout is not a guard at all: it would
+  regenerate the database password on every redeploy while the data sat in a
+  named volume under the old one.
+
+  The last service is a no-op that exits 0 once zabbix-web is healthy. `docker
+  compose up -d` runs without --wait (engine#204), so without it a deploy is
+  "finished" when the containers have been created rather than when Zabbix
+  answers -- and the first boot is not quick: the server imports a 170-table
+  schema before it opens :10051.
+
+  One Zabbix agent runs in the stack, which sounds like a contradiction and is
+  not: the schema creates a host called "Zabbix server" with an agent interface
+  on 127.0.0.1:10050, and with nothing there a fresh account opens on eleven
+  unsupported items and a permanent red "Zabbix agent is not available"
+  (measured on the first build of this recipe). The sidecar answers it, and the
+  init service repoints that interface at it, so the stock "Linux by Zabbix
+  agent" template collects from minute one: 23 of 23 agent items had data and
+  zero problems were open on a freshly deployed account.
+
+  Read those numbers with care, and tell the customer to. /proc/loadavg and
+  /proc/meminfo are **not** namespaced, so the agent's CPU, load-average and
+  memory items are the *host's* figures, not the account's -- measured:
+  `cat /proc/loadavg` gave `0.85 1.27 1.53` identically on the host, in the
+  account and in the agent container, and MemTotal inside the agent is the
+  host's 15.2 GB. That is a property of Linux and of how accounts are isolated
+  here, not something this recipe introduces, but a monitoring product is the
+  one place it will be believed. The agent's filesystem and `agent.ping` items
+  are genuinely the container's; anything CPU- or memory-shaped is the
+  machine's, and is also, incidentally, host capacity disclosed to a tenant.
+  An operator who minds that should delete the "Zabbix server" host rather than
+  the sidecar -- the remaining 11 unsupported items on it are internal counters
+  for subsystems this build never starts (IPMI, Java, VMware, reports,
+  connectors, SNMP trapper), which raise no trigger and are unsupported on
+  every Zabbix with those features off.
+
+  What is left for the customer: hosts. The interesting targets -- their
+  routers, their servers, their websites -- are theirs to add, over SNMP, ICMP,
+  HTTP or a passive agent they install. Active agent checks are out of scope:
+  they need the customer's agent to connect *in* to :10051, which is a second
+  published port the engine's proxy has no way to express. No SMTP is
+  configured either, so triggers fire and show in the UI but email nothing
+  until a media type is filled in.

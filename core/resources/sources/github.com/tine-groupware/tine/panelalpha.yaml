@@ -1,0 +1,217 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  tine (formerly Tine 2.0) is PHP groupware on MySQL -- contacts, calendars,
+  tasks, a file manager, CRM, sales and an IMAP mail client -- with CalDAV,
+  CardDAV and ActiveSync in front of it. The repository is not the application:
+  the application is `tine20/`, and the repository root holds `ci/` (the release
+  pipeline and its Dockerfile), `scripts/`, `tests/`, `docs/` and `etc/` (the
+  packaging's nginx, PHP and config templates). Detection read that correctly as
+  far as it could -- no composer.json at the repository root, so the `php-plain`
+  platform on the `php` strategy -- and the deploy finished and answered 403 on
+  every request: `serving-missing_entry`, which is what this recipe fixes.
+
+
+  **The document root is `tine20/`, and no probe can reach it.**
+  `PhpDocroot::CANDIDATES` is `['public', 'web', 'public_html', 'webroot']`
+  followed by the repository root and the late candidates
+  (app/Lib/Deploy/Platform/Runtime/Php/PhpDocroot.php:25-54). tine serves from
+  `tine20/`, which is on neither list under stock `development-2.0.0` (`['src']`)
+  nor under the widened patch mariusz runs
+  (`['www','htdocs','httpdocs','source','upload','webui','src']`) -- so
+  `detect()` falls through every candidate and returns `''`, no PA_DOCROOT is
+  emitted, and the base image's `panelalpha-serve.sh` falls back to `/app`
+  because there is no `/app/public`. `/app` then holds five Markdown files and
+  eight directories with no index among them, so Apache answers 403 on `/` --
+  while every file in the repository stays readable one path segment down.
+
+
+  **`app_root: tine20`, not `docroot: tine20`, and the difference is the whole
+  recipe.** Both would fix the 403. Only `app_root` also fixes the three things
+  underneath it:
+
+  * *Composer.* `tine20/composer.json` is the application's manifest -- 193
+    locked packages including sabre/dav, PhpSpreadsheet, simplesamlphp and
+    Zend Framework 1 -- and `tine20/vendor/autoload.php` is the third line of
+    `tine20/bootstrap.php`, which every entry point requires. The repository
+    root has no composer.json, so with the whole checkout as the application the
+    `php-plain` platform matches, no `composer install` ever runs, and every
+    request is a fatal on the missing autoloader. That is not a prediction: the
+    control deploy answered `/tine20/index.php` with `Fatal error: Uncaught
+    Error: Failed opening required '/app/tine20/vendor/autoload.php'`.
+    `PhpStrategy::build()` resolves `<app_root>/composer.json`
+    (app/System/Project/Dind/Strategy/PhpStrategy.php:163-165) and
+    `DindHostBuilder::phpBuildArgv()` runs the host build in
+    `PhpHostBuild::workingDir($appRoot)` = `/app/tine20`, so declaring it puts
+    Composer where the manifest is.
+
+  * *The PHP version.* `tine20/composer.json` pins `config.platform.php` to 8.2
+    beside `require.php` `8.2 - 8.4 | ~8.5.4`; read at the repository root there
+    is no manifest and the deploy takes the engine default, which is how the
+    control deploy ran on PHP 8.3. Resolved through `app_root` it is 8.2, and
+    the same image both resolves the tree and serves it.
+
+  * *What is web-reachable.* This is the one that matters most here. With
+    `docroot: tine20` the whole checkout is still bind-mounted at /app and only
+    the vhost keeps `.git/` out of reach; `ci/`, `docs/`, `etc/`, `scripts/` and
+    `tests/` would all stay one request away, and `etc/tine20/config.inc.php.dist`
+    -- 6.6 KB of annotated configuration -- was served verbatim by the control
+    deploy. With `app_root: tine20` they are not in the container at all: /app
+    **is** `~/project/tine20`.
+
+
+  Once `tine20/` is the application root, the probe answers correctly on its
+  own: `tine20/index.php` exists, `PhpDocroot::detect()` returns `ROOT` and
+  `PA_DOCROOT` is `/app`. No `docroot:` key is needed, and #172 -- which folds a
+  literal `docroot: .` into "undeclared" -- never comes up.
+
+
+  **There is no client in the repository, and without one tine cannot render a
+  page.** `.gitignore` excludes `tine20/Tinebase/js/build/*`,
+  `tine20/Tinebase/styles/build/*` and `tine20/*/*/*FAT*`, so a checkout ships
+  sources and no bundles. `Tinebase_Core::detectBuildType()` (Tinebase/Core.php)
+  decides what the installation *is* by whether
+  `Tinebase/js/webpack-assets-FAT.json` exists: present, RELEASE, serve the
+  bundles; absent, DEVELOPMENT, and
+  `SinglePageApplication::getAssetsMap()` fetches the asset manifest over HTTP
+  from a webpack-dev-server on localhost:10443 and throws when there is none.
+  There is no third mode.
+
+  The engine's own frontend pass does not fire here on its own:
+  `HostCompile::runForPhp()` looks for `package.json` in **`$projectDir`**, the
+  checkout root, with no `app_root` applied (HostCompile.php:188-190), and
+  tine's is four levels down in `tine20/Tinebase/js`. So this recipe puts a
+  `package.json` at the checkout root whose only job is a `build` script, and
+  `files/panelalpha-build.sh` runs the real install and the real webpack.
+  Two details of that are load-bearing and neither is obvious. Ten of tine's
+  frontend dependencies resolve to `git+ssh://git@github.com/...` in
+  npm-shrinkwrap.json, and npm fetches those by shelling out to `git` -- while
+  the Node image is `node:24-bookworm-slim`, which has no git binary, unless
+  `NodeRuntime::needsGitBinary()` sees a git subcommand in a package.json script.
+  Measured: the slim image fails the install with `npm error syscall spawn git`,
+  and it cost one deploy. And the root `.nvmrc` says `10.15.3`, a Node that
+  cannot parse an .mjs webpack config, so the root package.json declares
+  `engines.node: ">=24"`, which `NodeRuntime::declaredVersion()` reads first.
+
+  The build itself is upstream's `webpack/common.mjs` unchanged, through this
+  recipe's own `webpack/panelalpha.mjs` rather than upstream's `prod.mjs`:
+  prod.mjs reached 5.0 GB resident and was OOM-killed by the build container's
+  own cgroup after 2m38s. What that file drops and why is in its header.
+  Measured in the deploy: composer 76s, npm install 60s cold, webpack 106s.
+
+
+  **The client is two builds and the second one is PHP.** Once the webpack pass
+  has written the asset manifest the installation is RELEASE, and in RELEASE
+  `Tinebase_Frontend_Http::getJsTranslations()` serves *prebuilt*
+  `<App>/js/<App>-lang-<locale>.js` files instead of generating translations per
+  request (Tinebase/Frontend/Http.php:175-186) -- files `.gitignore` excludes and
+  that upstream builds with a phing task needing require-dev. Without them the
+  endpoint answers 200 with a zero-byte body, the health probe passes, `serving`
+  is `ok`, and the client waits ten seconds for
+  `Tine.__translationData.__isLoaded`, shows "A problem with the translations was
+  detected", reloads, and waits again, for ever. Found in a browser and nowhere
+  else. files/tine20/panelalpha-langbuild.php is upstream's loop in thirty lines
+  around upstream's own Tinebase_Translation::getJsTranslations(): 1440 files, 45
+  locales x 32 application directories, measured at 1.4-2.0s on the install and
+  upgrade stages.
+
+
+  **The installer is not a wizard here, and the wizard is the security story.**
+  `tine20/setup.php` is the setup UI, and the hole is not the obvious one.
+  `Setup_Server_Json.php:62-76` checks the json key and the session user only
+  `&& Setup_Core::configFileExists()`. A fresh checkout has no config.inc.php --
+  `.gitignore` excludes it -- so in that state **every** method on
+  `Setup_Frontend_Json` is anonymous, including `saveConfig()`, which writes
+  config.inc.php from POST data (so a stranger can point the installation at a
+  database they control) and `installApplications()`, which creates the first
+  administrator on it. `Setup_Auth` (Setup/Auth.php:31-46) then only refuses
+  logins once a `setupuser` exists, which is to say the door only appears once
+  someone has already walked through the doorway.
+
+  So this recipe writes config.inc.php -- with a `setupuser` whose password is
+  generated per account and handed to nobody -- from the install stage, in a CLI
+  process, before Apache binds; runs tine's own `setup.php --install`
+  non-interactively; and denies setup.php in `files/tine20/.htaccess` for the
+  rest of the installation's life. Upstream agrees about the risk and answers it
+  differently: its packaged nginx puts HTTP basic auth in front of the same file
+  (etc/nginx/snippets/tine20-locations.conf).
+
+  `files/tine20/.htaccess` also carries the two routing rules the same nginx
+  snippet has and an Apache vhost does not: `try_files $uri /index.php` (tine
+  routes CalDAV, CardDAV, ActiveSync, WebDAV mounts, SSO and Filemanager
+  download links entirely by path, none of which exists on disk) and
+  `rewrite .+\.php$ /index.php`, which is a security control -- it is what stops
+  `tine20.php`, `worker.php`, `langHelper.php` and several hundred `.php` files
+  under `vendor/` from being executed directly.
+
+
+  **Where the data lives, and what a redeploy does to it.** Better than most:
+  tine keeps nothing user-generated inside the checkout. `filesdir`, `tmpdir`,
+  `caching.path` and `session.path` are plain config values
+  (etc/tine20/config.inc.php.mpl names all four), so this recipe points them at
+  `/data`, which the compose override bind-mounts from `~/.panelalpha/tine/data`
+  -- and the clone that wipes `~/project` on every deploy (#173) cannot touch a
+  single uploaded file. The database is the account's own MySQL from
+  `database: mysql` and survives the same way. The three generated secrets are
+  in `~/.panelalpha/tine/app.env`, 0600 in a 0700 directory, delivered as a
+  second `env_file:` -- so config.inc.php itself holds nothing but `getenv()`
+  calls and is not a secret even though it sits in the document root.
+
+
+  **Mail: in scope, and this is a deliberate reading.** tine's mail application
+  is Felamimail, and Felamimail is an IMAP/SMTP *client*: it reads a folder list
+  and messages over IMAP and submits outgoing mail to a configured SMTP server,
+  and the account credentials are per user, entered in the UI, and encrypted with
+  `credentialCacheSharedKey`. Nothing in it listens on port 25 or wants to be the
+  destination MTA. tine does ship `etc/sql/postfix_tables.sql` and
+  `etc/sql/dovecot_tables.sql` and an "email user backend" that manages a
+  Postfix/Dovecot installation's own tables -- that is the part this platform
+  cannot host, and it is optional, off by default and never configured here.
+  So: an IMAP client, in scope; no inbound SMTP is configured, and the recipe
+  neither needs nor asks for it.
+
+
+  **Licensing: AGPL-3.0, and hosting for third parties is permitted.**
+  `LICENSE.md` is the verbatim GNU Affero General Public License v3 and
+  `tine20/composer.json` declares `AGPL-3.0-or-later` first among its licences.
+  AGPL-3.0 places no limit on running the software for third parties; its one
+  network clause, section 13, requires that users interacting with it over a
+  network be offered the Corresponding Source, which for an unmodified
+  deployment is satisfied by pointing at https://github.com/tine-groupware/tine.
+  tine's `Tinebase_License` exists for the commercial editions' licence files and
+  is neither set nor checked by this recipe. See README.md beside this file for
+  what `acceptedTermsVersion=1` on the install means and who is accepting what.
+extends: php
+# The application is tine20/. The docroot, Composer, the PHP version and what
+# is inside the container at all follow from this one key.
+app_root: tine20
+# No `docroot:`. With app_root pointing at tine20/, PhpDocroot's own probe finds
+# tine20/index.php and answers PA_DOCROOT=/app, which is right. Saying
+# `docroot: .` here would be worse than saying nothing: readDocroot() folds it
+# to '' (#172).
+#
+# MySQL or nothing. tine20/composer.json requires ext-pdo, every Setup XML is
+# MySQL DDL, Setup_Backend_Factory has only a Mysql backend, and
+# `--migrateUtf8mb4` exists because the schema is MySQL's. The checkout ships no
+# .env and no compose file to point itself at a server, so without this the
+# engine has nothing to hand it. Declaring it also keeps PhpStrategy from mining
+# the checkout for sidecars (#166) -- and there *is* something to mine here:
+# scripts/docker-compose/ ships workstation compose files.
+database: mysql
+commands:
+  - stage:
+      - install
+      - upgrade
+    # One line. CommandScript::descriptionLine() prefixes '#' to the first line
+    # only (app/Lib/Deploy/Platform/Stage/CommandScript.php:42), so a second
+    # line would be written into the entrypoint as bare shell -- a syntax error,
+    # a restart loop and a 502, under a deploy log that still says "Deploy
+    # finished successfully" (#198). The folded scalar below is one line: it has
+    # no blank line in it, so YAML joins it with spaces.
+    description: >-
+      Writes tine20/config.inc.php from the database the engine provisioned and
+      the secrets hooks/prepare.sh generated, then runs tine's own installer in
+      a CLI process on the first deploy, or its own update path when the
+      checkout is newer than the schema. Runs before Apache binds, which is what
+      closes the unauthenticated setup API described above, and is idempotent so
+      the upgrade stage can replay it on every redeploy.
+    run: 'sh panelalpha-setup.sh'

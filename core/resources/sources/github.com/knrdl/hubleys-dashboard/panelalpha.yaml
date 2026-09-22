@@ -1,0 +1,200 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hubleys is a self-hosted dashboard for several people at once: one YAML file
+  describes tiles, search engines, calendars and messages, and every entry
+  carries `allow:`/`deny:` rules so each visitor is served only the subset their
+  user id and groups may see. MIT, active (last commit six days before this was
+  written), a real runnable application rather than a plugin -- nothing here is
+  a scope question.
+
+  It builds and runs out of the box. The repository's Dockerfile is a clean
+  three-stage Node build, the engine detects `dockerfile`, and the stock deploy
+  finished successfully in 75.3s. The site was then HTTP 500 on every path and
+  the verdict was serving-error_page. The cause is one line:
+
+      // src/hooks.server.ts:56
+      } else { error(500, 'forward auth not configured') }
+
+  Hubleys authenticates nobody, by design. `handle()` reads the user out of
+  four request headers -- Remote-User, Remote-Groups, Remote-Name,
+  Remote-Email -- and believes them; section 3 of the README is instructions
+  for putting Caddy or nginx plus Authelia in front to set them. With nothing
+  in front there is no Remote-User, so every request is that 500. Reproduced
+  on the stock deploy, inside the container:
+
+      $ curl -s localhost:3000/
+      {"message":"forward auth not configured"}
+
+  And the 500 is the less interesting half. On that same stock deploy:
+
+      $ curl -s -o /dev/null -w '%{http_code}' https://<domain>/
+      500
+      $ curl -s -o /dev/null -w '%{http_code}' -H 'Remote-User: attacker' https://<domain>/
+      200        (40449 bytes -- the whole dashboard)
+      $ curl -s -H 'Remote-User: attacker' -H 'Remote-Groups: admins' \
+             https://<domain>/settings/admin
+      200
+
+  An unauthenticated deploy of this repository is not a broken site. It is an
+  open one, wearing a 500 as a disguise: anyone on the internet can name
+  themselves anything, read the dashboard, and write a per-user profile into
+  the container for any user id they invent. The header is the whole of the
+  authentication, so the recipe's job is to own that header.
+
+  == What the recipe does ==
+
+  An nginx sidecar, `auth`, becomes the only thing on the account's port 3000,
+  and the app publishes nothing. Its configuration is
+  ~/project/panelalpha/hubleys-auth.conf, and the four lines that matter are
+  `proxy_set_header Remote-User/-Groups/-Name/-Email`, set unconditionally on
+  every proxied request. `proxy_set_header` replaces whatever the client sent,
+  so the spoof above is dead: measured after the recipe, a request carrying
+  `Remote-User: admin` and `Remote-Groups: admins` returns a body byte-identical
+  to the anonymous one (the only difference in the two documents is the CSP
+  nonce).
+
+  Authentication itself is HTTP Basic, which is the one authenticator a
+  shared-hosting account already has -- there is no IdP here to do forward auth
+  properly. `admin` and a generated password are seeded into
+  ~/.panelalpha/hubleys/auth/htpasswd, and ~/.panelalpha/hubleys/auth/groups.map
+  maps a signed-in username to Hubleys groups (`admin "admins";`), which
+  ADMINS=group:admins turns into the Settings -> Admin page.
+
+  The realm is switched by a variable rather than being on:
+
+      map $http_authorization $hubleys_realm { default "Hubleys"; "" off; }
+
+  so a visitor who offers no credentials is let through as the user `guest`
+  rather than challenged. That is a deliberate trade and worth stating
+  plainly. Always-on Basic is a legitimate way to run this app and would make
+  `/` a 401 for the public the domain exists for -- and the engine's own
+  reachability probe and health check read that same 401. With the variable,
+  `/` is a 200 and who may see what is decided where Hubleys decides it: in
+  getUserSections() (src/lib/server/authz.ts), server-side, which drops
+  disallowed tiles out of the payload rather than hiding them in CSS. A
+  customer who wants the whole thing private deletes the `allow: true` and
+  `user:guest` rules from config.yml; they then get an empty page rather than
+  a password prompt, which is written down in the README the recipe leaves in
+  the account.
+
+  Measured on the finished deploy, three different people getting three
+  different dashboards from one process:
+
+      anonymous (guest)    200   10292 b   public section + a Sign in tile
+      bob (no group)       200    7998 b   public section only
+      admin (group admins) 200   13226 b   + the Private section
+      admin, wrong password 401
+
+  A tile the operator added under `allow: [group:admins]`, pointing at
+  https://example.internal/backups/, appeared for admin after Settings ->
+  Admin -> Reload application (POSTed over the public HTTPS name, 200
+  "Reload successful") and was absent from the anonymous and from bob's
+  payloads -- the string `example.internal` does not occur in either document.
+  `/panelalpha-login` is the way to make a browser ask for the password, since
+  a browser never volunteers Basic credentials: anonymous 401, with credentials
+  200 and a page that bounces to `/`.
+
+  == Where the data lives ==
+
+  Upstream's Dockerfile declares `VOLUME /data`, so the stock deploy gets a
+  named volume -- which survives a redeploy and which nothing in the product
+  can put a file into, so the customer could never edit config.yml, and
+  config.yml *is* the product. The override replaces that mount, by target,
+  with ~/.panelalpha/hubleys/data. ~ itself is chown root:root on every rebuild
+  (Project.php:813) and ~/project is cleared and re-cloned (engine#173), so
+  ~/.panelalpha is the only place that both survives and belongs to the account
+  (Project.php:814). ~/project/config.yml is left behind as a symlink to the
+  real file, recreated each deploy, so it is still where a file manager will
+  look.
+
+  That mount is why the app runs as the account rather than as the image's
+  `USER 1000`. Run against the same bind mount without it, the image says so
+  and exits:
+
+      Missing write permission for folder "/data/users/backgrounds".
+      The folder must be writable by the user with uid=1000.
+
+  which is onServerStartup() calling process.exit(1), i.e. a restart loop
+  rather than a site. Running as the account also keeps everything under /data
+  owned by the customer, which is the only reason config.yml is editable over
+  SFTP at all. The uid is not knowable when the recipe is written, which is
+  why hooks/prepare.sh generates docker-compose.override.yml instead of
+  shipping one: it runs after the app config's own overrides are laid down and
+  before the engine generates docker-compose.yml (AppConfigBootstrap::run()),
+  so nothing overwrites it.
+
+  The `auth` container is `nginxinc/nginx-unprivileged` run as `<account
+  uid>:0`. Stock nginx drops its workers to uid 101, which cannot read a 0600
+  htpasswd in a 0700 directory the account owns -- measured: every
+  authenticated request answered 500 while anonymous ones were fine. The
+  unprivileged image is built to run as an arbitrary uid, so the password file
+  never has to be loosened; it listens on 8080 and the override publishes that
+  on 3000.
+
+  == Redeploy ==
+
+  Four real `POST /projects/<user>/rebuild` calls, across two accounts. Every
+  time: config.yml with the operator's added section, users/config/admin.json,
+  the uploaded wallpaper, htpasswd with a second user added by hand, groups.map
+  and the generated password all came back byte-identical by md5, and the three
+  dashboards above were unchanged. ~/project is re-cloned and the recipe's
+  files, the symlink and the generated override are all laid down again.
+
+  The timing is a story about the build context. The first rebuild took 62s
+  because `COPY . /app/` was not cached: the engine's generated
+  docker-compose.yml sits in the context and carries `PA_DEPLOY_PHASE: install`
+  on the first deploy and `upgrade` on every one after, and that one word threw
+  away the 42s npm layer under it -- cache_hit_ratio 0.313, 48.5s of build, and
+  excluding only .git did not help. With the platform's own files excluded as
+  well, the next rebuild with nothing changed was 13s total, 0.1s of build,
+  cache_hit_ratio 0.75, `COPY . /app/` cached -- and on a fresh account with
+  the finished recipe, where the exclusions are in place from the first deploy,
+  the very first rebuild was already the 13s one.
+
+  == Numbers ==
+
+  Recipe deploy 90.3s and 90.5s on two fresh accounts, deploy-ok, serving: ok,
+  HTTP 200, `healthy: true` with no failing check. Control, same host, same
+  commit: 75.3s, serving-error_page, HTTP 500. The 15s difference is the nginx
+  image pull and two containers instead of one. Redeploy 13s warm. Memory:
+  app 31-48 MiB, auth 3.7-10.3 MiB of a 48 MiB cap, whole account container
+  190-263 MiB of its 1200 MiB limit. No `ready` gate: the site answered 200
+  16 seconds after a 13s rebuild returned, with the app container still
+  reporting `health: starting`.
+
+  == Things worth knowing ==
+
+  * BODY_SIZE_LIMIT is set to 12M because adapter-node caps a body at 512 kB,
+    a twentieth of the 10 MB wallpaper upload the app advertises. Measured: a
+    1.47 MB PNG answered `{"error":{"message":"Payload Too Large"}}`
+    (handler.js:1405) without it and 200 with it.
+  * FAVICON_FILE is pointed at a path that does not exist. onServerStartup()
+    copies it over /app/client/favicon.png, /app is owned by uid 1000 inside
+    the image, and the container runs as the account -- so a customer who put a
+    favicon.png in their data directory would turn the next start into an
+    unhandled rejection under NODE_OPTIONS=--unhandled-rejections=strict. A
+    custom favicon is the price of a dashboard that starts.
+  * `/settings` is every user's own settings, not an admin screen, so the
+    shared `guest` identity can change the guest background. It is bounded --
+    saveUserConfig() unlinks the previous upload, so `guest` can occupy one
+    image, not many -- but a customer who does not want strangers touching
+    anything should make the dashboard private as described above.
+  * `/healthcheck` answers 200 to anyone. It returns the string "ok" and
+    discloses nothing.
+  * Upstream serves /background/<id> to any user whose *own* background is set
+    to an upload, without checking that the id is theirs
+    (src/routes/background/[slug]/+server.ts). The ids are 32 random bytes, so
+    this is not reachable by guessing, but it is upstream's check to add, not
+    the recipe's.
+  * Multipart form POSTs to a *.panelalpha.online name never arrive: the
+    wallpaper upload over the public name timed out at 40s and the account's
+    own nginx access log has no line for it, so it dies before the account.
+    The same request through the same proxy on the account's own :3000
+    answered 200 in 0.024s, and a urlencoded POST (Settings -> Admin ->
+    Reload) over the public name is a normal 200. That is the platform, not
+    this app.
+  * Nothing in ~/project is web-reachable: the vhost is a pure proxy, so
+    /.git/config, /docker-compose.override.yml, /.env, /package.json,
+    /node_modules/..., /Dockerfile, /src/hooks.server.ts and
+    /panelalpha/hubleys-auth.conf all come back as the application's own 404
+    page, compared by body and not by status.

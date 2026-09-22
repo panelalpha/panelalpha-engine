@@ -1,0 +1,140 @@
+# The stack for the repository, which ships none the engine would load.
+#
+# manticoresoftware/manticoresearch is the daemon's own source: a C++/CMake
+# project whose build is clang, cmake and a vendored columnar/secondary/knn/
+# embeddings set, producing a binary upstream already publishes as
+# manticoresearch/manticore. Nothing here builds it. The repository's only
+# compose file, docker-compose-test.yml, is a CI harness and not a deployment.
+#
+# Detection without this file read the root, found the PHP that Manticore Buddy
+# is written in, chose the `php` strategy and served the C++ checkout over
+# Apache with no index.php -- Apache's 403, which checks/php/entry-served.yaml
+# reports as serving: missing_entry. That is the whole of the verdict on
+# supported-apps#297, and it is a detection artefact rather than anything about
+# Manticore.
+services:
+  # The daemon. One container, one process tree: searchd plus Manticore Buddy,
+  # which the image starts alongside it and which implements roughly half the
+  # SQL surface (create table, show, insert, the Elasticsearch emulation on /).
+  manticore:
+    image: ${MANTICORE_IMAGE:-manticoresearch/manticore:29.9.0}
+    restart: unless-stopped
+
+    # The HTTP API, and the only published port in the stack, so ComposePortScan
+    # makes it the account's primary port and the domain proxies here.
+    #
+    # The daemon also listens on 9306 (MySQL protocol) and 9312 (binary), and
+    # both are deliberately left off this list. They are not filtered by
+    # InternalPorts -- 9306 and 9312 are in neither its KNOWN nor its NON_WEB
+    # table -- so publishing them would put two non-HTTP sockets in front of
+    # DetectAppPort with nothing to tell it which is the site. They stay
+    # reachable inside this compose network, where a tenant's own container can
+    # use them, and unreachable from anywhere else.
+    ports:
+      - "9308:9308"
+
+    # MANTICORE_ADMIN_USER, MANTICORE_ADMIN_PASSWORD, searchd_auth and
+    # searchd_listen, written by hooks/prepare.sh.
+    #
+    # In a file rather than in `environment:` for two reasons. engine#173: the
+    # engine republishes ~/project/.env as .env.default at 644, and the path
+    # here is relative to the project directory, so '..' is the account's home
+    # and the file is outside the checkout the next deploy empties. And
+    # ComposePlaceholders and the sidecar miner both read
+    # `services.<name>.environment` and nothing else, so a variable whose name
+    # ends in PASSWORD is not rewritten under us.
+    env_file:
+      - ../.panelalpha/manticore/manticore.env
+
+    volumes:
+      # data_dir. Tables, the binlog, and auth.json -- the hashed admin
+      # credential -- all live here, which is what makes the login survive a
+      # redeploy: ~/project is emptied every time, this volume is not.
+      - manticore_data:/var/lib/manticore
+      # Read-only, and it only contains this recipe's three shell scripts.
+      - ./panelalpha/manticore:/pa:ro
+
+    # The image's own entrypoint, wrapped.
+    #
+    # The bootstrap has to run inside this container and cannot be a service of
+    # its own: AuthBootstrap() reads pid_file, then signals that pid with
+    # SIGUSR1 and answers over a named FIFO (src/daemon/daemon_ipc.cpp), so it
+    # needs the daemon's pid namespace and /run. start.sh backgrounds it and
+    # then hands off to docker-entrypoint.sh unchanged, so the image's own
+    # chown, gosu-to-manticore and config generation all still happen.
+    entrypoint: ["/bin/bash", "/pa/start.sh"]
+    command: ["searchd", "-c", "/etc/manticoresearch/manticore.conf.sh", "--nodetach"]
+
+    # There is no curl in the image (Ubuntu 24.04, wget only). 401 is the
+    # healthy answer here and wget exits 8 on it, so the status line is matched
+    # instead: anything that answers HTTP at all means searchd is accepting
+    # connections, which is all this needs to say.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -q -S -O /dev/null http://127.0.0.1:9308/ 2>&1 | grep -q 'HTTP/1.1 [0-9]'"
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 10s
+
+    # Measured on a live deploy: 34.5 MiB with a 1000-document table, and
+    # 35.0 MiB after two hundred full-text searches against it -- searchd and
+    # Buddy's eight PHP workers share most of their pages. What actually
+    # consumes memory here is a table's RAM chunk, and `rt_mem_limit` defaults
+    # to 128 MB per table, so a handful of tables is what 1 GB is for. It is
+    # also half of the 2 GB minimum an account gets (DindHostBuilder::
+    # MIN_MEMORY_LIMIT), which leaves the other half for everything else.
+    mem_limit: 1g
+
+  # Refuses the deploy unless this instance is closed.
+  #
+  # Not a no-op gate. It asserts both halves of the thing this recipe exists to
+  # guarantee, and exits non-zero if either fails -- which the `verified`
+  # service below turns into a failed `docker compose up -d`, and so a failed
+  # deploy:
+  #
+  #   - an anonymous request is refused (401), so nothing was published open;
+  #   - the generated credential is accepted (200), so the bootstrap ran and
+  #     the account actually has the login its credentials.txt advertises.
+  #
+  # The first without the second would pass on a daemon that locked itself and
+  # then failed to create a user -- reachable by nobody, including its owner.
+  #
+  # alpine:3 on purpose: a `ready` service on a datastore image is resolved as
+  # a sidecar and rewired into `app -> ready -> app`.
+  ready:
+    image: alpine:3
+    restart: "no"
+    env_file:
+      - ../.panelalpha/manticore/manticore.env
+    volumes:
+      - ./panelalpha/manticore:/pa:ro
+    depends_on:
+      manticore:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/pa/ready.sh"]
+    mem_limit: 64m
+
+  # What turns `ready`'s verdict into the deploy's verdict.
+  #
+  # `docker compose up -d` starts containers; it does not wait for them, so a
+  # one-shot service that exits 1 leaves it exiting 0 and the deploy green.
+  # Measured: with authentication switched off in the account's env file,
+  # `ready` printed its refusal and exited 1 and the rebuild still reported
+  # success. A `service_completed_successfully` dependency is what makes
+  # compose wait: it blocks `up -d` on `ready` finishing and fails the command
+  # with "dependency failed to start" when it finishes badly.
+  #
+  # So this service does nothing, and the doing-nothing is the point.
+  verified:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      ready:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  manticore_data: {}

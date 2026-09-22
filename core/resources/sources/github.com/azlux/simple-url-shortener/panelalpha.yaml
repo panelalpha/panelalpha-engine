@@ -1,0 +1,158 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Simple-URL-Shortener is 12 PHP files and no dependencies: one index.php that
+  looks a code up and sends a 302, one shorten.php that writes a row, a login
+  and a list. No framework, no Composer manifest, no build, no vendor
+  directory. Detection read it correctly -- `php-plain` on the `php` strategy,
+  and the document root is the repository root, which PhpDocroot reaches on its
+  own from index.php (PhpDocroot.php:80). The control deploy finished in 45.3s
+  and every request answered HTTP 200 with a stack trace in the body, which is
+  the `serving-php_error` verdict this recipe is opened for.
+
+  **The PHP error is one missing file.** `inc/bdd.php` line 2 is
+  `require 'config.php'`; `.gitignore` line 2 is `config.php`; upstream's
+  install instruction is "copy inc/config.example.php to inc/config.php". So a
+  clone never has one:
+
+      Warning: require(config.php): Failed to open stream: No such file or
+        directory in /app/inc/bdd.php on line 2
+      Fatal error: Uncaught Error: Failed opening required 'config.php'
+        (include_path='.:/usr/local/lib/php') in /app/inc/bdd.php:2
+
+  It answers **200** rather than 500 for the reason engine#185 describes: the
+  shared PHP base image loads no php.ini at all (`php -i` on the deployed
+  container says `Loaded Configuration File => (none)`), so display_errors is
+  on, the warning is written into the body, and writing a body sends the
+  headers with the 200 that was already on them. Measured on the control
+  deploy, with `php_flag display_errors off` added to a .htaccess and nothing
+  else changed, the same checkout answers an empty 500 of zero bytes -- so here
+  the warning is publishing a failure rather than being one. Both halves are
+  fixed: hooks/prepare.sh writes the config file, and files/.htaccess turns
+  display_errors off so a deploy in which that somehow did not happen fails
+  visibly instead of printing a stack trace to visitors.
+
+  **The second thing the engine cannot infer is the router, and without it the
+  product does not exist.** Nothing in the repository routes `/abc12` to
+  `index.php?site=abc12`. Upstream's README gives an nginx block and a
+  three-line Apache rewrite as things you write yourself, and ships neither, so
+  a clone serves a working form that mints short links which all 404.
+  files/.htaccess carries upstream's rule with the character class widened from
+  `[a-zA-Z0-9]+` to `[A-Za-z0-9_-]{1,30}`: the form's "Optional short url"
+  field is maxlength=30 and accepts anything, so a custom code with a dash in
+  it was reachable nowhere under the narrower class.
+
+  **Nobody can create a link without an account, and that had to be made true.**
+  Upstream's defaults are `PUBLIC_INSTANCE = 'false'` and
+  `ALLOW_SIGNIN = 'false'`, and one of those two does not work. login.php:14
+  reads the constant as `if (ALLOW_SIGNIN)` -- truthiness, not a comparison --
+  and every non-empty string is truthy in PHP, so upstream's own documented
+  "off" value leaves `POST login.php?signin` open to anyone who finds it.
+  header.php:35 does compare against `'true'`, so the button is hidden and the
+  endpoint is not; the only signal that it worked is the words `ACCOUNT
+  CREATED.` in the response. And login.php:19 gives administrator rights to
+  whoever registers while the users table is empty, so on a public name an
+  uninstalled instance is an admin account waiting for a stranger. This recipe
+  closes both without patching PHP: `ALLOW_SIGNIN` is defined as the empty
+  string, which is falsy at line 14 and still `!= 'true'` at header.php:35 --
+  genuinely off in both places, and `'true'` still turns it on -- and
+  panelalpha-setup.php creates the admin account from the deploy, before Apache
+  binds, so the first-user-wins slot is already taken.
+
+  **installation.php is an unauthenticated schema installer** that upstream
+  tells you to delete by hand after loading it once. hooks/prepare.sh deletes
+  it on every clone and panelalpha-setup.php runs the DDL from the install
+  stage instead.
+
+  **A shortened URL with a query string in it redirected to the wrong place.**
+  shorten.php:112 stores `htmlspecialchars(...)` of the target, so
+  `https://example.org/?a=1&b=2` is written as `...?a=1&amp;b=2`. That is
+  correct for the `<a href>` list.php renders and wrong for the `Location:`
+  header index.php:23 sends, where the target receives a parameter named
+  `amp;b`. hooks/prepare.sh decodes at the point of use, which leaves the HTML
+  path escaped as upstream intended. Verified end to end over the public name:
+  the 302 now carries the ampersand the operator typed.
+
+  **The data is in the account's own MySQL database, not in the checkout.**
+  `database: mysql` rather than the SQLite the application also supports, and
+  not only for the usual reason. Upstream's SQLITE3_FILE default is
+  `./database.sqlite3`, which is inside the document root -- and upstream's own
+  nginx snippet denies `\.(sqlite3|ht)$` while its Apache snippet does not, so
+  the Apache installation it documents publishes every short link, every target
+  URL and every bcrypt hash as a downloadable file. It is also inside
+  ~/project, which a redeploy clears and re-clones (engine#173), so every short
+  link an account had handed out would stop working on the next deploy while
+  the people holding those links still held them. MySQL costs nothing here --
+  it is the account's own server, already running, the one in the panel and in
+  phpMyAdmin -- and it survives a redeploy untouched, which was verified by
+  reproducing one by hand. files/.htaccess denies `*.sqlite3` anyway, for the
+  operator who switches.
+
+  The schema is installation.php's with three corrections, because DDL is not
+  code and a better version of it is not a patch anyone maintains. `short` is
+  VARCHAR(30) rather than `char(URL_SIZE)`: URL_SIZE is 5, the length of a
+  *generated* code, but the form offers a 30-character custom one, and on
+  char(5) under STRICT_TRANS_TABLES every custom code longer than five
+  characters is a `Data too long` error while the shorter ones are right-padded
+  by CHAR so the lookup never matches them again. `users.username` is a primary
+  key, where upstream's table has no key of any kind and two accounts can share
+  a name. And the generated API token is `random_bytes()` rather than
+  `uniqid()`, which is the clock in hex.
+
+  **An emoji in a comment was a blank 500.** inc/bdd.php:7 pins the MySQL
+  connection to `charset=utf8` -- utf8mb3 -- so anything outside the Basic
+  Multilingual Plane is invalid in the connection's own charset before the
+  column is reached, and shorten.php:46 throws an uncaught
+  `SQLSTATE[22007] Incorrect string value` that display_errors-off renders as an
+  empty 500. Verified on the deployed account: ASCII and Latin-2 accented
+  comments store, one emoji does not. hooks/prepare.sh makes it `utf8mb4`; no
+  column charset can fix it, because the connection is where the bytes are
+  rejected.
+
+  **login.php's Change Password never checks the old password.** login.php:54
+  requires `old_password` to be non-empty and then never verifies it -- measured,
+  not read: a POST with `old_password=totally-wrong` changed the password and
+  the new one worked. There is no CSRF token on that form, or on any other, so
+  cross-site that would be a one-request account takeover. files/.htaccess sets
+  `session.cookie_samesite=Lax`, which is what stops it; PHP's session cookie
+  has no SameSite attribute without a php.ini and there is none (engine#185), so
+  this is a line the recipe has to carry.
+
+  Three upstream defects this recipe reports and does not touch, because the
+  defaults it sets put them out of reach: the GET/bookmarklet path in
+  shorten.php:59-66 stores `comment` and `url` unescaped where list.php:46 and
+  :48 echo them raw, which is stored XSS -- self-inflicted while
+  PUBLIC_INSTANCE is off, and cross-user against the admin's `list.php?UNKNOWN`
+  the moment it is on; `list.php:63` is `if ($username = 'UNKNOWN')`, an
+  assignment, so the delete form always posts as UNKNOWN; and `list.php:6`
+  reads `$_SESSION['admin']` with no isset() for anyone who requests
+  `list.php?UNKNOWN` while signed out, which on this image is a notice printed
+  into the page and is why display_errors stays off rather than being a
+  first-deploy measure. Upstream's README says the project is finished and that
+  improvements should be forked.
+extends: php-plain
+# MySQL. `database: mysql` provisions a database and user on the account's own
+# server and hands the container DB_HOST / DB_PORT / DB_DATABASE / DB_USERNAME
+# / DB_PASSWORD; inc/config.php reads them from the environment rather than
+# writing them into a file that lives inside the document root.
+database: mysql
+# `docroot` is deliberately absent rather than `docroot: .`: the manifest reader
+# folds '.' to '' (PlatformManifest.php:305), which means "undeclared", so it
+# cannot say "the repository root" at all -- engine#172. It does not need to:
+# index.php is at the root, so PhpDocroot::detect() returns the root candidate
+# and the deploy sets PA_DOCROOT=/app, which was confirmed on the deployed
+# container.
+commands:
+  - id: shortener-setup
+    # Not `build`: engine#171, a `stage: build` command is inert. install runs
+    # on a first deploy and upgrade on every one after it, and this is
+    # idempotent by construction -- CREATE TABLE IF NOT EXISTS, and the admin
+    # account is only created when the users table is empty.
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Creates the two tables in the database the engine provisioned, and the
+      administrator account whose password hooks/prepare.sh generated into
+      ~/.panelalpha/. Replaces installation.php, which upstream ships as an
+      unauthenticated page and asks you to delete afterwards.
+    run: 'php panelalpha-setup.php'

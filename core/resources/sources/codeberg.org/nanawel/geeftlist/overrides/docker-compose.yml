@@ -1,0 +1,207 @@
+# Replaces the project's compose entirely. The repository ships four compose
+# files (docker-compose.yml + .dev/.ci variants) but all are developer stacks
+# that build the image from local base images (geeftlist-theme-builder,
+# geeftlist-base-web) the Makefile builds and no registry holds. This stack is
+# modelled on the project's own production guide (support/docker/production/):
+# the published image nanawel/geeftlist plus MariaDB and Redis.
+#
+# Writing docker-compose.yml (not docker-compose.override.yml) is what makes
+# this a compose project: an app config is applied before detection, the
+# compose platform outranks any other walk match, and UserComposeStrategy runs
+# this file as written -- so ComposePlaceholders rewrites app__BASE_URL below
+# from localhost to the account's public URL, and engine#221 (the fromSource
+# platform trap) never applies because no platform is declared.
+services:
+  db:
+    image: mariadb:10.5
+    restart: unless-stopped
+    # utf8mb4 as upstream's production stack runs it.
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+    environment:
+      MARIADB_DATABASE: geeftlist
+      MARIADB_USER: geeftlist
+      # Interpolated from ~/project/.env, written by hooks/prepare.sh from the
+      # persisted store. Not a repo placeholder, so ComposePlaceholders leaves
+      # ${...} alone and compose interpolates it at up time.
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      # Named volume, not a bind mount: mariadb initialises its datadir as uid
+      # 999 and a ~/.panelalpha bind mount cannot be chowned to it by the
+      # account. Named volumes survive project_rebuild (only account teardown
+      # prunes volumes); verified by redeploy.
+      - geeftlist_db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 512m
+
+  redis-cache:
+    image: redis:6-alpine
+    restart: unless-stopped
+    # The app's cache pool. 100mb cap as upstream sets it, LRU eviction so a
+    # full cache evicts rather than erroring.
+    command: ["redis-server", "--maxmemory", "100mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    mem_limit: 128m
+
+  # One-shot database initialiser. setup/install refuses once a schema exists,
+  # so this decides from the database which to run: upgrade if installed,
+  # install if not (RETURN_YES=0 / RETURN_NO=200). cli.php chdir's to src/ and
+  # reads the app__* env vars into config, so the DB/redis env below is all it
+  # needs. Runs as www-data (uid 33) so the cache files it writes under
+  # src/var/ stay writable by Apache's workers.
+  installer:
+    image: ${GEEFTLIST_IMAGE:-nanawel/geeftlist:latest}
+    restart: "no"
+    user: "33:33"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+    environment:
+      # DEBUG=0 for production, but app.ini keeps LOG_LEVEL commented and only
+      # derives it from a truthy DEBUG (di/sections/50-decorations.php), so with
+      # DEBUG=0 monolog.yml's ${app.LOG_LEVEL} cannot resolve and bootstrap dies
+      # ("Cannot resolve variable 'app.LOG_LEVEL'"). Set it explicitly.
+      F3__DEBUG: "0"
+      app__LOG_LEVEL: WARNING
+      app__RESOURCE_CONFIG__db__hostname: db
+      app__RESOURCE_CONFIG__db__database: geeftlist
+      app__RESOURCE_CONFIG__db__username: geeftlist
+      app__RESOURCE_CONFIG__db__password: ${MARIADB_PASSWORD}
+      app__RESOURCE_CONFIG__redis_cache__host: redis-cache
+      app__RESOURCE_CONFIG__redis_cache__port: "6379"
+      app__RESOURCE_CONFIG__redis_cache__database: "0"
+      app__AUTHENTICATION_JWT_SECRET_KEY: ${AUTHENTICATION_JWT_SECRET_KEY}
+      app__GEEFTER_SESSION_SECRET_KEY: ${GEEFTER_SESSION_SECRET_KEY}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        if php /var/www/webapp/src/console setup/isInstalled; then
+          php /var/www/webapp/src/console setup/upgrade;
+        else
+          php /var/www/webapp/src/console setup/install;
+        fi
+    mem_limit: 512m
+
+  webapp:
+    image: ${GEEFTLIST_IMAGE:-nanawel/geeftlist:latest}
+    restart: unless-stopped
+    # ComposePlaceholders rewrites app__BASE_URL to the public URL but rtrims its
+    # trailing slash. The app tolerates that for its HTML URLs (Url\Builder
+    # rtrims anyway), but api.base_url is a raw concat -- app.base_url . 'api'
+    # (di/sections/10-values.php) -- so a slash-less BASE_URL yields
+    # "https://host" + "api" = "https://hostapi", and the browser ApiClient
+    # (GiftListModal: assigning a gift to lists) then calls a host that does not
+    # exist. Re-add the trailing slash at boot before Apache starts. $$ is
+    # escaped so compose does not try to interpolate it.
+    command:
+      - /bin/sh
+      - -c
+      # Runs as root (apache's master runs as root, workers drop to www-data).
+      # The image writes uploads as www-data (uid 33) but ships src/pub/userdata
+      # root:root 0755 and the mounted volume inherits that, so chown it to 33
+      # once at boot -- exactly what upstream's install guide does
+      # (chown -R 33:33). Without it, gift-image uploads fail with EACCES.
+      - 'chown 33:33 /var/www/webapp/src/pub/userdata 2>/dev/null || true; export app__BASE_URL="$${app__BASE_URL%/}/"; exec apache2-foreground'
+    # Host 8080 (container 80): 80 is the proxy's own port in the account.
+    # ComposePortScan prefers 8080 among the app's published ports; the
+    # sidecars publish nothing, so the webapp's port is the ingress.
+    ports:
+      - "8080:80"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      installer:
+        condition: service_completed_successfully
+    environment:
+      # Rewritten to the account's public https URL by
+      # ComposePlaceholders::isLocalPublicUrl() before the stack starts (the
+      # key ends in _URL, the value is a bare localhost). The app rtrims the
+      # trailing slash itself, so a slash-less rewritten value is correct.
+      app__BASE_URL: http://localhost/
+      # Production hardening: no stack traces to the browser. LOG_LEVEL must be
+      # set explicitly because it is otherwise derived only from a truthy DEBUG
+      # (see the installer note above).
+      F3__DEBUG: "0"
+      app__LOG_LEVEL: WARNING
+      app__TITLE: Geeftlist
+      app__TIMEZONE: UTC
+      F3__LANGUAGE: en
+      F3__FALLBACK: en
+      app__SHOW_VERSION: "1"
+      # No SMTP on a fresh account: disable mail and skip the confirmation mail
+      # so registration completes without a mail round-trip.
+      app__EMAIL_ENABLED: "0"
+      app__NO_CONFIRMATION_EMAIL: "1"
+      # Open registration is the collaborative product; the shipped GD image
+      # captcha (no external service) stays on to stop bot signups.
+      app__GEEFTER_REGISTRATION_ENABLE: "1"
+      app__CAPTCHA_GEEFTER_SIGNUP_ENABLE: "1"
+      app__CAPTCHA_INVITATION_CREATION_ENABLE: "1"
+      app__CAPTCHA_CONTACT_VISITOR_ENABLE: "1"
+      # Localhost + docker bridge ranges, so the container's own HEALTHCHECK and
+      # any host-side cron curl are allowed.
+      app__CRON_ALLOWED_IPS: 127.0.0.1/8,::0,172.16.0.0/12
+      app__HEALTHCHECK_ALLOWED_IPS: 127.0.0.1/8,::0,172.16.0.0/12
+      app__RESOURCE_CONFIG__db__hostname: db
+      app__RESOURCE_CONFIG__db__database: geeftlist
+      app__RESOURCE_CONFIG__db__username: geeftlist
+      app__RESOURCE_CONFIG__db__password: ${MARIADB_PASSWORD}
+      app__RESOURCE_CONFIG__redis_cache__host: redis-cache
+      app__RESOURCE_CONFIG__redis_cache__port: "6379"
+      app__RESOURCE_CONFIG__redis_cache__database: "0"
+      app__AUTHENTICATION_JWT_SECRET_KEY: ${AUTHENTICATION_JWT_SECRET_KEY}
+      app__GEEFTER_SESSION_SECRET_KEY: ${GEEFTER_SESSION_SECRET_KEY}
+    volumes:
+      # Uploaded gift images. A named volume, not a ~/.panelalpha bind mount:
+      # the prebuilt image writes them as a fixed uid 33 (www-data) that is not
+      # the account uid (1001), and chowning a host bind mount to 33 from inside
+      # the container (sysbox userns) would take the directory out of the
+      # account's own ownership. A named volume is chowned to 33 cleanly (see the
+      # command wrapper) and survives project_rebuild -- verified -- like the DB
+      # volume. This is the koillection/tandoor upload-volume pattern.
+      - geeftlist_userdata:/var/www/webapp/src/pub/userdata
+    healthcheck:
+      # wget ships in the base image. /system/healthcheck answers 200 for
+      # localhost (allowed above) once Apache+PHP serve; the installer has
+      # already put the schema in place, so this gates readiness.
+      test: ["CMD", "wget", "-q", "--tries=1", "--timeout=10", "-O", "/dev/null", "http://127.0.0.1/system/healthcheck"]
+      interval: 10s
+      timeout: 15s
+      retries: 30
+      start_period: 60s
+    mem_limit: 768m
+
+  # Does nothing and exits 0. `docker compose up -d` runs without --wait
+  # (engine#204), so without a service that waits on the webapp's healthcheck
+  # the deploy is called done while Geeftlist is still starting. A clean exit 0
+  # is not a crash loop to AppHealth. alpine so nothing large is pulled.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      webapp:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  geeftlist_db: {}
+  geeftlist_userdata: {}

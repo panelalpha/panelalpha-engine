@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Ghost is a publishing platform: a Node server (ghost/core) that serves the
+  public site and the admin SPA on :2368. The repository is the Ghost
+  monorepo, not a deployable Ghost — its root is a pnpm 12 / nx workspace of
+  38 build targets whose package.json has no start script at all, and the only
+  compose files are compose.dev.yaml and its compose.dev.*.yaml companions:
+  names Docker never auto-loads, describing a laptop stack that bind-mounts
+  the source tree, fronts Ghost with a Caddy dev gateway on :80 and adds
+  mailpit and a stripe CLI. So detection found no compose file and no
+  recognisable platform and fell through to Railpack, which built all 38
+  targets in ten minutes and then said "No start command detected": the
+  container exited 0 on every boot and restart-looped, which is the
+  serving-unknown verdict.
+
+  Nor is there a production image to build instead. Dockerfile.production has
+  a `core` target (server only, no admin, the Ghost-Pro base) and a `full`
+  target for self-hosting — but `full` ends in
+  `COPY ghost/core/core/built/admin core/built/admin`, a path its own comment
+  says CI injects from a separate admin build job and that "local `full`
+  builds must populate first". On a fresh checkout that directory does not
+  exist and the build fails; `core` would build but serves no /ghost/ admin,
+  so a site could never be set up. Ghost's own published image is the
+  self-hosting artifact, so the recipe supplies it as the stack.
+
+  overrides/docker-compose.yml runs ghost:<major>-alpine — the major read out
+  of the checkout's own ghost/core/package.json, so a clone of a 6.x branch
+  gets a 6.x image — beside MySQL 8.4, which Ghost requires rather than
+  prefers: env/config.production.json hardcodes `database.client: mysql`
+  against 127.0.0.1 root with an empty password, and there is no sqlite
+  fallback under NODE_ENV=production, so without a database sidecar Ghost
+  cannot boot at all. The prepare hook generates the MySQL credentials into
+  .env, which compose interpolates into both services from one text.
+
+  The one value the recipe cannot generate is Ghost's `url`, which has to be
+  the account's public address and is not known until the domain exists.
+  Ghost reads it as a lowercase `url` env var (nconf, separator `__`, keys
+  taken verbatim), so the engine's own PublicUrlEnvironment aliases — URL,
+  APP_URL, SITE_URL — never reach it, and those are only set by the dockerfile
+  strategy anyway. Instead the compose file ships `url: http://localhost`,
+  which is exactly the shape ComposePlaceholders rewrites: the key matches its
+  public-URL pattern, the value is a bare localhost on port 80, and
+  UserComposeStrategy replaces it with the account's https URL before the
+  stack starts. Ghost then 301s a plain-HTTP request to its canonical https
+  origin and serves 200 through the proxy, which forwards X-Forwarded-Proto
+  and which Ghost trusts because `trust proxy` is on by default.
+
+  One service in the compose file is a no-op that exits 0. The engine runs
+  `docker compose up -d` without `--wait` and calls the deploy finished when
+  that returns, which is when Ghost's container has been started rather than
+  when it answers — and its first boot runs knex-migrator against an empty
+  database. The first run of this recipe deployed cleanly and was still 503 at
+  the moment the probe ran. Compose does block on a depends_on health
+  condition, so `ready` waits on Ghost's healthcheck and nothing else, and
+  `up -d` now returns only once the site answers; a clean exit 0 is explicitly
+  not a crash loop to AppHealth. Ghost reaches healthy about 25 seconds after
+  its container starts.
+
+  Mail is left unconfigured: Ghost boots and the owner-setup flow at /ghost/
+  works without it, but staff invites and member emails need an SMTP service
+  the engine does not provide.

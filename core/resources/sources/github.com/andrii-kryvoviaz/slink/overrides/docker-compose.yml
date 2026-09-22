@@ -1,0 +1,121 @@
+# Compose-replace: the repo ships only a bare `image + a few env lines` example
+# (docker/docker-compose.yaml is 8 lines); upstream publishes the whole app as
+# anirdev/slink on Docker Hub as a SINGLE container -- FrankenPHP/Symfony API,
+# the SvelteKit client, Redis and a scheduler all supervised by s6 inside one
+# image, with the public SvelteKit server on :3000 fronting everything. This
+# runs that official image directly (pulled, not built), pinned to the current
+# stable release v1.13.1 (Hub `latest` at time of writing). Seeding a Docker Hub
+# image also sidesteps engine#229 (image-seed NotFound is the GHCR/registry-save
+# case, not Hub).
+#
+# WHY COMPOSE-REPLACE. Nothing to add as a sidecar -- SQLite is embedded and
+# Redis runs inside the container -- but a hosted deploy needs three things bare
+# detection cannot give: the SQLite DBs and uploaded images on volumes that
+# outlive a redeploy, a first admin whose password is not a shipped default, and
+# registration closed so a stranger cannot self-register on a single-owner
+# instance. This override is the upstream single-image shape with persistence,
+# the security posture and the admin bootstrap wired in.
+#
+# SECRETS ARE SELF-MANAGED BY THE IMAGE. docker/scripts/init-secrets (run from
+# the image ENTRYPOINT) generates the JWT keypair + passphrase, the Mercure JWT
+# secret and APP_SECRET (derived from the JWT key) into /app/var/data/keys/ on
+# first boot and reuses them thereafter. Because /app/var/data is on the named
+# volume below, every one of those secrets is stable across redeploys with no
+# seeding on our side -- the only secret this recipe manages is the admin
+# password (hooks/prepare.sh), which the app only reads on the very first boot.
+#
+# ONE ORIGIN. The browser only ever talks to :3000; the SvelteKit server reaches
+# the Symfony API in-container. ORIGIN is the one public-facing value SvelteKit
+# needs (origin check on POST + absolute links); left http://localhost:3000, the
+# engine rewrites it to this account's public https address (ComposePlaceholders:
+# a key ending in ORIGIN with a localhost value on an allowed port). On an
+# account with no domain yet it stays localhost.
+services:
+  slink:
+    image: anirdev/slink:v1.13.1
+    restart: unless-stopped
+    # .env is the platform-merged account env (touched by the prepare hook so
+    # `up` never aborts on a missing file); admin.env carries the admin
+    # username/email/password the hook generated once and keeps stable across
+    # redeploys. Paths are relative to ~/project, where the engine runs compose.
+    env_file:
+      - .env
+      - ../.panelalpha/slink/admin.env
+    environment:
+      # Rewritten to the account's public https URL by the engine; drives the
+      # SvelteKit origin check and every absolute/share link. Only public value.
+      ORIGIN: "http://localhost:3000"
+      TZ: UTC
+      # Local disk storage; the image dir is on the named volume below.
+      STORAGE_PROVIDER: local
+      API_ENABLED: "true"
+      # Behind the engine's TLS-terminating proxy; the app speaks http inside.
+      REQUIRE_SSL: "false"
+      # --- security posture (single-owner instance) ---
+      # Registration closed: strangers cannot sign up. Approval-required is left
+      # on as well (defence in depth) so that even if an operator re-opens
+      # registration later, new users cannot act until an admin approves them.
+      USER_ALLOW_REGISTRATION: "false"
+      USER_APPROVAL_REQUIRED: "true"
+      # No anonymous uploads: only logged-in users can upload.
+      IMAGE_ALLOW_GUEST_UPLOADS: "false"
+      # Share links stay anonymously reachable (the whole point of the app);
+      # unauthenticated browsing of the public Explore feed stays on as designed.
+      # The upload and admin planes require login regardless of these.
+      USER_ALLOW_UNAUTHENTICATED_ACCESS: "true"
+      USER_REQUIRE_AUTH_FOR_MEDIA_SHARES: "false"
+      # Strip EXIF (incl. GPS) from uploads by default.
+      IMAGE_STRIP_EXIF_METADATA: "true"
+      IMAGE_MAX_SIZE: 15M
+    volumes:
+      # SQLite databases (slink.db + the event-store slink_store.db) AND the
+      # self-generated secrets under keys/ (APP_SECRET, JWT keypair + passphrase,
+      # Mercure secret) all live under /app/var/data -- one volume keeps the
+      # data, the admin user row and every signing key stable across redeploy.
+      - slink-data:/app/var/data
+      # Uploaded images. Image storage is the whole point of the app, so this
+      # MUST survive a redeploy; separate volume from the DB.
+      - slink-images:/app/slink/images
+    # The SvelteKit server listens on 3000; publish it so the engine's port scan
+    # takes it as the primary (engine#234). No other service publishes a port.
+    ports:
+      - "3000:3000"
+    mem_limit: 1536m
+
+  # Polls Slink's public UI on :3000 until it answers, then exits 0. The app
+  # boots several supervised services behind s6, so the first response lags
+  # container start; curlimages/curl (Docker Hub, busybox /bin/sh) probes it.
+  healthgate:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      slink:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 90); do
+          curl -fsS -o /dev/null "http://slink:3000/" && exit 0
+          sleep 4
+        done
+        echo "slink did not become ready in time" >&2
+        exit 1
+    mem_limit: 64m
+
+  # Starts nothing, exits 0, waits on the health probe. `docker compose up -d`
+  # blocks on a depends_on completion condition, so `up` returns -- and the
+  # engine reports the deploy finished -- only after Slink actually answers
+  # (engine#204: up -d returns before the app is up).
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      healthgate:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  slink-data: {}
+  slink-images: {}

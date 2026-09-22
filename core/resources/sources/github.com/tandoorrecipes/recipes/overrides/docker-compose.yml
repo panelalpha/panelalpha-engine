@@ -1,0 +1,155 @@
+# The stack for the repository, which ships no compose file Docker would load:
+# the examples live under docs/install/docker/*/docker-compose.yml, which the
+# compose probe never looks at, and their own page tells the operator to
+# download one and edit a .env beside it.
+#
+# This is docs/install/docker/plain/docker-compose.yml rewritten for a single
+# hosting account: the same published image and the same PostgreSQL major, no
+# host bind mounts, no .env to edit by hand, and two extra services that turn
+# `docker compose up -d` into something that has actually finished.
+#
+# Tandoor runs from the published image rather than from this checkout because
+# the checkout cannot build a working one. The repository's Dockerfile copies
+# the source in and installs requirements.txt; it never builds vue3/. That
+# happens in .github/workflows/build-docker.yml, in a `yarn build` step before
+# `docker build`, so only the published image carries
+# cookbook/static/vue3/manifest.json. A locally built image boots, serves, and
+# has no frontend.
+services:
+  db:
+    # The version upstream's own plain/docker-compose.yml pins. Tandoor cannot
+    # downgrade its schema, so the major is pinned rather than floating.
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only -- written once into ~/.panelalpha/tandoor/ by
+    # hooks/prepare.sh, because ~/project is emptied before every clone and a
+    # regenerated password would lock the app out of this volume for good.
+    env_file:
+      - ../.panelalpha/tandoor/tandoor.env
+    environment:
+      POSTGRES_DB: tandoor
+      POSTGRES_USER: tandoor
+      # postgres refuses to initialise into a non-empty directory, and a
+      # volume mounted at the data directory is not always empty (lost+found).
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tandoor -d tandoor -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 256m
+
+  # One-shot. Runs the migrations and creates this account's administrator,
+  # then exits 0. `app` will not start until it has, which is the whole point:
+  # cookbook/views/views.py:349 serves an unauthenticated first-superuser form
+  # at /setup/ for as long as auth_user is empty, and the image's own boot.sh
+  # starts nginx *before* it migrates. Doing this inside a gate rather than
+  # after the app is up means there is no window in which that form is
+  # reachable over the public domain.
+  init:
+    image: ${TANDOOR_IMAGE:-ghcr.io/tandoorrecipes/recipes:latest}
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+      - ../.panelalpha/tandoor/tandoor.env
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: tandoor
+      POSTGRES_USER: tandoor
+    volumes:
+      - ./panelalpha/tandoor:/pa:ro
+      - media:/opt/recipes/mediafiles
+      - staticfiles:/opt/recipes/staticfiles
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    mem_limit: 512m
+
+  app:
+    image: ${TANDOOR_IMAGE:-ghcr.io/tandoorrecipes/recipes:latest}
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - ../.panelalpha/tandoor/tandoor.env
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: tandoor
+      POSTGRES_USER: tandoor
+      # The image's nginx listens here; boot.sh substitutes it into
+      # http.d/Recipes.conf.template. Port 80 would need root inside the
+      # container for no gain.
+      TANDOOR_PORT: "8080"
+      # Not a real address and not meant to survive: ComposePlaceholders
+      # rewrites a bare http://localhost under a key ending in _URL to the
+      # account's public https address before the stack starts
+      # (ComposePlaceholders::PUBLIC_URL_KEY_PATTERN). /pa/entrypoint.sh turns
+      # it into ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS, which is the difference
+      # between a site and 400 DisallowedHost on every path.
+      PA_PUBLIC_URL: http://localhost
+      # Two workers, two threads. The image's default is 3x2 sized for a
+      # machine, not for one account's recipe book, and each worker is a full
+      # Django process.
+      GUNICORN_WORKERS: "2"
+      GUNICORN_THREADS: "2"
+      # Recipe imports fetch and scrape a remote page; 30s is the image default
+      # and is not always enough before gunicorn kills the worker.
+      GUNICORN_TIMEOUT: "60"
+    volumes:
+      - ./panelalpha/tandoor:/pa:ro
+      # User uploads: recipe photos, imported images, exported archives. The
+      # only data in this stack that is not in the database, and the reason
+      # this is a named volume and not a directory under ~/project, which is
+      # deleted before every clone.
+      - media:/opt/recipes/mediafiles
+      # Regenerated by collectstatic on every boot, kept as a volume so a
+      # restart does not repeat ~1700 post-processed files into a fresh layer.
+      - staticfiles:/opt/recipes/staticfiles
+    entrypoint: ["/bin/sh", "/pa/entrypoint.sh"]
+    healthcheck:
+      # The login form: a real Django view that renders the Vue manifest, so a
+      # boot with no frontend fails this instead of passing on a redirect. The
+      # image has no curl (the Dockerfile purges the build deps that provide
+      # it); wget is busybox's. 127.0.0.1 is in ALLOWED_HOSTS because
+      # entrypoint.sh puts it there.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/accounts/login/ || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    mem_limit: 1024m
+
+  # Does nothing and exits 0. `docker compose up -d` runs without --wait
+  # (engine#204), so without this the deploy is finished while Tandoor is still
+  # running collectstatic. Compose does block on a depends_on health condition,
+  # so a service that waits on app's healthcheck makes `up -d` return only once
+  # the site answers. alpine, not the postgres or tandoor image: nothing extra
+  # is pulled and nothing large starts. A clean exit 0 is not a crash loop as
+  # far as AppHealth is concerned.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}
+  media: {}
+  staticfiles: {}

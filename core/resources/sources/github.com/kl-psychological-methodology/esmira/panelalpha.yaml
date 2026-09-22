@@ -1,0 +1,147 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ESMira runs longitudinal psychology studies -- experience sampling, ambulatory
+  assessment, EMA -- on the researcher's own server: a PHP web interface for
+  designing studies and reading the data, and a JSON API the Android and iOS
+  clients talk to. There is no database server; every study, every collected
+  response and the account file are plain files on disk.
+
+  Detection reads the checkout the way the checkout asks to be read and still
+  cannot host it. Measured on a control deploy with no recipe:
+  `serving-missing_entry`, HTTP 403, 45.1 s. Three separate things are wrong
+  and the document root is only the last of them.
+
+  **This repository is a meta repository.** github.com/KL-Psychological-Methodology/ESMira
+  is four files, an `about/` directory of screenshots and a `.gitmodules`: the
+  server is the `ESMira-web` submodule and the phone client is `ESMira-apps`.
+  The engine does fetch them -- `git submodule update --init --depth=1
+  --recursive` after the clone, GitRepository.php:137-151, measured at 3.9 s
+  for 11.8 MB -- but it *swallows* a failure into a warn line
+  (GitRepository.php:589-607), which is right for a repository whose submodules
+  are optional and fatal for one where the submodule is the entire application.
+  hooks/prepare.sh turns that into an error.
+
+  **The application has to be compiled, and the engine will not do it by
+  itself.** ESMira-web is TypeScript and webpack: `npm run prod` writes
+  `dist/`, and the PHP half of the application is *copied into* dist by
+  CopyWebpackPlugin (build_configs/config.base.js) alongside the bundles, so
+  `dist/` -- not `src/` -- is the deployable tree. The engine already knows how
+  to compile a PHP project's frontend on the host, with the account's shared
+  npm cache and the account's memory cap: `HostCompile::runForPhp()`. It fires
+  on exactly two conditions -- a `package.json` at the *project root* carrying
+  a `scripts.build` (HostCompile.php:188-201) -- and ESMira satisfies neither:
+  its package.json is one level down, and its production script is called
+  `prod`. files/package.json is a four-line shim that satisfies both and
+  delegates. Measured: 132 s on a 2-core host, 24 s of it webpack.
+
+  **The document root is `ESMira-web/dist`, and the probe cannot reach it.**
+  `PhpDocroot::CANDIDATES` is `['public', 'web', 'public_html', 'webroot']`,
+  then the repository root, then `src/` for an index.php only
+  (PhpDocroot.php:25-95). ESMira's front controller is two levels down, at
+  `ESMira-web/dist/index.php`, so `detect()` falls through everything, returns
+  `''`, and `environment()` emits no `PA_DOCROOT` at all. panelalpha-serve.sh
+  then falls back to `/app` (serve script lines 18-27, measured:
+  `PA_DOCROOT=/app` in the container's `/proc/1/environ`), the checkout root
+  has no index file, and `Options -Indexes` in apache-vhost.stub answers 403 to
+  every request. `ESMira-web/dist` is a plain relative path, so unlike `.` it
+  survives `PlatformManifest::readDocroot()` and engine #172 does not bite.
+
+  Serving `dist/` is also most of what makes this application safe to host.
+  The checkout root, `ESMira-apps/` (5.4 MB of Kotlin), `ESMira-web/src/`,
+  `ESMira-web/node_modules/` (218 MB), the engine's own `docker-compose.yml`,
+  `.env` and entrypoint, and this recipe's own setup script are all *outside*
+  the document root and have no URL by construction rather than by an
+  `.htaccess` rule.
+
+  **The first-run setup is first-visitor-wins, and it is the security story.**
+  `InitESMira` is registered in `api/admin.php`'s `//no permission:` block and
+  its only guard is `Configs::getDataStore()->isInit()`. On a server that has
+  never been set up, one unauthenticated POST --
+  `/api/admin.php?type=InitESMira` with `new_account`, `pass` and
+  `data_location` -- creates the administrator and hands the sender the server
+  and everything that will ever be collected on it. On an account with a public
+  HTTPS domain the window is however long it takes the owner to open a browser.
+  files/panelalpha-esmira-setup.php closes it on the install stage, before
+  Apache binds, by calling the wizard's own `ESMiraInitializerFS` and
+  `FileSystemBasics::writeServerConfigs()` rather than reimplementing them; the
+  compose override's healthcheck then asserts on every probe that it stayed
+  closed.
+
+  **The data is files, and by default those files live inside the document
+  root.** ESMira's setup wizard offers `DIR_BASE` as the data location and
+  upstream's Dockerfile takes it (`VOLUME /var/www/html/esmira_data/`), so the
+  shipped arrangement has studies, participant responses, `.logins` (the bcrypt
+  password hashes) and `.permissions` inside the served tree, protected by an
+  `.htaccess` holding `Deny from all` that the initialiser writes
+  (ESMiraInitializerFS::createDataFolder()). Two things are wrong with that
+  here. It is one `AllowOverride` away from being a no-op, on data about human
+  research participants. And `~/project` is emptied before every clone (engine
+  #173), so it would not survive a redeploy. `dataFolder_path` is a *config*
+  value (backend/fileSystem/PathsFS.php:21), so the recipe points it at `/data`
+  -- a bind mount of `~/.panelalpha/esmira/data` -- which removes the URL
+  instead of denying it and keeps the studies across redeploys.
+
+  `backend/config/configs.php` is the one thing that cannot be moved:
+  `Paths::FILE_CONFIG` is a class constant pinned to `DIR_BASE`
+  (backend/Paths.php:8). It is bind-mounted from `~/.panelalpha/esmira/config`
+  into the document root, which is where upstream's own Dockerfile mounts it.
+  It holds no credential.
+
+  **No php.ini reaches this image** (engine #185): `php --ini` answers "Loaded
+  Configuration File: (none)", so `display_errors` is On and `expose_php` is
+  On. ESMira never overrides either -- its own error handling writes traces
+  into the data folder for the administrator, not into the response -- so on
+  the defaults a PHP warning prints the account's absolute paths into the JSON
+  body the phone client parses. files/panelalpha/php/zz-esmira.ini fixes that
+  and raises memory_limit; the override names it with `PHP_INI_SCAN_DIR`.
+  Upload limits are left to upstream's own `dist/.htaccess`, whose `php_value`
+  lines work because the base image is `php:*-apache`, i.e. mod_php.
+
+  Licence: AGPL-3.0 (`LICENSE`, and package.json says "GNU AGPL 3.0"). The
+  network-service clause applies: the application is deployed unmodified from
+  its own sources and the source URL is in the repository, so a hosted instance
+  satisfies section 13 by pointing at upstream. This recipe adds no patch to
+  the application itself -- every file it writes is configuration, outside the
+  application's own tree except for the setup script, which is not served.
+extends: php-plain
+# ESMira serves from the webpack output inside the submodule. See the note
+# above: this key is the only thing that can say so, the probe cannot reach it,
+# and `ESMira-web/dist` (unlike `.`) survives readDocroot().
+docroot: ESMira-web/dist
+requires:
+  php: runtime
+  # Not optional here, unlike php.yaml's entry: without a Node toolchain there
+  # is no dist/ and therefore no document root and no application. Declared so
+  # an inspection of this repository says so before a deploy finds out.
+  node:
+    role: build
+commands:
+  # No `id:`, deliberately. A stale detection cache drops every stage command
+  # from a recipe that carries one while the log still reports "Recipe named by
+  # ..." (engine #169); omitting it and extending a shipped manifest is the
+  # mitigation.
+  #
+  # Declaring `commands:` replaces what php-plain.yaml declared, top level by
+  # top level (SourceRecipes::fromAppConfig uses array_merge) -- which costs
+  # nothing, because php-plain ships `commands: {}`: it is the manifest for PHP
+  # *without* Composer, and ESMira has no composer.json.
+  #
+  # Nothing on the `build` stage. A source recipe's build-stage commands are
+  # inert (engine #171), and the compile this application needs is not a stage
+  # command at all: it is the engine's own host Node build, reached through
+  # files/package.json.
+  - stage:
+      - install
+      - upgrade
+    description: >-
+      Finishes the first-run setup the way the wizard would, before Apache
+      binds: writes backend/config/configs.php through ESMira's own
+      configuration writer with the data folder pointed at /data, creates the
+      esmira_data tree, and stores the administrator account as a bcrypt hash
+      in esmira_data/.logins. On the upgrade stage an already-initialised
+      server is left alone apart from MigrationManager::autoRun(), which is the
+      same call upstream's docker-entrypoint.sh makes on every boot -- that is
+      what makes a redeploy safe. On the build stage it would not run at all
+      (engine #171).
+    run: 'php /app/panelalpha-esmira-setup.php'
+    timeout: 300

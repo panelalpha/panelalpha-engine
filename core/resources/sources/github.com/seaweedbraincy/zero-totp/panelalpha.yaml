@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Zero-TOTP is a zero-knowledge encrypted TOTP (2FA) vault: an Angular SPA
+  (nginx) plus a Flask/Connexion API (gunicorn + uvicorn worker) backed by
+  MariaDB. The repository ships no root compose file the engine could run —
+  only api/Dockerfile, frontend/Dockerfile and an e2e-tests stack — so this
+  recipe replaces detection with its own overrides/docker-compose.yml built on
+  the project's official prebuilt images (ghcr.io/seaweedbraincy/zero-totp-api
+  and -frontend, pinned to 2.1.0), the MariaDB the API's mysqlclient driver
+  needs on a named volume, and a thin nginx that fronts both on one origin
+  (`/` to the SPA, `/api/` to the API) because the SPA calls its API
+  same-origin and the frontend image's own nginx does not proxy it. The API is
+  configured from a config.yml the API service renders at boot from
+  environment: the flask session key, the server-side encryption key and the
+  DB password are generated once and persisted in ~/.panelalpha/zero-totp
+  (regenerating either would log everyone out or lock the app out of its
+  volume), and the public domain comes from PUBLIC_URL, which the engine
+  rewrites from http://localhost to the account's real https origin. Signup is
+  self-contained email/password (no operator OAuth or SMTP required; Google
+  Drive backup and email confirmation stay off). The RSA vault-signing keypair
+  the API generates on first boot lives on its own named volume so vault
+  signatures survive a rebuild.

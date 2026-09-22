@@ -1,0 +1,196 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OpenEMR is an electronic health record and practice-management system: about
+  9,000 files of PHP served straight out of the checkout, MySQL or MariaDB
+  underneath, and an installer that builds a 700-table schema. Detection read
+  the repository correctly -- composer.json and no artisan, so the `php`
+  strategy, PHP 8.3 (composer.json pins `config.platform.php` to 8.3 beside
+  `require.php >=8.3.0`), the shared Apache base image with ~/project
+  bind-mounted and `composer install` on the host. The deploy finished
+  successfully, `composer install` resolved 187 packages and the webpack theme
+  build ran, and every request still answered HTTP 500. That is the
+  `serving-error_page` verdict this recipe exists to fix.
+
+  **The 500, reproduced:** `PHP Fatal error: Uncaught UnexpectedValueException:
+  Could not detect environment name. Searched envvars: ENVIRONMENT, ENV` out of
+  `vendor/firehed/container/src/AutoDetect.php:51`, reached from
+  `bootstrap.php:48` from `public/index.php:20`. PhpDocroot had pointed Apache
+  at `/app/public`, so every request in the account went through OpenEMR's
+  opt-in front controller, whose first act is to build a DI container that
+  refuses to exist without ENVIRONMENT or ENV -- neither of which is in
+  `.env.example` or set anywhere in a checkout. `bootstrap.php` also sets
+  `display_errors=0`, so the body was empty, which is why the health report's
+  whole `php` group passed on a site that was completely dead: no-fatal-error,
+  no-database-error and no-diagnostics-in-output all match against the response
+  body. The missing database configuration was never even reached.
+
+  **The document root is the repository root, and no manifest key can say so.**
+  PhpDocroot probes `public web public_html webroot` before it tries the root,
+  and OpenEMR master has a `public/index.php` -- so the probe stops there and
+  Apache is pointed at `/app/public`. That directory is not a document root. It
+  holds `assets/`, `images/`, `certs/` and an *experimental* front controller
+  whose own `.htaccess.example` says so in as many words: "EXAMPLE ONLY -- if
+  you move this file from `.htaccess.example` to `.htaccess` AND delete the
+  other `.htaccess` files throughout, you'll use the front controller. This is
+  still an experimental/opt-in process." Nothing in the checkout opts in, and
+  with `/app/public` served every OpenEMR URL --
+  `/interface/login/login.php`, `/library/js/...`, `/apis/...` -- is an Apache
+  404, because it resolves under `public/` where those paths do not exist, and
+  `interface/globals.php` computes `$web_root` by subtracting DOCUMENT_ROOT
+  from the application directory and prefixes every generated URL with
+  `/public`.
+
+  `docroot: .` does **not** fix it, and that is worth knowing before you write
+  it: `PlatformManifest::readDocroot()` folds both `''` and `'.'` into `''`,
+  and `PhpDocroot::environment()` reads `''` as "not declared" and runs the
+  probe. Measured -- with `docroot: .` in this file, the generated compose file
+  still said `PA_DOCROOT: /app/public`. Nor does leaving it out: the base
+  image's own `panelalpha-serve.sh` falls back to `/app/public` whenever that
+  directory exists. So the document root is set as `PA_DOCROOT: /app` in
+  overrides/docker-compose.override.yml, which is the one lever a recipe has,
+  and it matches what upstream's Apache config does
+  (`docker/release/openemr.conf`: `DocumentRoot
+  /var/www/localhost/htdocs/openemr`). If `readDocroot()` ever learns to keep
+  `.` as "the application root", this belongs back here as a manifest key.
+
+  **There was no database, and no database configuration.** OpenEMR is MySQL or
+  nothing -- composer.json requires ext-mysqli and ext-pdo_mysql, and the
+  installer speaks mysqli directly -- and the repository ships no .env, no
+  compose file and nothing that names a server. It does ship
+  `sites/default/sqlconf.php`, committed, pointing at `openemr:openemr@localhost`
+  with `$config = 0`, which is the flag meaning "not installed yet".
+  `database: mysql` is the manifest key that answers this (the same one Matomo
+  and Omeka S need, for the same reason): the engine provisions a database and
+  user on the account's own MySQL server -- visible in the panel, openable in
+  phpMyAdmin, inside the account's backup, and costing this 3.7 GB host neither
+  a container nor a volume -- and hands the container DB_HOST, DB_PORT,
+  DB_DATABASE, DB_USERNAME and DB_PASSWORD.
+
+  **The first administrator.** OpenEMR seeds no user. Until the installer has
+  run, `index.php` redirects every visitor to `setup.php`, an unauthenticated
+  web wizard on which the first stranger to arrive becomes the superuser of an
+  electronic health record. So the install runs from the install stage instead,
+  in the container, before Apache accepts a request:
+  files/panelalpha-install.php drives `Installer::quick_install()` -- OpenEMR's
+  own installer, the one `contrib/util/installScripts/InstallerAuto.php` and
+  upstream's `docker/release/auto_configure.php` both call -- with
+  `no_root_db_access` set, because the database and its user already exist and
+  the account has no MySQL root. The admin password is generated per account
+  into ~/project/.panelalpha-admin-password (0600) and is never a default;
+  upstream's own automation ships `iuserpass = 'pass'`.
+
+  **Nothing the installer prints may reach standard output before it runs, and
+  that is not a style rule.** `Installer::install_gacl()` constructs
+  `OpenEMR\Gacl\Gacl`, whose constructor calls
+  `DatabaseConnectionFactory::detectConnectionPersistenceFromGlobalState()`,
+  which asks for the active session -- and Symfony's
+  `NativeSessionStorage::start()` refuses with "Failed to start the session
+  because headers have already been sent" whenever `headers_sent()` is true,
+  which under the CLI SAPI it becomes on the first byte PHP writes to stdout.
+  Measured: one `echo` before `quick_install()` killed the deploy with an
+  uncaught RuntimeException out of `Gacl->__construct()` *after* the schema,
+  the language pack, the globals and the version row were all written -- a
+  half-installed database with no ACLs and no administrator. Every message in
+  panelalpha-install.php therefore goes to stderr through `fwrite(STDERR, ...)`,
+  which bypasses PHP's output layer. Upstream's own two CLI entry points print
+  nothing before the call, which is the same rule reached by having nothing to
+  say.
+
+  **The install looks like it should be slow and is not.**
+  `Installer::load_file()` reads each dump file a line at a time and issues one
+  `mysqli_query` per statement: `sql/database.sql` is 6,408 statements, and the
+  language pack, `contrib/util/language_translations/currentLanguage_utf8.sql`,
+  is 23.6 MB and **237,511 single-row INSERTs** that
+  `initialize_dumpfile_list()` loads unconditionally -- there is no switch that
+  skips it, and deleting the file fails the install outright. Measured on this
+  host, all of that is about 20 seconds and `quick_install()` returns in about
+  30: `database-users.shared-hosting.palocal` is one bridge away rather than a
+  real network hop, and the whole load runs inside a single transaction with
+  autocommit off. The healthcheck's `start_period` is 600s anyway, because a
+  check that passes inside the start period costs nothing and this host is
+  usually building something else at the same time.
+
+  **A redeploy re-clones ~/project, and `sites/default/sqlconf.php` is a
+  committed file.** So every redeploy resets it to `$config = 0` and
+  `openemr@localhost` while the database still holds the account's records --
+  and `index.php` would send the operator back to the web installer over a live
+  EHR. panelalpha-install.php checks the database first: a `users_secure` table
+  means installed, and it then only rewrites sqlconf.php (through the
+  Installer's own `write_configuration_file()`) and leaves the data alone. It
+  runs on the install and upgrade stages both, so that is every deploy.
+
+  **Two unauthenticated maintenance scripts sit in the document root.**
+  `sql_upgrade.php` and `acl_upgrade.php` both set `$ignoreAuth = true; // no
+  login required` before including globals.php: on a health-records site,
+  anyone who can reach the domain can run schema migrations. files/.htaccess
+  404s those two, `ippf_upgrade.php`, `setup.php` and `public/index.php` at the
+  root. `admin.php`
+  needs no rule -- it 403s itself unless OPENEMR_ADMIN_PHP_ENABLED=1 -- and
+  `bin/` already ships its own deny. See the README for how to lift the rule if
+  you need the web upgrader.
+
+  **`sites/` is inside the document root.** It holds `sqlconf.php` (the
+  account's MySQL password), `config.php`, and `documents/` -- where OpenEMR
+  files every uploaded patient record. The .php files execute rather than
+  disclose, and PHI only lands there once the practice is in use, which is
+  exactly the point: nothing stops `GET /sites/default/documents/1/...`
+  otherwise. files/sites/.htaccess denies the tree and
+  files/sites/default/images/.htaccess re-opens the one part of it the
+  application links to over HTTP (`OE_SITE_WEBROOT . "/images/..."` in
+  interface/globals.php -- practice logos). Upstream's Apache config makes the
+  same two cuts from outside (`<Directory .../sites>` plus a denied
+  `sites/*/documents`); .htaccess is the only place a bind-mounted checkout can
+  make them.
+
+  **One dependency lands in the wrong directory.**
+  `claimrevolution/oe-module-claimrev-connect` is `"type": "openemr-module"`,
+  and what knows where those go is `openemr/oe-module-installer-plugin`, a
+  composer-plugin whose `CustomModuleInstaller::getInstallPath()` returns
+  `interface/modules/custom_modules/<name>`. The php manifest installs with
+  `--no-plugins`, and `PhpHostBuild::mayRunPlugins()` lifts that only for the
+  five installer plugins it names, so Composer used its default installer and
+  the module is in `vendor/`. panelalpha-install.php copies it across.
+  Cosmetic -- the module is optional billing integration, not a boot
+  requirement -- but a module in vendor/ is a module the practice cannot see.
+
+  Two things in the deploy log are noise, not faults. The `ci/inferno`
+  submodules fail to clone because `openemr/inferno-files` is not a public
+  repository; they are ONC certification test fixtures and nothing outside
+  `ci/` reads them. And `php-http/discovery` reports "plugin was not loaded" --
+  OpenEMR's own composer.json already sets that plugin to `false` in
+  `allow-plugins`, so `--no-plugins` changed nothing.
+extends: php
+# No `docroot:` here, deliberately. OpenEMR serves from its own root --
+# index.php, setup.php and .htaccess.example are all at the top of the
+# checkout, as upstream's openemr.conf has it -- but this key cannot express
+# that: readDocroot() folds '.' into '' and PhpDocroot then probes, and the
+# probe stops at master's public/index.php. It is set as PA_DOCROOT in
+# overrides/docker-compose.override.yml instead, where the comment has the
+# whole story.
+#
+# OpenEMR is MySQL or nothing: composer.json requires ext-mysqli and
+# ext-pdo_mysql, and Installer::connect_to_database() is raw mysqli. The
+# checkout has no .env and no compose file to point itself at a server, so
+# without this the engine has nothing to hand it and sites/default/sqlconf.php
+# keeps its committed `openemr:openemr@localhost` placeholder.
+database: mysql
+env:
+  # config/env.php reads nothing from this, but version.php, src/Core/Kernel.php
+  # and interface/globals.php all compare it to 'dev' to decide whether to put
+  # PHP errors on the page. .env.example ships it empty, and the engine copies
+  # .env.example's keys in as defaults -- an empty value already means "not
+  # dev", but an EHR should say which side of that line it is on rather than
+  # inherit it from a blank.
+  OPENEMR__ENVIRONMENT: prod
+commands:
+  - id: openemr-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Installs OpenEMR against the database the engine provisioned, or -- on a
+      redeploy over an account that already has records -- rewrites
+      sites/default/sqlconf.php, which the re-clone reset to its committed
+      placeholder, and leaves the data alone. Idempotent; the upgrade stage
+      replays it on every redeploy.
+    run: 'sh panelalpha-setup.sh'

@@ -1,0 +1,53 @@
+# Layers over the compose file the dockerfile strategy generates. That file is
+# right about the app — it builds the repository's Dockerfile, publishes 4000
+# and reads env_file: .env — and it has no database, because the repository has
+# no compose file for the engine's sidecar reader to learn one from. This layer
+# is the missing half of the upstream stack: one PostgreSQL, named
+# `database` because that is the DATABASE_HOST the prepare hook wrote.
+#
+# The app side only adds what the generated file cannot say. depends_on turns
+# the image entrypoint's `while ! nc -z $DATABASE_HOST 5432` wait loop into a
+# few seconds instead of a hang, so `bin/teslamate eval TeslaMate.Release.migrate`
+# does not race the first initdb. mem_limit replaces the hardener's 384m default
+# for an app-role service: the BEAM plus the migration run starts near that
+# ceiling and TeslaMate's own requirements ask for 1 GB.
+services:
+  app:
+    mem_limit: 768m
+    depends_on:
+      database:
+        condition: service_healthy
+
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-teslamate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-teslamate}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    # Sized for one account, not a host. The migrations need cube and
+    # earthdistance (20190925152807_create_geo_extensions), which are contrib
+    # modules present in the official image and installable by POSTGRES_USER
+    # because it is the superuser initdb created.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - max_connections=30
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-teslamate} -d ${POSTGRES_DB:-teslamate}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    shm_size: 128mb
+    volumes:
+      - teslamate-db:/var/lib/postgresql/data
+    mem_limit: 512m
+
+volumes:
+  teslamate-db:

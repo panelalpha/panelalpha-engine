@@ -1,0 +1,88 @@
+# Compose-replace: the repository ships only the Kresus source and a
+# from-source Dockerfile (support/docker/) plus a traefik-fronted dev compose,
+# but upstream publishes the same app as bnjbvr/kresus on Docker Hub, so this
+# runs the official image directly instead of rebuilding a node+python+woob
+# image on a small host. Secrets are interpolated from ~/project/.env, which the
+# prepare hook writes once from values persisted under ~/.panelalpha/kresus.
+services:
+  db:
+    # Kresus strongly discourages sqlite (it can't do certain migrations) and
+    # the stable image re-pulls at boot, so migrations DO run on a redeploy;
+    # postgres is upstream's recommended, migration-safe backing store. Its data
+    # lives on a named volume so a redeploy (which wipes ~/project) keeps it.
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kresus
+      POSTGRES_DB: kresus
+      POSTGRES_PASSWORD: ${KRESUS_DB_PASSWORD}
+    volumes:
+      - kresus_db:/var/lib/postgresql/data
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kresus -d kresus"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  kresus:
+    image: bnjbvr/kresus:0.25.4
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The stable image's entrypoint runs `yarn global upgrade kresus` on every
+      # boot unless IS_NIGHTLY is set. Pin to the version baked in 0.25.4:
+      # deterministic, faster boots, and no surprise npm version drift on a
+      # 2-core host. (woob is still refreshed at boot; that's not gated.)
+      IS_NIGHTLY: "1"
+      KRESUS_DB_TYPE: postgres
+      KRESUS_DB_HOST: db
+      KRESUS_DB_PORT: "5432"
+      KRESUS_DB_USERNAME: kresus
+      KRESUS_DB_PASSWORD: ${KRESUS_DB_PASSWORD}
+      KRESUS_DB_NAME: kresus
+      # HTTP Basic Auth gating the WHOLE app (server/index.ts mounts it before
+      # every route). Format is user:pass; the prepare hook generates it once
+      # with a colon-free password (Kresus splits on the first ':').
+      KRESUS_AUTH: ${KRESUS_AUTH}
+      # Stable salt for export encryption; generated once, reused across deploys.
+      KRESUS_SALT: ${KRESUS_SALT}
+    volumes:
+      # KRESUS_DIR (woob modules, sources.list, logs). The relational data is in
+      # postgres; this holds runtime bank-scraping state. Named volume so it
+      # survives a redeploy.
+      - kresus_data:/home/user/data
+    # engine#234: an only-expose'd port makes the proxy 502; publish it so the
+    # engine learns the app port is 9876 (host binding is re-wired by the proxy).
+    ports:
+      - "9876:9876"
+    expose:
+      - "9876"
+    mem_limit: 900m
+    healthcheck:
+      # curl isn't in the image; a bash /dev/tcp connect confirms express is
+      # listening on 9876 (the port opens before basic-auth is evaluated).
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/9876"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  # No-op gate: `up` waits for kresus to be healthy before starting this, and
+  # the engine calls the deploy finished when `up` returns (engine#90). Reuses
+  # the already-pulled image with a trivial entrypoint so it pulls nothing extra
+  # and runs no woob install.
+  ready:
+    image: bnjbvr/kresus:0.25.4
+    restart: "no"
+    entrypoint: ["/bin/true"]
+    depends_on:
+      kresus:
+        condition: service_healthy
+
+volumes:
+  kresus_db:
+  kresus_data:

@@ -1,0 +1,10 @@
+# CKEditor's bundled demo pages. b1gMail never links them and they are the
+# kind of thing a scanner finds first: assets/posteddata.php echoes back what
+# was posted to it and calls get_magic_quotes_gpc(), removed in PHP 8.
+<IfModule mod_authz_core.c>
+	Require all denied
+</IfModule>
+
+<IfModule !mod_authz_core.c>
+	Deny from all
+</IfModule>

@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SPIP 5.0.x-dev, the French CMS "Système de Publication pour l'Internet". The
+  repository is a Composer *distribution* project, not the application tree:
+  git ships only spip.php, index.php, bin/spip, config/spip/ and composer.json;
+  the whole application (ecrire/, prive/, plugins-dist/, squelettes-dist/,
+  vendor/) is fetched by `composer install` from get.spip.net. spip.php boots
+  SpipHttpKernel through vendor/autoload_runtime.php (symfony/runtime), and the
+  back office + web installer live under ecrire/. composer.json requires
+  php ^8.4, so the engine resolves PHP 8.4 (in range 8.1-8.5); HEAD runs clean
+  there. Detection reads it as the plain `php` strategy (composer.json, no
+  artisan).
+
+  What the bare deploy gets wrong, none of it a code fix:
+
+  1. **The default composer install strips the layout plugin.** SPIP's tree is
+     laid out by spip-league/composer-installer, a composer-plugin the lock
+     pins. The engine's stock php install runs with `--no-plugins` (that plugin
+     is not on its installer whitelist, and it is all-or-nothing with the
+     whitelisted symfony/runtime), so ecrire/, prive/, plugins-dist/ and
+     squelettes-dist/ would land under vendor/ instead of the root and the
+     kernel would never boot. This recipe overrides the `composer-install`
+     command to drop only `--no-plugins`; SPIP's own composer config.allow-plugins
+     already limits what may run to exactly composer-installer + symfony/runtime,
+     so no third-party plugin code runs. `--no-scripts` is kept: SPIP declares
+     no root scripts and the installer plugin lays out the tree and creates the
+     writable base dirs (config/, local/, tmp/, IMG/) from its own event hook,
+     which --no-scripts does not disable.
+
+  2. **URLs, config and media live in the checkout, wiped every redeploy.**
+     ~/project is emptied on every deploy (engine#173). SPIP keeps its DB
+     connection file and its crypto keys in config/ (config/connect.php +
+     config/cles.php, both under _DIR_ETC) and uploaded media in IMG/. The
+     recipe points _DIR_ETC at persistent storage with SPIP_ETC_DIR
+     (=/pa-data/spip/config, where mes_options.php is also read from) and
+     symlinks IMG/ onto /pa-data, so both survive. The relational content lives
+     in the account's own MySQL (database: mysql), which survives on its own.
+     local/ and tmp/ are regenerable caches and are left in the checkout.
+
+  3. **The installer is a first-visitor-wins web wizard, closed headless.** SPIP
+     ships no CLI installer, and its boot is not CLI-safe on an empty database,
+     so the schema/admin cannot be created by a plain PHP script. spip-install.sh
+     instead drives SPIP's OWN web wizard over a throwaway php -S bound to
+     127.0.0.1 only, during the start hook BEFORE Apache serves: the DB step is
+     answered from mes_options.php's _INSTALL_* constants, the schema is created,
+     the plugins activated and the super-admin created with SPIP's server-side
+     hashing. The admin password is generated once into ~/.panelalpha/spip/
+     (0600) and reused; a redeploy finds the webmestre and skips. So the first
+     public visitor never sees an open installer. See README "First run".
+
+  Hardening: mes_options.php and connect.php (which hold the DB password) live
+  under SPIP_ETC_DIR, outside the document root, so they are unreachable over
+  HTTP; the recipe's .htaccess is SPIP's own htaccess.txt (dotfiles, composer
+  files and PHP-in-IMG blocked) plus an explicit deny of config/ and tmp/. The
+  deploy tooling under panelalpha/ ships its own deny .htaccess and .pa-php is
+  blocked by the dotfile rule.
+
+  SOURCE: keyed to the canonical git.spip.net/spip/spip, which clones
+  anonymously (verified). supported-apps#1267.
+extends: php
+docroot: "."
+database: mysql
+env:
+  # Persist SPIP's config dir (connect.php + cles.php crypto keys +
+  # mes_options.php) on the bind-mounted account home, so the DB connection and
+  # the auth secret survive the redeploy that empties ~/project (engine#173).
+  SPIP_ETC_DIR: /pa-data/spip/config
+  # Symfony runtime env; SPIP defaults to prod when unset, set it explicitly.
+  APP_ENV: prod
+  # The base image loads no php.ini (engine#185); add ours. The LEADING COLON
+  # keeps PHP's compiled-in conf.d (which enables mysqli/pdo_mysql) and only
+  # appends ours -- a bare path would drop every DB extension.
+  PHP_INI_SCAN_DIR: ":/app/.pa-php"
+commands:
+  # Overrides the base php recipe's composer-install (the whole commands list is
+  # replaced on extend, not merged): identical except `--no-plugins` is dropped
+  # so spip-league/composer-installer lays out the application tree. Runs on the
+  # host build image, where Composer sees the real PHP 8.4 and extension set.
+  - id: composer-install
+    stage: build
+    role: dependencies
+    description: 'composer install with the SPIP layout plugin enabled (--no-plugins dropped); SPIP''s own allow-plugins limits execution to composer-installer + symfony/runtime.'
+    run: 'composer install --no-dev --no-interaction --no-scripts --optimize-autoloader'
+  - id: spip-setup
+    stage:
+      - start
+    before: true
+    timeout: 300
+    description: Redirect SPIP's config dir to persistent storage, symlink IMG/ onto ~/.panelalpha so uploaded media survives the redeploy that empties ~/project, and seed mes_options.php so the install wizard's database step is pre-filled from the account MySQL credentials.
+    run: 'sh panelalpha/spip-setup.sh'

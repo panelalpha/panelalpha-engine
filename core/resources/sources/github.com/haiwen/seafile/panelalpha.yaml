@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Seafile is a file sync-and-share server: a C file server, a Django web UI
+  (Seahub) and a MariaDB behind them. This repository is not that. It is the
+  Seafile *desktop sync client daemon* -- an autotools C/Vala tree that builds
+  libseafile, seaf-daemon and seaf-cli, with no HTTP server, no compose file and
+  no Dockerfile in it. Detection was right to give up: "Unknown", strategy
+  fallback, nginx:alpine serving the placeholder over a 217-file checkout of
+  which about 130 are .c and .h.
+
+  The server lives in other repositories -- haiwen/seafile-server for the file
+  server, haiwen/seahub for the web UI -- and is assembled, built and published
+  by Seafile Ltd as seafileltd/seafile-mc. The same README that lists those
+  repositories also calls this one "the front page for Seafile project on
+  Github" and uses its issue tracker for the server and the web interface, and
+  seafile-docker's README links here as "a Seafile server". So this URL means
+  Seafile the product; what it holds is one component of it. The recipe runs
+  the published server rather than trying to make a web application out of a
+  sync client, which is the same choice the Ghost, Mattermost and paperless-ngx
+  recipes make for different reasons, taken one step further: there, the
+  checkout is at least the application's source. Here it is a different program
+  and contributes nothing -- not the source, not the compose file, not even a
+  version number. configure.ac says 9.0.21, which is the client's version; the
+  server is on 13.0.
+
+  overrides/docker-compose.yml is manual.seafile.com's 13.0 ce/seafile-server.yml
+  rewritten for a single account: seafile, MariaDB (there is no SQLite mode --
+  setup-seafile-mysql.py creates ccnet_db, seafile_db and seahub_db before
+  anything starts) and Redis, which since Seafile 13 is the default
+  CACHE_PROVIDER and not optional, because seahub/settings.py raises on
+  anything that is not redis or memcached. Upstream's Caddy is dropped -- the
+  engine is the reverse proxy -- and so is every default extension: SeaDoc, the
+  notification server, the metadata server and the AI service are four more
+  containers and roughly a gigabyte of images for features a file server does
+  not need to come up.
+
+  The one value the recipe cannot generate is the account's public address, and
+  Seafile wants it as a hostname plus a scheme rather than a URL:
+  SEAFILE_SERVER_HOSTNAME and SEAFILE_SERVER_PROTOCOL, neither of which matches
+  ComposePlaceholders' /(^|_)(URL|ORIGIN|ENDPOINT|DOMAIN)$/i. So the compose
+  file carries PA_PUBLIC_URL: http://localhost, which does match, and
+  files/panelalpha-seafile-init.sh splits it before execing the image's own
+  CMD. seahub/settings.py reads both variables on every boot and rebuilds
+  SERVICE_URL and FILE_SERVER_ROOT from them, so a renamed project follows its
+  domain without a reinstall. The same script pins seahub's gunicorn to two
+  workers: the generated conf asks for five preloaded Django processes, sized
+  for a dedicated server.
+
+  One service in the compose file is a no-op that exits 0. `docker compose up
+  -d` runs without --wait, so the deploy is finished when the containers have
+  been started rather than when Seafile answers; `ready` waits on the seafile
+  healthcheck and nothing else, which makes `up -d` block until the site is
+  really up.

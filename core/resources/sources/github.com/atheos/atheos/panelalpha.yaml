@@ -1,0 +1,133 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Atheos is a browser-based IDE -- a maintained fork of Codiad -- written in
+  plain PHP with no framework, no Composer manifest and no database server. It
+  keeps its users, projects and settings as JSON wrapped in PHP comments under
+  data/, and the files it edits under workspace/, both inside the checkout.
+
+  Detection was already right: runtime php, served from the repository root.
+  The public/ directory it ships is an asset-bundle cache with only a README in
+  it, so PhpDocroot's probe falls through to the root, which is where index.php
+  is. Nothing in this recipe names a docroot, and naming '.' would not have
+  helped anyway -- PlatformManifest::readDocroot() folds '.' to '' and the
+  probe runs regardless (engine#171's neighbour, engine#172).
+
+  The verdict was serving-php_error, and the page really was HTTP 200 with PHP
+  in it -- but it is a fatal, not noise, and the application is completely
+  unreachable without this recipe. Common::$configDefaults gives TIMEZONE the
+  default `false`; the guard above date_default_timezone_set() is dead code,
+  because the loop three lines earlier has already defined every key in that
+  array, so `false` reaches the function as "" and it emits a notice. The
+  shared PHP image runs display_errors=1 with no php.ini at all (`php -i`
+  reports `Loaded Configuration File => (none)`), so that notice is written
+  into the response body -- which *sends the headers*. session_name() and
+  session_start() twenty lines later both refuse with "headers already sent",
+  $_SESSION is never created, and traits/exchange.php:75 dies on
+  array_key_exists(..., null) with an uncaught TypeError. One notice, and there
+  is no login page at all. Upstream never sees it because upstream's own
+  installer writes a real timezone into config.php, and config.php is exactly
+  what a fresh checkout does not have.
+
+  The same mechanism bites the install script, because on the CLI SAPI any
+  output makes headers_sent() true: panelalpha/atheos-install.php sets
+  display_errors=stderr as its first statement for that reason. The second
+  error source is secondary -- the vendored matthiasmullie/minify is not PHP
+  8.2-clean and emits `Use of "parent" in callables is deprecated` twenty times
+  from vendor/minify/JS.php:127, inside the web request that first builds
+  public/*.min.js, because SourceManager minifies lazily.
+
+  The recipe cuts the chain twice on purpose. config.php, written by the
+  install stage, defines TIMEZONE and turns display_errors off; the root
+  .htaccess, written by the after-clone hook, carries `php_flag display_errors
+  off` inside an <IfModule mod_php.c>. The hook is not a stage command, so that
+  second copy is the one that holds on a deploy where the install stage did not
+  run -- which is what engine#169 does to this recipe on the queue path, every
+  time.
+
+  What the engine cannot infer is where an IDE keeps things. WORKSPACE and DATA
+  both default to BASE_PATH . "/..." -- inside the checkout -- and a redeploy
+  re-clones ~/project after clearing it (engine#173). For a CMS that loses a
+  cache. Here it deletes the customer's source code and the account's own
+  login. overrides/docker-compose.override.yml bind-mounts ~/.panelalpha/atheos
+  at /data and the generated config.php points both constants into it.
+
+  Security is the reason this recipe is more than a config.php. Atheos's setup
+  is first-visitor-wins twice over: index.php serves components/install/view.php
+  whenever the user and project files are absent, and
+  components/install/process.php is a POST endpoint that takes no session,
+  creates the first user with ["configure","read","write"] and userACL "full",
+  and logs the caller in. In an IDE "configure" is not an ordinary admin flag --
+  Common::checkPath() grants a user holding it everything under BASE_PATH, the
+  project component has a hidden "@TH305" shortcut that opens the application's
+  own directory as a project, and the Macro component's `execute` action runs
+  its stored string through system() with no sanitisation at all
+  (Common::raw_execute, common.php:269). Whoever completes that installer owns
+  the container. panelalpha/atheos-install.php closes it on the install stage,
+  before Apache binds, by calling upstream's own process.php with a password
+  generated once per account into ~/.panelalpha/atheos/admin-credentials (0600,
+  outside the checkout and outside the document root).
+
+  That is the only unauthenticated hole. Everything a signed-in administrator
+  can then do -- write PHP into the document root, run shell commands, git
+  clone -- is the product, not a defect, and it stops at the container: the php
+  strategy mounts ~/project and this recipe's /data, and nothing else of the
+  account or the host is visible from inside. An operator should still read
+  this as "Atheos is a shell for the account", because it is one.
+
+  hooks/prepare.sh writes the per-directory .htaccess files the application
+  needs and upstream does not have. Atheos is served from its own repository
+  root, so every trait, class, template and component controller is a URL; the
+  three RedirectMatch rules in its shipped .htaccess are regexes that match
+  nothing they were meant to ("/data/*" is "/dat" followed by any number of
+  "a"s). Only index.php, controller.php, dialog.php, error.php and
+  components/transfer/download.php are entry points, and the rest are denied.
+  data/users.json.php is shipped as a stub for the same reason in a form no
+  webserver configuration can undo: process.php's own guard reads
+  BASE_PATH . "/data/", not DATA, and a file at that path keeps the endpoint
+  shut even on a webserver that ignores .htaccess entirely.
+
+  There is no Composer manifest and no lock file anywhere in the tree, which is
+  why this extends `php-plain` rather than `php`: the `php` platform's
+  composer-install command carries no `when` guard, so extending it fails every
+  deploy on "Composer could not find a composer.json file in /app" before the
+  image is built. php-plain is the same strategy, image and document root with
+  no dependency pass, so engine#168 never comes up either. There is nothing to wait for either: the
+  install stage is a single PHP process over a handful of small JSON files and
+  Apache binds a second later, so no readiness gate is added (engine#90).
+
+  One feature is given up on purpose. FileTree::loadURL() builds a preview URL
+  of the form <host>/workspace/<path>, which only works while the workspace is
+  inside the document root -- and a workspace inside the document root means
+  every file the customer writes is anonymously fetchable, and any .php among
+  them executes on request. Preview returns 404 here. An operator who wants it
+  back can mount ~/.panelalpha/atheos/workspace at /app/workspace instead and
+  drop the WORKSPACE define; the data still survives the redeploy, and the
+  exposure comes with it.
+# php-plain, not php: this repository has no composer.json anywhere in the
+# tree, and the `php` platform's dependency command is unguarded -- extending
+# it makes every deploy fail on `Composer could not find a composer.json file
+# in /app` before the image is even built. php-plain is the same strategy, the
+# same image and the same document root with no dependency pass, which is
+# exactly this application.
+extends: php-plain
+id: atheos
+label: Atheos
+runtime: php
+port: 8000
+commands:
+  - id: atheos-install
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Writes config.php -- which a redeploy deletes with the rest of the
+      checkout (engine#173) -- and, on the first deploy only, runs Atheos's own
+      components/install/process.php with a password generated per account.
+      Without it the account serves an unauthenticated installer to whoever
+      reaches it first, and that visitor gets "configure" rights on a web IDE:
+      shell commands through the Macro component and write access to the
+      document root. A no-op once DATA/users.json.php exists, so the upgrade
+      stage rewrites config.php and nothing else. On the build stage it would
+      not run at all (engine#171).
+    run: 'php /app/panelalpha/atheos-install.php'
+    timeout: 120

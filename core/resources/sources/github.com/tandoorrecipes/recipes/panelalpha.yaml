@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tandoor Recipes is a Django recipe manager -- recipes, meal plans, shopping
+  lists and ingredient scaling -- whose UI is a Vue 3 single-page app. The
+  repository is the source tree and detection reads it as what it looks like:
+  a root Dockerfile, so the `dockerfile` strategy builds it. That build
+  succeeds, and the result is still not Tandoor. The Dockerfile never touches
+  vue3/ -- .github/workflows/build-docker.yml runs `yarn install` and `yarn
+  build` in vue3/ as a separate step before `docker build`, so the published
+  image contains cookbook/static/vue3/manifest.json and an image built from a
+  bare checkout contains no vue3 directory at all. django-vite then logs
+  W001 "Cannot read Vite manifest file" on every boot and the application has
+  no frontend. Measured on this host: the published image has
+  /opt/recipes/cookbook/static/vue3/{manifest.json,assets/,service-worker.js},
+  the image the engine built has no /opt/recipes/cookbook/static/vue3 at all.
+
+  The second failure is the one a visitor sees. recipes/settings.py:125 reads
+  ALLOWED_HOSTS from the environment with an empty default and DEBUG is 0, so
+  Django rejects every request with 400 DisallowedHost -- every path, not just
+  the site root. The engine's own probe calls that `serving: ok, healthy:
+  true`, because a 400 is neither a 5xx nor a placeholder page.
+
+  So the recipe runs the image upstream publishes, and supplies the four
+  things nothing else can: the account's public hostname (ALLOWED_HOSTS and
+  CSRF_TRUSTED_ORIGINS, derived at container start from PA_PUBLIC_URL), a
+  SECRET_KEY -- settings.py:49 otherwise falls back to the literal
+  INSECURE_STANDARD_KEY_SET_IN_ENV, which is in every copy of the repository
+  and signs every session cookie -- a PostgreSQL password, and an
+  administrator, because cookbook/views/views.py:349 serves an anonymous
+  first-superuser form at /setup/ for as long as the user table is empty.
+
+  PostgreSQL rather than MySQL: the image has no MySQL driver (requirements.txt
+  ships psycopg2-binary and nothing else) and settings.py:511 raises
+  "Unsupported database schema" for any DATABASE_URL that is not postgres or
+  sqlite, so `database: mysql` cannot work whatever is configured. SQLite does
+  work -- measured, all 245 cookbook migrations apply cleanly in the published
+  image -- but it turns off Tandoor's full-text and trigram search
+  (cookbook/helper/recipe_search.py:199 falls back to icontains) and the app
+  puts a "not recommended" banner in its own system page
+  (cookbook/views/views.py:193). postgres:16-alpine, the version upstream's own
+  docs/install/docker/plain/docker-compose.yml uses, costs about 30 MB
+  resident, which is cheaper than the feature loss.
+
+  Two of the three services exist only to make `docker compose up -d` mean
+  what it says. The engine runs it without --wait (engine#204), so a deploy is
+  "finished" when containers have been started. `init` runs the migrations and
+  creates the administrator before the web container is allowed to start, which
+  is what closes /setup/ -- `app` waits on it with
+  service_completed_successfully, so a failure there fails the deploy instead
+  of leaving an open superuser form on the internet. `ready` is an alpine no-op
+  that waits on `app`'s healthcheck, which makes `up -d` block until the site
+  actually answers.
+
+  Secrets live in ~/.panelalpha/tandoor/, 0600 in a 0700 directory, and reach
+  the containers as a second env_file entry. Not ~/project/.env: every deploy
+  re-clones and ProjectTree::clearContents (GitRepository.php:89) empties
+  ~/project first, so a secret written there is regenerated on every rebuild --
+  a new SECRET_KEY logs everyone out and a new POSTGRES_PASSWORD locks the app
+  out of its own database. ProjectEnvironment::apply() also republishes
+  ~/project/.env as .env.default at mode 644, which is not where a database
+  password belongs.

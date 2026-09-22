@@ -1,0 +1,64 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Donetick is a self-hosted task and chore manager: a single Go binary that
+  serves its own React frontend and the JSON API on one port (2021), with an
+  embedded SQLite database behind it (the pure-Go glebarez/sqlite driver, so no
+  CGO and no database sidecar). It is genuinely multi-user -- every account has
+  its own tasks and belongs to its own "circle", and a request for another
+  user's data is refused server-side -- with email/password login, optional
+  OIDC and optional TOTP two-factor. This is the shared-instance, open-signup
+  model, which is acceptable here precisely because of that isolation: a
+  stranger who signs up lands in their own empty circle and can see nothing of
+  the owner's, and every data route needs a valid JWT (an anonymous request to
+  the API gets 401, not data).
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. The repository's own docker-compose.yaml
+  builds from source (Go 1.24 + a Vite frontend), which is a slow build for a
+  small host, and upstream publishes the very same app as donetick/donetick on
+  Docker Hub and tags every release. This recipe runs the official image with a
+  compose-replace, pinned to the current stable release v0.1.79 (which is also
+  what Docker Hub's `latest` points at). Seeding a Hub image also sidesteps
+  engine#229 (image-seed NotFound on a from-registry seed).
+
+  WHY COMPOSE-REPLACE. There is no datastore sidecar to add -- SQLite is
+  embedded -- but the app still needs two things the bare detection cannot give
+  it: a stable JWT signing secret and a database file that outlives a redeploy.
+  The image reads its config from /config/<DT_ENV>.yaml (DT_ENV defaults to
+  `selfhosted`, which ships database.type=sqlite and server.port=2021) and lets
+  every value be overridden by a DT_* environment variable (viper AutomaticEnv
+  with a "."->"_" replacer). So this recipe configures entirely through env,
+  with no config file to render: DT_JWT_SECRET carries the generated secret and
+  DT_SQLITE_PATH points the database at the named volume.
+
+  PERSISTENCE. internal/database/database.go opens the SQLite file at
+  DT_SQLITE_PATH (default `donetick.db`, relative to the container's `/` working
+  dir, i.e. ephemeral). This recipe sets DT_SQLITE_PATH=/data/donetick.db and
+  mounts a named volume at /data, so the entire state -- users, circles, tasks,
+  history -- survives `project_rebuild`. Uploaded avatars go to
+  /data/uploads (DT_STORAGE_BASE_PATH) on the same volume. The volume is enough
+  because Donetick creates its first user through the normal signup flow rather
+  than from a pre-seeded row, so nothing has to be written into the DB ahead of
+  time.
+
+  SECRET. jwt.secret has no usable default (the shipped config carries a
+  visible placeholder and the app prints a "generate one" hint at startup); it
+  must be a real random value and must stay stable across redeploys or every
+  session token is invalidated. hooks/prepare.sh generates it once into
+  ~/.panelalpha/donetick/donetick.env (0600 in 0700) -- the only writable,
+  rebuild-surviving place, since ~/project is wiped on every deploy (engine#173)
+  -- and never regenerates it.
+
+  REGISTRATION POSTURE. is_user_creation_disabled is left false: Donetick has no
+  admin-seed or first-run wizard, so the owner must be able to sign up, and
+  there is no runtime hook to flip the toggle after the first user exists.
+  The exposure this leaves open is bounded by the per-user/circle isolation
+  above (verified: a second signup sees none of the first user's tasks). An
+  operator who wants a closed instance can set DT_IS_USER_CREATION_DISABLED=true
+  after the owner has registered. OIDC and TOTP are supported by the app and
+  left off by default; email is not configured, so password-reset links are
+  logged to the container console (log_raw_url) rather than mailed.
+
+  A curl healthcheck on the unauthenticated /health endpoint plus a no-op
+  `ready` service gated on service_healthy make `compose up` block until
+  Donetick actually answers, so the engine's "deploy finished" is honest
+  (engine#204: up -d returns before the app is up).

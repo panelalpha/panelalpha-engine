@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Craft CMS: a Yii 2 application with a Twig front end and a Vue control panel
+  at /admin, over MySQL or PostgreSQL. This repository is Craft's source
+  package and not a site -- composer.json says `"name": "craftcms/cms"` with
+  psr-4 `craft\` => `src/`, and there is no web root, no index.php and no
+  `craft` console script anywhere in it. Detection read that correctly:
+  composer.json and no artisan, so the `php` strategy and PHP 8.2 against
+  `"php": "^8.2"`, and then "serving-missing_entry", because there is genuinely
+  no entry point to serve.
+
+  The deployable Craft is craftcms/craft, the starter project `composer
+  create-project` makes a site from. It is three files, a config directory and
+  a templates directory around a `require craftcms/cms`. So this recipe writes
+  those files -- files/web/index.php, files/craft, files/config/*, one
+  placeholder template -- and lets the checkout be the Craft they load, rather
+  than throwing it away and pulling craftcms/cms back from Packagist. The code
+  that runs is the code that was cloned, which is the whole point of pasting a
+  repository URL, and the difference from craftcms/craft is one line:
+  bootstrap/bootstrap.php is reached at its own path instead of through
+  vendor/craftcms/cms/, and CRAFT_VENDOR_PATH is stated because that file
+  otherwise derives it from sitting four levels down inside vendor/.
+
+  Four other things the engine cannot infer. **The npm build is not for us.**
+  package.json declares `build`, so HostCompile::runForPhp() would run webpack
+  over 66 control-panel asset bundles on the host -- after a `prebuild` that
+  runs `prettier --write .` across the repository. The built control panel is
+  committed: src/web/assets/*/dist is 28 MB of compiled JS and CSS in git, and
+  is what a published craftcms/cms tarball serves. hooks/prepare.sh moves
+  package.json aside.
+
+  **Craft has no SQLite.** craft\db\Connection speaks mysql and pgsql and
+  nothing else, so `database: mysql` here is not a preference; and the engine
+  hands the app DB_HOST / DB_DATABASE / DB_USERNAME / DB_PASSWORD while Craft
+  reads CRAFT_DB_SERVER / CRAFT_DB_DATABASE / CRAFT_DB_USER, so
+  files/config/db.php is the translation between the two.
+
+  **The install is a race if nobody wins it.** An uninstalled Craft answers
+  /index.php?p=admin/install with its own installer, and whoever gets there
+  first becomes the administrator. `php craft install` runs from the install
+  stage instead, before Apache binds, with a password generated per account.
+
+  **And the security key must outlive the checkout.** Craft encrypts and hashes
+  with CRAFT_SECURITY_KEY, `setup/keys` generates one per deploy and writes it
+  to .env, and the engine copies .env to a world-readable .env.default while
+  re-cloning ~/project from scratch every time -- so the key would be new on
+  every deploy, published at 644, and unable to read the data the last one
+  wrote. hooks/prepare.sh generates it once into ~/.panelalpha/craft.env at
+  0600, and overrides/docker-compose.override.yml names that file as a second
+  env_file. The same directory holds the three things Craft keeps that are data
+  rather than code, bind-mounted back in: the license key api.craftcms.com
+  issues on first run (/pa/license.key, because config/license.key would be
+  re-issued every deploy), @storage, and an uploads directory under the web
+  root for the first asset volume to point at.
+
+  Craft is commercial software -- LICENSE.md is a proprietary licence, not an
+  OSS one -- but the Solo edition is free and is what a fresh install runs as
+  (Install.php writes `'edition' => solo`). Solo is a complete CMS with a limit
+  of one user account (Users::getMaxUsers()); Team, Pro and Enterprise are paid
+  upgrades bought from the control panel. See README.md.
+extends: php
+# craftcms/craft's web root, recreated here by files/web/. PhpDocroot would
+# otherwise probe `public` and fall back to the repository root, which would
+# publish src/, .git/ and composer.json as web content.
+docroot: web
+# Not a choice. craft\db\Connection supports mysql and pgsql; there is no
+# SQLite driver, so an account with no database is a Craft that cannot install.
+# It is also what keeps the recipe's own compose file from being mined for
+# sidecars: PhpStrategy skips RuntimeSidecars entirely when the manifest
+# declares a database.
+database: mysql
+requires:
+  # No `node` entry, unlike the php manifest this extends: hooks/prepare.sh
+  # takes package.json away, so there is nothing for a Node toolchain to do
+  # and nothing to be optional about.
+  php: runtime
+env:
+  # LOG_CHANNEL is restated because `env` replaces the php manifest's map
+  # rather than merging into it.
+  LOG_CHANNEL: stderr
+  # Read in bootstrap/bootstrap.php, before any config file is loaded: send
+  # PHP's error log and Craft's own log target to php://stderr instead of
+  # storage/logs, so `docker logs` and the deploy log can see them and nothing
+  # accumulates in a directory the next deploy deletes.
+  CRAFT_STREAM_LOG: 1
+  # Craft asks api.craftcms.com for a license key on first run and writes it
+  # to this path; the default is config/license.key, inside the checkout,
+  # which a redeploy would throw away. /pa is ~/.panelalpha/craft, mounted by
+  # overrides/docker-compose.override.yml. Read here by bootstrap.php's
+  # writability probe and promoted to the PHP constant of the same name by
+  # files/web/index.php, which is what Path::getLicenseKeyPath() actually
+  # reads -- the variable alone moves the probe and not the key.
+  CRAFT_LICENSE_KEY_PATH: /pa/license.key
+commands:
+  - id: craft-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Waits for the database, installs Craft with a generated administrator on
+      a first deploy, and brings migrations and project config up to the
+      checkout on every one after. Idempotent.
+    run: 'sh panelalpha/craft-setup.sh'
+    timeout: 900

@@ -1,0 +1,120 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Contao is a PHP content management system: Symfony 8 under the hood, a front
+  end of pages, articles and content elements, and a back end at /contao. This
+  repository is not that. It is the development monorepo -- `"type":
+  "symfony-bundle"`, thirteen bundle directories (core-bundle, manager-bundle,
+  news-bundle and the rest) that are split out to their own packages by a bot,
+  with no front controller, no public/, no config/ and nothing that answers
+  HTTP. Its own README says so:
+
+    The purpose of this package is to develop the Contao bundles in a monorepo.
+    Use it when you want to create a pull request or report an issue. [...]
+    Please do not use `contao/contao` in production! Use the split packages
+    instead.
+
+  Detection read it correctly: composer.json and no artisan, so the `php`
+  strategy, PHP 8.4 against `"php": "^8.4"`, the shared Apache base image with
+  ~/project bind-mounted, `composer install` on the host, and no index.php
+  anywhere -- `serving-missing_entry`, which is the right answer about the tree.
+
+  Contao's deployable shape is the Managed Edition, and it is a composer.json
+  and nothing else: github.com/contao/managed-edition holds four files, of
+  which one is a manifest requiring the released split packages. So the URL
+  means Contao the product and what it holds is the source those packages are
+  cut from -- the same reading the Seafile and Ghost recipes take, one step
+  less severe: there the checkout is a different program or a build that is
+  skipped, here it is the application's own source, one release ahead of what
+  gets installed. hooks/prepare.sh moves the monorepo to .contao-monorepo/ and
+  writes the Managed Edition manifest in its place, pinned to the newest
+  released series in the major the checkout's `extra.branch-alias` names: a
+  clone of main develops 6.1-dev, so it installs 6.0.*. The PHP constraint is
+  the checkout's own, which is the one thing about the deploy the repository
+  still decides.
+
+  **A Contao with no pages answers 404, and that is a correct answer.** There
+  is no seeded site and no first-run wizard -- the install tool was removed in
+  5.0 -- so a deploy that stopped at "the application boots" would publish a
+  CMS whose every URL is Page not found. The recipe lays down
+  contao/contao-demo, which is upstream's official example website and is
+  itself the Managed Edition manifest plus files/, templates/, theme.xml and a
+  full database dump; `composer create-project contao/contao-demo` is how
+  docs.contao.org says to get one. The restore is guarded on an empty tl_page
+  rather than on the deploy stage, so a retried first deploy cannot overwrite a
+  site that already has content.
+
+  **That dump ships a working administrator, and closing it is most of why
+  this recipe has a security section.** tl_user row 1 is `k.jones`, admin=1,
+  login=1, and its bcrypt hash verifies against `kevinjones` -- checked against
+  this dump with password_verify(), not assumed. tl_member ships `j.smith` the
+  same way. Restored unchanged onto a public domain that is the back end handed
+  to whoever reads the demo's documentation. panelalpha/contao-setup.sh gives
+  every account the dump created a random password and disables it, before
+  anything is served, and creates the account's own administrator from a
+  password generated per account into ~/project/.panelalpha-admin-password
+  (0600). Disabled and not deleted: the demo's pages and articles carry those
+  ids in their author and permission columns.
+
+  **The install cannot happen on the host.** The php manifest installs with
+  `--no-scripts --no-plugins` -- both run arbitrary PHP out of a customer
+  repository on the host daemon -- and PhpHostBuild::mayRunPlugins() lifts that
+  only for an allowlist of scaffolding plugins that Contao's two are not on.
+  Both are load-bearing. contao/manager-plugin subscribes to POST_INSTALL_CMD
+  and writes vendor/contao/manager-plugin/.generated/plugins.php, the only file
+  PluginLoader reads; without it Contao's kernel registers zero bundles.
+  contao-components/installer is the custom installer for the
+  `contao-component` type and puts nineteen packages under assets/; without it
+  they stay in vendor/ and every back-end script and stylesheet is a 404.
+  Measured here: the host pass installs 180 packages in 25 s and leaves no
+  public/, no assets/ and no plugins.php. So the host pass is left to do what
+  it is good at -- resolving the graph and writing composer.lock, which makes
+  the second pass an install and not a resolve -- and panelalpha/contao-setup.sh
+  runs `composer install` again in the account's own container with plugins and
+  scripts on. `composer dump-autoload` is not a substitute: the listener is on
+  POST_INSTALL_CMD, not POST_AUTOLOAD_DUMP.
+
+  The demo's composer.json is not used verbatim because it carries no
+  config.allow-plugins -- it is meant to be installed by `composer
+  create-project`, which asks interactively -- and a non-interactive install
+  without it dies on "contao-components/installer contains a Composer plugin
+  which is blocked by your allow-plugins config".
+
+  APP_SECRET is written to .env rather than .env.local, which is deliberate use
+  of the property that usually bites: the generated compose file carries
+  `env_file: - .env`, so every line becomes a real environment variable and
+  Symfony's Dotenv will not overwrite one. ContaoSetupCommand generates and
+  writes a *new* APP_SECRET into .env.local whenever it cannot see one, so
+  without this the secret would rotate on every redeploy and take every session
+  and remember-me cookie with it. The value is generated once into
+  ~/.panelalpha/contao.env, which survives the clone clearing ~/project.
+extends: php
+# public/index.php is Contao's front controller and public/.htaccess carries
+# its rewrite. PhpDocroot probes `public` first so it would reach the same
+# answer, but the answer decides which files are web-reachable -- with the
+# checkout root served, .env, .env.local, .panelalpha-admin-password,
+# composer.json and the whole .contao-monorepo/ tree would be one request away
+# -- and that is not something to leave to a probe order.
+docroot: public
+# Contao is MySQL or nothing: doctrine/dbal on a `mysql:` DSN, and
+# contao:migrate builds ~35 tl_* tables from the DCA. The checkout has no
+# compose file and no DATABASE_URL to point the engine at one.
+database: mysql
+env:
+  # Symfony spells its production environment `prod`. Repeated from the compose
+  # override so the inspect preview and the deploy agree.
+  APP_ENV: prod
+commands:
+  - id: contao-setup
+    stage:
+      - install
+      - upgrade
+    timeout: 1800
+    description: >-
+      Everything that needs either the database credentials (which do not exist
+      when the prepare hook runs) or Composer's plugins (which the host build is
+      not allowed to run): DATABASE_URL into .env.local, the plugin-enabled
+      Composer install that writes plugins.php and fills assets/, the demo
+      restore on an empty database, contao:migrate, the lockdown of the demo's
+      seeded accounts, the account's own administrator, and a prod cache warmup.
+      Idempotent: the upgrade stage replays it on every redeploy.
+    run: 'sh panelalpha/contao-setup.sh'

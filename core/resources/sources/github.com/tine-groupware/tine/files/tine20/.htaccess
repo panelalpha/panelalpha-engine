@@ -1,0 +1,107 @@
+# tine on Apache: the routing and the denials upstream writes in nginx.
+#
+# tine is not distributed with an .htaccess -- `.gitignore` even excludes
+# `tine20/.htaccess` -- because upstream serves it from nginx and ships the
+# rules as etc/nginx/snippets/tine20-locations.conf. Three of those rules are
+# not cosmetic, and an Apache vhost with no .htaccess has none of them:
+#
+#   location / { try_files $uri /index.php$is_args$args; }
+#       index.php is the front controller. Everything tine routes by path --
+#       CalDAV and CardDAV under /calendars and /addressbooks, ActiveSync under
+#       /Microsoft-Server-ActiveSync, WebDAV file mounts, /favicon/<size>,
+#       Filemanager download links, SSO -- is a path that exists nowhere on
+#       disk. Without this rule every one of them is a 404.
+#
+#   location ~ .+\.php$ { rewrite .+\.php$ /index.php; }
+#       *Every* PHP file except index.php and setup.php is rewritten into the
+#       front controller rather than executed. That is a security control, not
+#       a routing convenience: the tree contains tine20.php and worker.php
+#       (both CLI entry points), langHelper.php, and several hundred .php files
+#       under vendor/ and library/ that were never meant to be reachable. It is
+#       also what stops /config.inc.php being requested directly.
+#
+#   location ~* \.(cvs|svn|git|old|ts|sql|tmp|bak|save)$ { return 403; }
+#       source and backup extensions.
+#
+# AllowOverride All in resources/deploy/templates/apache-vhost.stub is what
+# lets this file exist at all.
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # setup.php is denied outright, and this is the one place this recipe is
+    # deliberately stricter than upstream (which puts HTTP basic auth in front
+    # of it). Two reasons, both measured:
+    #
+    #   * Setup_Server_Json.php:62-76 only checks the json key and the session
+    #     user `&& Setup_Core::configFileExists()`. With no config.inc.php --
+    #     which is the state of every fresh checkout, since `.gitignore`
+    #     excludes tine20/config.inc.php -- every method on Setup_Frontend_Json
+    #     is anonymous, including saveConfig() (writes config.inc.php from POST
+    #     data, so a stranger can point the installation at a database they
+    #     control) and installApplications() (creates the first administrator).
+    #     panelalpha-setup.sh closes that window by writing the config before
+    #     Apache binds; this rule is the second lock on the same door.
+    #   * Once it *is* configured, setup.php is the schema-migration and
+    #     uninstall UI for the whole life of the installation, behind a single
+    #     shared password. The account does not need it: the install and the
+    #     updates run from the deploy, in a CLI process, on every deploy.
+    #
+    # Everything setup.php can do is still available over SSH:
+    #   php setup.php --update|--list|--setconfig|--backup  (from ~/project/tine20)
+    RewriteRule ^setup\.php$ - [F,L]
+
+    # Upstream's `rewrite .+\.php$ /index.php`. setup.php never gets here
+    # because the rule above already answered it.
+    #
+    # The condition is on REQUEST_FILENAME, not REQUEST_URI, and that is what
+    # makes it terminate: after the internal redirect mod_rewrite runs the
+    # ruleset again with the *rewritten* path, where REQUEST_FILENAME is
+    # /app/index.php and this condition is false. Written against REQUEST_URI
+    # it would still be the original /foo.php on the second pass, rewrite
+    # index.php to index.php, and end in "Too many internal redirects".
+    RewriteCond %{REQUEST_FILENAME} !/index\.php$
+    RewriteRule \.php$ index.php [QSA,L]
+
+    # Upstream's `try_files $uri /index.php$is_args$args`.
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+# If mod_rewrite were ever absent, the rules above would silently stop applying
+# and the config file would be served as source. These do not depend on it.
+# (`.dist`, `.mpl` and `.tmpl` are tine's own config templates;
+# install.properties is the packaging answer file.)
+<FilesMatch "^(config\.inc\.php|install\.properties)$">
+    Require all denied
+</FilesMatch>
+<FilesMatch "\.(cvs|svn|git|old|ts|sql|tmp|bak|save|dist|mpl|tmpl|neon|po|pot|mo)$">
+    Require all denied
+</FilesMatch>
+
+# The build manifests. Not secret -- this is a public repository and the tag is
+# in every page's X-Tine20-Version -- but composer.lock is 572 KB naming the
+# exact commit of 193 dependencies, and handing an attacker the version of every
+# library in one request is work they should have to do themselves. Measured as
+# served before this rule existed.
+<FilesMatch "^(composer\.(json|lock)|package\.json|npm-shrinkwrap\.json|package-lock\.json|build\.xml|phpcs\.baseline\.xml|phpstan(-baseline)?\.neon)$">
+    Require all denied
+</FilesMatch>
+
+# vendor/ is a dependency tree and none of it is web content. Checked rather
+# than assumed: nothing in the built client, the twig templates or the compiled
+# CSS references a `vendor/` URL, while `/vendor/composer/installed.json` -- 508
+# KB naming every installed package and its version -- was served with a 200
+# before this rule. The `.php` rewrite above already covered the code; this
+# covers everything else in there.
+#
+# library/ is deliberately NOT denied the same way: the compiled client does
+# link into it (`library/ExtJS/resources/images/default/s.gif` is requested on
+# every page load, and it is in tinebase-*-FAT.js). Only its PHP is denied.
+<If "%{REQUEST_URI} =~ m#^/vendor(/|$)#">
+    Require all denied
+</If>
+<If "%{REQUEST_URI} =~ m#^/library/.*\.php$#">
+    Require all denied
+</If>

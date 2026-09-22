@@ -1,0 +1,91 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  TeslaMate is a self-hosted data logger for Tesla vehicles: an Elixir/Phoenix
+  release serving its LiveView web interface on :4000, backed by PostgreSQL.
+  The repository ships a Dockerfile and no compose file at all — the stack only
+  exists as a fenced block in website/docs/installation/docker.md — so detection
+  builds the image correctly (elixir:1.20/otp-29 builder, debian:trixie-slim
+  runtime) and then starts it alone, with an empty .env and no database.
+
+  That container never serves. `elixir/config/runtime.exs` reads its database
+  settings through `Util.fetch_env!`, which is `System.fetch_env!` under
+  `config_env() == :prod`: DATABASE_USER, DATABASE_PASS, DATABASE_HOST and
+  DATABASE_NAME are hard requirements with no defaults, and MQTT_HOST is a
+  fifth one unless DISABLE_MQTT is `true`. Before any of that is even reached,
+  the image's entrypoint.sh blocks in `while ! nc -z "${DATABASE_HOST:-127.0.0.1}"
+  5432` waiting for a Postgres that does not exist, then runs
+  `bin/teslamate eval "TeslaMate.Release.migrate"`. So the deploy reports
+  success, the container stays up, and :4000 answers `Recv failure: Connection
+  reset by peer` forever — nothing is listening, because nothing past the
+  entrypoint's wait loop has run. That is the `serving-unknown` this recipe
+  exists to turn into a served page.
+
+  The recipe supplies the database and the environment the Dockerfile cannot.
+  `hooks/prepare.sh` writes .env — the file the generated app service already
+  reads through `env_file:` — with one generated password shared by
+  DATABASE_PASS and POSTGRES_PASSWORD, plus ENCRYPTION_KEY, SECRET_KEY_BASE and
+  SIGNING_SALT. ENCRYPTION_KEY matters beyond the first boot: TeslaMate.Vault
+  encrypts the stored Tesla API tokens with SHA-256 of that key and, when it is
+  unset, logs a freshly generated one and uses it for that session only, so
+  every restart would invalidate the saved tokens and force a new sign-in.
+  `overrides/docker-compose.override.yml` adds the `database` service
+  (postgres:17-alpine, named volume, healthcheck) and makes the app wait on it,
+  which turns the entrypoint's wait loop from a hang into a few seconds.
+
+  Two services of the upstream stack are deliberately left out. Mosquitto is
+  replaced by DISABLE_MQTT=true: MQTT is an outbound publishing integration for
+  Home Assistant, nothing in the web interface needs it, and leaving MQTT_HOST
+  unset without the flag is a boot-time raise. Grafana is a second image serving
+  a second port (:3000) and the account publishes one — the dashboards are
+  reachable by pointing a Grafana elsewhere at this database, and the app's
+  Settings → URLs page exists for exactly that.
+
+  Two environment variables are there for the engine rather than for TeslaMate.
+  HTTP_BINDING_ADDRESS is pinned to 0.0.0.0 because the endpoint's default
+  binding is `transport_options: [socket_opts: [:inet6]]`, which depends on the
+  container having a working dual-stack loopback to answer the IPv4 connection
+  the published port forwards. RELEASE_DISTRIBUTION=none is the one that decides
+  whether the deploy serves at all: an Elixir release starts epmd, which binds
+  0.0.0.0:4369 the instant the VM comes up, while entrypoint.sh is still waiting
+  on Postgres and running the migrations — so AppPortAlignment, which polls for
+  24 seconds, sees a reachable web-candidate port that is not 4000 and
+  republishes the account's port onto epmd, which answers HTTP with an empty
+  reply forever. TeslaMate is a single node with no libcluster and no `:global`
+  usage, so distribution buys it nothing and turning it off leaves exactly one
+  listening socket for the engine to find.
+
+  Note that the app is usable but idle until a Tesla account is signed in: the
+  first page is a token sign-in form, which is the 200 the health probe sees.
+extends: dockerfile
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe's dockerfile/port_hint would be null/80 even though the
+  # repository ships a root Dockerfile — and the deployability check then fails
+  # with "Dockerfile strategy selected but Dockerfile is missing." State what
+  # the probe would have found until that path runs its probes too. The
+  # Dockerfile EXPOSEs 4000, which is also the Phoenix endpoint's PORT default.
+  dockerfile: Dockerfile
+  port_hint: 4000
+env:
+  # Settings with no secret in them, so they read the same in the compose file
+  # as in the log. DISABLE_MQTT is what makes MQTT_HOST optional — runtime.exs
+  # raises on the missing variable otherwise. HTTP_BINDING_ADDRESS replaces the
+  # endpoint's :inet6 default with an explicit IPv4 bind. DATABASE_POOL_SIZE is
+  # 10 by default, which is a lot of idle Postgres backends for one account.
+  DISABLE_MQTT: 'true'
+  HTTP_BINDING_ADDRESS: 0.0.0.0
+  DATABASE_POOL_SIZE: '5'
+  DATABASE_PORT: '5432'
+  # The one line that decides whether the deploy serves. An Elixir release
+  # starts epmd, which binds 0.0.0.0:4369 the instant the VM comes up — while
+  # entrypoint.sh is still waiting on Postgres and running the migrations, so
+  # :4000 does not exist yet. AppPortAlignment polls for 24s (12 × 2s), sees a
+  # reachable web-candidate port that is not 4000, decides the app "is
+  # listening on port 4369, not 4000" and republishes the account's port onto
+  # epmd — which speaks the Erlang port-mapper protocol and answers HTTP with
+  # an empty reply, forever. TeslaMate is a single node with no libcluster and
+  # no :global usage, so distribution buys it nothing: turning it off means no
+  # epmd, no second listening socket, and nothing for the realignment to
+  # mistake for the web server.
+  RELEASE_DISTRIBUTION: none

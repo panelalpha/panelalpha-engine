@@ -1,0 +1,109 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Rocket.Chat is a self-hosted team chat server: a Meteor/Node application that
+  serves the REST API, the DDP websocket and the React webapp on :3000, over
+  MongoDB. The repository is the Rocket.Chat monorepo — apps/meteor plus 83
+  yarn workspaces under packages/, ee/apps/ and ee/packages/ — with no compose
+  file Docker would auto-load and no Dockerfile at its root. Detection fell
+  through to Railpack, which installed yarn 4.18.0 and ran `yarn install
+  --check-cache`; that died in the link step with "cannot allocate memory"
+  after fetching 3236 packages (+372 MiB). The deploy still reported success,
+  because the failed build falls back to a generated nginx:alpine compose, and
+  the account ended up serving PanelAlpha's placeholder page on :8080 — the
+  serving-placeholder verdict, strategy railpack.
+
+  A bigger account would not have fixed it. Building the checkout is not the
+  alternative, and the repository's own release recipe says so:
+  apps/meteor/.docker/Dockerfile.alpine begins `COPY . /app` and then `cd
+  /app/bundle/programs/server && npm install --omit=dev`. Its context is a
+  finished Meteor bundle, not this tree — docker-compose-ci.yml builds it with
+  `context: /tmp/build`, a directory CI fills from a separate `meteor build`
+  job. A fresh clone has no bundle/, so that Dockerfile cannot build here at
+  all. Producing one means the Meteor toolchain plus an 83-package yarn
+  workspace plus a full client bundle, for a binary that is published as
+  rocketchat/rocket.chat. So overrides/docker-compose.yml runs that image.
+
+  The tag comes from the checkout rather than from a constant, but Docker Hub
+  carries no major or minor tag for this repository — only exact x.y.z
+  releases, their -rc.N and -fips variants, and :latest. hooks/prepare.sh reads
+  the major from the root package.json (develop says 8.9.0-develop) and takes
+  the newest published plain <major>.<minor>.<patch> tag, which keeps a clone
+  of an 8.x branch on an 8.x image; the closing quote in the pattern is what
+  keeps 8.9.0-rc.0 and 8.8.1-fips out of the answer. Nothing published for that
+  major falls back to :latest rather than to a tag whose pull would fail.
+
+  MongoDB is not optional, not substitutable, and not an ordinary sidecar: it
+  has to be a replica set. Rocket.Chat watches change streams for every
+  real-time update, and the driver refuses a `replicaSet=` connection string
+  against a standalone mongod, so a plain `mongo` container leaves the server
+  retrying its connection forever. `rs.initiate()` therefore has to run before
+  the application, and the mongo service's own healthcheck is what runs it:
+  the probe initiates the set when rs.status() throws and passes only once the
+  node reports isWritablePrimary. depends_on: condition: service_healthy then
+  holds Rocket.Chat back until that is true. One service, no init container,
+  and a redeploy re-runs nothing because rs.status() succeeds on an initiated
+  set.
+
+  Its major is chosen from the host's kernel rather than pinned, and that is
+  what made the difference between a rolled-back deploy and a working one. The
+  first run used mongo:8.0, the version docker-compose-ci.yml tests against,
+  and every container exited instantly with "MongoDB cannot start: Linux kernel
+  versions 6.19 and newer has a known incompatibility with this version of
+  MongoDB" (SERVER-121912) — a refusal MongoDB ships itself, present in
+  mongo:8.0 and mongo:latest alike, with no 8.1 or 8.2 image to move to. The
+  healthcheck never passed, so the engine rolled the deploy back. mongo:7.0
+  carries no such guard, and Rocket.Chat accepts it: serverRunning.ts exits
+  only below 7.0.0 and merely prints a deprecation box below 8.0.0, warning
+  that support ends in Rocket.Chat 9.0.0. So hooks/prepare.sh takes 8.0 below
+  kernel 6.19 and 7.0 at or above it; containers share the host's kernel, so
+  uname in the account shell is the kernel mongod will run on.
+
+  Two things the recipe supplies that the engine cannot infer.
+
+  The first is the administrator. Rocket.Chat's first boot leaves the setup
+  wizard open, and the wizard hands admin to whoever completes it — on a public
+  HTTPS name, the first stranger to load the page. apps/meteor/server/startup/
+  initialData.ts has insertAdminUserFromEnv(), which creates that account from
+  ADMIN_PASS / ADMIN_USERNAME / ADMIN_EMAIL when no user holds the admin role,
+  so the compose file carries them and the wizard has nothing left to give
+  away. The password is generated per account into
+  ~/project/.panelalpha-admin-password (0600), never a default, and is built to
+  satisfy Rocket.Chat's own default policy — Accounts_Password_Policy_Enabled
+  is true with a 14-character minimum and character-class rules — so the admin
+  can also use it to sign in and to reset it later.
+
+  Creating the admin does not close the door behind it. Show_Setup_Wizard stays
+  'pending' until something completes it, and Accounts_RegistrationForm
+  defaults to 'Public', so a fresh instance still accepts a signup from anyone.
+  The wizard setting is declared readonly: true, so no API call can move it and
+  OVERWRITE_SETTING_Show_Setup_Wizard=completed in the environment is the only
+  way — locking a field the admin UI never let anyone edit costs nothing.
+  Registration is different: an operator should be able to re-open it, and a
+  value set through the environment is locked for good. So a one-shot `setup`
+  service signs in through POST /api/v1/login and turns it off through POST
+  /api/v1/settings/Accounts_RegistrationForm, leaving the field editable.
+
+  The second is the public address. Rocket.Chat builds every permalink,
+  invitation, password reset, OAuth redirect and CDN path from ROOT_URL —
+  Site_Url's own default is __meteor_runtime_config__.ROOT_URL — and it is not
+  known until the account's domain exists. Here the engine needs no help: the
+  key ends in _URL, so ComposePlaceholders rewrites the bare http://localhost
+  the compose file ships to the account's https URL before the stack starts.
+  The setup service re-asserts it through POST /api/v1/settings/Site_Url as
+  well, because on a redeploy the stored setting, not the environment default,
+  is what the server serves.
+
+  One service is a no-op that exits 0, for the reason it is in most of these
+  recipes: the engine runs `docker compose up -d` without --wait and takes the
+  deploy to be finished when that returns, which is when containers have been
+  started rather than when the site answers. Rocket.Chat's first boot runs its
+  whole migration set against an empty replica set and takes about a minute.
+  `ready` waits for `setup`, which waits for the healthcheck, so `up -d`
+  returns only once the server answers /livez, an admin exists, the sign-in as
+  that admin has succeeded and registration is closed. A clean exit 0 is
+  explicitly not a crash loop to AppHealth::isCrashing().
+
+  Mail is left unconfigured. The admin signs in, channels and direct messages
+  work, but invitations, password resets and notification emails need an SMTP
+  server the engine does not provide; set SMTP_HOST and its companions, or the
+  Email settings in the admin area.

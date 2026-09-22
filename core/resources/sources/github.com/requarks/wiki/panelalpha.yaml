@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Wiki.js is a wiki: a Node server that renders pages and serves its Vue admin
+  on :3000, backed by PostgreSQL. The repository is the source tree, and
+  detection read the only thing it could -- package.json, whose `start` is
+  `node server` -- and picked the express strategy on Node 20. That cannot
+  work. `assets/` is webpack output and is gitignored, so the views render
+  against a bundle that does not exist, and there is no config.yml either:
+  the repo ships config.sample.yml pointed at a PostgreSQL on localhost, and
+  server/core/config.js exits 1 with "Unable to read configuration file" when
+  it is not there. The container restart-looped from its first boot, nothing
+  ever bound 3000, and the probe returned serving-unknown after a deploy that
+  had already spent 248 seconds compiling.
+
+  Building the repository is not the alternative. dev/build/Dockerfile is not
+  at the root, so detection would never choose it, and it is a two-stage
+  node:24-alpine build that runs a full yarn install, a webpack production
+  build and then a second production-only install -- minutes of build and a
+  gigabyte of layers per account, to arrive at an image upstream already
+  publishes as ghcr.io/requarks/wiki. So overrides/docker-compose.yml runs
+  that image instead, beside postgres:15-alpine, which is the stack
+  dev/examples/docker-compose.yml describes. The tag is pinned to the major
+  rather than derived from the checkout: package.json on `main` carries
+  version 2.0.0 and releaseDate 2026-01-01T01:01:01.000Z, placeholders CI
+  substitutes at release, so the checkout cannot say which 2.5.x it is.
+  PostgreSQL is not a preference -- Wiki.js 2.5 dropped SQLite, and upstream's
+  example compose, Helm chart and docs are all Postgres.
+
+  The rest of the recipe is the setup wizard. A fresh Wiki.js has no admin and
+  no site URL, WIKI.config.setup is true, and kernel.js boots server/setup.js
+  rather than the app: the account's domain serves a form asking for an
+  address that defaults to https://wiki.yourdomain.com. There is no CLI, no
+  seed and no environment variable for any of it -- server/core/config.js
+  reads one YAML file of $(VAR) placeholders (dev/build/config.yml, database
+  and TLS only) and takes everything else from the `settings` table. So
+  files/panelalpha-setup.sh posts the wizard's own POST /finalize from inside
+  the container: it has no CSRF token and no session, because it is the route
+  of an application that is by definition not yet configured. That writes the
+  admin user, the guest account, the two system groups, the default locale,
+  the session secret, the RSA keypair and `host`. The site URL it sends is the
+  one value the recipe cannot generate; the compose file ships
+  WIKI_SITE_URL: http://localhost, the shape ComposePlaceholders rewrites to
+  the account's https URL before the stack starts.
+
+  The finalizer runs inside the wiki service rather than beside it. `docker
+  compose up -d` returns once a service has been started, so a sibling
+  container still finalizing would race the health probe; backgrounded next to
+  the server, it is inside the thing the readiness gate waits on. The gate is
+  a no-op `ready` service that exits 0 and depends on the wiki being healthy,
+  and the wiki's healthcheck asks two questions rather than one: /healthz
+  answers 200 in setup mode too, because the wizard's Express app renders the
+  setup page for every GET, so a plain check would call an unconfigured wiki
+  healthy. The second question is a marker file the finalizer writes -- once
+  the wiki is configured and answering again, or once it has given up, so a
+  finalize that fails ends with the wizard served rather than with a deploy
+  that hangs waiting for a health condition that will never be true.
+
+  Mail is left unconfigured. Wiki.js boots, the admin logs in and pages can be
+  written without it, but invitations, password resets and comment
+  notifications need an SMTP server the engine does not provide; set it under
+  Administration -> Mail.

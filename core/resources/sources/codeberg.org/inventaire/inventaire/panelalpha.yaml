@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=../../../platforms/_schema.json
+description: >-
+  Inventaire is a collaborative books/resources mapper (Node.js/tsx server on
+  :3016 that also serves its bundled client). Its data lives in CouchDB and it
+  needs Elasticsearch for local search; server/server.ts blocks startup on
+  Promise.all([waitForCouchInit(), waitForElasticsearchInit()]) and
+  server/db/elasticsearch/init.ts loops forever on ECONNREFUSED, so ES is
+  mandatory -- there is no degraded ES-less mode. The upstream repository ships
+  no Dockerfile (its production image is built in the separate docker-inventaire
+  repo, which clones+builds the server and the separate inventaire-client repo),
+  so this recipe deploys the official published image inventaire/inventaire:latest
+  -- which already bundles the built client -- via a one-line FROM Dockerfile
+  (files/Dockerfile); no client build runs at deploy time. Runs in NODE_APP_INSTANCE
+  federated: entity/book search is delegated to https://inventaire.io
+  (production-federated.ts remoteEntitiesOrigin), local ES only indexes local
+  items/users/shelves/lists/groups. CouchDB and Elasticsearch are provisioned by
+  overrides/docker-compose.override.yml; the app reaches them at the hostnames the
+  image entrypoint hardcodes (couchdb, elasticsearch). NODE_CONFIG overrides the
+  production defaults that would otherwise break a single-container reverse proxy:
+  serveStaticFiles (off in production.ts, letting nginx serve statics) is forced
+  on so the Node server serves the client itself, and hostname (the image sets it
+  to 'inventaire') is forced to 0.0.0.0 so the app binds every interface and
+  PanelAlpha's proxy reaches it. The CouchDB admin password is a compose
+  placeholder (STRONG_DB_PASSWORD) so the engine derives one deterministic value
+  per account that survives redeploys. Elasticsearch needs ~850 MB with a 512 MB
+  heap, well over the 384m sidecar-catalogue default, so the override pins an
+  explicit mem_limit; the account cgroup caps the total, so Node+CouchDB+ES
+  (~1.13 GB idle measured) is what a 2 GB account must hold.
+extends: dockerfile
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe's dockerfile/port_hint would be null/80 even though
+  # files/Dockerfile is copied into the checkout -- and the deployability check
+  # then fails with "Dockerfile strategy selected but Dockerfile is missing."
+  # State what the probe would have found until that path runs its probes too.
+  dockerfile: Dockerfile
+  port_hint: 3016
+env:
+  # The image's docker-entrypoint.sh runs under `set -eu` and expands ~20 env
+  # vars into dist/config/local.js; every one must be present or the container
+  # exits on an unbound variable. The datastore hostnames (couchdb,
+  # elasticsearch) and the persistent paths are hardcoded in that script, not
+  # read from here -- the override compose names its services to match.
+  NODE_ENV: production
+  NODE_APP_INSTANCE: federated
+  INVENTAIRE_PORT: '3016'
+  PUBLIC_HOSTNAME: inventaire.example.invalid
+  INSTANCE_NAME: Inventaire
+  ORG_NAME: Inventaire
+  ORG_URL: https://inventaire.example.invalid
+  CONTACT_ADDRESS: contact@inventaire.example.invalid
+  # No SMTP on a fresh account: NODE_CONFIG disables the mailer so boot does not
+  # hang on nodemailer, and signup still logs the user straight in
+  # (controllers/auth/signup.ts serializes a session without email confirmation).
+  MAILER_SMTP_HOST: localhost
+  MAILER_SMTP_PORT: '587'
+  MAILER_SMTP_USERNAME: unused
+  MAILER_SMTP_PASSWORD: unused
+  # Leaflet map tiles are optional; without a real MapBox token only the maps
+  # widget degrades, the rest of the app is unaffected.
+  MAP_TILES_ACCESS_TOKEN: unused
+  MOTOMO_ENABLED: 'false'
+  MOTOMO_ENDPOINT: https://matomo.example.invalid/matomo.php
+  MOTOMO_IDSITE: '1'
+  MOTOMO_REC: '1'
+  MEDIA_STORAGE_MODE: local
+  SWIFT_USERNAME: unused
+  SWIFT_PASSWORD: unused
+  SWIFT_AUTH_URL: https://swift.example.invalid
+  SWIFT_PUBLIC_URL: https://swift.example.invalid
+  SWIFT_TENANT_NAME: '1'
+  SWIFT_REGION: unused
+  # node-config applies NODE_CONFIG over every config file including the
+  # entrypoint's dist/config/local.js. serveStaticFiles: production.ts sets it
+  # false (nginx serves statics); forced true so the Node server serves the
+  # bundled client. hostname: the image sets 'inventaire' and app.listen binds
+  # it (init_express.ts), unreachable as any other service name; forced 0.0.0.0.
+  NODE_CONFIG: '{"serveStaticFiles":true,"hostname":"0.0.0.0","mailer":{"disabled":true}}'

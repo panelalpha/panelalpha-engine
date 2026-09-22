@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mafl is a minimalistic self-hosted homepage: a Nuxt 3 app that reads one YAML
+  file and draws a grid of links to everything else you run. No database, no
+  users, no admin screen -- the file is the product. The repository ships a
+  Dockerfile and nothing else runnable at its root (its two compose files are
+  under .example/ and templates/, which detection does not look at), so the
+  stock deploy built the Dockerfile, the container came up, and the deploy
+  finished successfully in 718s. The page was HTTP 500 and the verdict was
+  serving-error_page.
+
+  The cause is the file that was never written. Nitro is configured with
+  `storage.data` on the fs driver at `./data` (nuxt.config.ts), loadConfig() in
+  src/server/utils/config.ts does `storage.hasItem('config.yml')` and throws
+  `Config not found` when it is absent, and src/pages/index.vue turns that into
+  `throw createError({ message: $settings.error })`. So the whole application is
+  one 500 until /app/data/config.yml exists. Reproduced directly on the
+  published image with no mount:
+
+      Listening on http://[::]:3000
+      Error: Config not found
+          at loadConfig (file:///app/server/chunks/_/config.mjs:96:13)
+
+      HTTP 500 {"url":"/","statusCode":500,"message":"Config not found"}
+
+  Upstream never hits this because their own docker-compose.yml is
+  `./config.yml:/app/data/config.yml` next to a README that tells you to write
+  that file first. The engine has nobody to write it: the customer pasted a Git
+  URL. So hooks/prepare.sh writes a starter config -- a real one, four services
+  in a group, not an empty skeleton, because an empty `services:` renders a
+  blank page and a blank page is not the product either.
+
+  Where it lives is the other half. Upstream bind-mounts ./config.yml from
+  inside the checkout, and a redeploy clears and re-clones ~/project
+  (engine#173) -- so the customer's entire homepage, which is the only thing
+  they ever author here, would be destroyed by the next deploy. It is
+  ~/.panelalpha/mafl/data/config.yml instead, mounted as the whole `data`
+  directory so nitro's fs storage and its file watcher both sit outside the
+  checkout, and prepare.sh writes it only when it is not already there. ~ is
+  root-owned 0755 and the account cannot create anything in it; ~/.panelalpha
+  is created with the account and belongs to it. ~/project/config.yml is left
+  behind as a symlink to it, recreated on every deploy, so the file is still
+  where the documentation says to look.
+
+  The mount is read-only. Mafl has no write path to its config -- no admin UI,
+  no API route that writes, and the only websocket message it accepts is
+  `ping` (src/server/api/websocket.ts) -- so nothing in the container has any
+  business rewriting the file, and read-only means a compromised container
+  cannot plant one in the account's ~/.panelalpha either. 0600 in a 0700
+  directory, because a service entry may carry `secrets:` (an OpenWeatherMap
+  API key) and the generated compose file beside it is 0644 and readable by
+  every other tenant (engine#173).
+
+  The image is built from the checkout rather than pulled. hywax/mafl:latest on
+  Docker Hub is v0.15.4 from 2024-07-13 and upstream has cut no release since,
+  while main has moved on by two years -- Nuxt 3.14, @vueuse/nuxt 12, the
+  update-check endpoint, four more locales. Pulling it would serve code two
+  years older than the checkout the customer is looking at. The price is the
+  build: 493s of `yarn run build` out of a 572s deploy, most of it because
+  package.json pins `rollup: npm:@rollup/wasm-node` for multi-arch release
+  builds, so the bundler runs as WebAssembly. That resolution is upstream's and
+  is left alone.
+
+  And `.git` is added to .dockerignore, which is what makes a redeploy
+  affordable. Upstream excludes node_modules, .output, .nuxt and README.md;
+  .git stays in the build context, and two clones of the same commit are
+  identical except for it (`diff -r --exclude=.git` over two fresh clones is
+  empty, while the index, the reflogs and the pack names differ every time).
+  So `COPY . /app` hashed differently on every deploy and threw away the
+  `RUN yarn run build` layer under it: the first redeploy took 486s to rebuild
+  a bundle that was already in the cache. With .git excluded, the next redeploy
+  was 11s, 8 of 12 layers cached, and the measurement was repeated three times.
+
+  No `ready` gate (engine#90). Nitro binds :3000 about a second after the
+  container starts and the config task runs immediately behind it; the deploy's
+  own first probe came back `serving: ok`, HTTP 200. That still holds on the
+  11s redeploy, where there is no build to hide the boot behind: health polled
+  with no delay at all after `rebuild` returned answered `serving: ok`, HTTP
+  200, twice.
+
+  Editing works while the site is up, which is the point of a file-driven
+  homepage and was verified rather than assumed: with a websocket open to
+  /api/websocket through the engine's proxy (101, not 426 -- curl's half
+  handshake reports a false negative there), a write to the config on the
+  read-only mount reached the watcher in src/server/api/websocket.ts, the
+  config:update task re-read it, and the frame that reloads the page arrived
+  within a second. With no browser connected there is nothing watching, so an
+  edit made while nobody is looking lands on the next page the app serves after
+  a restart -- upstream's design, not the mount's doing.
+
+  Nothing is authenticated. Mafl has no login of any kind, by design -- the
+  dashboard and every link, description and tag on it are public to anyone who
+  reaches the domain. `secrets:` values are the one exception: extractSafelyConfig()
+  in src/server/utils/config.ts strips them before /api/settings answers, and
+  that is verified rather than assumed.

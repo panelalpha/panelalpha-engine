@@ -1,0 +1,16 @@
+services:
+  app:
+    volumes:
+      # Kirby's state -- content/, site/accounts/, site/config/, site/sessions/
+      # -- is symlinked out of the checkout to /data by hooks/prepare.sh, so it
+      # survives the rebuild that empties ~/project (engine#173). This mounts
+      # the persisted store at /data, where those symlinks point.
+      #
+      # ~/.panelalpha is created by the engine, owned by the account, and
+      # untouched by a rebuild -- and it is the only writable place outside
+      # ~/project, because the home itself is root:root (Project.php:813).
+      # Read-write: the Panel writes accounts, sessions and uploaded content
+      # here at runtime. The path is relative to the compose file, whose parent
+      # is the account home, exactly as the shipped Apaxy recipe (#798) mounts
+      # ../.panelalpha/apaxy/files.
+      - '../.panelalpha/kirby:/data'

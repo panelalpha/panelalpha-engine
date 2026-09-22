@@ -1,0 +1,11 @@
+{
+  "name": "panelalpha-esmira-build",
+  "private": true,
+  "description": "Not upstream's. Written into the checkout root by the PanelAlpha ESMira recipe so the engine's own host Node build compiles ESMira-web. HostCompile::runForPhp() fires on exactly two conditions: a package.json at the *project root* with a `scripts.build` (HostCompile.php:190-201). ESMira's package.json is one level down, in the ESMira-web submodule, and calls its production build `prod` rather than `build` -- so without this file the engine never compiles anything and the document root that panelalpha.yaml names does not exist. See the recipe's README.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "cd ESMira-web && npm install --no-audit --no-fund --loglevel=error && npm run prod"
+  }
+}

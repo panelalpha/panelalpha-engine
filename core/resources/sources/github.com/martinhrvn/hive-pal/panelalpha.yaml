@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hive-Pal, a self-hosted beekeeping / apiary manager (NestJS API + React SPA
+  served from one all-in-one image) with a Postgres sidecar. REPLACE compose:
+  the published ghcr image runs instead of the repo's source build. The prepare
+  hook generates the DB password, the Better Auth session secret and the admin
+  password once into ~/.panelalpha/hive-pal/ (0600) and reuses them across
+  redeploys, so a rebuild neither logs everyone out nor locks the app out of its
+  pgdata volume. ComposePlaceholders rewrites BETTER_AUTH_URL / FRONTEND_URL from
+  http://localhost to the account's public https URL. The entrypoint runs
+  `prisma migrate deploy` and seeds/promotes the admin from ADMIN_EMAIL /
+  ADMIN_PASSWORD before the app starts serving, so the owner admin exists ahead of
+  public exposure (self-registration stays open by app design; data is strictly
+  per-user and anonymous access is refused). Image pinned to 0.19.0 — the release
+  whose entrypoint carries the Better Auth seed. Optional Ollama/whisper AI, S3
+  audio storage and Sentry/Faro telemetry are left disabled; uploads go to a local
+  named volume.

@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  readflow is a self-hosted "read-later" / news reader (Go backend, React SPA,
+  PostgreSQL): subscribe to feeds, save and categorise articles, full-text
+  search, offline PWA. This is the access-controlled case -- HTTP Basic
+  Authentication with a generated password -- not a no-auth private instance.
+
+  ONE OFFICIAL IMAGE, ONE PORT. Upstream publishes ncarlier/readflow on Docker
+  Hub; this recipe pins the current release (1.2.0) and pulls it from Docker
+  Hub, which is fetched normally and sidesteps engine#229 (the GHCR/quay
+  docker-save seeding stub). The image is a single distroless binary that both
+  serves the built React UI (baked at /var/local/html) and exposes the
+  GraphQL/REST API on one port (8080), so unlike a split front+API app it needs
+  no nginx to fold two origins together: readflow is already one origin. Only
+  this service publishes a host port, so the engine's port scan takes 8080 as
+  the primary app (engine#231); the image's baked EXPOSE 9090 (Prometheus,
+  disabled by default) never reaches the compose file, so ComposePortScan does
+  not see it.
+
+  WHY COMPOSE-REPLACE. The schema's `database:` is MySQL-only and readflow
+  speaks PostgreSQL, and the repo's own docker-compose.yml is a demo stack
+  (postgres with a hard-coded `secret`, a checked-in demo/demo htpasswd, the
+  :edge tag). This override supplies a real Postgres sidecar on a named volume,
+  a pinned image, generated credentials, and a readiness gate.
+
+  SAME-ORIGIN UI WITHOUT KNOWING THE DOMAIN. readflow's React bundle reads its
+  API base URL at runtime from /config.js, which the server regenerates on boot
+  from http.public_url. That value cannot be left empty (the app's mergo merge
+  forces the built-in default http://localhost:8080), and the per-account public
+  domain is unknown at deploy time, so a generated config.js would point the SPA
+  at localhost:8080 and every GraphQL call would fail. The recipe instead
+  read-only bind-mounts readflow's own upstream default config.js
+  (apiBaseUrl:'' -> the SPA calls the API on document.location.origin,
+  authority:'' -> basic-auth mode) over /var/local/html/config.js. The server's
+  boot-time write to that path fails harmlessly on the read-only mount (a logged
+  warning, not fatal) and the good default is served, so the UI works on
+  whatever domain the account ends up with.
+
+  AUTH AND SECRETS. Authentication is Basic (READFLOW_AUTHN_METHOD=basic)
+  against an htpasswd file generated once with a strong random password
+  (bcrypt when htpasswd(1) is present, else {SHA}); readflow auto-registers the
+  user on first successful login (GetOrRegisterUser) and marks it admin
+  (READFLOW_AUTHN_ADMINS). The htpasswd, the Postgres password (baked into the
+  pgdata volume) and the hash secret key/salt (rotating them would break
+  content hashing) are written once into ~/.panelalpha/readflow/ (0600 in 0700)
+  -- the only writable place a redeploy does not delete -- and reused on every
+  rebuild. hooks/prepare.sh materialises them and the container env each deploy
+  (~/project is wiped every deploy). The database schema is created and migrated
+  automatically by readflow on start (embedded SQL migrations), so no init
+  one-shot is needed. Onboarding notes and the password go in credentials.txt.

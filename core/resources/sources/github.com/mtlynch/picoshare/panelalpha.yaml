@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PicoShare is a minimal self-hosted file-sharing service: a single Go binary
+  that serves its own web UI on one port (4001) with an embedded SQLite database
+  (store.db) behind it. You upload a file and get a permanent, shareable link.
+  This is the public-by-design-content, private-write case, like a pastebin:
+  retrieving a file by its share link (GET /-{id}) is public on purpose -- the
+  links are meant to be handed out -- while everything that stores or manages
+  data (the upload API, the file list, guest-link management, settings) sits
+  behind a single admin passphrase. The security boundary is that admin gate,
+  and this recipe sets it.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes the app as
+  mtlynch/picoshare on Docker Hub and tags every release; this recipe runs that
+  official image with a compose-replace, pinned to the current stable release
+  v1.5.4 (Hub `latest` at time of writing). Building from source would compile
+  a Go binary on a small host for no gain, and seeding a Docker Hub image also
+  sidesteps engine#229 (image-seed NotFound is the GHCR/from-registry case, not
+  Hub). The image is FROM alpine (it has a shell), so readiness could be an
+  internal probe, but to match the proven pattern a curl sidecar polls the
+  public landing page and a `ready` gate waits on it (engine#204).
+
+  WHY COMPOSE-REPLACE. PicoShare ships no compose file of its own -- only a
+  Dockerfile -- so there is nothing for bare detection to run. The upstream
+  docker-compose example is the bare `image + one bind-mount + a plaintext
+  PS_SHARED_SECRET` snippet. A hosted deploy needs three things it cannot give:
+  the admin passphrase generated once (never a hardcoded dummy) and fed from a
+  redeploy-surviving store, the SQLite DB + uploads on a named volume so they
+  outlive a rebuild, and the port published so the engine's scan takes it as the
+  primary (engine#234).
+
+  ADMIN GATE, NO OPEN DEFAULT. main.go log.Fatal's if neither PS_SHARED_SECRET
+  nor PS_SHARED_SECRET_FILE is set, so the passphrase is mandatory -- there is
+  no "empty secret / open admin" state the container will boot into.
+  hooks/prepare.sh generates a strong PS_SHARED_SECRET once into
+  ~/.panelalpha/picoshare/ (0600 in 0700, the only writable place a redeploy
+  does not wipe, since ~/project is emptied every deploy, engine#173) and feeds
+  it via env_file. POST /api/auth exchanges that passphrase for a `sharedSecret`
+  session cookie; every write route (/api/entry/*, /files, /guest-links,
+  /settings) requires it, so an anonymous upload or admin request is rejected.
+  GET of a share link (/-{id}) stays public by design.
+
+  PERSISTENCE. The binary keeps the SQLite database and the uploaded file bytes
+  under /data (the CMD passes -db /data/store.db); a named volume mounted at
+  /data means uploads and the passphrase-independent data survive
+  project_rebuild and storage reclaim. The image runs as root, so a fresh named
+  volume needs no chown.
+
+  PORT. The app listens on 4001 (PORT, default 4001); only the app publishes a
+  port (4001:4001) so the port scan takes it as the primary (engine#234). The
+  curl and ready helpers publish nothing.

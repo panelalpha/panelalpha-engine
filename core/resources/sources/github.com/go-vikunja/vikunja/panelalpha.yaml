@@ -1,0 +1,93 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Vikunja is a to-do and project management app: one Go binary that serves the
+  REST API and the Vue frontend embedded in it on :3456, with SQLite, MySQL or
+  PostgreSQL behind it. The repository ships a root Dockerfile and no compose
+  file, so detection read it as `dockerfile`, cross-compiled the binary and the
+  frontend in about eight and a half minutes, and started the container alone
+  with an empty .env. The container then restart-looped — `app (Restarting (1)
+  10 seconds ago)`, nothing ever listening on 3456 — which is the
+  `serving-unknown` this recipe exists to turn into a served page.
+
+  The image is not what was wrong, and this recipe keeps building it. What was
+  wrong is that the final stage is `FROM scratch`, and three of the things
+  Vikunja needs on its first boot are outside what a Dockerfile can state.
+
+  First, it exits before it opens anything. `cors.enable` defaults to true and
+  `service.publicurl` defaults to empty, and InitConfig pairs those two with
+  `log.Fatalf("service.publicurl is required when cors.enable is true")`. A
+  Vikunja started with no configuration at all cannot boot, whatever else is
+  right — that is the exit 1 behind the restart loop.
+
+  Second, nothing it writes to exists. The Dockerfile's `VIKUNJA_DATABASE_PATH`
+  is /db/vikunja.db and a scratch image has no /db, while files.basepath
+  resolves to /app/vikunja/files, a directory `WORKDIR` created as root in an
+  image whose `USER` is 1000. db.initSqliteEngine fails on the first with
+  `could not open database file [uid=1000, gid=0]` and files.InitFileHandler on
+  the second with `Could not init file handler`, both fatal. So the override
+  mounts a named volume at each — the two paths upstream's own documented
+  compose binds — and an `init` service chowns them to 1000 first, because a
+  named volume whose path does not exist in the image is created root-owned.
+
+  Third, the account's public address is not knowable from the checkout, and
+  the usual ways of getting it there are both unavailable here: the
+  `http://localhost` placeholder ComposePlaceholders rewrites only works under
+  UserComposeStrategy, and the SITE_URL the dockerfile strategy does write onto
+  the app service cannot be copied into a VIKUNJA_ variable at start, because a
+  scratch image has no shell to copy it with. hooks/prepare.sh cannot supply it
+  either: it runs before detection, so the generated compose file does not
+  exist yet and neither does the account's own ~/<domain>/ directory, which on
+  the test account was created five and a half seconds after the hook wrote its
+  file. So the `init` service does it, being the one container in the stack
+  with a shell: it mounts the generated compose file read-only, reads SITE_URL
+  out of it and writes service.publicurl into a config file at /etc/vikunja/,
+  the second path viper.AddConfigPath() looks in. Environment variables still
+  outrank it, so an account that sets VIKUNJA_SERVICE_PUBLICURL keeps the last
+  word. When no URL can be read it writes `cors.enable: false` instead, so the
+  fatal above can never be what a deploy ends on: CORS is for a frontend served
+  from a different origin, and this one comes from the same binary on the same
+  host.
+
+  hooks/prepare.sh generates VIKUNJA_SERVICE_SECRET. Left unset, Vikunja
+  creates a random one per boot (generateServiceSecretIfEmpty), so every
+  restart would invalidate every session and API token. It also pulls alpine:3
+  before the build rather than during it: `up -d` pulls what it lacks while it
+  builds what it lacks, and the first run of this recipe died on the xgo link
+  step with `ResourceExhausted: ... cannot allocate memory` and `Image alpine:3
+  Pulling` in the same output, inside the 2500 MB account the same commit had
+  built in without it.
+
+  Two services in the override do nothing but make `docker compose up -d`
+  return at the right moment. Vikunja runs its ~200 migrations against the
+  empty SQLite file before it binds 3456, the engine runs `up -d` without
+  `--wait`, and the probe that follows would ask a port nothing is listening on
+  yet. `probe` polls /api/v1/info until it answers and `ready` waits on it
+  having exited, which is what makes `up -d` block until the site is really up.
+  It takes two services rather than the usual one because a healthcheck on the
+  app would need a binary the scratch image does not have: the only executable
+  in it is `vikunja` itself, and `vikunja healthcheck` runs FullInitWithoutAsync
+  — migrations included — which is not something to run every ten seconds
+  beside a live SQLite database.
+
+  No database sidecar: SQLite is Vikunja's own default, one person's task list
+  is not what a database server is for, and the memory a sidecar wants is
+  memory the Go build wants more. No Redis either — keyvalue and the rate
+  limiter both default to in-memory and only matter across several instances.
+
+  Registration is left enabled, which is upstream's default and the only way
+  into a fresh instance: Vikunja has no bootstrap admin and no sign-up-free
+  setup flow. Sign up first, then turn it off through the account's env vars
+  (VIKUNJA_SERVICE_ENABLEREGISTRATION=false). Mail is left unconfigured — the
+  app works without it, but email confirmation and password resets need an SMTP
+  server the engine does not provide.
+extends: dockerfile
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe's dockerfile/port_hint would be null/80 even though the
+  # repository ships a root Dockerfile — and the deployability check then fails
+  # with "Dockerfile strategy selected but Dockerfile is missing." State what
+  # the probe would have found. 3456 is what the Dockerfile EXPOSEs and what
+  # service.interface defaults to; the failed run detected the same number.
+  dockerfile: Dockerfile
+  port_hint: 3456

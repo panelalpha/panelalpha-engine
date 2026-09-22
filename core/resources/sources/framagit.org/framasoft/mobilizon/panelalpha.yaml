@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mobilizon is a federated (ActivityPub) events and groups platform: an
+  Elixir/Phoenix API plus a compiled Vue front-end the release bundles, backed
+  by PostgreSQL WITH THE POSTGIS extension (event geolocation). It is one
+  product delivered as one official image. This recipe is the compose-REPLACE
+  pattern (cannery/passit): no platform block is declared, so detection runs via
+  fromWalk and engine#221 does not bite; ComposePlaceholders rewrites the one
+  PA_PUBLIC_URL value below to the account's public https address.
+
+  IMAGE, OFFICIAL PREBUILT. Upstream builds and publishes an official image on
+  Docker Hub. The historical framasoft/mobilizon name no longer exists on the
+  Hub; the project's own .gitlab-ci.yml now builds and pushes kaihuri/mobilizon
+  (the Dockerfile's opencontainers source label is framagit.org/kaihuri/mobilizon),
+  tagging :main from branch HEAD and :<version>/:latest from releases. The recipe
+  pins kaihuri/mobilizon:5.2.4 (== :latest, 2026-06-30, Mobilizon 5.2.4) rather
+  than building the clone. The tracker Repository URL resolves to the repo's main
+  branch (HEAD e4e3d707); main is ahead of 5.2.4, but the runtime config surface
+  this recipe depends on -- config/docker.exs env var names and the mobilizon_ctl
+  users.new / migrate CLI -- is stable across 5.x, so the pinned image matches
+  what the recipe drives. Overridable with MOBILIZON_IMAGE (e.g. kaihuri/mobilizon:main).
+
+  WHAT THE RECIPE SUPPLIES. Mobilizon's own docker/production files are an
+  operator template: a Dockerfile plus a docker-entrypoint.sh that expects
+  MOBILIZON_INSTANCE_HOST, MOBILIZON_INSTANCE_SECRET_KEY_BASE,
+  MOBILIZON_INSTANCE_SECRET_KEY and MOBILIZON_DATABASE_* to already exist and a
+  Postgres with PostGIS to already be running. There is no runnable compose and
+  the secrets default to "changethis", so a bare deploy cannot start. This
+  override replaces it with a working stack: a postgis/postgis:16-3.5 database on
+  a NAMED volume, the official app image, a one-shot `init` that migrates and
+  seeds a confirmed admin, and a `ready` gate (engine#204) so `docker compose up
+  -d` returns only once the site answers on :4000. PLAIN postgres will not work
+  -- Mobilizon's first migration runs CREATE EXTENSION postgis and every event
+  address is a PostGIS geometry; the postgis image ships the extension and its
+  POSTGRES_USER is a superuser, so the extension creates cleanly.
+
+  SECRETS, PERSISTED ONCE. hooks/prepare.sh generates and stores the database
+  password, MOBILIZON_INSTANCE_SECRET_KEY_BASE (endpoint/session signing),
+  MOBILIZON_INSTANCE_SECRET_KEY (Guardian auth/JWT signing) and the seeded
+  admin password under ~/.panelalpha/mobilizon/ (0600 in 0700), the only
+  writable place a deploy does not delete (engine#173: ProjectTree::clearContents
+  empties ~/project on every rebuild). A rebuild reuses them: a new
+  SECRET_KEY_BASE/SECRET_KEY logs everyone out and invalidates outstanding
+  confirmation/reset tokens, and a new DB password locks the app out of the
+  pgdata volume that still holds the old one. MOBILIZON_INSTANCE_HOST is a BARE
+  hostname (not a URL), so ComposePlaceholders does not rewrite it directly;
+  instead PA_PUBLIC_URL (key ends in _URL) is rewritten to the account's public
+  https URL and /pa/entrypoint.sh strips the scheme into MOBILIZON_INSTANCE_HOST,
+  the Cannery pattern. On an account with no domain yet PA_PUBLIC_URL stays
+  http://localhost and HOST=localhost lets the release boot.
+
+  DATA: DATABASE + UPLOADED MEDIA, BOTH ON NAMED VOLUMES. The Postgres data is
+  on a named volume (pgdata). Mobilizon also writes UPLOADED MEDIA -- event
+  pictures, avatars, participant-export files -- to disk under
+  /var/lib/mobilizon/uploads (config/docker.exs, MOBILIZON_UPLOADS), so that
+  directory is a second named volume (uploads). The image creates
+  /var/lib/mobilizon/uploads owned by nobody:nobody and runs as nobody, so a
+  fresh named volume inherits that ownership and is writable without a chown
+  step. Named volumes survive project_rebuild and storage reclaim; only account
+  deletion / failed-deploy rollback wipe them (verified in engine source:
+  pruneAllArgv runs only from AccountTeardown/fullWipeScript, never the deploy
+  path). VERIFIED: both the database rows and an uploaded event picture survive a
+  rebuild.
+
+  ADMIN IS SEEDED, CONFIRMED, NO EMAIL NEEDED. Mobilizon confirms a user's email
+  on registration before it will log them in, and delivers the link by SMTP. The
+  recipe does not depend on that for the owner: the one-shot `init` runs
+  mobilizon_ctl users.new <admin-email> --admin, which registers the user with
+  confirmed_at set to now and no confirmation token (Mix.Tasks.Mobilizon.Users.New:
+  create_database_user), i.e. an immediately usable administrator with a seeded
+  profile -- no mail is sent or required. The password is generated once into
+  ~/.panelalpha/mobilizon/ (0600) and surfaced only in that store's
+  credentials.txt. Seeding is idempotent and domain-change-safe: init gates on
+  `SELECT count(*) FROM users WHERE role='administrator'` (role is the Postgres
+  user_role enum) and creates nobody if an admin already exists. mobilizon_ctl's
+  default RPC-into-a-running-node path is disabled (MOBILIZON_CTL_RPC_DISABLED)
+  so the seed runs in its own eval instance with serve_endpoints=false (no port
+  bind), before the app container starts.
+
+  REGISTRATION IS CLOSED BY DEFAULT; PUBLIC SIGN-UP NEEDS OPERATOR SMTP. Public
+  self-registration is off (MOBILIZON_INSTANCE_REGISTRATIONS_OPEN=false, the
+  config default), so the account is admin-created and needs no mail server to be
+  fully usable. To OPEN public registration the operator must also configure SMTP
+  (MOBILIZON_SMTP_SERVER/PORT/USERNAME/PASSWORD/TLS): a self-registered user
+  cannot log in until they confirm their address, and with no SMTP the
+  confirmation link is only written to the app log. Client-side SENDING (SMTP
+  out) is all that is involved; Mobilizon receives no inbound mail, which is out
+  of scope. This is stated in credentials.txt, the cannery/passit precedent.
+
+  VERIFIED end to end on this engine over the real public HTTPS domain: deploy
+  from the bare tracker URL fails (no compose, changethis secrets, no PostGIS);
+  with the recipe it deploys, the seeded admin logs in, creates a group and a
+  public event with a location and an uploaded picture, the event and its picture
+  read back on the public site, anonymous visitors are refused the admin/moderation
+  surface while the public event stays publicly viewable, /.env /.git/config and
+  the config/DB/admin script do not leak and no debug traceback is served, and a
+  rebuild preserves the admin login, the event and the uploaded picture.
+
+  ENGINE CAVEAT (NOT A RECIPE FAULT). Media upload is multipart and Mobilizon's
+  live UI opens an Absinthe GraphQL WebSocket; the shared panelalpha.online
+  (WithoutDNS) tunnel does not reliably carry multipart/upgrade (engine#170), so
+  upload and live subscriptions are verified against the account's own address.
+  On an account with its own domain pointed straight at the engine the whole UI
+  works. Report as engine/tunnel limitation, not a recipe or app failure.

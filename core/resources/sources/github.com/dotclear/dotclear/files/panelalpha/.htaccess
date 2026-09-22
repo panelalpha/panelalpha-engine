@@ -1,0 +1,8 @@
+# The setup script is deploy tooling, not site content. Deny it (Dotclear does
+# the same for inc/ and plugins/). AllowOverride is on in the base image.
+<IfModule authz_core_module>
+  Require all denied
+</IfModule>
+<IfModule !authz_core_module>
+  Deny from all
+</IfModule>

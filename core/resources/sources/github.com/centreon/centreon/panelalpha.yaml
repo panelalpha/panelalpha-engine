@@ -1,0 +1,241 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Centreon is a Nagios-lineage monitoring platform in three languages at once:
+  a PHP/Symfony web application (centreon-web), a C++ scheduler and a C++
+  results broker (centreon-engine and centreon-broker, both forks of Nagios
+  Core's), and a Perl orchestrator (gorgone). A Central runs all four plus
+  Apache, php-fpm, snmpd and cron in one container, against two MariaDB
+  schemas -- `centreon` for configuration, `centreon_storage` for results --
+  with the graphs in RRD files beside them. That shape is not negotiable: the
+  three programs share a Unix socket and a directory of generated
+  configuration, and Centreon's own container image runs them together.
+
+  The checkout does not run, and the 403 says why. There is no composer.json
+  at the repository root -- the application's is one directory down, in
+  centreon/ -- so detection chose `php` and pointed Apache at a top level that
+  holds LICENSE.md, README.md, six product directories and nothing servable.
+  Not a broken application: the wrong directory entirely.
+
+  **There is no published Centreon image to fall back to, and that is the
+  first thing this recipe had to establish.** The repository ships two compose
+  files and neither deploys a Central. docker/docker-compose.yaml builds a
+  *remote poller* and will not start without a CENTRAL_HOST, a GORGONE_UID and
+  a GORGONE_TOKEN issued by a Central that already exists elsewhere.
+  .github/docker/docker-compose.yml is the CI harness, and the image it names,
+  docker.centreon.com/centreon/centreon-web-alma9, refuses an anonymous pull:
+  `authorization failed: no basic auth credentials`. Docker Hub's `centreon`
+  namespace is private too; the images there under other names are strangers'
+  forks, one of them of Centreon 2.5. So unlike Zabbix, Seafile or Mattermost,
+  **this stack has to be built.**
+
+  It can be, entirely from public artifacts, and the repository's own
+  Dockerfile is what builds it. Two things upstream publishes make that work:
+  ghcr.io/centreon/centreon/centreon-web-dependencies-collect:26.11-alma9 is
+  public (AlmaLinux 9, PHP 8.4 from remi, and centreon-engine,
+  centreon-broker, gorgone and the Nagios plugins already installed, 926 MB),
+  and packages.centreon.com serves centreon-web for the series without
+  credentials. files/Dockerfile.panelalpha is
+  .github/docker/centreon-web/alma9/Dockerfile with exactly one substitution:
+  `dnf install centreon-web centreon-poller centreon-trap` from that
+  repository, instead of installing RPMs that upstream's pipeline has just
+  built and bind-mounted in. That is the branch upstream's own file takes when
+  STABILITY=stable. Nothing is patched, nothing is forked and nothing from the
+  checkout is compiled. Build: **1m30s** on a warm base image, producing a
+  1.2 GB image.
+
+  What the checkout *does* contribute, and the reason the build context is the
+  repository, is .github/docker/centreon-web/alma9/entrypoint -- the only
+  unattended installer Centreon has. Centreon's supported install is a
+  six-step web wizard at /centreon/install/setup.php; that entrypoint drives
+  the same steps from the CLI, out of JSON answer files, and then deletes the
+  installer. Without it this application could not be deployed without a human
+  clicking through a wizard on a public URL.
+
+  **Version.** 26.11.0, the series the checkout is on (.version says
+  MAJOR=26.11) and the series the base image is built for. Be plain that this
+  is Centreon's development series: packages.centreon.com has no stable
+  26.11 yet, and the base images published for older majors carry their own
+  pre-release builds of the collect components. Unlike the Zabbix recipe,
+  which could pin an LTS because the images are versioned independently of the
+  checkout, here the image *is* built from the checkout's own CI definition,
+  so following the checkout is the coherent choice. CENTREON_BASE_IMAGE in the
+  account's environment variables moves it.
+
+  ## Two shapes of this recipe that look like style and are not
+
+  The `web` service must not bind-mount anything under `./`. It builds, and
+  `ComposeFileInspector::isLocalDevCompose()` treats a service that both
+  builds and bind-mounts a project path as a workstation file; the compose
+  probe then declines the whole file and `dockerfile` wins on priority.
+  Measured with `./panelalpha:/panelalpha:ro` present: "Detected project type:
+  Dockerfile", port 8080 instead of 8000. The installer's answer files
+  therefore reach the container through `COPY` in the Dockerfile.
+
+  And ~/project/panelalpha/ is 0755, not 0700: the engine scans the project
+  tree after the prepare hook, and a directory it may not read fails the
+  deploy outright -- `scandir(/home/<user>/project/panelalpha): Failed to open
+  directory: Permission denied`.
+
+  ## What a tenant can actually monitor
+
+  The same answer as Zabbix, reached the same way: **everything outbound, and
+  nothing inbound.** centengine runs Nagios plugins, all of which are
+  clients -- measured from inside a real account, ICMP to a public address
+  answers (the image's check_icmp is setuid root, so the account needs no
+  CAP_NET_RAW of its own), TCP connects, DNS resolves and SNMP over UDP goes
+  out. centreon-plugins, the Perl collection that does the interesting work
+  (SNMP, HTTP, database, cloud-API checks), is installed. A customer pointing
+  this at their own routers, switches, sites and servers is what the product
+  is for here.
+
+  What does not work is anything a remote machine has to connect *in* for.
+  Centreon's own distributed model is the clearest case: a remote poller
+  reaches its Central over :5556 (ZMQ) or :443, and the Centreon Monitoring
+  Agent reaches a poller over :4317 (OpenTelemetry gRPC). Both are second
+  published ports the engine's proxy cannot express, so a tenant's Centreon is
+  a single Central with a single local poller. Passive SNMP traps on :162/udp
+  are out for the same reason -- the repository's own poller compose file
+  publishes that port, and this one cannot. A tenant also cannot monitor the
+  host: an account sees its own containers and the internet.
+
+  ## /proc is not namespaced, and this is where that is believed
+
+  panelalpha/engine#215. `/proc/loadavg` and `/proc/meminfo` read the same
+  inside an account as on the host. The starter dataset's CPU, Load and Memory
+  services check 127.0.0.1 over SNMP and therefore report the *machine's*
+  figures: measured, "Ram Total: 15.24 GB" on a host with 15 GB and an account
+  with 2 GB, and a Load service in CRITICAL on a load average the account did
+  not generate. Ping, Disk-/ and anything aimed at a real external target are
+  genuinely the account's own view. An operator who minds should set
+  CENTREON_DATASET=0 and let the customer add their own hosts; the trade is
+  that the account then opens on an empty monitor.
+
+  ## Credentials
+
+  Centreon's installer answer file ships in this repository at
+  .github/docker/centreon-web/alma9/configuration/admin.json, holding the
+  bcrypt hash of **Centreon!2021** -- the same pair that appears in four of the
+  entrypoint's own scripts and in every CI log. database.json beside it ships
+  root/`centreon` and centreon/`centreon`, and the installer grants that second
+  user `ALL ON *.* WITH GRANT OPTION`. Measured on a stock build of the same
+  images: `admin`/`Centreon!2021` returns HTTP 200 and an API token.
+
+  This recipe never installs on any of the three. hooks/prepare.sh generates a
+  database root password, a database user password and a 20-character admin
+  password, bcrypt-hashes the last with the account's own PHP, and writes its
+  own admin.json and database.json into ~/.panelalpha/centreon/ (the only
+  writable directory that survives a rebuild, panelalpha/engine#173) and from
+  there into the checkout on every deploy. A container.d step copies them over
+  upstream's *before* the installer reads them, and refuses to continue -- exit
+  1, which stops the container, because container.sh sources these scripts --
+  if they are missing or still hold the shipped hash.
+
+  The point of doing it at install time rather than afterwards is that there is
+  then no instant at which the shipped password is valid. Rotating after the
+  fact would still be a rotation of a live account. Here the row is written
+  once, with this account's hash.
+
+  The published port is closed for the whole of that. Upstream starts Apache at
+  step 06 and installs Centreon at step 15, so for the two minutes the install
+  takes, a stock container serves the installation wizard on its published
+  port. This recipe makes step 06 a no-op and starts httpd at step 97, after
+  the install, the credential rotation and the poller configuration. A redeploy
+  of an installed account skips all of it and leaves whatever password the
+  customer has set.
+
+  The gate was tested by breaking its precondition, on a fresh account: with
+  the answer files not written, step 14 printed "refusing to install:
+  /panelalpha/admin.json is missing or empty", the container exited, compose
+  reported `dependency failed to start: container project-web-1 is unhealthy`,
+  the deploy **failed**, and the public name returned **502** -- not a login
+  form and not an installer. That is the panelalpha/engine#204 shape that
+  works: `up -d` runs without `--wait`, but compose does block on a
+  `depends_on` health condition, and the failing service is a dependency of
+  one the deploy notices.
+
+  Measured on the control: `admin`/`Centreon!2021` over the real public HTTPS
+  name returns **401 Authentication failed** here, and **HTTP 200 with an API
+  token** on a stock build of the same image. The shipped database
+  credentials are refused too -- `centreon`/`centreon` and `root`/`centreon`
+  both give `ERROR 1045 Access denied`. `/centreon/install/setup.php` is 404:
+  upstream's entrypoint deletes the installer, and this recipe keeps that.
+
+  ## Applying a configuration change does not work from the UI, and that is
+  ## upstream's
+
+  Measured, and the one thing an operator must know before selling this.
+  Adding a host and pressing Configuration > Pollers > Export configuration
+  with "Move Export Files" and "Restart Monitoring Engine" ticked **generates
+  and moves the files correctly and does not restart centengine.** The same is
+  true of `centreon -a POLLERRESTART` and `-a POLLERRELOAD`, which report "A
+  restart signal has been sent to 'Central'" and change nothing.
+
+  It is gorgone's engine module that drops it, not a permission and not this
+  recipe. gorgone accepts the request, logs `[engine] Event: [ENGINECOMMAND]
+  ... RESTART_PROGRAM`, logs `Create sub-process`, logs `commands processing
+  has finished`, and centengine's external-command counter stays at zero --
+  120 commands in a row produced `External Commands Last 1/5/15 min: 0 / 0 /
+  0`, so it is not buffering either. Writing the same line to the same FIFO as
+  the same user (`su -s /bin/bash centreon-gorgone -c "echo '[$(date +%s)]
+  RESTART_PROGRAM' > /var/lib/centreon-engine/rw/centengine.cmd"`) reloads the
+  configuration in under fifteen seconds, every time, and is how every
+  configuration change in this recipe's verification was applied. The
+  permissions check out (centreon-gorgone is in the centreon-engine group, the
+  FIFO is 0660 centreon-engine:centreon-engine) and gorgone's
+  `command_file:` matches centengine's.
+
+  Upstream is aware of the shape of this: its own
+  .github/docker/centreon-web/alma9 entrypoint says, in
+  75-broker-outputs.sh, "centengine is left as-is: ... the container systemctl
+  shim cannot restart it." Repairing gorgone is not what a recipe does, so it
+  is not repaired here. Note it, document the one-line workaround, and read
+  the rest of the recipe knowing that what it delivers is a Centreon that
+  monitors correctly and needs a shell for the last step of a configuration
+  change.
+
+  ## pids_limit
+
+  ServiceHardener gives a service 256 pids unless it asks for more
+  (ServiceHardener.php:279). A Centreon Central is six daemons and their
+  children -- httpd, php-fpm, cbd and cbwd, centengine forking a plugin per
+  check, snmpd, crond, and gorgone with about fifteen Perl workers -- and 256
+  is enough at rest (36 in use) but has no headroom for a burst. Measured: a
+  single `systemctl restart gorgoned`, which briefly runs two sets of workers,
+  crossed it and centengine began returning `(Execute command failed) ... fail
+  to start /usr/lib64/nagios/plugins/check_icmp: Resource temporarily
+  unavailable` -- a monitoring system reporting UNKNOWN because it could not
+  fork. The compose file sets 1024.
+
+  ## Memory: it fits
+
+  Measured on the account's own cgroup, with a 2048 MB limit on the account.
+
+  | | |
+  |---|---|
+  | web (the Central) | 274 MB |
+  | db (mariadb:11.4) | 128 MB |
+  | account cgroup, `anon` | **454 MB** |
+  | account cgroup, slab | 179 MB |
+  | account cgroup, `memory.current` | 1785 MB (of which 1141 MB is page cache) |
+  | peak | 2050 MB, during the image build |
+  | `oom_kill` | **0** |
+
+  The number that matters is `anon`: about 450 MB of real working set for the
+  whole stack, which is less than Zabbix. `memory.current` runs high because
+  page cache from a 1.2 GB image build sits in the account's cgroup and is
+  reclaimed rather than allocated -- `memory.events` shows 1865 reclaims and
+  zero OOM kills. There is no schema-import spike to plan around; the install
+  is incremental.
+
+  **Disk is the real cost**: 2.4 GB in the account home -- a 1.65 GB image
+  (926 MB base plus the packages), a 274 MB checkout read only at build time,
+  1.24 GB of buildkit cache that makes a redeploy 42 s instead of 200 s, and
+  289 MB of volumes. Budget 4 GB, not 2.
+
+  ## Left for the customer
+
+  Hosts. The starter dataset is one local host; routers, sites and servers are
+  theirs to add, over SNMP, ICMP, HTTP or centreon-plugins -- with the
+  configuration-apply caveat above. No SMTP is configured, so notifications
+  are defined and displayed but email nothing until a notification command and
+  a contact's media are filled in. No `overrides/app.sh`.

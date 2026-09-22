@@ -1,0 +1,64 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  lesma is a simple, self-hosted paste app (a pastebin) written in Rust, equally
+  friendly to a browser and to `curl`. It has NO database and NO external
+  services: the storage backend is plain files under /var/lib/lesma, and one
+  static binary (Rocket) serves the whole thing. Upstream publishes an official
+  prebuilt image, ogarcia/lesma, and this recipe pulls it -- building the Rust
+  binary from the clone is slow and, more to the point, the repo's own Dockerfile
+  is a CI artifact stage (`COPY target/release/lesma /bin/lesma`) that only works
+  after GitLab CI has already produced the binary, so a bare deploy of the clone
+  cannot build. Pulling the published image is not grafting.
+
+  STRATEGY: compose-REPLACE. No platform/strategy block is declared, so the
+  panelalpha.yaml stays a description only (AppConfig::manifest() is null) and
+  detection runs normally via fromWalk. The override docker-compose.yml is
+  written into the checkout before detection, so fromWalk sees a compose file
+  (compose priority 980 outranks the repo's Dockerfile at 970) and selects
+  runtime: compose over the unbuildable Rust Dockerfile. engine#221 does not bite
+  because no platform block is declared. One service (the official image) plus a
+  `ready` gate; no sidecar, because lesma needs no database or cache.
+
+  THE ACCOUNT DOMAIN IS THE ONLY THING THAT MUST BE INJECTED. lesma builds every
+  paste URL by sanitising the request Host against a whitelist (LESMA_DOMAINS):
+  get_uri() -> Host::to_absolute() returns an EMPTY string for a host that is not
+  on the list (src/lib.rs:556-563, and its own unit test asserts "" for an
+  unlisted host), so the account domain MUST be present or generated links come
+  out blank. It also needs LESMA_HTTPS=true to emit https:// links. Neither can
+  be baked into the image -- the domain is unknown until deploy. ComposePlaceholders
+  rewrites PA_PUBLIC_URL (key ends _URL, localhost value) to the account's public
+  https URL; files/panelalpha/lesma/entrypoint.sh parses that once at boot into
+  LESMA_HTTPS + LESMA_DOMAINS, then execs the untouched upstream /bin/lesma. The
+  image already defaults LESMA_ADDRESS=0.0.0.0, LESMA_PORT=8000 and
+  LESMA_STORAGE=/var/lib/lesma, so nothing else is set. VERIFIED in a throwaway
+  container: LESMA_DOMAINS="[<host>, localhost:8000, 127.0.0.1:8000]" (the
+  README's unquoted figment-array form) + LESMA_HTTPS=true makes a paste POSTed
+  with that Host return a link of https://<host>/<id>.
+
+  PERSISTENCE: pastes are the state, and they are files. /var/lib/lesma is on a
+  NAMED volume (lesmadata), which survives project_rebuild and storage reclaim --
+  only account deletion or a FAILED-deploy rollback wipe it. ~/project is emptied
+  on every redeploy (engine#173), so the store is deliberately NOT there. The
+  upstream image creates /var/lib/lesma owned by uid/gid 100 (the `lesma` user it
+  runs as), so a fresh named volume inits to 100:100 and the app can write it; no
+  chown, no bind mount needed. lesma has a built-in background cleaner that
+  expires old pastes (default 30 days, LESMA_MAX_EXPIRE hours) -- normal for a
+  pastebin, not data loss.
+
+  SECURITY: lesma is a PUBLIC paste service; anonymous POST /paste is the product,
+  not a vuln. There is NO admin, login or management surface at all -- the entire
+  route table is get/post `/`, get/post `/<id>`, `/clone/<id>`, `/new`, `/help`,
+  `/offline` and static assets (src/routes.rs); no database, no config endpoint,
+  nothing to gate. Per-paste optional passwords, per-paste view limits and
+  expiry are built in. Abuse limits are on by default: LESMA_TEXT_SIZE_LIMIT=1MiB
+  and LESMA_BINARY_SIZE_LIMIT=10MiB cap upload size, and LESMA_MAX_EXPIRE bounds
+  retention. The file store is never published -- only :8000 is exposed -- so the
+  paste directory is not reachable directly. There are no secrets to leak (the
+  app has none; nothing is written under ~/project or into env from a credential).
+  The one operator-tunable worth knowing is the size limits, overridable via env.
+
+  IMAGE: ${LESMA_IMAGE:-docker.io/ogarcia/lesma:latest}. The tracker Repository
+  URL resolves to the repo default branch `master`; Docker Hub's `latest` tracks
+  upstream releases/master and its route and domain-sanitising behaviour matches
+  the cloned src/ exactly (verified against src/lib.rs and src/routes.rs). Pin a
+  release tag (e.g. ogarcia/lesma:1.0.0) via LESMA_IMAGE for a frozen version.

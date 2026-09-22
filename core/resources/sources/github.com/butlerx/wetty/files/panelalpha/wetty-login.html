@@ -1,0 +1,32 @@
+<!doctype html>
+<!--
+  Served by the `auth` container at /panelalpha-login, behind an always-on
+  Basic realm. Reaching this page at all means the password was right; the
+  browser now has the credentials for this origin and will send them on the
+  socket.io requests that open the terminal.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="1; url=/">
+    <title>Signed in</title>
+    <style>
+      body { margin: 0; height: 100vh; display: flex; align-items: center;
+             justify-content: center; background: #1e1e1e; color: #ddd;
+             font: 16px/1.6 system-ui, sans-serif; }
+      div  { text-align: center; }
+      a    { color: #6cf; }
+      code { color: #9c9; }
+    </style>
+  </head>
+  <body>
+    <div>
+      <p>Signed in. Opening the terminal&hellip;</p>
+      <p><a href="/">Continue</a></p>
+      <p><small>The terminal will ask for the same password again &mdash;
+      that one is <code>sshd</code>'s, and it is what actually opens the
+      shell.</small></p>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+<!doctype html>
+<!--
+  Served by the auth proxy at /panelalpha-login, and only to a request that has
+  already passed HTTP Basic. Its whole job is to exist so that nginx reaches the
+  access phase: a `return 302` in that location would be issued in the rewrite
+  phase, before the password is asked for.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="0; url=/" />
+    <title>Signed in</title>
+    <style>
+      body { font: 16px/1.5 system-ui, sans-serif; margin: 4rem auto; max-width: 28rem; padding: 0 1rem; }
+    </style>
+  </head>
+  <body>
+    <p>Signed in. <a href="/">Continue to the dashboard</a>.</p>
+  </body>
+</html>

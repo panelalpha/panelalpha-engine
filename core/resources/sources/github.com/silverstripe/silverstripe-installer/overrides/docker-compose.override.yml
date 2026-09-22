@@ -1,0 +1,17 @@
+# Layered over the compose file the engine generates; the upstream repository
+# ships none.
+#
+# One thing only: a second env_file, holding the administrator password. It has
+# to be a file rather than a manifest `env:` value because the value is
+# generated per account by hooks/prepare.sh, and it has to live outside
+# ~/project because a redeploy empties that directory. env_file paths are
+# resolved against the compose project directory (~/project), so `../` is the
+# account's home.
+#
+# The engine's own file already names `.env`; compose appends to the list
+# rather than replacing it, and this recipe keeps nothing in .env that it
+# would matter to lose.
+services:
+  app:
+    env_file:
+      - ../.panelalpha/silverstripe/admin.env

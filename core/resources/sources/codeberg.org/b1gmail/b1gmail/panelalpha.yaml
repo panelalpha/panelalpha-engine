@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  b1gMail 7.4, webmail on plain PHP + MariaDB, served from src/. The
+  repository ships serverlib/config.default.inc.php but no config.inc.php, so
+  an unassisted deploy dies in serverlib/init.inc.php:285 with a 200 that
+  contains a PHP fatal error. files/ supplies a config.inc.php that reads the
+  account database out of the container environment, and the install command
+  drives b1gMail's own setup wizard from the CLI - before Apache is listening,
+  so the first-visitor-wins wizard is never reachable - then deletes setup/.
+  Receiving is b1gMail's own default, the POP3 catchall gateway pulled by
+  cron.php; nothing here listens for inbound SMTP and the app is never the
+  destination MTA for its domain.
+extends: php-plain
+docroot: src
+database: mysql
+commands:
+  # Fresh install and schema sync both run here: the script decides from the
+  # database which one it is, so a rebuild whose PA_DEPLOY_PHASE is wrong
+  # still does the right thing.
+  - id: b1gmail-setup
+    stage: [install, upgrade]
+    run: php /app/panelalpha-b1gmail-setup.php
+  # cron.php is b1gMail's only scheduler: it is what runs the POP3 gateway,
+  # calendar notifications and every cleanup job. The engine has no cron stage
+  # for a recipe, so the loop is a background process in the app container.
+  - id: b1gmail-cron
+    stage: start
+    run: sh /app/panelalpha-b1gmail-cron.sh &

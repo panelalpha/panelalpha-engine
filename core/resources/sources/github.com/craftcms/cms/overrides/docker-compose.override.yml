@@ -1,0 +1,117 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the app -- the shared PHP base image, ~/project bind-mounted at /app,
+# the account's own uid, PA_DOCROOT=/app/web, Apache on 8000, APP_URL from the
+# account's main domain and DB_* from the database `database: mysql` asked the
+# engine to provision -- and it cannot know three things: where this account's
+# generated secrets are kept, which of Craft's directories hold data rather
+# than code, and when Craft is ready.
+#
+# An override rather than a replacement compose file, and here that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# *before* detection runs, so a compose file in the project root would make
+# Craft look like a compose project and take the php strategy -- and with it
+# the bind mount, the docroot, the Composer pass and the staged entrypoint --
+# off the table entirely.
+services:
+  app:
+    # The second env_file is the whole reason this file has one at all.
+    # CRAFT_SECURITY_KEY encrypts what is in the database and must be the same
+    # value on every deploy, so it cannot live in ~/project -- which is
+    # re-cloned each time -- and it must not live in .env, which the engine
+    # copies to a world-readable .env.default (engine#173). hooks/prepare.sh
+    # writes it to ~/.panelalpha/craft.env at 0600 and it is read from there.
+    #
+    # `.env` is restated rather than left to be inherited: Compose merges some
+    # sequences across files and replaces others, and naming both is correct
+    # under either rule. The path is relative to the project directory, which
+    # is ~/project, so `..` is the account's home.
+    env_file:
+      - .env
+      - ../.panelalpha/craft.env
+
+    # Three directories that hold data and must not be inside the checkout,
+    # because GitRepository::cloneConfiguredRepository() empties ~/project
+    # before every deploy (engine#173). All three are under ~/.panelalpha/craft,
+    # created by hooks/prepare.sh and owned by the account, whose home is
+    # bind-mounted into its own DinD container at the same path -- which is what
+    # makes a relative `..` source resolve on both sides.
+    volumes:
+      # The license key api.craftcms.com issues on first run. Its default is
+      # config/license.key; a redeploy would throw it away and ask for a new
+      # one, which for a paid edition is a site reporting the wrong license
+      # every time it is deployed. CRAFT_LICENSE_KEY_PATH points at /pa, and
+      # files/web/index.php promotes it to the PHP constant Craft actually
+      # reads -- see the comment there.
+      - ../.panelalpha/craft:/pa
+      # @storage. Mostly caches Craft can rebuild (runtime/, config-deltas/),
+      # but also storage/rebrand -- the control panel logo and site icon an
+      # operator uploads -- and storage/backups.
+      - ../.panelalpha/craft/storage:/app/storage
+      # Somewhere for an asset volume to live. Craft creates none on install;
+      # the first one a customer adds is a "Local" filesystem pointed at a path
+      # they type, and the obvious path -- @webroot/uploads -- is inside the
+      # checkout and would lose every uploaded file on the next deploy. This is
+      # that path, made durable, so the README can name one that works. Nothing
+      # forces its use.
+      - ../.panelalpha/craft/uploads:/app/web/uploads
+
+    # ServiceLimits caps an app-role service it did not write at 384m. Craft's
+    # install migration builds ~60 tables and the entire default project config
+    # in one process and the setup script asks PHP for 512M to do it; a
+    # container ceiling below that turns the overrun into a kill rather than an
+    # error message. In an override the line reaches Docker as written -- the
+    # hardener never sees it.
+    mem_limit: 768m
+
+    # The install stage does all of Craft's setup before Apache binds: the
+    # Composer autoload dump, the install migration, the administrator, `craft
+    # up` and a cache clear. The engine runs `docker compose up -d` without
+    # --wait and probes as soon as it returns, which is while that is still
+    # going: nothing is listening and the probe reads `Failed to connect to
+    # 127.0.0.1 port 8000` (engine#90).
+    #
+    #   1. GET /            templates/index.twig, rendered. A 200 means the
+    #                       schema exists, Craft booted against it and Twig
+    #                       compiled. An uninstalled Craft redirects here to
+    #                       the installer and a half-built one 500s; `-f`
+    #                       fails on neither, which is why there is a second
+    #                       request.
+    #   2. GET /admin/login the control panel's own login form, and the
+    #                       request that proves the part of Craft this recipe
+    #                       exists to make reachable actually loaded -- the CP
+    #                       routes, the published resources and the session
+    #                       component. It is also what would be answering the
+    #                       *installer* if the install stage had not run, so a
+    #                       200 here is the check that the site is not sitting
+    #                       open waiting to be claimed.
+    #
+    # Host is 127.0.0.1:8000 for both, as it is for AppHealth's own probe.
+    # Craft accepts it: nothing in this config validates the request host, and
+    # @web is pinned to APP_URL so no route depends on the Host header.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null --max-time 30 http://127.0.0.1:8000/ &&
+          curl -fsS -o /dev/null --max-time 30 http://127.0.0.1:8000/admin/login
+      interval: 10s
+      timeout: 40s
+      retries: 30
+      # The install stage on two slow cores. A failing check inside this window
+      # neither counts against retries nor marks the container unhealthy.
+      start_period: 300s
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once Craft has
+  # built its schema, created its administrator and answered, and what the
+  # health probe then meets. A clean exit 0 is not a crash loop as far as
+  # AppHealth::isCrashing() is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

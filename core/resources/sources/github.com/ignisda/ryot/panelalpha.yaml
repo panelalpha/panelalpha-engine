@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Ryot ("Roll Your Own Tracker") is a self-hosted tracker for the things you
+  consume and do -- movies, shows, books, video games, audiobooks, podcasts,
+  manga, anime, music and fitness -- with collections, reviews, progress and
+  per-user data. It is a Rust (Axum + async-graphql) backend and a React-Router
+  frontend, both bundled into one official image behind Caddy, with PostgreSQL
+  as the only external datastore. Caddy listens on 8000 and reverse-proxies the
+  frontend (:3000) and the backend (:5000) internally, so the whole app is a
+  single origin on one port and its GraphQL API lives at /backend/graphql.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes the app as
+  ignisda/ryot on Docker Hub (and ghcr.io) and tags every release; this recipe
+  runs that official image with a compose-replace, pinned to the current stable
+  release v10.5.0. Building from the clone would cross-compile a Rust backend
+  and build a Node frontend on the host for no gain -- the checkout's own
+  Dockerfile assembles a prebuilt backend artifact plus a yarn/turbo frontend
+  build that a bare `docker build` of the clone does not reproduce, and the
+  published image already carries all three processes wired together. Seeding a
+  Docker Hub image also sidesteps engine#229 (image-seed NotFound is the GHCR
+  case, not Hub).
+
+  WHY COMPOSE-REPLACE. Ryot needs a PostgreSQL sidecar (>= 15; upstream pins
+  18-alpine) that a bare deploy does not add, DATABASE_URL wired to it, a data
+  directory that outlives a redeploy, and a required SERVER_ADMIN_ACCESS_TOKEN.
+  The override adds the db service on a named volume, materialises those secrets
+  from ~/.panelalpha/ryot/ via env_file, publishes only the app's port 8000, and
+  adds an init one-shot plus a ready gate. Ryot runs its own schema migrations
+  on boot, so no migrate stage is needed.
+
+  OWNER IS SEEDED, REGISTRATION IS CLOSED. Ryot's registerUser mutation makes
+  the FIRST user it creates an admin. Rather than leave the public sign-up page
+  open for a stranger to win that race, USERS_ALLOW_REGISTRATION is set to false
+  from boot, which disables the sign-up page and refuses registerUser for any
+  caller whose adminAccessToken does not match SERVER_ADMIN_ACCESS_TOKEN. An
+  init sidecar -- on the internal network, holding that token -- then registers
+  the owner over the GraphQL API with a password hooks/prepare.sh generates once
+  into ~/.panelalpha/ryot/ryot.env (0600 in 0700) and records in
+  credentials.txt (username admin). It is idempotent: on a redeploy the owner
+  already exists in the persisted database, so it logs in with the stored
+  password, confirms, and exits. The ready gate waits on the init, so the deploy
+  reports finished only after the owner is claimed. There is never a window in
+  which a stranger can register or become the admin. To add more users, the
+  owner registers them from the admin UI or an operator flips
+  USERS_ALLOW_REGISTRATION; each user's tracked data is isolated to that user.
+
+  DOMAIN. FRONTEND_URL is a `_URL` key set to a localhost placeholder that
+  ComposePlaceholders rewrites to the account's real https origin at deploy.
+  Ryot uses it for absolute links, sharing and OIDC redirects; it is not a host
+  allowlist, so an un-rewritten fallback does not break the site.
+
+  PERSISTENCE. The whole application (the owner, every user and all tracked
+  data) lives in the PostgreSQL database on a named volume, so it survives
+  project_rebuild and storage reclaim; ~/project is wiped every deploy
+  (engine#173) and the recipe writes nothing there. Uploaded artwork is proxied
+  from the metadata providers or an optional external S3 bucket, so a default
+  deploy has no local upload store to persist.
+
+  PORT + READINESS. Caddy listens on 8000 and only the app publishes a port
+  (8000:8000), so the engine's port scan takes it as the primary (engine#231/
+  #234). The app healthcheck polls /backend/config (200 only once the Rust
+  backend is up), and the init one-shot additionally confirms the frontend
+  serves before it registers the owner; the ready gate waits on the init, so
+  `docker compose up` returns only once Ryot actually answers and its owner
+  exists (engine#204).

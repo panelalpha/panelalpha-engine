@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PmWiki 2.3.27, a flat-file PHP wiki with no database: every page is a file
+  under wiki.d/ and the whole app is pmwiki.php plus its scripts/. Petko Yotov's
+  canonical source is SVN-only (svn://pmwiki.org/pmwiki) with no official git
+  remote, so a project cannot be cloned from it. This recipe is keyed to
+  github.com/l2dy-sonarcloud/pmwiki, a git mirror of the 2.3.x tree (HEAD =
+  pmwiki-2.3.27, scripts/version.php). supported-apps#1294 (canonical,
+  uncloneable) is Rejected and points here; the mirror row is the Supported one.
+
+  The tree lints clean on PHP 8.3 (the version the `php` runtime hands a repo
+  with no composer.json) and calls no function removed in PHP 8 -- the two
+  create_function() references are guarded legacy-addon shims, never reached by
+  core. So detection reads it as the plain `php` strategy and it boots with
+  nothing built.
+
+  What the bare deploy gets wrong, none of it a code fix:
+
+  1. **No front controller.** PmWiki is reached as pmwiki.php?n=Group.Page; the
+     tree ships no index.php, so `/` is a 403 and PhpDocroot has no index to
+     resolve the root against. files/index.php is the one-line front controller
+     PmWiki's own install docs tell you to write (include_once 'pmwiki.php');
+     docroot: "." then pins the root.
+
+  2. **URLs are self-detected from the container's own host:port.** Behind the
+     engine's http proxy PmWiki would emit http://...:8000 links and load pub/
+     assets over the wrong scheme. local/config.php pins $ScriptUrl / $PubDirUrl
+     / $UploadUrlFmt from APP_URL, the public https origin.
+
+  3. **World-editable by default, and its data lives in the checkout.** A stock
+     PmWiki lets any visitor edit every page, and stores pages in wiki.d/ and
+     attachments in uploads/ inside the tree -- both wiped by the redeploy that
+     empties ~/project (engine#173). pmwiki-setup.sh moves wiki.d/ and uploads/
+     onto ~/.panelalpha (symlinked back in each boot) and, on first boot,
+     generates an admin password (bcrypt, into ~/.panelalpha/pmwiki, 0600).
+     config.php reads that hash into $DefaultPasswords['admin'] and sets
+     ['edit'] to the same, so reading stays public but editing and uploading
+     require the admin login. Redeploy survival is the acceptance test.
+
+  No database: PmWiki needs none, so no `database:` key and no sidecar -- it fits
+  the smallest host. The setup tooling (local/, panelalpha/, wiki.d/, .git) is
+  denied over HTTP by shipped .htaccess files and by rm of the clone's .git.
+extends: php-plain
+docroot: "."
+env:
+  # The shared PHP base image loads no php.ini (engine#185); this scan dir adds
+  # ours. Leading colon keeps PHP's compiled-in conf.d so nothing is dropped.
+  PHP_INI_SCAN_DIR: ":/app/.pa-php"
+commands:
+  - id: pmwiki-setup
+    stage:
+      - start
+    before: true
+    timeout: 120
+    description: Move wiki.d and uploads onto ~/.panelalpha and symlink them back, and on first boot generate the admin password, so wiki content survives the redeploy that empties ~/project and the wiki is not world-editable.
+    run: 'sh panelalpha/pmwiki-setup.sh'

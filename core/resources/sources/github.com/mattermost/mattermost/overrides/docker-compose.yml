@@ -1,0 +1,141 @@
+# The stack for the repository, which ships none Docker would load: its only
+# compose files are server/docker-compose.yaml and its companions, a developer's
+# dependency rig (postgres, minio, inbucket, openldap, elasticsearch, opensearch,
+# redis, dejavu, keycloak, prometheus, grafana) one directory down from the root,
+# under names nothing auto-loads and without Mattermost itself in it.
+#
+# Mattermost runs from its published image because the checkout is not the
+# artifact and its own Dockerfile says so: server/build/Dockerfile's build stage
+# is `curl -L $MM_PACKAGE | tar -xvz` with MM_PACKAGE defaulting to
+# https://latest.mattermost.com/mattermost-enterprise-linux. It downloads a
+# finished release and copies it into a distroless final stage; it compiles
+# nothing from the tree it sits in. Building it would produce the published
+# binary by the slowest possible route, and building the tree properly means Go
+# plus a 4000-package npm webapp plus `make build-cmd dist` on a 2.5 GB account.
+services:
+  postgres:
+    # Mattermost supports PostgreSQL only (MySQL support was removed in v10).
+    # 16-alpine rather than the 18-alpine upstream's docker repo moved to: 18
+    # relocated PGDATA under /var/lib/postgresql/<ver>/docker, so the
+    # conventional /var/lib/postgresql/data mount silently stops being the data
+    # directory.
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # A default Postgres sizes itself for a dedicated host; this one shares a
+    # 2.5 GB account with the application that matters.
+    command:
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - max_connections=50
+    environment:
+      POSTGRES_USER: mmuser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: mattermost
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mmuser -d mattermost"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    mem_limit: 384m
+
+  mattermost:
+    # Tag written by hooks/prepare.sh from the checkout's own version list.
+    image: ${MATTERMOST_IMAGE:-mattermost/mattermost-team-edition:latest}
+    restart: unless-stopped
+    ports:
+      - "8065:8065"
+    environment:
+      TZ: UTC
+      # The two values the server cannot start without. There is no sqlite or
+      # embedded fallback: with no datasource the server exits on boot.
+      MM_SQLSETTINGS_DRIVERNAME: postgres
+      MM_SQLSETTINGS_DATASOURCE: postgres://mmuser:${POSTGRES_PASSWORD}@postgres:5432/mattermost?sslmode=disable&connect_timeout=10
+      # Console logging so a failed boot is visible in `docker logs`; the
+      # server also writes to /mattermost/logs, which nobody here reads.
+      MM_LOGSETTINGS_ENABLECONSOLE: "true"
+      MM_LOGSETTINGS_CONSOLELEVEL: INFO
+      # Deliberately NOT MM_SERVICESETTINGS_SITEURL. That key does not match the
+      # engine's public-URL pattern (it ends in SITEURL, not _URL), the image is
+      # distroless so no shell wrapper can compose it from one that does, and a
+      # value set through the environment is locked read-only in the System
+      # Console. The setup service below writes it through the API instead.
+    volumes:
+      # Every path the image declares as a VOLUME, named so a redeploy does not
+      # strand five anonymous ones. They are seeded from the image, which chowns
+      # /mattermost to uid 2000 — the user the server runs as.
+      - mattermost_config:/mattermost/config
+      - mattermost_data:/mattermost/data
+      - mattermost_logs:/mattermost/logs
+      - mattermost_plugins:/mattermost/plugins
+      - mattermost_client_plugins:/mattermost/client/plugins
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # The image's own healthcheck, at a tighter interval than its 30s. The
+    # image is distroless: no shell, no curl, no wget — mmctl talking to the
+    # server's local-mode unix socket is the only probe available inside it,
+    # and MM_SERVICESETTINGS_ENABLELOCALMODE=true is baked into the image.
+    # It answers only once the server is serving, which is after it has run its
+    # migrations against an empty database.
+    healthcheck:
+      test: ["CMD", "/mattermost/bin/mmctl", "system", "status", "--local"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1280m
+
+  # Creates the system admin and sets SiteURL, once the server answers. Not a
+  # convenience on either count — see files/panelalpha-setup.sh. Always exits 0.
+  setup:
+    image: ${CURL_IMAGE:-curlimages/curl:8.22.0}
+    restart: "no"
+    depends_on:
+      mattermost:
+        condition: service_healthy
+    environment:
+      # Not a real address, and not meant to survive: ComposePlaceholders
+      # rewrites a bare http://localhost under a *_URL-shaped key to the
+      # account's public https URL before the stack starts. This is how the
+      # account's own address reaches a server whose config key the engine
+      # cannot recognise.
+      PA_PUBLIC_URL: http://localhost
+      MM_ADMIN_EMAIL: ${MM_ADMIN_EMAIL}
+      MM_ADMIN_USERNAME: ${MM_ADMIN_USERNAME}
+      MM_ADMIN_PASSWORD: ${MM_ADMIN_PASSWORD}
+    volumes:
+      - ./panelalpha-setup.sh:/panelalpha-setup.sh:ro
+    entrypoint: ["/bin/sh", "/panelalpha-setup.sh"]
+    mem_limit: 128m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be finished
+  # when that returns — which is when every service has been *started*. For
+  # `setup` that is not when it has *finished*, so without this the health probe
+  # can run while the first account is still being created. Compose does block
+  # on depends_on conditions, so waiting for setup to exit makes `up -d` return
+  # only once Mattermost has answered, an admin exists and SiteURL is set. A
+  # clean exit 0 is explicitly not a crash loop to AppHealth::isCrashing().
+  #
+  # Not the mattermost image, the way most of these recipes reuse the app's own:
+  # that image is distroless and has no /bin/sh to exit from.
+  ready:
+    image: ${CURL_IMAGE:-curlimages/curl:8.22.0}
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  postgres_data: {}
+  mattermost_config: {}
+  mattermost_data: {}
+  mattermost_logs: {}
+  mattermost_plugins: {}
+  mattermost_client_plugins: {}
