@@ -34,7 +34,7 @@ PACKAGE_HOST='connect.panelalpha.com'
 MONITORING_HOST="${PANELALPHA_MONITORING_HOST:-monitoring.panelalpha.com}"
 STARTED_AT=$(date +%s || echo 0)
 # Installed when the version lookup fails (legacy hub path only). Bump at release.
-FALLBACK_ENGINE_VERSION='2.0.0'
+FALLBACK_ENGINE_VERSION='2.0.1'
 # Git URL for the engine tree. Default is the public GitHub mirror. Credentials may
 # be embedded (https://user:token@host/...). Empty string forces the legacy hub package path.
 # "unset" vs empty: get.sh always exports a default; clearing the var opts into hub.
@@ -49,7 +49,34 @@ REPO_PROJECT="${PANELALPHA_REPO_PROJECT:-panelalpha/engine}"
 REPO_REF="${PANELALPHA_REPO_REF:-development-2.0.0}"
 REPO_TOKEN="${PANELALPHA_REPO_TOKEN:-}"
 # A repository clone carries no vendor directory; a release package does.
-COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:20260908'
+COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.0.1'
+
+# Tagged with the engine version, not a build date, so the tag moves whenever
+# core/composer.json's PHP constraint does -- an unpublished tag does not pull
+# and Dockerfile-composer is built instead. This stays as the second guard, for
+# a published tag whose PHP is older than core asks for: `composer install`
+# would abort on every platform requirement and leave no vendor/ at all. The
+# pull is still preferred, but only kept when its PHP satisfies the constraint.
+resolve_composer_image() {
+    local want image_php
+    want=$(sed -n 's/.*"php"[[:space:]]*:[[:space:]]*"[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$1/composer.json" | head -1)
+
+    docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 || docker pull "$COMPOSER_IMAGE" || true
+
+    if [ -n "$want" ] && docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1; then
+        image_php=$(docker run --rm "$COMPOSER_IMAGE" php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null || echo 0)
+        # sort -V puts the lower version first; if that is not $want the image is older.
+        if [ "$(printf '%s\n%s\n' "$want" "$image_php" | sort -V | head -1)" != "$want" ]; then
+            echo ">>> $COMPOSER_IMAGE ships PHP ${image_php}, core requires >= ${want} -- building from dockerfiles/Dockerfile-composer" >&2
+            COMPOSER_IMAGE='panelalpha/engine-composer:local'
+            docker build --tag "$COMPOSER_IMAGE" - <"$2/dockerfiles/Dockerfile-composer"
+            return
+        fi
+    fi
+
+    docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 ||
+        docker build --tag "$COMPOSER_IMAGE" - <"$2/dockerfiles/Dockerfile-composer"
+}
 DEBUG_MODE=0
 NO_LOCAL_IP=0
 ENABLE_NAT=0
@@ -80,6 +107,20 @@ RUN_DIR=''
 CONFIGURE_MODE=0
 # install | update — set from --software-op or detected from an existing tree.
 ENGINE_OP=''
+# The repository the one-liner was asked to put on this host (--repo), and how
+# to clone it. Empty means an engine install with nothing deployed into it.
+DEPLOY_REPO=''
+DEPLOY_BRANCH=''
+DEPLOY_GIT_TOKEN=''
+# owner/repo, for the lines an operator reads. Filled from DEPLOY_REPO.
+DEPLOY_REPO_LABEL=''
+# 1 when an engine is already here: then --repo is a project to create through
+# the CLI, not a reason to install the whole engine over the top of itself.
+DEPLOY_ONLY=0
+# Filled by deploy_repository from what `pae project:create` reports back.
+DEPLOY_PROJECT_NAME=''
+DEPLOY_PROJECT_URL=''
+DEPLOY_FAILED=0
 
 usage() {
     cat <<'USAGE'
@@ -99,6 +140,15 @@ Usage: bash installer.sh [options]
                            later -- for when DNS is not pointing here yet.
       --cert-email ADDR    Let's Encrypt account email (expiry warnings)
       --email ADDR         Contact/monitoring email (settings:set email)
+      --repo REPO          deploy a repository once the engine is up: a clone
+                           URL, host/owner/repo, or a bare owner/repo, which
+                           means GitHub unless the engine's default_git_host
+                           setting says otherwise. The project name and the
+                           domain are generated. Where an engine is already
+                           installed, only the project is created -- the engine
+                           is left alone.
+      --branch REF         branch, tag or commit for --repo
+      --git-token TOKEN    HTTPS access token for a private --repo
   -p, --package-host HOST  package host (legacy hub path only)
       --monitoring-host H  monitoring host for install status (default: monitoring.panelalpha.com)
   -d, --debug              set -x
@@ -187,6 +237,33 @@ while true; do
         ;;
     --email=*)
         INSTALL_EMAIL="${1#*=}"
+        shift
+        ;;
+    --repo)
+        DEPLOY_REPO="$2"
+        shift
+        shift
+        ;;
+    --repo=*)
+        DEPLOY_REPO="${1#*=}"
+        shift
+        ;;
+    --branch)
+        DEPLOY_BRANCH="$2"
+        shift
+        shift
+        ;;
+    --branch=*)
+        DEPLOY_BRANCH="${1#*=}"
+        shift
+        ;;
+    --git-token)
+        DEPLOY_GIT_TOKEN="$2"
+        shift
+        shift
+        ;;
+    --git-token=*)
+        DEPLOY_GIT_TOKEN="${1#*=}"
         shift
         ;;
     --no-cert-request)
@@ -620,10 +697,7 @@ download_engine_from_repository() {
 
 # What the release package ships prebuilt and a repository archive does not.
 install_composer_dependencies() {
-    if ! docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 &&
-        ! docker pull "$COMPOSER_IMAGE"; then
-        docker build --tag "$COMPOSER_IMAGE" - <"$PANELALPHA_DIR/shared-hosting/dockerfiles/Dockerfile-composer"
-    fi
+    resolve_composer_image "$PANELALPHA_DIR/shared-hosting/core" "$PANELALPHA_DIR/shared-hosting"
     docker run --rm -v "$PANELALPHA_DIR/shared-hosting/core:/app" -w /app \
         "$COMPOSER_IMAGE" composer install --no-interaction --no-progress
 }
@@ -1144,6 +1218,97 @@ post_install_config() {
     bash /opt/panelalpha/shared-hosting/scripts/prewarm-images.sh || echo_warning "Could not start image prewarm"
 }
 
+# owner/repo out of whatever spelling was passed, for the lines an operator
+# reads. Credentials in a URL are dropped with the rest of it.
+repo_label() {
+    printf '%s' "$1" |
+        sed -E 's#^[a-z][a-z0-9+.-]*://##; s#^[^/@]+@##; s#\.git$##; s#/+$##' |
+        awk -F/ '{ if (NF >= 2) printf "%s/%s", $(NF-1), $NF; else printf "%s", $0 }'
+}
+
+# One field out of `project:create --json`. jq where the host has it (the
+# installer installs it), a narrow sed where a deploy-only run on an older
+# host does not.
+json_field() { # json_field <name> <json>
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "$2" | jq -r --arg k "$1" '.data[$k] // empty' 2>/dev/null
+        return 0
+    fi
+    printf '%s' "$2" | sed -n "s/.*\"$1\":\"\\([^\"]*\\)\".*/\\1/p" | head -n1
+}
+
+# The repository the one-liner asked for, deployed into a project of its own.
+# Everything the project needs beyond the repository -- the account name, the
+# domain, the template -- is generated by the API, so nothing is invented here.
+#
+# A failed deploy is reported, not fatal: on an install the engine itself is up
+# and usable, and saying so beats rolling it back over a bad repository URL.
+deploy_repository() {
+    local args=(project:create "--repo=${DEPLOY_REPO}" --json)
+    if [ -n "$DEPLOY_BRANCH" ]; then
+        args+=("--branch=${DEPLOY_BRANCH}")
+    fi
+    if [ -n "$DEPLOY_GIT_TOKEN" ]; then
+        args+=("--git-token=${DEPLOY_GIT_TOKEN}")
+    fi
+    if [ -n "$INSTALL_EMAIL" ]; then
+        args+=("--email=${INSTALL_EMAIL}")
+    fi
+
+    # stdout only: `project:create --json` keeps the JSON there and puts the
+    # deploy log on stderr, so the operator watches the deploy happen while
+    # this still captures something parseable.
+    local result=''
+    if ! result=$(docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+        php artisan "${args[@]}"); then
+        DEPLOY_FAILED=1
+        echo_warning "Could not deploy ${DEPLOY_REPO_LABEL}:"
+        printf '%s\n' "$result" >&2
+        return 0
+    fi
+
+    # The JSON line out of whatever else the deploy wrote to the terminal.
+    local json domain
+    json=$(printf '%s\n' "$result" | grep -E '^\{"data":' | tail -n1 || true)
+    DEPLOY_PROJECT_NAME=$(json_field username "$json")
+    domain=$(json_field domain "$json")
+    if [ -z "$DEPLOY_PROJECT_NAME" ] || [ -z "$domain" ]; then
+        DEPLOY_FAILED=1
+        echo_warning "Deployed ${DEPLOY_REPO_LABEL}, but could not read the project it was deployed into:"
+        printf '%s\n' "$result" >&2
+        return 0
+    fi
+    DEPLOY_PROJECT_URL="https://${domain}"
+}
+
+# Where the repository ended up — stdout for logs, and the same lines in the
+# TUI's ready screen. The outro writers live inside finish_installation, so
+# this is called from there and nowhere else.
+report_deployed_project() {
+    if [ -z "$DEPLOY_REPO" ]; then
+        return 0
+    fi
+
+    if [ "$DEPLOY_FAILED" = 1 ]; then
+        echo_warning "${DEPLOY_REPO_LABEL} was not deployed. Try again with:"
+        echo_warning "  pae project:create --repo ${DEPLOY_REPO_LABEL}"
+        outro_say 221 "${DEPLOY_REPO_LABEL} was not deployed. Try again with:"
+        outro_c 15 "  pae project:create --repo ${DEPLOY_REPO_LABEL}"
+        outro_nl
+        outro_nl
+        return 0
+    fi
+
+    echo_info "${DEPLOY_REPO_LABEL} available at: ${DEPLOY_PROJECT_URL}"
+    echo_info "Project: ${DEPLOY_PROJECT_NAME}    logs: pae project:deploy:log ${DEPLOY_PROJECT_NAME}"
+    echo_info ""
+    outro_c 15 "${DEPLOY_REPO_LABEL}"
+    outro_c 247 ' available at: '
+    outro_c 39 "${DEPLOY_PROJECT_URL}"
+    outro_nl
+    outro_nl
+}
+
 finish_installation() {
     # Stdout: verbose for --no-tui / logs / legacy sed fallback.
     # $RUN_DIR/outro: mockup-shaped ANSI body for the TUI ready screen only
@@ -1173,12 +1338,21 @@ finish_installation() {
     }
 
     echo_info ""
+    # Nothing was installed on this run, so the project is the whole report.
+    if [ "$DEPLOY_ONLY" = 1 ]; then
+        report_deployed_project
+        finish_commit
+        return
+    fi
+
     if [ "$ENGINE_OP" = update ]; then
         echo_info "PanelAlpha engine has been successfully updated!"
     else
         echo_info "PanelAlpha engine has been successfully installed!"
     fi
     echo_info ""
+
+    report_deployed_project
 
     echo_info "API URL: ${API_URL}    new token: pae api:token:create default"
     echo_info "MCP URL: ${MCP_URL}    new token: pae mcp:token:create default"
@@ -1262,8 +1436,6 @@ fi
 
 define_variables
 
-resolve_engine_version
-
 case "$ENGINE_OP" in
 install | update) ;;
 *)
@@ -1276,6 +1448,32 @@ install | update) ;;
 esac
 
 refuse_engine_v1_to_v2_upgrade
+
+if [ -n "$DEPLOY_REPO" ]; then
+    DEPLOY_REPO_LABEL=$(repo_label "$DEPLOY_REPO")
+    if [ -f /opt/panelalpha/shared-hosting/docker-compose.yml ]; then
+        DEPLOY_ONLY=1
+    fi
+fi
+
+# An engine is already here, so --repo is a project to create through the CLI,
+# not a reason to install the engine over the top of itself.
+if [ "$DEPLOY_ONLY" = 1 ]; then
+    # before_install, which normally asks, is skipped on this path.
+    check_root
+    echo_info "PanelAlpha engine is already installed on this host"
+    update_progress 50 "Deploying ${DEPLOY_REPO_LABEL}"
+    echo_info "Deploying ${DEPLOY_REPO_LABEL}"
+    deploy_repository
+    update_progress 100 "Finishing"
+    finish_installation
+    # Neither an install nor an update happened, so there is no install status
+    # to report; the trap would send one for a run that changed no engine.
+    trap - EXIT
+    exit "$DEPLOY_FAILED"
+fi
+
+resolve_engine_version
 
 if [ "$ENGINE_OP" = update ]; then
     update_progress 5 "Preparing update"
@@ -1342,6 +1540,12 @@ clean_installer
 update_progress 90 "Applying additional configuration"
 echo_info "Applying additional configuration"
 post_install_config
+
+if [ -n "$DEPLOY_REPO" ]; then
+    update_progress 95 "Building ${DEPLOY_REPO_LABEL}"
+    echo_info "Deploying ${DEPLOY_REPO_LABEL}"
+    deploy_repository
+fi
 
 update_progress 100 "Finishing installation"
 finish_installation

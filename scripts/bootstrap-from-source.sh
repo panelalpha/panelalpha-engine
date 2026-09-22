@@ -16,7 +16,34 @@
 set -euo pipefail
 
 ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:20260908'
+COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.0.1'
+
+# Tagged with the engine version, not a build date, so the tag moves whenever
+# core/composer.json's PHP constraint does -- an unpublished tag does not pull
+# and Dockerfile-composer is built instead. This stays as the second guard, for
+# a published tag whose PHP is older than core asks for: `composer install`
+# would abort on every platform requirement and leave no vendor/ at all. The
+# pull is still preferred, but only kept when its PHP satisfies the constraint.
+resolve_composer_image() {
+    local want image_php
+    want=$(sed -n 's/.*"php"[[:space:]]*:[[:space:]]*"[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$1/composer.json" | head -1)
+
+    docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 || docker pull "$COMPOSER_IMAGE" || true
+
+    if [ -n "$want" ] && docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1; then
+        image_php=$(docker run --rm "$COMPOSER_IMAGE" php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null || echo 0)
+        # sort -V puts the lower version first; if that is not $want the image is older.
+        if [ "$(printf '%s\n%s\n' "$want" "$image_php" | sort -V | head -1)" != "$want" ]; then
+            echo ">>> $COMPOSER_IMAGE ships PHP ${image_php}, core requires >= ${want} -- building from dockerfiles/Dockerfile-composer" >&2
+            COMPOSER_IMAGE='panelalpha/engine-composer:local'
+            docker build --tag "$COMPOSER_IMAGE" - <"$2/dockerfiles/Dockerfile-composer"
+            return
+        fi
+    fi
+
+    docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 ||
+        docker build --tag "$COMPOSER_IMAGE" - <"$2/dockerfiles/Dockerfile-composer"
+}
 
 PUBLIC_IP=''
 INSTALL_SYSBOX=1
@@ -226,9 +253,7 @@ docker network inspect pash-default-network >/dev/null 2>&1 || {
 # ----------------------------------------------------------------------- vendor
 if [ "$FORCE_COMPOSER" = 1 ] || [ ! -d core/vendor ]; then
     step "Installing composer dependencies"
-    docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 ||
-        docker pull "$COMPOSER_IMAGE" ||
-        docker build --tag "$COMPOSER_IMAGE" - <dockerfiles/Dockerfile-composer
+    resolve_composer_image "${ENGINE_DIR}/core" "${ENGINE_DIR}"
     docker run --rm -v "${ENGINE_DIR}/core:/app" -w /app "$COMPOSER_IMAGE" composer install
 fi
 

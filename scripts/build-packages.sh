@@ -48,7 +48,7 @@ else
     rm -rf "$core_dir/vendor.bak"
     mv "$core_dir/vendor" "$core_dir/vendor.bak"
   fi
-  IMAGE="ghcr.io/panelalpha/engine-composer:20260908"
+  IMAGE="ghcr.io/panelalpha/engine-composer:v2.0.1"
   # try pull, fallback to build
   if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
     if ! docker pull "$IMAGE"; then
