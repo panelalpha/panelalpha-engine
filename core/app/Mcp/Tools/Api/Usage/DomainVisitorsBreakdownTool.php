@@ -13,17 +13,17 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
-#[Name('project_usage')]
+#[Name('domain_visitors_breakdown')]
 #[Description(<<<'MARKDOWN'
-    Get resource usage for a project
+    Get a visitor breakdown for a domain
 
-    Includes this calendar month's transfer as bandwidth.usage (bytes) against bandwidth.maximum (the project bandwidth_limit in bytes, or null when unlimited).
+    Breakdown visits are the hits/visits from the AWStats section for every calendar month overlapping start/end; they are not clipped to the day range. Geo dimensions (countries, continents, regions) are empty until `geolocation:database update` has stored a local City MMDB. Device and device-brand are not implemented.
 
-    Calls GET /api/projects/{username}/usage.
+    Calls GET /api/projects/{username}/domains/{domain}/visitors/{dimension}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
-class ProjectUsageTool extends ApiTool
+class DomainVisitorsBreakdownTool extends ApiTool
 {
     protected function method(): string
     {
@@ -32,7 +32,7 @@ class ProjectUsageTool extends ApiTool
 
     protected function path(): string
     {
-        return '/projects/{username}/usage';
+        return '/projects/{username}/domains/{domain}/visitors/{dimension}';
     }
 
     /**
@@ -42,6 +42,19 @@ class ProjectUsageTool extends ApiTool
     {
         return [
             'username',
+            'domain',
+            'dimension',
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function queryParams(): array
+    {
+        return [
+            'start',
+            'end',
         ];
     }
 
@@ -62,6 +75,10 @@ class ProjectUsageTool extends ApiTool
     {
         return [
             'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'domain' => $schema->string()->required(),
+            'dimension' => $schema->string()->description('One of: pages, countries, continents, regions, referrers, os, browsers.')->required(),
+            'start' => $schema->string()->description('Example: 2026-09-01.')->required(),
+            'end' => $schema->string()->description('Example: 2026-09-30.')->required(),
         ];
     }
 }

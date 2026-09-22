@@ -10,6 +10,8 @@ users/*
 version
 crt
 awstats-config
+awstats-data
+*.mmdb
 litespeed-config
 webserver-logs
 pureftpd

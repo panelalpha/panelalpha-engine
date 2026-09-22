@@ -19,8 +19,8 @@ Throughout this page, `{project}` means the project's name - the value shown as 
 | Command | What it does |
 |---|---|
 | `pae configure` | Opens the menu: pick what to configure, do it, come back for the next thing. |
-| `pae configure mcp` | Skips the menu and goes straight to ticking what a connected AI assistant may use. |
-| `pae configure tokens` | Limits one assistant's token to some of those commands, leaving the others alone. |
+| `pae configure mcp-tokens` | Connect an assistant, or change what assistants may use. |
+| `pae configure api-tokens` | Mint a token for your own software, and limit it to part of the API. |
 | `pae configure mcp --dry-run` | Shows what it would write, and writes nothing. |
 
 The first menu asks which part of the engine you want to change; today that is the assistant's commands, and the list grows as more of the engine moves in here. Choosing it opens its own menu:
@@ -200,6 +200,16 @@ Setup: [Create a token](../04-connecting-your-ai/create-a-token.md).
 |---|---|
 | `pae project:file:upload {project} {file} --path=` | Copies a local file into the project. |
 | `pae project:file:download {project} --path= --out=` | Fetches one file out of the project. |
+| `pae project:usage {project}` | Resource usage, including this month's transfer against the bandwidth limit. |
+| `pae project:bandwidth {project} --start= --end= --group-by=day` | Transfer series for the project, in bytes. |
+| `pae project:domain:bandwidth {project} {domain} --start= --end=` | Transfer series for one hostname. |
+| `pae project:domain:visitors {project} {domain} --start= --end=` | Visitor overview for one hostname (`domain_visitors`). Daily hits and visits clip to the range; unique visitors and session length are calendar months. |
+| `pae project:domain:visitors-breakdown {project} {domain} {dimension} --start= --end=` | Visitor breakdown (`domain_visitors_breakdown`): pages, countries, continents, regions, referrers, os, or browsers. Month grain. |
+| `pae geolocation:database update` | Downloads the local City MMDB used for country / continent / region. Not scheduled. Geo lists stay empty until this has run. `--accept-terms` for scripts; `--force` to replace this month's file. |
+
+Access-log ingest uses AWStats `LogFormat=1` (NCSA combined). LiteSpeed and OpenLiteSpeed vhost access logs use that same combined layout, so every current webserver variant shares this format.
+
+Country charts still need a visible [DB-IP](https://db-ip.com) backlink: [Visitor statistics](../05-capabilities/visitor-statistics.md).
 
 ## Security
 

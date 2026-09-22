@@ -2,12 +2,19 @@
 
 namespace App\Providers;
 
+use App\Integrations\GeoLocation\DbIp;
+use App\Integrations\GeoLocation\GeoLocation;
+use App\Integrations\Statistics\Awstats;
+use App\Integrations\Statistics\Statistics;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Models\PersonalAccessToken;
+use App\System;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
 use Illuminate\Http\Request;
 use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
 use Laravel\Sanctum\Sanctum;
 
 class AppServiceProvider extends ServiceProvider
@@ -33,6 +40,27 @@ class AppServiceProvider extends ServiceProvider
         // The same lifetime for the same reason, one question earlier: not
         // which commands this deploy runs, but which recipe it runs them from.
         $this->app->singleton(RecipeChoiceContext::class);
+
+        $this->app->singleton(GeoLocation::class, function (Application $app) {
+            $driver = (string) config('geolocation.driver', 'dbip');
+
+            return match ($driver) {
+                'dbip' => new DbIp($app->make(System::class)->engineDirPath()),
+                default => throw new InvalidArgumentException(
+                    "Unknown geolocation driver [{$driver}].",
+                ),
+            };
+        });
+
+        $this->app->singleton(Statistics::class, function (Application $app) {
+            $root = $app->make(System::class)->engineDirPath();
+
+            return new Awstats(
+                $root . '/awstats-data',
+                $root . '/awstats-config',
+                $app->make(GeoLocation::class),
+            );
+        });
     }
 
     public function boot()

@@ -1,0 +1,3 @@
+# Empty AWStats file: no DAY section.
+BEGIN_GENERAL 0
+END_GENERAL

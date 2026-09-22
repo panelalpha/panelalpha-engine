@@ -50,6 +50,10 @@ return [
     'PUT /projects/{username}/suspend' => 'project_suspend',
     'PUT /projects/{username}/unsuspend' => 'project_unsuspend',
     'GET /projects/{username}/usage' => 'project_usage',
+    'GET /projects/{username}/bandwidth' => 'project_bandwidth',
+    'GET /projects/{username}/domains/{domain}/bandwidth' => 'domain_bandwidth',
+    'GET /projects/{username}/domains/{domain}/visitors' => 'domain_visitors',
+    'GET /projects/{username}/domains/{domain}/visitors/{dimension}' => 'domain_visitors_breakdown',
 
     // Deploy
     'POST /projects/{username}/deploy-cancel' => 'deploy_cancel',
@@ -214,17 +218,10 @@ return [
     // ref gets the plaintext. `status` is what an agent polls to wait for the
     // paste; `delete` is cleanup. The secret itself is never returned by any
     // of these.
-    //
-    // `create` with `scope: global` stores the engine's own secret of a type
-    // instead -- pasted once, used by every project that has none of its own,
-    // so an agent stops asking for the same Git token at every project. The
-    // `config` pair is the switch that governs whether projects inherit it.
     'POST /vault/secrets' => 'vault_secret_create',
     'GET /vault/secrets' => 'vault_secret_list',
     'GET /vault/secrets/{ref}' => 'vault_secret_status',
     'DELETE /vault/secrets/{ref}' => 'vault_secret_delete',
-    'GET /vault/config' => 'vault_config_get',
-    'PUT /vault/config' => 'vault_config_set',
 
     // System
     // Files a bug against the engine over the telemetry channel. `create`

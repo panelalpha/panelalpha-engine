@@ -2,6 +2,7 @@
 
 namespace App\System\Project;
 
+use App\Integrations\Statistics\Statistics;
 use App\Lib\HttpAcmeChallengeStore;
 use App\Lib\Ssl\CertificateFacts;
 use App\Lib\Ssl\CertificateStatus;
@@ -50,6 +51,7 @@ class Domain implements IssuableDomain
 
             $this->hostWebserver()->addDomain($this->model);
             $this->hostWebserver()->reload(false);
+            $this->syncStatisticsConfig();
         } catch (\Exception $e) {
             // Cleanup is best-effort; its own failure must not replace the error that caused it.
             try {
@@ -91,6 +93,8 @@ class Domain implements IssuableDomain
                 "ProxyRule cleanup during domain delete failed for {$this->model->domain}: " . $e->getMessage()
             );
         }
+
+        $this->forgetStatistics();
 
         $this->hostWebserver()->deleteDomainConfig($this->model->domain);
         if (!config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
@@ -510,6 +514,44 @@ class Domain implements IssuableDomain
             } catch (\Exception $e) {
             }
         }
+    }
+
+    private function syncStatisticsConfig(): void
+    {
+        try {
+            $this->statistics()->configureDomain(
+                $this->model->domain,
+                $this->model->getAliases(),
+                $this->hostAccessLogDirectory(),
+            );
+        } catch (\Throwable $e) {
+            Log::warning(
+                "Statistics configure failed for {$this->model->domain}: " . $e->getMessage()
+            );
+        }
+    }
+
+    private function forgetStatistics(): void
+    {
+        try {
+            $this->statistics()->forgetDomain($this->model->domain);
+        } catch (\Throwable $e) {
+            Log::warning(
+                "Statistics cleanup during domain delete failed for {$this->model->domain}: " . $e->getMessage()
+            );
+        }
+    }
+
+    private function statistics(): Statistics
+    {
+        return app(Statistics::class);
+    }
+
+    private function hostAccessLogDirectory(): string
+    {
+        $webserver = $this->system()->webserver()->getCurrentWebserver();
+
+        return $this->system()->engineDirPath() . '/webserver-logs/' . $webserver . '/' . $this->model->domain;
     }
 
     private function hostWebserver(): WebserverInterface

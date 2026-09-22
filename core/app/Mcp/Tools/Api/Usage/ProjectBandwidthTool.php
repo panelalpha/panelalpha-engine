@@ -13,17 +13,17 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
-#[Name('project_usage')]
+#[Name('project_bandwidth')]
 #[Description(<<<'MARKDOWN'
-    Get resource usage for a project
+    Get bandwidth time series for a project
 
-    Includes this calendar month's transfer as bandwidth.usage (bytes) against bandwidth.maximum (the project bandwidth_limit in bytes, or null when unlimited).
+    Values are bytes. Project transfer is the sum of that project's domains. Missing AWStats data is an empty object, not an error.
 
-    Calls GET /api/projects/{username}/usage.
+    Calls GET /api/projects/{username}/bandwidth.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
-class ProjectUsageTool extends ApiTool
+class ProjectBandwidthTool extends ApiTool
 {
     protected function method(): string
     {
@@ -32,7 +32,7 @@ class ProjectUsageTool extends ApiTool
 
     protected function path(): string
     {
-        return '/projects/{username}/usage';
+        return '/projects/{username}/bandwidth';
     }
 
     /**
@@ -42,6 +42,18 @@ class ProjectUsageTool extends ApiTool
     {
         return [
             'username',
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function queryParams(): array
+    {
+        return [
+            'start',
+            'end',
+            'group_by',
         ];
     }
 
@@ -62,6 +74,9 @@ class ProjectUsageTool extends ApiTool
     {
         return [
             'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'start' => $schema->string()->description('Example: 2026-09-01.')->required(),
+            'end' => $schema->string()->description('Example: 2026-09-30.')->required(),
+            'group_by' => $schema->string()->description('One of: day, month.')->required(),
         ];
     }
 }

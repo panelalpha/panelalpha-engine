@@ -339,7 +339,7 @@ pae mcp:tool:list
 | [PHP](#php) | `php` | On | 3 |
 | [Containers](#containers) | `containers` | On | 5 |
 | [App users](#app-users) | `appusers` | On | 9 |
-| [Usage](#usage) | `usage` | On | 1 |
+| [Usage](#usage) | `usage` | On | 5 |
 | [WP-CLI](#wp-cli) | `wpcli` | On | 1 |
 | [Deploy](#deploy) | `deploy` | On | 4 |
 | [Proxy rules](#proxy-rules) | `proxyrules` | On | 5 |
@@ -545,7 +545,11 @@ pae mcp:tool:list
 
 | Tool | What it does |
 |---|---|
-| `project_usage` | Get resource usage for a user |
+| `project_usage` | Resource usage for a project, including this month's transfer vs the bandwidth limit |
+| `project_bandwidth` | Project transfer over a date range (`start`, `end`, `group_by` day or month), in bytes |
+| `domain_bandwidth` | Transfer over a date range for one domain |
+| `domain_visitors` | Visitor overview for a domain. `start`/`end` clip daily hits and visits; unique visitors, session length, and breakdowns are overlapping calendar months. Period aliases such as last-week stay in the client. |
+| `domain_visitors_breakdown` | Visitor breakdown by pages, countries, continents, regions, referrers, os, or browsers (month grain) |
 
 ## WP-CLI
 
