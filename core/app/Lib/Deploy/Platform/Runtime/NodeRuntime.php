@@ -318,7 +318,9 @@ final class NodeRuntime implements Runtime
             }
         }
 
-        return false;
+        // 4. A dependency npm has to clone before anything of the project's
+        //    own runs.
+        return self::installsFromGit($context, $dependencies);
     }
 
     /**
@@ -333,13 +335,65 @@ final class NodeRuntime implements Runtime
      */
     private static function invokesGit(string $text): bool
     {
-        // The word git, then whitespace, then a subcommand: the subcommand
-        // anchor keeps `digit-check` and `.gitignore` out.
+        // The word git, then any global options, then a subcommand: the
+        // subcommand anchor keeps `digit-check` and `.gitignore` out.
+        //
+        // The options are not optional detail. `git -C /app submodule update`
+        // and `git -c safe.directory=/app submodule update` are the engine's
+        // own idiom -- System/Project/Git.php spells both -- so a recipe
+        // author who copies how the engine invokes git wrote exactly the form
+        // this could not see. The build then ran on node:*-slim, which has no
+        // git, and died as `npm error syscall spawn git`: a message naming
+        // neither the missing binary nor the image choice.
         return preg_match(
-            '/(?:^|[\s\'"&|;(=\[`])git\s+(?:rev-parse|log|describe|show|status|diff|branch|tag|config|ls-files|archive|submodule)\b/',
+            '/(?:^|[\s\'"&|;(=\[`])git(?:\s+' . self::GIT_GLOBAL_OPTION . ')*'
+            . '\s+(?:rev-parse|log|describe|show|status|diff|branch|tag|config|ls-files|archive|submodule)\b/',
             $text
         ) === 1;
     }
+
+    /**
+     * A git option that may sit between `git` and its subcommand.
+     *
+     * `-c` takes `key=value` and `-C` a path, with or without a space between
+     * flag and value, so `\s*\S+` covers both spellings of each.
+     */
+    private const GIT_GLOBAL_OPTION =
+        '(?:-[cC]\s*\S+|--(?:git-dir|work-tree|exec-path|namespace)=\S+|--no-pager|--bare|-[pP])';
+
+    /**
+     * Does any declared dependency resolve over git?
+     *
+     * A different route to the same failure, and the one tine arrived by: ten
+     * of its dependencies are `git+ssh://git@github.com/...` in
+     * npm-shrinkwrap.json, so `npm install` itself shells out to git before a
+     * single script runs. No script mentions git, so the checks above see
+     * nothing, and the install fails with `git dep preparation failed`.
+     */
+    private static function installsFromGit(ProjectContext $context, array $dependencies): bool
+    {
+        foreach (['dependencies', 'devDependencies', 'optionalDependencies'] as $section) {
+            foreach ((array) ($dependencies[$section] ?? []) as $spec) {
+                if (is_string($spec) && preg_match('#^(?:git\+|git://|github:|bitbucket:|gitlab:)#', $spec) === 1) {
+                    return true;
+                }
+            }
+        }
+
+        // The specs above are what the manifest says; a lockfile is what the
+        // install will actually fetch, and a transitive git dependency only
+        // appears there. Read whole -- they are large, and this runs once per
+        // build decision.
+        foreach (self::LOCKFILES as $lockfile) {
+            $contents = $context->contents($lockfile);
+            if ($contents !== null && str_contains($contents, 'git+')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
 
     /**
      * $tag without `-slim`: the full Debian image, the one that can run

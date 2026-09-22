@@ -29,6 +29,13 @@ final class SourceRecipes
     /** @var array<string, list<PlatformManifest>> */
     private static array $allCache = [];
 
+    /**
+     * Directories {@see all()} walked past and why, keyed by root then slug.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private static array $skipped = [];
+
     /** Where the shipped directories live: `core/resources/sources/`. */
     public static function defaultDirectory(): string
     {
@@ -228,8 +235,11 @@ final class SourceRecipes
      * Every recipe the tree declares, in path order. Only id lookups and the
      * contract tests walk it; a deploy reads one directory.
      *
+     * A directory it cannot read is skipped and recorded in {@see skipped()},
+     * not thrown: this walk stands behind findById(), so one malformed
+     * directory used to take every app on the host with it.
+     *
      * @return list<PlatformManifest>
-     * @throws ManifestException
      */
     public static function all(?string $directory = null): array
     {
@@ -240,8 +250,24 @@ final class SourceRecipes
 
         $manifests = [];
         $seen = [];
+        $skipped = [];
         foreach (self::directories($root) as $slug => $dir) {
-            $manifest = self::at($dir, $slug);
+            // A directory this cannot read breaks its own app, not the
+            // registry. `at()` throwing is right when a caller named that
+            // repository -- silence there would hide a typo -- but `all()` is
+            // walked by findById(), so every deploy and every health report on
+            // the host went down with one malformed directory, naming an
+            // application the reader had never heard of. Twice in one day:
+            // once for a write-up committed without a manifest, once for the
+            // window between `mkdir` and writing panelalpha.yaml while a
+            // recipe was being written.
+            try {
+                $manifest = self::at($dir, $slug);
+            } catch (ManifestException $e) {
+                $skipped[$slug] = $e->getMessage();
+                error_log('panelalpha: skipping recipe directory ' . $dir . ': ' . $e->getMessage());
+                continue;
+            }
             if ($manifest === null) {
                 continue;
             }
@@ -257,7 +283,28 @@ final class SourceRecipes
             $manifests[] = $manifest;
         }
 
+        self::$skipped[$root] = $skipped;
+
         return self::$allCache[$root] = $manifests;
+    }
+
+    /**
+     * What the last {@see all()} over this tree could not read, slug => reason.
+     *
+     * Skipping without saying so would turn a loud failure into a silent one,
+     * which is the other way to get this wrong. Deploying the malformed app
+     * itself still fails, through {@see at()} on its own path.
+     *
+     * @return array<string, string>
+     */
+    public static function skipped(?string $directory = null): array
+    {
+        $root = rtrim($directory ?? self::defaultDirectory(), '/');
+        if (!isset(self::$skipped[$root])) {
+            self::all($root);
+        }
+
+        return self::$skipped[$root] ?? [];
     }
 
     /**
@@ -293,6 +340,7 @@ final class SourceRecipes
     {
         self::$cache = [];
         self::$allCache = [];
+        self::$skipped = [];
     }
 
     /** @return list<string> directory names, `_` and `.` entries skipped */

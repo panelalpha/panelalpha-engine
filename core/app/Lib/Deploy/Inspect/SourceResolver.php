@@ -133,6 +133,7 @@ final class SourceResolver
             }
 
             $this->run($command, 'Could not clone the repository', $root);
+            $this->initSubmodules($target, $askPass);
         } catch (\Throwable $e) {
             (new ResolvedSource(self::TYPE_GIT, $repoUrl, $root, [], $root))->release();
             throw $e;
@@ -317,6 +318,50 @@ final class SourceResolver
      * @param ?string $redact a path that must not appear in the error message
      * @throws InspectException
      */
+    /**
+     * Fetch submodules, the way the deploy path already does.
+     *
+     * The two clones disagreed about this, and the disagreement was visible to
+     * an operator: for a meta repository whose application lives in a
+     * submodule, inspect saw empty directories, found no composer.json and no
+     * .php anywhere, and answered `deployable: false` with
+     * "Runtime 'php' is required but could not be resolved" — while the very
+     * next deploy of the same URL with the same recipe came up in 120 s
+     * (ESMira, supported-apps#1216).
+     *
+     * Guarded on `.gitmodules`, so a repository without submodules — nearly
+     * all of them — pays one stat. Best effort: a submodule that needs a
+     * credential this request does not have leaves the parent checkout as it
+     * was, which is strictly better than the empty directories, and never
+     * turns a readable repository into a failed inspect.
+     */
+    private function initSubmodules(string $target, ?string $askPass): void
+    {
+        if (!is_file($target . '/.gitmodules')) {
+            return;
+        }
+
+        $command = [
+            'git',
+            '-c', 'safe.directory=*',
+            '-c', 'credential.helper=',
+            '-c', 'core.askpass=',
+            '-C', $target,
+            // Shallow, to match the --depth=1 clone: inspect reads a tree, not
+            // a history. Measured on ESMira at 3.9 s / 11.8 MB.
+            'submodule', 'update', '--init', '--recursive', '--depth=1',
+        ];
+        if ($askPass !== null) {
+            $command = GitUrl::withAskPass($command, $askPass);
+        }
+
+        try {
+            $this->run($command, 'Could not fetch submodules', $target);
+        } catch (InspectException) {
+            // Deliberately swallowed -- see the docblock.
+        }
+    }
+
     private function run(array $command, string $failure, ?string $redact = null): void
     {
         $process = new Process($command, null, [

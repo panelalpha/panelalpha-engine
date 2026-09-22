@@ -204,6 +204,14 @@ class SourceRecipeTest extends TestCase
     {
         $recipes = SourceRecipes::all();
 
+        // `all()` skips what it cannot read so that one malformed directory
+        // does not take every app on a live host with it. Here, where the tree
+        // is the shipped one, a skip is a defect: this is the strict pass.
+        $this->assertSame(
+            [],
+            SourceRecipes::skipped(),
+            'a shipped recipe directory could not be read'
+        );
         $this->assertNotEmpty($recipes, 'resources/sources/ shipped no recipes');
         foreach ($recipes as $recipe) {
             $this->assertNotSame('', $recipe->id);

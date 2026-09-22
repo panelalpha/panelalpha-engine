@@ -66,6 +66,13 @@ class ProjectEnvironment
                 $logger?->info("Replaced the published placeholder in {$key} from .env.example with a generated secret");
             }
             $baseContents = $this->withoutComposeDefaultedKeys($baseContents);
+            [$baseContents, $blanks] = self::withoutTemplatePlaceholders($baseContents, $overrides);
+            if ($blanks !== []) {
+                $logger?->info(
+                    'Left to the image, which sets them: .env.example had blanks to fill in for '
+                    . implode(', ', $blanks)
+                );
+            }
             $source = '.env.example';
         }
 
@@ -262,6 +269,52 @@ class ProjectEnvironment
         return $generated === []
             ? [$contents, []]
             : [EnvFile::merge($contents, $generated), array_keys($generated)];
+    }
+
+    /**
+     * Blanks in a `.env.example` that were never meant to be a value.
+     *
+     * The same mechanism as {@see deferToComposeDefaults()} and the opposite
+     * direction from {@see withoutPublishedSecrets()}: the copied file reaches
+     * the container through `env_file:`, which beats the image's own `ENV`, so
+     * a template's fill-in-the-blank silently overrides a working default the
+     * image author set.
+     *
+     * Homarr is the case. Its image ships `ENV DB_URL=/appdata/db/db.sqlite`;
+     * its `.env.example` says `DB_URL=FULL_PATH_TO_YOUR_SQLITE_DB_FILE`. The
+     * copy won, `run.sh` migrated into a file literally called that, the
+     * Next.js server chdir'd and opened a different, empty one, and the
+     * account restart-looped 1026 times in 35 minutes behind a deploy
+     * reported successful.
+     *
+     * Commented rather than deleted, so the file still says what upstream
+     * suggested. Keys the account set itself are left alone -- those are a
+     * person's answer, not a template's blank.
+     *
+     * @param array<string, string> $overrides
+     * @return array{0: string, 1: list<string>} contents, the keys left out
+     */
+    public static function withoutTemplatePlaceholders(string $contents, array $overrides = []): array
+    {
+        $blanks = [];
+        $rows = [];
+        foreach (EnvFile::parse($contents) as $row) {
+            $key = ($row['type'] ?? '') === 'variable' ? (string) ($row['key'] ?? '') : '';
+            if ($key !== '' && !isset($overrides[$key])
+                && ComposePlaceholders::isTemplatePlaceholder((string) ($row['value'] ?? ''))
+            ) {
+                $blanks[] = $key;
+                $rows[] = [
+                    'type' => 'comment',
+                    'text' => '# ' . $key . '=' . (string) ($row['value'] ?? '')
+                        . ' # a blank in .env.example, left to the image',
+                ];
+                continue;
+            }
+            $rows[] = $row;
+        }
+
+        return $blanks === [] ? [$contents, []] : [EnvFile::serialise($rows), $blanks];
     }
 
     private function materializeNestedEnvExamples(string $projectDir, ?string $chown): void

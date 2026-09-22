@@ -20,13 +20,24 @@ final class ProbedResponse
     public function __construct(
         public readonly int $status,
         public readonly string $body,
-        public readonly string $url
+        public readonly string $url,
+        public readonly float $time = 0.0
     ) {
     }
 
     public static function none(string $url = ''): self
     {
         return new self(0, '', $url);
+    }
+
+    /**
+     * Answered faster than the given number of seconds, with a time actually
+     * measured. A proxy 502 with no upstream comes back in ~2ms; no
+     * application-generated 5xx does, which is how the two are told apart.
+     */
+    public function respondedWithin(float $seconds): bool
+    {
+        return $this->time > 0.0 && $this->time < $seconds;
     }
 
     /** Whether anything answered at all. */

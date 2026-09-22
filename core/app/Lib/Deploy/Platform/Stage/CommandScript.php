@@ -41,7 +41,11 @@ final class CommandScript
 
     private function descriptionLine(): ?string
     {
-        return $this->command->description === null ? null : '# ' . $this->command->description;
+        // Prefix every line: a folded multi-line description must stay fully
+        // commented, or a subsequent line lands in the entrypoint as bare shell.
+        return $this->command->description === null
+            ? null
+            : '# ' . str_replace("\n", "\n# ", $this->command->description);
     }
 
     /**

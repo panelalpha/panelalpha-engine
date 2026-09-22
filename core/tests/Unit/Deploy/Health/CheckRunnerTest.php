@@ -55,6 +55,15 @@ class CheckRunnerTest extends TestCase
     }
 
     /**
+     * @return array{serving: string, checks: list<array<string, mixed>>}
+     */
+    private function probeTimed(int $status, string $body, float $time): array
+    {
+        return CheckRunner::for(PlatformManifest::RUNTIME_NGINX)
+            ->run(new ProbedResponse($status, $body, 'http://127.0.0.1:8080/', $time), $this->dir);
+    }
+
+    /**
      * @param array{checks: list<array<string, mixed>>} $report
      * @return array<string, mixed>|null
      */
@@ -179,6 +188,27 @@ class CheckRunnerTest extends TestCase
             CheckResult::STATUS_PASS,
             $this->check($this->probe(401, 'Unauthorized'), 'no-server-error')['status']
         );
+    }
+
+    /**
+     * A fast 502 is the engine's proxy with no upstream, not the app failing:
+     * it must point at `docker logs`, and a slow 5xx must still point at the
+     * application's own log. The tell is response time.
+     */
+    public function test_a_fast_502_blames_the_proxy_and_a_slow_5xx_blames_the_app(): void
+    {
+        $this->write('index.html');
+
+        $proxy = $this->check($this->probeTimed(502, 'Bad Gateway', 0.002), 'no-server-error');
+        $this->assertSame(CheckResult::STATUS_FAIL, $proxy['status']);
+        $this->assertStringContainsString('docker logs', $proxy['fix']);
+        $this->assertStringContainsString('crash-looping', $proxy['detail']);
+        $this->assertStringNotContainsString('Read the application log', $proxy['fix']);
+
+        $app = $this->check($this->probeTimed(500, 'Internal Server Error', 0.4), 'no-server-error');
+        $this->assertSame(CheckResult::STATUS_FAIL, $app['status']);
+        $this->assertSame('Read the application log.', $app['fix']);
+        $this->assertStringContainsString('running container', $app['detail']);
     }
 
     /**

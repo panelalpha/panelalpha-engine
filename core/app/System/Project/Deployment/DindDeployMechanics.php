@@ -9,6 +9,7 @@ use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\Source\GitRepository;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -112,6 +113,7 @@ final class DindDeployMechanics implements DeployMechanics
     public function syncHostingForSourceRebuild(?string $zipPath): void
     {
         $project = $this->aggregate();
+        $this->stopApplicationBeforeWipe();
         $project->prepareLinuxIsolation();
         if ($zipPath !== null && $zipPath !== '') {
             $project->importProjectArchive($zipPath);
@@ -119,11 +121,37 @@ final class DindDeployMechanics implements DeployMechanics
         $project->recreateOuterCompose();
     }
 
+    // prepareLinuxIsolation() clears ~/project and the re-clone lands on a new inode; any
+    // container bind-mounted under the old one (n8n's ./docker, and every recipe shipping
+    // overrides/) keeps reading the now-unlinked directory unless it's stopped first.
+    private function stopApplicationBeforeWipe(): void
+    {
+        $app = $this->dind->app();
+        if ($app === null) {
+            return;
+        }
+
+        $warn = $this->aggregate()->isRunning();
+
+        $result = $app->projectAction('down');
+        if ($result['exit_code'] === 0 || !$warn) {
+            return;
+        }
+
+        Log::warning(
+            "Could not stop the app before the wipe rebuild of {$this->user()->username}: "
+            . trim($result['stderr'] ?: $result['stdout']),
+        );
+    }
+
     public function ingestForWipeRebuild(?string $zipPath): void
     {
         if ($this->user()->hasGitProject() && ($zipPath === null || $zipPath === '')) {
             $this->dind->preCheckFromSources();
             (new GitRepository($this->dind))->cloneConfiguredRepository();
+            // Re-clone lands on the same ~/project the wipe just cleared; bootstrap it
+            // like ingestApplicationSource() does, or the app config's files never come back.
+            $this->dind->prepareFromSources();
         } else {
             $this->dind->prepareFromSources();
         }

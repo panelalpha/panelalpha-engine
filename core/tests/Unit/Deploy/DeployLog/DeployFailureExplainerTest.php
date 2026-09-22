@@ -413,6 +413,64 @@ OUT;
         $this->assertSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule']);
     }
 
+    /**
+     * A duplicate slug is invisible: PHP keeps the last one and the earlier
+     * rule simply stops existing, with no error anywhere. `git-binary-missing`
+     * was nearly given a second entry, which would have deleted the first.
+     */
+    public function test_no_rule_slug_is_declared_twice(): void
+    {
+        $source = file_get_contents(
+            __DIR__ . '/../../../../app/Lib/Deploy/DeployLog/DeployFailureExplainer.php'
+        );
+        $this->assertIsString($source);
+
+        preg_match_all("/^\s+'([a-z0-9-]+)' => \[/m", $source, $matches);
+        $declared = $matches[1];
+
+        $this->assertSame(
+            [],
+            array_values(array_diff_assoc($declared, array_unique($declared))),
+            'a duplicate slug silently replaces the rule above it'
+        );
+        $this->assertSame(count($declared), count(DeployFailureExplainer::ruleIds()));
+    }
+
+    /**
+     * tine's failure, which named npm and nothing else. The image is picked
+     * from what the project declares, so the reader needs to be told that is
+     * what went wrong -- 149 s of build otherwise ends in a message about a
+     * dependency.
+     */
+    public function test_a_missing_git_binary_is_explained(): void
+    {
+        $output = "npm error code 1\n"
+            . "npm error syscall spawn git\n"
+            . 'npm error git dep preparation failed';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('git-binary-missing', $match['rule']);
+        $this->assertStringContainsString('git binary', $match['message']);
+    }
+
+    /** The shell's wording for the same thing, from a build script. */
+    public function test_the_shells_wording_for_a_missing_git_is_explained(): void
+    {
+        $this->assertSame(
+            'git-binary-missing',
+            DeployFailureExplainer::match("/bin/sh: 1: git: not found\n")['rule']
+        );
+    }
+
+    /** An ordinary mention of git is not a missing binary. */
+    public function test_a_build_that_merely_runs_git_does_not_match(): void
+    {
+        $match = DeployFailureExplainer::match('Cloning into \'app\'... git rev-parse HEAD');
+
+        $this->assertNotSame('git-binary-missing', $match['rule'] ?? null);
+    }
+
     /** A build that merely mentions Python is not a toolchain failure. */
     public function test_an_ordinary_python_mention_does_not_match(): void
     {
@@ -583,5 +641,85 @@ OUT;
         $this->assertStringContainsString('Poetry application', $match['message'] ?? '');
         // The specific rule has to beat the generic exit-code fallback.
         $this->assertStringContainsString('no-root', $match['message'] ?? '');
+    }
+
+    /**
+     * engine#235. A compose that builds the app image to a local tag and has a
+     * sibling reference it makes `docker compose up` PULL that tag first: it
+     * fails with a benign `failed to resolve reference ... not found`, then
+     * builds it (`naming to ... done`). The container then dies on a missing
+     * entrypoint -- Limbas (supported-apps#1195) -- and that, not the benign
+     * pull, is the cause the reader needs.
+     */
+    public function test_a_missing_entrypoint_wins_over_the_benign_local_build_pull(): void
+    {
+        $output = <<<'OUT'
+ limbas-local Pulling
+ limbas-local Warning  failed to resolve reference "docker.io/library/limbas-local:latest": docker.io/library/limbas-local:latest: not found
+#1 [internal] load build definition from panelalpha.Dockerfile
+#8 naming to docker.io/library/limbas-local:latest done
+ Container limbas-app  Created
+ Container limbas-app  Starting
+Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: exec: "docker-entrypoint.sh": executable file not found in $PATH: unknown
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('container-entrypoint-missing', $match['rule'] ?? null);
+        $this->assertStringContainsString('docker-entrypoint.sh', $match['message'] ?? '');
+        $this->assertStringNotContainsString('base image', (string) DeployFailureExplainer::explain($output));
+    }
+
+    /**
+     * The same shape with a one-shot exiting non-zero rather than a bad
+     * entrypoint -- Bitpoll (supported-apps#1085), whose init container exits 1.
+     */
+    public function test_a_one_shot_exit_wins_over_the_benign_local_build_pull(): void
+    {
+        $output = <<<'OUT'
+ bitpoll-local Pulling
+ bitpoll-local Warning  failed to resolve reference "docker.io/library/bitpoll-local:latest": docker.io/library/bitpoll-local:latest: not found
+#12 naming to docker.io/library/bitpoll-local:latest done
+ Container bitpoll-init-1  Created
+ Container bitpoll-init-1  Starting
+ Container bitpoll-init-1  Error
+dependency failed to start: container bitpoll-init-1 exited (1)
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('container-start-failed', $match['rule'] ?? null);
+        $this->assertStringContainsString('exited with code 1', $match['message'] ?? '');
+        $this->assertStringNotContainsString('base image', (string) DeployFailureExplainer::explain($output));
+    }
+
+    /**
+     * A base image that really is missing -- nothing in the log builds that tag
+     * (no `naming to`) -- still reads as base-image-unavailable.
+     */
+    public function test_a_genuinely_missing_base_image_is_still_base_image_unavailable(): void
+    {
+        $output = <<<'OUT'
+ someapp Pulling
+ someapp Warning  failed to resolve reference "ghcr.io/acme/someapp:1.4.2": ghcr.io/acme/someapp:1.4.2: not found
+Error response from daemon: failed to resolve reference "ghcr.io/acme/someapp:1.4.2": not found
+OUT;
+
+        $this->assertSame('base-image-unavailable', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    /**
+     * The benign local-build pull on its own must not claim a missing base
+     * image: a lower-ranked generic failure has to surface instead.
+     */
+    public function test_the_benign_local_build_pull_does_not_mask_a_lower_ranked_failure(): void
+    {
+        $output = <<<'OUT'
+ foo-local Warning  failed to resolve reference "docker.io/library/foo-local:latest": docker.io/library/foo-local:latest: not found
+#9 naming to docker.io/library/foo-local:latest done
+failed to solve: process "/bin/sh -c some-post-step" did not complete successfully: exit code: 1
+OUT;
+
+        $this->assertSame('build-step-failed', DeployFailureExplainer::match($output)['rule'] ?? null);
     }
 }

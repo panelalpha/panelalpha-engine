@@ -115,6 +115,32 @@ class HostScriptTest extends TestCase
         $this->assertSame(0, $code, 'generated script is not valid bash: ' . implode("\n", $output));
     }
 
+    /**
+     * A folded multi-line description must be commented on every line, or its
+     * later lines land in the host script as bare shell (engine#198).
+     */
+    public function test_a_multiline_description_is_fully_commented(): void
+    {
+        $script = HostScript::render(
+            $this->manifest([[
+                'id' => 'prep',
+                'stage' => 'prepare',
+                'run' => 'echo prep',
+                'description' => "Prepare the account.\n\nRuns once per deploy.",
+            ]]),
+            PlatformStage::PREPARE
+        );
+
+        $this->assertStringContainsString("# Prepare the account.\n# \n# Runs once per deploy.", $script);
+
+        $tmp = tempnam(sys_get_temp_dir(), 'hostscript');
+        file_put_contents($tmp, $script);
+        exec('bash -n ' . escapeshellarg($tmp) . ' 2>&1', $output, $code);
+        unlink($tmp);
+
+        $this->assertSame(0, $code, 'generated script is not valid bash: ' . implode("\n", $output));
+    }
+
     public function test_a_container_stage_is_refused(): void
     {
         $this->expectException(\InvalidArgumentException::class);

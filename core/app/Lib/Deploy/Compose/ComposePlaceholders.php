@@ -224,8 +224,68 @@ class ComposePlaceholders
 
         return in_array($value, self::PUBLISHED_SECRET_VALUES, true)
             || preg_match('/^x{3,}$/', $value) === 1
-            || preg_match('/^(django-)?insecure/', $value) === 1;
+            || preg_match('/^(django-)?insecure/', $value) === 1
+            // One character repeated: the shape a template uses when the key
+            // has to be a fixed length. Homarr's SECRET_ENCRYPTION_KEY is 64
+            // zeroes, which is valid 32-byte hex, so its own validation
+            // accepts it and nothing anywhere fails -- every deploy would
+            // encrypt its stored integration credentials under a value
+            // published in the upstream repository. Nothing that is actually
+            // a secret is one character repeated.
+            || preg_match('/^(.)\1{7,}$/', $value) === 1;
     }
+
+    /**
+     * A value that is a blank to fill in rather than a value.
+     *
+     * Only ever asked of a `.env.example`, which is by convention a template
+     * of things the operator must replace -- that is what the suffix means.
+     * Treating one as runtime configuration inverts its purpose, and doing so
+     * through `env_file:` puts it *above* the image's own ENV: Homarr's image
+     * ships `DB_URL=/appdata/db/db.sqlite` and its template says
+     * `DB_URL=FULL_PATH_TO_YOUR_SQLITE_DB_FILE`, so the account ran with the
+     * blank. The migration wrote `/app/FULL_PATH_TO_YOUR_SQLITE_DB_FILE` and
+     * the server opened a different, empty one: `no such table: session`,
+     * 1026 restarts in 35 minutes, behind a deploy reported successful.
+     *
+     * Deliberately narrow. A placeholder here is either bracketed, or an
+     * all-caps sentence in snake case carrying a word that says "fill me in"
+     * -- so `LOG_LEVEL=DEBUG`, `APP_ENV=production` and `TZ=UTC` are values,
+     * not blanks. Being wrong in the other direction costs an override the
+     * image would have supplied anyway; being wrong this way is what it was
+     * doing already.
+     */
+    public static function isTemplatePlaceholder(string $value): bool
+    {
+        $value = trim(trim($value), '"\'');
+        if ($value === '') {
+            return false;
+        }
+
+        // <your-token>, {{TOKEN}}, [TOKEN] -- unambiguous in any casing.
+        if (preg_match('/^(<.+>|\{\{.+\}\}|\[.+\])$/', $value) === 1) {
+            return true;
+        }
+
+        // An all-caps snake-case phrase, which is a sentence rather than a
+        // value: at least one underscore, no lowercase, nothing but word
+        // characters. `DEBUG` and `UTC` do not qualify on the underscore.
+        if (preg_match('/^[A-Z0-9]+(_[A-Z0-9]+)+$/', $value) !== 1) {
+            return false;
+        }
+
+        return preg_match(self::PLACEHOLDER_WORD_PATTERN, $value) === 1;
+    }
+
+    /**
+     * The words that turn an all-caps phrase into an instruction.
+     *
+     * `PATH_TO` rather than `PATH`, because `DEFAULT_PATH` is a value and
+     * `FULL_PATH_TO_YOUR_DB` is not.
+     */
+    private const PLACEHOLDER_WORD_PATTERN =
+        '/(^|_)(YOUR|YOURS|CHANGE|CHANGEME|REPLACE|TODO|FIXME|PLACEHOLDER|INSERT|ENTER|SOME)(_|$)'
+        . '|PATH_TO|_HERE$|^XXX/';
 
     /** Seeded by key name, so it survives redeploys; APP_KEY gets Laravel's format. */
     public static function publishedSecret(string $key, string $seed): string

@@ -56,4 +56,87 @@ class DindDeployMechanicsTest extends TestCase
         $this->assertStringContainsString('recreateOuterCompose', $source);
         $this->assertStringContainsString('importProjectArchive', $source);
     }
+
+    // The bare "prepareFromSources appears somewhere" assertion above stays green even if the
+    // git-clone branch of ingestForWipeRebuild forgets to bootstrap, because the else branch and
+    // reprepareApplicationFromCheckout() also call it. Check the git branch specifically.
+    public function test_wipe_rebuild_bootstraps_the_checkout_after_recloning_it(): void
+    {
+        $source = file_get_contents(
+            $this->coreAppRoot . '/System/Project/Deployment/DindDeployMechanics.php'
+        );
+
+        $body = self::methodBody($source, 'ingestForWipeRebuild');
+
+        $branchStart = strpos($body, 'if (');
+        $branchEnd = strpos($body, '} else {');
+        $this->assertNotFalse($branchStart, 'ingestForWipeRebuild no longer branches.');
+        $this->assertNotFalse($branchEnd, 'ingestForWipeRebuild no longer branches.');
+
+        $gitBranch = substr($body, $branchStart, $branchEnd - $branchStart);
+
+        $this->assertStringContainsString(
+            'cloneConfiguredRepository',
+            $gitBranch,
+            'The wipe rebuild branch is expected to re-clone the repository.'
+        );
+        $this->assertStringContainsString(
+            'prepareFromSources',
+            $gitBranch,
+            'ingestForWipeRebuild re-clones over the directory the app config wrote into '
+            . 'but never bootstraps the checkout again.'
+        );
+    }
+
+    // A wipe rebuild deletes ~/project while containers may still be bind-mounted under it;
+    // the app must be stopped first or those mounts go stale.
+    public function test_wipe_rebuild_stops_the_app_before_deleting_its_directory(): void
+    {
+        $source = file_get_contents(
+            $this->coreAppRoot . '/System/Project/Deployment/DindDeployMechanics.php'
+        );
+
+        $body = self::methodBody($source, 'syncHostingForSourceRebuild');
+        $this->assertNotSame('', $body, 'syncHostingForSourceRebuild() is the wipe step; it should still exist.');
+
+        $stopAt = strpos($body, 'stopApplicationBeforeWipe');
+        $this->assertNotFalse($stopAt, 'syncHostingForSourceRebuild() should stop the app before clearing ~/project.');
+
+        $isolationAt = strpos($body, 'prepareLinuxIsolation');
+        $this->assertNotFalse($isolationAt, 'prepareLinuxIsolation missing from the wipe step.');
+        $this->assertLessThan(
+            $isolationAt,
+            $stopAt,
+            'The app has to be stopped before the project directory is cleared.'
+        );
+
+        $stop = self::methodBody($source, 'stopApplicationBeforeWipe');
+        $this->assertStringContainsString("'down'", $stop, 'The pre-wipe stop should bring the inner compose project down.');
+        $this->assertStringNotContainsString(
+            "'-v'",
+            $stop,
+            "The pre-wipe stop must not pass -v; that removes the account's named volumes."
+        );
+    }
+
+    // Ends at the next method of any visibility, so a private method after the target
+    // doesn't get swallowed into the body and pass an assertion for the wrong reason.
+    private static function methodBody(string $source, string $method): string
+    {
+        $start = strpos($source, "function {$method}(");
+        if ($start === false) {
+            return '';
+        }
+
+        preg_match(
+            '/\n    (?:public|protected|private)(?: static)? function /',
+            $source,
+            $match,
+            PREG_OFFSET_CAPTURE,
+            $start + 10
+        );
+        $end = $match[0][1] ?? false;
+
+        return $end === false ? substr($source, $start) : substr($source, $start, $end - $start);
+    }
 }
