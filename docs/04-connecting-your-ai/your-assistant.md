@@ -35,32 +35,26 @@ Read this before you paste a token anywhere.
 ### The quick way: let the engine ask
 
 ```bash
-pae configure mcp
+pae configure mcp-tokens
 ```
 
-What this does: shows the assistant's commands as checkboxes — whole groups, or one group's commands at a time — and one setting for how far a ticked command may go. Tick what the assistant may use, untick what it may not, and the wizard works out which of the four settings below carries each decision. Nothing is written until you pick **Review and save** and say yes, and what it replaces is printed so you can put it back. Add `--dry-run` to see what it would write and write nothing.
+What this does: opens the assistant part of [Configure the engine](../02-getting-started/configure-the-engine.md). Choose **Global scope** for checkboxes, whole groups or one group's commands at a time, and one setting for how far a ticked command may go. Tick what every assistant may use, untick what it may not. Nothing is written until you pick **Review and save** and say yes, and what it replaces is printed so you can put it back. Add `--dry-run` to see what it would write and write nothing.
 
-`pae configure` on its own starts one level up, with the list of things the engine can walk you through.
+`pae configure` on its own starts one level up, with the address, tokens, the queue, and telemetry.
 
 Use it instead of editing the file by hand. The rest of this section is the reference for the settings it writes, and how to set the same things yourself.
 
 ### Different limits for different assistants
 
-Everything above applies to the whole engine. To give one assistant less than another:
-
-```bash
-pae configure tokens
-```
-
-What this does: lists your assistants' tokens, and lets you tick what each one may use. It can only take away — an assistant cannot be given a command the engine is not offering — and ticking everything means "no limit", so that assistant keeps whatever the engine offers. `pae mcp:token:list` shows the result in its **Commands** column.
+Everything above applies to the whole engine. To give one assistant less than another, run the same command and choose **Tokens**. It lists your assistants' tokens, and lets you tick what each one may use. It can only take away. An assistant cannot be given a command the engine is not offering. Ticking everything means "no limit", so that assistant keeps whatever the engine offers. `pae mcp:token:list` shows the result in its **Commands** column.
 
 An assistant asked for its command list when it connected, so reconnect it to see the change.
 
 A token minted for an assistant is refused if someone tries to use it against the engine's own API directly, so these limits are not one command away from being stepped around. A token minted for your own software (`pae api:token:create`) is refused at the assistant endpoint for the same reason. Tokens made before this distinction existed can still do both; mint a new one of the right kind to narrow that.
 
-Whatever the limits, a token you no longer trust should be revoked — `pae mcp:token:revoke {id}` — which now stops it everywhere at once.
+Whatever the limits, a token you no longer trust should be revoked with `pae mcp:token:revoke {id}`, which stops it everywhere at once.
 
-These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit that file by hand, the change does nothing until you restart the engine: [Change a setting](../02-getting-started/install.md#change-a-setting). Either way, an assistant that is already connected keeps the tool list it was given when it connected — reconnect it to see the change.
+These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit that file by hand, the change does nothing until you restart the engine: [Change a setting](../02-getting-started/install.md#change-a-setting). Either way, an assistant that is already connected keeps the tool list it was given when it connected. Reconnect it to see the change.
 
 ### How far it may go
 
@@ -307,7 +301,7 @@ Your assistant is using a list it loaded earlier. Restart your assistant, then r
 
 ## Every tool
 
-This is every MCP tool the engine ships: **186** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
+This is every MCP tool the engine ships: **197** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
 
 A **project** is one hosting account. Some tool descriptions still say *user*; that is the project's name, which every other tool takes as `name`.
 
@@ -324,7 +318,7 @@ pae mcp:tool:list
 | [Engine summaries](#engine-summaries) | `engine` | On | 2 |
 | [Projects](#projects) | `projects` | On | 15 |
 | [Domains](#domains) | `domains` | On | 7 |
-| [Domain PHP](#domain-php) | `domainphp` | On | 2 |
+| [Domain PHP](#domain-php) | `domainphp` | On | 4 |
 | [Domain ACME](#domain-acme) | `domainacme` | On | 5 |
 | [Domain log files](#domain-log-files) | `domainlogfiles` | On | 2 |
 | [SSL certificates](#ssl-certificates) | `sslcertificates` | On | 3 |
@@ -335,7 +329,7 @@ pae mcp:tool:list
 | [FTP accounts](#ftp-accounts) | `ftpaccounts` | On | 4 |
 | [SFTP accounts](#sftp-accounts) | `sftpaccounts` | On | 4 |
 | [Cron jobs](#cron-jobs) | `cronjobs` | On | 4 |
-| [Files](#files) | `files` | On | 11 |
+| [Files](#files) | `files` | On | 14 |
 | [PHP](#php) | `php` | On | 3 |
 | [Containers](#containers) | `containers` | On | 5 |
 | [App users](#app-users) | `appusers` | On | 9 |
@@ -353,11 +347,11 @@ pae mcp:tool:list
 | [Bug reports](#bug-reports) | `bugreports` | On | 1 |
 | [Backups](#backups) | `backups` | On | 5 |
 | [Tunnels](#tunnels) | `tunnels` | On | 3 |
-| [Git](#git) | `git` | On | 10 |
+| [Git](#git) | `git` | On | 14 |
 | [Project settings](#project-settings) | `projectsettings` | On | 4 |
 | [SSH](#ssh) | `ssh` | On | 1 |
 | [Tasks](#tasks) | `tasks` | On | 4 |
-| [Secret vault](#secret-vault) | `secretvault` | On | 4 |
+| [Secret vault](#secret-vault) | `secretvault` | On | 6 |
 
 ## Engine summaries
 
@@ -402,6 +396,8 @@ pae mcp:tool:list
 
 | Tool | What it does |
 |---|---|
+| `domain_php_directives_get` | Show the PHP settings for one domain. Traditional PHP hosting |
+| `domain_php_directives_set` | Replace the whole set of PHP settings for one domain. Naming one setting drops the others. An empty set removes them |
 | `domain_php_version_get` | Get PHP version for a domain |
 | `domain_php_version_set` | Set PHP version for a domain |
 
@@ -497,12 +493,15 @@ pae mcp:tool:list
 
 | Tool | What it does |
 |---|---|
+| `file_chmod` | Set the mode of one file or directory. Three or four octal digits. Does not walk into folders inside it |
 | `file_copy` | Copy a file or directory |
 | `file_delete` | Delete a file or directory |
 | `file_download` | Download a file |
 | `file_exists` | Check if a file or directory exists |
+| `file_fetch` | Download an http or https address into a directory that already exists. Does not deploy the file |
 | `file_mkdir` | Create a directory |
 | `file_move` | Move or rename a file or directory |
+| `file_move_contents` | Move the immediate children of a directory into a destination that already exists |
 | `file_stat` | Get file or directory stats |
 | `file_unzip` | Extract a ZIP archive |
 | `file_upload` | Upload a file |
@@ -740,7 +739,7 @@ Used when a private repository or a Cloudflare tunnel needs a token. You paste t
 
 ### What you can see, and what you cannot
 
-A secret is never readable again — not by your assistant, not by you, not by any command. What you can always see is the **inventory**: each entry's id, what kind of secret it is, what it is for, whether it has been filled in yet, and the dates.
+A secret is never readable again. Not by your assistant, not by you, not by any command. What you can always see is the **inventory**: each entry's id, what kind of secret it is, what it is for, whether it has been filled in yet, and the dates.
 
 Give a **purpose** when you ask for a link ("deploy key for the shop repo"). It is shown on the paste page, so whoever hands over a credential can see why it is wanted, and it appears in the listing afterwards. Since the value itself can never be read back, the purpose is usually the only thing that tells two entries of the same kind apart when you come to tidy up.
 
@@ -748,31 +747,26 @@ Give a **purpose** when you ask for a link ("deploy key for the shop repo"). It 
 
 Once a value has been pasted it is final. Opening the link again will not change it, and neither will asking for a new link for the same engine-wide secret. To replace one, delete the entry and create a fresh link. This is deliberate: an overwrite would be invisible afterwards, because nothing can read the value back to check.
 
-### From the server
-
-```bash
-php artisan vault:secret:create git_token --purpose="Deploy key for the shop repo"
-php artisan vault:secret:list
-php artisan vault:secret:delete <id>
-```
-
-`vault:secret:list` prints the inventory and never a secret. `--scope=global` on create stores the engine-wide one.
-
 ### Pasting a token once
 
-By default a paste page is for the calls your assistant is about to make, and it expires in an hour. Ask for a **global** one instead and the engine keeps that secret as its own: every project you create afterwards without a token of its own uses it, so you are asked for your Git or Cloudflare token once rather than at every project.
+By default a paste page is for the calls your assistant is about to make, and it expires in an hour. Ask for one for the whole engine instead:
 
-There is one global secret per kind. Asking for a new global paste page reopens the form so you can replace what is stored; the old value keeps working until you actually paste. The page itself still expires in an hour, so a link that ends up in an old chat cannot be used to overwrite your token later.
-
-A project that was given its own token keeps using that one. Nothing is copied at creation time, so replacing the global reaches every project that never had one.
-
-If you run projects for other people and want the old behaviour — each project strictly on its own credentials — turn sharing off with `vault_config_set`, or on the server:
-
-```bash
-php artisan vault:config --project-scoped=true
+```text
+Save my Git token once for this whole engine. New projects should use it
+when I do not give them one.
 ```
 
-Your stored globals are not deleted by that, and turning sharing back on restores them.
+The engine keeps that secret as its own. Every project you create afterwards without a token of its own uses it, so you paste a Git or Cloudflare token once. A project that was given its own token keeps using that one. The shared token is not copied onto the project, so replacing it reaches every project that never had one of its own.
+
+There is one shared secret per kind. Once it has been pasted, a new link for that same kind is refused. Delete the entry, then ask for a fresh link. The page still expires in an hour. The shared secret does not expire with the page. If nothing has been pasted yet, asking again gives you a new link for the same empty slot.
+
+If you host projects for other people, each project can stay on its own credentials:
+
+```text
+Stop projects from using the engine-wide tokens.
+```
+
+Stored engine-wide secrets stay stored. Ask to turn sharing back on and projects without their own token use them again. The same switch from the server: [Secrets](../06-commands/pae-cli.md#secrets).
 
 ## From the server
 

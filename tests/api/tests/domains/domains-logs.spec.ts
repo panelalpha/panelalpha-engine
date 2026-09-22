@@ -1,8 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
-import { delay, waitForCondition } from '@/helpers/retry';
+import { delay } from '@/helpers/retry';
 
 const LOG_FLUSH_DELAY_MS = 1_000;
-const DOMAIN_TEARDOWN_DELAY_MS = 2_000;
 
 test.describe('domain log listing', () => {
   test('every entry carries a name and a size', async ({ api, setupUser }) => {
@@ -43,15 +42,21 @@ test.describe('domain log listing', () => {
     await anonymousRequest.get(setupUser.url).catch(() => undefined);
 
     let logFiles: Awaited<ReturnType<typeof api.listDomainLogFiles>>['data'] = [];
-    await waitForCondition(
-      async () => {
-        logFiles = (await api.listDomainLogFiles(setupUser.username, setupUser.domain, true)).data;
-        return logFiles.length > 0;
-      },
-      { timeout: 20_000, interval: 2_000 }
+    try {
+      await expect
+        .poll(
+          async () => {
+            logFiles = (await api.listDomainLogFiles(setupUser.username, setupUser.domain, true))
+              .data;
+            return logFiles.length;
+          },
+          { timeout: 20_000, intervals: [2_000] }
+        )
+        .toBeGreaterThan(0);
+    } catch {
       // Still empty after the wait is a property of this webserver, not a
       // failure of the download the test is actually about.
-    ).catch(() => undefined);
+    }
     test.skip(
       logFiles.length === 0,
       'The domain lists no log files even after being requested — this webserver does not log here.'
@@ -100,12 +105,20 @@ test.describe('log endpoint lifecycle', () => {
 
     await domainFactory.deleteDomain(setupUser.username, domain);
     await domainAssertions.verifyDomainNotExists(setupUser.username, domain);
-    await delay(DOMAIN_TEARDOWN_DELAY_MS);
 
-    const response = await authedRequest.get(
-      `projects/${setupUser.username}/domains/${domain}/log-files`
-    );
-    expect(response.status()).toBe(404);
+    await expect
+      .poll(
+        async () =>
+          (
+            await authedRequest.get(`projects/${setupUser.username}/domains/${domain}/log-files`)
+          ).status(),
+        {
+          timeout: 10_000,
+          intervals: [500],
+          message: 'log-files endpoint still answers after the addon domain was deleted',
+        }
+      )
+      .toBe(404);
   });
 
   test('deleting a user removes its log endpoint', async ({
@@ -128,23 +141,27 @@ test.describe('log endpoint lifecycle', () => {
     });
     expect(hit.status()).toBeLessThan(500);
 
-    await waitForCondition(
-      async () => (await api.listDomainLogFiles(user.username, user.domain)).data.length > 0,
-      { timeout: settings.timing.propagationDelay, interval: 500 }
-    );
+    await expect
+      .poll(async () => (await api.listDomainLogFiles(user.username, user.domain)).data.length, {
+        timeout: settings.timing.propagationDelay,
+        intervals: [500],
+      })
+      .toBeGreaterThan(0);
 
     await userFactory.deleteUser(user.username);
 
-    await waitForCondition(
-      async () =>
-        (
-          await authedRequest.get(`projects/${user.username}/domains/${user.domain}/log-files`)
-        ).status() === 404,
-      {
-        timeout: settings.timing.propagationDelay * 2,
-        interval: 500,
-        message: 'log-files endpoint still answers after the user was deleted',
-      }
-    );
+    await expect
+      .poll(
+        async () =>
+          (
+            await authedRequest.get(`projects/${user.username}/domains/${user.domain}/log-files`)
+          ).status(),
+        {
+          timeout: settings.timing.propagationDelay * 2,
+          intervals: [500],
+          message: 'log-files endpoint still answers after the user was deleted',
+        }
+      )
+      .toBe(404);
   });
 });

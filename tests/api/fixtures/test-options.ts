@@ -94,7 +94,9 @@ export const test = base.extend<EngineFixtures>({
    *
    * A failed test keeps its users so the engine state can be inspected; their
    * names land in the report as a `preserved-users` annotation. Pass
-   * `{ autoCleanup: false }` when creating a user that must outlive one test.
+   * `{ autoCleanup: false }` when creating a user that must outlive one test,
+   * or `{ preserveOnFailure: false }` to delete even after a failure (Online
+   * names).
    */
   userFactory: async ({ api }, use, testInfo) => {
     const factory = new UserFactory(api);
@@ -106,12 +108,20 @@ export const test = base.extend<EngineFixtures>({
       return;
     }
 
-    if (testInfo.status !== testInfo.expectedStatus) {
-      testInfo.annotations.push({ type: 'preserved-users', description: pending.join(', ') });
-      return;
-    }
-
+    const failed = testInfo.status !== testInfo.expectedStatus;
+    const keep: string[] = [];
+    const drop: string[] = [];
     for (const username of pending) {
+      if (failed && factory.shouldPreserveOnFailure(username)) {
+        keep.push(username);
+      } else {
+        drop.push(username);
+      }
+    }
+    if (keep.length > 0) {
+      testInfo.annotations.push({ type: 'preserved-users', description: keep.join(', ') });
+    }
+    for (const username of drop) {
       await factory.deleteUser(username);
     }
   },

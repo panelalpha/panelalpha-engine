@@ -1,14 +1,10 @@
-# AGENTS.md — agent layer over `docs/`
+# AGENTS.md
 
-End-user documentation lives in [`docs/`](docs/README.md). It is written for the
-person who installs a host and deploys apps. Developer documentation from
-`development-2.0.0` lives in [`docs/internal/`](docs/internal/README.md). The
-MCP catalogue stays at [`docs/mcp-catalogue.html`](docs/mcp-catalogue.html).
-This file is for agents changing the engine. Never duplicate a user procedure
-here. Link to the baseline page, then add only what an agent needs: how to
-verify, what numbers to report, traps, internals.
+Coding agents changing this repository start here. [`CONTRIBUTING.md`](CONTRIBUTING.md) sends you here on purpose.
 
-`docs/` never links here. A public wiki export of `docs/` stays clean.
+People opening a pull request follow [`CONTRIBUTING.md`](CONTRIBUTING.md). Operators who install a host and deploy apps follow [`docs/`](docs/README.md). Link that page, then add only what an agent needs to change the code: how to verify, what numbers to report, and the traps. Do not copy an operator procedure into this file.
+
+`docs/` does not link here.
 
 The rule throughout: every claim is a measurement, and every measurement names
 the stage it belongs to. "Deploy took 100s" is not a result. "npm ci 16.9s,
@@ -17,7 +13,7 @@ apt-get 11.9s, build 2.2s, inside a 53.1s critical path" is.
 | Topic | Baseline (operator) | This file |
 |---|---|---|
 | Install, tokens, TLS | [`docs/02-getting-started/`](docs/02-getting-started/install.md) | `--in-container` for tests; installer prints `pae-artisan` |
-| MCP | [`docs/04-connecting-your-ai/`](docs/04-connecting-your-ai/your-assistant.md), [`docs/mcp-catalogue.html`](docs/mcp-catalogue.html) | CatalogueTest; do not invent client UIs |
+| MCP | [`docs/04-connecting-your-ai/`](docs/04-connecting-your-ai/your-assistant.md) | CatalogueTest; do not invent client UIs |
 | Detection / stacks | [`docs/07-supported-projects/`](docs/07-supported-projects/how-detection-works.md) | §6a Railpack measurements; §11 onboarding an app |
 | Deploy failures | [`docs/02-getting-started/what-happens.md`](docs/02-getting-started/what-happens.md) | Explainer rules vs DinD proof |
 | Telemetry | [`docs/02-getting-started/what-is-collected.md`](docs/02-getting-started/what-is-collected.md) | Field list when changing `DeployReport` |
@@ -62,13 +58,13 @@ over the same fixtures, and diff every field of the returned decision.
 The unit suite above covers the engine's logic in isolation. `tests/api/` drives
 a **live engine** over its REST API and its MCP endpoint: it creates real
 projects, domains, databases and deploys, and asserts on what comes back.
-Conventions, setup and the project list are in
-[`tests/api/README.md`](tests/api/README.md) — read it before adding a spec.
+How to run the suite, and which group does what, is in
+[`tests/api/README.md`](tests/api/README.md).
 
 ```bash
 cd tests/api
 npm install
-npm test                  # unit + the API suite against the engine in env/.env
+npm test                  # unit, the API, and the supported-app deploys
 npm run test:unit         # pure logic, no engine
 npm run check             # typecheck + lint + format — run before pushing
 ```
@@ -88,10 +84,11 @@ passing says nothing about the MCP surface on top of them. `tests/mcp/` compares
 tool. **Changing `tool-names.php` or anything under `core/app/Mcp/` means
 running `tests/mcp/`.**
 
-**Only the engine host runs the whole thing.** The `cli`, `deploy`,
+**Only the engine host runs the whole thing.** The `cli`,
 `webserver-change`, `update`, `engine-cert` and `network-mutation` projects
-reconfigure the host or wait on a real deploy, and are excluded from `npm test`.
-Naming them in a result means having run them explicitly.
+reconfigure the host, and are excluded from `npm test`. Naming them in a
+result means having run them explicitly. The supported-app deploys are part
+of `npm test`.
 
 ---
 
@@ -1084,20 +1081,3 @@ Worked examples in the tree: `php.yaml` (DokuWiki), `matomo.yaml` (database +
 restore-config), `adminer.yaml` (build produces the entry point), `phpbb.yaml`
 (`app_root`), `opencart.yaml` (docroot below repo, outranks Dockerfile),
 `osticket.yaml` (PHP, no Composer).
-
-
----
-
-## Agent skills
-
-### Issue tracker
-
-Local markdown files under `.scratch/<feature>/`; design plans live in `docs/internal/plans/`. See `docs/internal/agents/issue-tracker.md`.
-
-### Triage labels
-
-The five default roles, label string equal to the role name. See `docs/internal/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: `CONTEXT.md` at the root, ADRs in `docs/internal/adr/`. See `docs/internal/agents/domain.md`.

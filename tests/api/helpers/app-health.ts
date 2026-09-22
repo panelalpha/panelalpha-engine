@@ -29,11 +29,15 @@ export function assertDeploymentWarnings(
     }
     return;
   }
-  expect(
-    Array.isArray(warnings),
-    'deployment_warnings must be a list after a finished deploy'
-  ).toBe(true);
-  const list = warnings ?? [];
+  // A clean success stores the status and leaves the list out. A partial
+  // deploy always writes the sentences that made it partial.
+  if (status === 'partial' || warnings != null) {
+    expect(
+      Array.isArray(warnings),
+      'deployment_warnings must be a list after a finished deploy'
+    ).toBe(true);
+  }
+  const list = Array.isArray(warnings) ? warnings : [];
   for (const line of list) {
     expect(typeof line).toBe('string');
     expect(line.length).toBeGreaterThan(0);

@@ -318,4 +318,4 @@ O PanelAlpha Engine é open source sob a licença Apache 2.0.
 
 ## Venha construir com a gente
 
-Quer participar? [`CONTRIBUTING.md`](CONTRIBUTING.md) te coloca no caminho. Para as convenções mais profundas de quem contribui e o fluxo de testes, vá para [`AGENTS.md`](AGENTS.md).
+Quer participar? [`CONTRIBUTING.md`](CONTRIBUTING.md) te coloca no caminho. A documentação para quem opera o servidor está em [`docs/`](docs/README.md).

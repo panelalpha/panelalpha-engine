@@ -26,7 +26,7 @@ A hand-written site of pages such as `home.html` and `about.html`, with no `inde
 
 ## WordPress and ready-made apps
 
-WordPress, Matomo, phpBB, Magento, Passbolt, OpenCart, osTicket, and a few others are recognised as PHP apps and started for you.
+WordPress, Matomo, phpBB, Magento, Passbolt, OpenCart, osTicket, Flarum, SuiteCRM, Chamilo, MantisBT, Easy!Appointments, Adminer, and phpMyAdmin are recognised as PHP apps and started for you.
 
 How to finish the first WordPress setup and look after a site that is already on this engine: [WordPress and known apps](../05-capabilities/wordpress-and-apps.md).
 

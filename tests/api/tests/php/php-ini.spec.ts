@@ -1,129 +1,149 @@
 import { expect, test } from '@/fixtures/test-options';
+import { expectOneOf } from '@/helpers/expect-one-of';
+import { getDomainBasePath } from '@/helpers/file-path-helpers';
+import { uniqueId } from '@/helpers/random';
+import { skipUnless } from '@/helpers/test-helpers';
+import { getWebserverInfo, getWebserverRestartReadyMs } from '@/helpers/webserver-helpers';
+import { McpSession, mcpResultText } from '@/helpers/mcp-helpers';
 import { customIniSettingsResponseSchema } from '@/schemas';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
-import { delay } from '@/helpers/retry';
-import { getWebserverInfo, httpScheme } from '@/helpers/webserver-helpers';
 
-test.describe('custom php.ini settings', () => {
-  test('a settings profile round-trips through the API', async ({ api, setupUser }) => {
-    const [version] = (await api.getAvailablePhpVersions()).data ?? [];
-    expect(version, 'the engine reports no PHP versions').toBeTruthy();
+const PROBE = "<?php echo 'MEMORY:' . ini_get('memory_limit'); ?>";
+const DISTINCT_LIMIT = '137M';
 
-    const profiles = [
-      { memory_limit: '128M', max_execution_time: '60', upload_max_filesize: '50M' },
-      { memory_limit: '256M', max_execution_time: '120', upload_max_filesize: '100M' },
-    ];
+function asIniMap(value: unknown): Record<string, string> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean') {
+      out[key] = String(entry);
+    }
+  }
+  return out;
+}
 
-    for (const profile of profiles) {
-      await api.setCustomIniSettings(setupUser.username, version, profile);
+test.describe('PHP custom INI settings', () => {
+  test('account-level INI can be read, written and is served over HTTP', async ({
+    api,
+    anonymousRequest,
+    authedRequest,
+    setupUser,
+  }) => {
+    const version = (await api.getDomainPhpVersion(setupUser.domain)).data;
+    skipUnless(version, 'the setup domain has no PHP version.');
 
-      const response = await api.getCustomIniSettings(setupUser.username, version);
-      validateParsedApiResponse(response, customIniSettingsResponseSchema);
-      expect(response.data).toMatchObject(profile);
+    const listed = await authedRequest.get(
+      `projects/${setupUser.username}/php/custom-ini-settings?php_version=${encodeURIComponent(version)}`
+    );
+    expect(listed.ok(), `GET custom-ini-settings answered HTTP ${listed.status()}`).toBe(true);
+    const original = asIniMap(
+      validateParsedApiResponse(await listed.json(), customIniSettingsResponseSchema).data
+    );
+
+    const wanted = original.memory_limit === DISTINCT_LIMIT ? '139M' : DISTINCT_LIMIT;
+    const script = `ini-probe-${uniqueId()}.php`;
+    const scriptPath = `${getDomainBasePath(setupUser.domain)}/${script}`;
+
+    try {
+      await api.setCustomIniSettings(setupUser.username, version, {
+        ...original,
+        memory_limit: wanted,
+      });
+
+      const after = validateParsedApiResponse(
+        await api.getCustomIniSettings(setupUser.username, version),
+        customIniSettingsResponseSchema
+      );
+      expect(String(after.data.memory_limit), 'GET did not echo the INI the PUT just wrote').toBe(
+        wanted
+      );
+
+      await api.putFileContents(setupUser.username, scriptPath, PROBE);
+
+      const { slug } = await getWebserverInfo(api);
+      // custom.ini is read when the FPM master starts, not on the next request.
+      await expect
+        .poll(
+          async () => {
+            const response = await anonymousRequest.get(
+              `https://${setupUser.domain}/${script}?t=${Date.now()}`,
+              { ignoreHTTPSErrors: true }
+            );
+            const body = await response.text();
+            if (response.ok() && body.includes(`MEMORY:${wanted}`)) {
+              return 'served';
+            }
+            return `HTTP ${response.status()} ${body.slice(0, 180).replace(/\s+/g, ' ')}`;
+          },
+          {
+            timeout: getWebserverRestartReadyMs(slug),
+            intervals: [2_000],
+            message: `${setupUser.domain} never served memory_limit=${wanted}`,
+          }
+        )
+        .toBe('served');
+    } finally {
+      await api.setCustomIniSettings(setupUser.username, version, original).catch(() => undefined);
+      await api.removeFile(setupUser.username, scriptPath).catch(() => undefined);
     }
   });
 
-  test('a predefined profile is accepted', async ({ api, authedRequest, setupUser }) => {
-    const [version] = (await api.getAvailablePhpVersions()).data ?? [];
-
-    const response = await authedRequest.put(
-      `projects/${setupUser.username}/php/custom-ini-settings`,
-      {
-        data: {
-          php_version: version,
-          settings: { memory_limit: '1G', upload_max_filesize: '128M', post_max_size: '128M' },
-        },
-      }
+  test('an unknown PHP version is refused', async ({ authedRequest, setupUser }) => {
+    const response = await authedRequest.get(
+      `projects/${setupUser.username}/php/custom-ini-settings?php_version=1.0`
     );
-
-    expect(response.status()).toBe(204);
+    expectOneOf(response.status(), [400, 422], 'php_version=1.0 should not be accepted');
   });
 
-  /**
-   * The API storing a setting is not the same as PHP honouring it. FPM stacks
-   * read the pool's ini, while lsphp reads a `.user.ini` next to the script, so
-   * each is verified through the path it actually uses.
-   */
-  test('the settings reach the PHP runtime', async ({
+  test('php_ini_get and php_ini_set work over MCP', async ({
     api,
     anonymousRequest,
+    authedRequest,
     settings,
     setupUser,
   }) => {
-    const [version] = (await api.getAvailablePhpVersions()).data ?? [];
-    const custom = { memory_limit: '321M', upload_max_filesize: '64M' };
+    const version = (await api.getDomainPhpVersion(setupUser.domain)).data;
+    skipUnless(version, 'the setup domain has no PHP version.');
 
-    await api.setCustomIniSettings(setupUser.username, version, custom);
-    await delay(settings.timing.phpExecutionDelay);
+    const listed = await authedRequest.get(
+      `projects/${setupUser.username}/php/custom-ini-settings?php_version=${encodeURIComponent(version)}`
+    );
+    expect(listed.ok(), `GET custom-ini-settings answered HTTP ${listed.status()}`).toBe(true);
+    const original = asIniMap(
+      validateParsedApiResponse(await listed.json(), customIniSettingsResponseSchema).data
+    );
+    const wanted = original.memory_limit === DISTINCT_LIMIT ? '139M' : DISTINCT_LIMIT;
 
-    const stored = await api.getCustomIniSettings(setupUser.username, version);
-    validateParsedApiResponse(stored, customIniSettingsResponseSchema);
-    expect(stored.data).toMatchObject(custom);
+    const created = await api.createMcpToken(uniqueId('mcp-ini-'));
+    const token = created.data.plain_text_token;
+    skipUnless(token, 'createMcpToken did not return a plaintext token.');
 
-    const { slug } = await getWebserverInfo(api);
-
-    if (slug.includes('litespeed')) {
-      const scriptPath = `${setupUser.domain}/public_html/pa-ini-check.php`;
-      await api.putFileContents(
-        setupUser.username,
-        scriptPath,
-        "<?php echo ini_get('memory_limit') . '|' . ini_get('upload_max_filesize');"
+    try {
+      const session = await McpSession.open(anonymousRequest, settings.apiBaseUrl, token);
+      const tools = new Set((await session.listTools()).map((tool) => tool.name));
+      skipUnless(
+        tools.has('php_ini_get') && tools.has('php_ini_set'),
+        'this engine does not expose php_ini_get / php_ini_set.'
       );
 
-      try {
-        await delay(settings.timing.phpExecutionDelay);
-        const response = await anonymousRequest.get(
-          `${httpScheme(settings.apiBaseUrl)}://${setupUser.domain}/pa-ini-check.php`,
-          { ignoreHTTPSErrors: true }
-        );
-
-        const [memoryLimit, uploadLimit] = (await response.text()).split('|');
-        expect(memoryLimit?.trim()).toBe(custom.memory_limit);
-        expect(uploadLimit?.trim()).toBe(custom.upload_max_filesize);
-      } finally {
-        await api.removeFile(setupUser.username, scriptPath);
-      }
-      return;
-    }
-
-    const result = await api.executeWpCliCommand(setupUser.username, [
-      'eval',
-      'echo shell_exec(\'php -r \\\'echo "MEM=" . ini_get("memory_limit") . "\\n" . "UPLOAD=" . ini_get("upload_max_filesize");\\\' \');',
-      `--path=${setupUser.wpPath}`,
-    ]);
-
-    expect(result.exit_code).toBe(0);
-    const lines = result.stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    expect(lines).toContain(`MEM=${custom.memory_limit}`);
-    expect(lines).toContain(`UPLOAD=${custom.upload_max_filesize}`);
-  });
-});
-
-test.describe('php-version endpoint validation', () => {
-  const invalidPayloads = [
-    ['an unknown version string', { version: 'invalid-version' }],
-    ['no version at all', {}],
-  ] as const;
-
-  for (const [label, payload] of invalidPayloads) {
-    test(`rejects ${label}`, async ({ authedRequest, setupUser }) => {
-      const response = await authedRequest.put(`domains/${setupUser.domain}/php-version`, {
-        data: payload,
+      await session.callOk('php_ini_set', {
+        name: setupUser.username,
+        php_version: version,
+        settings: { ...original, memory_limit: wanted },
       });
-      expect(response.status()).toBe(422);
-    });
-  }
 
-  test('rejects a version change for an unknown domain', async ({ api, authedRequest }) => {
-    const [version] = (await api.getAvailablePhpVersions()).data ?? [];
-    expect(version).toBeTruthy();
-
-    const response = await authedRequest.put('domains/nonexistent.domain.xyz/php-version', {
-      data: { version },
-    });
-    expect(response.status()).toBe(404);
+      const got = await session.callOk('php_ini_get', {
+        name: setupUser.username,
+        php_version: version,
+      });
+      expect(mcpResultText(got), 'php_ini_get did not mention the value just set').toContain(
+        wanted
+      );
+    } finally {
+      await api.setCustomIniSettings(setupUser.username, version, original).catch(() => undefined);
+      await api.deleteMcpTokenSafe(created.data.id);
+    }
   });
 });

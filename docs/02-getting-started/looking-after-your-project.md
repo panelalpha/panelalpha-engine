@@ -61,6 +61,10 @@ actually serving, and tell me what is wrong.
 
 The engine looks from inside the account and names what it found: [Monitoring and logs](../05-capabilities/monitoring-and-logs.md#what-the-engine-checks).
 
+## Build caches
+
+A deploy keeps copies of downloaded packages so the next deploy of that same project does not fetch them again. Once a day the engine deletes those copies for any project that has not deployed in the last 24 hours. A project that deploys every day keeps them. A deploy that is still running is left alone. The next deploy after a cleanup downloads the packages again. You do not have to ask for this. To run it yourself: [CLI commands](../06-commands/pae-cli.md#advanced-and-server-maintenance).
+
 ## Other day-to-day work
 
 - **WordPress.** Ask for a new site without bringing your own code, or look after WordPress that is already on this engine: [WordPress](../05-capabilities/wordpress-and-apps.md).

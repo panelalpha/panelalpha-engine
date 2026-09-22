@@ -3,7 +3,6 @@ import { expectOneOf } from '@/helpers/expect-one-of';
 import { cronJobListSchema } from '@/schemas';
 import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 import { rand } from '@/helpers/random';
-import { waitForCondition } from '@/helpers/retry';
 
 /**
  * How long to wait for a `* * * * *` job to actually run.
@@ -63,29 +62,31 @@ test.describe('cron jobs', () => {
       expect(listed?.command).toContain('echo');
 
       await test.step('the job runs and writes its file', async () => {
-        await waitForCondition(
-          async () => {
-            if (!(await api.fileExists(setupUser.username, relativePath)).exists) {
-              return false;
-            }
-            const content = await api.getFileContent(setupUser.username, relativePath);
-            return typeof content === 'string' && content.includes(marker);
-          },
-          {
-            timeout: CRON_EXECUTION_WAIT_MS,
-            interval: 5_000,
-            message: 'the cron job never produced its output file',
-            // Separates "the engine never wrote the crontab" from "the crontab
-            // is there but the daemon is not running it".
-            describeLast: async () => {
+        await expect
+          .poll(
+            async () => {
+              const exists = (await api.fileExists(setupUser.username, relativePath)).exists;
+              const content = exists
+                ? await api.getFileContent(setupUser.username, relativePath)
+                : undefined;
+              if (typeof content === 'string' && content.includes(marker)) {
+                return 'ready';
+              }
+              // Separates "the engine never wrote the crontab" from "the crontab
+              // is there but the daemon is not running it".
               const listing = await api.listCronJobs(setupUser.username);
               const present = listing.data.some((candidate) => candidate.hash === job.hash);
               return present
                 ? `job is in the crontab but never fired (is the cron daemon running?); expected ${relativePath}`
-                : `job is not in the crontab — the engine did not persist it`;
+                : 'job is not in the crontab — the engine did not persist it';
             },
-          }
-        );
+            {
+              timeout: CRON_EXECUTION_WAIT_MS,
+              intervals: [5_000],
+              message: 'the cron job never produced its output file',
+            }
+          )
+          .toBe('ready');
       });
 
       const updatedMarker = `updated-hash-${Date.now()}`;
@@ -95,25 +96,29 @@ test.describe('cron jobs', () => {
       });
       currentHash = updated.data.hash;
 
-      await waitForCondition(
-        async () =>
-          (await api.listCronJobs(setupUser.username)).data.some(
-            (candidate) =>
-              candidate.hash === updated.data.hash && candidate.command.includes(updatedMarker)
-          ),
-        { timeout: settings.timing.propagationDelay, interval: 500 }
-      );
+      await expect
+        .poll(
+          async () =>
+            (await api.listCronJobs(setupUser.username)).data.some(
+              (candidate) =>
+                candidate.hash === updated.data.hash && candidate.command.includes(updatedMarker)
+            ),
+          { timeout: settings.timing.propagationDelay, intervals: [500] }
+        )
+        .toBe(true);
 
       await api.deleteCronJob(setupUser.username, updated.data.hash);
       currentHash = '';
 
-      await waitForCondition(
-        async () =>
-          !(await api.listCronJobs(setupUser.username)).data.some(
-            (candidate) => candidate.hash === updated.data.hash
-          ),
-        { timeout: settings.timing.propagationDelay, interval: 500 }
-      );
+      await expect
+        .poll(
+          async () =>
+            (await api.listCronJobs(setupUser.username)).data.some(
+              (candidate) => candidate.hash === updated.data.hash
+            ),
+          { timeout: settings.timing.propagationDelay, intervals: [500] }
+        )
+        .toBe(false);
     } finally {
       if (currentHash) {
         await cronFactory.deleteCronJob(setupUser.username, currentHash);

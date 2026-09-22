@@ -25,8 +25,8 @@ New here? See CONTRIBUTING.md.
 ## How was it tested?
 
 <!--
-Say how you verified this. For engine changes, REPORT THE MEASUREMENTS
-(see AGENTS.md §3) — a status code alone is not a result.
+Say how you verified this. Operator-facing changes belong in docs/.
+Coding agents report measurements from AGENTS.md §3 — a status code alone is not a result.
 -->
 
 - [ ] `cd core && ./vendor/bin/phpunit --testsuite Unit` passes (or only the documented pre-existing failures remain)
@@ -36,7 +36,7 @@ Say how you verified this. For engine changes, REPORT THE MEASUREMENTS
 ## Checklist
 
 - [ ] My commits follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`)
-- [ ] I updated the docs where behaviour changed ([`docs/`](../blob/main/docs/README.md) for operators, [`AGENTS.md`](../blob/main/AGENTS.md) for internals)
+- [ ] I updated [`docs/`](../blob/main/docs/README.md) where an operator would notice the change
 - [ ] This PR is focused on a single change
 - [ ] This does **not** contain a security fix that should be disclosed privately first (see [`SECURITY.md`](../blob/main/SECURITY.md))
 

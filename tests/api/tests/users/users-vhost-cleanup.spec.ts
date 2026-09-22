@@ -2,7 +2,6 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@/fixtures/test-options';
 import { getDomainBasePath, randomFileContent, randomFileName } from '@/helpers/file-path-helpers';
-import { waitForCondition } from '@/helpers/retry';
 import { fetchSite } from '@/helpers/webserver-helpers';
 
 /**
@@ -38,29 +37,27 @@ test.describe('vhost cleanup on user deletion', () => {
     // error here is a reason to try again rather than to stop — but the last
     // one is carried into the timeout message, because "never served the
     // marker file" and "nothing was ever listening" want different fixes.
-    let lastFailure = 'no response yet';
-    await waitForCondition(
-      async () => {
-        try {
-          const response = await fetchSite(anonymousRequest, url);
-          const body = (await response.text()).trim();
-          if (response.status() === 200 && body === marker) {
-            return true;
+    await expect
+      .poll(
+        async () => {
+          try {
+            const response = await fetchSite(anonymousRequest, url);
+            const body = (await response.text()).trim();
+            if (response.status() === 200 && body === marker) {
+              return 'served';
+            }
+            return `HTTP ${response.status()}, body ${JSON.stringify(body.slice(0, 80))}`;
+          } catch (error) {
+            return error instanceof Error ? error.message : String(error);
           }
-          lastFailure = `HTTP ${response.status()}, body ${JSON.stringify(body.slice(0, 80))}`;
-          return false;
-        } catch (error) {
-          lastFailure = error instanceof Error ? error.message : String(error);
-          return false;
+        },
+        {
+          timeout: 60_000,
+          intervals: [2_000],
+          message: `${url} never served the marker file`,
         }
-      },
-      {
-        timeout: 60_000,
-        interval: 2_000,
-        message: `${url} never served the marker file`,
-        describeLast: () => lastFailure,
-      }
-    );
+      )
+      .toBe('served');
 
     await userFactory.deleteUser(user.username);
 

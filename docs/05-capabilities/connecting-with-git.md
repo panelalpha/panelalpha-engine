@@ -29,6 +29,23 @@ The assistant sends you a link on this engine. Open it, paste a git access token
 
 If the stored token later stops working, ask the assistant to replace it. You get the same paste page. Do not put the new token in the chat.
 
+## One token for the whole engine
+
+You can paste a Git token once, for every new project, instead of once per repository.
+
+```text
+Save my Git token once for this whole engine. New projects should use it
+when I do not give them one.
+```
+
+The assistant sends the same paste page. The secret does not expire. The link does, after one hour. A project that already has its own token keeps it. There is one shared Git token. To replace it, ask for that stored token to be deleted, then ask for a new link. Pasting again on the old link does not change it.
+
+```text
+Stop projects from using the engine-wide tokens.
+```
+
+Projects then use only the token they were given. Tokens already stored for the whole engine stay stored. Ask to turn sharing back on and new projects without their own token use them again.
+
 ## A zip of files, not a repository
 
 ```text
@@ -39,14 +56,14 @@ Use this when the code is not in git. After the first deploy, updating that proj
 
 ## After the project is connected
 
-The engine keeps a checkout of the repository. Updating the running application is still a rebuild. You can ask the assistant to pull, switch branch, or go back to the last deployed commit.
+The engine keeps a copy of the repository. Ask the assistant to pull, switch branch, or go back to the last deployed commit. A successful pull rebuilds the site. You do not ask for the rebuild as well. Switching branch, or going back to an earlier commit, rebuilds the same way.
 
 ```text
-Pull the latest commit on this project and rebuild it.
+Pull the latest commit on this project.
 ```
 
 ```text
-Switch this project to the branch release and rebuild.
+Switch this project to the branch release.
 ```
 
 ```text
@@ -74,4 +91,4 @@ Revoke that token at your git host and create a new one. Ask the assistant to se
 
 ## From the server
 
-Git commands for a project that is already deployed: [CLI commands](../06-commands/pae-cli.md#repository-projects).
+Git commands for a project that is already deployed: [CLI commands](../06-commands/pae-cli.md#repository-projects). The paste link and the shared token: [Secrets](../06-commands/pae-cli.md#secrets).

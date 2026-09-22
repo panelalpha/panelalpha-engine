@@ -48,4 +48,4 @@ At the end of a successful deploy the engine saves the exact plan it used. A **r
 Rebuild this project.
 ```
 
-If the project is connected to git, you can also ask the assistant to pull the latest commit and rebuild: [Connecting with Git](../05-capabilities/connecting-with-git.md).
+If the project is connected to git, ask the assistant to pull the latest commit. That pull rebuilds the site: [Connecting with Git](../05-capabilities/connecting-with-git.md).

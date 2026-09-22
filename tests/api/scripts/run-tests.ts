@@ -11,13 +11,13 @@ import { reportListenUrl, resolvePublicReportHost } from './lib/report-host';
  * `--` goes straight through, so `npm test -- tests/users --headed` behaves the
  * way `playwright test` would.
  *
- * `webserver-change`, `update`, `cli`, `deploy`, `engine-cert`,
- * `network-mutation` and `slow` are left out of the default run: they either
- * reconfigure the engine, need host SSH for `pae-artisan`, wait on a git
- * deploy, or take minutes of host-wide CSF / full PHP-version matrix.
+ * `webserver-change`, `update`, `cli`, `engine-cert`, `network-mutation` and
+ * `slow` are left out of the default run: they either reconfigure the engine,
+ * need host SSH for `pae-artisan`, or take minutes of host-wide CSF / full
+ * PHP-version matrix. The Supported-board catalogue runs here.
  */
 
-const DEFAULT_PROJECTS = ['unit', 'api'];
+const DEFAULT_PROJECTS = ['unit', 'api', 'supported-apps'];
 
 function playwrightArgs(passthrough: string[]): string[] {
   const args = ['test'];

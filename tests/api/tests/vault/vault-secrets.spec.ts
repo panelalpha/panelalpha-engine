@@ -75,8 +75,8 @@ test.describe('secret vault', () => {
 
     try {
       const listing = await api.listVaultSecrets(type);
-      // The schema is strict and pins `ref` to null, so an added field or a
-      // reference leaking back into the listing fails right here.
+      // The schema is strict and pins a request entry's `ref` to null, so an
+      // added field or a reference leaking back into the listing fails here.
       validateParsedApiResponse(listing, vaultSecretListSchema);
 
       const single = await api.getVaultSecret(created.data.ref);

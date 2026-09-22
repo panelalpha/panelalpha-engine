@@ -218,4 +218,50 @@ export class UsersApi extends EngineApiBase {
     const response = await this.api.post(`projects/${username}/push`, { data: { target } });
     return this.rawCall(response);
   }
+
+  async getProjectBandwidthRaw(
+    username: string,
+    query = ''
+  ): Promise<{ status: number; body: any }> {
+    const suffix = query === '' ? '' : `?${query}`;
+    const response = await this.api.get(`projects/${username}/bandwidth${suffix}`);
+    return this.rawCall(response);
+  }
+
+  async getDomainBandwidthRaw(
+    username: string,
+    domain: string,
+    query = ''
+  ): Promise<{ status: number; body: any }> {
+    const suffix = query === '' ? '' : `?${query}`;
+    const response = await this.api.get(
+      `projects/${username}/domains/${encodeURIComponent(domain)}/bandwidth${suffix}`
+    );
+    return this.rawCall(response);
+  }
+
+  async getDomainVisitorsRaw(
+    username: string,
+    domain: string,
+    query = ''
+  ): Promise<{ status: number; body: any }> {
+    const suffix = query === '' ? '' : `?${query}`;
+    const response = await this.api.get(
+      `projects/${username}/domains/${encodeURIComponent(domain)}/visitors${suffix}`
+    );
+    return this.rawCall(response);
+  }
+
+  async getDomainVisitorBreakdownRaw(
+    username: string,
+    domain: string,
+    dimension: string,
+    query = ''
+  ): Promise<{ status: number; body: any }> {
+    const suffix = query === '' ? '' : `?${query}`;
+    const response = await this.api.get(
+      `projects/${username}/domains/${encodeURIComponent(domain)}/visitors/${dimension}${suffix}`
+    );
+    return this.rawCall(response);
+  }
 }

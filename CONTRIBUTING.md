@@ -3,7 +3,19 @@
 First off, thank you for taking the time to contribute! 🙌
 Whether it's a bug report, a docs fix, a new supported project type, or a core change, it's welcome.
 
-This guide gets you from a clean checkout to a pull request that's easy to review.
+This guide gets a person from a clean checkout to a pull request that's easy to review.
+
+---
+
+## Documentation
+
+Operator documentation lives in [`docs/`](docs/README.md). It is written for the person who installs a host and deploys apps: install, connect an assistant, run a project, supported applications. If an operator would notice the change, it belongs there.
+
+This file is for a person sending a pull request.
+
+Coding agents changing the engine follow [`AGENTS.md`](AGENTS.md): how to verify a change, which numbers to report, and the traps. That file does not replace [`docs/`](docs/README.md).
+
+> 🔒 **Found a security issue?** Do **not** open a public issue. Follow [`SECURITY.md`](SECURITY.md) and report it privately.
 
 ---
 
@@ -11,11 +23,9 @@ This guide gets you from a clean checkout to a pull request that's easy to revie
 
 - **Report a bug.** Open an issue with clear steps to reproduce, the engine version, and the host OS.
 - **Suggest an idea.** Open an issue describing the problem you want solved, not just the solution.
-- **Improve the docs.** The operator documentation lives in [`docs/`](docs/README.md) and is written for the person who installs a host. Small fixes are very welcome.
-- **Add support for an application.** The playbook is in [`AGENTS.md` §11](AGENTS.md). Every claim is a measurement.
+- **Improve the docs.** Edit [`docs/`](docs/README.md). Small fixes are very welcome.
+- **Add support for an application.** What an operator needs is in [`docs/07-supported-projects/`](docs/07-supported-projects/how-detection-works.md). Coding agents follow the onboarding playbook in [`AGENTS.md`](AGENTS.md) (§11).
 - **Fix a bug or build a feature.** See the workflow below.
-
-> 🔒 **Found a security issue?** Do **not** open a public issue. Follow [`SECURITY.md`](SECURITY.md) and report it privately.
 
 ---
 
@@ -28,9 +38,8 @@ This repository is the engine. A few landmarks:
 | [`core/`](core/) | The Laravel application, the engine's brains (PHP 8.4). |
 | [`docs/`](docs/README.md) | Operator documentation (install → deploy → run). |
 | [`scripts/`](scripts/) | Host scripts, benchmarks, and the DinD deploy tester. |
-| [`AGENTS.md`](AGENTS.md) | **Contributor conventions and the testing playbook. Read this before changing the engine.** |
-
-For anything beyond a docs typo, **[`AGENTS.md`](AGENTS.md) is the source of truth.** It explains how to verify a change, what numbers to report, and the traps to avoid.
+| [`tests/api/`](tests/api/README.md) | Playwright tests against a live engine. |
+| [`AGENTS.md`](AGENTS.md) | Instructions for coding agents. People use this file. |
 
 ---
 
@@ -60,9 +69,9 @@ cd core
 ./vendor/bin/phpunit --testsuite Unit
 ```
 
-The current baseline and the two known, unrelated failures are documented in [`AGENTS.md` §1](AGENTS.md). **Prove a failure is pre-existing** (`git stash`, re-run, compare, `git stash pop`) before waving it away.
+If a failure looks unrelated to your change, prove it: `git stash`, re-run, compare, `git stash pop`. Coding agents: the current baseline is in [`AGENTS.md` §1](AGENTS.md).
 
-Changing detection or a recipe? There's a real deploy tester (Docker-in-Docker) and a full battery of measurements in [`AGENTS.md` §2–§6](AGENTS.md). Onboarding a new application? Follow [`AGENTS.md` §11](AGENTS.md).
+Changing detection, a recipe, or onboarding an application? Coding agents follow [`AGENTS.md`](AGENTS.md) — §2–§6 for the deploy tester, §11 for a new application.
 
 ### End-to-end API tests ([`tests/api/`](tests/api/README.md))
 
@@ -73,7 +82,7 @@ It needs an engine to point at. On the engine host itself `npm test` invents the
 ```bash
 cd tests/api
 npm install
-npm test          # first run sets up env, then runs the unit + API specs
+npm test          # first run sets up env, then runs unit, API, and supported-app deploys
 ```
 
 Handy variants (anything after `--` is passed straight to `playwright test`):
@@ -83,11 +92,11 @@ Handy variants (anything after `--` is passed straight to `playwright test`):
 | `npm run test:unit` | Pure logic against stub transports: **no engine required, runs offline** |
 | `npm run test:smoke` | Only `@smoke` specs: the critical path |
 | `npm test -- --grep "suspend"` | A single test by name |
-| `npm run test:deploy` | Git-deploy specs against a shared Docker-in-Docker project |
+| `npm run test:supported-apps` | Real application deploys, plus the once-each deploy checks |
 | `npm run test:cli` | `pae-artisan` operator commands on the host |
 | `npm run report` | Serve the HTML report (a failing run keeps a trace) |
 
-Before pushing changes to this suite, run `npm run check` (typecheck + lint + format). Full setup, conventions (fixtures, cleanup, no `waitForTimeout`), the project list, and how DNS uses panelalpha.direct / panelalpha.online are all in its own [`tests/api/README.md`](tests/api/README.md). Read it before adding a spec.
+Before pushing changes to this suite, run `npm run check` (typecheck + lint + format). How to run the suite, and which group does what, is in [`tests/api/README.md`](tests/api/README.md).
 
 ---
 
@@ -96,7 +105,7 @@ Before pushing changes to this suite, run `npm run check` (typecheck + lint + fo
 1. **Branch** off the default branch with a descriptive name (e.g. `fix/archive-deploy-port`, `feat/detect-deno`).
 2. **Keep it focused.** Small, single-purpose pull requests are far easier to review and land faster.
 3. **Write a test** where it makes sense, and run the suite.
-4. **Update the docs** if behaviour changed: [`docs/`](docs/README.md) for operators, [`AGENTS.md`](AGENTS.md) for engine internals.
+4. **Update [`docs/`](docs/README.md)** if an operator would notice the change. Coding agents update [`AGENTS.md`](AGENTS.md) when the way to verify that change changes.
 
 ### Commit messages
 
@@ -134,7 +143,7 @@ When you open your first pull request, our CLA check will guide you through the 
 
 - Give it a clear title and describe **what** changed and **why**.
 - Link the related issue.
-- Say how you verified it. For engine changes, **report the measurements** (see [`AGENTS.md` §3](AGENTS.md)): a status code alone is not a result.
+- Say how you verified it. Coding agents report the measurements in [`AGENTS.md` §3](AGENTS.md): a status code alone is not a result.
 - Keep the pull request description up to date if behaviour changes during review.
 
 We'll review as soon as we can. Expect a bit of back-and-forth; it's how we keep the engine dependable for the thousands of sites it runs.

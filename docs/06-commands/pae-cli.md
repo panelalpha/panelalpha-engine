@@ -18,12 +18,17 @@ Throughout this page, `{project}` means the project's name - the value shown as 
 
 | Command | What it does |
 |---|---|
-| `pae configure` | Opens the menu: pick what to configure, do it, come back for the next thing. |
+| `pae configure` | Opens the menu: address and certificate, assistant tokens, API tokens, the queue, telemetry. Pick one, do it, come back for the next. |
+| `pae configure address` | The address clients connect to, and the certificate on that name. |
 | `pae configure mcp-tokens` | Connect an assistant, or change what assistants may use. |
 | `pae configure api-tokens` | Mint a token for your own software, and limit it to part of the API. |
-| `pae configure mcp --dry-run` | Shows what it would write, and writes nothing. |
+| `pae configure queue` | How many deploys, backups, or staging jobs run at once. A number from 1 to 32. |
+| `pae configure telemetry` | Whether reports are sent, and how much they carry. |
+| `pae configure --dry-run` | Any of the above. Shows what it would write, and writes nothing. |
 
-The first menu asks which part of the engine you want to change; today that is the assistant's commands, and the list grows as more of the engine moves in here. Choosing it opens its own menu:
+The menu, and what each line does: [Configure the engine](../02-getting-started/configure-the-engine.md).
+
+Choosing assistant tokens, then **Global scope**, opens:
 
 ```text
  Groups      37 of 37 groups on
@@ -41,17 +46,15 @@ The first menu asks which part of the engine you want to change; today that is t
  ◻ app_user_delete              write
 ```
 
-Tick what the assistant may use and untick what it may not. You never have to think about which settings file line carries which decision — the wizard works that out when it saves.
+Tick what the assistant may use and untick what it may not. You never have to think about which settings file line carries which decision. The wizard works that out when it saves.
 
-`pae configure tokens` asks the same thing one token at a time: pick an assistant's token, tick what that one may use. It can only narrow — an assistant cannot be given a command the engine is not offering — and ticking everything means "no limit", so that token keeps following the engine. `pae mcp:token:list` shows the result in its **Commands** column, as `all` or `40 of 182`.
-
-This limits what an assistant may call. It does not limit the token itself: anyone holding it can still reach the engine's REST API in full.
+**Tokens**, on that same assistant menu, asks the same thing one token at a time: pick an assistant's token, tick what that one may use. It can only narrow. An assistant cannot be given a command the engine is not offering. Ticking everything means "no limit", so that token keeps following the engine. `pae mcp:token:list` shows the result in its **Commands** column, as `all` or `40 of 182`.
 
 **Ceiling** is the one thing that is not a tick, and it is worth setting first. It is a ceiling on what a ticked command may *do*: at `readonly` the assistant can look and change nothing, whatever you have ticked. Nothing below it can raise it.
 
 Nothing is written until you pick **Review and save** and confirm it, and the settings it replaces are printed so you can put them back. When you save, you land back on the first menu.
 
-The wizard takes over the terminal while it runs — each step is drawn over the last, so you always see the current one and nothing else. What it wrote is printed once more as it exits, and that is what stays on your screen afterwards.
+The wizard takes over the terminal while it runs. Each step is drawn over the last, so you always see the current one and nothing else. What it wrote is printed once more as it exits, and that is what stays on your screen afterwards.
 
 The settings themselves are ordinary lines in `.env-core` and you can still edit them by hand: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
@@ -60,7 +63,7 @@ The settings themselves are ordinary lines in `.env-core` and you can still edit
 | Command | What it does |
 |---|---|
 | `pae project:rebuild --project={project}` | Rebuilds from the last shipped plan. This is how you update a site deployed from a repository. |
-| `pae project:deploy:log {project}` | Prints the latest deploy log. |
+| `pae project:deploy:log {project}` | Prints a deploy log. `--id=` picks one deploy. Without it, the latest. |
 | `pae project:deploy:check {project}` | Opens the site and reports what it is actually serving. |
 | `pae project:deploy:timings {project}` | Shows where the last deploy spent its time, stage by stage. |
 | `pae project:health:report` | Checks every deployed application and reports the ones that have stopped serving themselves. |
@@ -71,31 +74,23 @@ The settings themselves are ordinary lines in `.env-core` and you can still edit
 | `pae project:ssh {project} '{command}'` | Runs one command inside the project. |
 | `pae project:delete {project}` | Deletes the project and everything in it. Asks you to confirm. |
 
-Create a project from a public repository:
+Create a project from a public repository and wait until it is up:
 
 ```bash
-pae api:call POST /projects '{"git_repo":"https://github.com/org/app"}'
+pae project:create --repo=https://github.com/org/app
 ```
 
-What this does: creates the hosting account and queues the deploy. The call returns at once. The deploy runs in the background.
+What this does: creates the hosting account and deploys the repository in this command. Leave out the project name and the domain and the engine assigns them.
 
-What you should see: JSON for a **task**. Note `id`, `username` (the project name), and `details.domain` (the address to open). `status` starts as `queued`.
+What you should see: a summary with the project name and the address to open. The deploy log prints while it runs. `--quiet-deploy` hides that log. `--json` prints the project as JSON instead of the summary.
 
-Poll until that task is finished:
+A private repository. The URL must be `https://`, with no username or password in it:
 
 ```bash
-pae api:call GET /tasks/{id}
+pae project:create --repo=https://github.com/org/private-app --git-token=<token>
 ```
 
-What you should see: `status` of `completed`, `failed`, or `cancelled`. On `completed`, `details.deployment_status` is `success`, or `partial` with warnings. A failed create is rolled back, so the name is free to use again.
-
-To wait in the same request instead of polling, use the same body on `POST /users`. New scripts should use `POST /projects` and poll.
-
-For a private repository, pass a git access token. The URL must be `https://`, with no username or password in it:
-
-```bash
-pae api:call POST /projects '{"git_repo":"https://github.com/org/private-app","git_token":"<token>"}'
-```
+`--branch` picks a branch, tag, or commit. `--project` and `--domain` set the name and hostname when you do not want them generated. `--env-var=KEY=VALUE` can be repeated.
 
 The usual way to deploy is to ask your assistant: [Connecting with Git](../05-capabilities/connecting-with-git.md).
 
@@ -121,16 +116,16 @@ Context: [Environment variables](../05-capabilities/projects.md#environment-vari
 
 ## Repository projects
 
-For projects deployed from git, these act on the checkout the engine owns. Updating the running site is still `pae project:rebuild`.
+For projects deployed from git, these act on the checkout the engine owns. A pull, a branch change, or a revert on that checkout rebuilds the running site. `pae project:rebuild` rebuilds without changing the checkout.
 
 | Command | What it does |
 |---|---|
 | `pae git:status {project}` | Shows the checkout's branch and whether it has local changes. |
 | `pae git:pull {project}` | Pulls the latest commit, then rebuilds the application from it. |
 | `pae git:branches {project}` | Lists the branches on the remote. |
-| `pae git:change-branch {project} {branch}` | Switches the checkout to another branch. |
+| `pae git:change-branch {project} {branch}` | Switches the checkout to another branch, then rebuilds. |
 | `pae git:commits {project}` | Lists recent commits. |
-| `pae git:revert {project}` | Returns the checkout to the last deployed commit. |
+| `pae git:revert {project}` | Returns the checkout to the last deployed commit, then rebuilds. |
 | `pae git:update-credentials {project}` | Replaces the stored git access token. |
 | `pae git:deploy-hook {project}` | Creates the push-to-deploy hook and prints its URL and secret; the secret is shown only this once. Run again, it prints the same URL without the secret. `--rotate` issues a new URL and secret, `--delete` removes the hook, `--path` picks another checkout, `--provider` narrows the TLS setup notes to one git host. |
 
@@ -170,6 +165,8 @@ A remote store needs its own connection details. `pae backup:container:create --
 | `pae project:settings:set cloudflare-api-token <token> --project={project}` | Saves a Cloudflare API token on the project. Cloudflare checks it before it is stored. |
 | `pae domain:set-proxy {domain}` / `pae domain:unset-proxy {domain}` | Turns a proxy layer in front of a domain on or off. |
 | `pae sites:base-domain {domain}` | Shows or sets the name new projects are given a site under. |
+| `pae domain:php-directives {domain}` | Shows the PHP settings for that hostname, on traditional PHP hosting. |
+| `pae domain:php-directives:set {domain} --settings='{"memory_limit":"256M"}'` | Replaces the whole set of PHP settings for that hostname. `--clear` removes them. Naming one setting drops the others. |
 | `pae domain:wp-cli {domain} {command}` | Runs a WP-CLI command on a WordPress site. |
 
 Extra routing is managed with `pae proxy:rule:list`, `pae proxy:rule:create`, `pae proxy:rule:update` and `pae proxy:rule:delete`. Most sites never need one.
@@ -187,13 +184,27 @@ Context: [Domains and HTTPS](../05-capabilities/domains-and-ssl.md) · [Cloudfla
 | `pae mcp:token:delete {id}` | Removes a token from the list. |
 | `pae mcp:check {token}` | Checks HTTPS, the token, and that an assistant can connect. |
 | `pae mcp:tool:list` | Lists what a connected assistant is currently allowed to do. |
-| `pae configure mcp` | Changes that, by asking. See [Configuring the engine](#configuring-the-engine). |
+| `pae configure mcp-tokens` | Changes that, by asking. See [Configuring the engine](#configuring-the-engine). |
 | `pae mcp:log:list` | Lists recent assistant requests. |
-| `pae api:token:create {name}` | Creates a token for your own software. Not for assistants — it is refused at the assistant endpoint unless you pass `--mcp`. `--expires=90d` makes it temporary. |
+| `pae api:token:create {name}` | Creates a token for your own software. Not for assistants. It is refused at the assistant endpoint unless you pass `--mcp`. `--expires=90d` makes it temporary. |
 | `pae api:token:list` | Lists those software tokens. |
 | `pae api:token:delete {id}` | Removes a software token. |
 
 Setup: [Create a token](../04-connecting-your-ai/create-a-token.md).
+
+## Secrets
+
+A paste link for a Git or Cloudflare token. The value is never printed back.
+
+| Command | What it does |
+|---|---|
+| `pae vault:secret:create {type} --purpose=` | Prints a paste link. `{type}` is `git_token` or `cloudflare_api_token`. `--scope=global` stores it for the whole engine. A request link expires in an hour, and so does that secret. A global secret does not expire. Creating a global one that is already filled is refused. |
+| `pae vault:secret:list` | Lists entries: id, type, purpose, and whether one is filled. Never the secret. `--scope=global` or `--type=` narrows the list. |
+| `pae vault:secret:delete {ref}` | Deletes one entry and its secret. `{ref}` is the id from the list, or `global:git_token`. Asks you to confirm. `--force` skips that. |
+| `pae vault:config` | Shows whether projects without their own token use the engine-wide ones, and which of those are stored. |
+| `pae vault:config --project-scoped=true` | Projects use only the token they were given. `--project-scoped=false` shares the engine-wide tokens again. Stored secrets are kept either way. |
+
+Context: [One token for the whole engine](../05-capabilities/connecting-with-git.md#one-token-for-the-whole-engine) · [Cloudflare](../05-capabilities/cloudflare.md).
 
 ## Files
 
@@ -201,6 +212,9 @@ Setup: [Create a token](../04-connecting-your-ai/create-a-token.md).
 |---|---|
 | `pae project:file:upload {project} {file} --path=` | Copies a local file into the project. |
 | `pae project:file:download {project} --path= --out=` | Fetches one file out of the project. |
+| `pae project:file:fetch {project} --url= --path=` | Downloads an `http` or `https` address into a directory that already exists. `--filename=` sets the name when the address has none. This does not deploy the file. |
+| `pae project:file:chmod {project} --path= --mode=755` | Sets the mode of one file or directory. Three or four octal digits. It does not walk into folders inside it. |
+| `pae project:file:move-contents {project} --source= --dest=` | Moves the immediate children of a directory into a destination that already exists. A name that is already there is replaced. `--override=0` leaves the existing file. |
 | `pae project:usage {project}` | Resource usage, including this month's transfer against the bandwidth limit. |
 | `pae project:bandwidth {project} --start= --end= --group-by=day` | Transfer series for the project, in bytes. |
 | `pae project:domain:bandwidth {project} {domain} --start= --end=` | Transfer series for one hostname. |
@@ -216,6 +230,8 @@ Country charts still need a visible [DB-IP](https://db-ip.com) backlink: [Visito
 
 | Command | What it does |
 |---|---|
+| `pae project:set-password --project={project}` | Asks visitors for a password on every address of that project. Prompts for the password. `--password=` sets it without a prompt. `--force` skips the confirmation. |
+| `pae project:unset-password --project={project}` | Removes that password. `--force` skips the confirmation. |
 | `pae modsec:log:show` | Lists the ModSecurity audit log files. Pass a filename to print one. |
 | `pae project:domain:log {project} {domain}` | Lists the webserver logs for a hostname. Pass a filename to print one. |
 
@@ -243,7 +259,7 @@ Context: [Telemetry](../02-getting-started/what-is-collected.md).
 The engine ships more commands than belong on a daily list. Most are for support to point you at, or for server upkeep the engine normally handles on its own. Each one describes itself with `pae <command> --help`. The main groups:
 
 - **Server upkeep:** `system:version`, `system:database:test`, `system:ip:sync`, `system:domain:rebuild`, `system:modsec:rebuild`, `system:sftp:rebuild`, `system:exim:rebuild`, `system:webserver:update`.
-- **Scheduled cleanup:** `task:prune`, `metrics:prune`, `deploy:cache:prune`, `deploy:log:prune`, `acme:challenge:prune`, `vault:purge`.
+- **Scheduled cleanup:** `task:prune`, `metrics:prune`, `deploy:cache:prune` (runs once a day and deletes build caches unused for 24 hours; `--older-than=7d` changes the window, `--dry-run` only prints), `deploy:log:prune`, `acme:challenge:prune`, `vault:purge` (removes expired paste slots, never a filled engine-wide secret).
 - **Per-project repair:** `project:permission:fix`, `project:quota:rebuild`, `project:domain:fix`, `project:domain:rebuild`, `project:domain:cleanup`.
 - **Per-domain Apache modules:** `apache:mod:enable`, `apache:mod:disable`.
 - **Engine settings:** `settings:get`, `settings:set`, `settings:exists`.

@@ -1,4 +1,4 @@
-import type { APIRequestContext, APIResponse } from '@playwright/test';
+import { expect, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { type EngineApi } from '@/clients/engine-api';
 import type { ApiResponse, SystemChangeStatus, SystemInfo } from '@/types';
 import { waitForCondition } from './retry';
@@ -206,6 +206,27 @@ export function getWebserverRewriteWaitMs(slug: string): number {
     return 45_000;
   }
   return 15_000;
+}
+
+/**
+ * Waits until `/` answers 2xx/3xx, then asserts the HTML contains `marker`.
+ * Used after a real app deploy to prove the frontend is the one we shipped.
+ */
+export async function expectSiteServesFrontend(
+  httpClient: APIRequestContext,
+  siteUrl: string,
+  marker: string,
+  options: { timeout?: number } = {}
+): Promise<void> {
+  await waitForSiteHttpReady(httpClient, siteUrl, {
+    timeout: options.timeout ?? 90_000,
+    requireSuccess: true,
+  });
+  const page = await fetchSite(httpClient, siteUrl);
+  const body = await page.text();
+  expect(page.status(), body.slice(0, 500)).toBeGreaterThanOrEqual(200);
+  expect(page.status()).toBeLessThan(400);
+  expect(body, body.slice(0, 800)).toContain(marker);
 }
 
 /**

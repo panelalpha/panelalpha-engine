@@ -183,4 +183,38 @@ export class GitApi extends EngineApiBase {
     const response = await this.api.post(`projects/${username}/git/revert`, { data });
     return this.rawCall(response);
   }
+
+  async createDeployHookRaw(
+    username: string,
+    data: { path?: string; provider?: string } = {}
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.post(`projects/${username}/git/deploy-hook`, { data });
+    return this.rawCall(response);
+  }
+
+  async getDeployHookRaw(
+    username: string,
+    options: GitPathRequest = {}
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.get(`projects/${username}/git/deploy-hook${gitQuery(options)}`);
+    return this.rawCall(response);
+  }
+
+  async rotateDeployHookRaw(
+    username: string,
+    data: GitPathRequest = {}
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.post(`projects/${username}/git/deploy-hook/rotate`, { data });
+    return this.rawCall(response);
+  }
+
+  async deleteDeployHookRaw(
+    username: string,
+    options: GitPathRequest = {}
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.delete(
+      `projects/${username}/git/deploy-hook${gitQuery(options)}`
+    );
+    return this.rawCall(response);
+  }
 }

@@ -9,6 +9,18 @@ import {
 } from '@/types';
 import { EngineApiBase } from '../engine-api-base';
 
+function deployLogQuery(options: { offset?: number; buildTimings?: boolean } = {}): string {
+  const query = new URLSearchParams();
+  if (options.offset !== undefined) {
+    query.set('offset', String(options.offset));
+  }
+  if (options.buildTimings === true) {
+    query.set('build_timings', '1');
+  }
+  const encoded = query.toString();
+  return encoded === '' ? '' : `?${encoded}`;
+}
+
 export class ContainersApi extends EngineApiBase {
   async listContainers(username: string): Promise<ApiResponse<unknown[]>> {
     const response = await this.api.get(`projects/${username}/containers`);
@@ -92,18 +104,24 @@ export class ContainersApi extends EngineApiBase {
     return this.rawCall(response);
   }
 
-  async getDeployLog(username: string, offset?: number): Promise<ApiResponse<DeployLogSnapshot>> {
-    const url =
-      offset === undefined
-        ? `projects/${username}/deploy-log`
-        : `projects/${username}/deploy-log?offset=${offset}`;
-    const response = await this.api.get(url);
+  async getDeployLog(
+    username: string,
+    options: { offset?: number; buildTimings?: boolean } = {}
+  ): Promise<ApiResponse<DeployLogSnapshot>> {
+    const response = await this.api.get(
+      `projects/${username}/deploy-log${deployLogQuery(options)}`
+    );
     await this.assertStatus(response, 200);
     return response.json();
   }
 
-  async getDeployLogRaw(username: string): Promise<{ status: number; body: any }> {
-    const response = await this.api.get(`projects/${username}/deploy-log`);
+  async getDeployLogRaw(
+    username: string,
+    options: { offset?: number; buildTimings?: boolean } = {}
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.get(
+      `projects/${username}/deploy-log${deployLogQuery(options)}`
+    );
     return this.rawCall(response);
   }
 

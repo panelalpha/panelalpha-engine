@@ -95,7 +95,7 @@ The webserver's access and error logs for a hostname. Not the deploy log - these
 Show me the error log for shop.example.com.
 ```
 
-Use these for 404s, 500s that only some visitors hit, and traffic questions. If the assistant cannot read them, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+Use these for 404s and 500s that only some visitors hit. For how many people came, and how much data they transferred, ask for the counts: [Visitor statistics](visitor-statistics.md). If the assistant cannot read the logs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 ## 4. Usage - "is it running out of something?"
 

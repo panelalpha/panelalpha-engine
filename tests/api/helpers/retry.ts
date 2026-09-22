@@ -1,16 +1,19 @@
+import { expect } from '@playwright/test';
+
 export interface WaitForConditionOptions {
   timeout?: number;
   interval?: number;
   message?: string;
-  /** Included in timeout error when the condition never becomes true. */
+  /** Included in the poll failure when the condition never becomes true. */
   describeLast?: () => string | Promise<string>;
 }
 
 /**
- * Waits for a condition to be true.
+ * Polls until `condition` returns true.
  *
- * @param condition - Async function that returns true when condition is met
- * @param options - Wait options
+ * Implemented with `expect.poll`, so a thrown error aborts immediately and a
+ * false result is retried until `timeout`. Prefer calling `expect.poll` from
+ * the spec when the value under test is the assertion itself.
  */
 export async function waitForCondition(
   condition: () => Promise<boolean>,
@@ -23,29 +26,29 @@ export async function waitForCondition(
     describeLast,
   } = options;
 
-  const startTime = Date.now();
-  let attempts = 0;
-
-  while (Date.now() - startTime < timeout) {
-    attempts += 1;
-    if (await condition()) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, interval));
-  }
-
-  const elapsedSec = Math.round((Date.now() - startTime) / 1000);
-  const lastState = describeLast ? await describeLast() : undefined;
-  const detail = lastState ? ` Last state: ${lastState}.` : '';
-  throw new Error(
-    `${message} (${attempts} attempts over ${elapsedSec}s, timeout ${timeout}ms).${detail}`
-  );
+  await expect
+    .poll(
+      async () => {
+        if (await condition()) {
+          return 'met';
+        }
+        if (!describeLast) {
+          return 'not met';
+        }
+        return `not met. Last state: ${await describeLast()}`;
+      },
+      {
+        message,
+        timeout,
+        intervals: [interval],
+      }
+    )
+    .toBe('met');
 }
 
 /**
- * Delays execution for specified milliseconds
- *
- * @param ms - Milliseconds to wait
+ * Fixed pause between mutations that have no readable condition yet
+ * (for example a daemon reload the API does not report).
  */
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

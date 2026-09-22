@@ -1,17 +1,25 @@
 # Visitor statistics
 
-The engine counts hits from host access logs. Bandwidth, pages, browsers, operating systems and referrers work as soon as logs are ingested. **Country, continent and region lists stay empty** until you fetch a local City database.
+The engine counts visits and transfer from the webserver's access logs for each hostname. Ask in chat. You do not download a log file to answer how much traffic a site had.
 
-That fetch is a command you run yourself. It is not part of install, it is not on a schedule, and `pae stats:update` does not download it. Visitor IP addresses are looked up on this VPS only. They are never sent to a public geolocation API.
-
-```bash
-pae geolocation:database update
+```text
+How many visitors did shop.example.com have between 2026-09-01 and 2026-09-07?
 ```
 
-The first run asks you to accept [DB-IP](https://db-ip.com) terms for **IP to City Lite** (Creative Commons Attribution 4.0). In a script, pass `--accept-terms`. Without a terminal, the command refuses to wait for a prompt: pass `--accept-terms`, or it exits without downloading.
+```text
+How much data did this project transfer between 2026-09-01 and 2026-09-30, by day?
+```
 
-A later run with this month already on disk succeeds without downloading again. Pass `--force` to replace the file anyway.
+```text
+Break down shop.example.com's visitors by pages and browsers for September 2026.
+```
 
-Confirming terms allows the download. It does **not** replace the CC BY 4.0 duty to show a visible backlink where people see country charts. Engine JSON has no HTML; the command prints `IP Geolocation by DB-IP (https://db-ip.com)` on success so you know the link still belongs on any page that displays those results.
+Hits and visits follow the dates you name. Unique visitors, how long a visit lasts, and every breakdown are counted by calendar month. A range that sits inside a month still reports that whole month for those. Breakdowns are pages, browsers, operating systems, referrers, countries, continents, or regions.
 
-From the server: [CLI commands](../06-commands/pae-cli.md#files).
+Country, continent, and region lists stay empty until a City database is on this VPS. That download is not part of install and it is not on a schedule. Visitor addresses are looked up on this VPS only. They are never sent to a public geolocation service.
+
+Showing country charts still needs a visible credit: `IP Geolocation by DB-IP (https://db-ip.com)`. The download command prints that line when it succeeds, so you know the link belongs on any page that displays those results.
+
+## From the server
+
+Visitor counts, transfer, and the City database: [CLI commands](../06-commands/pae-cli.md#files).

@@ -1,4 +1,5 @@
 import { test } from '@playwright/test';
+import { onlineLabel } from '@/config/site-domain';
 import type { UserFactory } from '@/test-data/factories';
 
 /** Skips the current test with a consistent `[skip]` prefix in reports. */
@@ -16,6 +17,11 @@ export function skipUnless<T>(value: T, reason: string): asserts value is NonNul
   if (value == null || value === false || value === '') {
     test.skip(true, reason);
   }
+}
+
+/** Skip when DomainPlan did not allocate a `*.panelalpha.online` name. */
+export function skipUnlessOnline(domain: string): void {
+  skipUnless(onlineLabel(domain), `PanelAlpha Online was not allocated (${domain}).`);
 }
 
 /**

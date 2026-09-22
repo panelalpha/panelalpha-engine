@@ -318,4 +318,4 @@ PanelAlpha Engine 是开源软件，采用 Apache 2.0 许可证。
 
 ## 一起来构建
 
-想参与？[`CONTRIBUTING.md`](CONTRIBUTING.md) 会带你起步。更深入的贡献者约定和测试流程，去看 [`AGENTS.md`](AGENTS.md)。
+想参与？[`CONTRIBUTING.md`](CONTRIBUTING.md) 会带你起步。给运维人员看的文档在 [`docs/`](docs/README.md)。

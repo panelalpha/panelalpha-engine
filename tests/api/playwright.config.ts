@@ -171,10 +171,12 @@ export default defineConfig({
       testMatch: /tests\/cli\/.*\.spec\.ts/,
     },
     {
-      name: 'deploy',
-      dependencies: ['setup-dind'],
-      testMatch: /tests\/deploy\/.*\.spec\.ts/,
-      timeout: Timeouts.deploy,
+      // Real Supported-board apps, plus the checks that run once (staging,
+      // backup, hook, a missing front page). Hours for the whole catalogue.
+      // SUPPORTED_APPS=slug,slug narrows the catalogue only.
+      name: 'supported-apps',
+      testMatch: /tests\/deploy\/supported-apps.*\.spec\.ts/,
+      timeout: Timeouts.supportedApp,
     },
     {
       name: 'webserver-change',

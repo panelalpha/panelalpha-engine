@@ -320,6 +320,6 @@ PanelAlpha Engine مفتوح المصدر برخصة Apache 2.0.
 
 ## تعال ابنِ معنا
 
-تريد المشاركة؟ [`CONTRIBUTING.md`](CONTRIBUTING.md) يضعك على الطريق. للاصطلاحات الأعمق للمساهمين ومسار الاختبار، اذهب إلى [`AGENTS.md`](AGENTS.md).
+تريد المشاركة؟ [`CONTRIBUTING.md`](CONTRIBUTING.md) يضعك على الطريق. توثيق المشغّل موجود في [`docs/`](docs/README.md).
 
 </div>

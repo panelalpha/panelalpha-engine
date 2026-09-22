@@ -318,4 +318,4 @@ PanelAlpha Engine має відкритий код за ліцензією Apach
 
 ## Будуйте це разом з нами
 
-Хочете долучитися? [`CONTRIBUTING.md`](CONTRIBUTING.md) вас запустить. Для глибших домовленостей контриб'юторів і процесу тестування дивіться [`AGENTS.md`](AGENTS.md).
+Хочете долучитися? [`CONTRIBUTING.md`](CONTRIBUTING.md) вас запустить. Документація для оператора є в [`docs/`](docs/README.md).

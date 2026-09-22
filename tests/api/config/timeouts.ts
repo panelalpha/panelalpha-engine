@@ -35,4 +35,13 @@ export const Timeouts = {
 
   /** Git clone + image build + health probe for a live DinD deploy. */
   deploy: 600_000,
+
+  /** Poll budget for one supported-app deploy. */
+  supportedAppDeploy: 1_800_000,
+
+  /**
+   * Whole supported-app test: inspect retries, then the deploy poll, then the
+   * health check and the external probe.
+   */
+  supportedApp: 2_700_000,
 } as const;

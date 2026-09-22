@@ -1,9 +1,8 @@
-import { test } from '@/fixtures/test-options';
+import { expect, test } from '@/fixtures/test-options';
 import SftpClient from 'ssh2-sftp-client';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { getDomainBasePath } from '@/helpers/file-path-helpers';
 import { rand } from '@/helpers/random';
-import { delay } from '@/helpers/retry';
 import { requireEngineConnectHost } from '@/helpers/engine-host';
 
 /**
@@ -28,13 +27,29 @@ test(
     const sftp = new SftpClient();
 
     try {
-      await delay(settings.timing.propagationDelay);
-      await sftp.connect({
-        host,
-        port: settings.ports.sftp,
-        username: account.username,
-        password: account.password,
-      });
+      await expect
+        .poll(
+          async () => {
+            try {
+              await sftp.connect({
+                host,
+                port: settings.ports.sftp,
+                username: account.username,
+                password: account.password,
+              });
+              return 'connected';
+            } catch (error) {
+              await sftp.end().catch(() => undefined);
+              return error instanceof Error ? error.message : String(error);
+            }
+          },
+          {
+            timeout: settings.timing.propagationDelay,
+            intervals: [500],
+            message: 'SFTP account was not reachable',
+          }
+        )
+        .toBe('connected');
 
       const created = await createSymlink(sftp, target, sftpPath);
       test.skip(!created, 'This SFTP server does not expose a symlink operation.');
