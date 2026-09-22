@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\CacheManager;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\RuntimeImageCatalog;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpApacheConfig;
+use App\Lib\Deploy\Platform\Runtime\Php\PhpIniDefaults;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpProxyHeaders;
 use App\Lib\Deploy\Template\Template;
 use App\Lib\Deploy\Template\TemplateLoader;
@@ -67,6 +68,15 @@ class PhpBaseImage
     public const SERVE_ASSET = 'panelalpha-serve.sh';
 
     /**
+     * What a checkout with no front controller is served from. Empty, and
+     * outside /app so the account cannot put anything in it -- the previous
+     * fallback published the whole source tree with the PHP handler over it.
+     * {@see SERVE_ASSET} spells the same path; PhpServeFallbackTest pins them
+     * together.
+     */
+    public const EMPTY_DOCROOT = '/usr/local/lib/panelalpha/empty-docroot';
+
+    /**
      * Everything a deployed PHP application is served with. No per-project
      * Dockerfile installs what is missing, so an extension absent here is
      * absent from the running site — a working deploy serving a 500.
@@ -85,6 +95,12 @@ class PhpBaseImage
      * @var list<string>
      */
     public const EXTENSIONS = [
+        // symfony/amqp-messenger hard-requires ext-amqp, and Symfony
+        // distributions pull it in with the Messenger transport set whether or
+        // not they ever speak to a broker -- pimcore/skeleton does. Without it
+        // Composer refuses to resolve at all, so the deploy dies in the host
+        // build naming an extension rather than anything the user can act on.
+        'amqp',
         'apcu',
         'bcmath',
         'calendar',
@@ -270,11 +286,14 @@ class PhpBaseImage
             'ports_conf' => PhpApacheConfig::ports(self::PORT),
             'vhost_path' => PhpApacheConfig::VHOST_PATH,
             'vhost_conf' => PhpApacheConfig::vhost(self::PORT),
+            'php_ini_path' => PhpIniDefaults::INI_PATH,
+            'php_ini' => PhpIniDefaults::ini(),
             'proxy_script_dir' => PhpProxyHeaders::IMAGE_DIR,
             'proxy_script_path' => PhpProxyHeaders::IMAGE_PATH,
             'proxy_script' => rtrim(PhpProxyHeaders::script()),
             'proxy_ini_path' => PhpProxyHeaders::INI_PATH,
             'proxy_ini' => PhpProxyHeaders::ini(PhpProxyHeaders::IMAGE_PATH),
+            'empty_docroot' => self::EMPTY_DOCROOT,
             'serve_path' => self::SERVE_PATH,
             'serve_script' => rtrim(TemplateLoader::asset(self::SERVE_ASSET)),
             'entrypoint_path' => self::ENTRYPOINT_PATH,

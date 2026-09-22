@@ -27,22 +27,31 @@ final class PhpDocroot
     /**
      * Tried only after the project root, and only for `index.php`.
      *
-     * `src/` is WackoWiki's document root, but unlike the four above it is the
+     * These are names that *may* be a document root but, unlike the four
+     * above, are not reserved for one: `www/` (ZenTao, Group Office,
+     * Bluecherry), `htdocs/` (DAViCal), `source/` (OXID eShop), `upload/`
+     * (ClipBucket), `webui/` (piler). Each was serving a 403 because nothing
+     * probed it and Apache got the project root with no index.
+     *
+     * `src/` stays last, and is the reason this list is late-ranked at all.
+     * It is WackoWiki's document root, but unlike the four above it is the
      * conventional name for *source* — and ranked with them it outranked the
      * root and matched `index.html` too. Two ordinary shapes broke on that: a
      * PHP app whose frontend sources live in `src/` with a `src/index.html`
      * had Apache pointed at the unbuilt source tree, serving `.ts`, `.env` and
      * config files as plaintext; and the blank "silence is golden" `index.php`
      * people drop into a directory to stop listings silently replaced the real
-     * root front controller with an empty page.
+     * root front controller with an empty page. A project carrying both
+     * `www/index.php` and `src/index.php` should get `www/`, hence the order.
      *
      * After the root, so a project that has its own front controller keeps it,
      * and `index.php` only, so a directory of documents is not mistaken for a
-     * document root.
+     * document root. That last rule is what keeps Perl applications out: Sympa
+     * ships `www/` and AWStats `wwwroot/`, and neither holds an index file.
      *
      * @var list<string>
      */
-    public const LATE_CANDIDATES = ['src'];
+    public const LATE_CANDIDATES = ['www', 'htdocs', 'httpdocs', 'source', 'upload', 'webui', 'src'];
 
     /**
      * What Apache's DirectoryIndex serves in the base image. index.htm is not

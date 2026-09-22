@@ -21,6 +21,9 @@ final class DockerfileFinder
     public const NESTED_CANDIDATES = [
         'docker/Dockerfile',
         'scripts/docker/Dockerfile',
+        // Flipt keeps its release build here while a Dockerfile.dev sits at
+        // the root, which is the shape DEMOTED_VARIANTS exists to lose to.
+        'build/Dockerfile',
     ];
 
     private const ROOT_NAME = 'Dockerfile';
@@ -198,34 +201,101 @@ final class DockerfileFinder
     }
 
     /**
-     * Paths that might be a Dockerfile, best first: root `Dockerfile`, then
-     * `Dockerfile.<variant>` from the root listing and again from disk (so the
-     * original case is preserved), then `Containerfile`, then NESTED_CANDIDATES.
-     * Lazy: the directory scan runs only when the listing has not answered.
+     * Suffixes naming a Dockerfile written for something other than running
+     * the application in production. Ranked below NESTED_CANDIDATES, because
+     * `docker/Dockerfile` is a likelier production build than `Dockerfile.dev`.
+     *
+     * @var list<string>
+     */
+    private const DEMOTED_VARIANTS = [
+        'dev', 'develop', 'development', 'local', 'test', 'tests', 'ci',
+        'builder', 'build', 'client', 'dispatcher', 'heroku', 'example', 'sample',
+        // Authelia's root Dockerfile is the release image and is rejected for
+        // other reasons, so detection fell through to Dockerfile.coverage --
+        // `go build -tags dev -cover`, an instrumented binary that also swaps
+        // the portal's CSP for the development one. A coverage build is never
+        // what a site should run.
+        'coverage',
+    ];
+
+    /**
+     * Suffixes that say "this is the one to ship". Ranked above every other
+     * variant so they beat whatever the directory listing happens to return
+     * first.
+     *
+     * @var list<string>
+     */
+    private const PREFERRED_VARIANTS = ['prod', 'production', 'release', 'stable'];
+
+    /**
+     * Paths that might be a Dockerfile, best first: root `Dockerfile` (or
+     * `Containerfile`), then PREFERRED_VARIANTS, then variants that say
+     * nothing either way, then NESTED_CANDIDATES, then DEMOTED_VARIANTS.
+     *
+     * The ranking is the whole point. Variants used to be yielded in directory
+     * order, so whichever the filesystem listed first won: `Dockerfile.client`
+     * beat `Dockerfile.server.production`, `Dockerfile.heroku` beat
+     * `docker/Dockerfile`, `Dockerfile.dev` beat `build/Dockerfile` and
+     * `Dockerfile.latest` beat `Dockerfile.stable`. Each built something the
+     * project never meant to run as its server, and the deploy then reported a
+     * successful build of the wrong image.
+     *
+     * A multi-part suffix is judged on every part (`server.production` is
+     * preferred, `server.dev` demoted); a part appearing in both lists is
+     * demoted, since `Dockerfile.prod.test` is still a test file.
      *
      * @return Generator<string>
      */
     private function candidates(): Generator
     {
-        if (isset($this->files[strtolower(self::ROOT_NAME)])) {
-            yield self::ROOT_NAME;
-        }
+        $plain = [];
+        $preferred = [];
+        $neutral = [];
+        $demoted = [];
 
+        // The listing is lowercased, so names are taken from disk as well:
+        // `Dockerfile.prod` has to be opened under the case it was written in.
+        $names = [];
         foreach (array_keys($this->files) as $name) {
             if (str_starts_with((string) $name, 'dockerfile.')) {
-                yield (string) $name;
+                $names[(string) $name] = true;
             }
         }
-
-        // Again from disk: the listing is lowercased, and `Dockerfile.prod`
-        // has to be opened under the name it was written with.
         foreach (scandir($this->projectDir) ?: [] as $entry) {
             if (preg_match(self::NAME_PATTERN, $entry) === 1) {
-                yield $entry;
+                $names[$entry] = true;
             }
         }
 
+        if (isset($this->files[strtolower(self::ROOT_NAME)])) {
+            $plain[] = self::ROOT_NAME;
+        }
+
+        foreach (array_keys($names) as $name) {
+            $suffix = (string) strstr((string) $name, '.');
+            if ($suffix === '') {
+                // `Dockerfile` is already in $plain; this is `Containerfile`.
+                if (strcasecmp((string) $name, self::ROOT_NAME) !== 0) {
+                    $plain[] = (string) $name;
+                }
+                continue;
+            }
+
+            $parts = array_filter(explode('.', strtolower(ltrim($suffix, '.'))));
+            if (array_intersect($parts, self::DEMOTED_VARIANTS) !== []) {
+                $demoted[] = (string) $name;
+            } elseif (array_intersect($parts, self::PREFERRED_VARIANTS) !== []) {
+                $preferred[] = (string) $name;
+            } else {
+                $neutral[] = (string) $name;
+            }
+        }
+
+        yield from $plain;
+        yield from $preferred;
+        yield from $neutral;
         yield from self::NESTED_CANDIDATES;
+        yield from $demoted;
     }
 
     /**
