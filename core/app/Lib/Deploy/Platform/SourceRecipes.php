@@ -308,10 +308,18 @@ final class SourceRecipes
     }
 
     /**
-     * Every `<host>/<owner>/<repo>` directory under the tree, keyed by slug.
+     * Every recipe directory under the tree, keyed by slug.
      *
-     * Exactly three levels: the depth is the address, so anything at another
-     * depth is a mistake rather than a repository.
+     * A recipe lives at least at `<host>/<owner>/<repo>` (three levels) and is
+     * any directory there that carries a `panelalpha.yaml`. The owner may be a
+     * multi-level GitLab namespace, so the walk descends until it meets the
+     * manifest rather than stopping at a fixed depth: a namespace directory
+     * above a subgroup repo (`<host>/<group>/<subgroup>/`) is walked through,
+     * and the manifest, once found, ends the descent so a recipe's own nested
+     * `files/…/panelalpha.yaml` payload is not mistaken for another recipe.
+     *
+     * A three-level leaf with no manifest is kept — the half-written recipe
+     * {@see all()} reports rather than throws.
      *
      * @return array<string, string>
      */
@@ -324,15 +332,29 @@ final class SourceRecipes
 
         $found = [];
         foreach (self::entries($root) as $host) {
-            foreach (self::entries("{$root}/{$host}") as $owner) {
-                foreach (self::entries("{$root}/{$host}/{$owner}") as $repo) {
-                    $found["{$host}/{$owner}/{$repo}"] = "{$root}/{$host}/{$owner}/{$repo}";
-                }
-            }
+            self::collect("{$root}/{$host}", $host, 1, $found);
         }
         ksort($found);
 
         return $found;
+    }
+
+    /**
+     * Record every recipe directory in one namespace subtree.
+     *
+     * @param array<string, string> $found slug => directory, filled in place
+     */
+    private static function collect(string $dir, string $slug, int $depth, array &$found): void
+    {
+        $children = self::entries($dir);
+        if ($depth >= 3 && (is_file($dir . '/' . AppConfigDirectory::CONFIG) || $children === [])) {
+            $found[$slug] = $dir;
+
+            return;
+        }
+        foreach ($children as $child) {
+            self::collect("{$dir}/{$child}", "{$slug}/{$child}", $depth + 1, $found);
+        }
     }
 
     /** Drop the cache. Tests that write directories to a temp dir need this. */

@@ -415,6 +415,38 @@ class SourceRecipeTest extends TestCase
         $this->assertSame(AppConfigDirectory::DIRNAME, $decision['source_recipe']);
     }
 
+    /**
+     * Regression for #232: a recipe that ships its own check must resolve it at
+     * selection time. `fromSource()` dropped the recipe's `checks/` directory,
+     * so a `check:` naming a recipe-owned check was refused as unknown here even
+     * though `SourceRecipes::at()` threads the same directory correctly.
+     */
+    public function test_a_recipe_owned_check_resolves_through_source_selection(): void
+    {
+        $project = $this->tmpDir . '/owns-a-check';
+        $recipeDir = $project . '/' . AppConfigDirectory::DIRNAME;
+        mkdir($recipeDir . '/checks/_baseline', 0777, true);
+        file_put_contents(
+            $project . '/composer.json',
+            (string) json_encode(['require' => ['php' => '>=8.2']])
+        );
+        file_put_contents(
+            $recipeDir . '/' . AppConfigDirectory::CONFIG,
+            "extends: matomo\ncheck:\n  - _baseline/deploy-232-owned\n"
+        );
+        file_put_contents(
+            $recipeDir . '/checks/_baseline/deploy-232-owned.yaml',
+            "id: deploy-232-owned\nmessage: 'x'\nexpect:\n  status: [200]\nfix: 'y'\n"
+        );
+
+        // Without the fix this throws "has no check 'deploy-232-owned'" because
+        // the recipe's own checks never reach the manifest during selection.
+        $decision = DetectProjectStrategy::detect($project, 'https://github.com/acme/fork');
+
+        $this->assertSame('matomo', $decision['platform']);
+        $this->assertSame(AppConfigDirectory::DIRNAME, $decision['source_recipe']);
+    }
+
     private function write(string $contents): void
     {
         @mkdir($this->tmpDir . '/github.com/acme/widget', 0777, true);

@@ -3,8 +3,10 @@
 namespace App\Lib\Deploy\Source;
 
 /**
- * A repository URL broken into the three things the engine keys anything by:
- * host, owner, repo.
+ * A repository URL broken into the things the engine keys anything by:
+ * host, owner and repo. The owner is a namespace and may itself hold slashes
+ * — a GitLab subgroup makes `gitlab.com/rtraceio/web/flink` owner
+ * `rtraceio/web`, repo `flink` — so only the last path segment is the repo.
  *
  * Two trees are addressed this way — the paemd pages under
  * `/opt/panelalpha/shared-hosting/paemd-pages` and the source recipes under
@@ -38,21 +40,46 @@ final class RepoUrl
         }
         $gitUrl = rtrim($gitUrl, '/');
 
-        // SCP-style git URLs: git@host:owner/repo
-        if (preg_match('/^[^@\s\/]+@([^:\s]+):([^\/\s]+)\/([^\/\s]+)$/', $gitUrl, $m)) {
-            return ['host' => $m[1], 'owner' => $m[2], 'repo' => $m[3]];
+        // SCP-style git URLs: git@host:owner/.../repo
+        if (preg_match('/^[^@\s\/]+@([^:\s]+):([^\s]+)$/', $gitUrl, $m)) {
+            return self::build($m[1], $m[2]);
         }
 
         $parts = parse_url($gitUrl);
         if (empty($parts['host']) || empty($parts['path'])) {
             return null;
         }
-        $segments = array_values(array_filter(explode('/', trim($parts['path'], '/'))));
+
+        return self::build($parts['host'], $parts['path']);
+    }
+
+    /**
+     * Split a host and path into host/owner/repo, the repo being the last
+     * segment and the owner every namespace segment before it.
+     *
+     * @return ?array{host: string, owner: string, repo: string}
+     */
+    private static function build(string $host, string $path): ?array
+    {
+        $segments = array_values(array_filter(
+            explode('/', trim($path, '/')),
+            static fn (string $s): bool => $s !== ''
+        ));
+
+        // GitLab decorates project URLs with a `/-/` route marker
+        // (`group/sub/repo/-/tree/main`); the repository is everything before it.
+        $marker = array_search('-', $segments, true);
+        if ($marker !== false) {
+            $segments = array_slice($segments, 0, $marker);
+        }
+
         if (count($segments) < 2) {
             return null;
         }
 
-        return ['host' => $parts['host'], 'owner' => $segments[0], 'repo' => $segments[1]];
+        $repo = array_pop($segments);
+
+        return ['host' => $host, 'owner' => implode('/', $segments), 'repo' => $repo];
     }
 
     /**
@@ -64,7 +91,7 @@ final class RepoUrl
      * an owner or repo name are how a crafted remote would read a YAML file
      * from somewhere else on the host.
      *
-     * @return ?array{0: string, 1: string, 2: string} host, owner, repo
+     * @return ?list<string> host, then each namespace segment, then repo
      */
     public static function segments(string $gitUrl): ?array
     {
@@ -73,18 +100,24 @@ final class RepoUrl
             return null;
         }
 
-        $segments = [
-            strtolower($parsed['host']),
-            strtolower($parsed['owner']),
-            strtolower($parsed['repo']),
-        ];
-        foreach ($segments as $segment) {
-            if ($segment === '' || $segment === '.' || $segment === '..') {
+        // The owner may be a multi-level namespace, so validate every segment
+        // on its own — a subgroup separator is legitimate, `..` never is.
+        $parts = array_merge(
+            [$parsed['host']],
+            explode('/', $parsed['owner']),
+            [$parsed['repo']]
+        );
+
+        $segments = [];
+        foreach ($parts as $part) {
+            $part = strtolower($part);
+            if ($part === '' || $part === '.' || $part === '..') {
                 return null;
             }
-            if (str_contains($segment, '/') || str_contains($segment, '\\') || str_contains($segment, "\0")) {
+            if (str_contains($part, '/') || str_contains($part, '\\') || str_contains($part, "\0")) {
                 return null;
             }
+            $segments[] = $part;
         }
 
         return $segments;

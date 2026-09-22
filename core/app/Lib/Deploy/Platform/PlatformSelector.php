@@ -99,7 +99,10 @@ final class PlatformSelector
         );
         $manifest = SourceRecipes::fromAppConfig(
             $hit['config'] ?? null,
-            $hit === null ? '' : AppConfigLocator::describe($hit)
+            $hit === null ? '' : AppConfigLocator::describe($hit),
+            // The recipe's own checks, so a `check:` naming one resolves at
+            // selection time the same way it does through SourceRecipes::at().
+            $hit === null ? null : SourceRecipes::checksDirectory($hit['path'])
         );
         if ($manifest === null || $hit === null) {
             return null;
