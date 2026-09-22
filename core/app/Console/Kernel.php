@@ -84,6 +84,8 @@ class Kernel extends ConsoleKernel
         // telemetry is off, since an install that does not report has nothing
         // to gain from paying for the sweep.
         $schedule->command('project:health:report')->everySixHours()->withoutOverlapping();
+        // Host access logs into AWStats text databases.
+        $schedule->command('stats:update')->daily()->withoutOverlapping();
     }
 
     /**

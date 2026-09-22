@@ -67,7 +67,7 @@ else
 fi
 mkdir -p "/home/\$(hostname)/docker"
 cat > /etc/docker/daemon.json <<EOF
-{"data-root": "/home/\$(hostname)/docker", "ip": "0.0.0.0", "ipv6": false, "group": "{$username}", "insecure-registries": ["panelalpha-cache-registry:5000"]}
+{"data-root": "/home/\$(hostname)/docker", "ip": "0.0.0.0", "ipv6": false, "group": "{$username}", "insecure-registries": ["panelalpha-cache-registry:5000", "panelalpha-registry-proxy:5000"], "registry-mirrors": ["http://panelalpha-registry-proxy:5000"]}
 EOF
 echo "[init] generated /etc/docker/daemon.json"
 mkdir -p "/home/{$username}/.docker"
