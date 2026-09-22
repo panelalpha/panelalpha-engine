@@ -107,7 +107,7 @@ class ComposeHardenTest extends TestCase
         $this->assertSame(['database', 'vite'], $result['services']['app']['depends_on']);
         $this->assertSame('384m', $result['services']['app']['mem_limit']);
         $this->assertSame('512m', $result['services']['database']['mem_limit']);
-        $this->assertSame(256, $result['services']['app']['pids_limit']);
+        $this->assertSame(1024, $result['services']['app']['pids_limit']);
     }
 
     public function test_preserves_worker_configuration_and_caps_application_resources(): void
@@ -332,6 +332,105 @@ YAML
         $this->assertArrayNotHasKey('network_mode', $service);
         $this->assertArrayNotHasKey('devices', $service);
         $this->assertSame(['./data:/app/data'], $service['volumes']);
+    }
+
+    public function test_removes_capability_and_confinement_options(): void
+    {
+        // Dropping `privileged` is not enough on its own: every capability it
+        // implies can be asked for one at a time, and the confinement that
+        // would otherwise catch the abuse can be switched off by name.
+        $compose = ['services' => ['app' => [
+            'image' => 'example/app',
+            'cap_add' => ['SYS_ADMIN', 'SYS_PTRACE', 'ALL'],
+            'security_opt' => ['apparmor:unconfined', 'seccomp:unconfined'],
+            'userns_mode' => 'host',
+            'cgroup_parent' => '/',
+            'group_add' => ['docker'],
+            'sysctls' => ['kernel.shm_rmid_forced' => 0],
+            'device_cgroup_rules' => ['c *:* rwm'],
+        ]]];
+
+        $service = ComposeHarden::apply($compose)['services']['app'];
+
+        foreach (
+            ['cap_add', 'security_opt', 'userns_mode', 'cgroup_parent', 'group_add', 'sysctls', 'device_cgroup_rules']
+            as $key
+        ) {
+            $this->assertArrayNotHasKey($key, $service, "{$key} survived hardening");
+        }
+    }
+
+    public function test_removes_docker_socket_mounted_through_its_parent_directory(): void
+    {
+        // Matching the socket path alone left the directory it lives in as a
+        // way to hand over the daemon without naming the socket.
+        $compose = ['services' => ['app' => [
+            'image' => 'example/app',
+            'volumes' => [
+                '/var/run:/var/run',
+                '/run:/hostrun',
+                '/run/docker.sock:/tmp/d.sock',
+                './data:/app/data',
+            ],
+        ]]];
+
+        $service = ComposeHarden::apply($compose)['services']['app'];
+
+        $this->assertSame(['./data:/app/data'], $service['volumes']);
+    }
+
+    public function test_removes_binds_of_the_host_filesystem(): void
+    {
+        $compose = ['services' => ['app' => [
+            'image' => 'example/app',
+            'volumes' => [
+                '/:/hostfs',
+                '/etc:/hostetc:ro',
+                '/var/lib/docker:/var/lib/docker',
+                '/proc:/hostproc',
+                'appdata:/var/lib/app',
+                './src:/app/src',
+            ],
+        ]]];
+
+        $service = ComposeHarden::apply($compose)['services']['app'];
+
+        // A named volume and a path inside the project are the legitimate cases
+        // and must survive.
+        $this->assertSame(['appdata:/var/lib/app', './src:/app/src'], $service['volumes']);
+    }
+
+    public function test_long_form_mounts_are_filtered_too(): void
+    {
+        $compose = ['services' => ['app' => [
+            'image' => 'example/app',
+            'volumes' => [
+                ['type' => 'bind', 'source' => '/', 'target' => '/hostfs'],
+                ['type' => 'bind', 'source' => '/var/run/docker.sock', 'target' => '/sock'],
+                ['type' => 'volume', 'source' => 'appdata', 'target' => '/data'],
+            ],
+        ]]];
+
+        $service = ComposeHarden::apply($compose)['services']['app'];
+
+        $this->assertSame(
+            [['type' => 'volume', 'source' => 'appdata', 'target' => '/data']],
+            $service['volumes']
+        );
+    }
+
+    public function test_a_path_that_only_starts_like_run_is_kept(): void
+    {
+        // `/var/running` is not `/var/run`, and the socket pattern must not
+        // widen into a prefix match.
+        $compose = ['services' => ['app' => [
+            'image' => 'example/app',
+            'volumes' => ['/var/running:/app/running', './run:/app/run'],
+        ]]];
+
+        $service = ComposeHarden::apply($compose)['services']['app'];
+
+        $this->assertSame(['/var/running:/app/running', './run:/app/run'], $service['volumes']);
     }
 
     public function test_a_build_base_service_is_not_restarted(): void

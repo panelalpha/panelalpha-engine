@@ -16,14 +16,57 @@ final class ServiceHardener
      * Options that escape isolation or hand over the daemon. None of them is
      * ever needed by an application service.
      *
+     * The second half of the list was added after a hostile compose file was
+     * run through this class and came out still carrying `cap_add: [ALL]`,
+     * `security_opt: [seccomp:unconfined]` and `userns_mode: host`: dropping
+     * `privileged` means little while the capabilities it implies can be asked
+     * for one at a time. This is still a denylist, so a compose key nobody has
+     * thought about yet passes -- an allowlist is the real answer.
+     *
      * @var list<string>
      */
-    private const FORBIDDEN_KEYS = ['privileged', 'pid', 'ipc', 'uts', 'devices'];
+    private const FORBIDDEN_KEYS = [
+        'privileged',
+        'pid',
+        'ipc',
+        'uts',
+        'devices',
+        'cap_add',
+        'security_opt',
+        'userns_mode',
+        'cgroup_parent',
+        'cgroup',
+        'group_add',
+        'sysctls',
+        'device_cgroup_rules',
+    ];
 
     /** @var list<string> */
     private const DOCKER_SOCKETS = ['/var/run/docker.sock', '/run/docker.sock'];
 
-    private const DOCKER_SOCKET_PATTERN = '#(^|:)\s*/(?:var/)?run/docker\.sock(?::|$)#';
+    /**
+     * The socket itself, and the directories it sits in. Matching only the
+     * exact path left `- /var/run:/var/run` as a way to mount the socket
+     * without naming it.
+     */
+    private const DOCKER_SOCKET_PATTERN = '#(^|:)\s*/(?:var/)?run(?:/docker\.sock)?(?:/)?(?::|$)#';
+
+    /**
+     * Host paths an application service is never given. `/` covers the whole
+     * filesystem; the rest are the parts of it that carry the daemon's state
+     * or the host's identity.
+     *
+     * @var list<string>
+     */
+    private const FORBIDDEN_SOURCE_PREFIXES = [
+        '/var/lib/docker',
+        '/var/lib/containerd',
+        '/etc',
+        '/boot',
+        '/sys',
+        '/proc',
+        '/dev',
+    ];
 
     private const NODE_COMMAND_PATTERN = '/\b(node|nodejs|npm|npx|pnpm|yarn|bun)\b/';
 
@@ -163,7 +206,7 @@ final class ServiceHardener
         if (is_array($service['volumes'] ?? null)) {
             $kept = array_values(array_filter(
                 $service['volumes'],
-                static fn ($volume): bool => !self::isDockerSocketMount($volume)
+                static fn ($volume): bool => !self::isForbiddenMount($volume)
             ));
             // Dropped when empty: an empty PHP array dumps as `volumes: {  }` --
             // a map, not a sequence -- and Compose refuses the whole file with
@@ -340,16 +383,55 @@ final class ServiceHardener
     /**
      * @param mixed $volume
      */
-    private static function isDockerSocketMount($volume): bool
+    private static function isForbiddenMount($volume): bool
     {
         if (is_string($volume)) {
-            return preg_match(self::DOCKER_SOCKET_PATTERN, $volume) === 1;
+            if (preg_match(self::DOCKER_SOCKET_PATTERN, $volume) === 1) {
+                return true;
+            }
+
+            // Only the source side is a host path. A named volume has no
+            // leading slash and is not one of these.
+            $source = self::splitFields(trim($volume))[0] ?? '';
+
+            return self::isForbiddenSource($source);
         }
         if (!is_array($volume)) {
             return false;
         }
 
-        return in_array((string) ($volume['source'] ?? ''), self::DOCKER_SOCKETS, true)
-            || in_array((string) ($volume['target'] ?? ''), self::DOCKER_SOCKETS, true);
+        $source = (string) ($volume['source'] ?? '');
+        $target = (string) ($volume['target'] ?? '');
+
+        return in_array($source, self::DOCKER_SOCKETS, true)
+            || in_array($target, self::DOCKER_SOCKETS, true)
+            || self::isForbiddenSource($source);
+    }
+
+    /**
+     * A host path the account's own services never get: `/` itself, or anything
+     * under one of {@see FORBIDDEN_SOURCE_PREFIXES}. `/hostfs` bound from `/`
+     * was the case that prompted this -- it reads and writes the whole
+     * filesystem the service's daemon is running on.
+     */
+    private static function isForbiddenSource(string $source): bool
+    {
+        $source = trim($source);
+        if (!str_starts_with($source, '/')) {
+            return false;
+        }
+        if (rtrim($source, '/') === '') {
+            // The root of the filesystem, the worst one of all.
+            return true;
+        }
+        $source = rtrim($source, '/');
+
+        foreach (self::FORBIDDEN_SOURCE_PREFIXES as $prefix) {
+            if ($source === $prefix || str_starts_with($source, $prefix . '/')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

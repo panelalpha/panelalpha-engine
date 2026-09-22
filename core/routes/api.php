@@ -72,9 +72,16 @@ Route::post('/mcp-activity-logs', [McpActivityLogController::class, 'store']);
  * from API calls as `vault:<ref>` in the field that would otherwise carry it
  * (git_token, env_vars values). The secret never passes through the API
  * caller -- see SecretVaultController.
+ *
+ * `/vault/config` is the other half: whether a project without a credential
+ * of its own falls back to the engine's `global` entry of that type.
  */
+Route::get('/vault/config', [SecretVaultController::class, 'config']);
+Route::put('/vault/config', [SecretVaultController::class, 'updateConfig']);
 Route::get('/vault/secrets', [SecretVaultController::class, 'index']);
 Route::post('/vault/secrets', [SecretVaultController::class, 'store']);
+// `{ref}` is the minted reference, or `global:<type>` for an engine-wide
+// secret, whose paste link is rotated and so cannot name it.
 Route::get('/vault/secrets/{ref}', [SecretVaultController::class, 'show']);
 Route::delete('/vault/secrets/{ref}', [SecretVaultController::class, 'destroy']);
 
@@ -116,10 +123,6 @@ $projectRoutes = function (): void {
     Route::delete('/{username}', [UserController::class, 'destroy']);
 
     Route::get('/{username}/usage', [UsageController::class, 'getUsage']);
-    Route::get('/{username}/bandwidth', [UsageController::class, 'getBandwidth']);
-    Route::get('/{username}/domains/{domain}/bandwidth', [UsageController::class, 'getDomainBandwidth']);
-    Route::get('/{username}/domains/{domain}/visitors', [UsageController::class, 'getDomainVisitors']);
-    Route::get('/{username}/domains/{domain}/visitors/{dimension}', [UsageController::class, 'getDomainVisitorBreakdown']);
 
     Route::get('/{username}/domains', [UserDomainController::class, 'index']);
     Route::get('/{username}/domains/installed-ssl-certs', [UserDomainController::class, 'indexInstalledSslCerts']);
@@ -242,8 +245,13 @@ $projectRoutes = function (): void {
     Route::delete('/{username}/app/users/{userId}', [AppUserController::class, 'destroy']);
     Route::put('/{username}/app/users/{userId}/password', [AppUserController::class, 'resetPassword']);
     Route::post('/{username}/app/users/{userId}/sso', [AppUserController::class, 'createSsoToken']);
+    // Unauthenticated: the token in the query string is the capability. The
+    // throttle is the brute-force floor the api group does not provide -- it
+    // has `throttle:api` commented out, so without this the route answers as
+    // fast as a client can ask.
     Route::get('/{username}/app/sso-token', [AppUserController::class, 'useAppSsoToken'])
-        ->withoutMiddleware('auth:api');
+        ->withoutMiddleware('auth:api')
+        ->middleware('throttle:60,1');
     Route::get('/{username}/app/health', [AppHealthController::class, 'show']);
     Route::get('/{username}/app/info', [AppUserController::class, 'info']);
     Route::get('/{username}/app/roles', [AppUserController::class, 'roles']);
@@ -268,9 +276,12 @@ Route::put('/backup-containers/{id}', [BackupContainerController::class, 'update
 Route::delete('/backup-containers/{id}', [BackupContainerController::class, 'destroy']);
 Route::post('/backup-containers/{id}/test', [BackupContainerController::class, 'test']);
 
+// Same shape, and this one hands back MySQL credentials, so it gets the same
+// floor. PmaSso is a second gate, not the only one: it reads the client address,
+// and an address is only as good as the proxy chain that produced it.
 Route::put('/mysql/phpmyadmin-sso-token', [MysqlController::class, 'usePhpmyadminSsoToken'])
     ->withoutMiddleware('auth:api')
-    ->middleware(PmaSso::class);
+    ->middleware([PmaSso::class, 'throttle:60,1']);
 
 Route::get('/proxy-rules', [ProxyRuleController::class, 'index']);
 Route::get('/proxy-rules/{id}', [ProxyRuleController::class, 'show']);

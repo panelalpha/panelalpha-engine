@@ -2,11 +2,17 @@ include:
   - docker-compose.yml-webserver
 services:
   core:
+    # Versioned, not date-tagged, because this image runs core/vendor and so is
+    # pinned to core/composer.json's PHP. A date tag kept resolving to a real,
+    # pullable 8.3 image after core moved to ^8.4, and core crash-looped on
+    # vendor/composer/platform_check.php. A version tag the registry does not
+    # carry yet is built from Dockerfile-core instead, which is always current.
+    # The rest of the stack stays on date tags -- it has no such coupling.
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-core
       target: php_nginx_prod
-    image: ghcr.io/panelalpha/engine-core:20260908
+    image: ghcr.io/panelalpha/engine-core:v2.0.1
     pull_policy: missing
     restart: always
     post_start:
@@ -177,8 +183,13 @@ services:
     volumes:
       - ./config/sftp/ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key
       - ./config/sftp/ssh_host_rsa_key:/etc/ssh/ssh_host_rsa_key
-      - ./config/sftp/logins.conf:/etc/sftp/logins.conf
-      - ./config/sftp/sync-logins.sh:/etc/sftp/sync-logins.sh
+      # The directory, not the two files inside it. A single-file bind binds an
+      # inode: once anything replaces logins.conf on the host -- and something in
+      # the install/update path does -- the container keeps reading the file it
+      # was started with, and no SFTP account ever reaches it again. Measured on
+      # a live host with the container on a 0-byte copy from days earlier. The
+      # image ships nothing under /etc/sftp, so nothing is shadowed.
+      - ./config/sftp:/etc/sftp
       - ./config/sftp/entrypoint.sh:/entrypoint.sh
       - /home:/home
     entrypoint: ["/bin/bash", "/entrypoint.sh"]
@@ -246,30 +257,46 @@ services:
       - cache-registry-data:/var/lib/registry
     mem_limit: ${MEM_LIMIT_CACHE_REGISTRY:-1G}
     memswap_limit: ${MEMSWAP_LIMIT_CACHE_REGISTRY:-0}
-  # A pull-through cache for docker.io, not the engine's own image store above
-  # -- registry:2 cannot be both at once: a `proxy.remoteurl` registry only
-  # ever serves from upstream and refuses any push, so this has to be a
-  # second instance, not a second use of cache-registry. The container name
-  # is load-bearing the same way cache-registry's is: every account daemon
-  # lists it by this name in `registry-mirrors`, tried before Docker Hub
-  # itself and falling through to it untouched if this container is not
-  # running (an engine without the profile enabled behaves exactly as before).
-  dockerhub-mirror:
-    profiles: ["dockerhub-mirror", "full"]
-    image: registry:2
+  # A credentials-only pass-through to Docker Hub. A pull carrying a Hub login
+  # counts against that account's quota (200/6h) instead of this host IP's
+  # anonymous one (100/6h), and the login cannot go in a tenant's own daemon
+  # without handing the tenant the secret. Like cache-registry, the container
+  # name is load-bearing -- every account daemon names it in `registry-mirrors`.
+  #
+  # Failure here is a slowdown, not an outage: dockerd wraps an error from a
+  # mirror endpoint as a fallbackError and retries the whole pull against Hub
+  # (moby continueOnError), so the worst case is one unauthenticated re-pull.
+  #
+  # Nothing is kept for long. `proxy.ttl` expires an entry an hour after it is
+  # fetched, and `storage.delete.enabled` is what makes that expiry free the
+  # bytes -- it defaults to false, and with it off the scheduler still runs and
+  # reclaims nothing. Manifest expiry drops only the tag link, so a few KB per
+  # repository survive. Nothing reclaims those on a schedule: it is ~28KB per
+  # manifest digest against a tmpfs that empties on every stack restart, and
+  # clearing it means taking the proxy away from whatever is mid-deploy.
+  # `system:registry-proxy:trim` does it by hand if a host ever needs it.
+  #
+  # Storage is a tmpfs because the image declares `VOLUME /var/lib/registry`;
+  # left unmounted it lands on disk as an anonymous volume. The tag is pinned
+  # because 3.x moved the config path the stock entrypoint reads.
+  registry-proxy:
+    profiles: ["registry-proxy", "full"]
+    image: registry:3.1.1
     pull_policy: missing
-    container_name: panelalpha-dockerhub-mirror
+    container_name: panelalpha-registry-proxy
     restart: unless-stopped
     environment:
       REGISTRY_PROXY_REMOTEURL: https://registry-1.docker.io
-      REGISTRY_PROXY_USERNAME: ${DOCKERHUB_MIRROR_USERNAME:-}
-      REGISTRY_PROXY_PASSWORD: ${DOCKERHUB_MIRROR_PASSWORD:-}
+      REGISTRY_PROXY_USERNAME: ${REGISTRY_PROXY_USERNAME:-}
+      REGISTRY_PROXY_PASSWORD: ${REGISTRY_PROXY_PASSWORD:-}
+      REGISTRY_PROXY_TTL: ${REGISTRY_PROXY_TTL:-30m}
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
     ports:
       - "127.0.0.1:5001:5000"
-    volumes:
-      - dockerhub-mirror-data:/var/lib/registry
-    mem_limit: ${MEM_LIMIT_DOCKERHUB_MIRROR:-1G}
-    memswap_limit: ${MEMSWAP_LIMIT_DOCKERHUB_MIRROR:-0}
+    tmpfs:
+      - /var/lib/registry:size=${REGISTRY_PROXY_SIZE:-512m},mode=0700
+    mem_limit: ${MEM_LIMIT_REGISTRY_PROXY:-1G}
+    memswap_limit: ${MEMSWAP_LIMIT_REGISTRY_PROXY:-0}
   lighthouse:
     profiles: ["lighthouse", "full"]
     build:
@@ -286,7 +313,6 @@ services:
     memswap_limit: ${MEMSWAP_LIMIT_LIGHTHOUSE:-0}
 volumes:
   cache-registry-data: {}
-  dockerhub-mirror-data: {}
   core-storage: {}
   database-core-data: {}
   database-users-data: {}

@@ -311,6 +311,24 @@ class Project
         $ftpAccounts = $user->ftpAccounts->pluck('user')->all();
         $this->ftp()->deleteMany($ftpAccounts);
 
+        // SFTP logins live in one host-wide logins.conf, so dropping the rows
+        // is only half of it -- the file has to be rebuilt without them. Left
+        // undone, the deleted account's credential stayed valid against a uid
+        // and home directory the next account gets handed straight back.
+        // Rebuilding is best-effort: the sftp service is behind a compose
+        // profile, and a host that does not run it must still delete projects.
+        $hadSftpAccounts = $user->sftpAccounts()->exists();
+        $user->sftpAccounts()->delete();
+        if ($hadSftpAccounts) {
+            try {
+                $this->sftp()->rebuild();
+            } catch (\Throwable $e) {
+                Log::warning(
+                    "SFTP logins rebuild failed after deleting {$username}: " . $e->getMessage()
+                );
+            }
+        }
+
         $mysql = $this->system->mysql();
         /** @var string[] $mysqlDatabases */
         $mysqlDatabases = $user->mysqlDatabases->pluck('database')->all();
