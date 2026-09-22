@@ -259,4 +259,15 @@ class DeployStrategy
     {
         $this->ruby()->installHostInitializer($projectDir, $chown);
     }
+
+    /**
+     * Re-normalize the project's own compose file into the run file, without
+     * running prepare or touching anything else. For {@see ContainerOperations}
+     * to call before `up`/`pull` on a compose-strategy project, so an edit the
+     * client made takes effect (ticket 05).
+     */
+    public function refreshComposeRunFile(string $projectDir, ?string $chown): void
+    {
+        $this->userCompose()->refreshRunFile($projectDir, $chown);
+    }
 }

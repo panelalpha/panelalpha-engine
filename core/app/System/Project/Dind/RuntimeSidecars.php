@@ -35,31 +35,25 @@ class RuntimeSidecars
      */
     public function runtimeSidecarsFromProject(string $projectDir): array
     {
-        foreach (ComposeFileInspector::COMPOSE_FILE_CANDIDATES as $candidate) {
+        foreach (Paths::composeFileCandidates() as $candidate) {
             $path = $projectDir . '/' . $candidate;
-            $stash = $path . ComposeFileInspector::COMPOSE_STASH_SUFFIX;
-            foreach ([$path, $stash] as $try) {
-                $raw = $this->dind->projectTree()->read($try);
-                if ($raw === null) {
-                    continue;
-                }
-                if ($try === $path && !ComposeFileInspector::isLocalDevComposeYaml($raw)) {
-                    continue;
-                }
-                $extracted = ComposeHarden::extractRuntimeSidecarsFromYaml(
-                    $raw,
-                    false,
-                    $this->imagePortLookup(),
-                    $this->projectIdentity(),
-                    $this->accountMemoryMb(),
-                    $this->placeholderSeed()
-                );
-                if ($extracted['services'] !== []) {
-                    $names = implode(', ', array_keys($extracted['services']));
-                    $this->dind->shell()->logger()?->info("Keeping runtime services from compose: {$names}");
+            $raw = $this->dind->projectTree()->read($path);
+            if ($raw === null || !ComposeFileInspector::isLocalDevComposeYaml($raw)) {
+                continue;
+            }
+            $extracted = ComposeHarden::extractRuntimeSidecarsFromYaml(
+                $raw,
+                false,
+                $this->imagePortLookup(),
+                $this->projectIdentity(),
+                $this->accountMemoryMb(),
+                $this->placeholderSeed()
+            );
+            if ($extracted['services'] !== []) {
+                $names = implode(', ', array_keys($extracted['services']));
+                $this->dind->shell()->logger()?->info("Keeping runtime services from compose: {$names}");
 
-                    return $extracted;
-                }
+                return $extracted;
             }
         }
 
@@ -141,11 +135,13 @@ class RuntimeSidecars
             foreach (['docker-compose.*.yml', 'docker-compose.*.yaml', 'compose.*.yml', 'compose.*.yaml'] as $pattern) {
                 foreach (glob($projectDir . '/' . $pattern) ?: [] as $path) {
                     $base = basename($path);
-                    if (in_array($base, ComposeFileInspector::COMPOSE_FILE_CANDIDATES, true)) {
+                    if (in_array($base, Paths::composeFileCandidates(), true)) {
                         continue;
                     }
-                    // Hosting file we just wrote, or a stash of the user's local one.
-                    if (str_ends_with($base, ComposeFileInspector::COMPOSE_STASH_SUFFIX)) {
+                    // The engine's own compose output can match this glob
+                    // (a reserved name still shaped like docker-compose.*.yml)
+                    // and must never be read back as the client's sidecar template.
+                    if (Paths::isEngineComposeFile($path)) {
                         continue;
                     }
                     // A recipe's own override we just copied in, not a stack template.

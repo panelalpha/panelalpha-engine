@@ -60,8 +60,8 @@ final class WelcomeBootstrap
                 application files in the <code>~/project</code> directory.
             </p>
             <p>
-                When you are ready, update <code>~/project/docker-compose.yml</code> with your
-                application's configuration and restart the service.
+                When you are ready, create <code>~/project/docker-compose.yml</code> with your
+                application's configuration, then start the project again (the <code>up</code> action).
             </p>
         HTML;
 

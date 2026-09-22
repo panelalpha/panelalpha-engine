@@ -491,6 +491,11 @@ class User extends Authenticatable
         return $this->hasMany(MysqlSsoToken::class);
     }
 
+    public function deployHooks(): HasMany
+    {
+        return $this->hasMany(DeployHook::class);
+    }
+
     public function assignedIpAddresses(): HasMany
     {
         return $this->hasMany(IpAssigned::class);
@@ -1624,6 +1629,20 @@ class User extends Authenticatable
     public function hasDeploymentWarnings(): bool
     {
         return !empty($this->getDeploymentWarnings());
+    }
+
+    /**
+     * Record a clean deploy: the status and an empty warnings list, together.
+     * The API reports deployment_warnings as a list once a deploy has finished,
+     * and setDetails() merges, so a list left by an earlier partial run has to
+     * be overwritten rather than left in place. Does not save.
+     */
+    public function markDeploySucceeded(): void
+    {
+        $this->setDetails([
+            'deployment_status' => 'success',
+            'deployment_warnings' => [],
+        ]);
     }
 
     public function delete()

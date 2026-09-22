@@ -59,6 +59,8 @@ This project's git token no longer works. Send me the page to replace it.
 
 A rebuild without a pull replays the last successful plan against the files already on disk: [How a deploy works](../02-getting-started/how-a-deploy-works.md#deploying-again-later).
 
+Instead of asking for a pull each time, you can have your git host redeploy the project itself on every push: [Push to deploy](push-to-deploy.md).
+
 ## Troubleshooting
 
 **The clone failed with "repository not found".**

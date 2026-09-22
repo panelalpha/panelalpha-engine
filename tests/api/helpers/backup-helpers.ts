@@ -66,3 +66,40 @@ export async function waitForBackupPhase(
   }
   return latest;
 }
+
+/**
+ * Waits for a backup delete to finish. A finished delete removes the backup row, so the record
+ * answers 404 from then on; `waitForBackupPhase` treats that as "not yet" and would poll until
+ * the test times out.
+ */
+export async function waitForBackupDeleted(
+  api: EngineApi,
+  username: string,
+  id: number,
+  options: { timeout?: number; interval?: number } = {}
+): Promise<void> {
+  let last = 'no response yet';
+
+  await waitForCondition(
+    async () => {
+      const response = await api.getProjectBackupRaw(username, id);
+      if (response.status === 404) {
+        return true;
+      }
+      if (response.status !== 200) {
+        last = `HTTP ${response.status}`;
+        return false;
+      }
+      const body = response.body as { data?: BackupRecord };
+      const phase = backupAsyncStatus(body.data, 'delete');
+      last = `delete=${phase ?? 'missing'} error=${body.data?.error ?? 'none'}`;
+      return phase === 'failed';
+    },
+    {
+      timeout: options.timeout ?? Timeouts.default,
+      interval: options.interval ?? 2_000,
+      message: `Backup ${id} for ${username} was not deleted`,
+      describeLast: () => last,
+    }
+  );
+}

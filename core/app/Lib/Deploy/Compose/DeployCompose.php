@@ -52,8 +52,12 @@ class DeployCompose
     {
         // A mounted Node project: nothing changes either, and `next start` read
         // its build output at boot, so the old process serves the previous build.
+        // Nitro (Nuxt, TanStack Start) deletes and recreates `.output` on every
+        // build, so a container left running keeps a bind mount of the removed
+        // directory and answers 500 for every static file.
         return $runtime === PlatformManifest::RUNTIME_PHP
-            || HostRunProject::isStrategy($strategy);
+            || HostRunProject::isStrategy($strategy)
+            || StandaloneNodeServe::isStandaloneStrategy($strategy);
     }
 
     /**

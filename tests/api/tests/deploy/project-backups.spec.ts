@@ -1,5 +1,10 @@
 import { expect, test } from '@/fixtures/test-options';
-import { backupAsyncStatus, backupTaskId, waitForBackupPhase } from '@/helpers/backup-helpers';
+import {
+  backupAsyncStatus,
+  backupTaskId,
+  waitForBackupDeleted,
+  waitForBackupPhase,
+} from '@/helpers/backup-helpers';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { rand } from '@/helpers/random';
 import { skipUnless } from '@/helpers/test-helpers';
@@ -67,7 +72,7 @@ test.describe('project backups on DinD', () => {
 
       const deleted = await api.deleteProjectBackupRaw(user.username, created.id);
       expect(deleted.status).toBe(202);
-      await waitForBackupPhase(api, user.username, created.id, 'delete').catch(() => undefined);
+      await waitForBackupDeleted(api, user.username, created.id);
 
       if (taskId !== undefined) {
         const cancel = await api.cancelTaskRaw(taskId);

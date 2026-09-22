@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Deploy\Dind;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Dind\DindAccountCleanup;
 use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
@@ -177,6 +178,22 @@ class DindAccountCleanupTest extends TestCase
         $this->assertStringContainsString("/*/project/docker-compose.yml", $script);
         $this->assertStringContainsString("/*/project/compose.yaml", $script);
         $this->assertStringContainsString(escapeshellarg('/home/shopware') . '/*) continue', $script);
+    }
+
+    /**
+     * ADR-0001: a recipe deploy's images live only under the engine's
+     * reserved run-file names now, never under a name the client would
+     * recognise — missing them here would mean another account's images
+     * get pruned as soon as it redeploys onto the new layout.
+     */
+    public function test_sibling_compose_scan_also_covers_the_reserved_run_file_names(): void
+    {
+        $argv = DindAccountCleanup::otherAccountComposeImagesArgv('/home/', 'shopware');
+        $script = $argv[3];
+
+        $this->assertStringContainsString('/*/project/' . EngineArtifacts::RUN_COMPOSE, $script);
+        $this->assertStringContainsString('/*/project/' . EngineArtifacts::RUN_COMPOSE_OVERRIDE, $script);
+        $this->assertStringContainsString('/*/project/' . EngineArtifacts::APP_CONFIG_COMPOSE, $script);
     }
 
     public function test_sibling_compose_scan_rejects_unsafe_input(): void

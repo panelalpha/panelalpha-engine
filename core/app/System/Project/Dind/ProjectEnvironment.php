@@ -3,9 +3,14 @@
 namespace App\System\Project\Dind;
 
 use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\Source\GitRepository;
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
+use App\Lib\Deploy\Compose\ComposeYaml;
+use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\Strategies;
+use Symfony\Component\Yaml\Yaml;
 
 /**
  * The .env files the application is deployed with.
@@ -15,6 +20,10 @@ use App\Lib\Deploy\Platform\Strategies;
  * the container actually reads, and the account's own env_vars are merged
  * over the base rather than replacing it — an empty field in the panel means
  * "keep what the project shipped", not "set this to nothing".
+ *
+ * A `.env` the repository tracks is the client's, not the engine's (ADR-0001
+ * D3): it is left as committed and the env_vars go to `.env.panelalpha`
+ * instead, loaded after `.env` by the services that load `.env`.
  */
 class ProjectEnvironment
 {
@@ -80,6 +89,36 @@ class ProjectEnvironment
             $fs->filePutContents($defaultPath, $baseContents, $chown, '644');
         }
 
+        $envOverridesPath = $projectDir . '/' . EngineArtifacts::ENV_OVERRIDES;
+        if ($overrides !== [] && $this->envIsTracked()) {
+            $fs->filePutContents($envOverridesPath, EnvFile::merge('', $overrides), $chown, '644');
+            $services = $this->syncRunFileEnvOverrides(true);
+            $keys = array_keys($overrides);
+            $logger?->info(
+                'The repository tracks .env, so it is left as committed. Using user-provided environment variables ('
+                . count($keys)
+                . ' keys) from ' . EngineArtifacts::ENV_OVERRIDES
+                . ($services === [] ? '' : ', loaded after .env by: ' . implode(', ', $services))
+                . ': ' . implode(', ', $keys)
+            );
+            $logger?->warn(
+                'Code that reads .env from disk will not see these overrides, including build-time readers '
+                . 'such as Vite or Next.js. Only the container environment carries them.'
+            );
+            $this->materializeNestedEnvExamples($projectDir, $chown);
+            $user->setDetails(['used_custom_env_vars' => true]);
+            $user->save();
+
+            return;
+        }
+
+        // No overrides, or a .env the engine owns: a .env.panelalpha from an
+        // earlier deploy would otherwise keep reapplying values removed since.
+        if ($fs->fileExists($envOverridesPath)) {
+            $system->exec(['sudo', 'rm', '-f', $envOverridesPath]);
+        }
+        $this->syncRunFileEnvOverrides(false);
+
         if ($overrides !== []) {
             $merged = EnvFile::merge($baseContents ?? '', $overrides);
             $fs->filePutContents($envPath, $merged, $chown, '644');
@@ -104,6 +143,69 @@ class ProjectEnvironment
         $logger?->info("Using default environment variables (source: {$source})");
         $user->setDetails(['used_custom_env_vars' => false]);
         $user->save();
+    }
+
+    /**
+     * Whether the checkout's git repository tracks `.env`. No git, or git
+     * failing to answer, reads as untracked: the engine's own `.env`, as
+     * before ADR-0001.
+     *
+     * Protected rather than private so a test can force either branch of
+     * {@see apply()} without a real git repository — `GitRepository` only
+     * runs through a live DinD shell, which a unit test has none of.
+     */
+    protected function envIsTracked(): bool
+    {
+        $git = new GitRepository($this->dind);
+        if (!$git->hasRepository()) {
+            return false;
+        }
+
+        try {
+            return $git->trackedAmong(['.env']) !== [];
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Attach `.env.panelalpha` to the run file's services that load `.env`,
+     * or detach it from all of them. Rewrites the run file only when that
+     * changes it.
+     *
+     * @return list<string> the services it is attached to
+     */
+    private function syncRunFileEnvOverrides(bool $attach): array
+    {
+        $fs = $this->dind->system()->filesystem();
+        $runPath = $this->dind->userAppComposeFilePath();
+        if (!$fs->fileExists($runPath)) {
+            return [];
+        }
+
+        $raw = (string) $fs->fileGetContents($runPath);
+        $compose = ComposeYaml::parse($raw);
+        if ($compose === null) {
+            return [];
+        }
+
+        if ($attach) {
+            [$updated, $services] = ComposeEnvFiles::attach($compose, EngineArtifacts::ENV_OVERRIDES);
+        } else {
+            [$updated, ] = ComposeEnvFiles::detach($compose, EngineArtifacts::ENV_OVERRIDES);
+            $services = [];
+        }
+
+        if ($updated !== $compose) {
+            $fs->filePutContents(
+                $runPath,
+                Yaml::dump($updated, 6, 2),
+                $this->dind->userModel()->getChownString(),
+                '644'
+            );
+        }
+
+        return $services;
     }
 
     /**
@@ -146,7 +248,10 @@ class ProjectEnvironment
         }
 
         $fs = $this->dind->system()->filesystem();
-        $composeFile = $this->dind->userAppComposeFileToRun();
+        // The run file may not exist yet at this point in a first deploy —
+        // read the project's own compose file (or the run file, once a
+        // redeploy has produced one and the source no longer applies).
+        $composeFile = $this->dind->userAppExistingComposeFilePath() ?? $this->dind->userAppComposeFilePath();
         if (!$fs->fileExists($composeFile)) {
             return $contents;
         }
@@ -343,23 +448,32 @@ class ProjectEnvironment
      * Compose V2 errors if a service `env_file:` is absent, even when every
      * interpolated value has a `${VAR:-default}`. Repos that tell the operator
      * to `cp .env.example .env` (or ship no example at all) hit this.
+     *
+     * Both files are read: the one the project brings, and the one the engine
+     * runs. A generated run file names `.env` whether or not the project shipped
+     * a compose file of its own.
      */
     private function materializeComposeEnvFiles(string $projectDir, ?string $chown): void
     {
-        $composePath = $this->dind->userAppExistingComposeFilePath();
-        if ($composePath === null) {
-            return;
-        }
         $fs = $this->dind->system()->filesystem();
         $logger = $this->dind->shell()->logger();
-        $raw = $fs->fileGetContents($composePath);
-        foreach (EnvFile::composeEnvFileRelativePathsFromYaml($raw) as $relative) {
-            $dest = $projectDir . '/' . $relative;
-            if ($fs->fileExists($dest)) {
+        $composePaths = array_unique(array_filter([
+            $this->dind->userAppExistingComposeFilePath(),
+            $this->dind->userAppComposeFilePath(),
+        ]));
+        foreach ($composePaths as $composePath) {
+            if (!$fs->fileExists($composePath)) {
                 continue;
             }
-            $fs->filePutContents($dest, '', $chown, '644');
-            $logger?->info("Created empty {$relative} (required by compose env_file)");
+            $raw = $fs->fileGetContents($composePath);
+            foreach (EnvFile::composeEnvFileRelativePathsFromYaml($raw) as $relative) {
+                $dest = $projectDir . '/' . $relative;
+                if ($fs->fileExists($dest)) {
+                    continue;
+                }
+                $fs->filePutContents($dest, '', $chown, '644');
+                $logger?->info("Created empty {$relative} (required by compose env_file)");
+            }
         }
     }
 }

@@ -122,6 +122,7 @@ class DeploymentWorkflowTest extends TestCase
         (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->run();
 
         $this->assertSame('success', $model->getDetails()['deployment_status'] ?? null);
+        $this->assertSame([], $model->getDetails()['deployment_warnings'] ?? null);
         $this->assertTrue($mechanics->ingestedSource);
         $this->assertTrue($mechanics->startedApplication);
     }
@@ -143,6 +144,51 @@ class DeploymentWorkflowTest extends TestCase
         $this->assertTrue($mechanics->ingestedWipeRebuild);
         $this->assertTrue($mechanics->startedApplication);
         $this->assertNull($model->getDetails()['deployment_status'] ?? null);
+    }
+
+    public function test_rebuild_from_checkout_logs_git_as_its_source_by_default(): void
+    {
+        $started = $this->rebuildFromCheckoutAndCollectStart(fn (DeploymentWorkflow $w, DeployLogger $l) => $w->rebuildFromCheckout($l));
+
+        $this->assertSame('Deploy started (source: git)', $started);
+    }
+
+    public function test_rebuild_from_checkout_names_a_push_and_its_commit_in_the_deploy_log(): void
+    {
+        $commit = 'c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00';
+
+        $started = $this->rebuildFromCheckoutAndCollectStart(
+            fn (DeploymentWorkflow $w, DeployLogger $l) => $w->rebuildFromCheckout($l, 'push', $commit),
+        );
+
+        $this->assertSame("Deploy started (source: push, commit: {$commit})", $started);
+    }
+
+    /**
+     * @param callable(DeploymentWorkflow, DeployLogger): void $run
+     */
+    private function rebuildFromCheckoutAndCollectStart(callable $run): string
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'static']);
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+        $mechanics = new RecordingDeployMechanics($model, $domain);
+        $mechanics->hasGit = true;
+        $mechanics->applicationRunning = true;
+
+        $messages = [];
+        $logger = $this->silentDeployLogger();
+        $logger->method('info')->willReturnCallback(function (string $message) use (&$messages): void {
+            $messages[] = $message;
+        });
+
+        $run(new DeploymentWorkflow(new StubDindProject($model), $mechanics), $logger);
+
+        $this->assertTrue($mechanics->startedApplication);
+        $started = array_values(array_filter($messages, static fn (string $m): bool => str_starts_with($m, 'Deploy started')));
+        $this->assertCount(1, $started);
+
+        return $started[0];
     }
 
     public function test_rebuild_from_source_passes_zip_and_throws_plain_exception_on_start_failure(): void
@@ -168,6 +214,45 @@ class DeploymentWorkflowTest extends TestCase
         $this->assertSame('/tmp/app.zip', $mechanics->sourceRebuildZipPath);
         $this->assertSame('/tmp/app.zip', $mechanics->wipeRebuildZipPath);
         $this->assertNull($model->getDetails()['deployment_status'] ?? null);
+        $this->assertFalse($mechanics->deletedProject);
+    }
+
+    public function test_deploy_from_archive_ingests_and_starts_without_wiping_or_persisting_status(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'php']);
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+
+        $mechanics = new RecordingDeployMechanics($model, $domain);
+        $workflow = new DeploymentWorkflow(new StubDindProject($model), $mechanics);
+
+        $workflow->deployFromArchive($this->silentDeployLogger(), '/project/app.zip');
+
+        $this->assertSame('/project/app.zip', $mechanics->archiveZipPath);
+        $this->assertTrue($mechanics->startedApplication);
+        $this->assertFalse($mechanics->syncedSourceRebuild, 'the archive sits in ~/project, so nothing may wipe it first');
+        $this->assertNull($model->getDetails()['deployment_status'] ?? null);
+    }
+
+    public function test_deploy_from_archive_throws_plain_exception_on_start_failure(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'php']);
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+
+        $mechanics = new RecordingDeployMechanics($model, $domain);
+        $mechanics->startResult = ['exit_code' => 1, 'stdout' => '', 'stderr' => 'env file .env not found'];
+        $workflow = new DeploymentWorkflow(new StubDindProject($model), $mechanics);
+
+        try {
+            $workflow->deployFromArchive($this->silentDeployLogger(), '/project/app.zip');
+            $this->fail('Expected Exception');
+        } catch (ProblemException $e) {
+            $this->fail('deployFromArchive must not throw ProblemException: ' . $e->getMessage());
+        } catch (\Exception $e) {
+            $this->assertStringContainsString('Failed to start app', $e->getMessage());
+        }
+
         $this->assertFalse($mechanics->deletedProject);
     }
 
@@ -251,6 +336,7 @@ final class RecordingDeployMechanics implements DeployMechanics
     public bool $ingestedWipeRebuild = false;
     public ?string $sourceRebuildZipPath = null;
     public ?string $wipeRebuildZipPath = null;
+    public ?string $archiveZipPath = null;
 
     public function __construct(
         private ModelsUser $userModel,
@@ -311,6 +397,11 @@ final class RecordingDeployMechanics implements DeployMechanics
         $this->wipeRebuildZipPath = $zipPath;
     }
 
+    public function ingestArchive(string $zipPath): void
+    {
+        $this->archiveZipPath = $zipPath;
+    }
+
     public function reprepareApplicationFromCheckout(): void
     {
         $this->ingestedSource = true;
@@ -357,6 +448,6 @@ final class RecordingDeployMechanics implements DeployMechanics
 
     public function persistSuccess(): void
     {
-        $this->userModel->setDetails(['deployment_status' => 'success']);
+        $this->userModel->setDetails(['deployment_status' => 'success', 'deployment_warnings' => []]);
     }
 }

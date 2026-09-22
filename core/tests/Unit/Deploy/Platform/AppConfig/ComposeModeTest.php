@@ -18,7 +18,7 @@ class ComposeModeTest extends TestCase
 {
     public function test_the_override_filename_is_the_one_compose_reserves(): void
     {
-        $this->assertSame('docker-compose.override.yml', Paths::COMPOSE_OVERRIDE_FILENAME);
+        $this->assertSame('docker-compose.override.yml', Paths::CLIENT_OVERRIDE_FILENAME);
     }
 
     public function test_replace_is_the_default_so_existing_pages_keep_their_behaviour(): void

@@ -205,7 +205,7 @@ silently *runs app N-1's image* and reports a meaningless HTTP 200 in ~5s. An
 earlier run of this battery had go-beszel "passing" while serving NestJS.
 
 ```bash
-docker exec $C docker compose -f $P/docker-compose.yml down --rmi local -v --remove-orphans
+docker exec $C docker compose -f $P/docker-compose.panelalpha.yml down --rmi local -v --remove-orphans
 docker exec $C docker rmi -f project-app:latest
 ```
 
@@ -1085,3 +1085,19 @@ restore-config), `adminer.yaml` (build produces the entry point), `phpbb.yaml`
 (`app_root`), `opencart.yaml` (docroot below repo, outranks Dockerfile),
 `osticket.yaml` (PHP, no Composer).
 
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown files under `.scratch/<feature>/`; design plans live in `docs/internal/plans/`. See `docs/internal/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default roles, label string equal to the role name. See `docs/internal/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` at the root, ADRs in `docs/internal/adr/`. See `docs/internal/agents/domain.md`.

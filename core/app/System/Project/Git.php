@@ -3,6 +3,7 @@
 namespace App\System\Project;
 
 use App\System\Project\Git\Exception as GitException;
+use App\System\Project\Git\FastForwardPull;
 use App\System\Project\Git\Path as GitPath;
 use App\System\Project\Git\Ref as GitRef;
 use App\Lib\Deploy\Source\GitUrl;
@@ -13,6 +14,8 @@ use Illuminate\Support\Facades\Log;
 
 class Git
 {
+    use FastForwardPull;
+
     public const string STRATEGY_FF = 'ff';
     public const string STRATEGY_FORCE = 'force';
     public const string STRATEGY_PUSH_FIRST = 'push_first';
@@ -61,6 +64,16 @@ class Git
     public function isDeployManaged(): bool
     {
         return $this->pathKey === 'project' && $this->user()->hasGitProject();
+    }
+
+    /**
+     * Whether this checkout has a remote recorded: the Deploy-managed one, or a
+     * Site Git checkout that `connect` set up. The precondition for anything
+     * that pulls from it.
+     */
+    public function isConnected(): bool
+    {
+        return $this->user()->getSiteGit($this->pathKey) !== null;
     }
 
     /**
@@ -491,21 +504,23 @@ class Git
         GitRef::assertName($branch);
         $token = $siteGit['token'] ?? null;
 
-        // Pre-flight for ff: reject dirty trees before fetch/backup so a 422
-        // never triggers restoreBackup (reset --hard + clean -fd).
-        if ($strategy === self::STRATEGY_FF && $this->hasWorkingTreeChanges()) {
-            throw new GitException('Working tree is dirty.', 422);
-        }
-
         $this->git(['fetch', 'origin'], $token);
         $this->createBackup();
+
+        // ff is git's call, not ours (see FastForwardPull), and a refusal leaves
+        // the tree untouched -- so it must bypass restoreBackup below, which
+        // would wipe the untracked files and local edits git just spared.
+        if ($strategy === self::STRATEGY_FF) {
+            $this->fastForwardOnly($branch);
+            $this->setUpstreamTracking($branch);
+
+            return $this->status();
+        }
 
         try {
             if ($strategy === self::STRATEGY_FORCE) {
                 $this->git(['reset', '--hard', 'origin/' . $branch]);
                 $this->git(['clean', '-fd']);
-            } elseif ($strategy === self::STRATEGY_FF) {
-                $this->git(['merge', '--ff-only', 'origin/' . $branch]);
             } else {
                 $this->pullPushFirst($branch, $token);
             }

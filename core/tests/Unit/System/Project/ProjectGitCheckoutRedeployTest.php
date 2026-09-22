@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project;
@@ -62,7 +63,7 @@ final class RecordingProjectCheckoutRedeploy extends CheckoutRedeploy
     /** @var list<string> */
     public array $usernames = [];
 
-    protected function rebuild(Project $project): void
+    protected function rebuild(Project $project, string $source = 'git', ?string $commit = null, ?DeployLogger $deployLogger = null): void
     {
         $this->usernames[] = $project->username();
     }

@@ -32,6 +32,29 @@ class EnsureTokenMayUseApiTest extends TestCase
         $this->assertSame(200, $this->through([]));
     }
 
+    /**
+     * `pae git:*` and the other CLI commands dispatch a route in-process as
+     * the root admin, a plain authenticatable that is not the token-bearing
+     * Admin model. There is no token to limit, and asking one for it used to
+     * turn every such command into "HTTP 500: Server Error".
+     */
+    public function test_a_caller_without_a_token_api_passes(): void
+    {
+        $request = Request::create('/api/projects');
+        $request->setUserResolver(fn () => new class extends \Illuminate\Foundation\Auth\User {
+        });
+
+        $this->assertSame(200, $this->statusOf($request));
+    }
+
+    public function test_a_request_with_no_user_passes(): void
+    {
+        $request = Request::create('/api/projects');
+        $request->setUserResolver(fn () => null);
+
+        $this->assertSame(200, $this->statusOf($request));
+    }
+
     public function test_an_assistants_token_may_not(): void
     {
         $this->assertSame(403, $this->through(TokenAbilities::build(api: false, mcp: true)));

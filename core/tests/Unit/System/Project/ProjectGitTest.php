@@ -174,25 +174,22 @@ class ProjectGitTest extends TestCase
         }
     }
 
-    public function test_pull_ff_rejects_dirty_tree_before_fetch(): void
+    public function test_pull_ff_leaves_dirtiness_to_git(): void
     {
         $model = $this->connectedPhpHostingModel();
         $runner = new FakeGitRunner();
         $runner->stdout = $this->connectedRepoStdout([
-            'status --porcelain' => " M foo.txt\n",
+            'status --porcelain' => " M foo.txt\n?? uploads/\n",
         ]);
         $git = $this->testable($model, 'public_html', $runner);
 
-        try {
-            $git->pull();
-            $this->fail('Expected GitException');
-        } catch (GitException $e) {
-            $this->assertSame('Working tree is dirty.', $e->getMessage());
-        }
+        $git->pull();
 
         $joined = $this->joined($runner);
-        $this->assertFalse($this->commandsContain($joined, 'fetch'));
-        $this->assertFalse($this->commandsContain($joined, 'merge --ff-only'));
+        $this->assertTrue($this->commandsContain($joined, 'fetch origin'));
+        $this->assertTrue($this->commandsContain($joined, 'merge --ff-only origin/main'));
+        $this->assertFalse($this->commandsContain($joined, 'reset --hard'));
+        $this->assertFalse($this->commandsContain($joined, 'clean -fd'));
     }
 
     public function test_pull_default_ff_fetches_then_ff_only_merge(): void

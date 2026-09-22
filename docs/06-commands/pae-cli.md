@@ -132,8 +132,9 @@ For projects deployed from git, these act on the checkout the engine owns. Updat
 | `pae git:commits {project}` | Lists recent commits. |
 | `pae git:revert {project}` | Returns the checkout to the last deployed commit. |
 | `pae git:update-credentials {project}` | Replaces the stored git access token. |
+| `pae git:deploy-hook {project}` | Creates the push-to-deploy hook and prints its URL and secret; the secret is shown only this once. Run again, it prints the same URL without the secret. `--rotate` issues a new URL and secret, `--delete` removes the hook, `--path` picks another checkout, `--provider` narrows the TLS setup notes to one git host. |
 
-Context: [Connecting with Git](../05-capabilities/connecting-with-git.md).
+Context: [Connecting with Git](../05-capabilities/connecting-with-git.md), [Push to deploy](../05-capabilities/push-to-deploy.md).
 
 ## Backups
 

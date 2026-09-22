@@ -36,6 +36,10 @@ Everything in the middle column must be at the **top level** of the repository -
 | Static site | An `index.html` or `index.htm`, and **none** of the language files above | nginx |
 | HTML site | Web pages only, no `index.html`, and none of the language files above | nginx |
 
+## Docker Compose projects: editing the compose file
+
+The engine never runs your `docker-compose.yml` as it is. It runs a copy made fit for hosting, with resource limits and a restart policy, and your own file stays unchanged. If you edit your compose file on the account, over SSH or with the file tools, start the project again with the `up` or `pull` action. The engine rebuilds that copy from your edited file before it starts the containers. It does not clone the repository again. The same applies to an account with no repository where you created a `docker-compose.yml` yourself.
+
 ## Node projects: the lockfile decides the tool
 
 Whichever lockfile is present is the package manager that gets used:

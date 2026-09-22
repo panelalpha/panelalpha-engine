@@ -179,7 +179,10 @@ class PhpHostBuildTest extends TestCase
      * The workaround also cannot be needed here: the advisory rule it dodges
      * is applied while resolving, and an install from a lock resolves
      * nothing. So islandora -- composer.json and no composer.lock -- keeps
-     * the manifest, and everything with a lock keeps its lock.
+     * the manifest, and everything with a lock keeps its lock -- as long as
+     * nothing else needs the manifest; {@see
+     * test_a_lock_gets_the_manifest_once_a_pin_needs_somewhere_to_land()} is
+     * the case where something does.
      */
     public function test_a_project_that_ships_a_lock_resolves_from_it_not_from_a_manifest(): void
     {
@@ -195,10 +198,41 @@ class PhpHostBuildTest extends TestCase
         // require-dev that can block an unlocked resolve is still dropped.
         $this->assertNotNull(PhpHostBuild::runtimeManifest($manifest));
 
-        // With one, nothing is written and Composer keeps composer.json,
-        // which is the name its lock is filed under.
+        // With one and no pin to write, nothing is written and Composer
+        // keeps composer.json, which is the name its lock is filed under.
         $this->assertNull(PhpHostBuild::runtimeManifest($manifest, '{"packages": []}'));
         $this->assertNull(PhpHostBuild::runtimeManifest($manifest, '{}'));
+    }
+
+    /**
+     * A lock stops protecting composer.json the moment a platform pin needs
+     * writing: `composer config` writes wherever `COMPOSER` points, and left
+     * unset that is composer.json -- exactly the file ADR-0001 says the
+     * engine may never write. So a lock with a pin still gets the manifest,
+     * carrying composer.json byte for byte (there is nothing to drop; the
+     * lock is what `install` reads), on the understanding that the caller
+     * copies composer.lock in beside it under the matching engine name
+     * before Composer ever sees `COMPOSER` pointed elsewhere -- see
+     * {@see \App\System\Project\Dind\HostCompile}.
+     */
+    public function test_a_lock_gets_the_manifest_once_a_pin_needs_somewhere_to_land(): void
+    {
+        $manifest = '{"require": {"php": "^8.4", "psr/log": "^3"}}';
+        $lock = '{"packages": []}';
+
+        $runtime = PhpHostBuild::runtimeManifest($manifest, $lock, '8.4');
+
+        $this->assertSame($manifest, $runtime, 'the manifest travels unchanged -- there is nothing to drop');
+    }
+
+    /** The other half of the same case: no minor to pin, so the lock still needs no manifest. */
+    public function test_a_lock_with_no_pin_to_write_still_needs_no_manifest(): void
+    {
+        $manifest = '{"require": {"php": "^8.4"}}';
+        $lock = '{"packages": []}';
+
+        $this->assertNull(PhpHostBuild::runtimeManifest($manifest, $lock, null));
+        $this->assertNull(PhpHostBuild::runtimeManifest($manifest, $lock, '8.4.25'));
     }
 
     /**

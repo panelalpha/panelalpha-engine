@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Detect;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 
@@ -74,7 +76,17 @@ final class PlaceholderPage
             return true;
         }
 
-        if ($name === 'docker-compose.yml' || $name === 'docker-compose.yaml') {
+        // The engine's reserved run-file names are exclusively its own — no
+        // client compose file is ever named one of these — so the content
+        // check below is unnecessary.
+        if ($name === strtolower(EngineArtifacts::RUN_COMPOSE)
+            || $name === strtolower(EngineArtifacts::RUN_COMPOSE_OVERRIDE)
+            || $name === strtolower(EngineArtifacts::APP_CONFIG_COMPOSE)
+        ) {
+            return true;
+        }
+
+        if (in_array($name, ComposeFileInspector::COMPOSE_FILE_CANDIDATES, true)) {
             $raw = @file_get_contents($dir . '/' . $entry);
 
             // Only the engine's own compose file.

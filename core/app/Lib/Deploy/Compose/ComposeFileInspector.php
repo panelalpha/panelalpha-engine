@@ -77,12 +77,6 @@ class ComposeFileInspector
     ];
 
     /**
-     * Suffix for compose files moved aside so docker compose V2 does not
-     * prefer them over the hosting `docker-compose.yml`.
-     */
-    public const COMPOSE_STASH_SUFFIX = '.panelalpha-local';
-
-    /**
      * The compose file a project ships, by the conventional names in
      * preference order, or null when it ships none.
      */
@@ -97,29 +91,6 @@ class ComposeFileInspector
         }
 
         return null;
-    }
-
-    /**
-     * Compose filenames in $projectDir that docker compose would load instead
-     * of $keep (V2 searches compose.yaml before docker-compose.yml).
-     *
-     * @return list<string>
-     */
-    public static function composeFilesThatShadow(string $projectDir, string $keep = 'docker-compose.yml'): array
-    {
-        $projectDir = rtrim($projectDir, '/');
-        $keep = strtolower($keep);
-        $found = [];
-        foreach (self::COMPOSE_FILE_CANDIDATES as $name) {
-            if (strtolower($name) === $keep) {
-                continue;
-            }
-            if (is_file($projectDir . '/' . $name)) {
-                $found[] = $name;
-            }
-        }
-
-        return $found;
     }
 
     /**
@@ -624,9 +595,50 @@ class ComposeFileInspector
             return true;
         }
 
-        return str_contains($raw, 'nginx:alpine')
-            && str_contains($raw, '/usr/share/nginx/html')
-            && !str_contains($raw, 'build:')
-            && substr_count($raw, 'image:') === 1;
+        return self::isUnlabelledStaticBootstrapYaml($raw);
+    }
+
+    /**
+     * The static bootstrap as the engine wrote it before it carried the label
+     * (August 2026): one `nginx:alpine` service, no build, serving the project
+     * root itself. Still left on an account nobody has migrated.
+     *
+     * The project root, not any directory: the engine only ever mounted `./`.
+     * A client stack serving `./html` or `./dist` with the same image is the
+     * client's own, and reading it as ours dropped their site for the
+     * placeholder page (ticket 08, live run).
+     */
+    private static function isUnlabelledStaticBootstrapYaml(string $raw): bool
+    {
+        try {
+            $parsed = ComposeYaml::parse($raw);
+        } catch (\Throwable) {
+            return false;
+        }
+        $services = is_array($parsed) ? ($parsed['services'] ?? null) : null;
+        if (!is_array($services) || count($services) !== 1) {
+            return false;
+        }
+        $service = reset($services);
+        if (!is_array($service) || isset($service['build']) || ($service['image'] ?? null) !== 'nginx:alpine') {
+            return false;
+        }
+
+        foreach ((array) ($service['volumes'] ?? []) as $volume) {
+            if (!is_string($volume)) {
+                continue;
+            }
+            $parts = explode(':', $volume);
+            if (count($parts) < 2) {
+                continue;
+            }
+            if (in_array(trim($parts[0]), ['.', './'], true)
+                && rtrim(trim($parts[1]), '/') === '/usr/share/nginx/html'
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

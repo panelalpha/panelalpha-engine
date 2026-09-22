@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\DeployLog;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\Telemetry\Telemetry;
+use App\Lib\DeployHook\Coalescing;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -211,6 +212,19 @@ class DeployLogger
         $id = $latest['id'] ?? null;
 
         return is_string($id) && $id !== '' ? new self($username, $id) : null;
+    }
+
+    /**
+     * Whether a live process holds this account's deploy lock -- a deploy is
+     * actually in progress, whatever latest.json says. The status alone stays
+     * `running` forever after a deploy is killed before finish() (an OOM, a
+     * worker timeout, a container restart), while the kernel releases the
+     * lock with the process. And a cancelled deploy still winding down holds
+     * the lock under a status that is no longer `running`.
+     */
+    public static function isLockedFor(string $username): bool
+    {
+        return (new DeployLock(new DeployLogPaths($username)))->isHeld();
     }
 
     /**
@@ -428,6 +442,12 @@ class DeployLogger
         // the explainer has to see what the build actually printed, not the
         // sentence it already turned that into.
         Telemetry::captureDeploy($this, $this->username, $status, $this->rawFailureOutput ?? $error);
+
+        // Same reasoning, same choke point: a push that coalesced while this
+        // deploy ran -- of any kind, for any reason -- is followed up from
+        // here, once, whatever this deploy's own outcome was. Cannot throw;
+        // see Coalescing.
+        Coalescing::runPendingFor($this->username);
     }
 
     /**

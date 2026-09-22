@@ -349,6 +349,8 @@ class Project
         $user->mysqlUsers()->delete();
         $user->mysqlDatabases()->delete();
         $user->ftpAccounts()->delete();
+        // hook_deliveries cascades from deploy_hooks at the DB level.
+        $user->deployHooks()->delete();
         DeployLogger::deleteUserLogs($username);
         $this->system->webserver()->rebuildDomains();
         $user->delete();
@@ -518,6 +520,15 @@ class Project
     public function buildIfMissing(): void
     {
         $this->runtime->buildIfMissing();
+    }
+
+    /**
+     * Whether the account has an application to start. A DinD account made from
+     * the template alone has none until a deploy sets its strategy.
+     */
+    public function hasUserApp(): bool
+    {
+        return $this->runtime instanceof Dind && $this->runtime->app() !== null;
     }
 
     /**

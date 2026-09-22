@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind\Strategy;
 
 use App\System\Project\Dind as DindProject;
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\HostScript;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
@@ -16,8 +17,8 @@ use App\Lib\Deploy\Platform\StageResolver;
  * An app config is a bootstrap, not a strategy: it writes its file snippets, its
  * compose file if it ships one, and runs its after-clone script. What that
  * leaves behind is what detection reads — a compose file an app config wrote is
- * the repository's compose file as far as the next step is concerned, and an
- * app config that writes none leaves the repository's own in place.
+ * read ahead of the repository's own, and an app config that writes none
+ * leaves the repository's own as the only one detection sees.
  */
 class AppConfigBootstrap
 {
@@ -36,6 +37,10 @@ class AppConfigBootstrap
         // has no app config at all, so the scripts run on their own terms rather
         // than as something an app config brought with it.
         if ($appConfig === null) {
+            // A config that is gone -- or has nothing left to say, which reads
+            // the same -- stopped shipping its compose file too. Left behind,
+            // that file would still be read ahead of the repository's own.
+            $this->removeCompose($projectDir);
             $this->runScripts($projectDir, null);
 
             return;
@@ -59,33 +64,67 @@ class AppConfigBootstrap
             return;
         }
 
+        $this->dind->noteAppConfigOverwritesTracked([EntrypointWriter::PROJECT_OVERRIDE]);
         $path = rtrim($projectDir, '/') . '/' . EntrypointWriter::PROJECT_OVERRIDE;
         $this->dind->shell()->execAsUser(['mkdir', '-p', dirname($path)]);
         $this->dind->system()->filesystem()->filePutContents($path, $script, $chown, '755');
     }
 
     /**
-     * The compose file the app config ships, written where Compose will find it.
+     * The compose file the app config ships, written under the engine's
+     * reserved names (ADR-0001) rather than one the client's own compose
+     * file might use.
      *
-     * `override` goes to the name Compose reserves for layering; `replace`
-     * takes over the project's own, stashing anything that would shadow it.
+     * `override` is layered over the run file whenever present (D8).
+     * `replace` goes to {@see EngineArtifacts::APP_CONFIG_COMPOSE}, which
+     * detection ({@see \App\Lib\Deploy\Platform\Probes\ComposeUsableProbe})
+     * reads ahead of the repository's own compose file — writing it to the
+     * run file directly would run before detection ever sees it, since the
+     * run file is not one of detection's own candidate names.
+     *
+     * An app config that stops shipping a compose file -- or stops existing --
+     * removes whichever of these it had written; they survive `clean -fd`
+     * (excluded), so a stale one would otherwise outlive the app config that
+     * wrote it.
      */
     private function writeCompose(AppConfig $appConfig, string $projectDir, ?string $chown): void
     {
+        $system = $this->dind->system();
+        $fs = $system->filesystem();
+        $appConfigCompose = rtrim($projectDir, '/') . '/' . EngineArtifacts::APP_CONFIG_COMPOSE;
+        $engineOverride = $this->dind->userAppComposeOverridePath();
+
         $content = $appConfig->compose();
         if ($content === null) {
+            $this->removeCompose($projectDir);
+
             return;
         }
 
-        $system = $this->dind->system();
         if ($appConfig->composeMode() === AppConfig::COMPOSE_OVERRIDE) {
-            $system->filesystem()->filePutContents($this->dind->userAppComposeOverridePath(), $content, $chown, '644');
+            $fs->filePutContents($engineOverride, $content, $chown, '644');
+            $this->removeIfExists($appConfigCompose, $system, $fs);
 
             return;
         }
 
-        $this->dind->composeWriter()->stashComposeFilesThatShadow($projectDir);
-        $system->filesystem()->filePutContents($this->dind->userAppComposeFilePath(), $content, $chown, '644');
+        $fs->filePutContents($appConfigCompose, $content, $chown, '644');
+        $this->removeIfExists($engineOverride, $system, $fs);
+    }
+
+    private function removeCompose(string $projectDir): void
+    {
+        $system = $this->dind->system();
+        $fs = $system->filesystem();
+        $this->removeIfExists(rtrim($projectDir, '/') . '/' . EngineArtifacts::APP_CONFIG_COMPOSE, $system, $fs);
+        $this->removeIfExists($this->dind->userAppComposeOverridePath(), $system, $fs);
+    }
+
+    private function removeIfExists(string $path, \App\System $system, \App\System\Filesystem $fs): void
+    {
+        if ($fs->fileExists($path)) {
+            $system->exec(['sudo', 'rm', '-f', $path]);
+        }
     }
 
     /**

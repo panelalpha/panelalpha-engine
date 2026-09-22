@@ -47,6 +47,35 @@ class DindDeployMechanicsTest extends TestCase
         $this->assertStringContainsString('prepareFromSources', $source);
     }
 
+    public function test_engine_artifact_exclude_is_written_after_ingest_and_after_checkout_rebuild_reprepare(): void
+    {
+        $source = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/DindDeployMechanics.php');
+
+        // ingestForWipeRebuild too: its re-clone starts from a fresh
+        // .git/info/exclude, and nothing later in the rebuild writes the block.
+        // Found live (ticket 08, scenario H): a POST /rebuild left every Engine
+        // Artifact untracked in `git status`.
+        foreach (['ingestApplicationSource', 'reprepareApplicationFromCheckout', 'ingestForWipeRebuild'] as $method) {
+            $body = $this->existingMethodBody($source, $method);
+            $prepare = strpos($body, 'prepareFromSources()');
+            $exclude = strpos($body, 'excludeEngineArtifacts()');
+            $this->assertNotFalse($prepare, $method);
+            $this->assertNotFalse($exclude, $method);
+            $this->assertGreaterThan($prepare, $exclude, "{$method} writes the block after preparing the app");
+        }
+
+        $helper = $this->existingMethodBody($source, 'excludeEngineArtifacts');
+        $this->assertStringContainsString('hasGitProject()', $helper);
+        $this->assertStringContainsString('EngineArtifactExclude::forProject', $helper);
+    }
+
+    private function existingMethodBody(string $source, string $method): string
+    {
+        $this->assertSame(1, preg_match('/function ' . $method . '\(.*?\r?\n    \}\r?\n/s', $source, $m), $method);
+
+        return $m[0];
+    }
+
     public function test_source_rebuild_uses_project_outer_helpers_and_wipe_ingest(): void
     {
         $source = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/DindDeployMechanics.php');
@@ -117,6 +146,20 @@ class DindDeployMechanicsTest extends TestCase
             $stop,
             "The pre-wipe stop must not pass -v; that removes the account's named volumes."
         );
+    }
+
+    // A clean deploy is recorded through User::markDeploySucceeded(), which stores the empty
+    // warnings list along with the status; writing the status by hand is how the list went
+    // missing in the first place.
+    public function test_persist_success_records_through_the_model_helper(): void
+    {
+        $source = file_get_contents(
+            $this->coreAppRoot . '/System/Project/Deployment/DindDeployMechanics.php'
+        );
+
+        $body = self::methodBody($source, 'persistSuccess');
+        $this->assertStringContainsString('markDeploySucceeded()', $body);
+        $this->assertStringNotContainsString("'deployment_status'", $body);
     }
 
     // Ends at the next method of any visibility, so a private method after the target

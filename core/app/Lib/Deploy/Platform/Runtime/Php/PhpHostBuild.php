@@ -159,13 +159,17 @@ final class PhpHostBuild
     public const DEFAULT_INSTALL = 'composer install ' . self::SAFE_INSTALL_FLAGS . ' --optimize-autoloader';
 
     /**
-     * The copy of the manifest Composer resolves from when require-dev is
-     * being dropped. Beside composer.json and inside the mount, so it is the
-     * same file to the build container as to the account.
+     * The copy of the manifest Composer resolves from: when require-dev is
+     * being dropped, or when a locked project's platform pin would otherwise
+     * land in composer.json. Beside composer.json and inside the mount, so it
+     * is the same file to the build container as to the account.
      *
      * @see runtimeManifest()
      */
     public const RUNTIME_MANIFEST_FILE = '.pa-runtime-composer.json';
+
+    /** Reserved for a copy of the client's `composer.lock` beside {@see RUNTIME_MANIFEST_FILE} (ADR-0001). */
+    public const RUNTIME_LOCK_FILE = '.pa-runtime-composer.lock';
 
     /**
      * The environment variable that points Composer at a manifest other than
@@ -230,24 +234,28 @@ final class PhpHostBuild
      * no per-scope advisory policy, so the resolver is handed a manifest with
      * `require-dev` removed and every runtime advisory left in place.
      *
-     * Null whenever the file is unreadable, has no require-dev to drop, or the
-     * project ships a composer.lock. The lock is the important one: Composer
-     * finds a lock by the name of the manifest handed to it, so
-     * `COMPOSER=.pa-runtime-composer.json` makes it look for
-     * `.pa-runtime-composer.lock`, and it then resolves the whole graph against
-     * the remote repositories instead of installing the committed lock —
-     * reaching api.github.com and dying on the unauthenticated
-     * 60-requests-per-hour budget every deploy on the host's egress IP shares.
-     * An install from a lock resolves nothing, so the advisory rule cannot fire
-     * there and a project with a lock never needed this.
+     * Null whenever the file is unreadable or has no require-dev to drop.
+     *
+     * A project shipping a composer.lock is different: `install` reads the
+     * lock and resolves nothing, so the advisory rule this manifest dodges
+     * cannot fire there, and ordinarily nothing needs to move. Composer finds
+     * a lock by the name of the manifest handed to it, though, so once
+     * something *does* need writing — {@see platformPin()} — pointing
+     * `COMPOSER` at a runtime manifest with no lock beside it would make
+     * Composer look for `.pa-runtime-composer.lock`, find none, and resolve
+     * the whole graph against the remote repositories instead of installing
+     * the committed one — reaching api.github.com and dying on the
+     * unauthenticated 60-requests-per-hour budget every deploy on the host's
+     * egress IP shares. So a lock with nothing to pin still returns null and
+     * installs straight from composer.json/.lock; a lock with a pin returns
+     * composer.json byte for byte, on the understanding that the caller
+     * copies composer.lock beside it under the matching engine name before
+     * Composer ever sees `COMPOSER` pointed elsewhere.
      */
-    public static function runtimeManifest(string $composerJson, ?string $composerLock = null): ?string
+    public static function runtimeManifest(string $composerJson, ?string $composerLock = null, ?string $phpVersion = null): ?string
     {
-        // A lock means `install` is possible, and `install` is both what the
-        // project committed and what cannot trip the advisory rule. Handing
-        // Composer a second manifest would throw that lock away.
         if ($composerLock !== null && trim($composerLock) !== '') {
-            return null;
+            return self::platformPin($phpVersion) !== '' ? $composerJson : null;
         }
 
         // Decoded as objects, not associative arrays, so what is written

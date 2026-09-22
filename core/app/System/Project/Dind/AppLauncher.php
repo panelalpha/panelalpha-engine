@@ -73,6 +73,20 @@ final class AppLauncher
                 ];
             }
             $this->project->alignAppPort();
+            // Advisory: the deploy has already succeeded, this only says
+            // whether the application behind it answers. See {@see AppHealth}.
+            $this->project->appHealth()->report();
+            // `up` returning 0 is not the only way to end up with nothing
+            // serving: a container that starts and then dies on its own
+            // configuration finishes `partial`. The health report has just
+            // named the container; this pastes what it printed.
+            if ($this->healthSawARestartLoop()) {
+                $this->recordContainerOutput();
+            }
+            // Same contract, for the certificate the app's URL depends on:
+            // recorded so a caller reporting the deploy does not have to
+            // assume what "https://" got it. See {@see AppCertificate}.
+            $this->project->appCertificate()->remember();
         }
 
         return [
@@ -244,6 +258,18 @@ final class AppLauncher
         $innerDocker->reclaimStorage(true);
 
         return $this->run($command);
+    }
+
+    private function healthSawARestartLoop(): bool
+    {
+        $details = $this->project->userModel()->getDetails();
+        foreach ((array) ($details[AppHealth::DETAIL_CHECKS] ?? []) as $check) {
+            if (is_array($check) && ($check['id'] ?? null) === AppHealth::CHECK_RESTART_LOOPING) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function recordContainerOutput(): void

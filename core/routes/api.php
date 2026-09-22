@@ -11,6 +11,7 @@ use App\Http\Controllers\ModsecController;
 use App\Http\Controllers\PhpController;
 use App\Http\Controllers\SystemController;
 use App\Http\Controllers\User\CronJobController;
+use App\Http\Controllers\User\DeployHookController;
 use App\Http\Controllers\User\Domain\LogFileController;
 use App\Http\Controllers\User\DomainController as UserDomainController;
 use App\Http\Controllers\User\ProjectSettingController;
@@ -217,6 +218,10 @@ $projectRoutes = function (): void {
     Route::post('/{username}/git/pull', [GitController::class, 'pull']);
     Route::post('/{username}/git/push', [GitController::class, 'push']);
     Route::post('/{username}/git/revert', [GitController::class, 'revert']);
+    Route::post('/{username}/git/deploy-hook', [DeployHookController::class, 'create']);
+    Route::get('/{username}/git/deploy-hook', [DeployHookController::class, 'show']);
+    Route::post('/{username}/git/deploy-hook/rotate', [DeployHookController::class, 'rotate']);
+    Route::delete('/{username}/git/deploy-hook', [DeployHookController::class, 'destroy']);
 
     Route::post('/{username}/wp-cli/command', [WpCliController::class, 'run']);
 

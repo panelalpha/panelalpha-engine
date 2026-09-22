@@ -96,6 +96,31 @@ class DeployLockTest extends TestCase
         }
     }
 
+    public function test_is_held_reports_a_lock_another_handle_holds_without_taking_it(): void
+    {
+        $observer = new DeployLock($this->paths);
+        $this->assertFalse($observer->isHeld());
+
+        $holder = new DeployLock($this->paths);
+        $holder->acquire();
+
+        try {
+            $this->assertTrue($observer->isHeld());
+            $this->assertTrue($holder->isHeld());
+        } finally {
+            $holder->release();
+        }
+
+        $this->assertFalse($observer->isHeld(), 'asking must not have taken the lock');
+        (new DeployLock($this->paths))->acquire();
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_is_held_is_false_for_an_account_with_no_log_directory(): void
+    {
+        $this->assertFalse((new DeployLock(new DeployLogPaths('lock-' . bin2hex(random_bytes(6)))))->isHeld());
+    }
+
     public function test_releasing_a_lock_never_taken_is_harmless(): void
     {
         (new DeployLock($this->paths))->release();

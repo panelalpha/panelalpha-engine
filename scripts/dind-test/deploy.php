@@ -804,7 +804,11 @@ foreach ($containers as $c) {
 
 // Logs
 step("Recent logs (last 20 lines)");
-$logs = shell_exec("docker exec {$containerName} docker compose --project-directory /home/{$containerName}/project -f /home/{$containerName}/project/docker-compose.yml logs --tail=20 --no-color 2>&1") ?? '';
+// The container mounts the account's project dir at this fixed in-container
+// path regardless of --real-home, so only the filename comes from the
+// resolver — it is the one thing that varies by strategy/repo.
+$runComposeFile = basename($dind->userAppComposeFileToRun());
+$logs = shell_exec("docker exec {$containerName} docker compose --project-directory /home/{$containerName}/project -f /home/{$containerName}/project/{$runComposeFile} logs --tail=20 --no-color 2>&1") ?? '';
 fwrite(STDERR, $logs . "\n");
 
 // HTTP check the same way the engine does: from a container on
@@ -915,7 +919,7 @@ if ($buildSteps !== []) {
 }
 fwrite(STDERR, "\n");
 fwrite(STDERR, "  Inspect:   docker exec -it {$containerName} bash\n");
-fwrite(STDERR, "  Logs:      docker exec {$containerName} docker compose -f /home/{$containerName}/project/docker-compose.yml logs -f\n");
+fwrite(STDERR, "  Logs:      docker exec {$containerName} docker compose -f /home/{$containerName}/project/{$runComposeFile} logs -f\n");
 // Never interpolate $testBaseDir here — under --real-home it is /home itself,
 // and this line is meant to be copy-pasteable.
 fwrite(STDERR, "  Cleanup:   docker rm -f {$containerName}"

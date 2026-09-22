@@ -28,7 +28,13 @@ class EnsureTokenMayUseApi
             return $next($request);
         }
 
-        $token = $request->user()?->currentAccessToken();
+        $user = $request->user();
+
+        // A caller with no token API has no token to limit: the CLI dispatches
+        // routes in-process as a plain authenticatable, not a token-bearing Admin.
+        $token = $user !== null && method_exists($user, 'currentAccessToken')
+            ? $user->currentAccessToken()
+            : null;
 
         // Sanctum has decided who this is; not ours to second-guess.
         if (!$token instanceof PersonalAccessToken) {

@@ -37,10 +37,14 @@ class HostCompilePhpPlatformPinTest extends TestCase
     /** @var array<string, string> absolute account path => contents */
     private array $files = [];
 
+    /** @var array<string, string> target path => contents, from every `sudo cp` the build issued */
+    private array $copiedTo = [];
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->files = [];
+        $this->copiedTo = [];
     }
 
     /**
@@ -58,16 +62,18 @@ class HostCompilePhpPlatformPinTest extends TestCase
         }
 
         $filesystem = $this->files;
+        $copiedTo = &$this->copiedTo;
 
-        $system = new class ($filesystem) extends System {
+        $system = new class ($filesystem, $copiedTo) extends System {
             /** @var array<string, string> */
             private array $files;
 
             /** @var list<list<string>> */
             public array $commands = [];
 
-            /** @param array<string, string> $files */
-            public function __construct(array $files)
+            /** @param array<string, string> $files
+             *  @param array<string, string> $copiedTo */
+            public function __construct(array $files, private array &$copiedTo)
             {
                 $this->files = $files;
             }
@@ -96,8 +102,20 @@ class HostCompilePhpPlatformPinTest extends TestCase
                 };
             }
 
+            /**
+             * Real writes go through `Filesystem::filePutContents()`, which
+             * stages the content in a real temp file and copies it out with
+             * `sudo cp <tmp> <target>`. Reading the temp file here, before the
+             * real filePutContents() unlinks it, is how the test observes what
+             * was actually written without a filesystem the account owns.
+             */
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
+                    $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
+                }
+
                 return '';
             }
 
@@ -231,37 +249,88 @@ class HostCompilePhpPlatformPinTest extends TestCase
     }
 
     /**
-     * A committed lock keeps Composer on composer.json -- the name its lock is
-     * filed under -- so `install` actually installs from it.
-     *
-     * Exporting COMPOSER=.pa-runtime-composer.json moves the lock out of
-     * reach: Composer looks for `.pa-runtime-composer.lock`, finds none, and
-     * resolves the whole graph remotely instead of installing. That is how
-     * espocrm and dreamfactory lost their deploys -- both ship a lock, both
-     * declare GitHub VCS repositories, and the remote resolve died on the
-     * unauthenticated rate limit. Neither has a require-dev that could have
-     * blocked an install from its lock, so the workaround bought them nothing
-     * and cost them the deploy.
+     * A committed lock does not, by itself, need a runtime manifest --
+     * `install` reads the lock and resolves nothing, so a require-dev pin
+     * cannot block it. But *this* project's minor still gets pinned (every
+     * project with a composer.json does, {@see PhpHostBuild::platformPin()}),
+     * and `composer config` writes wherever COMPOSER points. Left unset, that
+     * is composer.json -- exactly the file ADR-0001 says the engine may never
+     * write. So the pin redirects Composer to a runtime manifest here too,
+     * carrying composer.json byte for byte, with composer.lock copied beside
+     * it under the matching engine name so `install` still reads what the
+     * project committed rather than resolving the whole graph remotely.
      */
-    public function test_a_committed_lock_is_left_to_install_from_its_own_lock(): void
+    public function test_a_committed_lock_still_keeps_the_pin_out_of_composer_json(): void
     {
+        $composerJson = (string) json_encode([
+            'require' => ['php' => '^8.4', 'psr/log' => '^3'],
+            'require-dev' => ['phpunit/phpunit' => '^9'],
+        ]);
+        $composerLock = '{"packages": [], "packages-dev": []}';
         $argv = $this->build([
-            'composer.json' => (string) json_encode([
-                'require' => ['php' => '^8.4', 'psr/log' => '^3'],
-                'require-dev' => ['phpunit/phpunit' => '^9'],
-            ]),
-            // Presence is the whole of the rule; contents are Composer's.
-            'composer.lock' => '{"packages": [], "packages-dev": []}',
+            'composer.json' => $composerJson,
+            'composer.lock' => $composerLock,
         ], $this->phpDecision());
 
         $this->assertNotNull($argv);
         $line = implode(' ', $argv);
-        $this->assertStringNotContainsString(
-            PhpHostBuild::MANIFEST_ENV . '=',
+        $this->assertStringContainsString(
+            PhpHostBuild::MANIFEST_ENV . '=' . PhpHostBuild::RUNTIME_MANIFEST_FILE,
             $line,
-            'a lock means install, and an install needs no runtime manifest'
+            'a pin has to land somewhere other than composer.json'
         );
         $this->assertStringContainsString('composer install --no-dev', (string) end($argv));
+
+        $manifestPath = '/home/acme/project/' . PhpHostBuild::RUNTIME_MANIFEST_FILE;
+        $lockPath = '/home/acme/project/' . PhpHostBuild::RUNTIME_LOCK_FILE;
+        $this->assertArrayHasKey($manifestPath, $this->copiedTo, 'the runtime manifest was never written');
+        $this->assertSame($composerJson, $this->copiedTo[$manifestPath], 'composer.json must travel unchanged');
+        $this->assertArrayHasKey($lockPath, $this->copiedTo, 'the lock was never copied beside the runtime manifest');
+        $this->assertSame($composerLock, $this->copiedTo[$lockPath]);
+    }
+
+    /**
+     * Composer's own file is never touched by any of this: it stays exactly
+     * what the repository shipped, in the files map the build read from.
+     */
+    public function test_a_committed_lock_leaves_composer_json_byte_identical(): void
+    {
+        $composerJson = (string) json_encode(['require' => ['php' => '^8.4']]);
+        $this->build([
+            'composer.json' => $composerJson,
+            'composer.lock' => '{"packages": []}',
+        ], $this->phpDecision());
+
+        $this->assertSame(
+            $composerJson,
+            $this->files['/home/acme/project/composer.json'],
+            'nothing in this pass may write into the project\'s own composer.json'
+        );
+    }
+
+    /**
+     * A stale lock copy would let Composer install yesterday's dependencies
+     * against a repository that has since pulled a new one. Refreshed here
+     * means run every time, not written once and left behind.
+     */
+    public function test_the_lock_copy_is_refreshed_on_every_build(): void
+    {
+        $composerJson = (string) json_encode(['require' => ['php' => '^8.4']]);
+        $lockPath = '/home/acme/project/' . PhpHostBuild::RUNTIME_LOCK_FILE;
+
+        $this->build([
+            'composer.json' => $composerJson,
+            'composer.lock' => '{"packages": [], "revision": "first"}',
+        ], $this->phpDecision());
+        $this->assertSame('{"packages": [], "revision": "first"}', $this->copiedTo[$lockPath]);
+
+        $this->files['/home/acme/project/composer.lock'] = '{"packages": [], "revision": "second"}';
+        $this->build([], $this->phpDecision());
+        $this->assertSame(
+            '{"packages": [], "revision": "second"}',
+            $this->copiedTo[$lockPath],
+            'a new lock pulled from the repository must be the one Composer installs from'
+        );
     }
 
     /**

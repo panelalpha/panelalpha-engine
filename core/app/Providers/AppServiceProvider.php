@@ -7,6 +7,8 @@ use App\Integrations\GeoLocation\GeoLocation;
 use App\Integrations\Statistics\Awstats;
 use App\Integrations\Statistics\Statistics;
 use App\Lib\Deploy\Platform\DeployPlanContext;
+use App\Lib\DeployHook\CheckoutSync;
+use App\Lib\DeployHook\GitCheckoutSync;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Models\PersonalAccessToken;
 use App\System;
@@ -40,6 +42,10 @@ class AppServiceProvider extends ServiceProvider
         // The same lifetime for the same reason, one question earlier: not
         // which commands this deploy runs, but which recipe it runs them from.
         $this->app->singleton(RecipeChoiceContext::class);
+
+        // What a queued Hook Delivery does to the checkout. An interface so
+        // the code around it can be tested without a Docker daemon.
+        $this->app->bind(CheckoutSync::class, GitCheckoutSync::class);
 
         $this->app->singleton(GeoLocation::class, function (Application $app) {
             $driver = (string) config('geolocation.driver', 'dbip');

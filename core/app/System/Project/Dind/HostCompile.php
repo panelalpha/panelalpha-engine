@@ -360,23 +360,63 @@ class HostCompile
     /**
      * The PHP minor the deployed app will run on, so the host install
      * resolves for that rather than for the Composer image's own PHP.
+     *
+     * `$appRoot` is where the application's own composer.json lives, for the
+     * manifests that declare one — phpBB is the repository root plus a
+     * `phpBB/` directory that is the application. Reading the repository root
+     * instead resolves the wrong file, and for such a project no version at
+     * all, which is why every other composer question here is asked in the
+     * same subtree ({@see runtimeComposerManifest()}, {@see lockPhpContradicted()}).
      */
-    private function targetPhpMinor(): ?string
+    private function targetPhpMinor(string $appRoot = ''): ?string
     {
         // readIn(), not read(): the latter takes an absolute path, and
         // handing it a bare name silently answers null - which here would
         // mean falling back to an unpinned resolve without saying so.
         $projectDir = $this->project->engineAccount()->projectDir();
         $files = $this->project->projectTree();
-        $composerJson = $files->readIn($projectDir, 'composer.json');
+        $prefix = trim($appRoot, '/') === '' ? '' : trim($appRoot, '/') . '/';
+        $composerJson = $files->readIn($projectDir, $prefix . 'composer.json');
         if ($composerJson === null) {
             return null;
         }
 
         return PhpRuntime::requirementFor(
             $composerJson,
-            $files->readIn($projectDir, 'composer.lock')
+            $files->readIn($projectDir, $prefix . 'composer.lock')
         )->version;
+    }
+
+    /**
+     * The project's composer.lock, or null when it ships none.
+     *
+     * Read from the same subtree as the manifest, like every other composer
+     * question asked here, so an application in its own subtree resolves its
+     * own lock rather than one at the repository root.
+     */
+    private function projectComposerLock(string $appRoot = ''): ?string
+    {
+        $projectDir = $this->project->engineAccount()->projectDir();
+        $prefix = trim($appRoot, '/') === '' ? '' : trim($appRoot, '/') . '/';
+
+        return $this->project->projectTree()->readIn($projectDir, $prefix . 'composer.lock');
+    }
+
+    /**
+     * Whether the project's lock pins a PHP its own packages reject.
+     *
+     * Without a composer.json there is no install to relax: a project with a
+     * lock and no manifest is not one Composer can install from at all.
+     */
+    private function lockPhpContradicted(string $appRoot = ''): bool
+    {
+        $projectDir = $this->project->engineAccount()->projectDir();
+        $prefix = trim($appRoot, '/') === '' ? '' : trim($appRoot, '/') . '/';
+        if ($this->project->projectTree()->readIn($projectDir, $prefix . 'composer.json') === null) {
+            return false;
+        }
+
+        return PhpRuntime::lockedPhpContradicted($this->projectComposerLock($appRoot));
     }
 
     /**
@@ -407,7 +447,22 @@ class HostCompile
         $script = PhpHostBuild::script(
             is_string($decision['install_command'] ?? null) ? $decision['install_command'] : '',
             is_string($decision['build_command'] ?? null) ? $decision['build_command'] : '',
-            $hasComposer
+            $hasComposer,
+            // The engine's PHP minor, so this resolve answers the same
+            // question the build image was chosen for. Without it a project
+            // pinning an older `config.platform` won over the deployed
+            // interpreter -- YOURLS, and htmly, are how that was found.
+            $this->targetPhpMinor($appRoot),
+            // A lock whose own packages reject the PHP it pins cannot be
+            // installed strictly, and `install` may not rewrite it. egroupware
+            // is the case: its CI locks under --ignore-platform-reqs, so the
+            // engine stops enforcing the one requirement the lock contradicts
+            // instead of failing a deploy that would have worked.
+            $this->lockPhpContradicted($appRoot),
+            // Read for one decision: whether the plugins this lock pins are
+            // installers, which may run, or an application's build tooling,
+            // which may not. {@see PhpHostBuild::mayRunPlugins()}
+            $this->projectComposerLock($appRoot)
         );
         if ($script === '') {
             return;
@@ -426,7 +481,12 @@ class HostCompile
         $withCache = $this->prepareCache();
         $logger?->info('Resolving PHP dependencies on host');
 
-        $argv = $this->hostBuilder()->phpBuildArgv($account, $image, $script, $appRoot, $withCache);
+        // Written before the argv, so a Composer step that is dropped from
+        // the manifest (an app with no dependencies) does not leave a stale
+        // runtime manifest behind for the next deploy to read.
+        $manifest = $this->runtimeComposerManifest($account->projectDir(), $appRoot);
+
+        $argv = $this->hostBuilder()->phpBuildArgv($account, $image, $script, $appRoot, $withCache, $manifest);
         if ($logger === null) {
             $process = $system->runProcess($argv, [], self::PHP_BUILD_TIMEOUT_SECONDS);
         } else {
@@ -475,9 +535,14 @@ class HostCompile
     {
         $shell = $this->project->shell();
         $logger = $shell->logger();
+        $account = $this->project->engineAccount();
         $argv = $this->hostBuilder()->composerInstallArgv(
-            $this->project->engineAccount(),
-            $this->targetPhpMinor()
+            $account,
+            $this->targetPhpMinor(),
+            // The same decision runPhpBuild() made, so the two Composer
+            // passes never resolve against different manifests for the same
+            // deploy.
+            $this->runtimeComposerManifest($account->projectDir())
         );
 
         if ($logger === null) {
@@ -492,6 +557,76 @@ class HostCompile
             $message = $process->getErrorOutput() ?: $process->getOutput();
             throw new \Exception($message !== '' ? $message : 'Host Composer install failed');
         }
+    }
+
+    /**
+     * Write the manifest Composer should resolve from, and return its name,
+     * or null when the project's own composer.json is fine as-is.
+     *
+     * Two cases write one: a project with no lock and a require-dev to drop
+     * (the manifest is the fix itself), and a locked project that also needs
+     * a platform pin (the manifest is an untouched copy of composer.json,
+     * only so the pin has somewhere to land other than the client's file).
+     * {@see PhpHostBuild::runtimeManifest()} decides which, if either.
+     *
+     * The lock is copied beside it under the matching engine name in the
+     * second case, refreshed on every call: Composer finds a lock by the name
+     * of the manifest it was handed, so without a copy filed under the
+     * runtime manifest's name it would see no lock at all and resolve the
+     * whole graph remotely instead of installing the one the project
+     * committed.
+     *
+     * Best-effort. A project whose manifest cannot be written -- or that
+     * needs none of this -- resolves from its own composer.json, exactly as
+     * before.
+     */
+    private function runtimeComposerManifest(string $projectDir, string $appRoot = ''): ?string
+    {
+        // Beside the composer.json the build will actually read. For a
+        // project whose application is a subtree the build runs in that
+        // subtree (`-w /app/<root>`), not at the mount root, so the manifest
+        // has to be its sibling and the returned name is relative to it.
+        $appDir = rtrim($projectDir . '/' . trim($appRoot, '/'), '/');
+        $files = $this->project->projectTree();
+
+        $composerJson = $files->readIn($appDir, 'composer.json');
+        if ($composerJson === null) {
+            return null;
+        }
+
+        $composerLock = $files->readIn($appDir, 'composer.lock');
+        $runtime = PhpHostBuild::runtimeManifest($composerJson, $composerLock, $this->targetPhpMinor($appRoot));
+        if ($runtime === null) {
+            return null;
+        }
+
+        $filesystem = $this->project->system()->filesystem();
+        $chown = $this->project->userModel()->getChownString();
+        try {
+            $filesystem->filePutContents(
+                $appDir . '/' . PhpHostBuild::RUNTIME_MANIFEST_FILE,
+                $runtime,
+                $chown,
+                '644'
+            );
+            if ($composerLock !== null && trim($composerLock) !== '') {
+                $filesystem->filePutContents(
+                    $appDir . '/' . PhpHostBuild::RUNTIME_LOCK_FILE,
+                    $composerLock,
+                    $chown,
+                    '644'
+                );
+            }
+        } catch (\Exception $e) {
+            $this->project->shell()->logger()?->warn(
+                'Could not write a runtime-only Composer manifest, resolving from composer.json: '
+                    . $e->getMessage()
+            );
+
+            return null;
+        }
+
+        return PhpHostBuild::RUNTIME_MANIFEST_FILE;
     }
 
     /**

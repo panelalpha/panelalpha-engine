@@ -2,10 +2,12 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\EnvFile;
 use App\Models\User as ModelsUser;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
+use Symfony\Component\Yaml\Yaml;
 use Tests\TestCase;
 
 class DindProjectEnvironmentTest extends TestCase
@@ -66,6 +68,117 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertTrue($model->usedCustomEnvVars());
     }
 
+    public function test_apply_creates_the_env_file_a_generated_run_file_names(): void
+    {
+        // A PHP-plain archive: no .env, no .env.example, no compose file of its own.
+        // The engine's run file still names `.env`, and compose refuses to start without it.
+        file_put_contents(
+            $this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE,
+            "services:
+  app:
+    image: php:8-cli
+    env_file:
+      - .env
+"
+        );
+
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+
+        $this->assertFileExists($this->projectDir . '/.env');
+        $this->assertSame('', file_get_contents($this->projectDir . '/.env'));
+    }
+
+    /**
+     * ADR-0001 D3: a tracked `.env` is the client's. The overrides go to
+     * `.env.panelalpha` instead, attached only to the service whose own
+     * `env_file` already loads `.env` -- not the database sidecar, which
+     * never did.
+     */
+    public function test_tracked_env_stays_untouched_and_overrides_go_to_env_panelalpha(): void
+    {
+        $envContents = "APP_NAME=Demo\nAPP_KEY=base64:committedbytheclient\n";
+        file_put_contents($this->projectDir . '/.env', $envContents);
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE, <<<'YAML'
+        services:
+          app:
+            image: acme/app
+            env_file: .env
+          db:
+            image: mariadb
+            env_file: .env.db
+        YAML);
+
+        $model = $this->dindModel(['env_vars' => ['APP_NAME' => 'Custom']]);
+        $this->forcedEnvironment($model, tracked: true)->apply();
+
+        $this->assertSame($envContents, file_get_contents($this->projectDir . '/.env'));
+
+        $overrides = $this->vars((string) file_get_contents(
+            $this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES
+        ));
+        $this->assertSame('Custom', $overrides['APP_NAME']);
+
+        $compose = Yaml::parseFile($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
+        $this->assertSame(['.env', EngineArtifacts::ENV_OVERRIDES], $compose['services']['app']['env_file']);
+        $this->assertSame('.env.db', $compose['services']['db']['env_file']);
+        $this->assertTrue($model->usedCustomEnvVars());
+    }
+
+    /**
+     * The pre-ADR-0001 behaviour: an untracked `.env` (or no git at all) is
+     * still merged in place, and no `.env.panelalpha` is created.
+     */
+    public function test_untracked_env_is_merged_as_before(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "APP_NAME=Demo\nAPP_KEY=base64:generated\n");
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE, <<<'YAML'
+        services:
+          app:
+            image: acme/app
+            env_file: .env
+        YAML);
+
+        $model = $this->dindModel(['env_vars' => ['APP_NAME' => 'Custom']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('Custom', $env['APP_NAME']);
+        $this->assertFileDoesNotExist($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES);
+
+        $compose = Yaml::parseFile($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
+        $this->assertSame('.env', $compose['services']['app']['env_file']);
+    }
+
+    /**
+     * Clearing every env_vars field is itself a redeploy: the next apply()
+     * has to remove `.env.panelalpha` and detach it from the run file again,
+     * not leave a stale override in force.
+     */
+    public function test_removing_all_env_vars_removes_env_panelalpha_and_its_env_file_entry(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "APP_NAME=Demo\n");
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE, <<<'YAML'
+        services:
+          app:
+            image: acme/app
+            env_file: .env
+        YAML);
+
+        $this->forcedEnvironment(
+            $this->dindModel(['env_vars' => ['APP_NAME' => 'Custom']]),
+            tracked: true
+        )->apply();
+        $this->assertFileExists($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES);
+
+        $this->forcedEnvironment($this->dindModel(['env_vars' => []]), tracked: true)->apply();
+
+        $this->assertFileDoesNotExist($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES);
+        $compose = Yaml::parseFile($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
+        // detach() drops the entry rather than collapsing a lone survivor back
+        // to a bare scalar, so the round trip leaves a one-item list.
+        $this->assertSame(['.env'], $compose['services']['app']['env_file']);
+    }
+
     public function test_defer_to_compose_defaults_matches_lib_lychee_case(): void
     {
         $envExample = <<<'ENV'
@@ -111,6 +224,26 @@ YAML;
         $this->assertInstanceOf(Dind::class, $runtime);
 
         return $runtime;
+    }
+
+    /**
+     * A `ProjectEnvironment` whose tracked/untracked decision is forced
+     * rather than answered by a real git repository: `GitRepository` only
+     * runs through a live DinD shell, which nothing here provides.
+     */
+    private function forcedEnvironment(ModelsUser $model, bool $tracked): Dind\ProjectEnvironment
+    {
+        return new class($this->dind($model), $tracked) extends Dind\ProjectEnvironment {
+            public function __construct(Dind $dind, private bool $tracked)
+            {
+                parent::__construct($dind);
+            }
+
+            protected function envIsTracked(): bool
+            {
+                return $this->tracked;
+            }
+        };
     }
 
     private function dindModel(array $details = []): ModelsUser

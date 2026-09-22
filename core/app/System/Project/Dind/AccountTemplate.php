@@ -84,15 +84,13 @@ BASH;
     {
         $paths = $this->paths();
         $appDir = $paths->appDir();
-        $existingComposePath = $paths->existingComposeFile();
         $hasSources = ProjectContext::listRootFiles($appDir) !== [];
 
-        if ($existingComposePath === null && !$model->hasGitProject() && !$hasSources) {
+        if ($paths->existingComposeFile() === null && !$model->hasGitProject() && !$hasSources) {
             (new WelcomeBootstrap($this->project, $paths))->writeIfNeeded();
-            $existingComposePath = $paths->composeFile();
         }
 
-        return $existingComposePath ?? $paths->composeFile();
+        return $paths->composeFileForPorts();
     }
 
     /**

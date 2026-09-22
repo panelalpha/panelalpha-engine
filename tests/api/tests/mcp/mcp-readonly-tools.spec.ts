@@ -59,7 +59,13 @@ const NOT_SMOKE_CALLABLE: Record<string, string> = {
  * exercised against a project that has containers. Matching on the engine's own
  * message keeps this narrow: any other error is still a failure.
  */
-const NOT_APPLICABLE_TO_PROJECT = [/only available for dind users/i, /no git repository at path/i];
+const NOT_APPLICABLE_TO_PROJECT = [
+  /only available for dind users/i,
+  /no git repository at path/i,
+  // git_deploy_hook_show on a project that never had a hook set up: an honest
+  // 404, and creating one is a write this smoke must not make.
+  /has no deploy hook/i,
+];
 
 function isNotApplicable(detail: string): boolean {
   return NOT_APPLICABLE_TO_PROJECT.some((pattern) => pattern.test(detail));

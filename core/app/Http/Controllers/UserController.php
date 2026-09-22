@@ -29,9 +29,11 @@ use App\Lib\Domains\DomainAllocationException;
 use App\Lib\Domains\DomainAllocator;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Domains\PublicUrl;
+use App\Lib\Vault\GlobalVault;
 use App\Lib\Vault\RequestVault;
 use App\Models\Domain;
 use App\Models\ProxyRule;
+use App\Models\SecretVaultEntry;
 use App\Models\Setting;
 use App\Models\Task;
 use App\Models\Tunnel;
@@ -602,7 +604,13 @@ class UserController extends Controller
             $probe = (new GitRemoteProbe())->problem(
                 'git_repo',
                 $params['git_repo'],
-                $params['git_token'] ?? null
+                // The token the clone will actually use, which is not always
+                // the one being stored: a create that sends none inherits the
+                // engine's, and probing without it would refuse a private
+                // repository the deploy would then have read fine. Used here
+                // and dropped -- `git_token` above stays absent, so the
+                // project keeps inheriting and a rotation still reaches it.
+                GlobalVault::effective($params['git_token'] ?? null, SecretVaultEntry::TYPE_GIT_TOKEN)
             );
             if ($probe !== null) {
                 throw ProblemException::of([$probe]);
@@ -944,9 +952,7 @@ class UserController extends Controller
                 implode(' | ', $warnings)
             );
         } else {
-            $user->setDetails([
-                'deployment_status' => 'success'
-            ]);
+            $user->markDeploySucceeded();
             $user->save();
             $deployLogger?->finish(DeployLogger::STATUS_SUCCESS);
         }
@@ -1227,6 +1233,7 @@ class UserController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'User rebuilt', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'User not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'Rebuild failed', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
@@ -1267,23 +1274,62 @@ class UserController extends Controller
             $deployLogger = DeployLogger::resumeRunningOrStartSafely($user->username);
         }
 
+        // One closure for both shapes, so the streamed and the plain response
+        // cannot drift -- which is how this endpoint came to be the only
+        // deploy entry point with no handler at all. A rebuild whose compose
+        // dependency failed answered `500 {"message":"Server Error"}`: no
+        // problem code, no stage, no offset, and nothing to tell a client
+        // "your compose file is wrong" from "the engine is broken". The deploy
+        // log for the same run already had the real error in it.
+        $rebuild = function () use ($user, $deployLogger, $zipPath): void {
+            try {
+                $this->runProjectRebuild($user->project(), $deployLogger, $zipPath);
+                $user->project()->system()->webserver()->rebuildDomains();
+                $this->recordRebuildSucceeded($user);
+            } catch (DeployCancelledException $e) {
+                $stage = $deployLogger?->currentStage();
+                $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
+                throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
+            } catch (ValidationException $e) {
+                // ProblemException is one of these, so anything already in the
+                // documented shape passes through rather than being re-wrapped.
+                throw $e;
+            } catch (\Exception $e) {
+                throw $this->rebuildFailure($e, $deployLogger);
+            }
+        };
+
         if ($deployLogger !== null) {
             return $this->respondWithDeployStream(
-                function () use ($user, $deployLogger, $zipPath) {
-                    $this->runProjectRebuild($user->project(), $deployLogger, $zipPath);
-                    $user->project()->system()->webserver()->rebuildDomains();
-                    $this->recordRebuildSucceeded($user);
-                },
+                $rebuild,
                 $deployLogger,
                 static fn () => ['username' => $user->username, 'domain' => $user->domain]
             );
         }
 
-        $this->runProjectRebuild($user->project(), null, $zipPath);
-        $user->project()->system()->webserver()->rebuildDomains();
-        $this->recordRebuildSucceeded($user);
+        $rebuild();
 
         return new UserResource($user);
+    }
+
+    /**
+     * A failed rebuild, in the shape every other deploy endpoint answers in.
+     *
+     * Its own method so it can be exercised without a request: the defect was
+     * that this translation did not exist here at all, and a test that has to
+     * stand up a controller to see it would not have caught that either.
+     */
+    private function rebuildFailure(\Exception $e, ?DeployLogger $deployLogger): ProblemException
+    {
+        $deployLogger?->recordFailureOutput($e->getMessage());
+        // The same slug deploy telemetry reports, so a client and a dashboard
+        // name one failure the same way.
+        $match = DeployFailureExplainer::match($e->getMessage());
+        $message = $match['message'] ?? $e->getMessage();
+        $stage = $deployLogger?->currentStage();
+        $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
+
+        return self::deployProblem($match['rule'] ?? 'rebuild_failed', $message, $stage);
     }
 
     /**
@@ -1345,7 +1391,7 @@ class UserController extends Controller
         if ($user->getDeploymentStatus() === 'success' && ($user->getDetails()['deployment_warnings'] ?? []) === []) {
             return;
         }
-        $user->setDetails(['deployment_status' => 'success', 'deployment_warnings' => []]);
+        $user->markDeploySucceeded();
         $user->save();
     }
 
@@ -1432,20 +1478,7 @@ class UserController extends Controller
 
         $run = function () use ($user, $zipPath, $deployLogger): void {
             try {
-                $deployLogger?->stage(DeployLogger::STAGE_CLONING);
-                $project = $user->project();
-                $project->importProjectArchive($zipPath);
-                $project->prepareUserAppFromSources();
-                $deployLogger?->stage(DeployLogger::STAGE_RUNNING);
-                $result = $project->startUserApp();
-                if ($result['exit_code'] !== 0) {
-                    $full = $this->startFailureMessage(
-                        $result['stderr'] ?: $result['stdout'],
-                        $deployLogger
-                    );
-                    $deployLogger?->finish(DeployLogger::STATUS_FAILED, $full);
-                    throw new \Exception($full);
-                }
+                $user->project()->deployment()->deployFromArchive($deployLogger, $zipPath);
                 // The vhosts were rendered when the account was created, against
                 // the welcome app's port. Detection has just re-pointed app_port
                 // at what the archive really serves on (8000 for PHP, 3000 for
@@ -1453,9 +1486,7 @@ class UserController extends Controller
                 // rebuild() does it — or every non-8080 app answers 502 behind
                 // a green deploy.
                 $user->project()->system()->webserver()->rebuildDomains();
-                $user->setDetails(['deployment_status' => 'success']);
-                $user->save();
-                $deployLogger?->finish(DeployLogger::STATUS_SUCCESS);
+                $this->recordRebuildSucceeded($user);
             } catch (DeployCancelledException $e) {
                 $stage = $deployLogger?->currentStage();
                 $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());

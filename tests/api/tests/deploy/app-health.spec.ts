@@ -47,11 +47,16 @@ test.describe('app health and SSO on a deployed app', () => {
     }
   });
 
-  test('a static site with no front page is missing_entry', async ({ api, userFactory }) => {
+  test('a static site that lost its front page is missing_entry', async ({ api, userFactory }) => {
     const user = await userFactory.createDindUser();
     skipUnless(user, 'DinD is not available on this engine.');
 
     await api.createDirectory(user.username, '/site', true);
+    await api.putFileContents(
+      user.username,
+      '/site/index.html',
+      '<!doctype html><title>home</title>home\n'
+    );
     await api.putFileContents(
       user.username,
       '/site/about.html',
@@ -62,6 +67,11 @@ test.describe('app health and SSO on a deployed app', () => {
     expectOneOf(started.status, [200, 201]);
     await waitForDeploy(api, user.username);
 
+    // A deploy never yields a static site without an entry: detection serves the first page it
+    // finds when nothing is called index (HtmlSite::first). The check exists for a front page
+    // that disappears afterwards, and the health endpoint probes the running site every time.
+    await api.removeFile(user.username, '/project/index.html');
+
     const health = await api.getAppHealthRaw(user.username);
     test.skip(
       [403, 404, 422].includes(health.status),
@@ -69,10 +79,6 @@ test.describe('app health and SSO on a deployed app', () => {
     );
     expect(health.status).toBe(200);
     assertMissingEntry(healthFromRaw(health.body));
-
-    const shown = await api.getUser(user.username);
-    expect(shown.data.details.deployment_status).toBe('partial');
-    assertDeploymentWarnings('partial', shown.data.details.deployment_warnings);
   });
 
   test('a PHP site whose front page is a 403 is missing_entry', async ({ api, userFactory }) => {

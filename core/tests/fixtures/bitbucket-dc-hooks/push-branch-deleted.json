@@ -1,0 +1,15 @@
+{
+  "eventKey": "repo:refs_changed",
+  "date": "2026-09-21T15:42:11+0200",
+  "actor": {"name": "alice", "displayName": "Alice Example", "slug": "alice", "type": "NORMAL"},
+  "repository": {"slug": "site", "id": 84, "name": "site", "scmId": "git", "project": {"key": "ACME", "id": 1, "name": "Acme"}},
+  "changes": [
+    {
+      "ref": {"id": "refs/heads/main", "displayId": "main", "type": "BRANCH"},
+      "refId": "refs/heads/main",
+      "fromHash": "197a3e0d2f9a2b3ed1c4fe5923d5dd701bee9fdd",
+      "toHash": "0000000000000000000000000000000000000000",
+      "type": "DELETE"
+    }
+  ]
+}

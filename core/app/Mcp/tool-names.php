@@ -171,6 +171,10 @@ return [
     'POST /projects/{username}/git/pull' => 'git_pull',
     'POST /projects/{username}/git/push' => 'git_push',
     'POST /projects/{username}/git/revert' => 'git_revert',
+    'POST /projects/{username}/git/deploy-hook' => 'git_deploy_hook_create',
+    'GET /projects/{username}/git/deploy-hook' => 'git_deploy_hook_show',
+    'POST /projects/{username}/git/deploy-hook/rotate' => 'git_deploy_hook_rotate',
+    'DELETE /projects/{username}/git/deploy-hook' => 'git_deploy_hook_delete',
 
     // WP-CLI
     'POST /projects/{username}/wp-cli/command' => 'wp_cli_run',

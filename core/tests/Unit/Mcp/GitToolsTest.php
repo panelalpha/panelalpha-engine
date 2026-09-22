@@ -25,6 +25,10 @@ class GitToolsTest extends TestCase
         'git_pull' => \App\Mcp\Tools\Api\Git\GitPullTool::class,
         'git_push' => \App\Mcp\Tools\Api\Git\GitPushTool::class,
         'git_revert' => \App\Mcp\Tools\Api\Git\GitRevertTool::class,
+        'git_deploy_hook_create' => \App\Mcp\Tools\Api\Git\GitDeployHookCreateTool::class,
+        'git_deploy_hook_show' => \App\Mcp\Tools\Api\Git\GitDeployHookShowTool::class,
+        'git_deploy_hook_rotate' => \App\Mcp\Tools\Api\Git\GitDeployHookRotateTool::class,
+        'git_deploy_hook_delete' => \App\Mcp\Tools\Api\Git\GitDeployHookDeleteTool::class,
     ];
 
     /** Tokens every Git description must contain (path default). */
@@ -44,9 +48,13 @@ class GitToolsTest extends TestCase
         'git_disconnect' => ['deploy', 'origin'],
         'git_change_branch' => ['branch', 'dirty', 'deploy', 'project_rebuild'],
         'git_update_credentials' => ['token', 'omit'],
-        'git_pull' => ['ff', 'force', 'push_first', 'dirty', 'project_rebuild', 'reset --hard'],
+        'git_pull' => ['ff', 'force', 'push_first', 'untracked', 'diverged', 'reset --hard'],
         'git_push' => ['commit', 'Pull first', 'deploy'],
         'git_revert' => ['reset --hard', 'clean', 'HEAD'],
+        'git_deploy_hook_create' => ['secret', 'once', 'url', 'match the repository'],
+        'git_deploy_hook_show' => ['secret', 'never', 'url'],
+        'git_deploy_hook_rotate' => ['secret', 'once', 'old url', 'match the repository'],
+        'git_deploy_hook_delete' => ['url', '404'],
     ];
 
     /** @return array<string, string> */
@@ -55,7 +63,7 @@ class GitToolsTest extends TestCase
         return require base_path('app/Mcp/tool-names.php');
     }
 
-    public function test_the_map_names_the_ten_git_operations(): void
+    public function test_the_map_names_the_fourteen_git_operations(): void
     {
         $expected = [
             'GET /projects/{username}/git/status' => 'git_status',
@@ -68,6 +76,10 @@ class GitToolsTest extends TestCase
             'POST /projects/{username}/git/pull' => 'git_pull',
             'POST /projects/{username}/git/push' => 'git_push',
             'POST /projects/{username}/git/revert' => 'git_revert',
+            'POST /projects/{username}/git/deploy-hook' => 'git_deploy_hook_create',
+            'GET /projects/{username}/git/deploy-hook' => 'git_deploy_hook_show',
+            'POST /projects/{username}/git/deploy-hook/rotate' => 'git_deploy_hook_rotate',
+            'DELETE /projects/{username}/git/deploy-hook' => 'git_deploy_hook_delete',
         ];
 
         $map = $this->map();
@@ -156,10 +168,53 @@ class GitToolsTest extends TestCase
             $policy->filter(array_values(self::GIT_TOOLS))
         );
 
+        // Show is the one deploy-hook tool a read-only token keeps: it can
+        // learn that a hook exists and where it points, never its secret.
         $this->assertEqualsCanonicalizing(
-            ['git_status', 'git_branches', 'git_commits'],
+            ['git_status', 'git_branches', 'git_commits', 'git_deploy_hook_show'],
             $names
         );
+    }
+
+    /**
+     * The modes follow the verbs: create and rotate hand out a secret, so
+     * they are writes; delete is a DELETE and needs full.
+     */
+    public function test_deploy_hook_tools_follow_their_verbs_across_permission_modes(): void
+    {
+        $hookTools = array_filter(
+            self::GIT_TOOLS,
+            fn (string $name): bool => str_starts_with($name, 'git_deploy_hook_'),
+            ARRAY_FILTER_USE_KEY
+        );
+
+        $kept = function (string $mode) use ($hookTools): array {
+            $policy = new ToolPolicy(['toolsets' => 'all', 'permission_mode' => $mode]);
+
+            return array_map(
+                fn (string $c): string => $policy->nameOf($c),
+                $policy->filter(array_values($hookTools))
+            );
+        };
+
+        $this->assertEqualsCanonicalizing(['git_deploy_hook_show'], $kept('readonly'));
+        $this->assertEqualsCanonicalizing(
+            ['git_deploy_hook_show', 'git_deploy_hook_create', 'git_deploy_hook_rotate'],
+            $kept('modify')
+        );
+        $this->assertEqualsCanonicalizing(array_keys($hookTools), $kept('full'));
+    }
+
+    public function test_deploy_hook_tools_expose_an_optional_path_and_never_a_secret_argument(): void
+    {
+        foreach (['git_deploy_hook_create', 'git_deploy_hook_show', 'git_deploy_hook_rotate', 'git_deploy_hook_delete'] as $name) {
+            $class = self::GIT_TOOLS[$name];
+            $schema = (new $class())->schema(new \Illuminate\JsonSchema\JsonSchemaTypeFactory());
+
+            $this->assertArrayHasKey('name', $schema, "{$name} takes the project as `name`");
+            $this->assertArrayHasKey('path', $schema, "{$name} selects a checkout with `path`");
+            $this->assertArrayNotHasKey('secret', $schema, "{$name} must not accept a secret");
+        }
     }
 
     public function test_no_git_operation_is_declared_read_only_post(): void

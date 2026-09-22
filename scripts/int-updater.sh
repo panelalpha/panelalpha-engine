@@ -23,9 +23,9 @@ trap die EXIT
 umask 022
 
 PANELALPHA_ENGINE_VERSION='master'
-PACKAGE_HOST='hub.panelalpha.com'
+PACKAGE_HOST='connect.panelalpha.com'
+MONITORING_HOST="${PANELALPHA_MONITORING_HOST:-monitoring.panelalpha.com}"
 BACKGROUND=0
-LICENSE_KEY=''
 DEBUG_MODE=0
 FORCE_MODE=false
 RUN_DIR=''
@@ -33,14 +33,6 @@ CONFIGURE_MODE=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-    --key=*)
-        LICENSE_KEY="${1#*=}"
-        shift
-        ;;
-    --key)
-        LICENSE_KEY="$2"
-        shift 2
-        ;;
     --version=*)
         PANELALPHA_ENGINE_VERSION="${1#*=}"
         shift
@@ -63,6 +55,14 @@ while [[ $# -gt 0 ]]; do
         ;;
     --package-host)
         PACKAGE_HOST="$2"
+        shift 2
+        ;;
+    --monitoring-host=*)
+        MONITORING_HOST="${1#*=}"
+        shift
+        ;;
+    --monitoring-host)
+        MONITORING_HOST="$2"
         shift 2
         ;;
     --background)
@@ -124,7 +124,7 @@ define_variables() {
     LOG_FILE="${LOG_DIR}/engine-updater_$(date +"%Y-%m-%d_%H-%M-%S").log"
     ORIGINAL_USERNAME=$(whoami)
     ORIGINAL_HOME_DIR=$(getent passwd "$ORIGINAL_USERNAME" | cut -d: -f6)
-    LICENSE_STATUS=''
+    DOWNLOAD_STATUS=''
     TOKEN=''
     ERROR=''
     MSG=''
@@ -165,50 +165,21 @@ check_version() {
     fi
 }
 
-check_license_key() {
+request_download_token() {
+    # Hub package host resolves the caller by IP and returns a short-lived download token.
+    CURL_RESULTS=$(curl --http1.1 "https://${PACKAGE_HOST}/api/verify/request-download")
 
-    if [ ! -z "$LICENSE_KEY" ]; then
-        return
+    TOKEN=$(echo "$CURL_RESULTS" | jq -r '.["license"].download_token // empty')
+    DOWNLOAD_STATUS=$(echo "$CURL_RESULTS" | jq -r '.["license"].status // empty')
+    ERROR=$(echo "$CURL_RESULTS" | jq -r '.error // empty')
+    MSG=$(echo "$CURL_RESULTS" | jq -r '.msg // empty')
+
+    if [ "$ERROR" == true ]; then
+        echo_error "Could not obtain a download token. $MSG" 102
     fi
 
-    LICENSE_KEY=$(docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:get license_key || true)
-
-    if [ ! -z "$LICENSE_KEY" ]; then
-        return
-    fi
-
-    if [[ "$BACKGROUND" -eq 1 ]]; then
-        echo_error "Cannot detect license key. Manual upgrade required" 106
-    fi
-
-    echo -n "Enter License Key: "
-    read LICENSE_KEY
-
-    if [ ! -z "$LICENSE_KEY" ]; then
-        return
-    fi
-
-    echo_error "License Key is required." 101
-}
-
-license_verify() {
-    # Remove - characters
-    LICENSE_KEY=${LICENSE_KEY//-/}
-
-    # Execute CURL request
-    CURL_RESULTS=$(curl --http1.1 'https://'$PACKAGE_HOST'/api/verify/request-download' --header 'License-Key:'$LICENSE_KEY'')
-
-    TOKEN=$(echo $CURL_RESULTS | jq '.license | .download_token' --raw-output)
-    LICENSE_STATUS=$(echo $CURL_RESULTS | jq '.license | .status' --raw-output)
-    ERROR=$(echo $CURL_RESULTS | jq '.error' --raw-output)
-    MSG=$(echo $CURL_RESULTS | jq '.msg' --raw-output)
-
-    if [ $ERROR == true ]; then
-        echo_error "The license key is invalid. $MSG. Use '--key NEW_LICENSE_KEY' to apply other key'" 102
-    fi
-
-    if [ $LICENSE_STATUS != "Reissued" ] && [ $LICENSE_STATUS != "Created" ] && [ $LICENSE_STATUS != "Active" ]; then
-        echo_error "Invalid license status: $LICENSE_STATUS." 103
+    if [ "$DOWNLOAD_STATUS" != "Reissued" ] && [ "$DOWNLOAD_STATUS" != "Created" ] && [ "$DOWNLOAD_STATUS" != "Active" ]; then
+        echo_error "Invalid download status: $DOWNLOAD_STATUS." 103
     fi
 }
 
@@ -497,10 +468,13 @@ update_files() {
     backup_database
     record_pending_migrations
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan migrate --force
-    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:set license_key "${LICENSE_KEY}"
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:set package_host "${PACKAGE_HOST}"
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:set package_version "${PANELALPHA_ENGINE_VERSION}"
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:modsec:rebuild || true
+    # ADR-0001: move every DinD account onto the reserved run-file layout
+    # before the rebuild below regenerates anything from it. Idempotent and
+    # never restarts a container, so it is safe to run on every update.
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan users:migrate-engine-artifacts --all
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan users:rebuild --all --wipe-vhosts-dir
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan users:add-missing-www-domain-aliases --all
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan users:fix-file-permissions --all
@@ -649,6 +623,7 @@ send_update_status() {
     current_webserver=${current_webserver:-unknown}
     {
         jq -n \
+            --arg occurred_at "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")" \
             --arg started_at "$started_at" \
             --arg finished_at "$finished_at" \
             --arg exit_code "$exit_code" \
@@ -663,14 +638,34 @@ send_update_status() {
             --arg virtualization "$virtualization" \
             --arg disk_free "$disk_free" \
             --arg webserver "$current_webserver" \
-            '{started_at:$started_at, finished_at:$finished_at, exit_code:$exit_code, 
-              tail_stdout:$tail_stdout, tail_stderr:$tail_stderr,
-              from_version:$from_version, to_version:$to_version, background:$background,
-              total_ram:$total_ram, cpu_cores:$cpu_cores, os_name:$os_name,
-              virtualization:$virtualization, disk_free:$disk_free, webserver:$webserver}' \
-        | curl -sS -X POST "https://${PACKAGE_HOST}/api/verify/update-status" \
-            -H "License-Key: ${LICENSE_KEY:-none}" \
+            --arg software "engine" \
+            --arg software_op "update" \
+            '{events:[{
+              type:"panel.update",
+              occurred_at:$occurred_at,
+              payload:{
+                started_at:$started_at,
+                finished_at:$finished_at,
+                exit_code:$exit_code,
+                tail_stdout:$tail_stdout,
+                tail_stderr:$tail_stderr,
+                from_version:$from_version,
+                to_version:$to_version,
+                background:$background,
+                total_ram:$total_ram,
+                cpu_cores:$cpu_cores,
+                os_name:$os_name,
+                virtualization:$virtualization,
+                disk_free:$disk_free,
+                webserver:$webserver,
+                software:$software,
+                software_op:$software_op
+              }
+            }]}' \
+        | curl -4 -sS -X POST "https://${MONITORING_HOST}/api/v1/events" \
             -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -H "User-Agent: PanelAlpha-Engine/updater" \
             -d @- >/dev/null 2>&1 || true
     } || true
 }
@@ -741,14 +736,9 @@ update_progress 5 "Checking current version"
 echo_info "Checking current version"
 check_version
 
-update_progress 10 "Checking license key"
-echo_info "Checking license key"
-check_license_key
-
-update_progress 15 "Verify PanelAlpha license key"
-echo_info "Verify PanelAlpha license key"
-license_verify
-echo_warning "The license key $LICENSE_KEY was correctly loaded"
+update_progress 10 "Requesting the download token"
+echo_info "Requesting the download token"
+request_download_token
 
 update_progress 25 "Installing sysbox runtime"
 echo_info "Installing sysbox runtime"
