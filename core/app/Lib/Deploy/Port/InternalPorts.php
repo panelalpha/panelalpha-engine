@@ -59,7 +59,24 @@ final class InternalPorts
         2525 => 'SMTP (unprivileged)',
         1110 => 'POP3 (unprivileged)',
         1143 => 'IMAP (unprivileged)',
+        // Every Erlang/Elixir release starts epmd, and epmd binds 4369 the
+        // instant the VM comes up -- before the app has migrated, and so
+        // before it has bound its own port. TeslaMate's deploy was realigned
+        // onto it and answered `Empty reply from server` permanently, because
+        // epmd speaks the Erlang port-mapper protocol and nothing else. It is
+        // never a front door under any configuration.
+        4369 => 'Erlang port mapper (epmd)',
+        // The conventional unprivileged SSH port, and the same mistake as 22
+        // above one digit further out: an image that publishes it alongside
+        // its web port offers the proxy a shell instead of a site.
+        2222 => 'SSH (unprivileged)',
     ];
+
+    // Deliberately absent: 9000. It is php-fpm's FastCGI socket, which is how
+    // a PHP stack's front door gets mistaken for the app -- but it is equally
+    // MinIO's, Portainer's and SonarQube's *real* HTTP port. Listing it would
+    // cost more sites than it saves, which is the same trade the 7000/8086
+    // overlap is left out for.
 
     public static function isKnown(int $port): bool
     {

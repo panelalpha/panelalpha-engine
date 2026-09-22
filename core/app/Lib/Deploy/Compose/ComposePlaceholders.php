@@ -76,6 +76,19 @@ class ComposePlaceholders
     private const LOCAL_URL_PATTERN = '#^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|host\.docker\.internal)(:\d+)?/?$#i';
 
     /**
+     * A key that names a backing service rather than the site. Its
+     * `http://localhost:<port>` is the sidecar's own address and has to
+     * survive: rewriting it to the public origin points the app at its own
+     * website instead of its search index, object store or mail catcher.
+     *
+     * Anchored to the start of the key or a `_` boundary, so `MAIL_URL` is a
+     * mail server but `WEBMAIL_URL` is a webmail app's own address, and
+     * `MEILISEARCH_URL` -- the key Meilisearch actually ships -- is caught
+     * where a trailing-underscore form only ever caught `MEILI_URL`.
+     */
+    private const SIDECAR_KEY_PATTERN = '/(^|_)(REDIS|VALKEY|DATABASE|POSTGRES|PGSQL|MYSQL|MARIADB|MONGO|CACHE|QUEUE|BROKER|UPSTASH|TYPESENSE|MEILI|SRH|ELASTIC|OPENSEARCH|SOLR|CLICKHOUSE|MINIO|S3|BUCKET|QDRANT|CHROMA|WEAVIATE|OLLAMA|MAIL|SMTP|AMQP|RABBIT|KAFKA|NATS|INFLUX)/i';
+
+    /**
      * `${JWT_SECRET:?JWT_SECRET must be set}` -- Compose's fail-closed form,
      * used by projects that would rather not start than start on a guessable
      * secret. Nothing supplies a value here, so `docker compose up` refuses to
@@ -402,23 +415,21 @@ class ComposePlaceholders
         if (preg_match(self::PUBLIC_URL_KEY_PATTERN, $key) !== 1) {
             return false;
         }
-        if (preg_match(self::LOCAL_URL_PATTERN, trim($value), $m) !== 1) {
+        if (preg_match(self::LOCAL_URL_PATTERN, trim($value)) !== 1) {
             return false;
         }
 
-        // Datastore / cache HTTP gateways use http://localhost:<sidecar-port>.
-        // Rewriting those to the public site URL breaks Upstash-style clients.
-        if (preg_match('/(REDIS|DATABASE|POSTGRES|MYSQL|MONGO|CACHE|QUEUE|UPSTASH|TYPESENSE|MEILI|SRH)_/i', $key) === 1
-            || preg_match('/_(REDIS|DATABASE|POSTGRES|MYSQL|MONGO|CACHE|QUEUE)_URL$/i', $key) === 1
-        ) {
+        // Datastore / cache / sidecar HTTP gateways use
+        // http://localhost:<sidecar-port>. Rewriting those to the public site
+        // URL breaks Upstash-style clients, and is now the only thing standing
+        // between a sidecar and the rewrite: the port allowlist that used to
+        // catch what this pattern missed is gone.
+        if (preg_match(self::SIDECAR_KEY_PATTERN, $key) === 1) {
             return false;
         }
 
-        $port = isset($m[2]) ? (int) substr($m[2], 1) : 80;
-        if ($port > 0 && !in_array($port, [80, 443, 3000, 3001, 5173, 8000, 8080, 8081], true)) {
-            return false;
-        }
-
+        // The whole value is replaced by the public origin, so the placeholder's
+        // port is discarded either way -- any localhost port is fair game here.
         return true;
     }
 

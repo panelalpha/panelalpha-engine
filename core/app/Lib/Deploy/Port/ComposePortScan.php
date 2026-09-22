@@ -21,7 +21,29 @@ final class ComposePortScan
      */
     public static function of(string $composePath): array
     {
-        $ports = self::sorted(self::publicPorts(self::services($composePath)));
+        return self::fromServices(self::services($composePath));
+    }
+
+    /**
+     * As {@see of()}, from an already-parsed compose array.
+     *
+     * @param array<string, mixed> $compose
+     * @return array{all: list<int>, primary?: int}
+     */
+    public static function ofParsed(array $compose): array
+    {
+        $services = is_array($compose['services'] ?? null) ? $compose['services'] : [];
+
+        return self::fromServices(array_values(array_filter($services, 'is_array')));
+    }
+
+    /**
+     * @param list<array<string, mixed>> $services
+     * @return array{all: list<int>, primary?: int}
+     */
+    private static function fromServices(array $services): array
+    {
+        $ports = self::sorted(self::publicPorts($services));
 
         return $ports === [] ? ['all' => []] : ['all' => $ports, 'primary' => $ports[0]];
     }

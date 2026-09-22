@@ -35,7 +35,10 @@ final class ServiceHardener
 
     private const APPLICATION_CPUS = '0.75';
 
-    private const PIDS_LIMIT = 256;
+    // 256 starved multi-daemon images (a supervisor plus several daemons and a
+    // forked plugin per check exhausted it silently); 1024 clears them and still
+    // caps a fork bomb. A per-service pids_limit overrides this default.
+    private const PIDS_LIMIT = 1024;
 
     /** @var list<string> */
     private const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'];

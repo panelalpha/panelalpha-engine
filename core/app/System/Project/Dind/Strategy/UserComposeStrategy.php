@@ -128,6 +128,15 @@ class UserComposeStrategy
             $logger?->info($line);
         }
 
+        // The DinD proxy routes the domain to the account container on the
+        // detected primary port; a service that only expose:s it binds nothing
+        // there, so publish it explicitly or the domain 502s.
+        $binding = ComposeHarden::withPublishedPrimaryPort($parsed);
+        $parsed = $binding['compose'];
+        if ($binding['published'] !== null) {
+            $logger?->info("Published detected primary port {$binding['published']} so the domain reaches this app");
+        }
+
         foreach (ComposeHarden::oneShotServices($parsed) as $name) {
             $logger?->info("Service {$name} runs once and exits; not restarting it");
         }

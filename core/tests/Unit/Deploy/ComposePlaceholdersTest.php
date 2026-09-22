@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy;
 
 use App\Lib\Deploy\Compose\ComposePlaceholders;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
 
@@ -133,6 +134,112 @@ YAML);
 
         $this->assertSame('https://app.example.test', $env['APP_URL']);
         $this->assertSame('http://localhost:8079', $env['UPSTASH_REDIS_REST_URL']);
+    }
+
+    /** engine#236: a localhost placeholder is rewritten on any port, not just an allowlist. */
+    public function test_it_rewrites_a_localhost_url_on_a_non_allowlisted_port(): void
+    {
+        $compose = ['services' => ['fittrackee' => ['environment' => [
+            'UI_URL' => 'http://localhost:5000',
+        ]]]];
+
+        $result = ComposePlaceholders::fill($compose, self::SEED, 'https://fittrackee.example.test');
+        $env = $result['compose']['services']['fittrackee']['environment'];
+
+        $this->assertSame('https://fittrackee.example.test', $env['UI_URL']);
+        $this->assertContains('UI_URL', $result['urls']);
+    }
+
+    /**
+     * Dropping the port allowlist took away the only thing catching a sidecar
+     * whose key the datastore pattern did not name. These are the keys that
+     * fell through: each one's localhost address is the sidecar's, and
+     * rewriting it points the app at its own website.
+     *
+     */
+    #[DataProvider('sidecarKeys')]
+    public function test_a_sidecar_address_is_never_rewritten(string $key, string $value): void
+    {
+        $compose = ['services' => ['app' => ['environment' => [
+            'APP_URL' => 'http://localhost:8080',
+            $key => $value,
+        ]]]];
+
+        $result = ComposePlaceholders::fill($compose, self::SEED, 'https://app.example.test');
+        $env = $result['compose']['services']['app']['environment'];
+
+        $this->assertSame($value, $env[$key]);
+        $this->assertNotContains($key, $result['urls']);
+        // The app's own URL is still rewritten alongside it.
+        $this->assertSame('https://app.example.test', $env['APP_URL']);
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function sidecarKeys(): array
+    {
+        return [
+            // The key Meilisearch ships. A trailing-underscore pattern caught
+            // MEILI_URL and missed this one; :7700 covered for it.
+            'meilisearch' => ['MEILISEARCH_URL', 'http://localhost:7700'],
+            'meili' => ['MEILI_URL', 'http://localhost:7700'],
+            'elasticsearch' => ['ELASTICSEARCH_URL', 'http://localhost:9200'],
+            'opensearch' => ['OPENSEARCH_URL', 'http://localhost:9200'],
+            'solr' => ['SOLR_URL', 'http://localhost:8983'],
+            'clickhouse' => ['CLICKHOUSE_URL', 'http://localhost:8123'],
+            's3' => ['S3_ENDPOINT', 'http://localhost:9000'],
+            'minio' => ['MINIO_ENDPOINT', 'http://localhost:9000'],
+            'prefixed s3' => ['AWS_S3_ENDPOINT', 'http://localhost:9000'],
+            'qdrant' => ['QDRANT_URL', 'http://localhost:6333'],
+            'ollama' => ['OLLAMA_URL', 'http://localhost:11434'],
+            'mail catcher' => ['MAIL_URL', 'http://localhost:8025'],
+            'smtp' => ['SMTP_ENDPOINT', 'http://localhost:1025'],
+            'typesense' => ['TYPESENSE_URL', 'http://localhost:8108'],
+            'database' => ['DATABASE_URL', 'http://localhost:5432'],
+        ];
+    }
+
+    /**
+     * The other half of the pattern, and the one that would catch it growing
+     * too greedy: an app's own address is still rewritten, whatever the port.
+     * WEBMAIL_URL is the near miss -- it contains MAIL, but a webmail app's
+     * own URL is the site, not a mail server.
+     *
+     */
+    #[DataProvider('siteKeys')]
+    public function test_the_app_s_own_url_is_still_rewritten(string $key): void
+    {
+        $compose = ['services' => ['app' => ['environment' => [
+            $key => 'http://localhost:7700',
+        ]]]];
+
+        $result = ComposePlaceholders::fill($compose, self::SEED, 'https://app.example.test');
+
+        $this->assertSame('https://app.example.test', $result['compose']['services']['app']['environment'][$key]);
+        $this->assertContains($key, $result['urls']);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function siteKeys(): array
+    {
+        return [
+            'app' => ['APP_URL'],
+            'ui' => ['UI_URL'],
+            'public' => ['PUBLIC_URL'],
+            'site' => ['SITE_URL'],
+            'frontend' => ['FRONTEND_URL'],
+            'nextauth' => ['NEXTAUTH_URL'],
+            'vite api' => ['VITE_API_URL'],
+            'webhook' => ['WEBHOOK_URL'],
+            'base' => ['BASE_URL'],
+            'api endpoint' => ['API_ENDPOINT'],
+            'cors origin' => ['CORS_ORIGIN'],
+            'cookie domain' => ['COOKIE_DOMAIN'],
+            'webmail' => ['WEBMAIL_URL'],
+        ];
     }
 
     public function test_a_real_secret_is_never_replaced(): void

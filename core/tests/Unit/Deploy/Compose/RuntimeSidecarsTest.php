@@ -841,6 +841,35 @@ class RuntimeSidecarsTest extends TestCase
         $this->assertArrayNotHasKey('sidecars', $decision);
     }
 
+    /**
+     * The glob for `docker-compose.*.yml` stack slices must not pick up the
+     * recipe's own `docker-compose.override.yml` — which the engine copied in
+     * and whose `image:`-bearing services would be re-emitted as sidecars.
+     */
+    public function test_a_recipes_own_compose_override_is_not_read_as_a_stack_template(): void
+    {
+        $dir = sys_get_temp_dir() . '/pa-sidecars-' . bin2hex(random_bytes(6));
+        mkdir($dir);
+        file_put_contents(
+            $dir . '/docker-compose.override.yml',
+            "services:\n  ready:\n    image: alpine:3\n    command: [\"true\"]\n"
+        );
+        // A genuine engine slice the glob should still return.
+        file_put_contents($dir . '/docker-compose.services.yml', "services:\n  db:\n    image: postgres:16\n");
+
+        try {
+            $names = (new \ReflectionMethod(DindRuntimeSidecars::class, 'exampleComposeFilenames'))
+                ->invoke(null, $dir);
+
+            $this->assertNotContains('docker-compose.override.yml', $names);
+            $this->assertContains('docker-compose.services.yml', $names);
+        } finally {
+            unlink($dir . '/docker-compose.override.yml');
+            unlink($dir . '/docker-compose.services.yml');
+            rmdir($dir);
+        }
+    }
+
     public function test_mysql_and_redis_sidecars_are_kept_as_before(): void
     {
         $result = $this->extract(<<<'YAML'

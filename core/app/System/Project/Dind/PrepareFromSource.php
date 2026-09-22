@@ -8,8 +8,10 @@ use App\System\Project\Git\Exception as GitException;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Detect\DeployabilityCheck;
 use App\Lib\Deploy\Detect\PlaceholderPage;
+use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Platform\DeployPlanContext;
+use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\Platform\HostScript;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
@@ -122,6 +124,21 @@ class PrepareFromSource
         }
         $logger?->info("Detected project type: {$decision['label']}");
         $logger?->info("Using strategy: {$decision['strategy']}");
+
+        // A compose file the repo ships but ComposeUsableProbe skipped as a
+        // workstation dev compose is otherwise invisible: name the mount that
+        // demoted it so a wrong strategy is one log line, not a silent hunt.
+        if ($decision['strategy'] !== Strategies::COMPOSE
+            && ($composePath = ComposeFileInspector::firstIn($projectDir)) !== null
+            && ($reason = ComposeFileInspector::localDevComposeReason($composePath)) !== null
+        ) {
+            $logger?->info(sprintf(
+                'Compose file %s looks like a workstation dev compose (%s); using strategy %s instead',
+                basename($composePath),
+                $reason,
+                $decision['strategy']
+            ));
+        }
 
         // Detection reaching past the manifests is not a failure — Railpack
         // usually builds the project, and where even it has nothing to go on

@@ -492,4 +492,57 @@ YAML
         $this->assertSame('no', $result['services']['base']['restart']);
         $this->assertNotSame('no', $result['services']['rails']['restart'] ?? null);
     }
+
+    /**
+     * An expose-only app service gets its detected primary port published, so
+     * the account container binds the port the DinD proxy targets (engine#234).
+     */
+    public function test_publishes_the_detected_primary_port_for_an_expose_only_service(): void
+    {
+        $compose = ['services' => [
+            'app' => ['build' => '.', 'expose' => ['8080']],
+            'db' => ['image' => 'postgres:16'],
+        ]];
+
+        $result = ComposeHarden::withPublishedPrimaryPort($compose);
+
+        $this->assertSame(8080, $result['published']);
+        $this->assertSame(['8080:8080'], $result['compose']['services']['app']['ports']);
+        $this->assertArrayNotHasKey('ports', $result['compose']['services']['db']);
+    }
+
+    /** A service that already publishes the primary port is left untouched. */
+    public function test_leaves_a_service_that_already_publishes_the_port_unchanged(): void
+    {
+        $compose = ['services' => [
+            'app' => ['build' => '.', 'ports' => ['8080:80'], 'expose' => ['8080']],
+        ]];
+
+        $result = ComposeHarden::withPublishedPrimaryPort($compose);
+
+        $this->assertNull($result['published']);
+        $this->assertSame(['8080:80'], $result['compose']['services']['app']['ports']);
+    }
+
+    /**
+     * Traefik's routed port survives as `expose:` after HostIngress strips the
+     * proxy, then gets published — the recipes' explicit `<primary>:<primary>`
+     * is what this now makes unnecessary.
+     */
+    public function test_publishes_a_routed_port_left_as_expose_by_ingress_stripping(): void
+    {
+        $compose = ['services' => [
+            'app' => [
+                'build' => '.',
+                'labels' => ['traefik.http.services.app.loadbalancer.server.port' => '5000'],
+            ],
+            'traefik' => ['image' => 'traefik:v3.1'],
+        ]];
+
+        $stripped = ComposeHarden::withoutHostIngress($compose)['compose'];
+        $result = ComposeHarden::withPublishedPrimaryPort($stripped);
+
+        $this->assertSame(5000, $result['published']);
+        $this->assertContains('5000:5000', $result['compose']['services']['app']['ports']);
+    }
 }

@@ -148,6 +148,10 @@ class RuntimeSidecars
                     if (str_ends_with($base, ComposeFileInspector::COMPOSE_STASH_SUFFIX)) {
                         continue;
                     }
+                    // A recipe's own override we just copied in, not a stack template.
+                    if ($base === Paths::COMPOSE_OVERRIDE_FILENAME) {
+                        continue;
+                    }
                     $names[] = $base;
                 }
             }
