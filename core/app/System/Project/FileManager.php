@@ -119,13 +119,7 @@ class FileManager
     public function exists(string $path): bool
     {
         $path = $this->resolvePath($path);
-        $command = [
-            'test',
-            '-e',
-            $path,
-        ];
-
-        $process = $this->runProcess($command);
+        $process = $this->runOnCore(['test', '-e', $path]);
 
         return $process->getExitCode() === 0;
     }
@@ -136,16 +130,12 @@ class FileManager
     public function stat(string $path): array
     {
         $path = $this->resolvePath($path);
-        $command = [
+        $process = $this->runOnCore([
             'stat',
             '--printf=%n %s %u %g %X %Y %Z %W',
             $path,
-        ];
-
-        $process = $this->runProcess($command);
-        if (!$process->isSuccessful()) {
-            throw new \Exception($process->getErrorOutput());
-        }
+        ]);
+        $this->assertSucceeded($process);
 
         $result = [];
         [
@@ -166,41 +156,33 @@ class FileManager
     {
         $sourcePath = $this->resolvePath($sourcePath);
         $destPath = $this->resolvePath($destPath);
-        $command = [
+        $this->assertSucceeded($this->runOnCore([
             'mv',
             $sourcePath,
             $destPath,
-        ];
-
-        $process = $this->runProcess($command);
-
-        if (!$process->isSuccessful()) {
-            $message = ($process->getErrorOutput() ?: $process->getOutput()) . " (exit code {$process->getExitCode()})";
-            throw new \Exception($message);
-        }
+        ]));
     }
 
     public function cp(string $sourcePath, string $destPath): void
     {
         $sourcePath = $this->resolvePath($sourcePath);
         $destPath = $this->resolvePath($destPath);
-        $command = [
+        $this->assertSucceeded($this->runOnCore([
             'cp',
             '-a',
             $sourcePath,
             $destPath,
-        ];
-
-        $process = $this->runProcess($command);
-
-        if (!$process->isSuccessful()) {
-            $message = ($process->getErrorOutput() ?: $process->getOutput()) . " (exit code {$process->getExitCode()})";
-            throw new \Exception($message);
-        }
+        ]));
     }
 
-    public function zip(string $zipPath, string $path, bool $skipParents = false): void
-    {
+    public function zip(
+        string $zipPath,
+        string $path,
+        bool $skipParents = false,
+        ?int $compressionLevel = null,
+        ?string $fromDate = null,
+        bool $ignoreEmpty = false,
+    ): void {
         $zipPath = $this->resolvePath($zipPath);
         $path = $this->resolvePath($path);
 
@@ -210,18 +192,23 @@ class FileManager
             $path = basename($path);
         }
 
-        $command = [
-            'zip',
-            '-r',
-            $zipPath,
-            $path,
-        ];
-
-        $process = $this->runProcess($command, $workdir);
-        if (!$process->isSuccessful()) {
-            $message = ($process->getErrorOutput() ?: $process->getOutput()) . " (exit code {$process->getExitCode()})";
-            throw new \Exception($message);
+        $recurse = $compressionLevel === null ? '-r' : '-r' . $compressionLevel;
+        $command = ['zip', $recurse];
+        if (is_string($fromDate) && $fromDate !== '') {
+            $command[] = '--from-date';
+            $command[] = $fromDate;
         }
+        $command[] = $zipPath;
+        $command[] = $path;
+
+        $allowed = [0];
+        if ($ignoreEmpty) {
+            // zip exits 12 when there is nothing to archive, and 18 when some
+            // names were missing or unreadable.
+            $allowed[] = 12;
+            $allowed[] = 18;
+        }
+        $this->assertSucceeded($this->runOnCore($command, $workdir), $allowed);
     }
 
     public function unzip(string $zipPath, string $path): void
@@ -231,105 +218,185 @@ class FileManager
         $filename = basename($zipPath);
 
         if (Str::endsWith($filename, '.zip')) {
-            $command = [
+            $process = $this->runOnCore([
                 'unzip',
                 '-UU',
                 '-o',
                 $zipPath,
                 '-d',
                 $path,
-            ];
-            $process = $this->runProcess($command);
+            ]);
         } elseif (Str::endsWith($filename, '.tar.gz')) {
-            $command = [
+            $process = $this->runOnCore([
                 'tar',
                 '-zxvf',
                 $zipPath,
                 '-C',
                 $path,
-            ];
-            $process = $this->runProcess($command);
+            ]);
         } else {
             $path = rtrim($path, '/');
             if ($zipPath != "{$path}/{$filename}") {
                 $this->cp($zipPath, $path);
             }
-            $command = [
+            $process = $this->runOnCore([
                 'gunzip',
                 '-f',
                 $filename,
-            ];
-            $process = $this->runProcess($command, $path);
+            ], $path);
         }
-        if (!$process->isSuccessful()) {
-            $message = ($process->getErrorOutput() ?: $process->getOutput()) . " (exit code {$process->getExitCode()})";
-            throw new \Exception($message);
-        }
+        $this->assertSucceeded($process);
     }
 
     public function remove(string $path, bool $recursive = false): void
     {
         $path = $this->resolvePath($path);
-        $command = [
-            'rm',
-            '-f',
-        ];
+        $command = ['rm', '-f'];
         if ($recursive) {
             $command[] = '-r';
         }
         $command[] = $path;
 
-        $process = $this->runProcess($command);
-        if (!$process->isSuccessful()) {
-            $message = ($process->getErrorOutput() ?: $process->getOutput()) . " (exit code {$process->getExitCode()})";
-            throw new \Exception($message);
-        }
+        $this->assertSucceeded($this->runOnCore($command));
     }
 
     public function diskUsage(string $directory = '/'): int
     {
         $path = $this->resolvePath($directory);
-        $process = $this->runProcess([
-            'du',
-            '-shm',
-            $path,
-        ]);
-        $result = $process->getOutput();
-        $mb = Str::before($result, "\t");
+        $process = $this->runOnCore(['du', '-shm', $path]);
+        $this->assertSucceeded($process);
+        $mb = Str::before($process->getOutput(), "\t");
 
         return (int) $mb;
     }
 
-    /**
-     * @param array<string> $command
-     */
-    private function runProcess(array $command, ?string $workdir = null): Process
+    public function moveDirectoryContents(string $source, string $dest, bool $override = true): void
     {
-        $composeFile = $this->project->composeFilePath();
-        $uidgid = $this->project->model()->getChownString() ?? '33:33';
-        $execCommand = [
+        $sourceDir = rtrim($this->resolvePath($source), '/');
+        $destDir = rtrim($this->resolvePath($dest), '/');
+        if (!is_dir($destDir)) {
+            throw new \Exception('Destination directory does not exist');
+        }
+
+        $this->assertSucceeded($this->runOnCore([
+            'find',
+            $sourceDir,
+            '-mindepth',
+            '1',
+            '-maxdepth',
+            '1',
+            '-exec',
+            'mv',
+            $override ? '--force' : '--no-clobber',
+            '-t',
+            $destDir,
+            '--',
+            '{}',
+            '+',
+        ]));
+    }
+
+    public function fetch(string $url, string $destinationDir, ?string $filename = null): void
+    {
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            throw new \Exception('Only http and https URLs can be fetched');
+        }
+
+        $filename ??= $this->filenameFromUrl($url);
+        if ($this->filenameIsUnsafe($filename)) {
+            throw new \Exception('Invalid filename');
+        }
+
+        $dir = rtrim($this->resolvePath($destinationDir), '/');
+        if (!is_dir($dir)) {
+            throw new \Exception('Destination directory does not exist');
+        }
+
+        $this->assertSucceeded($this->runOnCore([
+            'curl',
+            '-fSL',
+            $url,
+            '-o',
+            $dir . '/' . $filename,
+        ]));
+    }
+
+    public function chmod(string $path, string $mode): void
+    {
+        if (!preg_match('/\A[0-7]{3,4}\z/', $mode)) {
+            throw new \Exception('Invalid mode');
+        }
+
+        $path = $this->resolvePath($path);
+        $this->assertSucceeded($this->runOnCore(['chmod', $mode, $path]));
+    }
+
+    /**
+     * Run a file command in the core container, as the project user.
+     *
+     * The account is named by uid and gid. Its passwd entry lives on the
+     * machine, so `sudo -u` cannot see it from this container. `setpriv`
+     * drops to the ids directly, the same way archive extraction does.
+     *
+     * @param list<string> $command
+     */
+    private function runOnCore(array $command, ?string $workdir = null): Process
+    {
+        $model = $this->project->model();
+        $uid = $model->getUid() ?? 33;
+        $gid = $model->getGid() ?? 33;
+        $argv = [
             'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $composeFile,
-            'exec',
-            '-u',
-            $uidgid,
-            '-T',
+            'setpriv',
+            '--reuid',
+            (string) $uid,
+            '--regid',
+            (string) $gid,
+            '--clear-groups',
         ];
-        if (!empty($workdir)) {
-            $execCommand[] = '-w';
-            $execCommand[] = $workdir;
+        if ($workdir !== null) {
             if (!is_dir($workdir)) {
                 throw new \Exception('Invalid path');
             }
+            $argv[] = 'env';
+            $argv[] = '--chdir=' . $workdir;
         }
-        $execCommand[] = $this->project->runtime()->defaultServiceName();
 
-        $command = [...$execCommand, ...$command];
+        return $this->project->system()->runProcess([...$argv, ...$command]);
+    }
 
-        return $this->project->system()->runProcess($command);
+    /**
+     * @param list<int> $allowedExitCodes
+     */
+    private function assertSucceeded(Process $process, array $allowedExitCodes = [0]): void
+    {
+        $code = $process->getExitCode();
+        if (in_array($code, $allowedExitCodes, true)) {
+            return;
+        }
+
+        $message = ($process->getErrorOutput() ?: $process->getOutput()) . " (exit code {$code})";
+        throw new \Exception($message);
+    }
+
+    private function filenameFromUrl(string $url): string
+    {
+        $filename = basename((string) parse_url($url, PHP_URL_PATH));
+        if ($filename === '' || $filename === '/' || $filename === '.' || $filename === '..') {
+            throw new \Exception('Could not determine destination filename from URL; provide filename explicitly');
+        }
+
+        return $filename;
+    }
+
+    private function filenameIsUnsafe(string $filename): bool
+    {
+        return $filename === ''
+            || $filename === '.'
+            || $filename === '..'
+            || str_contains($filename, '/')
+            || str_contains($filename, '\\');
     }
 
     /**
@@ -337,7 +404,7 @@ class FileManager
      */
     private static function sanitizePath(string $path): string|false
     {
-        if (Str::contains($path, ["\0", "\n", "\t"])) {
+        if (preg_match('/[\x00-\x1F\x7F]/', $path) === 1) {
             return false;
         }
         $validParts = [];

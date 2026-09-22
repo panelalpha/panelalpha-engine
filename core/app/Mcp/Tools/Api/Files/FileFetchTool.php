@@ -12,14 +12,14 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
-#[Name('file_zip')]
+#[Name('file_fetch')]
 #[Description(<<<'MARKDOWN'
-    Create a ZIP archive
+    Fetch an http or https URL into the project
 
-    Calls POST /api/projects/{username}/files/zip. This changes server state.
+    Calls POST /api/projects/{username}/files/fetch. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
-class FileZipTool extends ApiTool
+class FileFetchTool extends ApiTool
 {
     protected function method(): string
     {
@@ -28,7 +28,7 @@ class FileZipTool extends ApiTool
 
     protected function path(): string
     {
-        return '/projects/{username}/files/zip';
+        return '/projects/{username}/files/fetch';
     }
 
     /**
@@ -47,11 +47,9 @@ class FileZipTool extends ApiTool
     protected function bodyParams(): array
     {
         return [
-            'zip_path',
+            'url',
             'path',
-            'compression_level',
-            'from_date',
-            'ignore_empty',
+            'filename',
         ];
     }
 
@@ -72,11 +70,9 @@ class FileZipTool extends ApiTool
     {
         return [
             'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
-            'zip_path' => $schema->string()->description('Example: /public_html/backup.zip.')->required(),
-            'path' => $schema->string()->description('Example: /public_html/dir.')->required(),
-            'compression_level' => $schema->integer()->description('Example: 6.'),
-            'from_date' => $schema->string()->description('Example: 2026-01-01.'),
-            'ignore_empty' => $schema->boolean()->description('Example: .'),
+            'url' => $schema->string()->description('Example: https://example.com/plugin.zip.')->required(),
+            'path' => $schema->string()->description('Example: /public_html.')->required(),
+            'filename' => $schema->string()->description('Example: plugin.zip.'),
         ];
     }
 }

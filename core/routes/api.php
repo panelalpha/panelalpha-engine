@@ -204,6 +204,9 @@ $projectRoutes = function (): void {
     Route::post('/{username}/files/mkdir', [FileController::class, 'mkdir']);
     Route::post('/{username}/files/zip', [FileController::class, 'zip']);
     Route::post('/{username}/files/unzip', [FileController::class, 'unzip']);
+    Route::post('/{username}/files/move-contents', [FileController::class, 'moveContents']);
+    Route::post('/{username}/files/fetch', [FileController::class, 'fetch']);
+    Route::put('/{username}/files/chmod', [FileController::class, 'chmod']);
     Route::put('/{username}/files/mv', [FileController::class, 'mv']);
     Route::put('/{username}/files/cp', [FileController::class, 'cp']);
     Route::put('/{username}/files/put-contents', [FileController::class, 'putContents']);

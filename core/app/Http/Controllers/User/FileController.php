@@ -5,9 +5,12 @@ namespace App\Http\Controllers\User;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\FileExistsRequest;
 use App\Http\Requests\FileRemoveRequest;
+use App\Http\Requests\Files\ChmodRequest;
 use App\Http\Requests\Files\CpRequest;
 use App\Http\Requests\Files\DownloadRequest;
+use App\Http\Requests\Files\FetchRequest;
 use App\Http\Requests\Files\MkdirRequest;
+use App\Http\Requests\Files\MoveContentsRequest;
 use App\Http\Requests\Files\MvRequest;
 use App\Http\Requests\Files\PutContentsRequest;
 use App\Http\Requests\Files\StatRequest;
@@ -184,6 +187,9 @@ class FileController extends Controller
             properties: [
                 new OA\Property(property: 'zip_path', type: 'string', example: '/public_html/backup.zip'),
                 new OA\Property(property: 'path', type: 'string', example: '/public_html/dir'),
+                new OA\Property(property: 'compression_level', type: 'integer', example: 6),
+                new OA\Property(property: 'from_date', type: 'string', example: '2026-01-01'),
+                new OA\Property(property: 'ignore_empty', type: 'boolean', example: false),
             ],
         )),
         responses: [
@@ -203,6 +209,9 @@ class FileController extends Controller
          * @var array{
          *   zip_path: string,
          *   path: string,
+         *   compression_level?: int,
+         *   from_date?: string,
+         *   ignore_empty?: bool,
          * }
          */
         $params = $request->validated();
@@ -211,7 +220,15 @@ class FileController extends Controller
 
         $fileMan = $user->project()->fileManager();
         try {
-            $fileMan->zip($zipPath, $path, true);
+            $level = $params['compression_level'] ?? null;
+            $fileMan->zip(
+                $zipPath,
+                $path,
+                true,
+                $level === null ? null : (int) $level,
+                $params['from_date'] ?? null,
+                !empty($params['ignore_empty']),
+            );
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -262,6 +279,158 @@ class FileController extends Controller
         $fileMan = $user->project()->fileManager();
         try {
             $fileMan->unzip($zipPath, $path);
+        } catch (\Exception $e) {
+            return new JsonResponse([
+                'message' => $e->getMessage(),
+            ], 400);
+        }
+
+        return new JsonResponse([
+            'success' => true,
+        ]);
+    }
+
+    #[OA\Post(
+        path: '/projects/{username}/files/move-contents',
+        summary: 'Move the immediate children of a directory',
+        security: [['bearerAuth' => []]],
+        tags: ['Files'],
+        parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+            required: ['source_path', 'dest_path'],
+            properties: [
+                new OA\Property(property: 'source_path', type: 'string', example: '/public_html/incoming'),
+                new OA\Property(property: 'dest_path', type: 'string', example: '/public_html'),
+                new OA\Property(property: 'override', type: 'boolean', example: true),
+            ],
+        )),
+        responses: [
+            new OA\Response(response: 200, description: 'Children moved', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+        ],
+    )]
+    public function moveContents(string $username, MoveContentsRequest $request): JsonResponse
+    {
+        $user = User::findByUsername($username);
+        if (!$user) {
+            abort(new JsonResponse([
+                'message' => 'User not found',
+            ], 404));
+        }
+
+        /**
+         * @var array{
+         *   source_path: string,
+         *   dest_path: string,
+         *   override?: bool,
+         * }
+         */
+        $params = $request->validated();
+        $source = $user->project()->resolvePath($params['source_path']);
+        $dest = $user->project()->resolvePath($params['dest_path']);
+
+        $fileMan = $user->project()->fileManager();
+        try {
+            $fileMan->moveDirectoryContents($source, $dest, $params['override'] ?? true);
+        } catch (\Exception $e) {
+            return new JsonResponse([
+                'message' => $e->getMessage(),
+            ], 400);
+        }
+
+        return new JsonResponse([
+            'success' => true,
+        ]);
+    }
+
+    #[OA\Post(
+        path: '/projects/{username}/files/fetch',
+        summary: 'Fetch an http or https URL into the project',
+        security: [['bearerAuth' => []]],
+        tags: ['Files'],
+        parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+            required: ['url', 'path'],
+            properties: [
+                new OA\Property(property: 'url', type: 'string', example: 'https://example.com/plugin.zip'),
+                new OA\Property(property: 'path', type: 'string', example: '/public_html'),
+                new OA\Property(property: 'filename', type: 'string', example: 'plugin.zip'),
+            ],
+        )),
+        responses: [
+            new OA\Response(response: 200, description: 'File fetched', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+        ],
+    )]
+    public function fetch(string $username, FetchRequest $request): JsonResponse
+    {
+        $user = User::findByUsername($username);
+        if (!$user) {
+            abort(new JsonResponse([
+                'message' => 'User not found',
+            ], 404));
+        }
+
+        /**
+         * @var array{
+         *   url: string,
+         *   path: string,
+         *   filename?: string,
+         * }
+         */
+        $params = $request->validated();
+        $path = $user->project()->resolvePath($params['path']);
+
+        $fileMan = $user->project()->fileManager();
+        try {
+            $fileMan->fetch($params['url'], $path, $params['filename'] ?? null);
+        } catch (\Exception $e) {
+            return new JsonResponse([
+                'message' => $e->getMessage(),
+            ], 400);
+        }
+
+        return new JsonResponse([
+            'success' => true,
+        ]);
+    }
+
+    #[OA\Put(
+        path: '/projects/{username}/files/chmod',
+        summary: 'Set the mode of a file or directory',
+        security: [['bearerAuth' => []]],
+        tags: ['Files'],
+        parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+            required: ['path', 'mode'],
+            properties: [
+                new OA\Property(property: 'path', type: 'string', example: '/public_html/script.sh'),
+                new OA\Property(property: 'mode', type: 'string', example: '755'),
+            ],
+        )),
+        responses: [
+            new OA\Response(response: 200, description: 'Mode set', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+        ],
+    )]
+    public function chmod(string $username, ChmodRequest $request): JsonResponse
+    {
+        $user = User::findByUsername($username);
+        if (!$user) {
+            abort(new JsonResponse([
+                'message' => 'User not found',
+            ], 404));
+        }
+
+        /**
+         * @var array{
+         *   path: string,
+         *   mode: string,
+         * }
+         */
+        $params = $request->validated();
+        $path = $user->project()->resolvePath($params['path']);
+
+        $fileMan = $user->project()->fileManager();
+        try {
+            $fileMan->chmod($path, $params['mode']);
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
