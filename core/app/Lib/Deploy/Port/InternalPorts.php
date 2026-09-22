@@ -84,6 +84,22 @@ final class InternalPorts
     }
 
     /**
+     * What listens on a port, for a report that has to say why a port was
+     * turned down rather than just leave it out. The two lists are kept apart
+     * because they mean different things: a datastore port is filtered out of
+     * detection, a non-web one is only ever unfit to be a front door.
+     */
+    public static function datastoreOn(int $port): ?string
+    {
+        return self::KNOWN[$port] ?? null;
+    }
+
+    public static function nonWebOn(int $port): ?string
+    {
+        return self::NON_WEB[$port] ?? null;
+    }
+
+    /**
      * Whether a site could plausibly be served here: not a datastore and not
      * a non-HTTP service.
      */

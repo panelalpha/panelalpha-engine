@@ -146,4 +146,74 @@ class PortsReportTest extends ReportTestCase
         $this->assertSame(8080, $report['dockerfile_expose']);
         $this->assertSame('dockerfile', $report['source']);
     }
+
+    /**
+     * The engine proxies one port. Everything else the compose file publishes
+     * is reachable only through a proxy rule the caller has to ask for, so the
+     * report says so rather than listing every port as if they were equal.
+     */
+    public function test_only_the_primary_is_routed_and_the_rest_say_how(): void
+    {
+        $this->write('docker-compose.yml', "services:\n  web:\n    image: app\n    ports:\n      - \"8080:8080\"\n      - \"9001:9001\"\n");
+
+        $report = PortsReport::of($this->tmpDir, []);
+
+        $this->assertSame([8080], $report['routed']);
+        $this->assertSame(9001, $report['unrouted'][0]['port']);
+        $this->assertSame('secondary', $report['unrouted'][0]['reason']);
+        $this->assertTrue($report['unrouted'][0]['routable']);
+        $this->assertStringContainsString('proxy_rule_create', $report['unrouted'][0]['hint']);
+        // The flat list callers already read is unchanged.
+        $this->assertSame([8080, 9001], $report['compose']);
+    }
+
+    /**
+     * A datastore port is refused, not merely absent — and never offered as
+     * something a proxy rule could fix.
+     */
+    public function test_a_datastore_port_is_reported_as_refused(): void
+    {
+        $this->write('docker-compose.yml', "services:\n  web:\n    image: app\n    ports:\n      - \"8080:8080\"\n  db:\n    image: postgres:16\n    ports:\n      - \"5432:5432\"\n");
+
+        $report = PortsReport::of($this->tmpDir, []);
+
+        $this->assertSame([8080], $report['routed']);
+        $this->assertSame([], $report['unrouted']);
+        $this->assertSame(
+            [['port' => 5432, 'reason' => 'datastore', 'service' => 'PostgreSQL', 'routable' => false]],
+            $report['refused']
+        );
+    }
+
+    /**
+     * Detection keeps a non-web port in the list — it is a real published port
+     * — but nothing should ever be routed to it, so it is flagged rather than
+     * offered like an ordinary second web port.
+     */
+    public function test_a_non_web_port_is_unrouted_and_not_routable(): void
+    {
+        $this->write('docker-compose.yml', "services:\n  git:\n    image: gitea\n    ports:\n      - \"8080:8080\"\n      - \"22:22\"\n");
+
+        $report = PortsReport::of($this->tmpDir, []);
+
+        $this->assertSame([8080], $report['routed']);
+        $this->assertSame(22, $report['unrouted'][0]['port']);
+        $this->assertSame('non_web', $report['unrouted'][0]['reason']);
+        $this->assertSame('SSH', $report['unrouted'][0]['service']);
+        $this->assertFalse($report['unrouted'][0]['routable']);
+        $this->assertArrayNotHasKey('hint', $report['unrouted'][0]);
+    }
+
+    /** Nothing detected means nothing routed, rather than an empty primary. */
+    public function test_nothing_is_routed_when_no_port_was_found(): void
+    {
+        $this->write('docker-compose.yml', "services:\n  app:\n    image: app\n");
+
+        $report = PortsReport::of($this->tmpDir, []);
+
+        $this->assertNull($report['primary']);
+        $this->assertSame([], $report['routed']);
+        $this->assertSame([], $report['unrouted']);
+        $this->assertSame([], $report['refused']);
+    }
 }

@@ -389,7 +389,7 @@ YAML);
         $missing = sys_get_temp_dir() . '/nonexistent-' . uniqid('', true) . '.yml';
         $this->assertFileDoesNotExist($missing);
         $result = DetectAppPort::detectAllPorts($missing);
-        $this->assertSame(['all' => []], $result);
+        $this->assertSame(['all' => [], 'refused' => []], $result);
         $this->assertSame(8080, DetectAppPort::detectPrimaryPort($missing));
     }
 
@@ -397,7 +397,7 @@ YAML);
     {
         file_put_contents($this->composePath, "not: valid: yaml: at: all: :::");
         $result = DetectAppPort::detectAllPorts($this->composePath);
-        $this->assertSame(['all' => []], $result);
+        $this->assertSame(['all' => [], 'refused' => []], $result);
     }
 
     public function test_returns_empty_when_no_services(): void
@@ -406,7 +406,7 @@ YAML);
 services: {}
 YAML);
         $result = DetectAppPort::detectAllPorts($this->composePath);
-        $this->assertSame(['all' => []], $result);
+        $this->assertSame(['all' => [], 'refused' => []], $result);
     }
 
     public function test_returns_empty_when_no_ports(): void
@@ -417,7 +417,7 @@ services:
     image: myorg/webapp
 YAML);
         $result = DetectAppPort::detectAllPorts($this->composePath);
-        $this->assertSame(['all' => []], $result);
+        $this->assertSame(['all' => [], 'refused' => []], $result);
     }
 
     // ---- multiple services / sort order ----------------------------------
