@@ -782,6 +782,30 @@ class UserController extends Controller
      * client had to read English to tell "pin a PHP image" from "the
      * repository needs a token".
      */
+    /**
+     * An archive cannot replace a project that deploys from git (engine#269).
+     *
+     * The deploy treated the uploaded tree as the repository's checkout -- its
+     * recipe, its app config, its HEAD -- found no .git, and failed only after
+     * the archive had already replaced ~/project. A deploy-managed repository
+     * cannot be disconnected either, so say what can be done instead, before
+     * anything is touched.
+     */
+    private static function refuseArchiveOnGitProject(User $user): void
+    {
+        if (!$user->hasGitProject()) {
+            return;
+        }
+
+        throw ProblemException::one(
+            'zip_path',
+            'archive_on_git_project',
+            "Project '{$user->username}' deploys from its git repository, so an archive cannot replace it. "
+            . 'Push the change to the repository and rebuild, or deploy the archive into a project created without a repository.',
+            ['git_repo' => GitUrl::sanitize((string) $user->getGitRepo())]
+        );
+    }
+
     private static function deployProblem(string $code, string $message, ?string $stage): ProblemException
     {
         return ProblemException::one('deploy', $code, $message, array_filter([
@@ -1265,6 +1289,9 @@ class UserController extends Controller
             'stages' => 'array|nullable',
             'recipe' => 'string|nullable|max:64',
         ]);
+        if (($params['zip_path'] ?? '') !== '') {
+            self::refuseArchiveOnGitProject($user);
+        }
         DeployPlanInput::arm($request);
         RecipeChoiceInput::arm($request);
         if (array_key_exists('env_vars', $params)) {
@@ -1475,6 +1502,7 @@ class UserController extends Controller
             'stages' => 'array|nullable',
             'recipe' => 'string|nullable|max:64',
         ]);
+        self::refuseArchiveOnGitProject($user);
         DeployPlanInput::arm($request);
         RecipeChoiceInput::arm($request);
         if (array_key_exists('env_vars', $params)) {
