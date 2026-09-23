@@ -193,6 +193,34 @@ class ProjectFileManagerTest extends TestCase
         $this->assertSame('restored', file_get_contents($this->homeDir . '/tar-out/note.txt'));
     }
 
+    /** engine#244: the file manager refused nothing a deploy would refuse. */
+    public function test_unzip_refuses_an_archive_that_unpacks_past_the_cap(): void
+    {
+        $this->requireCommand('tar');
+        $files = new FileManager(
+            new Project($this->systemWithDirectFilesystem(), $this->userModel('alice')),
+            $this->homeDir . '/.unzip-stage',
+            100 * 1024
+        );
+        $zeros = $this->homeDir . '/zeros.bin';
+        file_put_contents($zeros, str_repeat("\0", 1024 * 1024));
+        $archive = new \PharData($this->homeDir . '/bomb.tar');
+        $archive->addFile($zeros, 'zeros.bin');
+        $archive->compress(\Phar::GZ);
+        unset($archive);
+        mkdir($this->homeDir . '/bomb-out');
+
+        try {
+            $files->unzip('bomb.tar.gz', 'bomb-out');
+            $this->fail('an archive past the cap must be refused');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->assertStringContainsString('more than this server accepts', $e->getMessage());
+        }
+
+        $this->assertSame([], array_values(array_diff(scandir($this->homeDir . '/bomb-out'), ['.', '..'])));
+        $this->assertSame([], glob($this->homeDir . '/.unzip-stage/*') ?: [], 'the staged copy is removed');
+    }
+
     public function test_move_directory_contents_moves_children_only(): void
     {
         $files = $this->fileManager();
@@ -326,7 +354,10 @@ class ProjectFileManagerTest extends TestCase
 
     private function fileManager(): FileManager
     {
-        return new FileManager(new Project($this->systemWithDirectFilesystem(), $this->userModel('alice')));
+        return new FileManager(
+            new Project($this->systemWithDirectFilesystem(), $this->userModel('alice')),
+            $this->homeDir . '/.unzip-stage'
+        );
     }
 
     private function systemWithDirectFilesystem(): System
@@ -380,6 +411,8 @@ class ProjectFileManagerTest extends TestCase
                 $argv = $cmd;
                 if (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'setpriv') {
                     $argv = array_slice($argv, 7);
+                } elseif (($argv[0] ?? '') === 'sudo') {
+                    $argv = array_slice($argv, 1);
                 }
                 $cwd = null;
                 if (($argv[0] ?? '') === 'env' && is_string($argv[1] ?? null) && str_starts_with($argv[1], '--chdir=')) {

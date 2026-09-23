@@ -2,6 +2,8 @@
 
 namespace App\System\Project;
 
+use App\Lib\Deploy\Source\ArchiveSafety;
+use App\Lib\Deploy\Source\ArchiveUnpackedSize;
 use App\System\Project as UserProject;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\UploadedFile;
@@ -13,8 +15,13 @@ use Symfony\Component\Process\Process;
 
 class FileManager
 {
+    /** Beside the deploy's own staging area, and just as root-owned. */
+    private const UNZIP_STAGE_DIR = '/var/lib/panelalpha/unzip-stage';
+
     public function __construct(
         private readonly UserProject $project,
+        private readonly string $unzipStageRoot = self::UNZIP_STAGE_DIR,
+        private readonly int $unzipMaxBytes = ArchiveSafety::MAX_UNCOMPRESSED_BYTES,
     ) {
     }
 
@@ -216,36 +223,45 @@ class FileManager
         $zipPath = $this->resolvePath($zipPath);
         $path = $this->resolvePath($path);
         $filename = basename($zipPath);
+        $isZip = Str::endsWith($filename, '.zip');
 
-        if (Str::endsWith($filename, '.zip')) {
-            $process = $this->runOnCore([
-                'unzip',
-                '-UU',
-                '-o',
-                $zipPath,
-                '-d',
-                $path,
-            ]);
-        } elseif (Str::endsWith($filename, '.tar.gz')) {
-            $process = $this->runOnCore([
-                'tar',
-                '-zxvf',
-                $zipPath,
-                '-C',
-                $path,
-            ]);
-        } else {
-            $path = rtrim($path, '/');
-            if ($zipPath != "{$path}/{$filename}") {
-                $this->cp($zipPath, $path);
+        // The size is counted off a root-owned read-only copy, and that copy is
+        // what gets extracted: the account can rewrite its own file between a
+        // check and an unpack. Without this a 6 MB zip wrote 6 GB here while
+        // the deploy path refused the same archive (engine#244).
+        $system = $this->project->system();
+        $stageDir = $this->unzipStageRoot . '/' . bin2hex(random_bytes(8));
+        $staged = $stageDir . '/' . $filename;
+        try {
+            $system->exec(['sudo', 'mkdir', '-p', $stageDir]);
+            $system->exec(['sudo', 'chmod', '0755', $stageDir]);
+            $system->exec(['sudo', 'cp', '--no-dereference', $zipPath, $staged]);
+            $system->exec(['sudo', 'chmod', '0444', $staged]);
+            try {
+                ArchiveUnpackedSize::assertWithin($staged, $isZip, $this->unzipMaxBytes);
+            } catch (\InvalidArgumentException | \RuntimeException $e) {
+                throw ValidationException::withMessages(['zip_path' => $e->getMessage()]);
             }
-            $process = $this->runOnCore([
-                'gunzip',
-                '-f',
-                $filename,
-            ], $path);
+
+            if ($isZip) {
+                $process = $this->runOnCore(['unzip', '-UU', '-o', $staged, '-d', $path]);
+            } elseif (Str::endsWith($filename, '.tar.gz')) {
+                $process = $this->runOnCore(['tar', '-zxvf', $staged, '-C', $path]);
+            } else {
+                // gunzip's own result: `x.gz` becomes `x` in the target
+                // directory, and a `.gz` that was already there is replaced.
+                $path = rtrim($path, '/');
+                $process = $this->runOnCore([
+                    'sh', '-c', 'gzip -dc -- "$1" > "$2"', 'sh', $staged, $path . '/' . Str::beforeLast($filename, '.gz'),
+                ]);
+                if ($process->isSuccessful() && $zipPath === "{$path}/{$filename}") {
+                    $this->runOnCore(['rm', '-f', $zipPath]);
+                }
+            }
+            $this->assertSucceeded($process);
+        } finally {
+            $system->runProcess(['sudo', 'rm', '-rf', $stageDir]);
         }
-        $this->assertSucceeded($process);
     }
 
     public function remove(string $path, bool $recursive = false): void
