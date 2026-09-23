@@ -4,14 +4,13 @@ namespace App\Console\Commands\System;
 
 use App\System;
 use App\Lib\Helper;
+use App\Models\Admin;
 use App\Models\Domain;
 use App\Models\MysqlDatabase;
 use App\Models\MysqlUser;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Console\Command;
-use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Foundation\Auth\User as AuthUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\App;
@@ -292,11 +291,8 @@ class CreateExampleDomain extends Command
 
     private function callApi(string $method, string $uri, array|null $body = null): JsonResponse
     {
-        $admin = (new class extends AuthUser {
-            protected $table = 'admins';
-        })->first();
-        assert($admin instanceof Authenticatable);
-        Auth::setUser($admin);
+        // rootAccount(): on a fresh install there is no admins row to find.
+        Auth::setUser(Admin::rootAccount());
 
         if (is_array($body)) {
             $body = json_encode($body);

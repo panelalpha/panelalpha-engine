@@ -2,13 +2,11 @@
 
 namespace App\Console\Commands\Concerns;
 
-use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Foundation\Auth\User;
+use App\Models\Admin;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
-use Laravel\Sanctum\HasApiTokens;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -31,22 +29,12 @@ trait DispatchesApiRoute
      */
     protected function dispatchApiRoute(string $method, string $uri, array $params = [], array $files = []): Response
     {
-        // Admin is a plain Model, so it cannot be handed to Auth::setUser; the
-        // admins table is reached through an Authenticatable of its own. The
-        // default guard is 'api', so setting the user here satisfies the
-        // auth:api middleware the route still runs under.
-        $admin = (new class extends User {
-            // Sanctum's accessor comes with it: `EnsureTokenMayUseApi` asks
-            // every authenticated user which token it came in on, and a plain
-            // Authenticatable has no such method -- so without this every
-            // command that dispatches a route died on a BadMethodCallException
-            // surfaced as `HTTP 500: Server Error`.
-            use HasApiTokens;
-
-            protected $table = 'admins';
-        })->first();
-        assert($admin instanceof Authenticatable);
-        Auth::setUser($admin);
+        // The default guard is 'api', so setting the user here satisfies the
+        // auth:api middleware the route still runs under. rootAccount(), not
+        // the first admins row: a fresh install has none until a token is
+        // minted, and every command here died on a TypeError until then --
+        // `installer.sh --repo` included (engine#225, #224).
+        Auth::setUser(Admin::rootAccount());
 
         $request = Request::create("/api{$uri}", strtoupper($method), $params, [], $files);
         App::instance('request', $request);
