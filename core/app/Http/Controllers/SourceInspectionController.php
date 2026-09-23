@@ -10,6 +10,7 @@ use App\Exceptions\ProblemException;
 use App\Lib\Deploy\Inspect\AppInspector;
 use App\Lib\Deploy\Inspect\DeploymentSnapshot;
 use App\Lib\Deploy\Inspect\InspectException;
+use App\Lib\Deploy\Inspect\RecipeFileOverlay;
 use App\Lib\Deploy\Inspect\ResolvedSource;
 use App\Lib\Deploy\Inspect\SourceResolver;
 use App\Lib\Deploy\Platform\DeployPlan;
@@ -264,6 +265,13 @@ class SourceInspectionController extends Controller
         // the checkout on disk has lost its remote, and that URL is what
         // decides whether the engine's own app config for that repository applies.
         $repositoryUrl = $this->repositoryUrl($resolved) ?? $user?->getGitRepo();
+
+        // The deploy lays a recipe's files over the checkout before detection;
+        // a clone is ours to write to, and without them inspect judged a tree
+        // the deploy never sees.
+        if ($resolved->type === SourceResolver::TYPE_GIT) {
+            RecipeFileOverlay::apply($dir, $repositoryUrl);
+        }
 
         $report = AppInspector::inspect($dir, $repositoryUrl, $plan, $recipe);
 
