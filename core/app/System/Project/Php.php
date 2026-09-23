@@ -4,6 +4,7 @@ namespace App\System\Project;
 
 use App\Models\Domain;
 use App\System\Project as UserProject;
+use App\System\Project\PhpHosting\PhpHandlerNotRunning;
 use Illuminate\Validation\ValidationException;
 
 class Php
@@ -177,8 +178,17 @@ class Php
     private function restartPhpHandler(string $phpVersion): void
     {
         $runtime = $this->project->runtime();
-        if ($runtime instanceof PhpHosting) {
+        if (!$runtime instanceof PhpHosting) {
+            return;
+        }
+        try {
             $runtime->phpRuntime()->restartPhpHandler($phpVersion);
+        } catch (PhpHandlerNotRunning) {
+            // No domain uses this version: the file is saved and takes effect
+            // when one does. Said in the log so it is not a silent success.
+            \Illuminate\Support\Facades\Log::info(
+                "PHP {$phpVersion} settings saved for {$this->project->username()}; no domain runs that version yet"
+            );
         }
     }
 }

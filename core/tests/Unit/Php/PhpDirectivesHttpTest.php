@@ -6,6 +6,7 @@ use App\Http\Middleware\Authenticate;
 use App\Models\Domain;
 use App\Models\User;
 use App\System;
+use App\System\Project\PhpHosting\FpmStack;
 use App\System\Services\Webserver;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -341,7 +342,7 @@ class PhpDirectivesHttpTest extends TestCase
     {
         $count = 0;
         foreach ($this->journal() as $command) {
-            if (in_array('php-fpm' . $version, $command, true)) {
+            if (in_array(FpmStack::restartFpmScript($version), $command, true)) {
                 $count++;
             }
         }

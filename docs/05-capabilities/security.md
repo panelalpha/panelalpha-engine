@@ -75,6 +75,8 @@ ModSecurity is a web application firewall on the public webserver. It inspects i
 Show me the ModSecurity audit log. A legitimate form submission was blocked.
 ```
 
+Two rulesets ship: `owasp-crs`, the OWASP Core Rule Set, and `panelalpha-wordpress`, which stops an anonymous visitor from reading WordPress login names through `?author=1` or the REST users list. Both are off until you switch them on, and neither does anything while ModSecurity itself is off. A WordPress site on this engine is only covered once both are on.
+
 You can read the mode, switch rulesets on and off, and read the audit log. If the assistant cannot, those tools have been turned off: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 **When a legitimate request gets blocked**, that is a false positive and it is a tuning problem, not a broken deploy. The audit log names the specific rule that fired. Turn off that rule, not the whole firewall. Ask the assistant to find it:

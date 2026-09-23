@@ -6,6 +6,7 @@ use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project;
 use App\System\Project\Php;
+use App\System\Project\PhpHosting\FpmStack;
 use App\System\Services\Webserver;
 use PHPUnit\Framework\TestCase;
 
@@ -74,9 +75,8 @@ class ProjectPhpTest extends TestCase
                 '-T',
                 'php',
                 'bash',
-                '/entrypoint-runner.sh',
-                'restart',
-                'php-fpm8.3',
+                '-c',
+                FpmStack::restartFpmScript('8.3'),
             ],
             $system->processJournal[0]
         );

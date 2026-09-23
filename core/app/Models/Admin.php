@@ -2,12 +2,17 @@
 
 namespace App\Models;
 
+use Illuminate\Auth\Authenticatable;
+use Illuminate\Contracts\Auth\Authenticatable as AuthenticatableContract;
 use Illuminate\Database\Eloquent\Model;
 use Laravel\Sanctum\HasApiTokens;
 
-class Admin extends Model
+// Authenticatable because the sanctum guard hands this model to middleware
+// that expects one: `throttle` keys its limiter on getAuthIdentifier(), and a
+// plain Model answered every bearer request on a throttled route with a 500.
+class Admin extends Model implements AuthenticatableContract
 {
-    use HasApiTokens;
+    use Authenticatable, HasApiTokens;
 
     protected $fillable = [
         'name',

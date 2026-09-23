@@ -106,9 +106,14 @@ final class FpmApacheStack implements PhpStack
 
         $phpVersion = $domain->getPhpVersion();
         if ($phpVersion) {
-            $project->system()->exec(
-                "sudo docker compose -f {$project->composeFilePath()} exec -T php service php{$phpVersion}-fpm restart"
-            );
+            // Through the runner, never `service ... restart`: that starts a
+            // master the runner cannot see, and every later INI change missed it.
+            try {
+                $this->restartPhpHandler($project, $phpVersion);
+            } catch (PhpHandlerNotRunning) {
+                // A PHP version switch lands here before the runner scripts are
+                // written; the runner's `sync --all` that follows starts it.
+            }
         }
 
         $this->reloadWebserver($project);
