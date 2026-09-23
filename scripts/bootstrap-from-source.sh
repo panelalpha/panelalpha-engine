@@ -233,6 +233,8 @@ cp -Rn templates/webserver-config/. webserver-config/
 cp -Rn templates/config/pure-ftpd/. config/pure-ftpd/
 chmod +x config/pure-ftpd/entrypoint.sh
 cp -Rn templates/config/sftp/. config/sftp/
+# Scripts are engine code, not host state: -n would keep the installed copy.
+cp templates/config/sftp/{entrypoint.sh,sync-logins.sh} config/sftp/
 cp -Rn templates/config/logrotate/. config/logrotate/
 cp -Rn templates/config/exim/. config/exim/
 cp -Rn templates/config/modsecurity/. config/modsecurity/

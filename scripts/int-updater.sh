@@ -303,6 +303,9 @@ prepare_config_files() {
     chmod +x /opt/panelalpha/shared-hosting/config/pure-ftpd/entrypoint.sh
     mkdir -p /opt/panelalpha/shared-hosting/config/sftp
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/sftp/. /opt/panelalpha/shared-hosting/config/sftp/.
+    # Scripts are engine code, not host state: -n kept every host on the copy it
+    # was installed with, bugs included (engine#243).
+    cp /opt/panelalpha/shared-hosting/templates/config/sftp/{entrypoint.sh,sync-logins.sh} /opt/panelalpha/shared-hosting/config/sftp/
     if [ ! -f /opt/panelalpha/shared-hosting/config/sftp/ssh_host_ed25519_key ]; then
         ssh-keygen -t ed25519 -N "" -f /opt/panelalpha/shared-hosting/config/sftp/ssh_host_ed25519_key < /dev/null
     fi
