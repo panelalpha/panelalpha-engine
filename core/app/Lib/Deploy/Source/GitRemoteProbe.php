@@ -14,7 +14,7 @@ use Symfony\Component\Process\Process;
  *
  * Runs from the core container: the account does not exist yet.
  */
-final class GitRemoteProbe
+class GitRemoteProbe
 {
     public const TIMEOUT_SECONDS = 10;
 
@@ -56,9 +56,19 @@ final class GitRemoteProbe
         ?string $token,
         string $tokenField = 'git_token'
     ): ?array {
+        return $this->check($repoField, $repoUrl, $token, $tokenField)->problem;
+    }
+
+    /** The same probe, telling "the remote answered" apart from "nothing was learned". */
+    public function check(
+        string $repoField,
+        string $repoUrl,
+        ?string $token,
+        string $tokenField = 'git_token'
+    ): GitProbeResult {
         $repoUrl = trim($repoUrl);
         if ($repoUrl === '') {
-            return null;
+            return GitProbeResult::unchecked();
         }
 
         $hasToken = $token !== null && trim($token) !== '';
@@ -73,14 +83,14 @@ final class GitRemoteProbe
                 $workspace = $this->makeWorkspace();
                 $askPass = $workspace === null ? null : $this->writeAskPass($workspace, (string) $token);
                 if ($askPass === null) {
-                    return null;
+                    return GitProbeResult::unchecked();
                 }
                 $command = GitUrl::withAskPass($command, $askPass);
             }
 
             return $this->interpret($this->run($command), $repoField, $repoUrl, $hasToken, $tokenField);
         } catch (\Throwable $e) {
-            return null;
+            return GitProbeResult::unchecked();
         } finally {
             if ($askPass !== null) {
                 @unlink($askPass);
@@ -97,7 +107,8 @@ final class GitRemoteProbe
      */
     private function run(array $command): array
     {
-        $process = new Process($command, null, [
+        // ls-remote needs no repository, and a broken one in the cwd would fail it.
+        $process = new Process($command, sys_get_temp_dir(), [
             'GIT_TERMINAL_PROMPT' => '0',
             // The terminal is not the only thing that waits: an askpass
             // program still launches unless it is pointed somewhere harmless.
@@ -126,7 +137,6 @@ final class GitRemoteProbe
 
     /**
      * @param array{timedOut: bool, ok: bool, stderr: string} $result
-     * @return ?array<string, mixed>
      */
     private function interpret(
         array $result,
@@ -134,45 +144,45 @@ final class GitRemoteProbe
         string $repoUrl,
         bool $hasToken,
         string $tokenField
-    ): ?array {
+    ): GitProbeResult {
         $host = $this->hostOf($repoUrl);
 
         if ($result['timedOut']) {
-            return $this->problemOf($repoField, 'unreachable',
+            return GitProbeResult::unchecked($this->problemOf($repoField, 'unreachable',
                 "{$host} did not answer within {$this->timeout}s. The repository was not checked, "
                 . 'so nothing was created -- retry, or check the host is reachable from this engine.',
-                true);
+                true));
         }
         if ($result['ok']) {
-            return null;
+            return GitProbeResult::verified();
         }
 
         $stderr = strtolower(GitUrl::sanitize($result['stderr']));
 
         if ($this->matches($stderr, 'unreachable')) {
-            return $this->problemOf($repoField, 'unreachable',
+            return GitProbeResult::unchecked($this->problemOf($repoField, 'unreachable',
                 "Could not reach {$host}. The engine must be able to open an HTTPS connection to it.",
-                true);
+                true));
         }
 
         // A forge will not admit a private repository exists to a caller it
         // has not authenticated, so these two answers must read as one.
         if ($this->matches($stderr, 'auth') || (!$hasToken && $this->matches($stderr, 'missing'))) {
-            return $hasToken
+            return GitProbeResult::refused($hasToken
                 ? $this->problemOf($tokenField, 'rejected',
                     "The token was refused by {$host}. Check it has not expired and that it "
                     . 'grants read access to this repository.')
                 : $this->problemOf($repoField, 'requires_token',
                     'This repository is private, or does not exist. Pass a read token as '
-                    . "`{$tokenField}`, or check the address.");
+                    . "`{$tokenField}`, or check the address."));
         }
         if ($this->matches($stderr, 'missing')) {
-            return $this->problemOf($repoField, 'not_found',
-                "No such repository on {$host}, or the token cannot see it.");
+            return GitProbeResult::refused($this->problemOf($repoField, 'not_found',
+                "No such repository on {$host}, or the token cannot see it."));
         }
 
-        return $this->problemOf($repoField, 'unreadable',
-            'The repository could not be read: ' . $this->firstLine($result['stderr']));
+        return GitProbeResult::refused($this->problemOf($repoField, 'unreadable',
+            'The repository could not be read: ' . $this->firstLine($result['stderr'])));
     }
 
     private function matches(string $stderr, string $outcome): bool

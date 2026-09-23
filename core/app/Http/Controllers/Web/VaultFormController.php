@@ -2,10 +2,11 @@
 
 namespace App\Http\Controllers\Web;
 
+use App\Lib\Vault\PasteCheck;
 use App\Models\SecretVaultEntry;
 use Illuminate\Contracts\View\View;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 /**
  * The browser side of the vault: the form the customer pastes a secret into.
@@ -50,15 +51,10 @@ class VaultFormController
             return $this->expired($entry);
         }
 
-        return view(self::SCREENS[$entry->type] ?? self::DEFAULT_SCREEN, [
-            'token' => $token,
-            'entry' => $entry,
-            'helpHtml' => SecretVaultEntry::help($entry->type),
-            'note' => $this->note($entry),
-        ]);
+        return $this->screen($token, $entry);
     }
 
-    public function store(Request $request, string $token): RedirectResponse|View
+    public function store(Request $request, string $token): Response|View
     {
         $validated = $request->validate([
             'secret' => ['required', 'string', 'max:8192', 'not_in:'],
@@ -83,10 +79,30 @@ class VaultFormController
             return $this->expired($entry);
         }
 
+        // Before the save, because a stored secret is final: a token that
+        // does not work must leave the link open for another try.
+        $check = app(PasteCheck::class)->run($entry, $validated['secret']);
+        if ($check['rejected'] !== null) {
+            return response($this->screen($token, $entry, $check['rejected']), 422);
+        }
+
         $entry->setSecret($validated['secret']);
+        $entry->verification = $check['verification'];
         $entry->save();
 
-        return view('vault.saved');
+        return view('vault.saved', ['verification' => $entry->verification]);
+    }
+
+    private function screen(string $token, SecretVaultEntry $entry, ?string $error = null): View
+    {
+        return view(self::SCREENS[$entry->type] ?? self::DEFAULT_SCREEN, [
+            'token' => $token,
+            'entry' => $entry,
+            'helpHtml' => SecretVaultEntry::help($entry->type),
+            'note' => $this->note($entry),
+            'error' => $error,
+            'checkTarget' => PasteCheck::describe($entry),
+        ]);
     }
 
     /**

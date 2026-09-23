@@ -57,7 +57,7 @@ class VaultSecretListCommand extends Command
         }
 
         $this->table(
-            ['id', 'type', 'purpose', 'scope', 'status', 'used', 'created', 'secret expires', 'link closes'],
+            ['id', 'type', 'purpose', 'scope', 'status', 'check', 'used', 'created', 'secret expires', 'link closes'],
             array_map(fn (SecretVaultEntry $e) => [
                 $e->id,
                 $e->type,
@@ -66,6 +66,7 @@ class VaultSecretListCommand extends Command
                 $e->purpose === null ? '-' : Str::limit($e->purpose, 40),
                 $e->scope,
                 $e->status(),
+                $e->verification['result'] ?? '-',
                 $e->use_count,
                 $e->created_at?->format('Y-m-d H:i') ?? '-',
                 $e->expires_at?->format('Y-m-d H:i') ?? 'never',

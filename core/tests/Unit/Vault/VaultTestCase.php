@@ -42,6 +42,8 @@ abstract class VaultTestCase extends TestCase
             $table->string('type');
             $table->string('scope', 16)->default(SecretVaultEntry::SCOPE_REQUEST);
             $table->string('purpose', 255)->nullable();
+            $table->json('verify_with')->nullable();
+            $table->json('verification')->nullable();
             $table->text('secret_encrypted')->nullable();
             $table->timestamp('filled_at')->nullable();
             $table->timestamp('link_expires_at')->nullable();

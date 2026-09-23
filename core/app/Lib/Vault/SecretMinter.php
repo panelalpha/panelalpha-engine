@@ -30,25 +30,28 @@ class SecretMinter
      *
      * @param string  $scope   {@see SecretVaultEntry::SCOPES}
      * @param ?string $purpose free text, shown on the form and in listings
+     * @param ?array<string, mixed> $verifyWith what the paste is checked against, see {@see PasteCheck}
      * @return array{0: SecretVaultEntry, 1: string} the entry and its raw ref
      *
      * @throws ValidationException when a global of this type already holds a
-     *         secret -- see {@see mintGlobal()}
+     *         secret -- see {@see mintGlobal()} -- or `$verifyWith` is unusable
      */
-    public static function mint(string $type, string $scope, ?string $purpose = null): array
+    public static function mint(string $type, string $scope, ?string $purpose = null, ?array $verifyWith = null): array
     {
+        $verifyWith = PasteCheck::prepare($type, $verifyWith);
         // Browser-URL entropy: this string is the capability.
         $ref = Str::random(self::REF_BYTES);
         $linkExpiresAt = Carbon::now()->addSeconds(SecretVaultEntry::TTL_SECONDS);
         $purpose = self::trimmedOrNull($purpose);
 
         $entry = $scope === SecretVaultEntry::SCOPE_GLOBAL
-            ? self::mintGlobal($type, $ref, $linkExpiresAt, $purpose)
+            ? self::mintGlobal($type, $ref, $linkExpiresAt, $purpose, $verifyWith)
             : SecretVaultEntry::create([
                 'ref_hash' => SecretVaultEntry::hashRef($ref),
                 'type' => $type,
                 'scope' => SecretVaultEntry::SCOPE_REQUEST,
                 'purpose' => $purpose,
+                'verify_with' => $verifyWith,
                 'link_expires_at' => $linkExpiresAt,
                 'expires_at' => $linkExpiresAt,
             ]);
@@ -67,9 +70,16 @@ class SecretMinter
      * Replacing the engine's stored credential means deleting it first,
      * deliberately.
      *
+     * @param ?array<string, string> $verifyWith
      * @throws ValidationException when a secret of this type is already set
      */
-    private static function mintGlobal(string $type, string $ref, Carbon $linkExpiresAt, ?string $purpose): SecretVaultEntry
+    private static function mintGlobal(
+        string $type,
+        string $ref,
+        Carbon $linkExpiresAt,
+        ?string $purpose,
+        ?array $verifyWith
+    ): SecretVaultEntry
     {
         $entry = SecretVaultEntry::globalFor($type);
 
@@ -88,6 +98,7 @@ class SecretMinter
             // A re-mint restates why, so an abandoned one does not leave the
             // wrong reason attached to the link somebody actually uses.
             'purpose' => $purpose,
+            'verify_with' => $verifyWith,
             'ref_hash' => SecretVaultEntry::hashRef($ref),
             'link_expires_at' => $linkExpiresAt,
             'expires_at' => null,

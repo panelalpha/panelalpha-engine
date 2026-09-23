@@ -32,6 +32,8 @@ use Illuminate\Support\Str;
  * @property string    $type
  * @property string    $scope
  * @property ?string   $purpose
+ * @property ?array<string, string> $verify_with  what a paste is checked against
+ * @property ?array<string, string> $verification the outcome of that check
  * @property ?string   $secret_encrypted
  * @property ?Carbon   $filled_at
  * @property ?Carbon   $link_expires_at
@@ -93,6 +95,7 @@ class SecretVaultEntry extends Model
         'type',
         'scope',
         'purpose',
+        'verify_with',
         'secret_encrypted',
         'filled_at',
         'link_expires_at',
@@ -104,6 +107,8 @@ class SecretVaultEntry extends Model
         'link_expires_at' => 'datetime',
         'expires_at'      => 'datetime',
         'last_used_at'    => 'datetime',
+        'verify_with'     => 'array',
+        'verification'    => 'array',
     ];
 
     protected $attributes = [

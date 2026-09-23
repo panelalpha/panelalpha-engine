@@ -3,6 +3,7 @@
 namespace Tests\Unit\Vault;
 
 use App\Models\SecretVaultEntry;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
 
 /**
@@ -22,7 +23,7 @@ class VaultFormPageTest extends VaultTestCase
     {
         $response->assertOk();
         $response->assertSee('name="secret"', false);
-        $response->assertSee('Save secret');
+        $this->assertMatchesRegularExpression('/(Save secret|Check and save)<\/button>/', (string) $response->getContent());
     }
 
     public function test_a_git_token_gets_the_repository_screen(): void
@@ -101,6 +102,11 @@ class VaultFormPageTest extends VaultTestCase
     public function test_pasting_stores_the_secret_and_ends_on_the_success_screen(): void
     {
         [$entry, $ref] = $this->entry(['type' => SecretVaultEntry::TYPE_CLOUDFLARE_API_TOKEN]);
+        // A Cloudflare paste is checked first (CloudflarePasteCheckTest); here it just has to pass.
+        Http::fake([
+            '*/accounts/acc1/cfd_tunnel*' => Http::response(['success' => true, 'result' => []]),
+            '*/accounts*' => Http::response(['success' => true, 'result' => [['id' => 'acc1', 'name' => 'A']]]),
+        ]);
 
         $response = $this->post('/vault/' . $ref, ['secret' => 'cf_secret_value']);
 
@@ -118,7 +124,7 @@ class VaultFormPageTest extends VaultTestCase
         [, $git] = $this->entry(['type' => SecretVaultEntry::TYPE_GIT_TOKEN]);
         [, $other] = $this->entry(['type' => 'some_future_secret']);
 
-        $one = (string) $this->post('/vault/' . $git, ['secret' => 'ghp_abc'])->getContent();
+        $one = (string) $this->post('/vault/' . $git, ['secret' => 'ghp_' . str_repeat('a', 36)])->getContent();
         $two = (string) $this->post('/vault/' . $other, ['secret' => 'whatever'])->getContent();
 
         $this->assertSame($one, $two);

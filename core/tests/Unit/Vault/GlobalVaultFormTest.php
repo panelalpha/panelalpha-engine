@@ -38,10 +38,10 @@ class GlobalVaultFormTest extends VaultTestCase
     {
         [$entry, $ref] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN);
 
-        $this->post('/vault/' . $ref, ['secret' => 'ghp_pasted_once'])->assertOk();
+        $this->post('/vault/' . $ref, ['secret' => 'ghp_pasted_once_' . str_repeat('a', 24)])->assertOk();
 
         $entry->refresh();
-        $this->assertSame('ghp_pasted_once', $entry->revealSecret());
+        $this->assertSame('ghp_pasted_once_' . str_repeat('a', 24), $entry->revealSecret());
         $this->assertNull($entry->expires_at, 'An engine-wide secret does not expire.');
     }
 

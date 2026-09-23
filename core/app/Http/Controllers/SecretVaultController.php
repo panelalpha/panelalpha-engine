@@ -52,7 +52,11 @@ class SecretVaultController extends Controller
             . "every project. Give `purpose` so the entry can be recognised later: the secret is never "
             . "readable again, so the listing is all you have. **A pasted secret is final** -- it cannot be "
             . "overwritten from the form or by minting over it; to replace one, delete it and create a new "
-            . "link.",
+            . "link. The form checks a `git_token` or `cloudflare_api_token` before saving it, with the "
+            . "same calls the engine makes when it uses one: a git token against `verify_with.repo_url` "
+            . "(required for the check), a Cloudflare token for its account and Tunnel access, plus the zone "
+            . "of `verify_with.hostname` when given. A refused token is not stored and the link stays open. "
+            . "`verification` on status then says whether it was checked.",
         security: [['bearerAuth' => []]],
         tags: ['Secret Vault'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -90,6 +94,19 @@ class SecretVaultController extends Controller
                     maxLength: 255,
                     example: 'Deploy key for the shop repo',
                 ),
+                new OA\Property(
+                    property: 'verify_with',
+                    type: 'object',
+                    description: 'What the pasted secret is checked against before it is saved. `git_token`: '
+                        . '`repo_url`, the HTTPS repository the token must be able to read. '
+                        . '`cloudflare_api_token`: `hostname` (optional), a domain whose zone the token must '
+                        . 'see. A refused token is not stored and the form asks again; an unreachable host '
+                        . 'saves it unchecked.',
+                    properties: [
+                        new OA\Property(property: 'repo_url', type: 'string', example: 'https://github.com/acme/shop'),
+                        new OA\Property(property: 'hostname', type: 'string', example: 'shop.example.com'),
+                    ],
+                ),
             ],
         )),
         responses: [
@@ -113,6 +130,7 @@ class SecretVaultController extends Controller
             'type' => ['required', 'string', 'max:64', 'regex:/^[a-z][a-z0-9_]*$/'],
             'scope' => ['nullable', 'string', 'in:' . implode(',', SecretVaultEntry::SCOPES)],
             'purpose' => ['nullable', 'string', 'max:255'],
+            'verify_with' => ['nullable', 'array'],
         ]);
 
         // One place decides what minting means, because the console mints too
@@ -121,6 +139,7 @@ class SecretVaultController extends Controller
             $validated['type'],
             $validated['scope'] ?? SecretVaultEntry::SCOPE_REQUEST,
             $validated['purpose'] ?? null,
+            $validated['verify_with'] ?? null,
         );
 
         return new JsonResponse(['data' => [
@@ -129,6 +148,7 @@ class SecretVaultController extends Controller
             'type' => $entry->type,
             'scope' => $entry->scope,
             'purpose' => $entry->purpose,
+            'verify_with' => $entry->verify_with,
             'url' => $this->formUrl($ref),
             'status' => $entry->status(),
             // A global secret has no expiry; only the form does.
@@ -366,6 +386,8 @@ class SecretVaultController extends Controller
             // Why it was asked for. The one field that tells two entries of
             // the same type apart, since the secret is never readable.
             'purpose' => $entry->purpose,
+            'verify_with' => $entry->verify_with,
+            'verification' => $entry->verification,
             'status' => $entry->status(),
             'used_count' => $entry->use_count,
             'last_used_at' => $entry->last_used_at?->toIso8601String(),

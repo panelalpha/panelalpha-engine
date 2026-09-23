@@ -73,7 +73,8 @@ class Cloudflare
         // better, so it goes first and the scoping advice follows it.
         if ($refused !== null) {
             throw new CloudflareException(
-                'Cloudflare rejected this API token: ' . $refused->getMessage()
+                'Cloudflare rejected this API token: ' . $refused->getMessage(),
+                previous: $refused
             );
         }
 

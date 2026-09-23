@@ -25,15 +25,24 @@
             'field' => 'Paste the token here',
         ],
     ];
+
+    // The repository being checked against names its forge; without one, GitHub.
+    $host = empty($checkTarget) ? null : strtolower(strtok($checkTarget, '/'));
+    $selected = match (true) {
+        $host === null, $host === 'github.com' => 'github',
+        $host === 'gitlab.com' => 'gitlab',
+        $host === 'bitbucket.org' => 'bitbucket',
+        default => 'other',
+    };
 @endphp
 
 <div class="field">
     <label class="field-label" for="provider">Where is your repository?</label>
     <div class="select-wrap">
-        <span class="provider-icon"><span id="provider-icon" style="background-image:url('/vault/icons/github.svg')"></span></span>
+        <span class="provider-icon"><span id="provider-icon" style="background-image:url('/vault/{{ $providers[$selected]['icon'] }}')"></span></span>
         <select id="provider" name="provider" autocomplete="off">
             @foreach ($providers as $value => $provider)
-                <option value="{{ $value }}" data-field="{{ $provider['field'] }}" data-placeholder="{{ $provider['placeholder'] }}" data-icon="/vault/{{ $provider['icon'] }}">{{ $provider['label'] }}</option>
+                <option value="{{ $value }}" data-field="{{ $provider['field'] }}" data-placeholder="{{ $provider['placeholder'] }}" data-icon="/vault/{{ $provider['icon'] }}" @selected($value === $selected)>{{ $provider['label'] }}</option>
             @endforeach
         </select>
         <span class="chevron" aria-hidden="true">
@@ -43,14 +52,14 @@
 </div>
 
 @foreach ($providers as $value => $provider)
-    <div data-provider-steps="{{ $value }}" @if ($value !== 'github') hidden @endif>
+    <div data-provider-steps="{{ $value }}" @if ($value !== $selected) hidden @endif>
         @include('vault.steps.' . ($value === 'github' || $value === 'gitlab' || $value === 'bitbucket' ? $value : 'other'))
     </div>
 @endforeach
 
 @include('vault.partials.paste', [
-    'label' => $providers['github']['field'],
-    'placeholder' => $providers['github']['placeholder'],
+    'label' => $providers[$selected]['field'],
+    'placeholder' => $providers[$selected]['placeholder'],
     'note' => $note,
 ])
 

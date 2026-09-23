@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Vault;
 
+use App\Lib\Vault\PasteCheck;
 use App\Lib\Vault\RequestVault;
 use App\Lib\Vault\SecretMinter;
 use App\Models\SecretVaultEntry;
@@ -20,7 +21,9 @@ class VaultSecretCreateCommand extends Command
     protected $signature = 'vault:secret:create
                             {type : The request field the reference is for (git_token, cloudflare_api_token, env_vars, ...)}
                             {--scope=request : request (one secret, expires in an hour) or global (the engine\'s own, no expiry)}
-                            {--purpose= : What the secret is for, shown on the paste form and in vault:secret:list}';
+                            {--purpose= : What the secret is for, shown on the paste form and in vault:secret:list}
+                            {--repo-url= : git_token only: the repository a pasted token is tried against before it is saved}
+                            {--hostname= : cloudflare_api_token only: a domain whose zone the pasted token must see}';
 
     protected $description = 'Create a vault paste link for a secret';
 
@@ -50,10 +53,15 @@ class VaultSecretCreateCommand extends Command
             return self::FAILURE;
         }
 
+        $verifyWith = array_filter([
+            'repo_url' => $this->option('repo-url'),
+            'hostname' => $this->option('hostname'),
+        ], static fn (mixed $v): bool => is_string($v) && $v !== '');
+
         try {
-            [$entry, $ref] = SecretMinter::mint($type, $scope, is_string($purpose) ? $purpose : null);
+            [$entry, $ref] = SecretMinter::mint($type, $scope, is_string($purpose) ? $purpose : null, $verifyWith);
         } catch (ValidationException $e) {
-            // The only one it raises: a global of this type is already set.
+            // A global of this type is already set, or --repo-url/--hostname is unusable.
             $this->error(collect($e->errors())->flatten()->implode(' '));
 
             return self::FAILURE;
@@ -69,6 +77,9 @@ class VaultSecretCreateCommand extends Command
         $this->line('  type:      ' . $entry->type);
         $this->line('  scope:     ' . $entry->scope);
         $this->line('  purpose:   ' . ($entry->purpose ?? '(none given)'));
+        if (($target = PasteCheck::describe($entry)) !== null) {
+            $this->line('  checked:   against ' . $target . ' before saving');
+        }
         $this->line('  reference: ' . ($entry->isGlobal()
             ? RequestVault::PREFIX . RequestVault::GLOBAL_REF
             : RequestVault::PREFIX . $ref));
