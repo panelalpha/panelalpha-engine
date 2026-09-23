@@ -68,8 +68,10 @@ The number should be higher than the one you noted in step 1. Then open one of y
 Before it changes anything, the updater backs up the engine's own database and tells you where it went:
 
 ```text
-Database backed up to /opt/panelalpha/backups/core-db-20260910-141530.sql
+Database backed up to /opt/panelalpha/backups/core-db-20260910-141530.sqlite
 ```
+
+The name ends in `.sqlite`. An engine that still keeps its own data the old way prints the same line ending in `.sql`. Either line means the copy is there.
 
 If instead you see this, stop and read it:
 
@@ -94,8 +96,8 @@ An update is already in progress; only one can run at a time. Wait for it to fin
 **The version number did not change.**
 Either you answered `n`, or the update failed. The update log is in `/opt/panelalpha/log/engine-updates/latest/`.
 
-**The update stopped with a licence error.**
-Your licence key was rejected and nothing was changed. Contact PanelAlpha at [manage.panelalpha.com/contact](https://manage.panelalpha.com/contact).
+**The update stopped while asking PanelAlpha for the download.**
+You will see `Could not obtain a download token.` or `Invalid download status:`. The engine on this VPS was not replaced. Contact PanelAlpha at [manage.panelalpha.com/contact](https://manage.panelalpha.com/contact).
 
 **My AI assistant lost its connection.**
 Expected while the engine restarts. Most reconnect on their own within a minute; if yours does not, restart it. Your token still works and does not need recreating.

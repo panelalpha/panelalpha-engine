@@ -222,8 +222,6 @@ Context: [One token for the whole engine](../05-capabilities/connecting-with-git
 | `pae project:domain:visitors-breakdown {project} {domain} {dimension} --start= --end=` | Visitor breakdown (`domain_visitors_breakdown`): pages, countries, continents, regions, referrers, os, or browsers. Month grain. |
 | `pae geolocation:database update` | Downloads the local City MMDB used for country / continent / region. Not scheduled. Geo lists stay empty until this has run. `--accept-terms` for scripts; `--force` to replace this month's file. |
 
-Access-log ingest uses AWStats `LogFormat=1` (NCSA combined). LiteSpeed and OpenLiteSpeed vhost access logs use that same combined layout, so every current webserver variant shares this format.
-
 Country charts still need a visible [DB-IP](https://db-ip.com) backlink: [Visitor statistics](../05-capabilities/visitor-statistics.md).
 
 ## Security

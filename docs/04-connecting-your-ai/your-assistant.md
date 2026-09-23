@@ -301,7 +301,7 @@ Your assistant is using a list it loaded earlier. Restart your assistant, then r
 
 ## Every tool
 
-This is every MCP tool the engine ships: **197** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
+This is every MCP tool the engine ships: **199** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
 
 A **project** is one hosting account. Some tool descriptions still say *user*; that is the project's name, which every other tool takes as `name`.
 
@@ -316,7 +316,7 @@ pae mcp:tool:list
 | Group | Toolset | Default | Tools |
 |---|---|---|---|
 | [Engine summaries](#engine-summaries) | `engine` | On | 2 |
-| [Projects](#projects) | `projects` | On | 15 |
+| [Projects](#projects) | `projects` | On | 17 |
 | [Domains](#domains) | `domains` | On | 7 |
 | [Domain PHP](#domain-php) | `domainphp` | On | 4 |
 | [Domain ACME](#domain-acme) | `domainacme` | On | 5 |
@@ -372,6 +372,8 @@ pae mcp:tool:list
 | `project_get` | Get a user by username |
 | `project_list` | List users (paginated) |
 | `project_list_all` | List all users (no pagination) |
+| `project_password_set` | Set a password visitors must type before they see the site |
+| `project_password_unset` | Remove that password |
 | `project_push` | Push project state to a paired staging or live project |
 | `project_rebuild` | Rebuild user environment |
 | `project_staging` | Create a linked staging mirror of a live project |

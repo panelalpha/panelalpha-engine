@@ -13,7 +13,7 @@ But most importantly, it makes managing your own server/VPS super simple. **You 
 Out of the box, PanelAlpha Engine gives you and your AI everything you need to run real projects in production:
 
 - Deploy any stack from Git or files
-- Instant preview URLs with optional password protection (`project:set-password` / `project:unset-password`; API `PUT|DELETE /projects/{username}/password`). Host-wide UX via `SITE_PASSWORD_AUTH_MODE=custom|basic` (nginx-proxy). External monitors should send HTTP Basic credentials — a bare probe gets 401 and is treated as down.
+- Instant preview URLs with optional password protection
 - Staging and Git workflows with separate live and staging environments
 - Automatic backups and restore
 - External monitoring and built-in visitor statistics
