@@ -53,6 +53,9 @@ class DeployLogger
         self::STATUS_FAILED => 'Deploy failed',
     ];
 
+    /** latest.json key set by {@see markPreCheckRejected()}. */
+    public const PRECHECK_REJECTED = 'precheck_rejected';
+
     private readonly DeployLogPaths $paths;
 
     private readonly DeployStatus $status;
@@ -283,6 +286,16 @@ class DeployLogger
         $running = ProcessIdentity::isStillRunning($latest['pid'] ?? null, $latest['pid_start_time'] ?? null);
 
         return ['cancelled' => true, 'pid' => $running ? $latest['pid'] : null];
+    }
+
+    /**
+     * The deploy stopped at a precheck: validation that runs before the clone.
+     * Kept in latest.json because the logger that finishes the deploy is a
+     * different instance from the one the precheck saw.
+     */
+    public function markPreCheckRejected(): void
+    {
+        $this->status->update([self::PRECHECK_REJECTED => true]);
     }
 
     public function isRunning(): bool

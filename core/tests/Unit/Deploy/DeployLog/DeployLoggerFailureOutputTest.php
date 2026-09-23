@@ -100,6 +100,23 @@ class DeployLoggerFailureOutputTest extends TestCase
         $logger->finish(DeployLogger::STATUS_SUCCESS);
     }
 
+    public function test_a_precheck_rejection_survives_finish_and_a_new_deploy_clears_it(): void
+    {
+        // The precheck and the controller that finishes the deploy hold
+        // different logger instances; the mark has to go through latest.json.
+        $username = $this->username();
+        $logger = DeployLogger::start($username);
+        $logger->stage(DeployLogger::STAGE_CLONING);
+        DeployLogger::current($username)?->markPreCheckRejected();
+        $logger->finish(DeployLogger::STATUS_FAILED, 'Error: Less than 10GB of disk space available.');
+
+        $this->assertTrue($logger->readLatest()[DeployLogger::PRECHECK_REJECTED] ?? null);
+
+        $next = DeployLogger::start($username);
+        $this->assertArrayNotHasKey(DeployLogger::PRECHECK_REJECTED, $next->readLatest());
+        $next->finish(DeployLogger::STATUS_SUCCESS);
+    }
+
     public function test_tail_of_a_log_that_does_not_exist_is_empty(): void
     {
         $logger = DeployLogger::forDeploy($this->username(), '20260825-000000-abcdef');

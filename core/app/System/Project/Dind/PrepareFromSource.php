@@ -5,6 +5,7 @@ namespace App\System\Project\Dind;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Source\GitRepository;
 use App\System\Project\Git\Exception as GitException;
+use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Detect\DeployabilityCheck;
 use App\Lib\Deploy\Detect\PlaceholderPage;
@@ -204,8 +205,20 @@ class PrepareFromSource
         $path = $this->dind->homeDirPath() . '/' . AppConfig::PRE_CHECK_SCRIPT;
         $chown = $this->dind->userModel()->getChownString();
         $this->dind->system()->filesystem()->filePutContents($path, $script, $chown, '644');
-        $this->dind->shell()->execAsUser(['bash', $path]);
-        $this->dind->shell()->exec(['rm', $path]);
+        try {
+            // Hooks explain a refusal on stdout; the failure message is built
+            // from stderr, so without this it only names the script.
+            $this->dind->shell()->execAsUser(['bash', '-c', 'exec bash "$0" 1>&2', $path]);
+        } catch (DeployCancelledException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            // A precheck refusing the host is not a deploy that broke, so
+            // telemetry must not report it as one.
+            $this->dind->shell()->logger()?->markPreCheckRejected();
+            throw $e;
+        } finally {
+            $this->dind->shell()->exec(['rm', '-f', $path]);
+        }
     }
 
     private function assertGitHeadReadable(string $projectDir): void

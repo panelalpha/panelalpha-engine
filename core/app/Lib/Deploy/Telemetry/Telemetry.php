@@ -212,7 +212,7 @@ class Telemetry
             $fields = new TelemetryFields($username);
             $reportId = (string) Str::ulid();
             $input = self::deployInput($fields, $logger, $outcome, $error, $reportId);
-            $sendable = self::isSendable($fields, $outcome);
+            $sendable = self::isSendable($fields, $outcome, $input['latest']);
 
             if ($sendable) {
                 // Cut now, not at ship time: a failed account creation is rolled
@@ -277,11 +277,16 @@ class Telemetry
      * Everything that can stop a report being *sent* — none of it stops the
      * report being written down. An install with telemetry off, one that cannot
      * fingerprint its machine, or a template this pipeline does not report on
-     * still leaves the operator a record to hand over later.
+     * still leaves the operator a record to hand over later. Neither does a
+     * deploy a precheck refused: the host failed the app's requirements
+     * before anything was deployed, so it is not a deploy failure.
+     *
+     * @param array<string, mixed> $latest
      */
-    private static function isSendable(TelemetryFields $fields, string $outcome): bool
+    private static function isSendable(TelemetryFields $fields, string $outcome, array $latest): bool
     {
-        return self::enabled()
+        return !DeployReport::isPreCheckRejection($latest)
+            && self::enabled()
             && DeployReport::isReportable($outcome)
             && self::safely(fn (): string => self::installId(), '') !== ''
             && $fields->isDindAccount();

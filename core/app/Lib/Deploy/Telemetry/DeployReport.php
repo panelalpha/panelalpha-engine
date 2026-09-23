@@ -3,7 +3,9 @@
 namespace App\Lib\Deploy\Telemetry;
 
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\Metadata\AppPackage;
+use App\Lib\Deploy\Platform\PlatformStage;
 use App\System\Project\Dind\AppHealth;
 
 /**
@@ -195,6 +197,14 @@ class DeployReport
 
     /**
      * @param array<string, mixed> $latest
+     */
+    public static function isPreCheckRejection(array $latest): bool
+    {
+        return ($latest[DeployLogger::PRECHECK_REJECTED] ?? false) === true;
+    }
+
+    /**
+     * @param array<string, mixed> $latest
      * @return array{stage: ?string, rule: ?string, explained: bool, message: ?string, signature: string}
      */
     private static function failure(
@@ -204,7 +214,10 @@ class DeployReport
         array $latest,
         string $username
     ): array {
-        $stage = self::stringOrNull($latest['stage'] ?? null);
+        // A precheck runs inside `cloning`, before the clone itself.
+        $stage = self::isPreCheckRejection($latest)
+            ? PlatformStage::PRECHECK
+            : self::stringOrNull($latest['stage'] ?? null);
 
         // A named signal explains itself: the engine chose the name, so there is no
         // build output for the explainer to read. Without it the fingerprint that
