@@ -92,6 +92,24 @@ TXT;
         $this->assertStringContainsString('start docker', $script);
     }
 
+    /**
+     * StorageReclaim runs both scripts with `sh -lc`, which is dash in the
+     * account image: a bash array failed every heavy build with
+     * `sh: 3: Syntax error: "(" unexpected`.
+     */
+    public function test_reclaim_scripts_parse_under_posix_sh(): void
+    {
+        foreach ([DindBuildStorage::partialReclaimScript(), DindBuildStorage::fullWipeScript()] as $script) {
+            $process = proc_open(['sh', '-n'], [0 => ['pipe', 'r'], 2 => ['pipe', 'w']], $pipes);
+            fwrite($pipes[0], $script);
+            fclose($pipes[0]);
+            $stderr = stream_get_contents($pipes[2]);
+            fclose($pipes[2]);
+
+            $this->assertSame(0, proc_close($process), $stderr);
+        }
+    }
+
     public function test_full_wipe_script_removes_entire_data_root_without_restart(): void
     {
         $script = DindBuildStorage::fullWipeScript();
