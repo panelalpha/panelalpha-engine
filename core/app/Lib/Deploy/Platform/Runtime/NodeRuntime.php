@@ -584,6 +584,10 @@ final class NodeRuntime implements Runtime
      * above it, or the constraint itself when it is plausible but newer than
      * anything shipped.
      *
+     * An open lower bound (`>=14`) is a floor, not a pin: it gets the default
+     * major when the floor allows it, and `>=16 <21` the newest shipped major
+     * in range.
+     *
      * Null means the constraint could not be believed — unparseable, `lts/*`,
      * or implausibly high. Null, not the default, so a project that pinned
      * exactly the default is still credited with having said so.
@@ -593,6 +597,22 @@ final class NodeRuntime implements Runtime
         $major = self::parseMajor($raw);
         if ($major === null) {
             return null;
+        }
+
+        $range = self::openRange($raw);
+        if ($range !== null) {
+            [$floor, $ceiling] = $range;
+            $inRange = array_values(array_filter(
+                self::majors(),
+                static fn (string $known): bool => (int) $known >= $floor
+                    && ($ceiling === null || (int) $known <= $ceiling)
+            ));
+            if ($ceiling !== null && $inRange !== []) {
+                return end($inRange);
+            }
+            if ($ceiling === null) {
+                $major = max($floor, (int) self::defaultMajor());
+            }
         }
 
         foreach (self::majors() as $known) {
@@ -657,6 +677,39 @@ final class NodeRuntime implements Runtime
         }
 
         return ['', ''];
+    }
+
+    /**
+     * `[floor, ceiling]` majors of a `>=N` / `>N` constraint, with an optional
+     * `<M` / `<=M` ceiling; null for anything else (`^18`, `18.x`, `a || b`).
+     *
+     * @return array{0: int, 1: ?int}|null
+     */
+    private static function openRange(string $constraint): ?array
+    {
+        $pattern = '/^>(=)?\s*v?(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?'
+            . '(?:\s*,?\s*<(=)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?)?$/i';
+        if (preg_match($pattern, trim($constraint), $m) !== 1) {
+            return null;
+        }
+
+        // `>14` is `>=15`; `>14.2` still allows 14.
+        $floor = (int) $m[2];
+        if (($m[1] ?? '') === '' && ($m[3] ?? '') === '') {
+            $floor++;
+        }
+
+        $ceiling = null;
+        if (($m[6] ?? '') !== '') {
+            $ceiling = (int) $m[6];
+            // `<21` and `<21.0.0` exclude 21; `<21.5` does not.
+            $lowerParts = (int) ($m[7] ?? 0) + (int) ($m[8] ?? 0);
+            if (($m[5] ?? '') === '' && $lowerParts === 0) {
+                $ceiling--;
+            }
+        }
+
+        return [$floor, $ceiling];
     }
 
     /**
