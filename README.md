@@ -64,7 +64,7 @@ Out of the box, PanelAlpha Engine gives you and your AI everything you need to r
 - External monitoring & built-in visitor statistics
 - Project isolation with separate Docker containers
 - Firewall & OWASP/WAF protection with per-project access rules
-- Domains, SSL, cron, FTP/SFTP, dDatabases, logs
+- Domains, SSL, cron, FTP/SFTP, Databases, logs
 - Easy Cloudflare integration for DNS, Tunnels and caching
 
 ## Why this needs to exist
