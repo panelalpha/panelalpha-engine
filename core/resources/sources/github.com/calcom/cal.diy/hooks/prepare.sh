@@ -23,4 +23,4 @@ grep -q "^REDIS_URL=" .env || printf '\nREDIS_URL=redis://redis:6379\n' >> .env
 printf '\nPOSTGRES_PASSWORD=%s\n' "${POSTGRES_PASSWORD}" >> .env
 
 # Pre-pull the image so that `docker compose up -d` (run by the engine after this script) starts instantly
-docker pull calcom/cal.com:v6.2.0
+docker pull calcom/cal.com:latest
