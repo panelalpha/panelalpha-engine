@@ -1276,10 +1276,14 @@ class UserController extends Controller
         $zipPath = $params['zip_path'] ?? null;
 
         $deployLogger = null;
-        if ($user->getTemplate() === 'dind' && $this->wantsDeployStream($request)) {
-            // Created here (not inside User::rebuild) so the stream can attach
-            // its backlog/start frames before the pipeline runs.
+        $stream = false;
+        if ($user->getTemplate() === 'dind') {
+            // Created here rather than inside the workflow, which would open
+            // the same one: a failure then knows its stage (the plain response
+            // used to be the only deploy answer without one), and the stream
+            // can attach its backlog/start frames before the pipeline runs.
             $deployLogger = DeployLogger::resumeRunningOrStartSafely($user->username);
+            $stream = $this->wantsDeployStream($request);
         }
 
         // One closure for both shapes, so the streamed and the plain response
@@ -1307,7 +1311,7 @@ class UserController extends Controller
             }
         };
 
-        if ($deployLogger !== null) {
+        if ($stream && $deployLogger !== null) {
             return $this->respondWithDeployStream(
                 $rebuild,
                 $deployLogger,

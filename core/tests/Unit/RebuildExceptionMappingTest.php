@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Exceptions\ProblemException;
 use App\Http\Controllers\UserController;
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use Illuminate\Validation\ValidationException;
 use ReflectionMethod;
 use Tests\TestCase;
@@ -69,6 +70,36 @@ class RebuildExceptionMappingTest extends TestCase
 
         $this->assertSame('native-build-toolchain-missing', $problem->problems[0]['code']);
         $this->assertStringContainsString('compiled during install', $problem->problems[0]['message']);
+    }
+
+    /** engine#272: the stage the deploy log was in reaches the problem. */
+    public function test_a_failure_names_the_stage_it_happened_in(): void
+    {
+        $username = 'rbstage' . bin2hex(random_bytes(3));
+        $this->beforeApplicationDestroyed(static fn () => DeployLogger::deleteUserLogs($username));
+        $logger = DeployLogger::start($username);
+        $logger->stage(DeployLogger::STAGE_RUNNING);
+
+        $problem = (new ReflectionMethod(UserController::class, 'rebuildFailure'))
+            ->invoke(new UserController(), new \RuntimeException('exited with code 1'), $logger);
+
+        $this->assertSame('running', $problem->problems[0]['stage']);
+    }
+
+    /**
+     * The plain JSON rebuild used to get no logger (only the stream opened
+     * one), so its failures could not say where they happened.
+     */
+    public function test_the_logger_does_not_depend_on_streaming(): void
+    {
+        $source = file_get_contents(__DIR__ . '/../../app/Http/Controllers/UserController.php');
+        $this->assertIsString($source);
+
+        $body = substr($source, (int) strpos($source, 'public function rebuild(string $username'));
+        $body = substr($body, 0, (int) strpos($body, '$rebuild = function'));
+
+        $this->assertStringContainsString("if (\$user->getTemplate() === 'dind') {", $body);
+        $this->assertStringNotContainsString("=== 'dind' && \$this->wantsDeployStream", $body);
     }
 
     /**
