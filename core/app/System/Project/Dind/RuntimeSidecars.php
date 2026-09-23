@@ -145,7 +145,7 @@ class RuntimeSidecars
                         continue;
                     }
                     // A recipe's own override we just copied in, not a stack template.
-                    if ($base === Paths::COMPOSE_OVERRIDE_FILENAME) {
+                    if ($base === Paths::CLIENT_OVERRIDE_FILENAME) {
                         continue;
                     }
                     $names[] = $base;
