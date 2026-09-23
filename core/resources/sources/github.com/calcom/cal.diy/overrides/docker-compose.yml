@@ -20,7 +20,7 @@ services:
     volumes:
       - redis-data:/data
   calcom:
-    image: calcom/cal.com:latest
+    image: calcom/cal.com:v6.2.0
     restart: always
     mem_limit: 1g
     ports:
