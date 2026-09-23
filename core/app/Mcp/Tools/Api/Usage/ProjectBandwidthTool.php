@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Get bandwidth time series for a project
 
-    Values are bytes. Project transfer is the sum of that project's domains. Missing AWStats data is an empty object, not an error.
+    Values are bytes. Project transfer is the sum of that project's domains. Transfer is every response, robots included, so it exceeds the viewed traffic AWStats reports. Missing AWStats data is an empty object, not an error.
 
     Calls GET /api/projects/{username}/bandwidth.
     MARKDOWN)]

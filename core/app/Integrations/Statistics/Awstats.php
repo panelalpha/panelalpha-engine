@@ -351,6 +351,11 @@ class Awstats implements Statistics
     }
 
     /**
+     * The monthly DAY section only holds traffic AWStats counted as viewed, so
+     * robots (curl, crawlers) are missing from it. The per-day database has
+     * viewed and not-viewed bytes per hour in TIME; it wins where it exists,
+     * and DAY is the fallback for days ingested before -databasebreak=day.
+     *
      * @return array<string, int>
      */
     private function dayBytes(string $domain, string $start, string $end): array
@@ -364,9 +369,47 @@ class Awstats implements Statistics
                 $days[$date] = ($days[$date] ?? 0) + $row['bytes'];
             }
         }
+        foreach ($this->dailyFiles($domain, $start, $end) as $date => $contents) {
+            $days[$date] = $this->timeBytes($contents);
+        }
         ksort($days);
 
         return $days;
+    }
+
+    /**
+     * @return array<string, string> Y-m-d => per-day database contents
+     */
+    private function dailyFiles(string $domain, string $start, string $end): array
+    {
+        $files = [];
+        foreach ($this->monthsCovering(Carbon::parse($start)->startOfDay(), Carbon::parse($end)->startOfDay()) as $month) {
+            $prefix = $this->dataDir . '/awstats' . $month->format('mY');
+            $suffix = '.' . $domain . '.txt';
+            foreach (glob($prefix . '[0-3][0-9]' . $suffix) ?: [] as $path) {
+                $date = $month->format('Y-m-') . substr($path, strlen($prefix), 2);
+                if ($date < $start || $date > $end) {
+                    continue;
+                }
+                $files[$date] = (string) file_get_contents($path);
+            }
+        }
+
+        return $files;
+    }
+
+    /**
+     * TIME rows are: hour, pages, hits, bandwidth, then the same three for
+     * not-viewed traffic.
+     */
+    private function timeBytes(string $contents): int
+    {
+        $bytes = 0;
+        foreach ($this->parseSection($contents, 'TIME') as $parts) {
+            $bytes += (int) ($parts[3] ?? 0) + (int) ($parts[6] ?? 0);
+        }
+
+        return $bytes;
     }
 
     /**

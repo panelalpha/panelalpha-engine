@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Get bandwidth time series for a domain
 
-    Values are bytes. Missing AWStats data is an empty object, not an error.
+    Values are bytes. Transfer is every response, robots included, so it exceeds the viewed traffic AWStats reports. Missing AWStats data is an empty object, not an error.
 
     Calls GET /api/projects/{username}/domains/{domain}/bandwidth.
     MARKDOWN)]

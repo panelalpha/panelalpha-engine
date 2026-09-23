@@ -289,6 +289,32 @@ class ProjectFileManagerTest extends TestCase
         $this->assertGreaterThanOrEqual(1, $files->diskUsage('/'));
     }
 
+    public function test_disk_usage_skips_the_dind_data_root_the_project_cannot_read(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('root reads a 0000 directory, so the unreadable ~/docker cannot be reproduced.');
+        }
+        $files = $this->fileManager();
+        file_put_contents($this->homeDir . '/blob.bin', str_repeat('x', 2 * 1024 * 1024));
+        mkdir($this->homeDir . '/docker');
+        chmod($this->homeDir . '/docker', 0000);
+
+        try {
+            $this->assertGreaterThanOrEqual(1, $files->diskUsage('/'));
+        } finally {
+            chmod($this->homeDir . '/docker', 0755);
+        }
+    }
+
+    public function test_disk_usage_still_counts_a_docker_directory_below_the_home_root(): void
+    {
+        $files = $this->fileManager();
+        mkdir($this->homeDir . '/project/docker', 0777, true);
+        file_put_contents($this->homeDir . '/project/docker/blob.bin', str_repeat('x', 3 * 1024 * 1024));
+
+        $this->assertGreaterThanOrEqual(3, $files->diskUsage('/'));
+    }
+
     private function userModel(string $username): ModelsUser
     {
         $model = new ModelsUser();

@@ -263,7 +263,10 @@ class FileManager
     public function diskUsage(string $directory = '/'): int
     {
         $path = $this->resolvePath($directory);
-        $process = $this->runOnCore(['du', '-shm', $path]);
+        // ~/docker is the DinD data-root: root-owned 0700, unreadable here, and
+        // engine images and build cache rather than the project's own files.
+        $dataRoot = rtrim($this->homeDirPath(), '/') . '/docker';
+        $process = $this->runOnCore(['du', '-shm', '--exclude=' . $dataRoot, $path]);
         $this->assertSucceeded($process);
         $mb = Str::before($process->getOutput(), "\t");
 

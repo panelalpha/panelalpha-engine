@@ -91,7 +91,7 @@ class UsageController extends Controller
 
     #[OA\Get(
         path: '/projects/{username}/bandwidth',
-        description: 'Values are bytes. Project transfer is the sum of that project\'s domains. Missing AWStats data is an empty object, not an error.',
+        description: 'Values are bytes. Project transfer is the sum of that project\'s domains. Transfer is every response, robots included, so it exceeds the viewed traffic AWStats reports. Missing AWStats data is an empty object, not an error.',
         summary: 'Get bandwidth time series for a project',
         security: [['bearerAuth' => []]],
         tags: ['Usage'],
@@ -134,7 +134,7 @@ class UsageController extends Controller
 
     #[OA\Get(
         path: '/projects/{username}/domains/{domain}/bandwidth',
-        description: 'Values are bytes. Missing AWStats data is an empty object, not an error.',
+        description: 'Values are bytes. Transfer is every response, robots included, so it exceeds the viewed traffic AWStats reports. Missing AWStats data is an empty object, not an error.',
         summary: 'Get bandwidth time series for a domain',
         security: [['bearerAuth' => []]],
         tags: ['Usage'],

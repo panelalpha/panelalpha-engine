@@ -51,6 +51,42 @@ class AwstatsBandwidthTest extends TestCase
         ], $series);
     }
 
+    public function test_daily_bandwidth_includes_traffic_awstats_did_not_count_as_viewed(): void
+    {
+        // Measured on a live project: 20 browser requests and 52 from curl,
+        // which AWStats files as a robot, at 355 bytes each.
+        file_put_contents($this->dataDir . '/awstats092026.robots.com.txt', implode("\n", [
+            'BEGIN_DAY 1',
+            '20260923 20 20 7100 1',
+            'END_DAY',
+            '',
+        ]));
+        file_put_contents($this->dataDir . '/awstats09202623.robots.com.txt', implode("\n", [
+            'BEGIN_TIME 24',
+            '7 0 0 0 1 1 355',
+            '8 20 20 7100 51 51 18105',
+            'END_TIME',
+            'BEGIN_DAY 1',
+            '20260923 20 20 7100 1',
+            'END_DAY',
+            '',
+        ]));
+        $stats = new Awstats($this->dataDir);
+
+        $this->assertSame(['2026-09-23' => 25560], $stats->domainBandwidth('robots.com', '2026-09-01', '2026-09-30', 'day'));
+        $this->assertSame(['2026-09-01' => 25560], $stats->domainBandwidth('robots.com', '2026-09-01', '2026-09-30', 'month'));
+    }
+
+    public function test_a_day_with_only_robot_traffic_is_not_missing_from_the_series(): void
+    {
+        file_put_contents($this->dataDir . '/awstats092026.robots.com.txt', "BEGIN_DAY 0\nEND_DAY\n");
+        file_put_contents($this->dataDir . '/awstats09202622.robots.com.txt', "BEGIN_TIME 24\n8 0 0 0 52 52 18460\nEND_TIME\n");
+        file_put_contents($this->dataDir . '/awstats09202624.robots.com.txt', "BEGIN_TIME 24\n9 0 0 0 1 1 355\nEND_TIME\n");
+        $stats = new Awstats($this->dataDir);
+
+        $this->assertSame(['2026-09-22' => 18460], $stats->domainBandwidth('robots.com', '2026-09-01', '2026-09-23', 'day'));
+    }
+
     public function test_domain_series_clips_to_the_requested_range(): void
     {
         $stats = new Awstats($this->dataDir);
