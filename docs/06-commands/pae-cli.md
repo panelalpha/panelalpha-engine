@@ -32,7 +32,7 @@ Choosing assistant tokens, then **Global scope**, opens:
 
 ```text
  Groups      37 of 37 groups on
- Commands    182 of 182 commands on
+ Commands    199 of 199 commands on
  Ceiling     full — they may do anything, including delete
  Review and save
  Back
@@ -48,7 +48,7 @@ Choosing assistant tokens, then **Global scope**, opens:
 
 Tick what the assistant may use and untick what it may not. You never have to think about which settings file line carries which decision. The wizard works that out when it saves.
 
-**Tokens**, on that same assistant menu, asks the same thing one token at a time: pick an assistant's token, tick what that one may use. It can only narrow. An assistant cannot be given a command the engine is not offering. Ticking everything means "no limit", so that token keeps following the engine. `pae mcp:token:list` shows the result in its **Commands** column, as `all` or `40 of 182`.
+**Tokens**, on that same assistant menu, asks the same thing one token at a time: pick an assistant's token, tick what that one may use. It can only narrow. An assistant cannot be given a command the engine is not offering. Ticking everything means "no limit", so that token keeps following the engine. `pae mcp:token:list` shows the result in its **Commands** column, as `all` or `40 of 199`.
 
 **Ceiling** is the one thing that is not a tick, and it is worth setting first. It is a ceiling on what a ticked command may *do*: at `readonly` the assistant can look and change nothing, whatever you have ticked. Nothing below it can raise it.
 
