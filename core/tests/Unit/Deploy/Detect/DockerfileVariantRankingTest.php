@@ -36,7 +36,7 @@ class DockerfileVariantRankingTest extends TestCase
      *
      * @param list<string> $paths relative, directories created as needed
      */
-    private function repo(array $paths): ?string
+    private function repo(array $paths, bool $withListing = true): ?string
     {
         $root = $this->dir . '/' . bin2hex(random_bytes(4));
         mkdir($root, 0o777, true);
@@ -51,7 +51,19 @@ class DockerfileVariantRankingTest extends TestCase
             }
         }
 
-        return DockerfileFinder::find($root, $files);
+        return DockerfileFinder::find($root, $withListing ? $files : []);
+    }
+
+    /**
+     * engine#258: PortsReport asks with no listing, and the ranking rewrite
+     * only took the plain name from the listing -- so it found nothing and
+     * inspect lost the Dockerfile's EXPOSE.
+     */
+    public function test_the_plain_dockerfile_is_found_without_a_listing(): void
+    {
+        $this->assertSame('Dockerfile', $this->repo(['Dockerfile'], false));
+        $this->assertSame('Dockerfile', $this->repo(['Dockerfile', 'Dockerfile.prod', 'Dockerfile.dev'], false));
+        $this->assertSame('Dockerfile.prod', $this->repo(['Dockerfile.prod', 'Dockerfile.dev'], false));
     }
 
     public function test_a_plain_dockerfile_still_wins_over_every_variant(): void
