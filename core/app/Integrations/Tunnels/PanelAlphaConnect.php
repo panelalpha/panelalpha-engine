@@ -13,28 +13,28 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * PanelAlpha Hub: WithoutDNS names under *.panelalpha.online.
+ * PanelAlpha Connect: WithoutDNS names under *.panelalpha.online.
  *
- * The hub is an integration the engine *calls* — register, update, or release
+ * Connect is an integration the engine *calls* — register, update, or release
  * a public label. Telemetry goes somewhere else ({@see \App\Integrations\Monitoring\PanelAlphaMonitoring}).
  *
- * POST create-only; PUT/DELETE require full path FQDN and ownership on the hub.
- * Licensing answers on the same host (`hub.panelalpha.com`).
+ * POST create-only; PUT/DELETE require full path FQDN and ownership on Connect.
+ * Licensing answers on the same host (`connect.panelalpha.com`).
  */
-class PanelAlphaHub
+class PanelAlphaConnect
 {
     public const PARENT_DOMAIN = 'panelalpha.online';
 
-    /** The configured hub without its trailing slash, or '' when unset. */
+    /** The configured Connect URL without its trailing slash, or '' when unset. */
     public static function base(): string
     {
-        return rtrim(trim((string) config('hub.url', '')), '/');
+        return rtrim(trim((string) config('connect.url', '')), '/');
     }
 
     /**
-     * The hub this engine registers names with.
+     * Connect this engine registers names with.
      *
-     * Unlike telemetry, an empty hub cannot mean "do nothing quietly" here: a
+     * Unlike telemetry, an empty Connect URL cannot mean "do nothing quietly" here: a
      * caller is asking for a name it intends to serve, and posting that at a
      * relative URL would be worse than saying so. The exception the allocator
      * already handles is the honest answer.
@@ -44,7 +44,7 @@ class PanelAlphaHub
         $base = self::base();
         if ($base === '') {
             throw new PanelAlphaException(
-                'No PanelAlpha Hub is configured (PANELALPHA_HUB), so *.'
+                'No PanelAlpha Connect is configured (PANELALPHA_CONNECT), so *.'
                 . self::PARENT_DOMAIN . ' names cannot be registered.'
             );
         }
@@ -101,7 +101,7 @@ class PanelAlphaHub
     }
 
     /**
-     * Register {path}.panelalpha.online → target_domain @ target_ip via hub proxy.
+     * Register {path}.panelalpha.online → target_domain @ target_ip via the Connect proxy.
      *
      * @return array{
      *   path: string,
@@ -223,7 +223,7 @@ class PanelAlphaHub
     }
 
     /**
-     * Register *.panelalpha.online via the hub's WithoutDNS proxy (no DinD / CF token).
+     * Register *.panelalpha.online via Connect's WithoutDNS proxy (no DinD / CF token).
      * Caller must have already run {@see TunnelManager::assertCreatable}.
      */
     public static function createTunnel(User $user, Domain $domain, string $hostname): Tunnel

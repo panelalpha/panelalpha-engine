@@ -155,6 +155,18 @@ if ! grep -q '^APP_KEY=.\+' .env-core; then
         echo "APP_KEY=${APP_KEY}" >>.env-core
     fi
 fi
+# APP_UID identifies this install to Connect and monitoring. Kept once set; an
+# exported APP_UID is used instead of a generated one.
+if ! grep -q '^APP_UID=[^"'"'"' ]' .env-core; then
+    APP_UID="${APP_UID:-$(cat /proc/sys/kernel/random/uuid)}"
+    [[ "$APP_UID" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || { echo "APP_UID must be 1-128 of A-Z a-z 0-9 . _ : -" >&2; exit 1; }
+    if grep -q '^APP_UID=' .env-core; then
+        sed -i "s|^APP_UID=.*|APP_UID=${APP_UID}|" .env-core
+    else
+        [ -z "$(tail -c1 .env-core)" ] || echo "" >>.env-core
+        echo "APP_UID=${APP_UID}" >>.env-core
+    fi
+fi
 
 # Optional services sit behind compose profiles; see .env.example for the list.
 # --core-only (empty) leaves just the control plane: core (which also serves

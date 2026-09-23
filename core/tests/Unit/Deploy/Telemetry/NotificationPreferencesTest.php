@@ -32,10 +32,11 @@ class NotificationPreferencesTest extends TestCase
         ]);
         config([
             'monitoring.url' => 'https://monitoring.test',
-            'hub.url' => 'https://hub.example.test',
+            'connect.url' => 'https://connect.example.test',
             'telemetry.reports_path' => Telemetry::EVENTS_PATH,
             'telemetry.timeout' => 5,
             'telemetry.token' => '',
+            'app.uid' => 'install-42',
         ]);
     }
 
@@ -59,12 +60,13 @@ class NotificationPreferencesTest extends TestCase
             return $request->url() === Telemetry::endpoint()
                 && $request->url() === 'https://monitoring.test/api/v1/events'
                 && $request->hasHeader('License-Key', 'TEST-KEY')
+                && $request->hasHeader('X-Engine-App-UID', 'install-42')
                 && ($event['type'] ?? null) === 'notification.preferences'
                 && ($event['payload']['enabled'] ?? null) === true
                 && ($event['payload']['notify_email'] ?? null) === 'ops@example.test'
                 && ($event['payload']['server_probe_url'] ?? null) === 'https://engine.example.test';
         });
-        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'hub.example.test'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'connect.example.test'));
         $this->assertNotSame('', Setting::get(NotificationPreferences::SETTING_PREFS_HASH));
     }
 

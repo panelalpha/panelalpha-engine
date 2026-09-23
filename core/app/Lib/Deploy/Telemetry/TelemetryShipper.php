@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Telemetry;
 
+use App\Lib\Apis\PanelAlpha;
 use App\System;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -151,7 +152,7 @@ class TelemetryShipper
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
                 'User-Agent' => $this->userAgent(),
-            ] + $this->authHeader())
+            ] + $this->authHeader() + PanelAlpha::identityHeaders())
             ->timeout($timeout)
             // Never longer than the whole budget, and never more than ten
             // seconds waiting on a socket that is not going to open.
@@ -358,7 +359,7 @@ class TelemetryShipper
                     'Content-Type' => 'application/zip',
                     'User-Agent' => $this->userAgent(),
                     'Content-Length' => (string) filesize($bundlePath),
-                ])
+                ] + PanelAlpha::identityHeaders())
                 ->timeout((int) config('telemetry.source_bundle.upload_timeout', 120))
                 ->withBody($handle, 'application/zip')
                 ->post($endpoint);

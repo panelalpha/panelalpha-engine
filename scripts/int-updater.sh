@@ -166,8 +166,9 @@ check_version() {
 }
 
 request_download_token() {
-    # Hub package host resolves the caller by IP and returns a short-lived download token.
-    CURL_RESULTS=$(curl --http1.1 "https://${PACKAGE_HOST}/api/verify/request-download")
+    # Connect resolves the caller by IP and returns a short-lived download token.
+    CURL_RESULTS=$(curl --http1.1 -H "X-Engine-App-UID: ${APP_UID}" \
+        "https://${PACKAGE_HOST}/api/verify/request-download")
 
     TOKEN=$(echo "$CURL_RESULTS" | jq -r '.["license"].download_token // empty')
     DOWNLOAD_STATUS=$(echo "$CURL_RESULTS" | jq -r '.["license"].status // empty')
@@ -189,7 +190,7 @@ download_panelalpha_engine() {
     PACKAGE_URL+=$PANELALPHA_ENGINE_VERSION
 
     while true; do
-        STATUS=$(cd ''$INSTALL_DIR'' && curl --http1.1 -o app.zip -w '%{http_code}' ''$PACKAGE_URL'' --header 'Download-Token:'$TOKEN'')
+        STATUS=$(cd ''$INSTALL_DIR'' && curl --http1.1 -o app.zip -w '%{http_code}' ''$PACKAGE_URL'' --header 'Download-Token:'$TOKEN'' --header "X-Engine-App-UID: ${APP_UID}")
         if [ $STATUS -eq 200 ]; then
             echo_info "Success! Package has been downloaded"
             break
@@ -599,6 +600,41 @@ post_install_config() {
     bash /opt/panelalpha/shared-hosting/scripts/prewarm-images.sh || echo_warning "Could not start image prewarm"
 }
 
+# APP_UID identifies this install to Connect and to monitoring (X-Engine-App-UID).
+# A value already in .env-core wins, then one a provisioning script exported as
+# APP_UID; only when neither exists is one generated. Never overwritten.
+read_app_uid() {
+    [ -f "$1" ] || return 0
+    { grep '^APP_UID=' "$1" || true; } | tail -n1 | cut -d '=' -f2- | tr -d "\"' \r"
+}
+
+resolve_app_uid() {
+    local existing
+    existing=$(read_app_uid /opt/panelalpha/shared-hosting/.env-core)
+    if [ -n "$existing" ]; then
+        APP_UID="$existing"
+    elif [ -z "${APP_UID:-}" ]; then
+        APP_UID=$(cat /proc/sys/kernel/random/uuid)
+    fi
+    if ! [[ "$APP_UID" =~ ^[A-Za-z0-9._:-]{1,128}$ ]]; then
+        # cleared first: the exit trap reports with this header
+        local bad="$APP_UID"
+        APP_UID=''
+        echo_error "APP_UID must be 1-128 characters from A-Z a-z 0-9 . _ : - (got '${bad}')" 109
+    fi
+}
+
+persist_app_uid() {
+    local env_core=/opt/panelalpha/shared-hosting/.env-core
+    [ -n "$(read_app_uid "$env_core")" ] && return 0
+    if grep -q '^APP_UID=' "$env_core"; then
+        sed -i "s|^APP_UID=.*|APP_UID=${APP_UID}|" "$env_core"
+    else
+        [ -z "$(tail -c1 "$env_core")" ] || echo "" >>"$env_core"
+        echo "APP_UID=${APP_UID}" >>"$env_core"
+    fi
+}
+
 send_update_status() {
     local exit_code=${1:-0}
     local finished_at started_at tail_stdout tail_stderr from_version to_version total_ram cpu_cores os_name virtualization disk_free current_webserver
@@ -666,6 +702,7 @@ send_update_status() {
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
             -H "User-Agent: PanelAlpha-Engine/updater" \
+            ${APP_UID:+-H} ${APP_UID:+"X-Engine-App-UID: ${APP_UID}"} \
             -d @- >/dev/null 2>&1 || true
     } || true
 }
@@ -735,6 +772,11 @@ fi
 update_progress 5 "Checking current version"
 echo_info "Checking current version"
 check_version
+
+# Written now, not with the other files: a run that stops before the restart
+# must not mint a second UID next time. Core picks it up on that restart.
+resolve_app_uid
+persist_app_uid
 
 update_progress 10 "Requesting the download token"
 echo_info "Requesting the download token"

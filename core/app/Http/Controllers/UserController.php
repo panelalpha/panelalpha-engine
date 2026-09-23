@@ -24,7 +24,7 @@ use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Deploy\ProjectName;
-use App\Integrations\Tunnels\PanelAlphaHub;
+use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Domains\DomainAllocationException;
 use App\Lib\Domains\DomainAllocator;
 use App\Lib\Domains\DomainPlan;
@@ -767,7 +767,7 @@ class UserController extends Controller
         // project's own domain by construction, which is the one arrangement
         // where the Host the proxy forwards is the name a visitor typed.
         if ($allocated->tunnelProvider === Tunnel::PROVIDER_PANELALPHA && $allocated->allocation !== null) {
-            PanelAlphaHub::recordPanelAlphaTunnel($user, $domain, $allocated->allocation);
+            PanelAlphaConnect::recordPanelAlphaTunnel($user, $domain, $allocated->allocation);
         }
 
         return $user;

@@ -2,13 +2,13 @@
 
 namespace Tests\Unit\Integrations\Tunnels;
 
-use App\Integrations\Tunnels\PanelAlphaHub;
+use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Apis\PanelAlpha\PanelAlphaException;
 use App\Models\Setting;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
-class PanelAlphaHubTest extends TestCase
+class PanelAlphaConnectTest extends TestCase
 {
     protected function tearDown(): void
     {
@@ -18,20 +18,20 @@ class PanelAlphaHubTest extends TestCase
 
     public function test_path_from_hostname_parses_fqdn_and_label(): void
     {
-        $this->assertSame('admin-demo', PanelAlphaHub::pathFromHostname('admin-demo.panelalpha.online'));
-        $this->assertSame('admin-demo', PanelAlphaHub::pathFromHostname('Admin-Demo'));
-        $this->assertNull(PanelAlphaHub::pathFromHostname('foo.example.com'));
-        $this->assertNull(PanelAlphaHub::pathFromHostname('a.b.panelalpha.online'));
-        $this->assertNull(PanelAlphaHub::pathFromHostname('panelalpha.online'));
+        $this->assertSame('admin-demo', PanelAlphaConnect::pathFromHostname('admin-demo.panelalpha.online'));
+        $this->assertSame('admin-demo', PanelAlphaConnect::pathFromHostname('Admin-Demo'));
+        $this->assertNull(PanelAlphaConnect::pathFromHostname('foo.example.com'));
+        $this->assertNull(PanelAlphaConnect::pathFromHostname('a.b.panelalpha.online'));
+        $this->assertNull(PanelAlphaConnect::pathFromHostname('panelalpha.online'));
     }
 
     public function test_create_site_posts_expected_payload_with_bearer(): void
     {
         Setting::setRuntimeSettings(['license_key' => 'TEST-KEY-123']);
-        config(['hub.url' => 'https://hub.panelalpha.com']);
+        config(['connect.url' => 'https://connect.panelalpha.com']);
 
         Http::fake([
-            'hub.panelalpha.com/api/without-dns/sites' => Http::response([
+            'connect.panelalpha.com/api/without-dns/sites' => Http::response([
                 'status' => 'success',
                 'data' => [
                     'path' => 'admin-demo.panelalpha.online',
@@ -41,14 +41,14 @@ class PanelAlphaHubTest extends TestCase
             ], 200),
         ]);
 
-        $result = (new PanelAlphaHub())->createSite(
+        $result = (new PanelAlphaConnect())->createSite(
             'admin.37-27-20-6.panelalpha.direct',
             '37.27.20.6',
             'admin-demo.panelalpha.online'
         );
 
         Http::assertSent(function ($request) {
-            return $request->url() === 'https://hub.panelalpha.com/api/without-dns/sites'
+            return $request->url() === 'https://connect.panelalpha.com/api/without-dns/sites'
                 && $request->hasHeader('Authorization', 'Bearer TEST-KEY-123')
                 && $request['target_domain'] === 'admin.37-27-20-6.panelalpha.direct'
                 && $request['target_ip'] === '37.27.20.6'
@@ -67,10 +67,10 @@ class PanelAlphaHubTest extends TestCase
     public function test_create_site_omits_bearer_when_no_license_key(): void
     {
         Setting::setRuntimeSettings(['license_key' => '']);
-        config(['hub.url' => 'https://hub.panelalpha.com']);
+        config(['connect.url' => 'https://connect.panelalpha.com']);
 
         Http::fake([
-            'hub.panelalpha.com/api/without-dns/sites' => Http::response([
+            'connect.panelalpha.com/api/without-dns/sites' => Http::response([
                 'status' => 'success',
                 'data' => [
                     'path' => 'no-key.panelalpha.online',
@@ -79,7 +79,7 @@ class PanelAlphaHubTest extends TestCase
             ], 200),
         ]);
 
-        (new PanelAlphaHub())->createSite('local.test', '203.0.113.10', 'no-key');
+        (new PanelAlphaConnect())->createSite('local.test', '203.0.113.10', 'no-key');
 
         Http::assertSent(function ($request) {
             return !$request->hasHeader('Authorization')
@@ -90,10 +90,10 @@ class PanelAlphaHubTest extends TestCase
     public function test_update_site_puts_fqdn_url(): void
     {
         Setting::setRuntimeSettings(['license_key' => 'KEY']);
-        config(['hub.url' => 'https://hub.panelalpha.com']);
+        config(['connect.url' => 'https://connect.panelalpha.com']);
 
         Http::fake([
-            'hub.panelalpha.com/api/without-dns/sites/*' => Http::response([
+            'connect.panelalpha.com/api/without-dns/sites/*' => Http::response([
                 'status' => 'success',
                 'data' => [
                     'path' => 'admin-demo.panelalpha.online',
@@ -102,7 +102,7 @@ class PanelAlphaHubTest extends TestCase
             ], 200),
         ]);
 
-        $result = (new PanelAlphaHub())->updateSite(
+        $result = (new PanelAlphaConnect())->updateSite(
             'admin-demo.panelalpha.online',
             'local.test',
             '203.0.113.10'
@@ -110,7 +110,7 @@ class PanelAlphaHubTest extends TestCase
 
         Http::assertSent(function ($request) {
             return $request->method() === 'PUT'
-                && $request->url() === 'https://hub.panelalpha.com/api/without-dns/sites/admin-demo.panelalpha.online'
+                && $request->url() === 'https://connect.panelalpha.com/api/without-dns/sites/admin-demo.panelalpha.online'
                 && $request['target_domain'] === 'local.test'
                 && $request['target_ip'] === '203.0.113.10';
         });
@@ -121,50 +121,50 @@ class PanelAlphaHubTest extends TestCase
     public function test_delete_site_calls_delete_on_fqdn(): void
     {
         Setting::setRuntimeSettings(['license_key' => 'KEY']);
-        config(['hub.url' => 'https://hub.panelalpha.com']);
+        config(['connect.url' => 'https://connect.panelalpha.com']);
 
         Http::fake([
-            'hub.panelalpha.com/api/without-dns/sites/*' => Http::response(null, 204),
+            'connect.panelalpha.com/api/without-dns/sites/*' => Http::response(null, 204),
         ]);
 
-        (new PanelAlphaHub())->deleteSite('gone.panelalpha.online');
+        (new PanelAlphaConnect())->deleteSite('gone.panelalpha.online');
 
         Http::assertSent(function ($request) {
             return $request->method() === 'DELETE'
-                && $request->url() === 'https://hub.panelalpha.com/api/without-dns/sites/gone.panelalpha.online';
+                && $request->url() === 'https://connect.panelalpha.com/api/without-dns/sites/gone.panelalpha.online';
         });
     }
 
     public function test_delete_site_treats_404_as_success(): void
     {
         Setting::clearRuntimeSettings();
-        config(['hub.url' => 'https://hub.panelalpha.com']);
+        config(['connect.url' => 'https://connect.panelalpha.com']);
 
         Http::fake([
             '*' => Http::response(['status' => 'error', 'message' => 'Site not found'], 404),
         ]);
 
-        (new PanelAlphaHub())->deleteSite('missing.panelalpha.online');
+        (new PanelAlphaConnect())->deleteSite('missing.panelalpha.online');
         $this->assertTrue(true);
     }
 
-    public function test_no_hub_configured_is_an_error_not_a_relative_url(): void
+    public function test_no_connect_configured_is_an_error_not_a_relative_url(): void
     {
         Setting::setRuntimeSettings(['license_key' => '']);
-        config(['hub.url' => '']);
+        config(['connect.url' => '']);
 
         Http::fake();
 
         $this->expectException(PanelAlphaException::class);
-        $this->expectExceptionMessage('No PanelAlpha Hub is configured');
+        $this->expectExceptionMessage('No PanelAlpha Connect is configured');
 
-        (new PanelAlphaHub())->createSite('local.test', '203.0.113.10', 'nowhere');
+        (new PanelAlphaConnect())->createSite('local.test', '203.0.113.10', 'nowhere');
     }
 
     public function test_create_site_surfaces_409_conflict(): void
     {
         Setting::setRuntimeSettings(['license_key' => '']);
-        config(['hub.url' => 'https://hub.panelalpha.com']);
+        config(['connect.url' => 'https://connect.panelalpha.com']);
 
         Http::fake([
             '*' => Http::response([
@@ -176,7 +176,7 @@ class PanelAlphaHubTest extends TestCase
         $this->expectException(PanelAlphaException::class);
         $this->expectExceptionMessage('Site already exists. Use PUT to update.');
 
-        (new PanelAlphaHub())->createSite('local.test', '203.0.113.10', 'taken');
+        (new PanelAlphaConnect())->createSite('local.test', '203.0.113.10', 'taken');
     }
 
     /**
@@ -186,7 +186,7 @@ class PanelAlphaHubTest extends TestCase
      */
     public function test_a_panelalpha_name_on_the_domain_of_the_same_name_serves_its_own_name(): void
     {
-        $this->assertTrue(PanelAlphaHub::servesItsOwnPublicName(
+        $this->assertTrue(PanelAlphaConnect::servesItsOwnPublicName(
             'shop.panelalpha.online',
             'shop.panelalpha.online',
             'panelalpha'
@@ -195,7 +195,7 @@ class PanelAlphaHubTest extends TestCase
 
     public function test_case_and_padding_do_not_change_the_answer(): void
     {
-        $this->assertTrue(PanelAlphaHub::servesItsOwnPublicName(
+        $this->assertTrue(PanelAlphaConnect::servesItsOwnPublicName(
             '  Shop.PanelAlpha.Online ',
             'shop.panelalpha.online',
             'PanelAlpha'
@@ -204,7 +204,7 @@ class PanelAlphaHubTest extends TestCase
 
     public function test_a_different_local_domain_is_not_serving_its_own_name(): void
     {
-        $this->assertFalse(PanelAlphaHub::servesItsOwnPublicName(
+        $this->assertFalse(PanelAlphaConnect::servesItsOwnPublicName(
             'shop.178-104-84-45.panelalpha.direct',
             'shop.panelalpha.online',
             'panelalpha'
@@ -216,7 +216,7 @@ class PanelAlphaHubTest extends TestCase
         // A Cloudflare tunnel points a name in the customer's own zone at the
         // connector; a name the engine already serves directly is a conflict
         // there, not an arrangement.
-        $this->assertFalse(PanelAlphaHub::servesItsOwnPublicName(
+        $this->assertFalse(PanelAlphaConnect::servesItsOwnPublicName(
             'shop.example.com',
             'shop.example.com',
             'cloudflare'

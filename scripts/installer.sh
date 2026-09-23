@@ -33,11 +33,11 @@ PANELALPHA_ENGINE_VERSION="${PANELALPHA_ENGINE_VERSION:-}"
 PACKAGE_HOST='connect.panelalpha.com'
 MONITORING_HOST="${PANELALPHA_MONITORING_HOST:-monitoring.panelalpha.com}"
 STARTED_AT=$(date +%s || echo 0)
-# Installed when the version lookup fails (legacy hub path only). Bump at release.
+# Installed when the version lookup fails (legacy Connect path only). Bump at release.
 FALLBACK_ENGINE_VERSION='2.0.1'
 # Git URL for the engine tree. Default is the public GitHub mirror. Credentials may
-# be embedded (https://user:token@host/...). Empty string forces the legacy hub package path.
-# "unset" vs empty: get.sh always exports a default; clearing the var opts into hub.
+# be embedded (https://user:token@host/...). Empty string forces the legacy Connect package path.
+# "unset" vs empty: get.sh always exports a default; clearing the var opts into Connect.
 if [ "${PANELALPHA_ENGINE_REPO+x}" = x ]; then
     ENGINE_REPO="${PANELALPHA_ENGINE_REPO}"
 else
@@ -126,7 +126,7 @@ usage() {
     cat <<'USAGE'
 Usage: bash installer.sh [options]
 
-  -v, --version REF        git ref / release (default: main with ENGINE_REPO, else newest hub release)
+  -v, --version REF        git ref / release (default: main with ENGINE_REPO, else newest Connect release)
   -host, --hostname HOST   hostname to install under
       --domain FQDN        serve the engine on your own name. Point an A
                            record at this host first; the certificate is
@@ -149,7 +149,7 @@ Usage: bash installer.sh [options]
                            is left alone.
       --branch REF         branch, tag or commit for --repo
       --git-token TOKEN    HTTPS access token for a private --repo
-  -p, --package-host HOST  package host (legacy hub path only)
+  -p, --package-host HOST  package host (legacy Connect path only)
       --monitoring-host H  monitoring host for install status (default: monitoring.panelalpha.com)
   -d, --debug              set -x
       --no-local-ip        resolve the public IP when the default route is private
@@ -375,6 +375,41 @@ echo_error() {
     exit 101
 }
 
+# APP_UID identifies this install to Connect and to monitoring (X-Engine-App-UID).
+# A value already in .env-core wins, then one a provisioning script exported as
+# APP_UID; only when neither exists is one generated. Never overwritten.
+read_app_uid() {
+    [ -f "$1" ] || return 0
+    { grep '^APP_UID=' "$1" || true; } | tail -n1 | cut -d '=' -f2- | tr -d "\"' \r"
+}
+
+resolve_app_uid() {
+    local existing
+    existing=$(read_app_uid /opt/panelalpha/shared-hosting/.env-core)
+    if [ -n "$existing" ]; then
+        APP_UID="$existing"
+    elif [ -z "${APP_UID:-}" ]; then
+        APP_UID=$(cat /proc/sys/kernel/random/uuid)
+    fi
+    if ! [[ "$APP_UID" =~ ^[A-Za-z0-9._:-]{1,128}$ ]]; then
+        # cleared first: the exit trap reports with this header
+        local bad="$APP_UID"
+        APP_UID=''
+        echo_error "APP_UID must be 1-128 characters from A-Z a-z 0-9 . _ : - (got '${bad}')"
+    fi
+}
+
+persist_app_uid() {
+    local env_core=/opt/panelalpha/shared-hosting/.env-core
+    [ -n "$(read_app_uid "$env_core")" ] && return 0
+    if grep -q '^APP_UID=' "$env_core"; then
+        sed -i "s|^APP_UID=.*|APP_UID=${APP_UID}|" "$env_core"
+    else
+        [ -z "$(tail -c1 "$env_core")" ] || echo "" >>"$env_core"
+        echo "APP_UID=${APP_UID}" >>"$env_core"
+    fi
+}
+
 # Report install/update outcome to monitoring (Engine emails / probes).
 send_update_status() {
     local exit_code=${1:-0}
@@ -433,6 +468,7 @@ send_update_status() {
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
             -H "User-Agent: PanelAlpha-Engine/installer" \
+            ${APP_UID:+-H} ${APP_UID:+"X-Engine-App-UID: ${APP_UID}"} \
             -d @- >/dev/null 2>&1 || true
     } || true
 }
@@ -460,7 +496,7 @@ resolve_engine_version() {
         return
     fi
 
-    # Legacy hub path (ENGINE_REPO explicitly cleared).
+    # Legacy Connect path (ENGINE_REPO explicitly cleared).
     if [ -n "$REPO_TOKEN" ]; then
         PANELALPHA_ENGINE_VERSION="$REPO_REF"
         echo_info "Installing PanelAlpha Engine ${PANELALPHA_ENGINE_VERSION} from ${REPO_PROJECT}"
@@ -469,7 +505,7 @@ resolve_engine_version() {
 
     echo_info "Resolving the latest release"
     PANELALPHA_ENGINE_VERSION=$(curl --http1.1 -fsSL --max-time 15 \
-        "https://${PACKAGE_HOST}/engine-latest" 2>/dev/null | tr -d ' \t\r\n' || true)
+        -H "X-Engine-App-UID: ${APP_UID}" "https://${PACKAGE_HOST}/engine-latest" 2>/dev/null | tr -d ' \t\r\n' || true)
 
     case "$PANELALPHA_ENGINE_VERSION" in
     '' | *[!0-9A-Za-z.-]*)
@@ -642,8 +678,9 @@ get_hostname() {
 }
 
 request_download_token() {
-    # Hub package host resolves the caller by IP and returns a short-lived download token.
-    CURL_RESULTS=$(curl --http1.1 "https://${PACKAGE_HOST}/api/verify/request-download")
+    # Connect resolves the caller by IP and returns a short-lived download token.
+    CURL_RESULTS=$(curl --http1.1 -H "X-Engine-App-UID: ${APP_UID}" \
+        "https://${PACKAGE_HOST}/api/verify/request-download")
 
     TOKEN=$(echo "$CURL_RESULTS" | jq -r '.["license"].download_token // empty')
     DOWNLOAD_STATUS=$(echo "$CURL_RESULTS" | jq -r '.["license"].status // empty')
@@ -676,7 +713,7 @@ install_docker_engine() {
 }
 
 # Git URL for the engine tree. Prefer PANELALPHA_ENGINE_REPO (credentials may be
-# embedded). Empty string forces the legacy hub package path.
+# embedded). Empty string forces the legacy Connect package path.
 download_engine_from_repository() {
     local safe
     safe=$(redact_repo_url "$ENGINE_REPO")
@@ -742,7 +779,7 @@ download_panelalpha_engine() {
     PACKAGE_URL+=$PANELALPHA_ENGINE_VERSION
 
     while true; do
-        STATUS=$(cd ''$INSTALL_DIR'' && curl --http1.1 -o app.zip -w '%{http_code}' ''$PACKAGE_URL'' --header 'Download-Token:'$TOKEN'')
+        STATUS=$(cd ''$INSTALL_DIR'' && curl --http1.1 -o app.zip -w '%{http_code}' ''$PACKAGE_URL'' --header 'Download-Token:'$TOKEN'' --header "X-Engine-App-UID: ${APP_UID}")
         if [ $STATUS -eq 200 ]; then
             echo_info "Success! Package has been downloaded"
             break
@@ -1023,6 +1060,8 @@ EOF
             echo "APP_KEY=${APP_KEY}" >>/opt/panelalpha/shared-hosting/.env-core
         fi
     fi
+
+    persist_app_uid
 
     # how account containers are isolated; empty leaves the app default (sysbox)
     if [ -n "$DIND_RUNTIME" ]; then
@@ -1435,6 +1474,7 @@ if [ "$CONFIGURE_MODE" = 1 ]; then
 fi
 
 define_variables
+resolve_app_uid
 
 case "$ENGINE_OP" in
 install | update) ;;

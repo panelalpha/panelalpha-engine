@@ -109,8 +109,8 @@ class Telemetry
     /**
      * The configured route, or this engine's own answer when nothing set one.
      *
-     * A blank override means "unset", not "post at the hub root": an empty path
-     * would send reports to whatever the hub serves at `/` — a web page.
+     * A blank override means "unset", not "post at the host root": an empty path
+     * would send reports to whatever that host serves at `/` — a web page.
      */
     public static function eventsPath(): string
     {
@@ -122,8 +122,8 @@ class Telemetry
     /**
      * Where a batch of reports is POSTed, or '' when nothing is configured.
      *
-     * {@see PanelAlphaMonitoring}, not the hub: the hub is an integration the
-     * engine calls to get something done. Addressing telemetry at the hub made
+     * {@see PanelAlphaMonitoring}, not Connect: Connect is an integration the
+     * engine calls to get something done. Addressing telemetry at Connect made
      * it 405.
      */
     public static function endpoint(): string
@@ -687,7 +687,7 @@ class Telemetry
      *
      * Refusals, each an error instead of a silent no-op: `disabled` (telemetry
      * or bug reports off, so nothing would ship it), `invalid` (no project,
-     * title or description), `no-project`, `not-ready` (no hub configured, or
+     * title or description), `no-project`, `not-ready` (no monitoring host configured, or
      * no fingerprint), `failed` (the spool could not be written).
      *
      * Only `queued` means it will be sent, by the next `telemetry:ship` run.

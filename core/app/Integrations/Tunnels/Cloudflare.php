@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Log;
  *
  * Token, remote cfd_tunnel, DNS CNAME, ingress from ProxyRules, and cloudflared
  * under supervisord. Public hostname rows live in `tunnels`; PanelAlpha Online
- * is {@see PanelAlphaHub}, dispatched by {@see TunnelManager}.
+ * is {@see PanelAlphaConnect}, dispatched by {@see TunnelManager}.
  */
 class Cloudflare
 {

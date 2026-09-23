@@ -41,7 +41,7 @@ class BugReportApiTest extends TestCase
             'telemetry.bug_reports.enabled' => true,
             'telemetry.spool_dir' => $this->spoolDir,
             'telemetry.pin_file' => $this->pinFile,
-            'hub.url' => 'https://hub.test',
+            'monitoring.url' => 'https://monitoring.test',
         ]);
         Telemetry::resetCache();
     }
@@ -136,9 +136,9 @@ class BugReportApiTest extends TestCase
         $this->assertSame([], glob($this->spoolDir . '/*.json') ?: []);
     }
 
-    public function test_no_hub_is_a_not_yet(): void
+    public function test_no_monitoring_host_is_a_not_yet(): void
     {
-        config(['hub.url' => '']);
+        config(['monitoring.url' => '']);
         $this->authenticate();
 
         $this->postJson('/api/bug-reports', $this->payload())->assertStatus(503);

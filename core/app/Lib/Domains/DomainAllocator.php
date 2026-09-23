@@ -2,7 +2,7 @@
 
 namespace App\Lib\Domains;
 
-use App\Integrations\Tunnels\PanelAlphaHub;
+use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Apis\PanelAlpha\PanelAlphaException;
 use App\Models\Domain;
 use App\Models\Setting;
@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Log;
  * for it where the name has to be bought.
  *
  * This is the impure half: it reads settings, asks the database whether a
- * name is taken, and calls the hub's proxy. What it must never do is
+ * name is taken, and calls Connect's proxy. What it must never do is
  * fail. A project whose preferred name was unavailable still gets a name --
  * one rung down, with `fallback_reason` saying which rung was skipped and
  * why. The single exception is a name the caller typed itself: silently
@@ -128,7 +128,7 @@ class DomainAllocator
                 // The proxy forwards with the Host of the domain it is told to
                 // target, so the target is the public name itself. That is what
                 // lets the application be installed under the name visitors type.
-                $created = (new PanelAlphaHub())->createSite($fqdn, $targetIp, $label);
+                $created = (new PanelAlphaConnect())->createSite($fqdn, $targetIp, $label);
             } catch (PanelAlphaException $e) {
                 if (self::nameIsTaken($e->getMessage())) {
                     if ($requestedByCaller) {

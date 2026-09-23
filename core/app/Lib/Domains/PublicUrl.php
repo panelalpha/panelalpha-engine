@@ -16,7 +16,7 @@ use App\Lib\Ssl\CertificateStatus;
  * that resolves nowhere, behind a certificate no browser accepts, finished as
  * a clean success and was reported to the fleet as one.
  *
- * The case that made it worth writing down is the licensing one. When the hub
+ * The case that made it worth writing down is the licensing one. When Connect
  * will not sell a `panelalpha.online` label -- an expired key, an unreachable
  * proxy -- {@see DomainAllocator} does not fail the creation: it drops a rung
  * and the project is built under `<name>.local` with a self-signed
@@ -104,7 +104,7 @@ final class PublicUrl
 
         // Why the better name was not had. This is the field that names the
         // licensing failure, and it is the whole reason an operator can tell
-        // "the hub refused us" from "this engine has no public address".
+        // "Connect refused us" from "this engine has no public address".
         $reason = $allocation['fallback_reason'] ?? null;
         if (is_string($reason) && trim($reason) !== '') {
             $message .= ' The public name was skipped: ' . rtrim(trim($reason), '.') . '.';

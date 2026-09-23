@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Log;
 /**
  * Shared tunnel entry point: guards + dispatch to Cloudflare or PanelAlpha Online.
  *
- * Provider-specific work lives in {@see Cloudflare} and {@see PanelAlphaHub}.
+ * Provider-specific work lives in {@see Cloudflare} and {@see PanelAlphaConnect}.
  * Controllers and console commands call this class so create/delete/sync rules
  * stay in one place.
  */
@@ -57,7 +57,7 @@ class TunnelManager
         // name its visitors typed, instead of an internal one it will
         // redirect away from. Anything else claiming the name is still a
         // conflict.
-        $attachedToItsOwnName = PanelAlphaHub::servesItsOwnPublicName(
+        $attachedToItsOwnName = PanelAlphaConnect::servesItsOwnPublicName(
             (string) $domain->domain,
             $hostname,
             $provider
@@ -78,7 +78,7 @@ class TunnelManager
             Cloudflare::clientFor($user);
         }
         if ($provider === Tunnel::PROVIDER_PANELALPHA) {
-            PanelAlphaHub::assertPanelAlphaOnlineHostname($hostname);
+            PanelAlphaConnect::assertPanelAlphaOnlineHostname($hostname);
         }
 
         return [$hostname, $provider];
@@ -97,7 +97,7 @@ class TunnelManager
         }
 
         if ($provider === Tunnel::PROVIDER_PANELALPHA) {
-            return PanelAlphaHub::createTunnel($user, $domain, $hostname);
+            return PanelAlphaConnect::createTunnel($user, $domain, $hostname);
         }
 
         throw new CloudflareException("Unsupported tunnel provider '{$provider}'.");
@@ -119,7 +119,7 @@ class TunnelManager
         if ($wasCloudflare) {
             Cloudflare::teardownHostname($user, $tunnel);
         } elseif ($tunnel->isPanelAlpha()) {
-            PanelAlphaHub::deleteTunnelRemote($tunnel);
+            PanelAlphaConnect::deleteTunnelRemote($tunnel);
         }
 
         $tunnel->delete();
@@ -149,7 +149,7 @@ class TunnelManager
 
     /**
      * After ProxyRule changes: push upstream into provider-specific tunnel config.
-     * Cloudflare: ingress + DNS. PanelAlpha Online: no-op (hub does not track upstream port).
+     * Cloudflare: ingress + DNS. PanelAlpha Online: no-op (Connect does not track upstream port).
      */
     public static function syncFromProxyRules(User $user, Domain $domain): void
     {

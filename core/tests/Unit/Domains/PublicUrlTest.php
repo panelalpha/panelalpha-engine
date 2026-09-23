@@ -73,7 +73,7 @@ class PublicUrlTest extends TestCase
         $this->assertStringContainsString('not reachable from the internet', $warnings[0]);
         $this->assertStringContainsString('shop.local', $warnings[0]);
         // The reason travels with the warning: this is what tells an operator
-        // the hub refused them rather than that the host has no address.
+        // Connect refused them rather than that the host has no address.
         $this->assertStringContainsString('License is not valid (HTTP 403)', $warnings[0]);
         $this->assertStringContainsString('browsers will refuse', $warnings[1]);
         $this->assertStringContainsString('self_signed', $warnings[1]);

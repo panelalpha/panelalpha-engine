@@ -36,7 +36,7 @@ class TelemetryStatusCommand extends Command
             ['Local log', $this->localLog()],
             ['Tier', $this->tierLabel(Telemetry::tier())],
             ['Source bundles', $this->bundleLabel(Telemetry::sourceBundleMode())],
-            ['Endpoint', $endpoint === '' ? '(no hub set — reports are held, not sent)' : $endpoint],
+            ['Endpoint', $endpoint === '' ? '(no monitoring host set — reports are held, not sent)' : $endpoint],
             ['Install ID', $installId === '' ? '(could not derive)' : $installId],
             ['Pin file', (string) config('telemetry.pin_file')],
             ['Spool', Telemetry::spool()->dir()],

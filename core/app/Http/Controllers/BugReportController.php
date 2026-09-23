@@ -30,7 +30,7 @@ use OpenApi\Attributes as OA;
  * moment the report is filed rather than remembered.
  *
  * Everything downstream is shared with the install events — the same spool, the
- * same `telemetry:ship` run, the same batch to the same hub — so an install
+ * same `telemetry:ship` run, the same batch to the same monitoring host — so an install
  * that already reports deploys needs no new configuration, no new port and no
  * new credential to file a bug. Reports leave as `support.bug_report`.
  *
@@ -64,7 +64,7 @@ class BugReportController extends Controller
             . 'exception and the one field that identifies a person: it is sent exactly as given, '
             . 'is never filled in automatically, and is omitted entirely when not supplied. '
             . 'Requires telemetry to be enabled (`TELEMETRY_ENABLED`, `TELEMETRY_BUG_REPORTS`) and '
-            . 'a hub to be configured; otherwise the call fails rather than dropping the report.',
+            . 'a monitoring host to be configured; otherwise the call fails rather than dropping the report.',
         security: [['bearerAuth' => []]],
         tags: ['Bug Reports'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -175,7 +175,7 @@ class BugReportController extends Controller
             ),
             new OA\Response(
                 response: 503,
-                description: 'The install cannot send reports yet: no hub configured, no install id, '
+                description: 'The install cannot send reports yet: no monitoring host configured, no install id, '
                     . 'or the spool could not be written',
                 content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')
             ),
@@ -249,7 +249,7 @@ class BugReportController extends Controller
      * ever work. `no-project` is a name that does not exist here — 404, the
      * same answer every other route gives for it. `disabled` is a decision
      * somebody made on this install and no retry changes it — 409.
-     * `not-ready` and `failed` are a hub that has not been configured, a
+     * `not-ready` and `failed` are a monitoring host that has not been configured, a
      * machine that could not fingerprint itself, or a full disk: all of them
      * are "not now", so 503 and an honest sentence.
      */

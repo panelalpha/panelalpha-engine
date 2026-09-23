@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Telemetry;
 
+use App\Lib\Apis\PanelAlpha;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
@@ -137,7 +138,7 @@ final class NotificationPreferences
             'Content-Type' => 'application/json',
             'Accept' => 'application/json',
             'User-Agent' => 'PanelAlpha-Engine/notification-preferences',
-        ];
+        ] + PanelAlpha::identityHeaders();
         $licenseKey = Setting::get('license_key');
         if (is_string($licenseKey) && $licenseKey !== '') {
             $headers['License-Key'] = $licenseKey;

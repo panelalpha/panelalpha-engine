@@ -46,7 +46,7 @@ return [
     /*
     | The route that accepts a batch of reports, as `telemetry-ingest-spec.md`
     | declares it. The host it hangs off is config('monitoring.url') -- the
-    | monitoring service, not the hub: the hub is an integration the engine
+    | monitoring service, not Connect: Connect is an integration the engine
     | calls, monitoring is where it reports. Telemetry::endpoint() is the two
     | joined, and moving an install to a staging ingest is the host variable
     | alone.

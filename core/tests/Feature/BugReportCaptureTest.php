@@ -129,7 +129,7 @@ class BugReportCaptureTest extends TestCase
         $this->assertSame([], $this->spooled());
     }
 
-    public function test_no_hub_means_not_yet_rather_than_no(): void
+    public function test_no_monitoring_host_means_not_yet_rather_than_no(): void
     {
         config(['monitoring.url' => '']);
 
