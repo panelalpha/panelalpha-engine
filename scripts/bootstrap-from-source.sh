@@ -12,6 +12,7 @@
 #                                         [--services "core nginx ..."]
 #                                         [--profiles "hosting,mail" | --core-only]
 #                                         [--dind-runtime privileged] [--mtu 1400]
+#                                         [--domain panel.example.com]
 
 set -euo pipefail
 
@@ -46,6 +47,7 @@ resolve_composer_image() {
 }
 
 PUBLIC_IP=''
+CERT_DOMAIN=''
 INSTALL_SYSBOX=1
 INSTALL_DOCKER=1
 FORCE_COMPOSER=0
@@ -60,6 +62,7 @@ DOCKER_NETWORK_MTU=1500
 while [ $# -gt 0 ]; do
     case "$1" in
     --ip) PUBLIC_IP="$2"; shift 2 ;;
+    --domain) CERT_DOMAIN="$2"; shift 2 ;;
     --no-sysbox) INSTALL_SYSBOX=0; shift ;;
     --no-docker-install) INSTALL_DOCKER=0; shift ;;
     --composer) FORCE_COMPOSER=1; shift ;;
@@ -70,7 +73,7 @@ while [ $# -gt 0 ]; do
     --core-only) PROFILES=''; SET_PROFILES=1; shift ;;
     --dind-runtime) DIND_RUNTIME="$2"; shift 2 ;;
     --mtu) DOCKER_NETWORK_MTU="$2"; shift 2 ;;
-    -h | --help) sed -n '2,12p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -464,10 +467,23 @@ bash scripts/pae-command.sh register || warn "Could not install the pae command"
 # ------------------------------------------------------- certificate and prewarm
 if [ "$HARDEN" = 1 ]; then
     if ! ipcalc "$PUBLIC_IP" | grep -q 'Private Internet'; then
-        step "Requesting a Let's Encrypt certificate for ${PUBLIC_IP}"
-        bash scripts/letsencrypt-request-ip-cert.sh "$PUBLIC_IP" || warn "Let's Encrypt IP request failed"
-        step "Requesting a Let's Encrypt certificate for the engine's domain"
-        bash scripts/letsencrypt-request-cert.sh --ip "$PUBLIC_IP" || warn "Let's Encrypt domain request failed — staying on the self-signed cert"
+        # Same rule as installer.sh: with no name asked for, the address is the
+        # name. The .panelalpha.direct default spends a weekly allowance every
+        # engine shares, so a domain certificate is only requested for --domain
+        # or a cert_domain already set (a re-run must not drop an existing name).
+        [ -n "$CERT_DOMAIN" ] ||
+            CERT_DOMAIN=$(docker compose exec -T core php artisan settings:get cert_domain 2>/dev/null | tr -d '\r' | tail -n 1)
+        if [ -z "$CERT_DOMAIN" ]; then
+            step "Requesting a Let's Encrypt certificate for ${PUBLIC_IP}"
+            bash scripts/letsencrypt-request-ip-cert.sh "$PUBLIC_IP" --install ||
+                warn "Let's Encrypt IP request failed — staying on the self-signed cert"
+        else
+            step "Requesting a Let's Encrypt certificate for ${PUBLIC_IP} (kept as the fallback)"
+            bash scripts/letsencrypt-request-ip-cert.sh "$PUBLIC_IP" || warn "Let's Encrypt IP request failed"
+            step "Requesting a Let's Encrypt certificate for ${CERT_DOMAIN}"
+            bash scripts/letsencrypt-request-cert.sh --domain "$CERT_DOMAIN" --ip "$PUBLIC_IP" ||
+                warn "Let's Encrypt request for ${CERT_DOMAIN} failed — staying on the current cert"
+        fi
     else
         warn "${PUBLIC_IP} is private — staying on the self-signed certificate"
     fi
