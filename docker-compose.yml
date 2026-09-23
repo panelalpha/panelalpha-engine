@@ -263,22 +263,20 @@ services:
   # without handing the tenant the secret. Like cache-registry, the container
   # name is load-bearing -- every account daemon names it in `registry-mirrors`.
   #
-  # Failure here is a slowdown, not an outage: dockerd wraps an error from a
-  # mirror endpoint as a fallbackError and retries the whole pull against Hub
-  # (moby continueOnError), so the worst case is one unauthenticated re-pull.
+  # A broken mirror is an outage, not a slowdown. dockerd falls back to Hub
+  # only when the mirror errors; a mirror that answers 200 with a truncated
+  # blob fails the pull with `unexpected commit digest` (containerd image
+  # store), and the build dies. That is what a full 512m tmpfs did (#285).
   #
-  # Nothing is kept for long. `proxy.ttl` expires an entry an hour after it is
-  # fetched, and `storage.delete.enabled` is what makes that expiry free the
+  # Nothing is kept for long. `proxy.ttl` expires an entry this long after it
+  # is fetched, and `storage.delete.enabled` is what makes that expiry free the
   # bytes -- it defaults to false, and with it off the scheduler still runs and
   # reclaims nothing. Manifest expiry drops only the tag link, so a few KB per
-  # repository survive. Nothing reclaims those on a schedule: it is ~28KB per
-  # manifest digest against a tmpfs that empties on every stack restart, and
-  # clearing it means taking the proxy away from whatever is mid-deploy.
-  # `system:registry-proxy:trim` does it by hand if a host ever needs it.
+  # repository survive; `system:registry-proxy:trim` clears them by hand.
   #
-  # Storage is a tmpfs because the image declares `VOLUME /var/lib/registry`;
-  # left unmounted it lands on disk as an anonymous volume. The tag is pinned
-  # because 3.x moved the config path the stock entrypoint reads.
+  # Storage is a named volume on disk: one uncached base image can be larger
+  # than any tmpfs worth reserving in RAM. The tag is pinned because 3.x moved
+  # the config path the stock entrypoint reads.
   registry-proxy:
     profiles: ["registry-proxy", "full"]
     image: registry:3.1.1
@@ -296,8 +294,8 @@ services:
       REGISTRY_LOG_LEVEL: ${REGISTRY_PROXY_LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:5001:5000"
-    tmpfs:
-      - /var/lib/registry:size=${REGISTRY_PROXY_SIZE:-512m},mode=0700
+    volumes:
+      - registry-proxy-data:/var/lib/registry
     mem_limit: ${MEM_LIMIT_REGISTRY_PROXY:-1G}
     memswap_limit: ${MEMSWAP_LIMIT_REGISTRY_PROXY:-0}
   lighthouse:
@@ -319,6 +317,7 @@ volumes:
   core-storage: {}
   database-core-data: {}
   database-users-data: {}
+  registry-proxy-data: {}
 networks:
   default:
     name: pash-default-network

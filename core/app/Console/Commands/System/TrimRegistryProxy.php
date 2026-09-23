@@ -6,7 +6,7 @@ use App\System;
 use Illuminate\Console\Command;
 
 /**
- * Clear the Docker Hub proxy's cache by restarting it.
+ * Clear the Docker Hub proxy's cache: wipe its store, then restart it.
  *
  * The proxy expires its own entries (`proxy.ttl`, with `storage.delete.enabled`
  * so expiry frees the bytes rather than only running), which covers the layer
@@ -14,17 +14,14 @@ use Illuminate\Console\Command;
  * manifest link and never calls the vacuum, so the manifest blob and its tag
  * links stay on disk for good. Kilobytes per digest, forever.
  *
- * The store is a tmpfs, so a restart is what fully clears it -- blobs,
- * manifests, tag links and scheduler state alike -- and it needs no shell and
- * no `rm`.
+ * The store is a named volume (#285), so a restart alone keeps everything.
+ * The wipe removes the storage tree and scheduler-state.json; the restart
+ * then drops the scheduler's in-memory copy of the entries it just lost.
  *
  * Nothing schedules this, deliberately. A restart takes the proxy away for a
- * couple of seconds, and while an account daemon should fall through to
- * Docker Hub on a connection refusal, that has not been tested against a pull
- * in flight and a customer's install is not the place to find out. The
- * residue this clears is ~28KB per manifest digest against a 512MB tmpfs that
- * empties itself whenever the stack restarts, so leaving it is cheap. Run it
- * by hand when the host is quiet, or if the store ever does grow.
+ * couple of seconds and a wipe under a pull in flight breaks that pull. The
+ * residue this clears is ~28KB per manifest digest, so leaving it is cheap.
+ * Run it by hand when the host is quiet, or if the store ever does grow.
  *
  * `registry garbage-collect` is the obvious alternative and is worse on both
  * counts. It does not finish -- measured, it deletes the manifest blobs but
@@ -57,13 +54,14 @@ class TrimRegistryProxy extends Command
         }
 
         if ($this->option('dry-run')) {
-            $this->info('Would restart ' . self::CONTAINER . ', emptying its tmpfs store.');
+            $this->info('Would wipe ' . self::CONTAINER . "'s store and restart it.");
 
             return 0;
         }
 
+        $system->exec(self::wipeArgv(), [], 120);
         $system->exec(self::clearArgv(), [], 120);
-        $this->info('Restarted ' . self::CONTAINER . '; cache store is empty.');
+        $this->info('Wiped and restarted ' . self::CONTAINER . '; cache store is empty.');
 
         return 0;
     }
@@ -85,6 +83,18 @@ class TrimRegistryProxy extends Command
         }
 
         return trim($out) === 'true';
+    }
+
+    /**
+     * The volume outlives a restart, so the store is removed first. Plain argv:
+     * rm runs without a shell, and the mountpoint itself is left in place.
+     */
+    public static function wipeArgv(): array
+    {
+        return [
+            'sudo', 'docker', 'exec', self::CONTAINER,
+            'rm', '-rf', '/var/lib/registry/docker', '/var/lib/registry/scheduler-state.json',
+        ];
     }
 
     /** Plain argv: nothing here is handed to a shell on either side. */
