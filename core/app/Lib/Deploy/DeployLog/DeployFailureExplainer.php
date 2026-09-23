@@ -279,6 +279,16 @@ class DeployFailureExplainer
                     'Docker Hub temporarily refused further downloads because of its rate limit. Try again in a few minutes.',
             ],
 
+            // The image exists but a layer arrived corrupted (seen when the host's registry
+            // mirror filled its disk and served a truncated blob). Above base-image-unavailable.
+            'layer-digest-mismatch' => [
+                '/unexpected commit digest/i',
+                static fn (): string =>
+                    'A downloaded image layer arrived corrupted — the host or its registry mirror '
+                        . 'delivered a damaged copy. This is a problem on the host, not in the project; '
+                        . 'retrying the deploy usually works.',
+            ],
+
             // `docker compose up` failures, ranked above base-image-unavailable: when a
             // compose builds the app image locally and a sibling references that tag, compose
             // first tries to PULL it, prints a benign `failed to resolve reference ... not

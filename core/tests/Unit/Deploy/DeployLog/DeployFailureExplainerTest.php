@@ -385,6 +385,19 @@ OUT;
         $this->assertSame('registry-rate-limited', DeployFailureExplainer::match($output)['rule']);
     }
 
+    /** Foodsoft (engine#285): the image exists, a layer came back corrupted from the mirror. */
+    public function test_a_layer_digest_mismatch_is_not_a_missing_base_image(): void
+    {
+        $output = 'failed commit on ref "layer-sha256:5c1e0a5b4f2b": commit failed: unexpected commit digest '
+            . 'sha256:e3b0c44298fc, expected sha256:5c1e0a5b4f2b: failed precondition';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('layer-digest-mismatch', $match['rule'] ?? null);
+        $this->assertStringContainsString('corrupted', $match['message']);
+        $this->assertStringContainsString('retrying', $match['message']);
+    }
+
     /**
      * Leon's install died on `better-sqlite3` and Supabase's on `node-pty`,
      * both with 4KB of gyp output and no rule to match it -- so the slug fell
