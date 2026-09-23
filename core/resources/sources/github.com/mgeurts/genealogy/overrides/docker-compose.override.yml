@@ -1,0 +1,12 @@
+# Layers over the engine's generated PHP compose (service `app`, /app is the
+# mounted ~/project). Adds one bind mount for the only state that must outlive
+# a redeploy: ~/.panelalpha/genealogy, the account's one rebuild-surviving
+# writable directory. persist.sh symlinks storage/app onto it and keeps the
+# generated APP_KEY and owner password there. The source is relative to the
+# compose project directory (~/project), so ../ reaches the account home; the
+# directory is created with the right ownership by hooks/prepare.sh before the
+# container starts (Docker would otherwise create a missing bind source as root).
+services:
+  app:
+    volumes:
+      - ../.panelalpha/genealogy:/app/.pa-data

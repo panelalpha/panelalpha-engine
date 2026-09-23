@@ -86,6 +86,18 @@ class ComposeHarden
     }
 
     /**
+     * Publishes the detected primary port when a service only `expose:`s it, so
+     * the account container binds the port the DinD proxy targets ({@see PrimaryPortBinding}).
+     *
+     * @param array<string, mixed> $compose
+     * @return array{compose: array<string, mixed>, published: ?int}
+     */
+    public static function withPublishedPrimaryPort(array $compose): array
+    {
+        return PrimaryPortBinding::apply($compose);
+    }
+
+    /**
      * Image-backed services from a local-dev compose that the app needs at
      * runtime (mysql, redis, typesense, postgres, …).
      *

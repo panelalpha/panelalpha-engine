@@ -6,7 +6,6 @@ use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\System\Project\Dind as DindProject;
-use App\Lib\Deploy\Compose\ComposeFileInspector;
 
 /**
  * Writes the inner compose file {@see DeployStrategy} decided on, plus the
@@ -23,7 +22,6 @@ class ComposeWriter
 
     public function writeGeneratedCompose(string $projectDir, string $yaml, ?string $chown): void
     {
-        $this->stashComposeFilesThatShadow($projectDir);
         $this->project->system()->filesystem()->filePutContents(
             $this->project->userAppComposeFilePath(),
             $yaml,
@@ -78,23 +76,6 @@ class ComposeWriter
     }
 
     /**
-     * docker compose V2 prefers compose.yaml over docker-compose.yml. Recipe
-     * deploys write the latter — move the higher-priority names aside.
-     */
-    public function stashComposeFilesThatShadow(string $projectDir): void
-    {
-        $system = $this->project->system();
-        $logger = $this->project->shell()->logger();
-        $keep = basename($this->project->userAppComposeFilePath());
-        foreach (ComposeFileInspector::composeFilesThatShadow($projectDir, $keep) as $name) {
-            $from = $projectDir . '/' . $name;
-            $to = $from . ComposeFileInspector::COMPOSE_STASH_SUFFIX;
-            $system->exec(['sudo', 'mv', '-f', $from, $to]);
-            $logger?->info("Set aside {$name} so docker compose uses the hosting file");
-        }
-    }
-
-    /**
      * Placeholder shown after the container environment is provisioned but
      * before the user has supplied an application.
      */
@@ -106,8 +87,8 @@ class ComposeWriter
                 application files in the <code>~/project</code> directory.
             </p>
             <p>
-                When you are ready, update <code>~/project/docker-compose.yml</code> with your
-                application's configuration and restart the service.
+                When you are ready, create <code>~/project/docker-compose.yml</code> with your
+                application's configuration, then start the project again (the <code>up</code> action).
             </p>
         HTML;
 
@@ -143,7 +124,7 @@ class ComposeWriter
             </p>
             <p>
                 To get started, log in to your account and prepare <code>docker-compose.yml</code>
-                in the <code>~/project</code> directory, then restart the service.
+                in the <code>~/project</code> directory, then deploy the project again.
             </p>
         HTML;
 

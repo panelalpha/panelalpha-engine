@@ -340,6 +340,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
             'app_port' => $user->getAppPort() ?? 80,
             'app_ssl_port' => $user->getAppPort() ?? 443,
         ];
+        $templateVars = array_merge($templateVars, \App\System\Project\SitePasswordProtection::nginxTemplateVars($user));
         $templateVars = array_merge($templateVars, $this->httpAcmeChallengeTemplateVars($domain));
         $connection = $this->system->project($user)->domain($domain);
         $templateVars = array_merge($templateVars, $this->sslTemplateVars($connection));

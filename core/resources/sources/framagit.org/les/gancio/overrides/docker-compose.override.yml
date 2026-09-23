@@ -1,0 +1,40 @@
+# Layers over the compose the dockerfile strategy generates for the `app`
+# service (image = the FROM-only Dockerfile, i.e. cisti/gancio). The override
+# reaches Docker as written, so it interpolates ${...} from ~/project/.env and
+# $$ becomes a literal $ for the container shell.
+services:
+  app:
+    # Run as the account uid (recorded by the prepare hook) so the bind mount,
+    # owned by the account, is writable. The image's own user is `node` (1000).
+    user: "${CONTAINER_UID}:${CONTAINER_UID}"
+    # ${GANCIO_DATA_DIR} = ~/.panelalpha/gancio/data — survives the per-deploy
+    # ~/project wipe. Holds the SQLite DB, config.json (session secret),
+    # uploaded event images and logs.
+    volumes:
+      - "${GANCIO_DATA_DIR}:/app/data"
+    mem_limit: 1g
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=768"
+    # Migrate, create the admin and close registration BEFORE `start` opens the
+    # port, so first-visitor-wins (engine#200) has no window. PUBLIC_URL is the
+    # public https URL the dockerfile strategy injects; Gancio reads BASEURL, so
+    # export it. The password is generated once and kept in the data volume, so
+    # it survives redeploy.
+    command:
+      - sh
+      - -c
+      - |
+        export BASEURL="$$PUBLIC_URL"
+        host="$${PUBLIC_URL#*://}"; host="$${host%%/*}"
+        ADMIN_EMAIL="admin@$${host}"
+        PW_FILE=/app/data/.admin_password
+        if [ ! -f "$$PW_FILE" ]; then
+          head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24 > "$$PW_FILE"
+        fi
+        ./server/gancio migrate
+        ADMIN_COUNT=$$(./server/gancio users list 2>/dev/null | grep -c 'role: admin' || true)
+        if [ "$${ADMIN_COUNT:-0}" -eq 0 ]; then
+          ./server/gancio users create "$$ADMIN_EMAIL" "$$(cat $$PW_FILE)" admin || true
+        fi
+        ./server/gancio settings set allow_registration false || true
+        exec ./server/gancio start

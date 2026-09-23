@@ -1,0 +1,74 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Grav is a flat-file CMS: PHP, Twig and Markdown, no database at all. The
+  repository is the real thing rather than a monorepo or a dev harness, and
+  detection read it correctly -- composer.json, no artisan, so the `php`
+  strategy, the shared Apache base image with ~/project bind-mounted, and
+  `composer install` on the host. That part worked on the first deploy: 61
+  packages resolved from the lock file in under a minute. The site then
+  answered HTTP 500 on every request, which is the `serving-error_page`
+  verdict this recipe exists to fix.
+
+  The 500 is one line, and Grav prints it as the whole body: `Theme 'quark2'
+  does not exist, unable to display page.` A Grav checkout is not a runnable
+  Grav. `.gitignore` excludes `user/plugins/*` and `user/themes/*`, so the
+  clone carries `user/config/system.yaml` naming the quark2 theme, two
+  `user/pages` entries to render, and no theme and no plugins to render them
+  with -- not even the `error` and `problems` plugins that exist to make this
+  class of failure readable, which is why the page was a bare 500 rather than
+  Grav's own diagnostic. What those directories should contain is in the
+  repository's own `.dependencies` file: four plugins and one theme, each a
+  git URL, a path and a branch. Upstream installs them with `bin/grav
+  install`, which cannot run here -- it is a Grav console command and needs
+  `vendor/`, and the prepare hook runs after the clone and *before* the
+  build, so `vendor/` does not exist yet. hooks/prepare.sh reads the same file
+  and clones the same five repositories directly.
+
+  Nothing else is missing. `index.php` sits at the repository root and there
+  is no `public/`, `web/` or `webroot/`, so the docroot is the root -- stated
+  here rather than left to PhpDocroot's probe, since a recipe that names its
+  platform should name that too. The root `.htaccess` is Grav's own front
+  controller and directory protection, and the engine's vhost already grants
+  `AllowOverride All` over the document root, so clean URLs work with nothing
+  added. The `Script "post-autoload-dump" is not defined` line in the deploy
+  log is the php manifest's optional build command finding nothing to run;
+  Grav has no such script and the command is already `optional: true`.
+
+  The second thing the engine cannot infer is that Grav is behind a
+  TLS-terminating proxy. Grav 2.0 turns every `http_x_forwarded` header off by
+  default -- deliberately, because a client can forge them when nothing
+  overwrites them -- and it appends a non-standard port to its own base URL.
+  The engine's proxy does send what Grav needs: the app block in
+  `templates/virtualHost-nginx-proxy.blade.php` sets `X-Forwarded-Proto`,
+  `X-Forwarded-Host` and `X-Forwarded-Port` and passes the original `Host`.
+  Grav simply does not trust any of it until told to, so it reads `SERVER_PORT`
+  from the Apache it is actually listening on and builds `http://<domain>:8000/`
+  as its base. That is what lands in canonical links, feeds, sitemaps,
+  redirects after a form post and every `base_url_absolute` a theme or plugin
+  emits -- an http:// URL on a port that is not published, inside an https
+  page. `HTTPS=on` in the container environment does not help: mod_php does not
+  expose the process environment as `$_SERVER['HTTPS']`, and Grav reads it from
+  there. So the prepare hook writes a `.env` -- Grav's own documented override
+  channel, read by symfony/dotenv before the configuration is compiled -- that
+  turns on `http_x_forwarded.protocol` and `.ip` and sets `reverse_proxy_setup`,
+  which is the switch that stops the port being appended. Measured against a
+  reproduction of the engine's shape (Apache on 8000 behind a TLS proxy):
+  `http://host:8000/` without it, `https://host/` with it.
+
+  No admin panel, and that is upstream's line rather than an omission here.
+  The classic `admin` plugin declares `compatibility: grav: ['1.7']` and its
+  own blueprint says Grav 2.0's admin is the separate `admin2` plugin talking
+  to an `api` plugin; this branch is Grav 2.1.8, and `.dependencies` -- the
+  repository's own statement of what it needs to run -- lists neither. So the
+  site serves its pages and is edited over SFTP, which for a flat-file CMS is
+  a working answer; installing an admin is `bin/gpm install` once the
+  2.0-compatible one is the published default.
+
+  No readiness gate either, unlike the compose-based recipes. There is no
+  compose file of this recipe's to add one to -- the php strategy generates it
+  -- and nothing to wait for: no database, no migration, no build at boot.
+  Apache binds before `docker compose up -d` returns and the first request
+  compiles the Twig cache in under a second.
+extends: php
+# index.php is at the repository root and there is no public/ or web/ to find.
+docroot: .

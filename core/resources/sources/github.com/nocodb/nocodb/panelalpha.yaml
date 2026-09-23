@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  NocoDB is an Airtable alternative: a NestJS server that serves its REST API
+  and a Vue dashboard on :8080, over a metadata database that is SQLite by
+  default. The repository is a 10-package pnpm workspace whose root
+  package.json has no start script, so detection found no compose file and no
+  recognisable platform and fell through to Railpack. Railpack installed the
+  workspace, reported "No start command detected", and the deploy ended with a
+  generated nginx:alpine compose serving PanelAlpha's placeholder page on 8080
+  -- a successful deploy of nothing.
+
+  Building the checkout is not the alternative, and here that is not a
+  judgement call: the repository contains no Dockerfile at all, at the root or
+  anywhere under packages/, so there is nothing for any build strategy to pick.
+  The image is built outside this tree and published as nocodb/nocodb, and
+  upstream's own README quickstart is a single container of it. So
+  overrides/docker-compose.yml runs that image. The tag is taken from
+  packages/nocodb/package.json rather than from a constant -- there is no
+  major-branch tag to pin to, the product is still 0.x -- and hooks/prepare.sh
+  confirms the tag exists on Docker Hub before using it, because develop
+  carries the next version, which may not be published yet; anything
+  unreadable or unpublished falls back to :latest rather than to a tag whose
+  pull would fail.
+
+  No database sidecar. NocoDB with NC_DB unset keeps its metadata in a sqlite3
+  file under NC_APP_DATA_DIR, which is the configuration the README leads with,
+  and the one volume holds the meta database, attachments and thumbnails. The
+  Postgres and Redis in upstream's compose examples belong to the scaled shape:
+  Redis is only *required* when NC_WORKER_CONTAINER is set (Noco.ts throws
+  without it), and the worker exists to run jobs off the web process, which a
+  single-account instance does not need. That keeps the stack inside an
+  account's memory budget instead of spending it on three idle services.
+
+  Two values the recipe supplies that the app cannot. NC_SITE_URL has to be the
+  account's public address -- NocoDB builds invitation links, password resets,
+  webhook callbacks and OAuth redirects from it, and mail.service.ts refuses to
+  send anything at all when it is unset -- and the address is not known until
+  the domain exists. So the compose file ships NC_SITE_URL: http://localhost,
+  exactly the shape ComposePlaceholders rewrites: the key ends in _URL and the
+  value is a bare localhost on the implied port 80, so UserComposeStrategy
+  substitutes the account's https URL before the stack starts. And
+  NC_ADMIN_EMAIL/NC_ADMIN_PASSWORD, because NocoDB has no installer: the first
+  account to sign up gets `org-level-creator,super` (users.service.ts), which
+  on a public HTTPS name means the first stranger to find it. initAdminFromEnv.ts
+  creates the super admin from those two instead; the password is generated per
+  account into ~/project/.panelalpha-admin-password (0600), never a default.
+
+  Creating the admin does not close the door behind it.
+  DEFAULT_APP_SETTINGS.invite_only_signup is false, so a fresh instance still
+  accepts a signup from anyone -- landing them as an org-level viewer in the
+  default workspace -- and that setting lives in nc_store, not in the
+  environment, so POST /api/v1/app-settings as the super admin is the only way
+  to change it. A one-shot `setup` service does exactly that once, marking the
+  data volume so an operator who later re-opens registration keeps their
+  choice, and exiting 0 whatever happens so a NocoDB that is serving is never
+  held back by it.
+
+  One service in the compose file is a no-op that exits 0. The engine runs
+  `docker compose up -d` without --wait and calls the deploy finished when that
+  returns, which is when the container has been started rather than when it
+  answers -- first boot runs NocoDB's whole meta migration set against an empty
+  sqlite file. `ready` waits for `setup` to complete, which waits for NocoDB's
+  healthcheck, so `up -d` returns only once the site answers and registration
+  is closed. A clean exit 0 is explicitly not a crash loop to AppHealth.
+
+  Mail is left unconfigured. NocoDB boots, the admin signs in and bases can be
+  built without it, but invitations, password resets and notification webhooks
+  by email need an SMTP server the engine does not provide; set NC_SMTP_HOST
+  and its companions through the account's env vars.

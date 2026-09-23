@@ -38,6 +38,11 @@ interface DeployMechanics
 
     public function reprepareApplicationFromCheckout(): void;
 
+    /**
+     * Import an uploaded archive into ~/project and prepare the app from it. No wipe.
+     */
+    public function ingestArchive(string $zipPath): void;
+
     public function publishDomain(DomainModel $domain): void;
 
     /**

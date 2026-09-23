@@ -1,0 +1,211 @@
+# The stack for the repository, which ships none Docker would load.
+#
+# Bluecherry runs from its published image because that image is built from
+# this repository -- actions/Dockerfile, actions/entrypoint.sh and
+# .github/workflows/docker-build.yml are all in the tree, pushing
+# bluecherrydvr/bluecherry to Docker Hub. It is not a build of the checkout
+# either: actions/Dockerfile's real payload is `curl $BLUECHERRY_DEB_URL`, a
+# release .deb produced elsewhere, and the C++ server (server/, lib/, a 40-line
+# Makefile chain over libavcodec, libconfig, pugixml and ONVIF) is compiled
+# into that .deb rather than here. So the image is the artifact.
+#
+# It does not need capture hardware. lib/v4l2_device_solo6x10.cpp,
+# lib/v4l2_device_tw5864.cpp and the libudev enumerator in server/bc-detect.cpp
+# are for Bluecherry's own optional PCI cards; with no /dev/video* the
+# enumerator finds nothing and bc-server carries on with the IP-camera path
+# (RTSP/ONVIF), which is how the product is sold. Verified in an ordinary
+# unprivileged container: no --privileged, no --device, no kernel module.
+services:
+  # MariaDB rather than MySQL, and pinned. The image's mysql-client talks to
+  # either; MariaDB is what the entrypoint's `mysql_native_password` ALTER
+  # fails against, harmlessly -- see the app service below.
+  db:
+    image: ${BLUECHERRY_DB_IMAGE:-mariadb:11.4}
+    restart: unless-stopped
+    command:
+      # A default MariaDB sizes its buffer pool for a machine, not for a 2 GB
+      # account; an empty NVR schema is 40-odd small tables.
+      - --innodb-buffer-pool-size=64M
+      - --performance-schema=0
+    # Every secret this stack uses reaches it from here, and only from here.
+    # hooks/prepare.sh writes ~/.panelalpha/bluecherry.env (0600, in a 0700
+    # directory) and the path is relative to compose's --project-directory,
+    # which is ~/project. Nothing secret is written into the project, because
+    # the engine copies ~/project/.env to .env.default at mode 644
+    # (ProjectEnvironment::apply, engine#173) inside a world-traversable home.
+    env_file:
+      - ../.panelalpha/bluecherry.env
+    environment:
+      # MARIADB_ROOT_PASSWORD comes from the env_file above. The entrypoint of
+      # the application container writes /root/.my.cnf from MYSQL_ADMIN_LOGIN /
+      # MYSQL_ADMIN_PASSWORD and bc_db_tool.sh new_db connects with them to
+      # CREATE DATABASE, CREATE USER and GRANT, so root has to be reachable
+      # from that container -- which is what the image's default root@'%'
+      # gives. It is reachable on the project's compose network only: `ports:`
+      # is deliberately not published.
+      #
+      # A redeploy onto an older data directory after the image moves on.
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      - db_data:/var/lib/mysql
+    # The image's own script; --innodb_initialized is what makes it mean
+    # "ready for DDL" rather than "the socket exists".
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    mem_limit: 384m
+
+  bluecherry:
+    # Tag written by hooks/prepare.sh from debian/changelog, confirmed on
+    # Docker Hub, falling back to :latest -- and deliberately never to :stable,
+    # which was last pushed in April 2024.
+    image: ${BLUECHERRY_IMAGE:-bluecherrydvr/bluecherry:latest}
+    restart: unless-stopped
+    ports:
+      # Host 7001 is the port Bluecherry documents its UI on, so the account's
+      # own address keeps the familiar number; the container end is 80 because
+      # that is where files/bluecherry-http.conf serves the UI over plain HTTP.
+      # The image's own 7001 is an https listener with a snakeoil certificate
+      # and is left unpublished: TLS for the account's domain is terminated by
+      # the engine's proxy, and the app-deploy path speaks http to its upstream.
+      - "7001:80"
+    environment:
+      # These four are not defaults -- they are the fix for an upstream bug.
+      # actions/entrypoint.sh defaults DB_NAME/DB_USER/DB_PASS locally and
+      # passes them *positionally* to /bin/bc-database-create, but
+      # actions/bc-database-create.sh ignores its arguments entirely and reads
+      # $BLUECHERRY_DB_NAME, $BLUECHERRY_DB_USER, $BLUECHERRY_DB_PASSWORD and
+      # $BLUECHERRY_USERHOST out of the environment with no defaults of its
+      # own. Leave them unset and the first boot runs
+      # `DROP DATABASE IF EXISTS ; CREATE DATABASE ` and dies with
+      # "ERROR 1064 ... DB create failed".
+      BLUECHERRY_DB_NAME: bluecherry
+      BLUECHERRY_DB_USER: bluecherry
+      # BLUECHERRY_DB_PASSWORD comes from the env_file below.
+      # bc-database-create.sh reads BLUECHERRY_USERHOST; the entrypoint's own
+      # /etc/bluecherry.conf and its GRANT block read BLUECHERRY_DB_ACCESS_HOST.
+      # Two names for one value, so both are set.
+      BLUECHERRY_USERHOST: "%"
+      BLUECHERRY_DB_ACCESS_HOST: "%"
+      BLUECHERRY_DB_HOST: db
+      # The administrative account bc_db_tool.sh creates the above with;
+      # MYSQL_ADMIN_PASSWORD comes from the env_file below.
+      MYSQL_ADMIN_LOGIN: root
+      # Expect one error in the log on first boot and ignore it: after the
+      # GRANT succeeds the entrypoint runs
+      # `ALTER USER ... IDENTIFIED WITH mysql_native_password BY ...`, which
+      # MariaDB 11 answers with ERROR 1064. The block is wrapped in
+      # `|| log 'WARN: grant/alter failed; continuing'`, the privileges the
+      # application needs were granted by the statement before it, and the
+      # account authenticates normally.
+    # Secrets, as above.
+    env_file:
+      - ../.panelalpha/bluecherry.env
+    volumes:
+      # Replaces the Debian default site *and* adds the plain-HTTP vhost, in
+      # one mount -- see files/bluecherry-http.conf. `default` is a symlink to
+      # sites-available/default in the image, which Docker resolves, so the
+      # file it points at is what gets replaced either way.
+      - ./bluecherry-http.conf:/etc/nginx/sites-enabled/default:ro
+      # Everything the server keeps: recordings/ (the Storage row
+      # initial_data_mysql.sql seeds points at
+      # /var/lib/bluecherry/recordings) and monitor.rrd, the round-robin
+      # database behind the Health and Statistics pages. The whole directory
+      # rather than recordings/ alone, so a redeploy does not throw away the
+      # monitoring history along with nothing else. Seeded from the image,
+      # which creates it 0770 bluecherry:bluecherry.
+      #
+      # An NVR writes continuously, and the seeded thresholds are 95% before it
+      # starts deleting and 90% after. Those are percentages of the filesystem
+      # this volume lands on, and measured on a live account that is the host's
+      # root filesystem, shared with every other tenant -- not a quota of the
+      # account's own. See README.md before offering this to anyone.
+      - bluecherry_data:/var/lib/bluecherry
+    depends_on:
+      db:
+        condition: service_healthy
+    # Not the image's own HEALTHCHECK, which is `pgrep -f /usr/sbin/bc-server`
+    # and passes while the UI is still 502. This probes the vhost this recipe
+    # adds, through php-fpm, and greps for the login page's own title so a PHP
+    # fatal rendered with a 200 does not pass. curl is in the image
+    # (actions/Dockerfile installs it). nginx has `server_name _`, so the
+    # loopback Host header is fine (engine#165 does not apply).
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS -m 5 http://127.0.0.1/login | grep -q 'Bluecherry DVR' || exit 1
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    # bc-server is one process with a thread per camera plus its HLS and API
+    # listeners; nginx, php-fpm and rsyslogd share the container. Measured
+    # 49.5 MiB idle with no cameras, and recording is ffmpeg muxing inside
+    # bc-server, so this is headroom for a handful of streams rather than a
+    # measurement of an empty instance.
+    mem_limit: 768m
+    # The hardener's default 256 counts threads. bc-server spawns per-camera
+    # threads on top of php-fpm's pool and nginx's workers.
+    pids_limit: 512
+
+  # Replaces the shipped Admin / bluecherry credential and proves the
+  # replacement signs in. Runs the application's own image because it needs
+  # both the mysql client and curl, and that image is already pulled.
+  # Always exits 0 -- see files/panelalpha-setup.sh.
+  setup:
+    image: ${BLUECHERRY_IMAGE:-bluecherrydvr/bluecherry:latest}
+    restart: "no"
+    depends_on:
+      bluecherry:
+        condition: service_healthy
+    # Secrets, as above.
+    env_file:
+      - ../.panelalpha/bluecherry.env
+    environment:
+      # The credentials -- BLUECHERRY_DB_PASSWORD, BLUECHERRY_ADMIN_USERNAME,
+      # BLUECHERRY_ADMIN_PASSWORD, BLUECHERRY_ADMIN_SALT -- come from the
+      # env_file above under exactly those names.
+      BLUECHERRY_DB_HOST: db
+      BLUECHERRY_DB_NAME: bluecherry
+      BLUECHERRY_DB_USER: bluecherry
+      # The service name, over the compose network, on the port the vhost
+      # serves. Not a public URL and not shaped like one, so
+      # ComposePlaceholders leaves it alone.
+      BLUECHERRY_APP_URL: http://bluecherry
+    volumes:
+      - ./panelalpha-setup.sh:/panelalpha-setup.sh:ro
+    entrypoint: ["/bin/bash", "/panelalpha-setup.sh"]
+    # The image carries HEALTHCHECK `pgrep -f /usr/sbin/bc-server`, which is
+    # false in a container that runs neither. Left in place it would report a
+    # one-shot as unhealthy for as long as it runs.
+    healthcheck:
+      disable: true
+    mem_limit: 128m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` (engine#90) and takes the deploy to
+  # be finished when that returns -- which is when every service has been
+  # *started*. Here that gap is the whole first boot: MariaDB initialises a
+  # data directory, then the application's entrypoint waits for it, creates the
+  # schema, loads the initial data and only then starts bc-server. Compose does
+  # block on depends_on conditions, so waiting for `setup` to exit makes
+  # `up -d` return only once the login page answers, the shipped default
+  # credential is gone and the generated one has been used to sign in. A clean
+  # exit 0 is explicitly not a crash loop to AppHealth::isCrashing().
+  ready:
+    image: ${BLUECHERRY_IMAGE:-bluecherrydvr/bluecherry:latest}
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    healthcheck:
+      disable: true
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  db_data: {}
+  bluecherry_data: {}

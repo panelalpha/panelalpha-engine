@@ -1,0 +1,15 @@
+# YAFFA keeps user uploads — receipt/attachment files, imported CSVs and AI
+# document files — under storage/app. The PHP checkout at /app is wiped on
+# every redeploy (engine#173), so without this those files are lost while the
+# relational data in the account MySQL survives. Bind storage/app to the
+# account's rebuild-surviving ~/.panelalpha area, which the prepare hook
+# creates account-owned first so the mount is writable by the app.
+#
+# The path is relative to the compose project directory (~/project), so
+# ../.panelalpha resolves to the account home. Only storage/app is bound:
+# logs go to stderr (LOG_CHANNEL) and storage/framework caches are
+# regenerated, so neither needs to persist.
+services:
+  app:
+    volumes:
+      - ../.panelalpha/yaffa/storage-app:/app/storage/app

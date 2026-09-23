@@ -1,0 +1,61 @@
+# Installed by PanelAlpha. MediaWiki serves from its own repository root, so
+# every file in the checkout is a URL unless something says otherwise.
+#
+# Upstream ships .htaccess files in cache/, includes/, languages/, maintenance/,
+# sql/, tests/ and images/, and .gitignore lists `/.htaccess` -- the root of
+# the tree is left to whoever installs it. This is that file. It is not served
+# itself: the generated vhost denies every path component and file name
+# starting with a dot except .well-known
+# (resources/deploy/templates/apache-vhost.stub).
+
+# ---------------------------------------------------------------------------
+# vendor/
+#
+# MediaWiki's own answer to this is a post-install-cmd Composer hook,
+# MediaWiki\Composer\ComposerVendorHtaccessCreator, which writes
+# `Require all denied` into vendor/.htaccess. The php platform runs
+# `composer install ... --no-scripts --no-plugins`
+# (resources/platforms/php.yaml), so that hook never fires. The setup script
+# writes upstream's file anyway, and this denies the path from the document
+# root as well -- a rule that does not depend on a Composer event having run,
+# or on vendor/.htaccess surviving whatever an operator does to the directory.
+#
+# RedirectMatch rather than <Directory>, which .htaccess does not allow.
+RedirectMatch 403 ^/vendor(/|$)
+
+# ---------------------------------------------------------------------------
+# The engine's own files, which sit in this directory because this directory is
+# the document root.
+#
+# The generated vhost already denies `^(?:docker-compose\.ya?ml|panelalpha[-.])`
+# by file name, which covers docker-compose.yml and panelalpha-setup.sh. It
+# does not cover `docker-compose.override.yml`: the pattern wants `yml` where
+# that name has `override` (engine#181). This recipe's override file carries no
+# secret, but it does name the base image, the bind mounts and the account's
+# uid, and the next thing written to that name might.
+<FilesMatch "^docker-compose\.">
+    Require all denied
+    Satisfy All
+</FilesMatch>
+
+# ---------------------------------------------------------------------------
+# LocalSettings.php
+#
+# It is not in this directory -- MW_CONFIG_FILE points MediaWiki at
+# /data/LocalSettings.php, on a bind mount that is not served at all. This is
+# for the case where somebody restores a backup, or follows a tutorial, and
+# puts one here: $wgDBpassword and $wgSecretKey in a file that PHP happens to
+# be executing today is one misconfiguration away from being served.
+<FilesMatch "^LocalSettings">
+    Require all denied
+    Satisfy All
+</FilesMatch>
+
+# ---------------------------------------------------------------------------
+# Logs, dumps and editor droppings anywhere in the tree. Apache serves an
+# unknown extension as a download, so a `.sql` left by an import or a `.log`
+# turned on by an operator would be public.
+<FilesMatch "\.(log|sql|sqlite|sqlite3|bak|orig|rej|swp|save)$">
+    Require all denied
+    Satisfy All
+</FilesMatch>

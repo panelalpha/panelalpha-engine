@@ -5,14 +5,27 @@ namespace App\OpenApi\Schemas;
 use OpenApi\Attributes as OA;
 
 #[OA\Schema(
+    schema: 'UsageQuota',
+    properties: [
+        new OA\Property(property: 'usage', type: 'integer', example: 123456),
+        new OA\Property(property: 'maximum', type: 'integer', nullable: true, example: 10485760),
+    ],
+    type: 'object',
+)]
+#[OA\Schema(
     schema: 'Usage',
     properties: [
-        new OA\Property(property: 'disk_used', type: 'integer', example: 512, description: 'Disk used in MB'),
-        new OA\Property(property: 'disk_limit', type: 'integer', example: 10240, description: 'Disk limit in MB, -1 for unlimited'),
-        new OA\Property(property: 'bandwidth_used', type: 'integer', example: 1024, description: 'Bandwidth used in MB', nullable: true),
-        new OA\Property(property: 'bandwidth_limit', type: 'integer', example: 102400, description: 'Bandwidth limit in MB, -1 for unlimited', nullable: true),
-        new OA\Property(property: 'inodes_used', type: 'integer', example: 25000, nullable: true),
-        new OA\Property(property: 'inodes_limit', type: 'integer', example: 500000, nullable: true),
+        new OA\Property(property: 'storage', ref: '#/components/schemas/UsageQuota'),
+        new OA\Property(
+            property: 'bandwidth',
+            ref: '#/components/schemas/UsageQuota',
+            description: 'Transfer for the current calendar month in the host timezone, in bytes. maximum is the project bandwidth_limit in bytes, or null when unlimited.',
+        ),
+        new OA\Property(property: 'addon_domains', ref: '#/components/schemas/UsageQuota'),
+        new OA\Property(property: 'subdomains', ref: '#/components/schemas/UsageQuota'),
+        new OA\Property(property: 'ftp_accounts', ref: '#/components/schemas/UsageQuota'),
+        new OA\Property(property: 'sftp_accounts', ref: '#/components/schemas/UsageQuota'),
+        new OA\Property(property: 'mysql_databases', ref: '#/components/schemas/UsageQuota'),
     ],
     type: 'object',
 )]

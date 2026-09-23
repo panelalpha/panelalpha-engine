@@ -1,0 +1,109 @@
+# Layers over the compose file the `go` strategy generates. That file is right
+# about the app -- it mounts the checkout at /app, runs the binary the host
+# compile produced, publishes 8080 and sets PORT and the public-URL aliases --
+# and it has no database, because the repository ships no compose file at its
+# root for the engine's sidecar reader to learn one from. This layer is the
+# missing half of the stack: one PostgreSQL, named `database` because that is
+# the host in the DATABASE_URL the prepare hook wrote.
+#
+# An override rather than a replacement compose file: the generated file is the
+# project compose here, and a docker-compose.yml written in overrides/ would
+# take its place and lose the mount, the port, the image and the entrypoint the
+# strategy resolved.
+services:
+  app:
+    # The one value that has to be restated here rather than left to .env, and
+    # the reason is this file. RuntimeSidecars::exampleComposeFilenames() globs
+    # `docker-compose.*.yml`, which matches `docker-compose.override.yml` -- so
+    # the engine reads this very file as a stack template, extracts `database`
+    # from it ("Adding backing services described in docker-compose.override.yml:
+    # database") and has SidecarCredentials write its own DATABASE_URL onto the
+    # generated app service. That URL is built from the service's environment,
+    # where the password is a bare `${POSTGRES_PASSWORD}` it cannot resolve, and
+    # it carries no query string -- so lib/pq applied its default sslmode=require
+    # and every boot ended in `pq: SSL is not enabled on the server`, restart
+    # loop and a failed deploy. `environment:` outranks `env_file:`, so .env
+    # could not win that argument; a later compose file outranks an earlier one,
+    # so this line can.
+    #
+    # `${DATABASE_URL}` and not a literal: compose interpolates it from the .env
+    # the prepare hook wrote, which is also where the account's own env_vars are
+    # merged -- so an account that sets DATABASE_URL still gets it.
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+
+    # Miniflux exits rather than waits: NewConnectionPool and store.Ping() both
+    # end in printfAndExit, so a first boot that raced initdb would be a restart
+    # loop until postgres happened to win.
+    depends_on:
+      database:
+        condition: service_healthy
+
+    # GET /healthcheck is Miniflux's own readiness probe
+    # (internal/http/server/routes.go) and it answers only once the migrations
+    # have run, the asset bundles are generated and the listener is bound --
+    # which is exactly what `ready` below has to wait for. wget is busybox's,
+    # from the golang:*-alpine image the app runs in.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+    # Replaces the hardener's 384m default for an app-role service. One Go
+    # binary with its assets embedded, and its heaviest moment is the migration
+    # run on first boot; the rest of the account's 2500m is wanted by the host
+    # compile, which is over before this container starts.
+    mem_limit: 512m
+
+  # Miniflux's only dependency, and there is no alternative: it speaks
+  # PostgreSQL and nothing else -- no SQLite mode, no MySQL driver.
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-miniflux}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-miniflux}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    # Sized for one account, not a host.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - max_connections=30
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-miniflux} -d ${POSTGRES_DB:-miniflux}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    shm_size: 128mb
+    # Named, and on the data directory rather than on /var/lib/postgresql: with
+    # PGDATA one level down, this is the path initdb actually writes.
+    volumes:
+      - miniflux-db:/var/lib/postgresql/data
+    mem_limit: 512m
+
+  # Does nothing and exits 0. It is the service `up -d` actually waits on: the
+  # engine runs compose without `--wait` and takes the deploy to be finished
+  # when it returns, which without this is the moment Miniflux was *started* --
+  # 135 migrations and two asset bundles before it answers anything. A
+  # service_healthy dependency blocks compose until the app's own healthcheck
+  # passes, and a clean exit 0 is explicitly not a crash loop as far as
+  # AppHealth is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  miniflux-db:

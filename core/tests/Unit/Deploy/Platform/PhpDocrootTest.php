@@ -196,6 +196,79 @@ class PhpDocrootTest extends TestCase
         $this->assertSame(['PA_DOCROOT' => '/app/public'], PhpDocroot::environment('', $symfony));
     }
 
+    /**
+     * Seven apps in the 2026-09 support batch answered 403 for one reason: the
+     * document root was a directory nothing probed, so Apache was handed the
+     * project root and had no index to serve.
+     */
+    public function test_the_remaining_conventional_docroot_names_are_recognised(): void
+    {
+        $cases = [
+            'www' => 'zentao, Group Office, Bluecherry',
+            'htdocs' => 'DAViCal',
+            'source' => 'OXID eShop',
+            'upload' => 'ClipBucket',
+            'webui' => 'piler',
+        ];
+
+        foreach ($cases as $dir => $apps) {
+            $this->assertSame(
+                ['PA_DOCROOT' => '/app/' . $dir],
+                PhpDocroot::environment(null, self::tree(['composer.json', $dir . '/index.php'])),
+                "{$dir}/ is the document root of {$apps}"
+            );
+        }
+    }
+
+    /**
+     * The whole reason these are late-ranked. A project with its own front
+     * controller keeps it -- otherwise adding names would move the document
+     * root of applications that serve correctly today.
+     */
+    public function test_a_root_front_controller_still_outranks_a_late_candidate(): void
+    {
+        foreach (['www', 'htdocs', 'source', 'upload', 'webui', 'src'] as $dir) {
+            $this->assertSame(
+                PhpDocroot::ROOT,
+                PhpDocroot::detect(self::tree(['index.php', $dir . '/index.php'])),
+                "a root index.php must outrank {$dir}/"
+            );
+        }
+    }
+
+    /** And a reserved candidate outranks all of them, wherever the root has none. */
+    public function test_public_still_outranks_a_late_candidate(): void
+    {
+        $this->assertSame(
+            'public',
+            PhpDocroot::detect(self::tree(['public/index.php', 'www/index.php']))
+        );
+    }
+
+    /**
+     * `src/` is last on purpose: it is the one name here that usually holds
+     * *source*, so any other match must win over it.
+     */
+    public function test_src_is_the_last_resort(): void
+    {
+        $this->assertSame(
+            'www',
+            PhpDocroot::detect(self::tree(['www/index.php', 'src/index.php']))
+        );
+        $this->assertSame('src', PhpDocroot::detect(self::tree(['src/index.php'])));
+    }
+
+    /**
+     * Sympa owns www/ and AWStats owns wwwroot/, and both are Perl programs
+     * with no PHP entry point in them. The index.php requirement is what keeps
+     * a directory that merely has a matching *name* from becoming a docroot.
+     */
+    public function test_a_matching_directory_without_an_index_is_not_a_docroot(): void
+    {
+        $this->assertSame('', PhpDocroot::detect(self::tree(['www/index.pl', 'www/style.css'])));
+        $this->assertSame('', PhpDocroot::detect(self::tree(['www/index.html'])));
+    }
+
     /** Nothing to go on: no PA_DOCROOT, so the image's own public/-or-root fallback applies. */
     public function test_no_index_anywhere_leaves_it_to_the_image(): void
     {

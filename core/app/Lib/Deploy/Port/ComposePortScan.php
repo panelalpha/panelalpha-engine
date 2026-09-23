@@ -7,7 +7,12 @@ use App\Lib\Deploy\Compose\ComposeYaml;
 /**
  * The public ports a compose file offers, best first. Both ends of every
  * binding are inspected: a mapping whose container port is well known (5432,
- * 3306) is dropped even when the host port is something else (5434).
+ * 3306) is dropped even when the host port is something else (5434). What was
+ * dropped comes back too, under `refused`, so a caller can tell a compose file
+ * that offers nothing from one that offers only a database.
+ *
+ * @psalm-type Refusal = array{port: int, reason: string, service: string}
+ * @psalm-type Scan = array{all: list<int>, primary?: int, refused: list<Refusal>}
  */
 final class ComposePortScan
 {
@@ -17,13 +22,44 @@ final class ComposePortScan
     private const DEFAULT_PRIMARY = 8080;
 
     /**
-     * @return array{all: list<int>, primary?: int}
+     * @return Scan
      */
     public static function of(string $composePath): array
     {
-        $ports = self::sorted(self::publicPorts(self::services($composePath)));
+        return self::fromServices(self::services($composePath));
+    }
 
-        return $ports === [] ? ['all' => []] : ['all' => $ports, 'primary' => $ports[0]];
+    /**
+     * As {@see of()}, from an already-parsed compose array.
+     *
+     * @param array<string, mixed> $compose
+     * @return Scan
+     */
+    public static function ofParsed(array $compose): array
+    {
+        $services = is_array($compose['services'] ?? null) ? $compose['services'] : [];
+
+        return self::fromServices(array_values(array_filter($services, 'is_array')));
+    }
+
+    /**
+     * @param list<array<string, mixed>> $services
+     * @return Scan
+     */
+    private static function fromServices(array $services): array
+    {
+        $scan = self::scan($services);
+        $ports = self::sorted($scan['public']);
+        // A port another service publishes legitimately is not refused, however
+        // the datastore next to it declared it.
+        $refused = array_values(array_filter(
+            $scan['refused'],
+            static fn (array $entry): bool => !in_array($entry['port'], $ports, true)
+        ));
+
+        return $ports === []
+            ? ['all' => [], 'refused' => $refused]
+            : ['all' => $ports, 'primary' => $ports[0], 'refused' => $refused];
     }
 
     public static function primaryOf(string $composePath): int
@@ -50,40 +86,76 @@ final class ComposePortScan
 
     /**
      * @param list<array<string, mixed>> $services
-     * @return list<int>
+     * @return array{public: list<int>, refused: list<Refusal>}
      */
-    private static function publicPorts(array $services): array
+    private static function scan(array $services): array
     {
         $ports = [];
+        $refused = [];
         foreach ($services as $service) {
-            foreach (self::servicePorts($service) as $port) {
+            $found = self::serviceScan($service);
+            foreach ($found['public'] as $port) {
                 $ports[$port] = true;
+            }
+            foreach ($found['refused'] as $entry) {
+                $refused[$entry['port']] ??= $entry;
             }
         }
 
-        return array_keys($ports);
+        return ['public' => array_keys($ports), 'refused' => array_values($refused)];
     }
 
     /**
      * `expose:` is lower priority than an explicit publish, so it is read
      * second and only adds ports the mappings did not already give.
      *
+     * A filtered binding is reported rather than dropped: "the compose file
+     * offers no port" and "it offers MySQL's, which we will never proxy" are
+     * different answers, and only one of them means the app is misconfigured.
+     *
      * @param array<string, mixed> $service
-     * @return list<int>
+     * @return array{public: list<int>, refused: list<Refusal>}
      */
-    private static function servicePorts(array $service): array
+    private static function serviceScan(array $service): array
     {
         $ports = [];
+        $refused = [];
         foreach (['ports', 'expose'] as $key) {
             foreach (self::entries($service[$key] ?? null) as $entry) {
                 $mapping = PortMapping::parse($entry);
-                if ($mapping !== null && !InternalPorts::coversBinding($mapping, $service)) {
-                    $ports[$mapping->hostPort] = true;
+                if ($mapping === null) {
+                    continue;
                 }
+                if (!InternalPorts::coversBinding($mapping, $service)) {
+                    $ports[$mapping->hostPort] = true;
+                    continue;
+                }
+                $refused[$mapping->hostPort] ??= self::refusal($mapping, $service);
             }
         }
 
-        return array_keys($ports);
+        return ['public' => array_keys($ports), 'refused' => array_values($refused)];
+    }
+
+    /**
+     * Why {@see InternalPorts::coversBinding()} turned a binding down: the port
+     * itself is a datastore's, or the image behind it is.
+     *
+     * @param array<string, mixed> $service
+     * @return Refusal
+     */
+    private static function refusal(PortMapping $mapping, array $service): array
+    {
+        $label = InternalPorts::datastoreOn($mapping->hostPort)
+            ?? ($mapping->containerPort === null ? null : InternalPorts::datastoreOn($mapping->containerPort));
+
+        if ($label !== null) {
+            return ['port' => $mapping->hostPort, 'reason' => 'datastore', 'service' => $label];
+        }
+
+        $image = is_string($service['image'] ?? null) ? $service['image'] : 'datastore image';
+
+        return ['port' => $mapping->hostPort, 'reason' => 'datastore_image', 'service' => $image];
     }
 
     /**

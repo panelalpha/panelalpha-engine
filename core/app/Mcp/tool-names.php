@@ -22,7 +22,7 @@
 // `php artisan mcp:tool:generate` reads this file and fails loudly on an
 // operation that is missing from it or on an entry that no longer matches a
 // route, so adding an endpoint is a deliberate naming decision rather than an
-// accident. Render the catalogue with `php artisan mcp:catalogue`.
+// accident. See docs/mcp-catalogue.html.
 
 return [
     // Projects -- one hosting account with its container, domains, databases and
@@ -49,7 +49,13 @@ return [
     'POST /projects/{username}/rebuild' => 'project_rebuild',
     'PUT /projects/{username}/suspend' => 'project_suspend',
     'PUT /projects/{username}/unsuspend' => 'project_unsuspend',
+    'PUT /projects/{username}/password' => 'project_password_set',
+    'DELETE /projects/{username}/password' => 'project_password_unset',
     'GET /projects/{username}/usage' => 'project_usage',
+    'GET /projects/{username}/bandwidth' => 'project_bandwidth',
+    'GET /projects/{username}/domains/{domain}/bandwidth' => 'domain_bandwidth',
+    'GET /projects/{username}/domains/{domain}/visitors' => 'domain_visitors',
+    'GET /projects/{username}/domains/{domain}/visitors/{dimension}' => 'domain_visitors_breakdown',
 
     // Deploy
     'POST /projects/{username}/deploy-cancel' => 'deploy_cancel',
@@ -88,6 +94,8 @@ return [
     'GET /domains/{domain}' => 'domain_find',
     'GET /domains/{domain}/php-version' => 'domain_php_version_get',
     'PUT /domains/{domain}/php-version' => 'domain_php_version_set',
+    'GET /domains/{domain}/php-directives' => 'domain_php_directives_get',
+    'PUT /domains/{domain}/php-directives' => 'domain_php_directives_set',
     'GET /projects/{username}/domains/{domain}/log-files' => 'domain_log_list',
     'GET /projects/{username}/domains/{domain}/log-files/{filename}' => 'domain_log_download',
 
@@ -148,6 +156,9 @@ return [
     'POST /projects/{username}/files/mkdir' => 'file_mkdir',
     'POST /projects/{username}/files/zip' => 'file_zip',
     'POST /projects/{username}/files/unzip' => 'file_unzip',
+    'POST /projects/{username}/files/move-contents' => 'file_move_contents',
+    'POST /projects/{username}/files/fetch' => 'file_fetch',
+    'PUT /projects/{username}/files/chmod' => 'file_chmod',
     'PUT /projects/{username}/files/mv' => 'file_move',
     'PUT /projects/{username}/files/cp' => 'file_copy',
     'PUT /projects/{username}/files/put-contents' => 'file_write',
@@ -165,6 +176,10 @@ return [
     'POST /projects/{username}/git/pull' => 'git_pull',
     'POST /projects/{username}/git/push' => 'git_push',
     'POST /projects/{username}/git/revert' => 'git_revert',
+    'POST /projects/{username}/git/deploy-hook' => 'git_deploy_hook_create',
+    'GET /projects/{username}/git/deploy-hook' => 'git_deploy_hook_show',
+    'POST /projects/{username}/git/deploy-hook/rotate' => 'git_deploy_hook_rotate',
+    'DELETE /projects/{username}/git/deploy-hook' => 'git_deploy_hook_delete',
 
     // WP-CLI
     'POST /projects/{username}/wp-cli/command' => 'wp_cli_run',
@@ -214,10 +229,17 @@ return [
     // ref gets the plaintext. `status` is what an agent polls to wait for the
     // paste; `delete` is cleanup. The secret itself is never returned by any
     // of these.
+    //
+    // `create` with `scope: global` stores the engine's own secret of a type
+    // instead -- pasted once, used by every project that has none of its own,
+    // so an agent stops asking for the same Git token at every project. The
+    // `config` pair is the switch that governs whether projects inherit it.
     'POST /vault/secrets' => 'vault_secret_create',
     'GET /vault/secrets' => 'vault_secret_list',
     'GET /vault/secrets/{ref}' => 'vault_secret_status',
     'DELETE /vault/secrets/{ref}' => 'vault_secret_delete',
+    'GET /vault/config' => 'vault_config_get',
+    'PUT /vault/config' => 'vault_config_set',
 
     // System
     // Files a bug against the engine over the telemetry channel. `create`

@@ -1,0 +1,33 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about everything it says -- the shared PHP base image at the version the
+# patched composer.json asks for, ~/project bind-mounted at /app, the account's
+# own uid, PA_DOCROOT=/app/public, Apache on 8000, the public https URL in
+# APP_URL -- and says nothing about where XBackBone's data goes, because a
+# checkout cannot say that.
+#
+# An override rather than a replacement compose file: an
+# `overrides/docker-compose.yml` is written into the checkout *before*
+# detection, and a docker-compose.yml in the project root would make XBackBone
+# look like a compose project and take the php strategy -- with it the bind
+# mount, the document root, the Composer pass and the staged entrypoint -- off
+# the table entirely.
+services:
+  app:
+    volumes:
+      # ~/.panelalpha/xbackbone. Everything XBackBone accumulates lives here
+      # and nowhere else:
+      #
+      #   /data/xbb.db             the SQLite database (DB_DATABASE)
+      #   /data/uploads/           every uploaded file (storage/app is a
+      #                            symlink to it, written by the prepare hook)
+      #   /data/app.key            the account's APP_KEY
+      #   /data/admin-credentials  the generated administrator, 0600
+      #
+      # A redeploy re-clones ~/project and clears it first, so an upload host
+      # that kept its files under the document root would lose every one of
+      # them on the next `git pull` (engine#173). ~ itself is root-owned 0755
+      # and nothing can be created in it; ~/.panelalpha is created with the
+      # account and belongs to it, which is why the data directory is a child
+      # of that one. The prepare hook creates it before this mount is made, so
+      # Docker never gets to create it as root.
+      - ../.panelalpha/xbackbone:/data

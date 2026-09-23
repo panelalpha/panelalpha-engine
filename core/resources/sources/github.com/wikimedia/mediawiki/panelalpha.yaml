@@ -1,0 +1,159 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MediaWiki from its own git repository, which is not the same artefact as the
+  release tarball everybody installs. The tarball ships `vendor/` and a
+  `LocalSettings.php` you write in a browser; the checkout ships neither, and
+  it ships something the tarball does not -- a `docker-compose.yml` for
+  MediaWiki-Docker, the Wikimedia developer environment.
+
+  That compose file is the whole of the original failure. Detection reads the
+  repository root, `compose.yaml` outranks `php.yaml` on priority, and the
+  engine deployed three `docker-registry.wikimedia.org/dev/*` images: a
+  php85-fpm container, an apache2 container on 8080 and a jobrunner, all
+  bind-mounting the checkout at /var/www/html/w, all pointed at SQLite in
+  `cache/`, all with XDebug and XHProf enabled by default. It came up in 62
+  seconds and answered HTTP 500 on every path -- not from the database, not
+  from a missing config file, but from
+  `includes/PHPVersionCheck.php:150`:
+
+      if ( !file_exists( __DIR__ . '/../vendor/autoload.php' ) )
+
+  called out of `PHPVersionCheck::run()` (PHPVersionCheck.php:340) on the
+  second line of `index.php`, before MediaWiki loads anything of its own. It
+  sends `header( "$protocol 500 MediaWiki configuration Error" )`
+  (PHPVersionCheck.php:237) and a page that says "Installing some dependencies
+  is required." Nothing in the MediaWiki-Docker stack ever runs `composer
+  install` -- upstream expects a developer to type it -- so that 500 is
+  permanent, and it is what the `serving-error_page` verdict on
+  panelalpha/playground/supported-apps#363 recorded.
+
+  So the first thing this recipe does is refuse the compose file.
+  `extends: php` puts the repository on the shared PHP base image with
+  `~/project` bind-mounted at /app, and a source recipe is consulted *before*
+  detection (PlatformSelector::forContext() is
+  `fromSource($context) ?? fromWalk($context, $directory)`,
+  app/Lib/Deploy/Platform/PlatformSelector.php:47), so the repository's own
+  `docker-compose.yml` is never read: PhpStrategy's generated compose file is
+  written over it by name (ComposeWriter::writeGeneratedCompose()). The php
+  platform's build stage then resolves `vendor/` on the host, in the same
+  image the app will be served from, which is the missing step.
+
+  **`--no-plugins` is survivable here, and it was worth checking.** The
+  platform runs `composer install --no-dev --no-interaction --no-scripts
+  --no-plugins --optimize-autoloader` (resources/platforms/php.yaml), and
+  MediaWiki's composer.json requires `wikimedia/composer-merge-plugin`. That
+  plugin's only job in core is `extra.merge-plugin.include:
+  ["composer.local.json"]` -- the file an operator writes to add extensions --
+  and a clone has `composer.local.json-sample` and no `composer.local.json`,
+  so with no extensions installed there is nothing to merge and the resolved
+  tree is the same either way. `--no-scripts` is not survivable, and that is
+  the next paragraph.
+
+  **The vendor directory is web-reachable and upstream knows it.**
+  `"post-install-cmd": "MediaWiki\\Composer\\ComposerVendorHtaccessCreator::onEvent"`
+  writes `vendor/.htaccess` containing `Require all denied`, and that is the
+  only thing standing between a visitor and every file under vendor/ --
+  because MediaWiki serves from its own repository root, so `/vendor/...` is a
+  URL. `--no-scripts` means that hook never fires. files/.htaccess denies
+  `^/vendor(/|$)` with `RedirectMatch 403` from the document root instead,
+  which does not depend on a Composer event having run, and
+  files/panelalpha-setup.sh writes upstream's own `vendor/.htaccess` as well
+  so the tree is what upstream would have produced.
+
+  **mw-config/ is a first-visitor-wins installer.** `mw-config/index.php:20`
+  defines `MW_CONFIG_CALLBACK` before WebStart, which is how it runs *without*
+  loading LocalSettings.php at all; it then hands the request to
+  `WebInstaller`, whose page sequence begins Language, ExistingWiki, Welcome,
+  DBConnect. `WebInstallerExistingWiki::execute()` is the only gate, it is
+  reached only when `Installer::getExistingLocalSettings()` finds a settings
+  file, and what it asks for is `$wgUpgradeKey`. On an account that has just
+  been handed a public HTTPS name that is a form on the open internet that
+  creates a wiki and its bureaucrat. The install is run from the install stage
+  instead -- MediaWiki's own `maintenance/run.php install`, not a
+  reimplementation of it -- and files/mw-config/.htaccess denies the directory
+  outright, which is what upstream's INSTALL file tells an administrator to do
+  by hand once they are finished.
+
+  **LocalSettings.php is not in the document root, and not in the checkout.**
+  It holds `$wgDBpassword`, `$wgSecretKey` (which signs every session and
+  every edit token) and `$wgUpgradeKey`, and a redeploy empties and re-clones
+  `~/project` before it does anything else
+  (System/Project/Dind/Source/GitRepository.php:89 calls
+  `tree()->clearContents($gitProjectDir)`, engine#173), so a settings file
+  written beside index.php would be a *different* `$wgSecretKey` on every
+  deploy -- every logged-in session invalidated, every open edit form
+  rejected. It lives on the bind mount at `/data/LocalSettings.php`
+  (`~/.panelalpha/mediawiki/`, 0700), and MediaWiki is told where by
+  `MW_CONFIG_FILE`, which `wfDetectLocalSettingsFile()` reads from the
+  environment before it falls back to `$IP/LocalSettings.php`
+  (includes/BootstrapHelperFunctions.php:42). The one settings file that has
+  to change between deploys -- `$wgServer`, which is the account's domain --
+  is a second file the setup script regenerates every time and the first one
+  requires at the end.
+
+  **Uploads go to the same place, for the same reason.** `$wgUploadDirectory`
+  defaults to `$IP/images` and `$wgUploadPath` to `/images`, so the bytes and
+  the URL are the same path and the path is inside what a redeploy deletes,
+  while the `image` and `oldimage` rows pointing at them survive. The prepare
+  hook replaces `images/` with a symlink to `/data/images` -- the generated
+  vhost sets `Options -Indexes +FollowSymLinks` on the document root
+  (resources/deploy/templates/apache-vhost.stub) -- and copies upstream's
+  `images/.htaccess` across with it, because that file is what turns off the
+  PHP engine and sets the sandboxing CSP for anything a wiki user uploaded.
+
+  **A wiki with no php.ini cannot take an upload worth having.** `php --ini`
+  in the base image answers "Loaded Configuration File: (none)" (engine#185),
+  so the compiled-in `upload_max_filesize = 2M` is what is in force, and a
+  POST over `post_max_size` is discarded before PHP is entered -- the upload
+  form would report a request that carried a file as one that did not. The
+  compose override sets `PHP_INI_SCAN_DIR` to the image's own conf.d *plus*
+  `/data/php` (the image's directory first and explicitly: the variable
+  replaces the compiled-in path rather than adding to it, and dropping it
+  would unload every docker-php-ext-*.ini and panelalpha-proxy.ini, which is
+  the auto_prepend_file that tells PHP the request arrived over https).
+  `memory_limit` is raised there too, because `maintenance/run.php update` and
+  the localisation cache do not fit in 128M.
+
+  Two things are left as upstream has them. Article URLs are
+  `/index.php/Page_Title` -- `$wgUsePathInfo` is true under mod_php, so
+  MediaWiki builds `$wgArticlePath = "$wgScript/$1"` itself -- rather than
+  short `/Page_Title` URLs, which need rewrite rules whose correctness depends
+  on what else the operator puts in the document root. And the job queue runs
+  the upstream default `$wgJobRunRate = 1`, at the end of web requests: the
+  MediaWiki-Docker jobrunner container this recipe replaced is a development
+  convenience, and a dedicated worker for a single-account wiki would cost a
+  container to run jobs that a wiki of this size produces a handful of.
+extends: php
+# MySQL on the account's own server, not a sidecar. MediaWiki's checkout has
+# no .env and no compose file of its own that the engine should read (the one
+# it does ship is the developer environment this recipe refuses), so there is
+# nothing for the engine to infer a database from -- and MediaWiki's own
+# default is SQLite under `cache/`, which is inside the directory a redeploy
+# deletes. `database: mysql` also stops RuntimeSidecars mining the repository
+# for backing services: PhpStrategy skips that step entirely when the manifest
+# declares a database (Strategy/PhpStrategy.php:66), which is what keeps the
+# three wikimedia dev images out of the generated compose file.
+database: mysql
+# `docroot` is deliberately absent rather than `docroot: .`. MediaWiki serves
+# from its own root -- index.php, api.php, rest.php, load.php, thumb.php and
+# img_auth.php are all at the top of the checkout -- but the manifest reader
+# folds '.' to '' (Platform/PlatformManifest.php:305-307), which means
+# "undeclared", so the key cannot say it (engine#172). PhpDocroot::detect()
+# reaches the root on its own here (none of public/, web/, public_html/ or
+# webroot/ exists and index.php does), and the compose override pins
+# PA_DOCROOT=/app anyway, because the document root decides which files are a
+# URL and that is not a thing to leave to a probe order.
+commands:
+  - id: mediawiki-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Runs MediaWiki's own installer on the first deploy and its own
+      `maintenance/run.php update` on every one after, from inside the
+      container and before Apache binds, so `mw-config/` is never a live form
+      on a public address and a schema change is never paid for by whichever
+      visitor arrives first. Idempotent: it branches on whether
+      /data/LocalSettings.php is there. On the build stage it would not run at
+      all (engine#171).
+    run: 'sh panelalpha-setup.sh'

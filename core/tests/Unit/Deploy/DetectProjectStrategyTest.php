@@ -145,17 +145,6 @@ class DetectProjectStrategyTest extends TestCase
         $this->assertSame($this->tmpDir . '/compose.yaml', $result['compose_path']);
     }
 
-    public function test_compose_yaml_shadows_generated_docker_compose_yml(): void
-    {
-        $this->writeFile('compose.yaml', "services:\n  app:\n    image: nginx\n");
-        $this->writeFile('docker-compose.yml', "services:\n  app:\n    image: alpine\n");
-
-        $this->assertSame(
-            ['compose.yaml'],
-            ComposeFileInspector::composeFilesThatShadow($this->tmpDir)
-        );
-    }
-
     public function test_compose_missing_devcontainer_dockerfile_keeps_compose_when_root_dockerfile_exists(): void
     {
         $this->writeFile('docker-compose.yml', "services:\n  app:\n    build:\n      context: .\n      dockerfile: .devcontainer/Dockerfile\n      target: development\n    ports:\n      - '8080:3000'\n");

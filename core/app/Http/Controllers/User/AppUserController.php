@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
+use App\Lib\Helpers\SafeRedirect;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppManager;
 use App\Models\AppSsoToken;
@@ -302,7 +303,7 @@ class AppUserController extends Controller
             'Lax',
         );
 
-        return redirect($record->redirect)->withCookie($cookie);
+        return redirect(SafeRedirect::toPath($record->redirect))->withCookie($cookie);
     }
 
     #[OA\Get(

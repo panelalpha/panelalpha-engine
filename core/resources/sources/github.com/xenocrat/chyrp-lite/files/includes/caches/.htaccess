@@ -1,0 +1,5 @@
+# Written by PanelAlpha. Twig's compiled templates and the thumbnail cache.
+# Thumbnails are served through includes/thumbnail.php, which reads this
+# directory itself, so none of it needs to be a URL. The parent .htaccess
+# already denies .php here; this covers the cached images too.
+Require all denied

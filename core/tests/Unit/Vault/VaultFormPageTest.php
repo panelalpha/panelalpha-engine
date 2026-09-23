@@ -3,6 +3,7 @@
 namespace Tests\Unit\Vault;
 
 use App\Models\SecretVaultEntry;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
 
 /**
@@ -22,7 +23,7 @@ class VaultFormPageTest extends VaultTestCase
     {
         $response->assertOk();
         $response->assertSee('name="secret"', false);
-        $response->assertSee('Save secret');
+        $this->assertMatchesRegularExpression('/(Save secret|Check and save)<\/button>/', (string) $response->getContent());
     }
 
     public function test_a_git_token_gets_the_repository_screen(): void
@@ -101,6 +102,11 @@ class VaultFormPageTest extends VaultTestCase
     public function test_pasting_stores_the_secret_and_ends_on_the_success_screen(): void
     {
         [$entry, $ref] = $this->entry(['type' => SecretVaultEntry::TYPE_CLOUDFLARE_API_TOKEN]);
+        // A Cloudflare paste is checked first (CloudflarePasteCheckTest); here it just has to pass.
+        Http::fake([
+            '*/accounts/acc1/cfd_tunnel*' => Http::response(['success' => true, 'result' => []]),
+            '*/accounts*' => Http::response(['success' => true, 'result' => [['id' => 'acc1', 'name' => 'A']]]),
+        ]);
 
         $response = $this->post('/vault/' . $ref, ['secret' => 'cf_secret_value']);
 
@@ -118,20 +124,26 @@ class VaultFormPageTest extends VaultTestCase
         [, $git] = $this->entry(['type' => SecretVaultEntry::TYPE_GIT_TOKEN]);
         [, $other] = $this->entry(['type' => 'some_future_secret']);
 
-        $one = (string) $this->post('/vault/' . $git, ['secret' => 'ghp_abc'])->getContent();
+        $one = (string) $this->post('/vault/' . $git, ['secret' => 'ghp_' . str_repeat('a', 36)])->getContent();
         $two = (string) $this->post('/vault/' . $other, ['secret' => 'whatever'])->getContent();
 
         $this->assertSame($one, $two);
     }
 
-    public function test_a_filled_entry_says_that_saving_again_replaces_it(): void
+    /**
+     * This used to offer a second paste that replaced the first. A stored
+     * secret is now final -- replacing one means deleting the entry -- so the
+     * page says so instead of showing a field.
+     */
+    public function test_a_filled_entry_refuses_instead_of_offering_to_replace(): void
     {
         [, $ref] = $this->entry(['type' => SecretVaultEntry::TYPE_GIT_TOKEN, 'secret' => 'ghp_first']);
 
         $response = $this->page($ref);
 
-        $this->assertIsPasteForm($response);
-        $response->assertSee('replaces it');
+        $response->assertOk();
+        $response->assertSee('This secret is already set');
+        $response->assertDontSee('name="secret"', false);
         $response->assertDontSee('ghp_first');
     }
 
@@ -180,6 +192,23 @@ class VaultFormPageTest extends VaultTestCase
         foreach ($matches[1] as $url) {
             $this->assertStringStartsWith('/', $url, "asset URL is not root-relative: {$url}");
         }
+    }
+
+    /**
+     * The tab icon shipped as the Git logo, so the vault looked like GitHub's.
+     * `git.svg` still labels the title tile -- it is only the favicon that is ours.
+     */
+    public function test_the_tab_icon_is_the_engine_mark_not_a_provider_logo(): void
+    {
+        [, $ref] = $this->entry(['type' => SecretVaultEntry::TYPE_GIT_TOKEN]);
+
+        $content = (string) $this->page($ref)->getContent();
+
+        $this->assertStringContainsString('<link rel="icon" href="/favicon.svg" type="image/svg+xml">', $content);
+        $this->assertStringContainsString('href="/favicon.ico"', $content);
+        $this->assertStringContainsString('href="/apple-touch-icon.png"', $content);
+        $this->assertStringContainsString('href="/site.webmanifest"', $content);
+        $this->assertStringNotContainsString('rel="icon" href="/vault/icons/', $content);
     }
 
     /** `url()->current()` shipped a dead Save button: it posts to port 80 behind the proxy. */

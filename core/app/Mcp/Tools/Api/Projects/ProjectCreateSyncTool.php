@@ -92,10 +92,10 @@ class ProjectCreateSyncTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Example: johndoe. Sent to the API as `username`.'),
+            'name' => $schema->string()->description('The project account name. Generated when omitted: from the repository name, else the domain, else the recipe, else "app" -- with a random numeric suffix when that name is taken. 3-15 lowercase letters and digits, starting with a letter. Example: johndoe. Sent to the API as `username`.'),
             'domain' => $schema->string()->description('The main domain. Omitted, it becomes <username>.<sites_base_domain>, which resolves nowhere while that setting is unset. Prefer a label under panelalpha.online and a matching tunnel -- see the description above. Example: shop-4f2a.panelalpha.online.'),
             'domain_redirect_url' => $schema->string(),
-            'email' => $schema->string()->description('Example: john@example.com.')->required(),
+            'email' => $schema->string()->description('Example: john@example.com.'),
             'disk_space_limit' => $schema->integer()->description('MB, -1 for unlimited Example: 10240.'),
             'memory_limit' => $schema->integer()->description('Example: 512.'),
             'cpu_limit' => $schema->number()->description('Example: 1.'),
@@ -110,7 +110,7 @@ class ProjectCreateSyncTool extends ApiTool
             'dedicated_ipv6' => $schema->boolean()->description('Example: .'),
             'template' => $schema->string()->description('dind runs an application in containers of its own, and is what a git_repo deploys into. Omitted over the REST API, the project is classic shared hosting (default: Apache/PHP-FPM, for WordPress and plain PHP sites). This tool sends dind when it is omitted.'),
             'tunnel' => $schema->string()->description('How the domain reaches this host. panelalpha, the default, allocates a free label under panelalpha.online, makes it the project domain and attaches the tunnel in this one call -- so `domain`, if given at all, must be that same name. none means the domain already resolves here, which is true of <name>.<cert_domain> and of a domain the caller pointed at this host. A Cloudflare tunnel is not available here: it needs the project\'s API token, which can only be set once the project exists -- create it, PUT /projects/{username}/settings/cloudflare-api-token, then POST the tunnel. One of: panelalpha, none.'),
-            'git_repo' => $schema->string(),
+            'git_repo' => $schema->string()->description('HTTPS clone URL. SSH remotes (git@host:owner/repo.git, ssh://...) are not supported: the engine clones anonymously or with `git_token` and holds no SSH keys -- a 422 names the HTTPS spelling to use instead. A schemeless github.com/owner/repo is accepted and has the scheme filled in. Example: https://github.com/owner/repo.git.'),
             'git_branch' => $schema->string(),
             'git_token' => $schema->string()->description('Optional HTTPS token injected at clone time. Never logged or returned in GET /users. A `vault:<ref>` from vault_secret_create is accepted here in place of the literal token -- the secret it stands for is substituted at read time, so the token itself never has to pass through the calling agent.'),
             'env_vars' => $schema->object()->description('Optional KEY=value overrides. Stored on the project and applied to its .env and its container environment on every deploy, outranking what the platform generates. An empty value is not an override and is not stored.'),

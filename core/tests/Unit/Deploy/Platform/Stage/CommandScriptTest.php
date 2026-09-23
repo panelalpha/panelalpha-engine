@@ -55,6 +55,25 @@ class CommandScriptTest extends TestCase
         $this->assertCount(3, $lines);
     }
 
+    public function test_every_line_of_a_multiline_description_is_commented(): void
+    {
+        // A YAML folded `>-` description with a blank line folds to real "\n".
+        // Commenting only the first line drops the rest into the entrypoint as
+        // bare shell: a syntax error that crash-loops the container while the
+        // deploy reports success (engine#198).
+        $lines = $this->lines([
+            'id' => 'migrate',
+            'run' => 'php artisan migrate --force',
+            'description' => "Apply pending migrations.\n\nSafe to re-run.",
+        ]);
+
+        $this->assertSame("# Apply pending migrations.\n# \n# Safe to re-run.", $lines[0]);
+
+        foreach (explode("\n", $lines[0]) as $line) {
+            $this->assertStringStartsWith('#', $line);
+        }
+    }
+
     public function test_an_optional_command_records_the_skip_rather_than_failing(): void
     {
         $lines = $this->lines([

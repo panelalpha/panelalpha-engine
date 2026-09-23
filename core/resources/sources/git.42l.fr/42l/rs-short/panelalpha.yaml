@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  rs-short is a minimal link shortener written in Rust (actix-web + Askama
+  server-side templates, ~1000 LOC, 5-20 MB RAM). Anyone may shorten a link and
+  anyone with the short link is redirected — a public-by-design service like a
+  pastebin, so there is no private-data/no-auth concern. Its only privileged
+  surfaces are secret-gated: the per-link admin/delete key is generated per link
+  and handed to its creator, and marking a link as phishing needs the
+  `phishing_password`; there is no global stats or admin panel that lists every
+  link.
+
+  The repository builds three ways behind Cargo features (default `sqlite`, plus
+  `postgres` and `mysql`) but reads all of its settings — including two secrets
+  and the public base URL for the short links — from a `./config.toml` that is
+  .gitignored and absent from the checkout, at a fixed relative path with no
+  environment-variable override. The store is a single SQLite file
+  (`database_path`), and diesel's embedded migrations run at startup. The app
+  listens on `0.0.0.0:8080`.
+
+  This recipe replaces the repository's shipped `Dockerfile` (which builds the
+  `postgres` feature and would need a database sidecar) with a `sqlite` build
+  and an entrypoint that closes the two gaps a source recipe cannot close any
+  other way. First, `config.toml` needs the account's own domain as
+  `instance_hostname` so short links resolve to it, and that value only exists
+  as the `PUBLIC_URL` env the engine injects into the running container (the
+  prepare hook runs before the domain is known and gets none of it) — so the
+  entrypoint renders `config.toml` at start from `$PUBLIC_URL`, stripped of any
+  trailing slash to match rs-short's `"{instance_hostname}/{url_from}"` link
+  format. Second, `cookie_key` and `phishing_password` must stay stable across
+  redeploys: the dockerfile strategy bind-mounts nothing from the account (not
+  `~/project`, wiped every redeploy, nor `~/.panelalpha`), so the durable
+  surface here is the Dockerfile `VOLUME /run_dir/db` the engine turns into a
+  named `data-*` volume that survives recreate. The entrypoint generates the two
+  secrets once into `secrets.env` (umask 077) inside that volume beside
+  `db.sqlite` and reuses them thereafter, so the created links, their admin keys
+  and the sessions all survive a rebuild.
+
+  A source recipe is applied before the probes run, so the deployable filename
+  and its port are stated in `extra`.
+extends: dockerfile
+extra:
+  dockerfile: Dockerfile
+  port_hint: 8080

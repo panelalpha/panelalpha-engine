@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Outline is a team knowledge base and wiki: a Node/Koa server that serves the
+  React editor, the REST API and a websocket collaboration service on :3000,
+  with PostgreSQL for documents and Redis for queues and pub/sub.
+
+  The repository ships a docker-compose.yml that contains no Outline — a
+  postgres and a redis, both published on 127.0.0.1, which is what `yarn dev`
+  connects to on a laptop. ComposeFileInspector classifies it correctly
+  (isSidecarsOnlyComposeYaml: every service a known datastore, none with a
+  build) and will not run it as the project, so detection fell through to the
+  root Dockerfile, built it in 145 seconds and started the image on its own
+  with an empty .env. Outline exits immediately without a database, a redis
+  and a SECRET_KEY, so the container restart-looped and nothing ever listened
+  on 3000 — the serving-unknown verdict this recipe turns into a served page.
+
+  Building that Dockerfile was also the wrong thing to spend the 145 seconds
+  on. It is a repackaging step, not a build: its first stage is `FROM
+  outlinewiki/outline-base` at the floating `latest` tag, and every COPY in
+  the runner stage lifts build/, server/, public/ and node_modules/ out of
+  that image, so the checkout contributes no compiled bytes and the resulting
+  container is whatever outline-base was pushed this morning — not the commit
+  that was cloned. The file that does build from source is Dockerfile.base,
+  and it needs `--max-old-space-size=24000` for the vite pass, which is a
+  24 GB heap inside a 2500 MB account. So overrides/docker-compose.yml runs
+  the project's published image, and hooks/prepare.sh takes the tag from the
+  checkout's own package.json version (the MAJOR.MINOR line, verified against
+  Docker Hub) so a clone still decides which Outline runs.
+
+  Both datastores are required; there is no single-file mode. The prepare hook
+  generates SECRET_KEY, UTILS_SECRET and the Postgres password into .env, once
+  and never again — SECRET_KEY encrypts stored data and the postgres volume
+  outlives the checkout. SECRET_KEY is 64 hex characters because server/env.ts
+  asserts exactly that with @IsHexadecimal() @Length(64, 64) and exits 1 on
+  the next tick otherwise, which reads as a restart loop rather than an error.
+  The one value the recipe cannot generate is URL, the public address every
+  link, redirect, websocket origin and passkey relying-party id is built from:
+  the compose file ships `URL: http://localhost`, the shape ComposePlaceholders
+  rewrites to the account's https URL before the stack starts.
+
+  Outline has no password login, and that is the interesting part of hosting
+  it: no local password, no CLI that creates a user, and a team that has only
+  ever been created by a successful SSO login. What it does have is a
+  first-run installation flow that needs no identity provider at all — it is
+  in the tree at v1.10.1 and back through at least v1.7.0: with no
+  authentication provider configured at all, the login page renders a
+  "Create workspace" form which POSTs to
+  /api/installation.create, and that endpoint creates the team, creates the
+  admin user and signs them in — guarded only by there being no team yet. So
+  the site is usable out of the box, and no OAuth application has to exist
+  first.
+
+  Two consequences are the operator's to manage and .panelalpha-admin-password
+  says so. The form is open to whoever reaches the address first, so the
+  workspace should be created before the URL is shared; and it works exactly
+  once, so the session it hands out is the only way in until the admin adds a
+  passkey (Settings → Profile, no external service needed), configures SMTP_*
+  for email sign-in links, or configures OIDC_* for a real identity provider.
+  All three are reachable through the account's environment variables, which
+  the app service reads via `env_file: .env`.
+
+  One thing to know before testing it: the editor syncs over a websocket at
+  /collaboration/<id>, and the engine's own vhost upgrades it correctly — a
+  handshake against the engine proxy answers 101. The same handshake against a
+  *.panelalpha.online test domain answers 200, because those resolve to a
+  front proxy (eu1.withoutdns.com) that drops the Upgrade header before the
+  engine ever sees it. Measured with a packet capture of the request arriving
+  at the account. It is not the recipe and not the engine, but it does mean
+  the editor will look broken on a test domain while the API is fine.
+
+  FORCE_HTTPS is deliberately off: TLS is the engine proxy's and the container
+  is only reached over the loopback, so the default would make it 301 every
+  probe while the site served a page. PROXY_HEADERS_TRUSTED stays at its
+  default, so session and CSRF cookies are still issued Secure for real
+  traffic. Mail is left unconfigured — Outline works without it, but invites,
+  sign-in links and notifications need an SMTP server the engine does not
+  provide.

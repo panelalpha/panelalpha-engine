@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Jetlog is a self-hosted personal flight logbook: a FastAPI (uvicorn) backend
+  that also serves its built React frontend, with a single SQLite database for
+  both users and flights. It has real authentication — every data route
+  (flights, airports, statistics, import/export) is gated by
+  Depends(get_current_user) and user creation is admin-only, so there is no
+  open-registration window — but it ships a fixed default owner, admin:admin,
+  created by the container the first time the database file is absent
+  (server/database.py create_first_user). The repository builds that image from
+  source (node + python multi-stage Dockerfile) and upstream also publishes it
+  as pbogre/jetlog on Docker Hub, so this recipe runs the official image with a
+  compose-replace rather than rebuilding it on a 2-core host.
+
+  Two things the plain image cannot do for a public deployment. First, the JWT
+  signing key SECRET_KEY is required at startup (server/environment.py exits(1)
+  without it) and must stay stable across redeploys or every session token is
+  invalidated; the prepare hook generates it once into ~/.panelalpha/jetlog and
+  never regenerates it, because ~/project is wiped on every redeploy
+  (engine#173). Second, admin:admin must never reach the public internet: the
+  hook pre-seeds ~/.panelalpha/jetlog/data/jetlog.db with a users table holding
+  a single admin whose password is randomly generated (argon2, using the
+  image's own hasher), so the container finds the DB already present and its
+  admin:admin bootstrap path never runs. The generated password is written
+  0600 to ~/.panelalpha/jetlog/credentials.txt for the account owner.
+
+  The SQLite database is the entire state (users + flights), so /data is a bind
+  mount onto ~/.panelalpha/jetlog/data — the only writable, rebuild-surviving
+  place a recipe can seed a file into (a named volume survives redeploy but
+  nothing can put the pre-seeded DB into it). JETLOG_PORT is set to 8080 and
+  published there. A curl healthcheck on the public /config endpoint plus a
+  no-op `ready` service gated on service_healthy make `compose up` block until
+  jetlog actually answers, so the engine's "deploy finished" is honest
+  (engine#90: up -d returns before the app is up).

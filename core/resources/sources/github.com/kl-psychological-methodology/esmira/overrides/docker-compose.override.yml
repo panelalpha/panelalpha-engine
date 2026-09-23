@@ -1,0 +1,140 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about everything it knows: the shared PHP base image, ~/project bind-mounted
+# at /app, the account's own uid, Apache on 8000, the staged entrypoint, and
+# PA_DOCROOT=/app/ESMira-web/dist from the manifest's `docroot:`. What it cannot
+# know is that this application keeps state, and where.
+#
+# An override rather than a replacement compose file, and that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# before detection runs, so a compose file in the project root would make
+# ESMira look like a compose project and take the php strategy -- the bind
+# mount, the host Node build, the staged install command, the document root --
+# off the table entirely.
+#
+# There is no second service here. ESMira has no database server: the data
+# store is `backend\fileSystem\DataStoreFS` and it is the only one shipped
+# (backend/defaults/configs.default.php:4). A sidecar would cost a second
+# container and a volume the panel does not show, for nothing.
+services:
+  app:
+    # Compose merges `environment` maps across files, so this adds to what the
+    # strategy wrote rather than replacing it.
+    environment:
+      # The one way to give this container a php.ini. The base image loads none
+      # at all -- `php --ini` says "Loaded Configuration File: (none)",
+      # measured -- and scans /usr/local/etc/php/conf.d, a directory inside the
+      # image that the account uid cannot write to (engine #185). PHP reads
+      # PHP_INI_SCAN_DIR from its own environment at startup whatever the SAPI,
+      # so naming a second directory here reaches mod_php and the CLI both, and
+      # both need it: the CLI runs the install stage, mod_php serves every
+      # request.
+      #
+      # The image's own directory is listed first and explicitly:
+      # PHP_INI_SCAN_DIR *replaces* the compiled-in path rather than adding to
+      # it, and dropping it would unload every docker-php-ext-*.ini -- zip
+      # among them, which is what ESMira builds media and snapshot archives
+      # with.
+      PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/panelalpha/php
+
+    # The administrator account, by a path that climbs out of the checkout.
+    # ~/.panelalpha survives the clone; ~/project does not (engine #173), and
+    # hooks/prepare.sh writes this file before compose runs. env_file rather
+    # than `environment:` because nothing else sets these keys, so nothing
+    # outranks the file -- and because .env would put a login credential into
+    # .env.default at mode 644 (engine #173).
+    #
+    # Read at container *creation*: a value written into this file afterwards
+    # never reaches the process, which is why the hook writes it first and why
+    # the setup script fails loudly rather than inventing a password.
+    env_file:
+      - ../.panelalpha/esmira-app.env
+
+    volumes:
+      # The studies, the collected responses, the participant messages, the
+      # account file and the permissions file: everything the account owns.
+      #
+      # Outside the document root, which is the point. ESMira's setup wizard
+      # offers DIR_BASE as the data location and its Docker image takes it
+      # (`VOLUME /var/www/html/esmira_data/`), so the shipped arrangement has
+      # research data sitting inside the served tree, protected by an
+      # `.htaccess` holding `Deny from all` that the initialiser writes
+      # (ESMiraInitializerFS::createDataFolder()). That file is one
+      # `AllowOverride` and one Apache 2.4 `mod_access_compat` away from being
+      # a no-op. `dataFolder_path` is a *config* value
+      # (backend/fileSystem/PathsFS.php:21), so pointing it at /data costs
+      # nothing and removes the URL rather than denying it.
+      #
+      # A bind mount and not a named volume, deliberately: the whole state of
+      # an ESMira account is a directory of JSON and CSV files, and on a bind
+      # mount the owner can list them, copy them and restore them with sftp.
+      - ../.panelalpha/esmira/data:/data
+
+      # configs.php, which cannot be moved: `Paths::FILE_CONFIG` is a class
+      # constant pinned to DIR_BASE (backend/Paths.php:8). Mounted into the
+      # document root at the same place upstream's Dockerfile mounts it. It
+      # holds the data folder path, the server name and the legal texts -- no
+      # credential; the password hash lives in esmira_data/.logins, under
+      # /data.
+      #
+      # Nested inside the ./:/app mount above. Compose applies mounts in order
+      # of destination depth, so this lands on top; hooks/prepare.sh creates
+      # both the source and the target first so neither is a root-owned
+      # directory the account cannot write.
+      - ../.panelalpha/esmira/config:/app/ESMira-web/dist/backend/config
+
+    # Apache with mod_php, one PHP process per request. ServiceLimits would cap
+    # an app-role service it did not write at 384m; ESMira reads a study's
+    # whole response file into memory when a researcher downloads or charts it
+    # (ResponsesStoreFS), so the ceiling is a function of collected data rather
+    # than of concurrency. Measured at rest this container sits well under
+    # 100 MiB; 512 leaves room for a real study inside the 1200 MB this was
+    # tested at.
+    mem_limit: 512m
+
+    # Two requests, because the two things that can be wrong here fail
+    # independently and a 200 proves neither.
+    #
+    #   1. `/` grepped, not trusted for its status. ESMira's front page is a
+    #      PHP-rendered shell around one call --
+    #      `ESMira.init('<jsKey>', ...)` (dist/index.php:72) -- and index.php
+    #      picks that key from `$dataStore->isInit()`: 'home' on a server that
+    #      is set up, 'initESMira' on one that is not. Both are HTTP 200 and
+    #      both are the same page, so the status code cannot tell them apart.
+    #      Matching 'home' means the webpack build produced dist/, mod_php ran
+    #      it, backend/autoload.php resolved, configs.php was found through the
+    #      nested mount, and the data folder exists at /data.
+    #
+    #   2. POST /api/admin.php?type=InitESMira must answer "Disabled". This is
+    #      the security invariant of the whole recipe, asserted on every
+    #      container health probe rather than once at install: that endpoint is
+    #      in api/admin.php's `//no permission:` block and its only guard is
+    #      `isInit()`, so if the data folder ever goes missing -- an unmounted
+    #      /data, a wiped directory -- this server silently becomes adoptable
+    #      by the first stranger who posts to it. An unhealthy container is the
+    #      correct answer to that, and a 200 on `/` is not.
+    #
+    #      The POST carries no body, and that is not tidiness. InitESMira
+    #      checks `isInit()` first and `isset($_POST['new_account'])` second
+    #      (InitESMira.php:15-18), so a probe that sent a plausible account
+    #      name and password would *perform the install* on any server where
+    #      the first check passed -- the health check would become the attack
+    #      it exists to detect. With no body the two outcomes are "Disabled"
+    #      (set up, healthy) and "Missing data" (not set up, unhealthy), and
+    #      neither writes anything.
+    #
+    # No `ready` service gating on this. The engine #90 workaround is for a
+    # deploy whose install stage is still loading a schema into a starting
+    # datastore when the probe fires; here the install stage creates five
+    # directories and writes three files onto a local mount, measured well
+    # under a second.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS --max-time 20 http://127.0.0.1:8000/ | grep -q "ESMira.init('home'" &&
+          curl -fsS --max-time 20 -X POST -d ''
+          'http://127.0.0.1:8000/api/admin.php?type=InitESMira' | grep -q '"error":"Disabled"'
+      interval: 15s
+      timeout: 30s
+      retries: 10
+      start_period: 60s

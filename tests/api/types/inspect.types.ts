@@ -31,10 +31,29 @@ export interface InspectSource {
   [key: string]: unknown;
 }
 
+export interface InspectPortNote {
+  port: number;
+  reason: string;
+  routable: boolean;
+  service?: string;
+  hint?: string;
+}
+
+/** PortsReport: which port is proxied, which needs a rule, which was refused. */
+export interface InspectPorts {
+  primary: number | null;
+  source: string | null;
+  routed: number[];
+  unrouted: InspectPortNote[];
+  refused: InspectPortNote[];
+  compose: number[];
+  dockerfile_expose: number | null;
+}
+
 export interface InspectReport {
   source: InspectSource;
   application: InspectApplication;
-  ports?: Record<string, unknown>;
+  ports: InspectPorts;
   environment?: {
     files?: string[];
     variables?: string[];

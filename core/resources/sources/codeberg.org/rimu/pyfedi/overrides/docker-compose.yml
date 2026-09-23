@@ -1,0 +1,148 @@
+# Replaces PieFed's workstation compose entirely. Writing docker-compose.yml
+# (not the .override.yml) is what makes this a compose project: the app config is
+# applied before detection, the compose platform outranks the walk match, and no
+# platform block is declared, so ComposePlaceholders rewrites PA_PUBLIC_URL below
+# from localhost to the account's public https URL and engine#221 never applies.
+# The app image is PieFed's own Dockerfile, built from the clone. Both build
+# services mount only named volumes (no ./ bind), so ComposeUsableProbe does not
+# read this as a workstation stack and fall back to the dockerfile strategy.
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, written once by hooks/prepare.sh into
+    # ~/.panelalpha/pyfedi/. The database never sees SECRET_KEY.
+    env_file:
+      - ../.panelalpha/pyfedi/db.env
+    environment:
+      POSTGRES_USER: piefed
+      POSTGRES_DB: piefed
+      # A named volume is not always empty (lost+found); postgres refuses to
+      # init into a non-empty dir, so give it a clean subdir.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    # Sized for a 1GB account: PieFed's own compose asks for shared_buffers=1GB.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - max_connections=60
+      - -c
+      - jit=off
+    shm_size: 128mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U piefed -d piefed -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    volumes:
+      # Named volume: survives project_rebuild and storage reclaim; only account
+      # deletion / failed-deploy rollback wipe it.
+      - pgdata:/var/lib/postgresql/data
+    mem_limit: 512m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # PieFed's cache pool and Celery broker. noeviction so broker lists are not
+    # dropped under pressure.
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning", "--maxmemory", "192mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - redisdata:/data
+    mem_limit: 256m
+
+  # One-shot database initialiser. `flask init-db` does drop_all()+create_all()
+  # and seeds the Site singleton, roles, languages and the first admin; run twice
+  # it WIPES all data. The init script runs `flask db upgrade` first (init-db
+  # needs alembic_version to exist) then seeds ONLY when the Site row is absent,
+  # so a fresh deploy initialises and a redeploy finds the row and skips. Runs as
+  # root to chown the media volume for the image's python user. The script is
+  # baked into the image (files/ overlay + the Dockerfile's COPY . /app), not
+  # bind-mounted, so this build service carries no ./ mount.
+  init:
+    build: .
+    image: pyfedi-pa:local
+    restart: "no"
+    user: "0:0"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # .env carries the account-overridable tunables; app.env carries SECRET_KEY,
+    # DATABASE_URL (with the db password) and the seeded admin's credentials.
+    env_file:
+      - .env
+      - ../.panelalpha/pyfedi/app.env
+    environment:
+      # Rewritten to the account's public https URL before the stack starts (key
+      # ends in _URL, value is a bare localhost). The script strips the scheme
+      # into SERVER_NAME, which PieFed needs as a bare hostname for the admin's
+      # ActivityPub actor URLs and the local Instance row.
+      PA_PUBLIC_URL: http://localhost
+    entrypoint: ["/bin/bash", "/app/panelalpha/pyfedi/init.sh"]
+    volumes:
+      - media:/app/app/static/media
+    mem_limit: 1024m
+
+  app:
+    build: .
+    image: pyfedi-pa:local
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - ../.panelalpha/pyfedi/app.env
+    environment:
+      PA_PUBLIC_URL: http://localhost
+    # The app wrapper derives SERVER_NAME from PA_PUBLIC_URL, then execs the
+    # image's own tini+entrypoint (flask db upgrade [no-op after init] +
+    # populate_community_search + gunicorn on :5000). Runs as the image's
+    # default python user.
+    entrypoint: ["/bin/bash", "/app/panelalpha/pyfedi/entrypoint.sh"]
+    volumes:
+      - media:/app/app/static/media
+    healthcheck:
+      # /health 500s until the Site row exists; the app depends on init, so by
+      # the time this runs the row is seeded and /health answers 200. curl ships
+      # in the image.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5000/health -o /dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1536m
+
+  # Starts nothing, exits 0, waits on the app's healthcheck. The engine runs
+  # `docker compose up -d` without --wait (engine#204), so without this gate the
+  # deploy is "done" the moment containers start and the probe lands while
+  # gunicorn is still booting. A clean exit 0 is not a crash loop to AppHealth.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}
+  redisdata: {}
+  media: {}

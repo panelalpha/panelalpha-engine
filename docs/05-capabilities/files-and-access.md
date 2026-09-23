@@ -14,9 +14,28 @@ Upload this archive into the project and deploy it: /path/to/app.zip
 Write these files into the project and rebuild.
 ```
 
-The assistant can upload a file, write files directly, or deploy a whole archive. An archive goes through the deploy process: it is unpacked into `project`, identified, and started, just like a repository would be.
+The assistant can upload a file, write files directly, download a file from an address, or deploy a whole archive. An archive goes through the deploy process: it is unpacked into `project`, identified, and started, just like a repository would be.
 
-**After changing files on a repository-deployed site, rebuild.** The running application does not pick up changed files on its own - it is running the version that was built. Say "and rebuild" as part of the request and it is handled.
+```text
+Download https://example.com/plugin.zip into /project on this project.
+```
+
+The file is saved into a directory that already exists. Only an `http` or `https` address works. This does not deploy the file. On a site deployed from a repository, say "and rebuild" if the running site should pick it up.
+
+```text
+Set the permissions on /project/script.sh to 755.
+```
+
+That changes that one file or directory. It does not walk into folders inside it. The mode is three or four digits from 0 to 7, such as `755` or `0644`.
+
+```text
+Move everything directly inside /project/incoming into /project.
+Leave files that are already there.
+```
+
+Only the immediate children move. The destination directory has to exist already. If you do not say to leave existing files, a file with the same name is replaced.
+
+**After changing files on a repository-deployed site, rebuild.** The running application does not pick up changed files on its own. It is running the version that was built. Say "and rebuild" as part of the request and it is handled.
 
 ## FTP and SFTP
 

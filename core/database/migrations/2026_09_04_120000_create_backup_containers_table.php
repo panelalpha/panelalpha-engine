@@ -10,7 +10,11 @@ return new class extends Migration
     {
         Schema::create('backup_containers', function (Blueprint $table) {
             $table->id();
-            $table->string('name')->unique();
+            $name = $table->string('name')->unique();
+            // MySQL's utf8mb4_unicode_ci makes name lookups case-insensitive; match that on sqlite.
+            if (Schema::getConnection()->getDriverName() === 'sqlite') {
+                $name->collation('NOCASE');
+            }
             $table->string('driver');
             $table->string('location', 1024);
             $table->longText('credentials')->nullable();

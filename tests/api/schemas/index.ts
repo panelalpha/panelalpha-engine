@@ -44,7 +44,19 @@ export {
   sslCertificateListSchema,
   sslCertificateSchema,
 } from './domain.schemas';
-export { customIniSettingsResponseSchema } from './php.schemas';
+export { customIniSettingsResponseSchema, domainPhpDirectivesResponseSchema } from './php.schemas';
+export {
+  deployHookCreateResponseSchema,
+  deployHookDeliverySchema,
+  deployHookRotateResponseSchema,
+  deployHookShowResponseSchema,
+} from './deploy-hook.schemas';
+export { fileExistsResponseSchema, fileStatSchema } from './files.schemas';
+export {
+  bandwidthSeriesSchema,
+  visitorBreakdownSchema,
+  visitorOverviewSchema,
+} from './usage.schemas';
 export { parseApiJson, safeParseApiJson } from './parse-api-json';
 export {
   systemInfoResponseSchema,
@@ -66,6 +78,8 @@ export {
 export {
   inspectApplicationSchema,
   inspectCandidateSchema,
+  inspectPortNoteSchema,
+  inspectPortsSchema,
   inspectReportResponseSchema,
   inspectReportSchema,
   inspectSourceSchema,
@@ -79,3 +93,12 @@ export {
   servingWordSchema,
   SERVING_WORDS,
 } from './inspect.schemas';
+export {
+  createdVaultSecretResponseSchema,
+  createdVaultSecretSchema,
+  deletedVaultSecretResponseSchema,
+  vaultSecretEntrySchema,
+  vaultSecretListSchema,
+  vaultSecretResponseSchema,
+  vaultSecretStatusSchema,
+} from './vault.schemas';

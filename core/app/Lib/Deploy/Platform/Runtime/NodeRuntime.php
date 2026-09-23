@@ -318,7 +318,9 @@ final class NodeRuntime implements Runtime
             }
         }
 
-        return false;
+        // 4. A dependency npm has to clone before anything of the project's
+        //    own runs.
+        return self::installsFromGit($context, $dependencies);
     }
 
     /**
@@ -333,13 +335,65 @@ final class NodeRuntime implements Runtime
      */
     private static function invokesGit(string $text): bool
     {
-        // The word git, then whitespace, then a subcommand: the subcommand
-        // anchor keeps `digit-check` and `.gitignore` out.
+        // The word git, then any global options, then a subcommand: the
+        // subcommand anchor keeps `digit-check` and `.gitignore` out.
+        //
+        // The options are not optional detail. `git -C /app submodule update`
+        // and `git -c safe.directory=/app submodule update` are the engine's
+        // own idiom -- System/Project/Git.php spells both -- so a recipe
+        // author who copies how the engine invokes git wrote exactly the form
+        // this could not see. The build then ran on node:*-slim, which has no
+        // git, and died as `npm error syscall spawn git`: a message naming
+        // neither the missing binary nor the image choice.
         return preg_match(
-            '/(?:^|[\s\'"&|;(=\[`])git\s+(?:rev-parse|log|describe|show|status|diff|branch|tag|config|ls-files|archive|submodule)\b/',
+            '/(?:^|[\s\'"&|;(=\[`])git(?:\s+' . self::GIT_GLOBAL_OPTION . ')*'
+            . '\s+(?:rev-parse|log|describe|show|status|diff|branch|tag|config|ls-files|archive|submodule)\b/',
             $text
         ) === 1;
     }
+
+    /**
+     * A git option that may sit between `git` and its subcommand.
+     *
+     * `-c` takes `key=value` and `-C` a path, with or without a space between
+     * flag and value, so `\s*\S+` covers both spellings of each.
+     */
+    private const GIT_GLOBAL_OPTION =
+        '(?:-[cC]\s*\S+|--(?:git-dir|work-tree|exec-path|namespace)=\S+|--no-pager|--bare|-[pP])';
+
+    /**
+     * Does any declared dependency resolve over git?
+     *
+     * A different route to the same failure, and the one tine arrived by: ten
+     * of its dependencies are `git+ssh://git@github.com/...` in
+     * npm-shrinkwrap.json, so `npm install` itself shells out to git before a
+     * single script runs. No script mentions git, so the checks above see
+     * nothing, and the install fails with `git dep preparation failed`.
+     */
+    private static function installsFromGit(ProjectContext $context, array $dependencies): bool
+    {
+        foreach (['dependencies', 'devDependencies', 'optionalDependencies'] as $section) {
+            foreach ((array) ($dependencies[$section] ?? []) as $spec) {
+                if (is_string($spec) && preg_match('#^(?:git\+|git://|github:|bitbucket:|gitlab:)#', $spec) === 1) {
+                    return true;
+                }
+            }
+        }
+
+        // The specs above are what the manifest says; a lockfile is what the
+        // install will actually fetch, and a transitive git dependency only
+        // appears there. Read whole -- they are large, and this runs once per
+        // build decision.
+        foreach (self::LOCKFILES as $lockfile) {
+            $contents = $context->contents($lockfile);
+            if ($contents !== null && str_contains($contents, 'git+')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
 
     /**
      * $tag without `-slim`: the full Debian image, the one that can run
@@ -530,6 +584,10 @@ final class NodeRuntime implements Runtime
      * above it, or the constraint itself when it is plausible but newer than
      * anything shipped.
      *
+     * An open lower bound (`>=14`) is a floor, not a pin: it gets the default
+     * major when the floor allows it, and `>=16 <21` the newest shipped major
+     * in range.
+     *
      * Null means the constraint could not be believed — unparseable, `lts/*`,
      * or implausibly high. Null, not the default, so a project that pinned
      * exactly the default is still credited with having said so.
@@ -539,6 +597,22 @@ final class NodeRuntime implements Runtime
         $major = self::parseMajor($raw);
         if ($major === null) {
             return null;
+        }
+
+        $range = self::openRange($raw);
+        if ($range !== null) {
+            [$floor, $ceiling] = $range;
+            $inRange = array_values(array_filter(
+                self::majors(),
+                static fn (string $known): bool => (int) $known >= $floor
+                    && ($ceiling === null || (int) $known <= $ceiling)
+            ));
+            if ($ceiling !== null && $inRange !== []) {
+                return end($inRange);
+            }
+            if ($ceiling === null) {
+                $major = max($floor, (int) self::defaultMajor());
+            }
         }
 
         foreach (self::majors() as $known) {
@@ -603,6 +677,39 @@ final class NodeRuntime implements Runtime
         }
 
         return ['', ''];
+    }
+
+    /**
+     * `[floor, ceiling]` majors of a `>=N` / `>N` constraint, with an optional
+     * `<M` / `<=M` ceiling; null for anything else (`^18`, `18.x`, `a || b`).
+     *
+     * @return array{0: int, 1: ?int}|null
+     */
+    private static function openRange(string $constraint): ?array
+    {
+        $pattern = '/^>(=)?\s*v?(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?'
+            . '(?:\s*,?\s*<(=)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?)?$/i';
+        if (preg_match($pattern, trim($constraint), $m) !== 1) {
+            return null;
+        }
+
+        // `>14` is `>=15`; `>14.2` still allows 14.
+        $floor = (int) $m[2];
+        if (($m[1] ?? '') === '' && ($m[3] ?? '') === '') {
+            $floor++;
+        }
+
+        $ceiling = null;
+        if (($m[6] ?? '') !== '') {
+            $ceiling = (int) $m[6];
+            // `<21` and `<21.0.0` exclude 21; `<21.5` does not.
+            $lowerParts = (int) ($m[7] ?? 0) + (int) ($m[8] ?? 0);
+            if (($m[5] ?? '') === '' && $lowerParts === 0) {
+                $ceiling--;
+            }
+        }
+
+        return [$floor, $ceiling];
     }
 
     /**

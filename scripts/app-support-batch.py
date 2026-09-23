@@ -24,8 +24,8 @@ reviewing the reports.
 Parallelism inside one instance:
   --parallel=N  run up to N apps concurrently (default 1). Each app still
                gets its own account, artifacts, and verdict. N should be at
-               most the queue worker count (core/config/horizon.php
-               maxProcesses) — a higher N only deepens the queue, it does
+               most the queue worker count (QUEUE_WORKERS in .env,
+               default 8) — a higher N only deepens the queue, it does
                not finish apps faster.
 
 Multiple instances are also possible, but only with disjoint slices:
@@ -136,7 +136,7 @@ UNFINISHED_VERDICTS = frozenset({
     "deploy-timeout",
     # A task the engine cancelled states nothing about the app. It means the
     # work stopped without a verdict -- the worker was killed mid-deploy
-    # (`docker restart core-queue`, a host reboot, an OOM), or a person called
+    # (`docker restart` of core, a host reboot, an OOM), or a person called
     # cancel. Recording it as `deploy-failed` reads as "this app does not work"
     # and hides it from every later run.
     #
@@ -321,7 +321,7 @@ def cleanup_orphans(email, outdir, keep):
             say(None, f"[orphan-cleanup] {p['username']} -> {dst}")
 
 
-def test_app(app, outdir, timeout_s, keep, email=DEFAULT_EMAIL):
+def test_app(app, outdir, timeout_s, keep, email=DEFAULT_EMAIL, memory_limit=None):
     slug = slugify(app["title"])
     # A retest overwrites result.json in place. What the earlier run found is
     # kept under `previous` so a report can say "was X, now Y" rather than
@@ -393,12 +393,23 @@ def test_app(app, outdir, timeout_s, keep, email=DEFAULT_EMAIL):
     t0 = time.time()
     st, body = 0, None
     for attempt in range(3):
-        st, body = api("POST", "/projects", {
+        create_body = {
             "email": email,
             "name": username,
             "git_repo": app["repo"],
             "git_branch": branch,
-        }, timeout=300)
+        }
+        # An account with no memory_limit is uncapped, and a build is not
+        # bounded by the runtime limits ServiceHardener applies. One tenant's
+        # `rustc` (7.9GB RSS) or `next build` (6.3GB) then triggers the
+        # kernel's *global* OOM killer, which took out core mid-run and turned
+        # 341 apps into `inspect failed: HTTP 0` -- recorded as real verdicts
+        # for repositories that were never even reached. Capped, an oversized
+        # build dies alone (CONSTRAINT_MEMCG) and the app gets an honest
+        # "needs more memory than the account has" instead.
+        if memory_limit:
+            create_body["memory_limit"] = memory_limit
+        st, body = api("POST", "/projects", create_body, timeout=300)
         msg = str(body.get("message", "")) if isinstance(body, dict) else ""
         if st in (200, 201, 202) or "504" not in msg:
             break
@@ -600,8 +611,11 @@ def main():
                          "partition the list, so M instances cover it exactly once")
     ap.add_argument("--parallel", type=int, default=1,
                     help="test up to N apps concurrently (default 1). Keep at or "
-                         "below the queue's Horizon maxProcesses; above it, "
+                         "below the engine's QUEUE_WORKERS; above it, "
                          "apps just wait in the deploy queue")
+    ap.add_argument("--memory-limit", type=int, default=0, dest="memory_limit",
+                    help="MB per account (0 = uncapped, the engine default). "
+                         "Uncapped lets one tenant build OOM the whole host.")
     ap.add_argument("--email", default=DEFAULT_EMAIL,
                     help="test account email (orphan cleanup deletes only "
                          "accounts with this email; use a distinct one per "
@@ -674,7 +688,8 @@ def main():
         slug = slugify(app["title"])
         say(slug, f"===== #{app['iid']} {app['title']} ({app['repo']})")
         try:
-            rec = test_app(app, args.outdir, args.timeout, args.keep, args.email)
+            rec = test_app(app, args.outdir, args.timeout, args.keep, args.email,
+                           args.memory_limit)
         except Exception as e:  # noqa: BLE001
             prev = read_result(os.path.join(args.outdir, slug, "result.json"))
             rec = {"iid": app["iid"], "title": app["title"], "repo": app["repo"], "slug": slug,

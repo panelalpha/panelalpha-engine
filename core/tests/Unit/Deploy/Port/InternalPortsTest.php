@@ -40,6 +40,32 @@ class InternalPortsTest extends TestCase
         }
     }
 
+    /**
+     * epmd is the reason TeslaMate deployed successfully and served nothing.
+     * An Elixir release starts it before the app migrates, so for the first
+     * half-minute 4369 is the only listening socket in the container, and the
+     * port realignment pointed the account at the Erlang port mapper -- which
+     * answers HTTP with an empty reply, permanently.
+     */
+    public function test_infrastructure_listeners_are_not_web_candidates(): void
+    {
+        foreach ([4369 => 'epmd', 2222 => 'unprivileged SSH', 22 => 'SSH', 25 => 'SMTP'] as $port => $what) {
+            $this->assertFalse(InternalPorts::isWebCandidate($port), $what);
+        }
+    }
+
+    /**
+     * The trade this class exists to make, stated as a test: 9000 is php-fpm's
+     * FastCGI socket, but it is also MinIO's and Portainer's real HTTP port,
+     * so filtering it would take working sites offline to fix a broken one.
+     */
+    public function test_ambiguous_ports_stay_web_candidates(): void
+    {
+        foreach ([9000, 7000, 7001, 8086, 3000, 8080] as $port) {
+            $this->assertTrue(InternalPorts::isWebCandidate($port), (string) $port);
+        }
+    }
+
     public function test_a_binding_is_covered_by_its_host_port(): void
     {
         $this->assertTrue(InternalPorts::coversBinding(PortMapping::parse('5432:5432'), []));

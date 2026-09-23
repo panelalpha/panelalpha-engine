@@ -1,0 +1,129 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Chyrp Lite is a blogging engine of the older school: plain PHP 8.1+, no
+  framework, no Composer, no build step, ~28 MB of checkout, and Twig themes
+  over a MySQL, PostgreSQL or SQLite database. It is actively maintained; this
+  recipe was written against 2026.02.02 "Caspian".
+
+  **The 503 is one committed file.** Detection chose `compose`, the deploy
+  finished in 60s, and every request answered HTTP 503 with Chyrp's own error
+  page: "This resource is temporarily unable to serve your request." That is
+  the `serving-error_page` verdict, and its cause is `includes/upgrading.lock`
+  -- nine bytes containing the word `UPGRADING`, *tracked in the repository*.
+  `includes/common.php:373` answers 503 to every request while it is there, and
+  only install.php (line 1229) and upgrade.php (line 1204) ever remove it. So
+  every deployment made by cloning this repository serves 503 until somebody
+  completes the web installer by hand -- upstream's own `docker compose up`
+  included. Behind it is the second 503, `common.php:381`, for the missing
+  config file. Running upstream's installer from the deploy closes both.
+
+  **`compose` was a fair reading of the tree and still the wrong answer.**
+  The root docker-compose.yaml is not a workstation stack the way s-cart's,
+  Shopware's and Koillection's are: one service, upstream's own Dockerfile, two
+  named volumes, 127.0.0.1:8080:80. It is a real deployment -- just not a
+  hosting account. Taking it builds a ~1 GB PHP image per account (apt-get plus
+  compiling pdo_pgsql and pdo_mysql from source: 38s of that 60s deploy on two
+  cores) to arrive at an Apache with `AllowOverride None`, no document-root
+  protection, and the installer still open on a public URL. `php-plain` gets
+  the shared php:8.3-apache image with ~/project bind-mounted and editable over
+  SFTP -- which is most of what someone hosting a blog wants to do -- the
+  account's own MySQL in the panel and phpMyAdmin, the engine's vhost, and a
+  staged entrypoint that can run the installer before Apache binds.
+  PlatformSelector::fromSource() resolves this manifest ahead of the detection
+  walk; hooks/prepare.sh additionally moves docker-compose.yaml, Dockerfile,
+  entrypoint.sh and .dockerignore into .panelalpha/, because two of them would
+  otherwise be served as plain text from the document root and none of the four
+  means anything here. It names them one at a time -- a `docker-compose.*` glob
+  would catch the engine's own overrides file, which is already in the project
+  root by the time the hook runs (engine#166).
+
+  **Two unauthenticated endpoints, not one.** install.php is first-visitor-wins
+  in the usual way: it creates every table and the first administrator from
+  whatever it is posted, with no token and no lock, and the only thing that
+  closes it is the config file it writes at the end.
+  files/panelalpha-install.php runs it from the install stage instead, in a CLI
+  process that sets $_SERVER and $_POST and includes upstream's own file -- so
+  the schema and the password hashing stay upstream's, and so does every
+  migration they add later. The password is 24 characters generated per account
+  into ~/.panelalpha/chyrp-lite/admin-credentials (0600 in a 0700 directory;
+  account homes are root-owned 0755, so the directory has to exist before
+  Docker mounts it). upgrade.php is the one that is easy to miss: it has no
+  authentication at all, and an anonymous `POST upgrade=yes` runs the
+  migrations and rewrites the config. Upstream means both to be deleted after
+  use -- install.php's closing screen says so and the Dockerfile's entrypoint
+  tries to, looking for them in includes/ when they are in the root, so it never
+  does. This recipe runs upgrade.php itself on every redeploy (which is also
+  what re-does the cacert.pem rename that a re-clone undoes) and then removes
+  both files. They come back with every clone, so that happens every deploy.
+  Measured afterwards: /install.php and /upgrade.php are 404.
+
+  **Where the data lives.** A redeploy clears and re-clones ~/project
+  (engine#173) and two things Chyrp keeps are inside it. config.json.php holds
+  the database password, the site URL and the secure_hashkey that signs
+  sessions; STORAGE_DIR comes from $_SERVER['CHYRP_STORAGE_DIR'] falling back
+  to includes/ (common.php:101), and files/.htaccess points it at /data --
+  ~/.panelalpha/chyrp-lite, bind-mounted by the compose override. It has to be
+  said in .htaccess rather than in the compose environment, for the same reason
+  upstream's Dockerfile needs `PassEnv CHYRP_STORAGE_DIR`: mod_php does not
+  publish the container environment as $_SERVER. The uploads directory is
+  harder. uploads_path is MAIN_DIR."/uploads/" with no setting in front of it,
+  and XBackBone's answer -- symlink it out of the checkout -- does not work
+  here, because Chyrp's uploads are served by Apache as static files and the
+  vhost's `<Directory /> Require all denied` matches the *resolved* path, so
+  every image on the blog would answer 403. Measured. So the override
+  bind-mounts ~/.panelalpha/chyrp-lite/uploads over /app/uploads instead: the
+  files stay where Chyrp expects them, inside the document root, and on the
+  account's own disk. The posts are in the account's own MySQL, which survives
+  a redeploy and opens in phpMyAdmin -- verified by redeploying an account with
+  a published post and two uploads and finding all of it still there.
+
+  **engine#185 shows through this application more than most.** The shared base
+  image loads no php.ini, so display_errors is on, and Chyrp's own
+  `ini_set("display_errors", false)` in includes/error.php only covers a request
+  that reached a file which includes it. `GET /includes/class/SQL.php` answered
+  200 with `Fatal error: Uncaught Error: Undefined constant "INCLUDES_DIR" in
+  /app/includes/class/SQL.php:11`. files/.htaccess sets `php_flag display_errors
+  Off` for the whole account, and files/includes/.htaccess and files/tools/.htaccess
+  deny the library and developer directories outright, keeping only
+  includes/download.php and includes/thumbnail.php, which are the two paths the
+  themes actually link.
+
+  **The readiness gate is measured, not assumed** (engine#90). `docker compose
+  up -d` returns before the ~20 CREATE TABLEs finish and the engine probes
+  immediately; the deploy log shows `Container project-app-1 Waiting` and
+  `Healthy` five seconds later on both a first install and a redeploy. GET / is
+  a real check here: it answers 200 only once upgrading.lock is gone,
+  config.json.php exists and the database is reachable.
+
+  See README.md for the exposure table, what a redeploy was measured to
+  preserve, and what is deliberately left as upstream has it.
+extends: php-plain
+# MySQL or SQLite, and MySQL wins: a SQLite file would have to live on the
+# ~/.panelalpha bind mount, invisible to every tool the account has, while the
+# engine's own database is in the panel, in phpMyAdmin and in the backup.
+# Declaring it is also what stops the checkout being mined for sidecars --
+# PhpStrategy skips RuntimeSidecars entirely when the manifest names a database
+# (app/System/Project/Dind/Strategy/PhpStrategy.php:67) -- which matters in a
+# repository that ships a compose file with commented-out postgres and mysql
+# services in it.
+database: mysql
+# `docroot` is deliberately absent rather than `docroot: .`: the manifest
+# reader folds '.' to '' (PlatformManifest.php:305), which means "undeclared",
+# so it cannot say "the repository root" at all (engine#172). index.php is at
+# the root and there is no public/, so the probe reaches /app on its own; the
+# compose override pins PA_DOCROOT=/app so the answer does not depend on that.
+commands:
+  - id: chyrp-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Runs Chyrp Lite's own installer -- or its upgrader, on a redeploy -- from
+      the deploy rather than leaving install.php on a public URL for whoever
+      arrives first, points the site at the account's current domain, and
+      removes install.php and upgrade.php from the document root afterwards.
+      Idempotent: the upgrade stage replays it on every redeploy over a
+      database that survived. On the build stage it would not run at all
+      (engine#171).
+    run: 'php /app/panelalpha-install.php'
+    timeout: 300

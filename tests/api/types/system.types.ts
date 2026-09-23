@@ -59,6 +59,11 @@ export interface UsageLimitPair {
 
 export interface UserUsage {
   storage: UsageLimitPair;
+  /** Calendar-month transfer in bytes. `maximum` is null when the project is unlimited. */
+  bandwidth: {
+    usage: number;
+    maximum: number | null;
+  };
   addon_domains: UsageLimitPair;
   subdomains: UsageLimitPair;
   ftp_accounts: UsageLimitPair;

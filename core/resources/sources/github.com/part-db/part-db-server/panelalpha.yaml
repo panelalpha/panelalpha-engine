@@ -1,0 +1,125 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Part-DB is an electronics parts inventory: Symfony 7.4, Doctrine ORM,
+  Twig, an Encore-built frontend, and a repository that ships its own
+  production Dockerfile. Detection reads it correctly and picks the
+  `dockerfile` strategy over `php` -- DockerfileFinder's probe outranks
+  composer.json -- so nothing here is a fight with the engine. The image
+  upstream builds is a good one: PHP 8.4 from sury with the whole extension
+  set, php-fpm behind Apache with its own vhost, an opcache/realpath tuning
+  file, `upload_max_filesize=256M` for an application whose whole point is
+  attachments, a `<Directory public/media>` block that refuses to execute PHP
+  out of the upload directory, a node-builder stage that compiles the
+  frontend, and an entrypoint that chowns the two data directories and
+  migrates the schema. It also declares
+  `VOLUME ["/var/www/html/uploads", "/var/www/html/public/media"]`, which
+  DockerfileStrategy::declaredVolumes() turns into two *named* volumes rather
+  than the anonymous ones Docker would invent.
+
+  It still answered HTTP 500 on every request, and the reason is two lines
+  of the generated compose file meeting two lines of the Dockerfile.
+
+  **The schema is never created.** `.docker/partdb-entrypoint.sh` runs
+  `doctrine:migrations:migrate` only inside `if [ "$DB_AUTOMIGRATE" = "true" ]`.
+  Nothing sets it, so a fresh account boots with an empty database and
+  `ErrorRenderer` answers `Invalid or not existing database schema.` -- the
+  `serving-error_page` verdict, measured on the control deploy at
+  https://pdbctl-d930.panelalpha.online/ before this recipe existed. Upstream
+  expect the variable to come from the compose file the operator writes; the
+  engine writes that compose file, so the engine is the operator here.
+  `DB_AUTOMIGRATE: 'true'` below is the whole fix for the 500, and it is
+  idempotent: the entrypoint runs `doctrine:migrations:up-to-date` first and
+  only migrates when it says no, taking a `partdb:backup --database` of the
+  old state into `uploads/.automigration-backup/` when it does.
+
+  **And the database was in the wrong place, which would have lost it.** The
+  generated compose carries `env_file: - .env`, so every line of the
+  repository's committed .env becomes a real process environment variable --
+  and a real environment variable outranks the image's own `ENV`. The
+  Dockerfile sets `ENV DATABASE_URL="sqlite:///%kernel.project_dir%/uploads/app.db"`,
+  which is upstream putting the database inside the volume they declared;
+  .env sets `DATABASE_URL="sqlite:///%kernel.project_dir%/var/app.db"`, which
+  is where a developer's checkout keeps it. Measured in the control
+  container: `printenv DATABASE_URL` printed the `var/app.db` one, and
+  `/var/www/html/var/app.db` existed, zero bytes, in the container's own
+  writable layer. Every redeploy rebuilds that layer. So the value is restated
+  here, in the manifest's `env:`, which
+  `ComposeEnvironment::layer()` puts in the compose `environment:` block --
+  the only one of the three that outranks env_file.
+
+  The same inversion decides `APP_ENV`. The image says `docker` and .env says
+  `prod`, so `prod` won. They are the same Symfony configuration --
+  config/packages/doctrine.yaml ends `when@docker: *prod` and aliases the
+  whole block -- except for monolog, where `when@prod` writes to
+  `%kernel.logs_dir%/prod.log` inside the container's writable layer and
+  `when@docker` writes to `php://stderr`. Restoring `docker` is what puts an
+  application error where `docker logs` and the panel can see it instead of
+  in a file that dies with the container. `.env.docker`, which Symfony's
+  Dotenv loads for that environment, carries the `APP_DEBUG=0` it needs.
+
+  **TRUSTED_PROXIES**, for the client address rather than the scheme.
+  config/parameters.yaml defaults it to `127.0.0.1` and
+  config/packages/framework.yaml feeds it straight into
+  `framework.trusted_proxies`, so behind the engine's nginx proxy Symfony
+  trusts no X-Forwarded-For and every visitor of the account shares one
+  address: the proxy's. `login_throttling: max_attempts: 5` in
+  config/packages/security.yaml is per client IP, so five failed logins a
+  minute would be the limit for the whole site rather than for each visitor,
+  and Part-DB's own event log -- which records the address of every login and
+  every change, anonymised for GDPR -- would record the proxy for all of
+  them. The proxy sends what is needed:
+  templates/dind/virtualHost-nginx-proxy.blade.php sets
+  X-Forwarded-For/-Proto/-Host/-Port on both server blocks, and framework.yaml
+  already trusts those headers by name, so this is only a matter of naming
+  the networks the proxy can be on.
+
+  The *scheme* was already right, and for a reason worth writing down because
+  it is not obvious: the generated compose sets `HTTPS: 'on'`, and the
+  Dockerfile's php-fpm pool is configured `clear_env = no`, so that variable
+  reaches `$_SERVER['HTTPS']` in every worker and `Request::isSecure()` is
+  true whatever the connection was. Measured inside the container:
+  `curl http://127.0.0.1/` -- no X-Forwarded-Proto anywhere -- answers
+  `302 https://127.0.0.1/en/`. That is what already made
+  `framework.session.cookie_secure: auto` mark the session cookie Secure, and
+  it is why the healthcheck below asks for `/en/` rather than following `/`.
+
+  **And a stock Part-DB is not private.** There is no installer and no
+  sign-up page, so nothing is left open in the sense engine#200 means -- but
+  migration Version1 creates `anonymous` (id 1) in the `readonly` group
+  beside `admin`, and that row is the identity of every visitor who has not
+  logged in. Measured against this recipe's own deploy with no cookie: `GET
+  /en/part/1` answers 200 with the part, its stock and its storage location;
+  `/en/statistics` and `/en/category/1/edit` answer 200; and `POST
+  /en/category/new` answers 302 to `/en/category/2/edit`, having inserted a
+  row. The compose override closes it once, on the first boot, by taking that
+  account's group away -- see the comment there for why it is done in the
+  data rather than in config, and how an operator turns it back on.
+
+  What is deliberately *not* here: `database: mysql`. The account's own MySQL
+  server would be the better home for this data, but `database:` is read in
+  exactly one place -- PhpStrategy.php:67 and :73 -- and is silently ignored
+  by every other strategy, DockerfileStrategy included. Taking it would mean
+  taking the `php` strategy too, which means giving up the image above and
+  rebuilding all of it worse: PHP 8.3, no php.ini at all (engine#185), so
+  `upload_max_filesize=2M` on an attachment manager, and `composer install
+  --no-plugins` with no way to lift it (engine#199), so symfony/runtime never
+  writes vendor/autoload_runtime.php and public/index.php dies on its second
+  line. SQLite in the `uploads` volume is upstream's own default for this
+  image, the volume is named and `docker compose down` -- which is what the
+  rebuild runs, DindDeployMechanics.php:136, without `-v` -- keeps it. See
+  the README for what that does and does not protect.
+extends: dockerfile
+env:
+  # The entrypoint's migration branch. Without it the first request is a 500
+  # on an empty schema; with it the container migrates before Apache binds.
+  DB_AUTOMIGRATE: 'true'
+  # The image's own value, restated where env_file cannot shadow it: inside
+  # the declared volume rather than the container's writable layer.
+  DATABASE_URL: 'sqlite:///%kernel.project_dir%/uploads/app.db'
+  # The image's own APP_ENV, for monolog's `when@docker` stderr handler.
+  # APP_DEBUG=0 comes from the repository's .env.docker.
+  APP_ENV: docker
+  # Loopback plus the RFC 1918 ranges: the engine's proxy reaches the app
+  # over the account's own docker bridge, and nothing else can reach it at
+  # all. Symfony trusts an X-Forwarded-* header only from these.
+  TRUSTED_PROXIES: '127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16'

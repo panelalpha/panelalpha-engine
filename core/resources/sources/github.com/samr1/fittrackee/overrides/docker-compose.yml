@@ -1,0 +1,171 @@
+# Compose-replace: FitTrackee's shipped compose file is written for an operator
+# to edit (host bind-mounts to create, a .env to fill in with APP_SECRET_KEY,
+# the DB password, UI_URL and the redis/mail wiring). This runs the same app
+# made durable and self-configuring:
+#   - the official image fittrackee/fittrackee, pinned to release v1.3.5
+#   - PostGIS (postgis/postgis:16-3.5-alpine) as the DB the app requires; the
+#     postgis image auto-creates the extension in the fittrackee database
+#   - Redis (internal only) so API rate limits are active
+#   - APP_SECRET_KEY and the DB password seeded from ~/.panelalpha/fittrackee
+#     (../.panelalpha from ~/project), reused on every rebuild
+#   - UI_URL derived from the account's public URL at boot
+#   - Postgres data, uploads, staticmap cache and logs each on a named volume
+#   - only the app service publishes a port
+# The app container runs docker-entrypoint.sh: `ftcli db upgrade` (migrations)
+# then gunicorn on :5000, serving the API and the built Vue frontend together.
+services:
+  fittrackee-db:
+    # PostGIS is required by FitTrackee; the postgis image creates the extension
+    # in POSTGRES_DB on first init. Plain postgres would fail migrations.
+    image: postgis/postgis:16-3.5-alpine
+    restart: unless-stopped
+    env_file:
+      # POSTGRES_USER/PASSWORD/DB come from the account's seeded secrets.
+      - .env
+      - ../.panelalpha/fittrackee/app.env
+    volumes:
+      # Postgres cluster on a named volume so users and workouts survive redeploy.
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fittrackee -d fittrackee || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1g
+
+  # Internal only: flask-limiter uses it for API rate limits (brute-force
+  # protection on login). Not published. No persistence needed (transient
+  # counters); email/async export are not configured, so no worker runs.
+  fittrackee-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    mem_limit: 256m
+
+  # Root one-shot: named volumes are created root-owned, but the app runs as the
+  # non-root 'fittrackee' user and must write uploads, the staticmap cache and
+  # gunicorn.log. Upstream's own compose does the same chown from a post_start
+  # hook, but that runs too late -- gunicorn opens its logfile at startup. So the
+  # ownership is fixed here, before the app starts. Pure provisioning of the
+  # mounts (no app source touched).
+  init-perms:
+    image: fittrackee/fittrackee:v1.3.5
+    restart: "no"
+    user: root
+    entrypoint: ["/bin/sh", "-c", "chown -R fittrackee:fittrackee /usr/src/app/uploads /usr/src/app/.staticmap_cache /usr/src/app/logs"]
+    volumes:
+      - uploads:/usr/src/app/uploads
+      - staticmap-cache:/usr/src/app/.staticmap_cache
+      - logs:/usr/src/app/logs
+    mem_limit: 128m
+
+  fittrackee:
+    image: fittrackee/fittrackee:v1.3.5
+    restart: unless-stopped
+    # Migrations then gunicorn on :5000 (the app's own entrypoint).
+    command: "sh docker-entrypoint.sh"
+    env_file:
+      # Platform-merged account env first, then this account's seeded secrets
+      # (APP_SECRET_KEY, DATABASE_URL, admin creds) so an empty default cannot
+      # clobber them.
+      - .env
+      - ../.panelalpha/fittrackee/app.env
+    environment:
+      FLASK_APP: "fittrackee"
+      FLASK_SKIP_DOTENV: "1"
+      APP_SETTINGS: "fittrackee.config.ProductionConfig"
+      # Uploads (GPX, avatars) and the staticmap cache live on named volumes.
+      UPLOAD_FOLDER: "/usr/src/app/uploads"
+      STATICMAP_CACHE_DIR: "/usr/src/app/.staticmap_cache"
+      # gunicorn workers; this host is roomy (8 cores / 15 GB).
+      APP_WORKERS: "2"
+      # Rewritten to the account's public https address before the stack starts
+      # (key ends in _URL, value is a bare localhost URL). Used for share/email
+      # links and absolute URLs. The port here is a placeholder only (the value
+      # is replaced wholesale): it must be one ComposePlaceholders allowlists,
+      # and the app's own :5000 is NOT allowlisted, so 8080 is used. The app
+      # still listens on 5000 (see ports/healthcheck). Left as-is on an account
+      # with no domain yet.
+      UI_URL: "http://localhost:8080"
+      # Points at the redis service (not localhost), so it is NOT rewritten;
+      # enables flask-limiter. Default limits from API_RATE_LIMITS below.
+      REDIS_URL: "redis://fittrackee-redis:6379"
+      API_RATE_LIMITS: "300 per 5 minutes"
+    volumes:
+      - uploads:/usr/src/app/uploads
+      - staticmap-cache:/usr/src/app/.staticmap_cache
+      - logs:/usr/src/app/logs
+    ports:
+      # Only the app publishes a port (engine#231/#234).
+      - "5000:5000"
+    depends_on:
+      fittrackee-db:
+        condition: service_healthy
+      fittrackee-redis:
+        condition: service_healthy
+      init-perms:
+        condition: service_completed_successfully
+    healthcheck:
+      # /api/check-db proves gunicorn is up AND the database is reachable
+      # (migrations applied). wget is present in the image. Generous start_period:
+      # first boot runs migrations before the port opens.
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:5000/api/check-db || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 180s
+    mem_limit: 2g
+
+  # One-shot: seeds the owner account. FitTrackee's entrypoint creates no admin,
+  # so this creates `admin` with role `owner` and the per-account password from
+  # ~/.panelalpha once the API is healthy (schema exists). Idempotent: on a
+  # redeploy the account already exists, so the password is left untouched and
+  # only the role is re-asserted.
+  seed-admin:
+    image: fittrackee/fittrackee:v1.3.5
+    restart: "no"
+    env_file:
+      - .env
+      - ../.panelalpha/fittrackee/app.env
+    environment:
+      FLASK_APP: "fittrackee"
+      FLASK_SKIP_DOTENV: "1"
+      APP_SETTINGS: "fittrackee.config.ProductionConfig"
+      # ProductionConfig reads UI_URL as a mandatory env var (create_app would
+      # crash without it), so ftcli needs it too. Rewritten to the public URL
+      # like the app's own (key ends in _URL, value is a bare localhost URL).
+      UI_URL: "http://localhost:8080"
+    entrypoint: ["/bin/sh", "/panelalpha/seed-admin.sh"]
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+    depends_on:
+      fittrackee:
+        condition: service_healthy
+    mem_limit: 512m
+
+  # No-op gate: `docker compose up` blocks on these depends_on conditions, so up
+  # returns only once the site answers AND the admin has been seeded (engine#204)
+  # -- the deploy never turns green without an owner account.
+  ready:
+    image: fittrackee/fittrackee:v1.3.5
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      fittrackee:
+        condition: service_healthy
+      seed-admin:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  db-data: {}
+  uploads: {}
+  staticmap-cache: {}
+  logs: {}

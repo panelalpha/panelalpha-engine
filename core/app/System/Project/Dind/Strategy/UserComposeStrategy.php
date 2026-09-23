@@ -3,21 +3,24 @@
 namespace App\System\Project\Dind\Strategy;
 
 use App\System\Project\Dind as DindProject;
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Compose\ComposeYaml;
+use App\Lib\Deploy\Env\ComposeEnvFiles;
 use Symfony\Component\Yaml\Yaml;
 
 /**
  * The project's own compose file, made fit to host.
  *
- * The only strategy that edits a file the customer wrote rather than
- * generating one, so it changes as little as it can: point a build at the
- * Dockerfile that actually exists, apply the hosting hardening, and fill in
- * the blanks the author left for whoever would run it.
+ * Reads the customer's file and changes as little as it can: point a build
+ * at the Dockerfile that actually exists, apply the hosting hardening, and
+ * fill in the blanks the author left for whoever would run it. The result is
+ * written to the run file (ADR-0001) — the customer's own file is never
+ * touched, so it stays byte-identical to their repository.
  */
 class UserComposeStrategy
 {
@@ -60,13 +63,34 @@ class UserComposeStrategy
     }
 
     /**
+     * Re-run {@see normalize()} on whatever compose file the project
+     * currently ships, so an edit made after the first deploy is picked up
+     * the next time the container starts (ticket 05: container actions
+     * regenerate the run file before `up`/`pull`). A no-op when the project
+     * has no compose file of its own to read.
+     */
+    public function refreshRunFile(string $projectDir, ?string $chown): void
+    {
+        $source = $this->dind->userAppExistingComposeFilePath();
+        if ($source === null) {
+            return;
+        }
+
+        $this->normalize($source, $projectDir, $chown);
+    }
+
+    /**
      * Point missing compose dockerfile paths at the root Dockerfile, then
      * apply hosting harden (skip git hooks, skip demo seeds, restart).
+     *
+     * Reads $composePath, the project's own file, and writes the result to
+     * the run file (ADR-0001) — the source is never touched.
      */
     private function normalize(string $composePath, string $projectDir, ?string $chown): void
     {
         $logger = $this->dind->shell()->logger();
         $system = $this->dind->system();
+        $runPath = $this->dind->userAppComposeFilePath();
         $missing = ComposeFileInspector::missingComposeDockerfileRefs($composePath, $projectDir);
         $raw = $system->filesystem()->fileGetContents($composePath);
         // Through ComposeYaml, not Yaml::parse: this was the one unguarded
@@ -87,6 +111,12 @@ class UserComposeStrategy
                     'Compose file builds from ' . $missing[0] . ' which does not exist.'
                 );
             }
+
+            // Nothing to harden, but the run file still has to exist for
+            // whatever runs `compose up` against it — copy the source through
+            // verbatim rather than leaving composeFileToRun() pointing at
+            // nothing.
+            $system->filesystem()->filePutContents($runPath, $raw, $chown, '644');
 
             return;
         }
@@ -128,6 +158,15 @@ class UserComposeStrategy
             $logger?->info($line);
         }
 
+        // The DinD proxy routes the domain to the account container on the
+        // detected primary port; a service that only expose:s it binds nothing
+        // there, so publish it explicitly or the domain 502s.
+        $binding = ComposeHarden::withPublishedPrimaryPort($parsed);
+        $parsed = $binding['compose'];
+        if ($binding['published'] !== null) {
+            $logger?->info("Published detected primary port {$binding['published']} so the domain reaches this app");
+        }
+
         foreach (ComposeHarden::oneShotServices($parsed) as $name) {
             $logger?->info("Service {$name} runs once and exits; not restarting it");
         }
@@ -137,7 +176,13 @@ class UserComposeStrategy
         // built-in defaults.
         $parsed = ComposeHarden::apply($parsed, $this->dind->userModel()->getMemoryLimit());
         $parsed = $this->fillPlaceholders($parsed, $logger);
-        $system->filesystem()->filePutContents($composePath, Yaml::dump($parsed, 6, 2), $chown, '644');
+        // A tracked .env's overrides (ADR-0001 D3). ProjectEnvironment decides
+        // on every deploy whether the file should exist; this only keeps it
+        // attached when the run file is regenerated without a deploy (`up`).
+        if ($system->filesystem()->fileExists($projectDir . '/' . EngineArtifacts::ENV_OVERRIDES)) {
+            [$parsed, ] = ComposeEnvFiles::attach($parsed, EngineArtifacts::ENV_OVERRIDES);
+        }
+        $system->filesystem()->filePutContents($runPath, Yaml::dump($parsed, 6, 2), $chown, '644');
         $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
         $logger?->info('Hardened compose for hosting (resource limits, restart policy, isolation)');
     }

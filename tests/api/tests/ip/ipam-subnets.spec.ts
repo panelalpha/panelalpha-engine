@@ -1,5 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import type { SubnetSpec } from '@/helpers/ipam-helpers';
+import { ipamSubnetListSchema } from '@/schemas';
+import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 import {
   IPV4_SUBNET,
   IPV6_SUBNET,
@@ -24,7 +26,7 @@ test.describe('IP subnets', () => {
 
   test('the subnet listing is paginated', async ({ api }) => {
     const listing = await api.listSubnets();
-    expect(listing).toHaveProperty('data');
+    validateParsedApiResponse(listing, ipamSubnetListSchema);
     expect(listing).toHaveProperty('meta');
   });
 

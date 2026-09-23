@@ -29,10 +29,15 @@ export function assertDeploymentWarnings(
     }
     return;
   }
-  expect(Array.isArray(warnings), 'deployment_warnings must be a list after a finished deploy').toBe(
-    true
-  );
-  const list = warnings ?? [];
+  // A clean success stores the status and leaves the list out. A partial
+  // deploy always writes the sentences that made it partial.
+  if (status === 'partial' || warnings != null) {
+    expect(
+      Array.isArray(warnings),
+      'deployment_warnings must be a list after a finished deploy'
+    ).toBe(true);
+  }
+  const list = Array.isArray(warnings) ? warnings : [];
   for (const line of list) {
     expect(typeof line).toBe('string');
     expect(line.length).toBeGreaterThan(0);
@@ -47,7 +52,9 @@ export function assertDeploymentWarnings(
 
 export function assertMissingEntry(report: AppHealth): void {
   expect(report.serving).toBe('missing_entry');
-  const failed = report.checks.find((check) => check.id === 'entry-served' && check.status === 'fail');
+  const failed = report.checks.find(
+    (check) => check.id === 'entry-served' && check.status === 'fail'
+  );
   expect(failed, 'missing_entry must come from a failed entry-served check').toBeTruthy();
   expect(failed?.severity).toBe('error');
 }

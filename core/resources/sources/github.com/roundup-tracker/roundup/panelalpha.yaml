@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../../platforms/_schema.json
+description: >-
+  Roundup is a Python issue tracker served over WSGI. It has no web installer
+  and no first-visitor-wins page: a tracker is created on the command line with
+  `roundup-admin install <template> <backend>` + `initialise <adminpw>`, which
+  writes the tracker home (config.ini, schema.py, the database) before anything
+  is served. The GitHub repo (an official mirror of the upstream Mercurial tree,
+  which the engine cannot clone) ships no Dockerfile and pip-installs cleanly,
+  so this recipe carries its own: files/Dockerfile does `pip install .` of the
+  checkout plus gunicorn, and panelalpha-entrypoint.sh creates the tracker home
+  non-interactively on first boot — sqlite backend, a per-account admin password
+  generated with secrets.token_urlsafe and saved to the tracker home, the public
+  [tracker] web URL taken from the engine's URL aliases — then serves the single
+  tracker at / with gunicorn. The classic template grants the Anonymous role the
+  'Register' permission (open self-registration); the entrypoint comments that
+  line out of the tracker's schema.py before initialise, so a fresh visitor gets
+  read-only issue View and cannot create an account or administer anything.
+  The tracker home IS the data (config.ini holds the session secret, plus the db
+  and attachments) and must outlive a redeploy, which wipes ~/project. It lives
+  on a bind mount to ~/.panelalpha/roundup — the tree the wipe leaves alone
+  (Project::createHomeDirectory only mkdir -p's it) — recorded by hooks/prepare.sh
+  in .env as ROUNDUP_DATA and mounted at /data by the override. Roundup only
+  *sends* notification mail as a client; SENDMAILDEBUG redirects that to a file
+  so the web path never depends on SMTP and no inbound mail is configured.
+extends: dockerfile
+label: Roundup Issue Tracker
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe's dockerfile/port_hint would be null/80 even though this
+  # recipe ships files/Dockerfile — and the deployability check then fails with
+  # "Dockerfile strategy selected but Dockerfile is missing." State what the
+  # probe would have found. The image EXPOSEs 8000 (gunicorn's bind).
+  dockerfile: Dockerfile
+  port_hint: 8000

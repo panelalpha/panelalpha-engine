@@ -1,0 +1,98 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Omeka S is a Laminas MVC application for publishing digital collections:
+  Doctrine ORM over MySQL, an admin at /admin, and public sites under /s/<slug>
+  rendered by a theme. Detection read the repository correctly -- composer.json
+  and no artisan, so the `php` strategy, PHP 8.1 (composer.json pins
+  `config.platform.php` to 8.1 beside `require.php >=8.1`), the shared Apache
+  base image with ~/project bind-mounted and `composer install` on the host.
+  The deploy finished successfully and every request still answered HTTP 500,
+  which is the `serving-error_page` verdict this recipe exists to fix.
+
+  **There was no database configuration, and that alone is the 500.**
+  `application/config/application.config.php` is not a static array: its first
+  statement reads `config/database.ini` through `Laminas\Config\Reader\Ini` and
+  rethrows the RuntimeException when the file is missing and
+  `OMEKA_DB_CONNECTION_URL` is unset. The repository ships
+  `config/database.ini.dist` with four empty values and `.gitignore`s the real
+  file, so a plain clone has none. index.php's outer catch turns that into
+  `http_response_code(500)` plus `application/view/error/fallback.phtml` on
+  every path, which is why the health report's php group passed -- php-executes,
+  entry-served, no-fatal-error and no-database-error all saw a rendered page.
+  There is nothing in a checkout for the engine to infer this from: no .env, no
+  compose file, no `DATABASE_URL`. `database: mysql` is the manifest key that
+  says it (the same one Matomo needs, and for the same reason), and the engine
+  then provisions a database and user on the account's own MySQL server and
+  hands the container DB_HOST/DB_PORT/DB_DATABASE/DB_USERNAME/DB_PASSWORD.
+  files/panelalpha-setup.sh writes those five values into config/database.ini
+  on the install and upgrade stages, before Apache binds.
+
+  **The document root is the repository root** -- index.php and .htaccess.dist
+  are both at the top -- which PhpDocroot works out anyway, since it probes
+  `public web public_html webroot` and then the root. It is written out because
+  the consequence is unusual: with the root served, `config/database.ini`,
+  `composer.json` and `logs/` are all one request away unless something denies
+  them, and what denies them is `.htaccess`. The repository ships it as
+  `.htaccess.dist` (gitignoring `.htaccess`), so hooks/prepare.sh installs it.
+  It is not optional decoration either: it carries the front-controller rewrite,
+  and without it every route but `/` is a 404 from Apache.
+
+  **The first administrator.** Omeka S seeds no user; `InstallController` puts a
+  form at `/install` that creates one, and `MvcListeners::redirectToInstallation`
+  sends every other route to it. A deploy that stops at "the wizard renders" has
+  published a form on which the first stranger to arrive becomes the global
+  admin of the account. So the install runs from the install stage instead, in
+  the container, before the server accepts a request: files/panelalpha-install.php
+  boots the application exactly as index.php does and drives
+  `Omeka\Installer` -- the same Installer, the same eight tasks, the same two
+  `registerVars()` calls the controller makes -- with a password generated per
+  account into ~/project/.panelalpha-admin-password (0600). Omeka's own CLI
+  support is what makes this safe: `MvcListeners::bootstrapSession()` returns
+  early on `PHP_SAPI === 'cli'`. On a redeploy the same script takes the other
+  branch, running `Omeka\MigrationManager::upgrade()` and writing the new
+  version -- the work `/migrate` does in the browser -- so a code change does
+  not leave the account on a form nobody will find.
+
+  **The default theme is installed by a Composer plugin that never runs.**
+  `omeka-s-themes/default` is `"type": "omeka-s-theme"`, and the thing that
+  knows to put it in `themes/` is `omeka/composer-addon-installer`, a
+  composer-plugin the repository ships in-tree as a path repository. The php
+  manifest installs with `--no-plugins`, and `PhpHostBuild::mayRunPlugins()`
+  lifts that only for the five installer plugins it lists by name, so Composer
+  falls back to its default installer and the theme lands in
+  `vendor/omeka-s-themes/default`. Omeka only looks in `themes/`, so the
+  account has no theme at all and no public site can be created. The setup
+  script copies it across; it cannot be fixed in the build, because an app
+  config's `commands` never reach the build stage.
+
+  **ImageMagick is a binary, and the base image has the extension instead.**
+  Omeka's default thumbnailer shells out to `convert`
+  (`Omeka\File\Thumbnailer\ImageMagick`); the shared PHP image ships the
+  `imagick` PHP extension and no ImageMagick CLI, so every media upload would
+  fail on a thumbnailer that cannot find its binary. files/config/local.config.php
+  aliases `Omeka\File\Thumbnailer` to the `Imagick` implementation, which uses
+  the extension that is actually there.
+extends: php
+# index.php, bootstrap.php and .htaccess are all at the top of the checkout:
+# Omeka S serves from its own root. PhpDocroot would reach the same answer --
+# it tries `public web public_html webroot` and then the root -- but the probe
+# order is not something a recipe should rely on silently, and here the answer
+# decides which files are web-reachable.
+docroot: .
+# Omeka S is MySQL or nothing: composer.json requires ext-pdo_mysql, and
+# Stdlib\Environment refuses anything below MySQL 5.7.9 / MariaDB 10.2.6. It
+# has no .env and no compose file to point itself at one, so without this the
+# engine has nothing to hand it and application.config.php throws on the
+# missing config/database.ini before a single byte is rendered.
+database: mysql
+commands:
+  - id: omeka-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Writes config/database.ini from the credentials the engine provisioned,
+      puts the default theme where Omeka looks for it, and then installs Omeka
+      (first deploy) or runs its migrations (every one after). Idempotent: the
+      upgrade stage replays it on every redeploy.
+    run: 'sh panelalpha-setup.sh'

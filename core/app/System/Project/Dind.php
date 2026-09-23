@@ -32,6 +32,8 @@ use App\System\Project\Dind\PrepareFromSource;
 use App\System\Project\Dind\ProjectEnvironment;
 use App\System\Project\Dind\ProjectFiles;
 use App\System\Project\Dind\ShellOperations;
+use App\System\Project\Dind\Source\Files as SourceFiles;
+use App\System\Project\Dind\Source\GitRepository;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -255,7 +257,7 @@ class Dind implements DeployableDindProject, Runtime
 
     public function importProjectArchive(string $zipPath): void
     {
-        (new Source\Files($this))->importProjectArchive($zipPath);
+        (new SourceFiles($this))->importProjectArchive($zipPath);
     }
 
     public function applyProjectEnvVars(): void
@@ -353,6 +355,10 @@ class Dind implements DeployableDindProject, Runtime
 
         $projectDir = $this->userAppDirPath();
         $chown = $this->userModel()->getChownString();
+        $this->noteAppConfigOverwritesTracked(array_map(
+            static fn (array $snippet): string => $snippet['path'],
+            $appConfig->files()
+        ));
         foreach ($appConfig->files() as $snippet) {
             $fullPath = "{$projectDir}/{$snippet['path']}";
             $this->shell()->execAsUser(['mkdir', '-p', dirname($fullPath)]);
@@ -360,9 +366,48 @@ class Dind implements DeployableDindProject, Runtime
         }
     }
 
+    /**
+     * An app config's `files/` and entrypoint override write where they say,
+     * even over a file the repository tracks (the ADR-0001 exception, D4) —
+     * but never silently: each such path gets a deploy-log line, so a client
+     * wondering why `git status` shows a change can find out why.
+     *
+     * @param list<string> $relativePaths checkout-relative
+     */
+    public function noteAppConfigOverwritesTracked(array $relativePaths): void
+    {
+        $logger = $this->shell()->logger();
+        if ($logger === null || $relativePaths === []) {
+            return;
+        }
+
+        $git = new GitRepository($this);
+        if (!$git->hasRepository()) {
+            return;
+        }
+
+        try {
+            $tracked = $git->trackedAmong(array_values(array_unique(array_map(
+                static fn (string $path): string => ltrim($path, '/'),
+                $relativePaths
+            ))));
+        } catch (\Throwable) {
+            return;
+        }
+
+        foreach ($tracked as $path) {
+            $logger->info("App config overwrites tracked file {$path}");
+        }
+    }
+
     public function userAppComposeFileToRun(): string
     {
         return $this->paths()->composeFileToRun();
+    }
+
+    public function userAppComposeFileForPorts(): string
+    {
+        return $this->paths()->composeFileForPorts();
     }
 
     public function userAppExistingComposeFilePath(): ?string

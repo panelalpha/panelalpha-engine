@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gramps Web is a collaborative genealogy application: a Flask/gunicorn REST API
+  (gramps_webapi.wsgi:app on :5000) that also serves the compiled gramps-web
+  single-page frontend, backed by a Gramps family-tree database, a full-text
+  search index, a users database and Redis for the Celery task queue. This
+  repository is only the API half -- its own Dockerfile builds
+  ghcr.io/gramps-project/gramps-web-base into an API image whose /app/static is a
+  single empty index.html, so a build from this checkout serves the JSON API
+  with no web UI at all, and the django/python-shaped detection the engine would
+  otherwise apply installs the [ai,sentry] extras (torch, sentence-transformers,
+  a PyTorch model download) into a base with no Gramps runtime and never listens
+  on 5000.
+
+  So the recipe runs the project's own all-in-one published image instead:
+  ghcr.io/gramps-project/grampsweb bundles this same API with the compiled
+  frontend baked into /app/static and every runtime dependency (Gramps itself,
+  the search backend, tesseract, the AI model). overrides/docker-compose.yml is
+  the upstream docs' compose rewritten for a single hosting account: the web
+  container, a grampsweb_celery worker sharing the image (celery -A
+  gramps_webapi.celery worker), a redis broker sidecar, a one-shot init that
+  seeds the owner, and a ready gate. There is no platform block, so the compose
+  probe walks this file (fromWalk) and ComposePlaceholders rewrites
+  GRAMPSWEB_BASE_URL from http://localhost/ to the account's public https URL
+  before the stack starts -- the app needs it for absolute links in the frontend.
+
+  hooks/prepare.sh writes the two values nothing else can supply, once, into
+  ~/.panelalpha/gramps/ (0600) and never regenerates them: GRAMPSWEB_SECRET_KEY
+  (Flask signs its JWTs with it -- a new one invalidates every session) and the
+  owner password. Gramps Web has no owner until one is created and open
+  registration is turned off (GRAMPSWEB_REGISTRATION_DISABLED), so without the
+  seed the site comes up on a login form nobody holds an account for. The seed
+  is a one-shot service that runs `gramps_webapi user add ... --role 5` only when
+  the user database is empty, so a redeploy never touches an existing owner.
+
+  Everything that is state -- the family-tree DB (/root/.gramps/grampsdb), the
+  users DB (/app/users), media (/app/media), the search index (/app/indexdir) --
+  is on named volumes, which survive the ~/project wipe on every redeploy. Redis
+  is a pure broker and runs without a volume.

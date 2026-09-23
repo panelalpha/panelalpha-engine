@@ -2,7 +2,31 @@
 
 The engine host is a privileged machine by design. The engine controls every container on it, and the installer replaces the firewall and the domain-name resolver. Treat your VPS as single-purpose and do not run anything else on it.
 
-This page covers the firewall, the web application firewall, and extra IP addresses you can assign to a project.
+This page covers an optional password on a project, the firewall, the web application firewall, and extra IP addresses you can assign to a project.
+
+## Password protection
+
+A project stays open until you set a password on it. Nothing asks for one on its own. Once you do, that password covers every address on that project. It does not cover the engine's own address, the one your assistant connects to.
+
+```text
+Set a password on this project so visitors have to type it before they see the site.
+```
+
+What you should see: the next visit shows a page with a password box. The words on that page are "This site is password protected." A correct password is remembered until the browser is closed. Setting a new password asks those visitors again.
+
+```text
+Remove the password from this project.
+```
+
+The site opens with no prompt.
+
+The password box is the usual prompt. The whole engine can use the browser's own login window instead. Both accept the same password. In the browser window the name beside the password is ignored. That choice is one setting, `SITE_PASSWORD_AUTH_MODE`: `custom` is the page, and it is the default, and `basic` is the browser window. Changing a setting: [Install](../02-getting-started/install.md#change-a-setting).
+
+A monitor that checks the site without sending the password gets "not allowed" and reports the site as down. Give the monitor the password.
+
+Let's Encrypt can still confirm you control the domain. That check is not behind the password.
+
+A Cloudflare tunnel on the project is checked the same way. This is enforced on the webserver a normal install uses.
 
 ## The most important setting on this page
 
@@ -51,6 +75,8 @@ ModSecurity is a web application firewall on the public webserver. It inspects i
 Show me the ModSecurity audit log. A legitimate form submission was blocked.
 ```
 
+Two rulesets ship: `owasp-crs`, the OWASP Core Rule Set, and `panelalpha-wordpress`, which stops an anonymous visitor from reading WordPress login names through `?author=1` or the REST users list. Both are off until you switch them on, and neither does anything while ModSecurity itself is off. A WordPress site on this engine is only covered once both are on.
+
 You can read the mode, switch rulesets on and off, and read the audit log. If the assistant cannot, those tools have been turned off: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 **When a legitimate request gets blocked**, that is a false positive and it is a tuning problem, not a broken deploy. The audit log names the specific rule that fired. Turn off that rule, not the whole firewall. Ask the assistant to find it:
@@ -75,4 +101,4 @@ A failing deploy is not a vulnerability. That goes through [What happens when a 
 
 ## From the server
 
-Reading the ModSecurity audit log: [CLI commands](../06-commands/pae-cli.md#security).
+The project password, and the ModSecurity audit log: [CLI commands](../06-commands/pae-cli.md#security).

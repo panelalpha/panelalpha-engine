@@ -18,7 +18,7 @@ class TelemetryEnableCommand extends Command
         Setting::set(NotificationPreferences::SETTING_TELEMETRY_ENABLED, '1');
         $this->info('Telemetry sending enabled.');
 
-        $sync = NotificationPreferences::sync(true);
+        $sync = NotificationPreferences::sync(true, force: true);
         $this->line($sync['ok'] ? $sync['message'] : '<error>'.$sync['message'].'</error>');
 
         return $sync['ok'] ? self::SUCCESS : self::FAILURE;

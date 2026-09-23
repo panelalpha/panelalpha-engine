@@ -118,7 +118,9 @@ final class HostScript
 
         $lines = [];
         if ($command->description !== null) {
-            $lines[] = '# ' . $command->description;
+            // Prefix every line, or a folded multi-line description drops bare
+            // shell into the host script (same defect as the entrypoint).
+            $lines[] = '# ' . str_replace("\n", "\n# ", $command->description);
         }
         $lines[] = 'pa_step ' . $stage . ' ' . self::quote($command->id);
         $lines[] = $command->optional

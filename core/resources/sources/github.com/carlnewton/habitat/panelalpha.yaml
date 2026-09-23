@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Habitat is a PHP 8.4 / Symfony (FrankenPHP) platform for local communities: a
+  location-based forum where people post and discuss things happening near a
+  central point. It stores everything in PostgreSQL and keeps uploaded images on
+  disk. Access is real: the first visit runs a setup wizard that creates the
+  single ROLE_SUPER_ADMIN account and marks setup complete; after that anonymous
+  visitors read public posts (by design for a community feed) but posting,
+  uploading, moderation and the /admin screens are all behind a login.
+  Self-registration is OFF by default (Settings 'registration' must be 'on',
+  SecurityController::signup) and, when on, needs a verification email, so no
+  open sign-up exposes data out of the box.
+
+  SEED AN IMAGE, DO NOT BUILD. The repository ships an official multi-stage
+  FrankenPHP Dockerfile, but its webpack-encore assets (public/build/) are
+  .gitignored and the Dockerfile does NOT run `npm run build` -- the compiled
+  CSS/JS only exist in the image the project's CI publishes. Building the repo's
+  own Dockerfile here would therefore produce a running app with no frontend
+  assets, and adding an npm build step would be a repair, out of scope. So this
+  recipe seeds the project's official Docker Hub image carlnewton/habitat:1.6.0
+  (== latest, built prod: APP_ENV=prod baked, assets precompiled). Docker Hub is
+  pulled normally and sidesteps engine#229 (the GHCR image-seeding NotFound).
+
+  WHY COMPOSE-REPLACE, NOT `dockerfile`. Habitat needs PostgreSQL beside the app
+  (Doctrine over pdo_pgsql; there is no MySQL/SQLite production path) and the
+  schema's `database:` is MySQL-only, so the datastore has to be expressed as
+  compose. The repo's own compose.yaml is the FrankenPHP template's dev shape
+  (auto-TLS on :443, a Mercure hub, a messenger worker) and leaves the DB
+  password as a public !ChangeMe! default, so it is not usable as-is. This
+  override supplies the real stack: postgres:16-alpine on a named volume, a
+  one-shot `init` that migrates to completion before the app is allowed to serve
+  (a failed migration fails the deploy instead of publishing a 500 site), the
+  app on 8080:80 with Caddy in plain-HTTP mode (SERVER_NAME=:80) because the
+  engine terminates TLS, and a `ready` gate (engine#204) so the deploy turns
+  green only once the site actually answers. Mercure and the messenger worker
+  are dropped: no application code references Mercure (it is dead template
+  scaffolding) and messenger has no async routing (config/packages/messenger.yaml
+  routes nothing off `sync://`), so a consumer would have nothing to consume.
+
+  IMAGE UPLOADS -- NO EXTERNAL S3 NEEDED. Habitat bundles the AWS SDK, but S3 is
+  an OPTIONAL, admin-chosen backend: image storage is a Settings row
+  ('imageStorage') set during the setup wizard to 'local' or 's3', and every
+  read/write path (UploadFileController, LoadAttachmentController,
+  DeleteAttachmentListener) defaults to the local directory /uploads and only
+  talks to S3 when that setting equals 's3'. This recipe keeps uploads on local
+  disk on a named volume (habitat_uploads:/uploads); an operator who later wants
+  a real bucket can switch it from /admin/s3. No external account is required to
+  run or use the app.
+
+  SECRETS AND ADMIN. APP_SECRET, the AES ENCRYPTION_KEY (a rotation would strand
+  every encrypted Settings value, e.g. SMTP/S3 credentials), the Postgres
+  password, the Mercure JWT key (Caddy's mercure directive refuses to load
+  without one) and a generated admin password are written once into
+  ~/.panelalpha/habitat/ (0600 in 0700) -- the only writable place a deploy does
+  not delete -- and reused across redeploys, so a rebuild does not log everyone
+  out, lock the app out of the pgdata volume, or reset the owner account. The
+  admin account itself is created by completing the setup wizard once, right
+  after the first deploy, with the generated password; the wizard's own
+  RedirectToSetupRequestListener then closes /setup for good (Settings
+  'setup'='complete', persisted in the DB volume across redeploys). Onboarding
+  notes and the admin password live in credentials.txt in that store.

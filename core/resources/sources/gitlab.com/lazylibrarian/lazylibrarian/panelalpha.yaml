@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LazyLibrarian is a self-hosted ebook/audiobook library manager: a single
+  CherryPy web process that follows authors, fetches metadata and keeps its
+  whole state — the SQLite database, config.ini, logs and cache — in one
+  datadir. HEAD is Python 3 (pyproject requires-python >=3.10, the launcher
+  refuses anything below 3.8) and pure Python: no compile step, it just runs
+  `python LazyLibrarian.py --datadir <dir> --port 5299`. The repository ships
+  no Dockerfile and no compose file, so the compose probe finds nothing and
+  file detection reaches Python but cannot settle on a single runnable entry
+  point from a tree that is also a library — the deploy is refused as not
+  deployable before the build begins.
+
+  The recipe ships a Dockerfile of its own (files/Dockerfile, copied to
+  ~/project/Dockerfile): python:3.12-slim, `pip install -r requirements.txt`
+  (76 wheels — cherrypy, cryptography, lxml, numpy, pillow — all manylinux, no
+  toolchain), the source COPYed in, and a CMD that starts the server on
+  0.0.0.0:5299 against a persistent datadir. python:3.12 is pinned because the
+  app's requires-python is >=3.10 and 3.12 has wheels for every pin; `3-slim`
+  would float onto an interpreter a pinned wheel may not yet publish. That is a
+  base-image choice, not a source patch.
+
+  Two things this app needs that the file alone cannot give it.
+
+  Persistence: LazyLibrarian keeps EVERYTHING in the datadir and ~/project is
+  wiped on every redeploy (engine#173), so the datadir must not live there.
+  overrides/docker-compose.override.yml bind-mounts the account's persistent
+  ~/.panelalpha onto /pa-data and the CMD points --datadir at
+  /pa-data/lazylibrarian, so lazylibrarian.db, config.ini and the cache survive
+  a rebuild.
+
+  Security: LazyLibrarian, like the *arr apps, ships with web auth OFF
+  (HTTP_USER/HTTP_PASS empty by default) — a public deploy with no auth is
+  world-controllable. hooks/prepare.sh seeds config.ini with BASIC auth and a
+  password generated ONCE into ~/.panelalpha/lazylibrarian/ (0600) and reused
+  on every redeploy, never regenerated and never written into ~/project. It
+  also enables the JSON API behind a generated 32-char key. After boot an
+  anonymous request to `/` is refused with 401; the credentials are recorded in
+  ~/.panelalpha/lazylibrarian/panelalpha-credentials.txt for the owner.
+
+  The recipe states dockerfile/port_hint because a source recipe is applied
+  before the probes run and neither would otherwise be known.
+extends: dockerfile
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe's dockerfile/port_hint would be null/80 even though the
+  # recipe ships a Dockerfile — and the deployability check then fails with
+  # "Dockerfile strategy selected but Dockerfile is missing." State what the
+  # probe would have found until that path runs its probes too.
+  dockerfile: Dockerfile
+  port_hint: 5299
+env:
+  # LazyLibrarian logs to stdout/stderr from Python; keep it unbuffered so the
+  # deploy log and `docker logs` show boot progress in real time.
+  PYTHONUNBUFFERED: '1'

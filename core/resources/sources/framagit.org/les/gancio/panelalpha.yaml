@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gancio is a shared agenda for local communities: a Nuxt 3 / nitro server
+  (Node 24) that serves its web UI and JSON API on :13120, SQLite by default
+  (Postgres/MariaDB optional), sharp for event-image thumbnails, and it
+  federates over ActivityPub. HEAD is 2.0.0-beta.5.
+
+  Nothing from the checkout is built or run. The repository's Dockerfile builds
+  the app from source with pnpm + a full Nuxt/nitro production build; the
+  project publishes that exact HEAD as an image (cisti/gancio:2.0.0-beta.5,
+  2026-07-06 on Docker Hub), so the recipe runs the image instead. It would
+  ship that as a one-service compose file (runtime: compose), but a source
+  recipe cannot: the engine only fills a compose strategy's compose_path from
+  the compose-usable probe, and PlatformSelector::fromSource() describes a
+  source recipe without probe data, so DeployabilityCheck fails with "Compose
+  strategy selected but compose file is missing" even though bootstrap has
+  already written the compose file to disk (measured — see the write-up). The
+  dockerfile strategy has no such gap (extra.dockerfile is resolved against the
+  project dir), so the recipe ships a one-line `FROM` Dockerfile that resolves
+  to the published image — no build steps run — and layers the hosting shape it
+  needs through the compose override, the way endurain does.
+
+  Persistence: everything Gancio writes — the SQLite DB, config.json (which
+  holds the session `secret`), uploaded event images, logs — lives under
+  GANCIO_DATA=/app/data, the image's VOLUME. The `FROM`-only Dockerfile
+  declares no VOLUME of its own, so the generated compose mounts nothing there
+  and the override's bind mount is unopposed. The image ships /app/data owned
+  by root and runs as `node` (uid 1000), so it cannot write a directory this
+  account owns; the prepare hook creates ~/.panelalpha/gancio/data (the only
+  writable, rebuild-surviving directory — ~/project is emptied every deploy,
+  engine#173) and records the account uid, and the override runs the container
+  as that uid so the bind mount it writes is owned by the user it runs as.
+
+  Public URL and first admin. Gancio reads BASEURL and freezes it into
+  config.json on first boot; it must be the real domain or every federation
+  actor, feed and absolute link is wrong. The dockerfile strategy injects the
+  public URL as PUBLIC_URL (among others), and the container command exports
+  BASEURL from it before the first boot. Gancio's first registered user becomes
+  an active admin and open registration is on by default (first-visitor-wins,
+  engine#200), with no gated /setup wizard to stop it; the command runs
+  migrations, creates the admin (role admin, a password generated once and kept
+  in the data volume) and sets allow_registration=false — all before `start`
+  opens the port, so the window in which a stranger could register as admin
+  never exists.
+
+  Ceiling: real ActivityPub federation cannot be proven on a throwaway
+  *.panelalpha.online domain (like GoToSocial) — the local product is what is
+  verified: create an event, it renders publicly, the admin area is protected,
+  registration is closed.
+extends: dockerfile
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe's dockerfile/port_hint would be null/80. Name what it would
+  # have found: the FROM-image Dockerfile this recipe ships (files:), and the
+  # port the image EXPOSEs (13120).
+  dockerfile: Dockerfile.panelalpha
+  port_hint: 13120
+files:
+  # Resolve the published image through the dockerfile strategy. No build steps,
+  # so nothing from the checkout is compiled; it is only a way to run the image
+  # the compose strategy could not (see description). No VOLUME line here, so the
+  # generated compose mounts nothing at /app/data and the override owns it.
+  Dockerfile.panelalpha: |
+    FROM cisti/gancio:2.0.0-beta.5

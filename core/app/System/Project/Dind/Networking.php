@@ -40,9 +40,9 @@ class Networking
 
     public function detectAndCreateProxyRules(User $user): void
     {
-        // Detect all public ports from the user's compose file. The repo may ship
-        // any of the docker-compose-recognised filenames, so resolve whichever exists.
-        $composePath = $this->project->userAppExistingComposeFilePath() ?? $this->project->userAppComposeFilePath();
+        // Detect all public ports from the user's compose file, via the same
+        // resolver every other reader of the inner compose file goes through.
+        $composePath = $this->project->userAppComposeFileForPorts();
         $portDetection = DetectAppPort::detectAllPorts($composePath);
         $primaryPort = $portDetection['primary'] ?? 8080;
 

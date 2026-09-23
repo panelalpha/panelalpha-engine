@@ -1,0 +1,76 @@
+# Replaces the repo's docker/docker-compose.yml (image + one named volume) with
+# the same stack plus what a hosted deploy needs: auth turned on, the admin
+# seeded before the site is published, and a ready gate so `up` returns only once
+# the site actually answers.
+#
+# The app image is the official Docker Hub release, pulled (not built), so there
+# is no build+bind-mount pair and detection keeps resolving to `compose`.
+services:
+  app:
+    # Latest published release. Pinned, not :latest, so a redeploy is
+    # reproducible and a new upstream release cannot change the running app under
+    # the account without a recipe bump.
+    image: docker.io/jensknipper/re-director:0.0.11
+    restart: unless-stopped
+    # Host port 8080 so the engine's port scan takes it as the primary (host 80
+    # is the proxy's own); container port 80 is where the live profile listens.
+    # For a Spring app the published port must equal the primary (engine#231).
+    ports:
+      - "8080:80"
+    env_file:
+      # Account env_vars, merged in by the platform; created by hooks/prepare.sh
+      # if the platform has not written it yet.
+      - .env
+    environment:
+      # Upstream ships auth OFF (re-director.auth.enabled defaults false and the
+      # live profile does not turn it on). Force it on: without this, anonymous
+      # users can manage redirects. SPRING_APPLICATION_JSON is the reliable way
+      # to set a hyphenated Spring property from the environment.
+      SPRING_APPLICATION_JSON: '{"re-director":{"auth":{"enabled":true}}}'
+    volumes:
+      # SQLite db (redirects + the admin's bcrypt hash) and the app log. A named
+      # volume survives redeploy and storage reclaim; the image made /data 777
+      # so the uid-1000 app can write into the fresh volume.
+      - rd_data:/data
+    healthcheck:
+      # `/` is permitAll and returns 200 with no redirect for the internal Host,
+      # so it proves the app is serving. busybox wget ships in the alpine base.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1024m
+
+  # One-shot: complete the web /setup to create the first admin before the site
+  # is published. Idempotent (skips when a user already exists). curlimages/curl
+  # is on Docker Hub, so it seeds fine.
+  seed:
+    image: docker.io/curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    env_file:
+      # RD_ADMIN_USERNAME / RD_ADMIN_PASSWORD, generated once by hooks/prepare.sh
+      # and kept in ~/.panelalpha/re-director/ (~/project is ~, so .. is ~).
+      - ../.panelalpha/re-director/admin.env
+    volumes:
+      - ./panelalpha/re-director/seed.sh:/seed.sh:ro
+    entrypoint: ["/bin/sh", "/seed.sh"]
+    mem_limit: 64m
+
+  # Starts nothing, exits 0, waits on the seeder. `docker compose up -d` blocks
+  # on a depends_on completion condition, so `up` returns -- and the engine
+  # publishes the site -- only after the admin has been seeded (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  rd_data: {}

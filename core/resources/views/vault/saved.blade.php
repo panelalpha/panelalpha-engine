@@ -8,6 +8,12 @@
 
         <h1>Secret saved</h1>
 
+        @if (($verification['result'] ?? null) === 'verified')
+            <p>Checked: this token can read {{ $verification['target'] }}.</p>
+        @elseif (($verification['result'] ?? null) === 'unchecked')
+            <p class="notice">Saved without a check: {{ $verification['reason'] }}</p>
+        @endif
+
         <p>Your AI agent can use it now. Close this tab and tell your agent you are done.</p>
     </main>
 @endsection

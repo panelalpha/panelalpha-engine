@@ -225,7 +225,7 @@ class AttachTaskTest extends SqliteTaskTestCase
         $job = new StubTaskJob();
         $job->attachTask($task);
         $queueJob = Mockery::mock(QueueJob::class);
-        $queueJob->shouldReceive('getJobId')->andReturn($jobId);
+        $queueJob->shouldReceive('uuid')->andReturn($jobId);
         $job->setJob($queueJob);
 
         return $job;

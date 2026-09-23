@@ -1,0 +1,70 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  portkey is a lightweight self-hosted start page / link portal: a single Go
+  binary (kodehat/portkey, AGPL-3.0) that serves a page of links ("portals",
+  optionally grouped) plus a few static custom pages, with a search box and
+  favicon fetching. It listens on :3000 and, optionally, a Prometheus metrics
+  server on :3030. There is no database, no session store and no write API of
+  any kind: the whole application is driven by one `config.yml` read once at
+  startup (internal/config/config.go — viper reads the file, then env vars
+  prefixed PORTKEY_ override known keys). Links are added by editing that file
+  and restarting, never through the running site. That single fact settles the
+  security question — there is no admin surface to gate, because nothing on the
+  wire can change anything. The portal page is meant to be public; that is the
+  product.
+
+  == Why compose-replace over the official image ==
+
+  Upstream publishes codehat/portkey on Docker Hub (amd64+arm64, ~18 MB
+  compressed) and the README's own quick-start is `docker run -p 3000:3000
+  codehat/portkey`. The repository also ships a working multi-stage Dockerfile
+  (Node frontend build -> Go build -> alpine), so stock detection would build
+  it — a Node+Go compile on a 2-core / 3.7 GB host for an image upstream
+  already publishes. overrides/docker-compose.yml runs the published image
+  instead; the checkout contributes nothing to the running container. A Docker
+  Hub image `docker save`s as a real multi-arch manifest and the engine's DinD
+  image-seeding delivers it intact (this is not Flink/engine#229, which bit
+  containerd-store images whose `docker save` yields a manifest-only stub).
+  v4.0.0 is pinned rather than `latest` so a redeploy is reproducible.
+
+  == The one thing the baked config gets wrong for hosting, and the one thing
+  it does that a customer would not want ==
+
+  The image bakes `/opt/config.yml` with `server.host: localhost` — bound to
+  loopback, so the engine's proxy (reaching the container by its bridge IP)
+  never connects. And that same baked config injects a third-party analytics
+  script (analytics.thisismy.cloud, pinned to demo.portkey.page) into every
+  page via `ui.headerAddition`, and ships the vendor's own demo links. Both are
+  configuration, not code: the recipe ships its own clean config.yml
+  (host 0.0.0.0, metrics off, no third-party tracker, favicon mode `direct` so
+  there is no runtime dependency on portkey.page's favicon service, a small
+  neutral starter set of links and an About page telling the operator where to
+  edit) and mounts the directory holding it with `--config-path=/pa`. No
+  upstream source is patched; only its runtime configuration is supplied, which
+  is exactly what a self-hosted config-file app leaves to the operator.
+
+  == Persistence: the config file IS the state ==
+
+  portkey writes nothing at runtime — no DB, favicon cache disabled, metrics
+  off — so the container is entirely read-only and the app is stateless in the
+  usual sense. The only mutable "state" is the operator's link list, and that
+  lives in the one config file. It must not live in ~/project, which engine#173
+  wipes and re-clones every redeploy, so hooks/prepare.sh seeds
+  ~/.panelalpha/portkey/config.yml once (only if absent, so a customer's edits
+  are never clobbered) and the compose mounts ~/.panelalpha/portkey read-only
+  into the container. Editing that file and redeploying is how links are added;
+  the change survives every redeploy. The directory, not the single file, is
+  bind-mounted, so a new-inode editor write is picked up on the next start
+  rather than leaving the container pinned to a stale inode (the engine's own
+  .env-core lesson).
+
+  == Strategy ==
+
+  No platform block: the recipe declares no `extends`/`id`, so SourceRecipes
+  returns null for it and detection runs on the checkout, finds the root
+  Dockerfile and selects the `dockerfile` strategy (EXPOSE 3000). The
+  compose-replace then supplies `image:` in place of `build:`, so nothing is
+  ever built — the Dockerfile detection only serves to give the project a
+  strategy. The proxy port is read from the compose `ports:` mapping
+  (Networking detects published ports from the user's compose), not from a
+  port_hint, so none is needed. This is the same shape as the Homarr recipe.

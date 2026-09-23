@@ -1,0 +1,89 @@
+# Replaces the repository's build-from-source compose with the upstream
+# prebuilt all-in-one image (tolgee/tolgee) plus an external Postgres sidecar.
+# The image can run an embedded Postgres, but that couples the DB to the app's
+# own data dir; here it is disabled and Tolgee points at postgres:17-alpine on a
+# named volume. Only the app publishes a port (8080), so the port scan takes it
+# as the primary. Secrets come from env_files hooks/prepare.sh writes into
+# ~/.panelalpha/tolgee (../.panelalpha resolves from ~/project).
+services:
+  db:
+    # Pin the major: a datadir cannot migrate backwards, so a floating tag would
+    # break the named volume the first time the major moves.
+    image: docker.io/library/postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/tolgee/db.env
+    environment:
+      POSTGRES_DB: tolgee
+      POSTGRES_USER: tolgee
+      # A named volume is not always empty (lost+found); give postgres a clean
+      # subdir so it does not refuse to init.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tolgee -d tolgee -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  app:
+    image: tolgee/tolgee:v3.224.5
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # SPRING_DATASOURCE_PASSWORD, TOLGEE_AUTHENTICATION_JWT_SECRET and
+    # TOLGEE_AUTHENTICATION_INITIAL_PASSWORD come from here.
+    env_file:
+      - ../.panelalpha/tolgee/app.env
+    environment:
+      # Use the external sidecar, not the image's embedded Postgres.
+      TOLGEE_POSTGRES_AUTOSTART_ENABLED: "false"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://db:5432/tolgee"
+      SPRING_DATASOURCE_USERNAME: "tolgee"
+      # Auth defaults to OFF under Docker; force it on and lock down signup.
+      TOLGEE_AUTHENTICATION_ENABLED: "true"
+      TOLGEE_AUTHENTICATION_NATIVE_ENABLED: "true"
+      TOLGEE_AUTHENTICATION_REGISTRATIONS_ALLOWED: "false"
+      TOLGEE_AUTHENTICATION_INITIAL_USERNAME: "admin"
+      # File storage (screenshots, imports) on the named volume mounted at /data.
+      TOLGEE_FILE_STORAGE_FS_DATA_PATH: "/data/"
+      # Rewritten to the real https origin at deploy (key ends in _URL, value is
+      # a localhost placeholder). UI + API work same-origin regardless.
+      TOLGEE_FRONT_END_URL: "http://localhost:8080"
+      SERVER_PORT: "8080"
+      # Give the JVM a heap proportional to the container limit below.
+      JAVA_OPTS: "-XX:MaxRAMPercentage=70.0"
+    volumes:
+      - tolgee-data:/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # Image ships wget; /actuator/health is public and renders through the DB,
+      # so a 200 proves the JVM, the API and Postgres are all up. Long
+      # start_period: JVM boot + Liquibase migrations take a while.
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 150s
+    mem_limit: 3g
+
+  # Starts nothing, exits 0, waits on app's healthcheck so `docker compose up -d`
+  # returns only once the site actually answers, not the moment the JVM launches
+  # (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}
+  tolgee-data: {}

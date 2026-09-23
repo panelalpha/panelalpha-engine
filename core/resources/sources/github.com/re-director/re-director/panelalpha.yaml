@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  re:Director is a Java 25 / Spring Boot self-hosted redirect manager (published
+  as jensknipper/re-director on Docker Hub). It stores its redirects and its
+  admin user in a SQLite file under /data and, as a redirect service, answers on
+  its own management host while 301/302-forwarding every OTHER domain pointed at
+  it to a configured target (DomainRedirectFilter keys redirects on the request
+  Host). So this is the access-controlled case: managing redirects sits behind a
+  login, and only that must be secured.
+
+  WHY COMPOSE-REPLACE ON THE OFFICIAL DOCKER HUB IMAGE. Upstream ships a clean
+  multi-arch image on Docker Hub (jensknipper/re-director:0.0.11, the latest
+  release), which the engine seeds fine (Docker Hub, not the GHCR case of
+  engine#229). The `dockerfile` strategy is not usable here: the app needs
+  server.port and the /data datastore path from the baked `live` Spring profile
+  and a persistent /data, which is a compose concern. The repo's own
+  docker/docker-compose.yml is the bare `image + one volume` example; this
+  override is that same shape plus the two things a hosted deploy needs -- auth
+  turned on, and a first-run admin seeded before the site is published.
+
+  SECURITY: AUTH IS OFF BY DEFAULT. re-director.auth.enabled defaults to false
+  (application.yml), and the live profile does NOT turn it on -- so a plain
+  deploy of the official image leaves redirect management wide open to anonymous
+  users. This recipe forces re-director.auth.enabled=true via
+  SPRING_APPLICATION_JSON. With auth on, /redirects, /redirects/create|edit|
+  delete and /settings all require a login; only /, /login, /setup and static
+  assets are public (SecurityConfig).
+
+  FIRST-RUN ADMIN, NO DEFAULT CREDENTIALS. There is no shipped admin and no env
+  bootstrap: the only way to create the first user is the web /setup form
+  (trust-on-first-use; once a user exists /setup 302s to /login). Leaving that
+  form reachable by the public would let a stranger claim the admin. So the
+  `seed` one-shot completes /setup itself (GET for the CSRF token + session
+  cookie, then POST) with a strong password generated once by hooks/prepare.sh,
+  and the `ready` gate waits on it -- the engine only publishes the site after
+  the admin already exists, so the setup window is never public. seed is
+  idempotent: on redeploy it sees a user and does nothing.
+
+  PERSISTENCE. The SQLite db (redirects + the admin user's bcrypt hash) lives on
+  a named Docker volume at /data, so it survives redeploy and storage reclaim;
+  the admin therefore persists via the volume, not by re-seeding. The generated
+  admin password is written once into ~/.panelalpha/re-director/ (0600 in 0700),
+  the only writable place a deploy does not wipe, and reused on every redeploy.
+
+  PORT. The app listens on 80 (live profile). Published as 8080:80 so the
+  engine's port scan takes host port 8080 as the primary (host port 80 is the
+  proxy's own), which for a Spring app must equal the primary (engine#231).

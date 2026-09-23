@@ -1,0 +1,167 @@
+# The stack for the repository, which ships none Docker would load: its
+# docker-compose-ci.yml, docker-compose-ci.fips.yml and docker-compose-local.yml
+# are the CI and laptop rigs (traefik, nats, openldap, httpbin, a mock server,
+# six ee microservices) under names compose never auto-loads — and, because the
+# engine's sidecar mining globs `docker-compose.*.yml`, names its glob does not
+# match either, since the separator here is a hyphen.
+#
+# Rocket.Chat runs from its published image because the checkout is not the
+# artifact and its own release recipe says so: apps/meteor/.docker/
+# Dockerfile.alpine starts `COPY . /app` and then builds
+# /app/bundle/programs/server. Its context is a finished Meteor bundle —
+# docker-compose-ci.yml passes `context: /tmp/build`, filled by a separate
+# `meteor build` job — so it cannot build this tree at all. Railpack's attempt
+# at the tree itself ran out of memory linking 3236 packages.
+services:
+  mongo:
+    # Rocket.Chat requires a replica set, not just MongoDB: it watches change
+    # streams for every real-time update, and the driver refuses a
+    # `replicaSet=` connection string against a standalone mongod.
+    #
+    # The major is chosen by hooks/prepare.sh from the host's kernel, not from
+    # a constant. 8.0 is what the repository's own docker-compose-ci.yml tests
+    # against and the only major Rocket.Chat 9 will accept, but every 8.x image
+    # refuses to boot on Linux 6.19 or newer — "MongoDB cannot start: Linux
+    # kernel versions 6.19 and newer has a known incompatibility with this
+    # version of MongoDB" (SERVER-121912), a hard exit before mongod starts. On
+    # such a host the fallback is 7.0, which carries no such guard and is still
+    # supported: serverRunning.ts exits on <7.0.0 and only prints a deprecation
+    # box on <8.0.0.
+    image: ${MONGO_IMAGE:-mongo:7.0}
+    restart: unless-stopped
+    command:
+      - mongod
+      - --replSet
+      - rs0
+      - --bind_ip_all
+      # A default mongod sizes WiredTiger's cache from the host's memory, not
+      # from the container's; on a 2 GB account that reservation is most of it.
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+    volumes:
+      - mongo_data:/data/db
+    # The probe is also the initiator: rs.status() throws NotYetInitialized on
+    # a fresh volume, rs.initiate() runs in the catch, and the probe keeps
+    # failing until the node has actually become primary — which is exactly
+    # what `depends_on: condition: service_healthy` needs to mean here. On a
+    # redeploy rs.status() succeeds and nothing is re-initiated. The host must
+    # be the compose service name, because that is the address the application
+    # resolves the set's one member by.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --eval 'try { rs.status() } catch (e) {
+          rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}) };
+          quit(db.hello().isWritablePrimary ? 0 : 1)'
+      interval: 5s
+      timeout: 10s
+      retries: 40
+      start_period: 20s
+    mem_limit: 448m
+
+  rocketchat:
+    # Tag written by hooks/prepare.sh from the checkout's own version.
+    image: ${ROCKETCHAT_IMAGE:-rocketchat/rocket.chat:latest}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Not a real address, and not meant to survive: ComposePlaceholders
+      # rewrites a bare http://localhost under a *_URL-shaped key to the
+      # account's public https URL before the stack starts. ROOT_URL matches
+      # (it ends in _URL) and port 80 is on isLocalPublicUrl()'s allowlist.
+      # It has to be set here rather than left to the image, which bakes in
+      # ROOT_URL=http://localhost:3000 — a value the engine would also rewrite,
+      # but only if it were in the compose file for the pass to see.
+      ROOT_URL: http://localhost
+      PORT: "3000"
+      DEPLOY_METHOD: docker
+      # The connection string the image bakes in has no replicaSet, so it has
+      # to be restated here. No directConnection: the driver rejects it
+      # alongside replicaSet, and SDAM discovery resolves the set's one member
+      # through the compose network alias anyway. Restated in full rather than
+      # amended, because sidecar mining has been known to overwrite a
+      # half-specified one.
+      MONGO_URL: mongodb://mongo:27017/rocketchat?replicaSet=rs0
+      # Creates the administrator on the first boot where no user holds the
+      # admin role (insertAdminUserFromEnv, apps/meteor/server/startup/
+      # initialData.ts). Without it the setup wizard is open on a public HTTPS
+      # name and gives admin to whoever completes it first.
+      ADMIN_USERNAME: ${RC_ADMIN_USERNAME}
+      ADMIN_EMAIL: ${RC_ADMIN_EMAIL}
+      ADMIN_PASS: ${RC_ADMIN_PASSWORD}
+      ADMIN_NAME: Administrator
+      # The wizard itself. Show_Setup_Wizard is declared `readonly: true`
+      # (apps/meteor/server/settings/general.ts), so the settings API cannot
+      # move it and OVERWRITE_SETTING_<key> is the only lever — and locking a
+      # field the admin UI never let anyone edit costs nothing. Registration is
+      # deliberately not done this way: see the setup service.
+      OVERWRITE_SETTING_Show_Setup_Wizard: completed
+      # Don't phone Rocket.Chat Cloud on first boot; the wizard would have
+      # asked.
+      OVERWRITE_SETTING_Register_Server: "false"
+      # Node sizes its heap from the host's memory unless told otherwise, so a
+      # container capped below that is killed before V8 decides to collect.
+      NODE_OPTIONS: --max-old-space-size=896
+    volumes:
+      # The image's only VOLUME, named so a redeploy does not strand an
+      # anonymous one. Seeded from the image, which chowns /app to the
+      # `rocketchat` user (uid 65533) the server runs as.
+      - rocketchat_uploads:/app/uploads
+    depends_on:
+      mongo:
+        condition: service_healthy
+    # The repository's own probe, from docker-compose-ci.yml. /livez answers
+    # only once the server is serving, which is after it has run its whole
+    # migration set against an empty database. The image is node:24-alpine, so
+    # busybox wget is there; curl is not.
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/livez || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 90
+      start_period: 45s
+    mem_limit: 1280m
+
+  # Closes registration and re-asserts the public address, once the server
+  # answers. Not a convenience on either count — see files/panelalpha-setup.sh.
+  # Always exits 0.
+  setup:
+    image: ${CURL_IMAGE:-curlimages/curl:8.22.0}
+    restart: "no"
+    depends_on:
+      rocketchat:
+        condition: service_healthy
+    environment:
+      # The same rewrite as ROOT_URL above, under a key of its own so this
+      # service does not have to guess what the application was given.
+      PA_PUBLIC_URL: http://localhost
+      RC_ADMIN_USERNAME: ${RC_ADMIN_USERNAME}
+      RC_ADMIN_PASSWORD: ${RC_ADMIN_PASSWORD}
+    volumes:
+      - ./panelalpha-setup.sh:/panelalpha-setup.sh:ro
+    entrypoint: ["/bin/sh", "/panelalpha-setup.sh"]
+    mem_limit: 64m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be finished
+  # when that returns — which is when every service has been *started*. For
+  # `setup` that is not when it has *finished*, so without this the health
+  # probe can run while the admin sign-in is still being checked. Compose does
+  # block on depends_on conditions, so waiting for setup to exit makes `up -d`
+  # return only once Rocket.Chat has answered /livez, the admin exists, the
+  # sign-in as that admin has succeeded and registration is closed. A clean
+  # exit 0 is explicitly not a crash loop to AppHealth::isCrashing().
+  ready:
+    image: ${CURL_IMAGE:-curlimages/curl:8.22.0}
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  mongo_data: {}
+  rocketchat_uploads: {}

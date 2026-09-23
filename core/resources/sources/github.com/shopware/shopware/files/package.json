@@ -1,0 +1,12 @@
+{
+    "name": "shopware-panelalpha-assets",
+    "version": "1.0.0",
+    "private": true,
+    "description": "Bridge, written by the PanelAlpha shopware recipe. Shopware's monorepo has no root package.json: its two frontends are npm projects nested at src/Storefront/Resources/app/storefront and src/Administration/Resources/app/administration. HostCompile::runForPhp() only compiles a PHP project's frontend when the ROOT package.json declares a build script, so this file is what makes the engine's own Node stage run at all. It declares no dependencies; the real installs happen inside the two nested projects.",
+    "engines": {
+        "node": "24"
+    },
+    "scripts": {
+        "build": "bash panelalpha/build-assets.sh"
+    }
+}

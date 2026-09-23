@@ -77,12 +77,6 @@ class ComposeFileInspector
     ];
 
     /**
-     * Suffix for compose files moved aside so docker compose V2 does not
-     * prefer them over the hosting `docker-compose.yml`.
-     */
-    public const COMPOSE_STASH_SUFFIX = '.panelalpha-local';
-
-    /**
      * The compose file a project ships, by the conventional names in
      * preference order, or null when it ships none.
      */
@@ -97,29 +91,6 @@ class ComposeFileInspector
         }
 
         return null;
-    }
-
-    /**
-     * Compose filenames in $projectDir that docker compose would load instead
-     * of $keep (V2 searches compose.yaml before docker-compose.yml).
-     *
-     * @return list<string>
-     */
-    public static function composeFilesThatShadow(string $projectDir, string $keep = 'docker-compose.yml'): array
-    {
-        $projectDir = rtrim($projectDir, '/');
-        $keep = strtolower($keep);
-        $found = [];
-        foreach (self::COMPOSE_FILE_CANDIDATES as $name) {
-            if (strtolower($name) === $keep) {
-                continue;
-            }
-            if (is_file($projectDir . '/' . $name)) {
-                $found[] = $name;
-            }
-        }
-
-        return $found;
     }
 
     /**
@@ -304,32 +275,59 @@ class ComposeFileInspector
 
     public static function isLocalDevComposeYaml(string $raw): bool
     {
+        return self::localDevComposeReasonYaml($raw) !== null;
+    }
+
+    /**
+     * Why a file reads as a workstation dev compose, or null when it does not.
+     * The boolean check and the deploy log share this, so a demotion can name
+     * the service and mount that triggered it instead of leaving a silent gap.
+     */
+    public static function localDevComposeReason(string $composePath): ?string
+    {
+        if (!is_file($composePath) || !is_readable($composePath)) {
+            return null;
+        }
+        $raw = @file_get_contents($composePath);
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+
+        return self::localDevComposeReasonYaml($raw);
+    }
+
+    public static function localDevComposeReasonYaml(string $raw): ?string
+    {
         if ($raw === '') {
-            return false;
+            return null;
         }
 
         try {
             $parsed = ComposeYaml::parse($raw);
         } catch (\Throwable $e) {
-            return false;
+            return null;
         }
         if (!is_array($parsed) || !isset($parsed['services']) || !is_array($parsed['services'])) {
-            return false;
+            return null;
         }
 
-        foreach ($parsed['services'] as $service) {
+        foreach ($parsed['services'] as $name => $service) {
             if (!is_array($service)) {
                 continue;
             }
             if (self::serviceHasUndefaultedHostUidBuildArg($service)) {
-                return true;
+                return 'service `' . (string) $name . '` maps a host UID/GID build arg';
             }
-            if (isset($service['build']) && self::serviceBindsProjectRoot($service)) {
-                return true;
+            if (isset($service['build']) && ($source = self::projectRootBindSource($service)) !== null) {
+                $where = in_array($source, ['.', './', '${PWD}', '$PWD'], true)
+                    ? 'the project root'
+                    : '`' . $source . '`';
+
+                return 'service `' . (string) $name . '` mounts ' . $where;
             }
         }
 
-        return false;
+        return null;
     }
 
     /**
@@ -465,42 +463,109 @@ class ComposeFileInspector
      */
     private static function serviceBindsProjectRoot(array $service): bool
     {
+        return self::projectRootBindSource($service) !== null;
+    }
+
+    /**
+     * The bind source that marks a service a workstation app service, or null.
+     *
+     * The project root (`.`/`./`/`${PWD}`) always counts: the service builds
+     * an image and then mounts the whole source over it, which is how a laptop
+     * gets live reload and never how a deployment ships.
+     *
+     * A `./subdir` counts only when it is a read-write mount of a source tree
+     * -- OpenCart 4.1 mounts `./upload`, its whole shop. It does NOT count when
+     * it is read-only, or a single generated file: that is a recipe injecting
+     * one artifact (an entrypoint/config/answer file, as Centreon, Saleor and
+     * Socioboard do), and demoting the whole compose over it wrote the wrong
+     * container topology. A datastore's `./data:/var/lib/mysql` is not reached
+     * here: that service carries an `image:`, and the caller only asks about
+     * services that `build:`.
+     *
+     * @param array<string, mixed> $service
+     */
+    private static function projectRootBindSource(array $service): ?string
+    {
         $volumes = $service['volumes'] ?? null;
         if (!is_array($volumes)) {
-            return false;
+            return null;
         }
         foreach ($volumes as $volume) {
-            $source = '';
-            if (is_string($volume)) {
-                if (!str_contains($volume, ':')) {
-                    continue;
-                }
-                $source = explode(':', $volume, 2)[0];
-            } elseif (is_array($volume)) {
-                $type = strtolower((string) ($volume['type'] ?? 'bind'));
-                if ($type !== '' && $type !== 'bind') {
-                    continue;
-                }
-                $source = (string) ($volume['source'] ?? '');
+            [$source, $target, $readOnly] = self::readBindVolume($volume);
+            if ($source === null) {
+                continue;
             }
-            $source = str_replace('\\', '/', trim($source));
             if (in_array($source, ['.', './', '${PWD}', '$PWD'], true)) {
-                return true;
+                return $source;
             }
-            // A subdirectory of the project is the same signal as the project
-            // root: the service builds an image and then mounts the source
-            // over it, which is how a workstation gets live reload and never
-            // how a deployment ships. OpenCart 4.1 mounts `./upload`, its
-            // whole shop, and was read as a hosting stack because the check
-            // only knew the root form. A datastore's `./data:/var/lib/mysql`
-            // is not caught by this: that service carries an `image:`, and the
-            // caller only asks about services that `build:`.
-            if (str_starts_with($source, './')) {
-                return true;
+            if (!str_starts_with($source, './')) {
+                continue;
             }
+            if ($readOnly || self::mountsSingleFile($source, $target)) {
+                continue;
+            }
+
+            return $source;
         }
 
-        return false;
+        return null;
+    }
+
+    /**
+     * A bind volume as [source, target, readOnly]; source is null for a named
+     * volume or a non-bind mount.
+     *
+     * @param mixed $volume
+     * @return array{0: ?string, 1: string, 2: bool}
+     */
+    private static function readBindVolume(mixed $volume): array
+    {
+        if (is_string($volume)) {
+            if (!str_contains($volume, ':')) {
+                return [null, '', false];
+            }
+            $parts = explode(':', $volume);
+            $mode = isset($parts[2]) ? trim($parts[2]) : '';
+            $readOnly = in_array('ro', array_map('trim', explode(',', $mode)), true);
+
+            return [
+                str_replace('\\', '/', trim($parts[0])),
+                str_replace('\\', '/', trim($parts[1] ?? '')),
+                $readOnly,
+            ];
+        }
+        if (is_array($volume)) {
+            $type = strtolower((string) ($volume['type'] ?? 'bind'));
+            if ($type !== '' && $type !== 'bind') {
+                return [null, '', false];
+            }
+            $source = str_replace('\\', '/', trim((string) ($volume['source'] ?? '')));
+
+            return [
+                $source === '' ? null : $source,
+                str_replace('\\', '/', trim((string) ($volume['target'] ?? ''))),
+                ($volume['read_only'] ?? false) === true,
+            ];
+        }
+
+        return [null, '', false];
+    }
+
+    /**
+     * A bind of one file rather than a source tree: the source's last segment
+     * or the target's carries a filename extension. One file is always an
+     * injected artifact, never a mounted app directory.
+     */
+    private static function mountsSingleFile(string $source, string $target): bool
+    {
+        return self::hasFileExtension($source) || self::hasFileExtension($target);
+    }
+
+    private static function hasFileExtension(string $path): bool
+    {
+        $base = basename($path);
+
+        return $base !== '' && preg_match('/\.[A-Za-z0-9]{1,8}$/', $base) === 1;
     }
 
     /**
@@ -530,9 +595,50 @@ class ComposeFileInspector
             return true;
         }
 
-        return str_contains($raw, 'nginx:alpine')
-            && str_contains($raw, '/usr/share/nginx/html')
-            && !str_contains($raw, 'build:')
-            && substr_count($raw, 'image:') === 1;
+        return self::isUnlabelledStaticBootstrapYaml($raw);
+    }
+
+    /**
+     * The static bootstrap as the engine wrote it before it carried the label
+     * (August 2026): one `nginx:alpine` service, no build, serving the project
+     * root itself. Still left on an account nobody has migrated.
+     *
+     * The project root, not any directory: the engine only ever mounted `./`.
+     * A client stack serving `./html` or `./dist` with the same image is the
+     * client's own, and reading it as ours dropped their site for the
+     * placeholder page (ticket 08, live run).
+     */
+    private static function isUnlabelledStaticBootstrapYaml(string $raw): bool
+    {
+        try {
+            $parsed = ComposeYaml::parse($raw);
+        } catch (\Throwable) {
+            return false;
+        }
+        $services = is_array($parsed) ? ($parsed['services'] ?? null) : null;
+        if (!is_array($services) || count($services) !== 1) {
+            return false;
+        }
+        $service = reset($services);
+        if (!is_array($service) || isset($service['build']) || ($service['image'] ?? null) !== 'nginx:alpine') {
+            return false;
+        }
+
+        foreach ((array) ($service['volumes'] ?? []) as $volume) {
+            if (!is_string($volume)) {
+                continue;
+            }
+            $parts = explode(':', $volume);
+            if (count($parts) < 2) {
+                continue;
+            }
+            if (in_array(trim($parts[0]), ['.', './'], true)
+                && rtrim(trim($parts[1]), '/') === '/usr/share/nginx/html'
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -1,0 +1,165 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the app -- the shared PHP base image, ~/project bind-mounted at /app,
+# the account's own uid, Apache on 8000, APP_URL from the account's main domain
+# and DB_* from the database `database: mysql` provisioned -- and says nothing
+# about where a settings file lives, where an uploaded file goes, what php.ini
+# is in force, or when MediaWiki is ready, because nothing in a PHP checkout
+# can.
+#
+# An override rather than a replacement compose file. Here that is not only a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# before detection runs, and this repository already ships a compose file of
+# its own -- the point of the recipe is to stop that file being what the
+# engine deploys, not to swap one compose project for another.
+#
+# There is no database service here. `database: mysql` in panelalpha.yaml gets
+# one on the account's own MySQL server: visible in the panel, openable in
+# phpMyAdmin, inside the account's backup, and costing the host neither a
+# container nor a volume. It is also what keeps the three
+# docker-registry.wikimedia.org/dev/* services in the repository's own
+# docker-compose.yml from being mined as sidecars -- RuntimeSidecars globs
+# every `docker-compose.*` in the checkout, and PhpStrategy skips that step
+# when the manifest declares a database (Strategy/PhpStrategy.php:66).
+services:
+  app:
+    volumes:
+      # ~/.panelalpha/mediawiki. Everything this account accumulates:
+      #
+      #   /data/LocalSettings.php       written by MediaWiki's own installer
+      #                                 (`--confpath /data`). $wgDBpassword,
+      #                                 $wgSecretKey and $wgUpgradeKey are in
+      #                                 it.
+      #   /data/PanelAlphaSettings.php  the handful of settings that depend on
+      #                                 *this* deploy -- $wgServer above all.
+      #                                 Regenerated every time; required from
+      #                                 the end of the file above.
+      #   /data/images/                 every uploaded file and every thumbnail
+      #                                 MediaWiki derives from one, plus
+      #                                 upstream's images/.htaccess.
+      #   /data/cache/                  $wgCacheDirectory: the localisation
+      #                                 cache, which is a minute of CPU to
+      #                                 rebuild.
+      #   /data/admin-credentials       the first bureaucrat, 0600.
+      #   /data/php/zz-mediawiki.ini    the php.ini the base image does not
+      #                                 load.
+      #
+      # A redeploy empties and re-clones ~/project (engine#173), so a wiki that
+      # kept any of this under the document root would come back with a new
+      # $wgSecretKey -- invalidating every session and every edit token -- and
+      # with every uploaded file gone while the `image` rows pointing at them
+      # survived. ~ itself is root-owned 0755 and nothing can be created in it;
+      # ~/.panelalpha belongs to the account, which is why the data directory
+      # is a child of that one. hooks/prepare.sh creates it before this mount
+      # is made, so Docker never creates it as root.
+      #
+      # Relative, because compose runs with `--project-directory ~/project`:
+      # `..` is the account home on both sides of the mount.
+      - ../.panelalpha/mediawiki:/data
+
+    environment:
+      # Said out loud, because the manifest cannot say it: MediaWiki serves
+      # from its own repository root, and `docroot: .` is folded to '' by
+      # PlatformManifest::readDocroot() (Platform/PlatformManifest.php:305),
+      # which means "undeclared" (engine#172). PhpDocroot::detect() reaches
+      # /app on its own -- none of public/, web/, public_html/ or webroot/
+      # exists here and index.php does -- but the document root decides which
+      # files are a URL, and that is not something to leave to a probe order.
+      PA_DOCROOT: /app
+
+      # Where the settings file is. wfDetectLocalSettingsFile() reads this
+      # from the environment before falling back to $IP/LocalSettings.php
+      # (includes/BootstrapHelperFunctions.php:42), and it is honoured
+      # identically by index.php, api.php, rest.php and every maintenance
+      # script -- they all go through the same function. The value contains a
+      # '/', which is what makes it an absolute path rather than a basename
+      # under $IP (BootstrapHelperFunctions.php:45).
+      #
+      # This is the whole reason the settings file never has to be in the
+      # document root. `Require all denied` on a LocalSettings.php beside
+      # index.php would be one Apache misconfiguration away from serving
+      # $wgSecretKey; a file that is not in the served tree at all is not.
+      MW_CONFIG_FILE: /data/LocalSettings.php
+
+      # The image loads no php.ini at all (engine#185) and its conf.d is not
+      # writable by the account uid, so this is the only way to give the
+      # container one. PHP reads PHP_INI_SCAN_DIR from its own environment at
+      # startup whatever the SAPI, so it reaches the Apache module and the CLI
+      # both -- and both need it: the CLI runs the installer and update.php,
+      # the Apache module takes the upload.
+      #
+      # The image's own directory is listed first and explicitly:
+      # PHP_INI_SCAN_DIR *replaces* the compiled-in path rather than adding to
+      # it, and dropping it would unload every docker-php-ext-*.ini -- mysqli,
+      # intl, calendar, gd, the lot -- as well as panelalpha-proxy.ini, the
+      # auto_prepend_file that tells PHP the request arrived over https.
+      # MediaWiki builds every absolute URL from $wgServer rather than from
+      # $_SERVER, but the login cookie's `secure` flag is decided from the
+      # request, and a session cookie that is not marked secure on an https
+      # site is a real defect.
+      PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/data/php
+
+    # ServiceLimits caps a service it recognises as the application at 384m
+    # (Lib/Deploy/Compose/ServiceLimits.php:24). MediaWiki does not fit: the
+    # install stage runs `maintenance/run.php install`, which builds ~50 tables
+    # and the localisation cache in one PHP process with memory_limit = 256M,
+    # inside the same container that is about to run Apache with its own
+    # workers. In an override file this reaches Docker as written -- the
+    # hardener never sees it -- which is the point of putting it here.
+    mem_limit: 768m
+
+    # The install stage does all of MediaWiki's setup before Apache binds --
+    # the schema, the first bureaucrat, the Main Page -- and the engine runs
+    # `docker compose up -d` without --wait and probes as soon as it returns,
+    # which is while that is still going: nothing is listening yet and the
+    # probe reads `Failed to connect to 127.0.0.1 port 8000`.
+    #
+    # Two requests, and the second is grepped rather than trusted for its
+    # status code, because MediaWiki answers 200 on a page that says the wiki
+    # is not set up:
+    #
+    #   1. GET / -- the main page, which is what the domain root serves once
+    #      $wgMainPageIsDomainRoot is on. A wiki with no LocalSettings.php
+    #      answers this 200 with includes/Output/NoLocalSettings.php, which is
+    #      a page pointing at /mw-config/; `-f` alone would call that a
+    #      success, which is why the second request exists.
+    #   2. GET /api.php?action=query&meta=siteinfo&format=json -- grepped for
+    #      the generator string. It answers only once the database is
+    #      reachable, the schema matches the code (a pending schema change
+    #      makes MediaWiki throw) and the ObjectCache and the parser are
+    #      wired; it is also the cheapest request that proves the API entry
+    #      point works, which is what an integration will use.
+    #
+    # Host is 127.0.0.1:8000 for both. MediaWiki does not care what Host
+    # arrives -- $wgServer in the settings file is where its own URLs come
+    # from -- so a loopback probe asks the same question a visitor does.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null --max-time 30 http://127.0.0.1:8000/ &&
+          curl -fsS --max-time 30 'http://127.0.0.1:8000/api.php?action=query&meta=siteinfo&format=json' |
+          grep -q '"generator":"MediaWiki'
+      interval: 10s
+      timeout: 40s
+      retries: 30
+      # The install stage on a shared host. A check that fails inside this
+      # window neither counts against retries nor marks the container
+      # unhealthy.
+      start_period: 300s
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once MediaWiki has
+  # built its schema and answered, and what the health probe then meets.
+  # alpine:3 rather than anything the sidecar miner would recognise as a
+  # backing service: a datastore image here produces `dependency cycle
+  # detected: app -> ready -> app`. A clean exit 0 is not a crash loop as far
+  # as AppHealth is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

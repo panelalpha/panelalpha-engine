@@ -1,0 +1,123 @@
+# Replaces the meta-repo's Dockerfile-only deploy (FROM passit/passit:latest,
+# one container, no database) with the real stack Passit needs. All three
+# long-running services use the official image; nothing is built from the
+# clone and no second source repo is pulled.
+services:
+  db:
+    # Pinned major: Postgres cannot migrate a datadir backwards, so a floating
+    # `latest` would break the volume the first time the major moves.
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, written once by hooks/prepare.sh into
+    # ~/.panelalpha/passit/. The database container never sees SECRET_KEY.
+    env_file:
+      - ../.panelalpha/passit/db.env
+    environment:
+      POSTGRES_DB: passit
+      POSTGRES_USER: passit
+      # A named volume is not always empty (lost+found); postgres refuses to
+      # init into a non-empty dir, so give it a clean subdir.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U passit -d passit -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  # settings.py wires CACHES to django_vcache.ValkeyCache and TASKS to
+  # django_vtasks.ValkeyTaskBackend. Registration enqueues the confirmation
+  # email through that task backend, so this is required, not optional -- a
+  # missing cache makes sign-up 500 on enqueue.
+  cache:
+    image: docker.io/valkey/valkey:8-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 128m
+
+  # One-shot: run migrations to completion before the app is allowed to serve.
+  # The image's default CMD (./bin/start.sh) launches granian and does NOT
+  # migrate, so without this the app answers 500 against an empty schema on the
+  # first boot. `app` waits on this with service_completed_successfully, so a
+  # failed migration fails the deploy instead of publishing a broken site.
+  init:
+    image: ${PASSIT_IMAGE:-docker.io/passit/passit:stable}
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+      - ../.panelalpha/passit/app.env
+    environment:
+      CACHE_URL: redis://cache:6379/1
+      IS_DEBUG: "False"
+    volumes:
+      - ./panelalpha/passit:/pa:ro
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    mem_limit: 512m
+
+  app:
+    image: ${PASSIT_IMAGE:-docker.io/passit/passit:stable}
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - ../.panelalpha/passit/app.env
+    environment:
+      # run-granian.sh binds 0.0.0.0:$PORT; named outright so the published
+      # port and the healthcheck cannot drift from it.
+      PORT: "8080"
+      CACHE_URL: redis://cache:6379/1
+      # settings.py:34 IS_DEBUG defaults False; named so DEBUG can never be on.
+      IS_DEBUG: "False"
+      # Rewritten to the account's public https address before the stack starts
+      # (ComposePlaceholders rewrites a local value whose key ends in _URL).
+      # /pa/entrypoint.sh turns it into EMAIL_CONFIRMATION_HOST so confirmation
+      # and password-reset links point at this account, not http://localhost.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      - ./panelalpha/passit:/pa:ro
+    entrypoint: ["/bin/sh", "/pa/entrypoint.sh"]
+    healthcheck:
+      # /_health/ (passit/urls.py) returns 200 "ok". python is the image's own
+      # interpreter (/usr/local/bin/python); the slim image has no curl/wget.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/_health/',timeout=5).read().strip()==b'ok' else 1)\""]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 40s
+    mem_limit: 768m
+
+  # Starts nothing, exits 0, waits on app's healthcheck. The engine runs
+  # `docker compose up -d` with no --wait, so without a gate the deploy is
+  # "done" the moment containers start and the probe lands while granian is
+  # still importing Django. Compose blocks on a depends_on health condition,
+  # so this makes `up -d` return only once the site actually answers.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}

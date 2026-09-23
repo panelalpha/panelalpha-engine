@@ -1,14 +1,22 @@
 # yaml-language-server: $schema=../_schema.json
 #
-# The rule the port probe has always applied, said out loud. A 5xx is the one
-# response that is unambiguously the application's own fault: it accepted the
-# connection, so it is running, and then failed to answer -- which is why 4xx
-# deliberately stays healthy here. Plenty of applications legitimately 404 on
-# `/`, and an API that answers 401 to an unauthenticated probe is working.
+# A 5xx from `/` is the one status a browser never wants, so this check fails
+# on it -- while 4xx deliberately stays healthy, because plenty of applications
+# legitimately 404 on `/` and an API that 401s an unauthenticated probe is
+# working.
+#
+# A 5xx does NOT prove the application is running. An unbound app port makes
+# the engine's own proxy answer 502, and that 502 cannot be told from an
+# application 500 by its status. The container behind it may be `Restarting (1)`
+# in a crash loop. So the two cases -- the application's code failing, and the
+# proxy answering for a container that never came up -- need different logs,
+# and the `server-error` explainer tells them apart by response time (the proxy
+# answers with no upstream in ~2ms; no application-generated 5xx is that fast).
 id: no-server-error
 severity: error
 serving: error_page
 expect:
   status_not: ['5xx']
-message: 'The application is running but failing: it answered {status}.'
-fix: 'Read the application log — the container is up, so this is the code inside it.'
+message: 'The site returned {status} instead of a page.'
+fix: 'A {status} is either the application failing (read its log) or the engine proxy answering because the container never bound its port -- if it came back in a few milliseconds, check `docker logs` for a container that did not start.'
+explain: server-error

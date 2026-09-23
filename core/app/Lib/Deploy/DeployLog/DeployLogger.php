@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\DeployLog;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\Telemetry\Telemetry;
+use App\Lib\DeployHook\Coalescing;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -51,6 +52,9 @@ class DeployLogger
         self::STATUS_CANCELLED => 'Deploy cancelled',
         self::STATUS_FAILED => 'Deploy failed',
     ];
+
+    /** latest.json key set by {@see markPreCheckRejected()}. */
+    public const PRECHECK_REJECTED = 'precheck_rejected';
 
     private readonly DeployLogPaths $paths;
 
@@ -214,6 +218,19 @@ class DeployLogger
     }
 
     /**
+     * Whether a live process holds this account's deploy lock -- a deploy is
+     * actually in progress, whatever latest.json says. The status alone stays
+     * `running` forever after a deploy is killed before finish() (an OOM, a
+     * worker timeout, a container restart), while the kernel releases the
+     * lock with the process. And a cancelled deploy still winding down holds
+     * the lock under a status that is no longer `running`.
+     */
+    public static function isLockedFor(string $username): bool
+    {
+        return (new DeployLock(new DeployLogPaths($username)))->isHeld();
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     public static function listUsers(): array
@@ -269,6 +286,16 @@ class DeployLogger
         $running = ProcessIdentity::isStillRunning($latest['pid'] ?? null, $latest['pid_start_time'] ?? null);
 
         return ['cancelled' => true, 'pid' => $running ? $latest['pid'] : null];
+    }
+
+    /**
+     * The deploy stopped at a precheck: validation that runs before the clone.
+     * Kept in latest.json because the logger that finishes the deploy is a
+     * different instance from the one the precheck saw.
+     */
+    public function markPreCheckRejected(): void
+    {
+        $this->status->update([self::PRECHECK_REJECTED => true]);
     }
 
     public function isRunning(): bool
@@ -428,6 +455,12 @@ class DeployLogger
         // the explainer has to see what the build actually printed, not the
         // sentence it already turned that into.
         Telemetry::captureDeploy($this, $this->username, $status, $this->rawFailureOutput ?? $error);
+
+        // Same reasoning, same choke point: a push that coalesced while this
+        // deploy ran -- of any kind, for any reason -- is followed up from
+        // here, once, whatever this deploy's own outcome was. Cannot throw;
+        // see Coalescing.
+        Coalescing::runPendingFor($this->username);
     }
 
     /**

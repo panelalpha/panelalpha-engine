@@ -124,6 +124,13 @@ final class TelemetryFields
      * public, and naming its path in the clear because no token happened to be
      * stored on the account was a disclosure this class could always have
      * avoided. A remote read off the disk is judged by exactly the same rule.
+     *
+     * A token the account *inherits* from the engine ({@see
+     * \App\Lib\Vault\GlobalVault}) counts, deliberately: it is a credential
+     * that may be what clones this repository, and the choice here has always
+     * been to over-redact rather than name a private path. An engine with a
+     * global Git token therefore reports fewer repository URLs, which is the
+     * safe direction to be wrong in.
      */
     public function repoIsPrivate(): bool
     {

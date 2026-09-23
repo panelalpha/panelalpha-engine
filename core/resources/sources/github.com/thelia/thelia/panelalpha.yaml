@@ -1,0 +1,157 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Thelia 3.1 is a Symfony 7.4 e-commerce platform: Propel over MySQL, a front
+  office theme (Flexy) and a back office at /admin. Detection read the
+  repository correctly -- composer.json and no artisan, so the `php` strategy,
+  PHP 8.3 against `"php": ">=8.3 <9.0"`, the shared Apache base image with
+  ~/project bind-mounted, `composer install` on the host, and `public/` as the
+  document root. The deploy finished successfully and every request answered
+  HTTP 500, which is the `serving-error_page` verdict this recipe exists to fix.
+
+  **thelia/thelia commits no composer.lock, and that is the 500.** The php
+  manifest installs with `--no-plugins` -- a plugin is arbitrary PHP out of a
+  customer repository and the install runs on the host daemon -- and
+  `PhpHostBuild::mayRunPlugins()` lifts that only when a *lock* pins nothing
+  but installer plugins. With no lock `lockedPlugins(null)` is empty, the
+  exemption cannot fire, and not one of the five plugins this project allows
+  (symfony/flex, symfony/runtime, composer/installers, thelia/installer,
+  phpstan/extension-installer) is activated. Two of them were load-bearing:
+
+  symfony/runtime writes `vendor/autoload_runtime.php` on POST_AUTOLOAD_DUMP,
+  and that file is the second line of `public/index.php` and the first of the
+  `Thelia` console. Without it every request and every console command is
+  `LogicException: Symfony Runtime is missing`. Measured on a plain
+  `composer install --no-dev --no-scripts --no-plugins` of this repository:
+  `vendor/autoload_runtime.php` does not exist. files/panelalpha/thelia-setup.sh
+  runs `composer dump-autoload` in the account's own container, which re-fires
+  that event and writes it -- and then runs it a second time with
+  `--no-plugins`, because the plugin-enabled run also rewrites the autoload map
+  and gets it badly wrong: composer/installers is active, so Composer believes
+  thelia/flexy and the back-office templates live under templates/, where
+  nothing is until bin/install copies them, and drops them along with
+  everything reachable only through them. That run produced 130 psr-4 prefixes
+  where the build's produced 157 -- no FlexyBundle, no Symfony UX, no
+  twig/extra-*, and no liip/imagine-bundle, which config/bundles.php registers
+  by name, so the kernel died on `Class
+  "Liip\ImagineBundle\LiipImagineBundle" not found`. The first run is for the
+  plugin, the second for the map; neither writes code of its own.
+
+  composer/installers reads `extra.installer-paths`, and Thelia's maps
+  `type:thelia-module` to `vendor/{$vendor}/modules/{$name}` and each template
+  type to `templates/<kind>/<name>`. Without the plugin Composer falls back to
+  its own LibraryInstaller and all sixteen modules land in
+  `vendor/thelia/<package>` -- Cheque, TheliaSmarty, TwigEngine, TheliaBlocks
+  and the rest. `core/bootstrap.php` defines
+  `THELIA_MODULE_DIR = vendor/thelia/modules/`, which is the only directory
+  `DatabaseSetup::registerAndApplyModules()` scans, so the install would
+  register zero modules and the shop would have no payment, no delivery, no
+  template engine -- measured, before this recipe existed as more than a
+  docroot: `0 module(s) registered`.
+  files/panelalpha/thelia-place-modules.php makes each one visible at the name
+  Thelia expects with a relative symlink, and symlinks rather than moves
+  because Composer has to keep finding each package where it put it. Composer 2
+  resolves a package's own autoload rules, and the `--no-dev` reachability walk
+  that decides which packages reach the autoloader at all, against the install
+  path it recorded -- and a package it cannot find is dropped together with
+  everything reachable only through it. Moving them cost two things, both
+  measured: thelia/tiptap-module declares psr-4 `Tiptap\` at its own root and
+  its classmap entry pointed at the directory it had just left
+  (`Class "Tiptap\Tiptap" not found`), and thelia/thelia-library-module is the
+  only package that requires liip/imagine-bundle, so moving it took liip out of
+  the autoloader entirely. Rewriting the recorded install-path did not help.
+  The four template packages are left where Composer put them: `bin/install`
+  already copies them out by reading `install-path` from
+  `vendor/composer/installed.json`, which is correct wherever they landed.
+
+  **There was no database, and no way for the engine to guess one.** Thelia is
+  MySQL or nothing -- `DatabaseSetup` is PDO-mysql and `bin/install` refuses to
+  start without `DATABASE_HOST` and `DATABASE_NAME`. The checkout has no
+  compose file and no `DATABASE_URL`; its committed `.env` carries the five
+  `DATABASE_*` keys with empty values. `database: mysql` is the manifest key
+  that asks for one (Matomo's and Omeka S's, for the same reason): the engine
+  provisions a database and user on the account's own MySQL server -- visible
+  in the panel, openable in phpMyAdmin, inside the account's backup -- and
+  hands the container DB_HOST/DB_PORT/DB_DATABASE/DB_USERNAME/DB_PASSWORD.
+
+  **And `.env` is loaded as real environment variables, which changes what
+  Thelia's own installer can do.** The generated compose file carries
+  `env_file: - .env`, so every line of the committed file becomes a process
+  environment variable, and `Dotenv::populate()` never overwrites one of those.
+  `bin/install` writes the credentials it was given into `.env.local` -- the
+  file Symfony documents for exactly this -- and on a deploy that kept the
+  committed `DATABASE_HOST=` line, that line wins and the shop answers 500 on
+  every request with nothing in its config to blame. So hooks/prepare.sh takes
+  the five empty keys out of `.env` and leaves `.env.local` in charge. The same
+  hook replaces `APP_ENV=dev` with `prod` and the empty `APP_SECRET=` with a
+  generated one, for the same reason: neither could be set from `.env.local`.
+
+  **Thelia refuses to install on the base image's php.ini.**
+  `Thelia\Core\Install\CheckPermission` is Phase 1 of bin/install and it fails
+  the run outright below memory_limit 128M, post_max_size 20M or
+  upload_max_filesize 2M. The shared PHP image loads no php.ini at all and its
+  compiled-in defaults are 128M / 8M / 2M, so the first deploy with this recipe
+  stopped at *"the PHP post_max_size configuration value (currently 8M) is
+  below minimal requirements to run Thelia"* and crash-looped. The image's
+  conf.d is not writable by the account uid, so the compose override sets
+  PHP_INI_SCAN_DIR to that directory plus one inside the checkout and
+  files/panelalpha/php/zz-thelia.ini is read from it -- by the Apache module as
+  well as the CLI, which the back office's own system page needs.
+
+  **The first administrator.** Thelia seeds no user and has no web installer to
+  fall back on (`public/install/bdd.php` is an empty file on this branch), so a
+  deploy that stopped at "the front office renders" would publish a shop nobody
+  can administer. `bin/install --with-admin` creates one; the password is
+  generated per account into ~/project/.panelalpha-admin-password (0600) and
+  never a default -- upstream's own `composer demo-database` script uses
+  `thelia/thelia`, which is why this recipe does not use that script.
+extends: php
+# public/index.php is Thelia's front controller and public/.htaccess carries
+# its rewrite. PhpDocroot probes `public` first so it would reach the same
+# answer, but the answer decides which files are web-reachable -- with the
+# checkout root served, .env, .env.local and the account's MySQL password
+# would all be one request away -- and that is not something to leave to a
+# probe order.
+docroot: public
+# Thelia is MySQL or nothing: Thelia\Install\Standalone\DatabaseSetup opens a
+# `mysql:` PDO DSN and bin/install exits before Phase 1 without DATABASE_HOST
+# and DATABASE_NAME. The checkout has no compose file and no DATABASE_URL to
+# point the engine at one.
+database: mysql
+# The engine handed this container `APP_ENV=production`, and with it a shop
+# running Symfony's debug error handler on a public domain.
+#
+# PhpEnvironment::appEnv() knows the difference -- Symfony's production
+# environment is spelled `prod` and only `prod`, `production` is Laravel's word
+# -- and asks PhpStrategy::isSymfony(), which reads the *root* composer.json's
+# require for symfony/framework-bundle or symfony/symfony. Thelia's root
+# requires thelia/core, and thelia/core is what requires framework-bundle, so
+# the check says "not Symfony" and Laravel's value is what arrives. Symfony
+# does not fail on an unknown environment name; it just loads no
+# config/packages/prod, and symfony/runtime turns APP_DEBUG on for every
+# environment that is not literally `prod`. Measured in the deployed container:
+# `Cache for the "production" environment (debug=true)`.
+#
+# An app config's `env` outranks the strategy's (ComposeEnvironment), and the
+# account's own env_vars still outrank this.
+env:
+  APP_ENV: prod
+  # Symfony would infer this from APP_ENV, but the value decides whether a
+  # stack trace is rendered to a visitor, and that is worth saying rather than
+  # inferring.
+  APP_DEBUG: '0'
+commands:
+  - id: thelia-setup
+    stage:
+      - install
+      - upgrade
+    timeout: 1800
+    description: >-
+      Puts back what Composer's plugins were not allowed to write -- the
+      Symfony runtime autoloader, and the modules composer/installers would
+      have placed under vendor/thelia/modules -- then runs Thelia's own
+      bin/install against the database the engine provisioned, with a generated
+      administrator password. Idempotent: on an account that is already
+      installed it re-points .env.local at the current credentials and clears
+      the cache instead, which is what the upgrade stage replays on every
+      redeploy.
+    run: 'sh panelalpha/thelia-setup.sh'

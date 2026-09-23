@@ -38,7 +38,7 @@ Open source. Self-hosted. Łatwy dla każdego, nie tylko dla sysadminów.
 <p>
 <a href="#krok-1-zainstaluj-engine-na-swoim-vps-ie"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Instalacja jedną komendą"></a>
 <a href="#krok-1-zainstaluj-engine-na-swoim-vps-ie"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Wspierane systemy"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-182_tools-6f42c1" alt="182 narzędzi MCP"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-199_tools-6f42c1" alt="199 narzędzi MCP"></a>
 <a href="#licencja"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Dołącz do Discorda"></a>
 </p>
@@ -158,7 +158,7 @@ Nie ma komend do nauczenia się i nie ma magicznych formułek. To przykłady poz
 | `Zrób tunel Cloudflare dla n8n.mydomain.com.` | DNS i tunel, czyli też sposób, żeby serwować stronę z serwera za NAT-em. |
 | `Ile ruchu mieliśmy w zeszłym tygodniu?` | Użycie, logi i limity tego projektu, i serwera jako całości. |
 
-Więcej przykładów: [o co poprosić](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Pełna lista tego, do czego asystent ma dostęp: [182 narzędzia](docs/04-connecting-your-ai/your-assistant.md).
+Więcej przykładów: [o co poprosić](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Pełna lista tego, do czego asystent ma dostęp: [199 narzędzi](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 
@@ -318,4 +318,4 @@ PanelAlpha Engine jest open source na licencji Apache 2.0.
 
 ## Buduj to razem z nami
 
-Chcesz się zaangażować? [`CONTRIBUTING.md`](CONTRIBUTING.md) Cię wprowadzi. Po głębsze konwencje dla współtwórców i przepływ testów idź do [`AGENTS.md`](AGENTS.md).
+Chcesz się zaangażować? [`CONTRIBUTING.md`](CONTRIBUTING.md) Cię wprowadzi. Dokumentacja dla operatora jest w [`docs/`](docs/README.md).

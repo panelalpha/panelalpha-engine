@@ -108,14 +108,36 @@ class DomainPlanTest extends TestCase
         $this->assertSame(DomainPlan::SOURCE_PANELALPHA_ONLINE, $this->sources($candidates)[0]);
     }
 
-    public function test_a_host_with_no_public_address_falls_all_the_way_to_local(): void
+    /**
+     * The zone is DNS and nothing else: it resolves whatever address the label
+     * spells, at any depth and private ranges included. So a host on a LAN
+     * gets a name every other machine on that LAN can open, where `.local`
+     * would have answered for nobody -- the engine registers no mDNS.
+     * panelalpha.online is the rung a private address really does lose, since
+     * the proxy has to reach the host from the internet.
+     */
+    public function test_a_private_address_still_gets_a_direct_name(): void
     {
         $candidates = DomainPlan::candidates('shop', null, null, [
             'default_ipv4' => '10.0.0.4',
         ]);
 
-        $this->assertSame([DomainPlan::SOURCE_LOCAL], $this->sources($candidates));
-        $this->assertSame('shop.local', $candidates[0]['domain']);
+        $this->assertSame(
+            [DomainPlan::SOURCE_PANELALPHA_DIRECT, DomainPlan::SOURCE_LOCAL],
+            $this->sources($candidates)
+        );
+        $this->assertSame('shop.10-0-0-4.panelalpha.direct', $candidates[0]['domain']);
+        $this->assertSame('shop.local', $candidates[1]['domain']);
+    }
+
+    public function test_a_host_with_no_address_at_all_falls_to_local(): void
+    {
+        foreach ([['default_ipv4' => null], ['default_ipv4' => 'not-an-address'], []] as $settings) {
+            $candidates = DomainPlan::candidates('shop', null, null, $settings);
+
+            $this->assertSame([DomainPlan::SOURCE_LOCAL], $this->sources($candidates));
+            $this->assertSame('shop.local', $candidates[0]['domain']);
+        }
     }
 
     public function test_a_requested_domain_is_the_only_candidate(): void
@@ -178,6 +200,25 @@ class DomainPlanTest extends TestCase
                 (string) DomainPlan::noPublicNameReason($settings)
             );
         }
+
+        // The two are not the same fact, and an operator acts on them
+        // differently: one needs a port forwarded, the other needs an address.
+        $this->assertStringContainsString(
+            "address is private",
+            (string) DomainPlan::noPublicNameReason(['default_ipv4' => '10.0.0.4'])
+        );
+        $this->assertStringContainsString(
+            'no IPv4 address on record',
+            (string) DomainPlan::noPublicNameReason([])
+        );
+    }
+
+    public function test_only_a_public_address_counts_as_publicly_reachable(): void
+    {
+        $this->assertTrue(DomainPlan::hasPublicIpv4(['default_ipv4' => '203.0.113.7']));
+        $this->assertFalse(DomainPlan::hasPublicIpv4(['default_ipv4' => '10.0.0.4']));
+        $this->assertFalse(DomainPlan::hasPublicIpv4(['default_ipv4' => '127.0.0.1']));
+        $this->assertFalse(DomainPlan::hasPublicIpv4([]));
     }
 
     public function test_a_retry_label_is_random_rather_than_sequential(): void

@@ -47,6 +47,28 @@ class GitUrl
     }
 
     /**
+     * A git command that cannot stop and ask a human for anything.
+     *
+     * Needed on every remote operation, not only the ones carrying a token:
+     * the tokenless case is the one that prompts. GIT_TERMINAL_PROMPT only
+     * closes the terminal, so an askpass program is pointed at /bin/false
+     * rather than left unset.
+     *
+     * @param list<string> $gitCommand
+     * @return list<string>
+     */
+    public static function withoutPrompts(array $gitCommand): array
+    {
+        return [
+            'env',
+            'GIT_TERMINAL_PROMPT=0',
+            'GIT_ASKPASS=/bin/false',
+            'SSH_ASKPASS=/bin/false',
+            ...$gitCommand,
+        ];
+    }
+
+    /**
      * @param list<string> $gitCommand
      * @return list<string>
      */
@@ -58,8 +80,9 @@ class GitUrl
 
         return [
             'env',
-            'GIT_ASKPASS=' . $askPassPath,
             'GIT_TERMINAL_PROMPT=0',
+            'SSH_ASKPASS=/bin/false',
+            'GIT_ASKPASS=' . $askPassPath,
             ...$gitCommand,
         ];
     }

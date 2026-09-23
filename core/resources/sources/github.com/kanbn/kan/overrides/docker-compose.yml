@@ -1,0 +1,154 @@
+# Replaces the repo's docker-compose.yml. Same four-part stack (postgres, a
+# one-shot migration container, the Next.js web app, plus a ready gate), but
+# wired for a PanelAlpha account: secrets from ~/.panelalpha/kan/, only the app
+# publishes a port, and the app waits for both migrations AND the owner seed
+# before it is allowed to answer.
+#
+# WHY PULL, NOT BUILD. Kan's images are on GHCR (ghcr.io/kanbn/kan and
+# .../kan-migrate). engine#229 corrupts SOME registry images when the host
+# seeds them into the account's nested Docker by `docker save | docker load`
+# (multi-arch OCI images whose save exports a manifest-only stub on the
+# containerd image store). Measured on the target host: `docker save` of both
+# Kan images returns the full ~80 MB / ~64 MB with real layer blobs, not the
+# ~9 KB stub, so they seed cleanly and are pulled here rather than rebuilt.
+#
+# NEXT_PUBLIC_* AT RUNTIME. Kan is Next.js, which normally bakes NEXT_PUBLIC_*
+# at build time, but this image ships apps/web/bootstrap.cjs (next-runtime-env):
+# on boot it rewrites public/__ENV.js from the live NEXT_PUBLIC_* environment,
+# and every read goes through env() at runtime. So the prebuilt GHCR image
+# takes NEXT_PUBLIC_BASE_URL and the auth toggles at run time; no local rebuild
+# to inject the URL is needed.
+services:
+  db:
+    # Pinned major to match the repo (postgres:15). A datadir cannot be
+    # migrated backwards, so a floating latest would break the named volume the
+    # first time the major moves. No published port: only the app is reachable.
+    image: postgres:15
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, written once by hooks/prepare.sh and baked into
+    # the pgdata volume; never regenerated.
+    env_file:
+      - ../.panelalpha/kan/db.env
+    environment:
+      POSTGRES_DB: kan_db
+      POSTGRES_USER: kan
+      # A named volume is not always empty (lost+found); postgres refuses to
+      # init into a non-empty dir, so give it a clean subdir.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - kan_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kan -d kan_db -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 1024m
+
+  # One-shot: apply the drizzle SQL migrations to completion, then exit. The
+  # image's default CMD is `npx drizzle-kit migrate`, which reads POSTGRES_URL
+  # (ssl off because NODE_ENV is unset here) and applies packages/db/migrations.
+  # web waits on this with service_completed_successfully, so a failed migration
+  # fails the deploy instead of publishing a 500 site.
+  migrate:
+    image: ghcr.io/kanbn/kan-migrate:latest
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/kan/app.env
+    mem_limit: 512m
+
+  # One-shot: seed the workspace owner directly into Postgres after migrations.
+  # Kan has no admin CLI and no "first user is admin" concept -- every user owns
+  # their own workspaces -- and sign-up is closed on the app (below), so the
+  # owner is written straight to the user/account tables the way Better Auth's
+  # email sign-up would (providerId=credential, accountId=user id, password =
+  # its scrypt salt:hash). Idempotent: it skips when the owner already exists,
+  # so a redeploy never resets the password. Reuses this image because it
+  # already carries node and the `pg` driver (at /db/node_modules); the seed
+  # script uses only Node's built-in crypto, so nothing is fetched at deploy.
+  seed:
+    image: ghcr.io/kanbn/kan-migrate:latest
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - ../.panelalpha/kan/app.env
+      - ../.panelalpha/kan/owner.env
+    environment:
+      NODE_PATH: /db/node_modules
+    volumes:
+      - ./pa:/pa:ro
+    entrypoint: ["/usr/local/bin/node", "/pa/seed.cjs"]
+    mem_limit: 256m
+
+  web:
+    image: ghcr.io/kanbn/kan:latest
+    restart: unless-stopped
+    # Only service to publish a port, so the engine's scan takes 3000 as the
+    # primary (engine#231/#234).
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+    # POSTGRES_URL and BETTER_AUTH_SECRET come from the account store.
+    env_file:
+      - ../.panelalpha/kan/app.env
+    environment:
+      # Ends in _URL and is a local URL, so ComposePlaceholders rewrites it to
+      # the account's public https address before the stack starts (left
+      # http://localhost on an account with no domain yet). bootstrap.cjs bakes
+      # it into __ENV.js at boot; Better Auth uses it as baseURL and trusted
+      # origin, so login/CSRF match the real host.
+      NEXT_PUBLIC_BASE_URL: http://localhost
+      # Enable email+password auth. Better Auth's emailAndPassword is gated on
+      # this exact value (packages/auth/src/auth.ts); without it there is no
+      # password login at all.
+      NEXT_PUBLIC_ALLOW_CREDENTIALS: "true"
+      # No SMTP on the account: switch every email path off so sign-in never
+      # needs a verification mail. No requireEmailVerification is set upstream,
+      # so password login works with this on.
+      NEXT_PUBLIC_DISABLE_EMAIL: "true"
+      # Close public sign-up: the user.create.before hook rejects anyone without
+      # a pending invitation. The owner is seeded straight into the DB above, so
+      # it does not go through sign-up and is unaffected.
+      NEXT_PUBLIC_DISABLE_SIGN_UP: "true"
+    healthcheck:
+      # Distroless image: no shell, no curl/wget, but node is the entrypoint.
+      # /login renders a 200 and proves the HTTP server answers (the DB is
+      # already proven by migrate+seed having completed before web starts).
+      test:
+        - "CMD"
+        - "/nodejs/bin/node"
+        - "-e"
+        - "require('http').get('http://127.0.0.1:3000/login',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 40s
+    mem_limit: 1536m
+
+  # Starts nothing, exits 0, waits on web's healthcheck. `docker compose up -d`
+  # blocks on a depends_on health condition, so `up` returns only once the site
+  # actually answers, not the moment containers start (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  kan_pgdata: {}

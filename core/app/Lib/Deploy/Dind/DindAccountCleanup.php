@@ -6,6 +6,7 @@ use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
 use App\Lib\Deploy\CacheManager\ImageCatalog;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\CacheManager\BuiltImage;
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
 use App\Lib\Deploy\ProjectCache;
@@ -88,8 +89,18 @@ class DindAccountCleanup
             throw new \InvalidArgumentException('Refusing to scan an unexpected home root');
         }
 
+        // The client's own candidate names (their compose file, still read for
+        // its `image:` lines by a compose-strategy project) plus the engine's
+        // reserved run-file names — a recipe deploy's images live only under
+        // the latter, never under a name the client would recognise.
+        $names = [
+            ...ComposeFileInspector::COMPOSE_FILE_CANDIDATES,
+            EngineArtifacts::RUN_COMPOSE,
+            EngineArtifacts::RUN_COMPOSE_OVERRIDE,
+            EngineArtifacts::APP_CONFIG_COMPOSE,
+        ];
         $globs = [];
-        foreach (ComposeFileInspector::COMPOSE_FILE_CANDIDATES as $candidate) {
+        foreach ($names as $candidate) {
             $globs[] = escapeshellarg($base) . '/*/project/' . $candidate;
         }
 

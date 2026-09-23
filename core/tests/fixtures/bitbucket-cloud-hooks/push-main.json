@@ -1,0 +1,57 @@
+{
+  "push": {
+    "changes": [
+      {
+        "forced": false,
+        "old": {
+          "name": "main",
+          "type": "branch",
+          "target": {
+            "type": "commit",
+            "hash": "197a3e0d2f9a2b3ed1c4fe5923d5dd701bee9fdd"
+          }
+        },
+        "links": {
+          "html": {"href": "https://bitbucket.org/acme/site/branches/compare/a8c1f4d9e2b7305c6d4a1e8f9b0c2d3e4f5a6b7c..197a3e0d2f9a2b3ed1c4fe5923d5dd701bee9fdd"},
+          "diff": {"href": "https://api.bitbucket.org/2.0/repositories/acme/site/diff/a8c1f4d9e2b7305c6d4a1e8f9b0c2d3e4f5a6b7c..197a3e0d2f9a2b3ed1c4fe5923d5dd701bee9fdd"},
+          "commits": {"href": "https://api.bitbucket.org/2.0/repositories/acme/site/commits?include=a8c1f4d9e2b7305c6d4a1e8f9b0c2d3e4f5a6b7c&exclude=197a3e0d2f9a2b3ed1c4fe5923d5dd701bee9fdd"}
+        },
+        "created": false,
+        "commits": [
+          {
+            "type": "commit",
+            "hash": "a8c1f4d9e2b7305c6d4a1e8f9b0c2d3e4f5a6b7c",
+            "message": "Fix the footer\n",
+            "author": {"type": "author", "raw": "Alice Example <alice@example.test>"},
+            "date": "2026-09-21T13:42:11+00:00"
+          }
+        ],
+        "truncated": false,
+        "closed": false,
+        "new": {
+          "name": "main",
+          "type": "branch",
+          "target": {
+            "type": "commit",
+            "hash": "a8c1f4d9e2b7305c6d4a1e8f9b0c2d3e4f5a6b7c",
+            "message": "Fix the footer\n",
+            "date": "2026-09-21T13:42:11+00:00"
+          }
+        }
+      }
+    ]
+  },
+  "actor": {
+    "type": "user",
+    "display_name": "Alice Example",
+    "uuid": "{6a0c1f2e-2c0d-4d4e-9d34-6f1f4cde0001}"
+  },
+  "repository": {
+    "type": "repository",
+    "full_name": "acme/site",
+    "name": "site",
+    "scm": "git",
+    "is_private": true,
+    "uuid": "{0c5f2f1a-7f0c-4c88-8f3b-6a8e2f7d0002}"
+  }
+}

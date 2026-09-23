@@ -1,0 +1,76 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the app -- the shared PHP base image, ~/project bind-mounted at /app,
+# the account's own uid, Apache on 8000, APP_URL from the account's main domain,
+# DB_* from the database the engine provisioned, and PA_DOCROOT=/app/www from
+# `docroot: www` in panelalpha.yaml -- and says nothing about when ZenTao is
+# ready, because nothing in a flat PHP checkout can.
+#
+# An override rather than a replacement compose file, and here that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# *before* detection runs, so a compose file in the project root would make
+# ZenTao look like a compose project and take the php strategy -- and with it
+# the bind mount, the docroot and the staged entrypoint -- off the table.
+#
+# There is no database service here on purpose. `database: mysql` in
+# panelalpha.yaml gets one on the account's own MySQL server: visible in the
+# panel, openable in phpMyAdmin, inside the account's backup, and costing the
+# host neither a container nor a volume. It is also what keeps this file from
+# being mined for sidecars -- RuntimeSidecars globs every `docker-compose.*` in
+# the checkout, including this one (#166), and PhpStrategy skips that step when
+# the manifest declares a database. Nothing in hooks/prepare.sh moves compose
+# files aside, so the trap in #166 -- globbing away the engine's own
+# docker-compose.override.yml and silently losing this healthcheck while the
+# deploy still reports success -- is not one this recipe can spring.
+services:
+  app:
+    # The install stage does all of ZenTao's setup before Apache binds: the 645
+    # KB of DDL in db/zentao.sql, the views, the company, the super-admin and
+    # the settings. The engine runs `docker compose up -d` without --wait and
+    # probes as soon as it returns, which is while that is still going --
+    # nothing is listening yet and the probe reads `Failed to connect to
+    # 127.0.0.1 port 8000`.
+    #
+    # The check follows the redirect and insists on the login page, and both
+    # halves of that are load-bearing.
+    #
+    # `curl -f` alone is not enough here: `/` is a 302 either way, and 3xx is
+    # not a failure for -f. Nor is `-L` alone. An uninstalled ZenTao redirects
+    # to install.php (www/index.php:40), which does not exist in a git checkout
+    # -- but upstream's own www/.htaccess rewrites every missing path back to
+    # index.php, and the install controller then calls helper::end()
+    # (install/control.php:25) because the app was not created in installing
+    # mode. The result is an empty 200, which -fsSL would happily accept.
+    #
+    # So the check asks for the thing only a working installation produces: the
+    # rendered login form. That is 200 only once the schema is there, the
+    # version row is written, the database is reachable and the router can build
+    # a page.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsSL --max-time 20 http://127.0.0.1:8000/ | grep -q user-login
+      interval: 5s
+      timeout: 25s
+      retries: 40
+      # Generous: importing db/zentao.sql is a few hundred DDL statements on a
+      # shared host. A check that fails inside this window neither counts
+      # against retries nor marks the container unhealthy.
+      start_period: 300s
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once ZenTao has
+  # built its schema and answered, and what the health probe then meets. A clean
+  # exit 0 is not a crash loop as far as AppHealth is concerned.
+  #
+  # alpine:3 and not a datastore image (#90): this pulls in a few megabytes and
+  # exits, where a mysql or postgres image would be a hundred megabytes of
+  # something that tries to initialise itself.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

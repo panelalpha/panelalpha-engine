@@ -1,0 +1,128 @@
+# Replaces Akkoma's from-source developer compose (a thin wrapper built locally
+# with the code bind-mounted and mix compiling at runtime -- the engine's
+# local-dev signature, which ComposeUsableProbe will not select) with a working
+# image-based stack around the OFFICIAL prebuilt OTP release. The `app`/`init`
+# image is BUILT from files/akkoma-image, which only downloads and unzips that
+# release; no application source is compiled, and no service bind-mounts the
+# project, so isLocalDevCompose does not fire and this file is selected as
+# STRATEGY_COMPOSE (the cannery/mobilizon pattern, no platform block).
+services:
+  db:
+    # Pinned major: Postgres cannot migrate a datadir backwards, so a floating
+    # tag would break the named volume the first time the major moves. Plain
+    # postgres is correct -- Akkoma needs only citext/pg_trgm/uuid-ossp, which
+    # the migrations CREATE as the superuser; rum is off (config rum_enabled:
+    # false), so no custom database image is needed.
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, written once by hooks/prepare.sh into
+    # ~/.panelalpha/akkoma/. The database never sees the app config.
+    env_file:
+      - ../.panelalpha/akkoma/db.env
+    environment:
+      POSTGRES_DB: akkoma
+      POSTGRES_USER: akkoma
+      # A named volume is not always empty (lost+found); postgres refuses to
+      # init into a non-empty dir, so give it a clean subdir.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Akkoma is text-heavy with GIN/trigram indexes; a little shared memory keeps
+    # index builds off disk without the upstream dev file's 4gb.
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U akkoma -d akkoma -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 768m
+
+  # One-shot: migrate, install frontends, seed the confirmed admin BEFORE the app
+  # is allowed to start, so exactly one thing touches the database at seed time.
+  # `app` waits with service_completed_successfully. Runs as root only to chown
+  # the fresh media/state volume; migrate and seed su to the akkoma user.
+  init:
+    image: akkoma-local:otp
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/usr/local/bin/pa-init.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    # .env: account-overridable defaults (INSTANCE_NAME, registration, release
+    # URL). app.env: persisted DB password. admin.env: the seeded admin password
+    # -- delivered only here, never to the long-running app.
+    env_file:
+      - .env
+      - ../.panelalpha/akkoma/app.env
+      - ../.panelalpha/akkoma/admin.env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: akkoma
+      DB_NAME: akkoma
+      # Rewritten to the account's public https URL before the stack starts
+      # (ComposePlaceholders rewrites a localhost value whose key ends in _URL).
+      # init strips the scheme into DOMAIN and derives admin@<host>.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      - akkoma_var:/var/lib/akkoma
+    mem_limit: 1024m
+
+  app:
+    # The one service that builds the image; init and ready reuse the tag. The
+    # build only fetches the official release (files/akkoma-image/Dockerfile).
+    image: akkoma-local:otp
+    build:
+      context: ./akkoma-image
+      args:
+        AKKOMA_RELEASE_URL: ${AKKOMA_RELEASE_URL:-https://akkoma-updates.s3-website.fr-par.scw.cloud/v3.20.0/akkoma-amd64.zip}
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - ../.panelalpha/akkoma/app.env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: akkoma
+      DB_NAME: akkoma
+      # Rewritten to the account's public https URL before the stack starts;
+      # entrypoint strips the scheme into DOMAIN (config/docker.exs bakes it into
+      # every actor URI / redirect / federation identity).
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      - akkoma_var:/var/lib/akkoma
+    healthcheck:
+      # /api/v1/instance is the public Mastodon-API endpoint: 200 only once the
+      # app is up and the database is reachable. Akkoma does not host-check plain
+      # HTTP GETs, so Host: 127.0.0.1 gets a real 200. curl is in the image.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:4000/api/v1/instance || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
+    mem_limit: 1536m
+
+  # Starts nothing, exits 0, waits on the app's healthcheck. `docker compose up
+  # -d` has no --wait, so without this gate the deploy is "done" the moment
+  # containers start and the probe lands while the release is still booting.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}
+  akkoma_var: {}

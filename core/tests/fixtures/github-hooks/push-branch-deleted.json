@@ -1,0 +1,21 @@
+{
+  "ref": "refs/heads/main",
+  "before": "a8c1f4d9e2b7305c6d4a1e8f9b0c2d3e4f5a6b7c",
+  "after": "0000000000000000000000000000000000000000",
+  "created": false,
+  "deleted": true,
+  "forced": false,
+  "commits": [],
+  "head_commit": null,
+  "repository": {
+    "id": 186853002,
+    "name": "Hello-World",
+    "full_name": "octocat/Hello-World",
+    "private": false,
+    "html_url": "https://github.com/octocat/Hello-World",
+    "clone_url": "https://github.com/octocat/Hello-World.git",
+    "default_branch": "main"
+  },
+  "pusher": {"name": "octocat", "email": "octocat@github.com"},
+  "sender": {"login": "octocat", "id": 583231, "type": "User"}
+}

@@ -1,0 +1,205 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Omeka Classic is the older of the two Omekas and a different application from
+  omeka/omeka-s, which has its own recipe beside this one: a Zend Framework 1
+  application (ZF1 vendored in application/libraries) for publishing digital
+  collections, with the public site at `/`, an admin at `/admin`, items,
+  collections and exhibits in MySQL, and uploaded files plus their derivatives
+  under `files/`. Detection read the repository correctly -- composer.json and
+  no artisan, so the `php` strategy, PHP 8.3, the shared Apache base image with
+  ~/project bind-mounted, and `composer install` on the host, which resolves
+  nothing because composer.json's `require` is an empty object (ZF1, getID3 and
+  the rest are committed in-tree). The deploy finished successfully in 60
+  seconds and every request answered HTTP 500 with Omeka's own "Omeka has
+  encountered an error" page, which is the `serving-error_page` verdict this
+  recipe exists to fix.
+
+  **The 500 is a file the repository does not ship.** Re-run under
+  APPLICATION_ENV=development, the page says what it is:
+
+      Omeka fatal error: Your Omeka database configuration file is missing.
+
+  `application/config/application.ini` carries `resources.db.inipath = BASE_DIR
+  "/db.ini"`, and Omeka_Application_Resource_Db::init() throws a
+  Zend_Config_Exception on the first line when that file does not exist.
+  Omeka_Application::initialize() catches it, calls
+  `header("HTTP/1.0 500 Internal Server Error")` and renders
+  application/views/scripts/error/index.php -- and because
+  `$displayError = $this->getEnvironment() != 'production'`, the production
+  page names nothing at all. The repository ships `db.ini.changeme` with
+  `host = "XXXXXXX"` and `.gitignore`s `/db.ini`, so a clone has none and never
+  will. There is nothing in the checkout for the engine to infer this from: no
+  .env, no compose file, no DATABASE_URL.
+
+  There is a **second** missing file of the same kind immediately behind it.
+  `resources.config = true` loads Omeka_Application_Resource_Config, which
+  throws `Your Omeka configuration file is missing.` when
+  application/config/config.ini is absent -- also gitignored, also shipped as
+  `config.ini.changeme`. Fixing only db.ini moves the 500 one line down.
+
+  **And a third, which is why fixing both is still not enough.**
+  `.gitignore` lists `/.htaccess`; the repository ships `.htaccess.changeme`.
+  That file is not decoration: its three RewriteRules are the entire front
+  controller -- `^install/.*$` to install/install.php, `^admin/.*$` to
+  admin/index.php, everything else to index.php -- so without it every route
+  but `/` is a 404 from Apache. It is also the only thing that denies `.ini` to
+  the web, and Omeka Classic serves from its own root, so without it
+  `GET /db.ini` returns the account's MySQL password in plain text.
+  Installer_Requirements::_checkHtaccessFilesExist() fails the install outright
+  when it is missing, which is upstream saying the same thing.
+
+  So three files a human is expected to rename, and `database: mysql` for the
+  credentials to put in the first of them. Omeka is MySQL through mysqli and
+  nothing else: Omeka_Application_Resource_Db calls
+  `Zend_Db::factory('Mysqli', ...)` with no alternative and
+  Installer_Requirements refuses to install without the extension. hooks/
+  prepare.sh installs .htaccess and config.ini from upstream's own `.changeme`
+  templates (so a new upstream setting arrives with the release that adds it);
+  files/panelalpha-setup.sh writes db.ini inside the container on the install
+  and upgrade stages, because the database does not exist yet when the hook
+  runs.
+
+  **The installer is first-visitor-wins.** install/install.php is a second
+  Zend_Application whose IndexController renders the form that creates the
+  super user, and the only thing in front of it is
+  `SHOW TABLES LIKE 'omeka_options'` -- no authentication of any kind. On an
+  account that has just been given a public HTTPS name, that means whoever
+  loads /install first becomes the site's super user, the hole found in
+  Koillection, Outline, NocoDB, Mattermost, Shopware and XBackBone. The install
+  runs from the install stage instead, before Apache binds:
+  files/panelalpha-install.php bootstraps exactly what install/install.php
+  bootstraps, fills the same Omeka_Form_Install that
+  IndexController::indexAction() validates, and hands it to the same
+  Installer_Default -- the same four tasks, nothing reimplemented -- with a
+  password generated per account into ~/.panelalpha/omeka/admin-credentials
+  (0600 in a 0700 directory). Afterwards /install answers "Omeka is installed."
+  and creates nothing.
+
+  Running that installer outside a request needed two lines the browser
+  supplies for free, and both were found by measurement rather than reading:
+
+    * `Zend_Application_Bootstrap_Exception: Resource matching "Helpers" not
+      found`. install/application.ini asks for `resources.layout`, Zend's
+      Layout resource bootstraps FrontController, and
+      `pluginPaths.Omeka_Application_Resource` makes that resolve to Omeka's
+      own Frontcontroller resource, which bootstraps a `Helpers` resource the
+      install application does not have. install/install.php registers Zend's
+      plain `Zend_Application_Resource_FrontController` first for exactly this
+      reason; its comment calls Omeka's "too heavily coupled for use".
+    * `Route default is not defined`. Installer_Task_Options stores the public
+      navigation, and Omeka_Navigation::getNavigationOptionValueForInstall()
+      assembles page URLs through Zend's router -- which only grows its
+      `default` route when Zend_Controller_Front::dispatch() routes a request.
+      A process that never calls run() has to call `addDefaultRoutes()` itself.
+
+  That second failure is also how the recipe learned that **a failed install
+  looks exactly like a finished one**. Every file in application/schema is
+  `CREATE TABLE IF NOT EXISTS` and MySQL commits DDL implicitly, so the
+  transaction Installer_Default::install() opens rolls back neither the schema
+  nor the rows the first three tasks wrote. The install died in the fourth task
+  and left the state upstream's own isInstalled() reads as installed; the next
+  deploy took the migrate branch and replayed fifteen years of migrations
+  against a current schema, dying on `Duplicate column name 'added'` in
+  20100810120000_detachCollectorsFromEntities and taking the site down for
+  good. So the marker used here is the last thing a successful install writes:
+  the `omeka_version` option, which Installer_Task_Migrations puts in the
+  options table empty and only Installer_Task_Options fills in. When it is
+  empty and the items table is empty too -- a site nobody has used -- the
+  half-built tables are dropped and the install runs again; when there are
+  items, the script refuses to touch anything and says so.
+
+  **The upgrade branch is not optional either.** While a migration is pending,
+  Omeka_Controller_Plugin_Upgrade::dispatchLoopStartup() answers every public
+  request with `die("Public site is unavailable until the upgrade completes.")`
+  -- an HTTP 200 carrying that one sentence, which no status check would catch
+  -- and sends an administrator to /admin/upgrade. The upgrade stage runs
+  Omeka_Db_Migration_Manager::migrate() and finalizeDbUpgrade(), which is what
+  UpgradeController::migrateAction() does when that form is posted, so a code
+  change carries into the schema instead of parking the site on a page nobody
+  is signed in to see.
+
+  **ImageMagick is a binary, and the base image has the extension instead.**
+  Omeka's default derivative strategy is
+  Omeka_File_Derivative_Strategy_ExternalImageMagick, which shells out to
+  `convert`; the shared PHP image ships ext/imagick and no ImageMagick CLI at
+  all (`which convert magick identify` finds nothing), so every uploaded image
+  would fail its thumbnail -- at upload time, long after the deploy said it was
+  fine. prepare.sh appends `fileDerivatives.strategy =
+  "Omeka_File_Derivative_Strategy_Imagick"` to config.ini, which is Omeka's own
+  implementation over the extension that is actually there. Measured: a 1200x900
+  PNG upload produces fullsize, thumbnail and square_thumbnail JPEGs.
+
+  **An item is a file somebody uploaded, and the platform loads no php.ini.**
+  `php --ini` in the base image answers "Loaded Configuration File: (none)"
+  (engine#185), so what is in force is the compiled-in `upload_max_filesize =
+  2M` and `post_max_size = 8M` -- and a POST over post_max_size is discarded
+  before PHP is entered, so $_POST and $_FILES both arrive empty and the item
+  form reports a request that carried a file as one that did not. The image's
+  conf.d is not writable by the account uid, so the compose override sets
+  PHP_INI_SCAN_DIR to that directory plus /data/php and prepare.sh puts
+  files/panelalpha-php.ini there -- on the bind mount rather than in the
+  checkout, because the document root here *is* the checkout and the vhost's
+  `^panelalpha[-.]` denial matches a file name, not a path component. With the
+  file in place the add-item form says "The maximum file size is 128 MB." and a
+  3.2 MB upload succeeds; without it the form says 2 MB.
+
+  **Where the files live is the other thing a checkout cannot say.**
+  bootstrap.php hard-codes both `FILES_DIR = BASE_DIR . '/files'` (where Omeka
+  writes) and `WEB_FILES = WEB_ROOT . '/files'` (the URL a visitor fetches),
+  so every original and every derivative is inside the directory a redeploy
+  deletes and re-clones (engine#173: GitRepository.php:90 calls
+  `clearContents($gitProjectDir)` before `clone`) -- while the `omeka_files`
+  rows pointing at them survive, so every item page would show a broken image.
+  `storage.adapterOptions.localDir` would move the writes but not the URL.
+  prepare.sh replaces files/ with a symlink to /data/files, which the compose
+  override bind-mounts from ~/.panelalpha/omeka; the generated vhost already
+  sets `Options +FollowSymLinks` on the document root. Measured across a
+  redeploy: a marker file in ~/project is gone, the uploaded original and its
+  derivatives are still served, and the item page still renders them.
+
+  Two things the engine gets right that this recipe depends on and would
+  otherwise have had to do itself. themes/ and plugins/ are **git submodules**
+  *and* in .gitignore, so a plain checkout has an empty themes directory and no
+  public theme at all -- Installer_Default hard-codes `DEFAULT_PUBLIC_THEME =
+  'default'`, which is the theme-thanksroy submodule; ProjectGit::initSubmodules()
+  fetches them ("Submodules fetched" in the deploy log) and that is the only
+  reason a public page renders. And TLS: bootstrap.php decides the scheme of
+  every absolute URL from `$_SERVER['HTTPS']` and `HTTP_X_FORWARDED_PROTO`,
+  which the base image's auto_prepend_file (panelalpha-proxy.ini) sets -- so
+  PHP_INI_SCAN_DIR lists the image's own conf.d first and explicitly, because
+  it replaces the compiled-in path rather than adding to it.
+
+  One thing is left as upstream has it. Omeka Classic dispatches long-running
+  jobs through application/scripts/background.php under
+  Omeka_Job_Dispatcher_Adapter_BackgroundProcess, which is only used by batch
+  operations an administrator starts by hand; the site, the admin area, items,
+  collections, file upload and derivative generation all run in-request and are
+  unaffected.
+extends: php
+# index.php, bootstrap.php and .htaccess.changeme are all at the top of the
+# checkout: Omeka Classic serves from its own root, and admin/ and install/ are
+# directories inside it rather than separate applications. PhpDocroot would
+# reach the same answer -- it tries `public web public_html webroot`, none of
+# which exist here, and then the root -- but the probe order is not something a
+# recipe should rely on silently, and here the answer decides which files are
+# web-reachable.
+docroot: .
+# Omeka Classic is MySQL or nothing: Omeka_Application_Resource_Db calls
+# `Zend_Db::factory('Mysqli', ...)` with no alternative, and
+# Installer_Requirements::_checkMysqliIsAvailable() refuses to install without
+# the extension. It has no .env and no compose file to point itself at one, so
+# without this the engine has nothing to hand it and db.ini cannot be written
+# at all.
+database: mysql
+commands:
+  - id: omeka-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Writes db.ini from the credentials the engine provisioned, then installs
+      Omeka (first deploy) or runs its pending migrations (every one after), so
+      that /install is never a live form on a public address. Idempotent: the
+      upgrade stage replays it on every redeploy. On the build stage it would
+      not run at all (engine#171).
+    run: 'sh panelalpha-setup.sh'

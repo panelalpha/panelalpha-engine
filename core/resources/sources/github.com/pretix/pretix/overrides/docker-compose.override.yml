@@ -1,0 +1,108 @@
+# Layers over the compose file the dockerfile strategy generates. That file is
+# right about the app -- it builds the repository's own Dockerfile, publishes
+# the image's EXPOSEd 80 on 8080, names the two paths the Dockerfile declares
+# as VOLUMEs and reads env_file: .env -- and it is missing everything the
+# Dockerfile has no way to say. This layer is that.
+#
+# An override rather than a replacement compose file: a `docker-compose.yml`
+# written here does not become the stack. pretix ships a root Dockerfile, so
+# detection picks the dockerfile strategy either way, and a compose file beside
+# it is read only for runtime sidecars -- the first version of this recipe
+# watched its whole app service dissolve into `Keeping runtime services from
+# compose: ready`, with the command, the healthcheck and the mount silently
+# dropped and the readiness gate wired up backwards.
+services:
+  app:
+    # Three steps in place of the image's `CMD ["all"]`, run through bash
+    # because two of them need a shell.
+    #
+    #   PRETIX_PRETIX_URL  pretix is multi-tenant by hostname:
+    #                      MultiDomainMiddleware 400s any request whose Host
+    #                      matches neither this URL nor the KnownDomain table,
+    #                      so at pretix's own default (http://localhost:8000)
+    #                      the account's domain serves nothing but "Unknown
+    #                      host". It is also the sole source of
+    #                      CSRF_TRUSTED_ORIGINS. The account's address is not
+    #                      known until the domain exists, and this is the one
+    #                      generated file that carries it: PublicUrlEnvironment
+    #                      writes the public https URL into SITE_URL (among
+    #                      other aliases) on the app service. pretix reads none
+    #                      of those names, so it is copied across here rather
+    #                      than declared -- compose cannot interpolate one
+    #                      service variable from another, and the generated
+    #                      file is not an app config's to edit.
+    #   migrate            ~350 migrations against an empty SQLite file, and
+    #                      the reason AUTOMIGRATE is set to skip: this is the
+    #                      image's own migration step, moved one line earlier
+    #                      so the admin password can be set after it.
+    #   admin password     pretixbase/0001_initial.py is not only tables: its
+    #                      `initial_user` data migration creates
+    #                      admin@localhost with `make_password('admin')`, so a
+    #                      freshly migrated pretix is already open to anyone
+    #                      who has read its repository. The script replaces
+    #                      that password with the one hooks/prepare.sh
+    #                      generated into .env, and only while it is still the
+    #                      shipped default. See files/panelalpha-admin-password.py.
+    #                      `pretix shell` with the script on stdin: Django's
+    #                      shell execs stdin when it is not a tty. `|| true`
+    #                      so that a site which would otherwise serve is never
+    #                      held back by this step.
+    #   web                nginx + gunicorn under supervisord. `web` rather
+    #                      than the image's `all`, which adds a celery
+    #                      taskworker: with no [celery] broker configured
+    #                      pretix sets CELERY_TASK_ALWAYS_EAGER and runs tasks
+    #                      in the web process, so that worker would only retry
+    #                      celery's amqp://localhost default forever and
+    #                      restart under supervisord while doing it.
+    #
+    # `$$` is compose's escape for a literal `$`: every expansion here is
+    # bash's at container start, not compose's at parse time.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - 'export PRETIX_PRETIX_URL="$${SITE_URL:-http://localhost}" && pretix migrate --noinput && { pretix shell < /pretix/panelalpha-admin-password.py || true; } && exec pretix web'
+
+    volumes:
+      # See files/pretix-loopback.conf. An extra nginx server block, not a
+      # replacement for the image's nginx.conf. Appended to the two named
+      # volumes the generated file already declares.
+      - ./pretix-loopback.conf:/etc/nginx/conf.d/zz-pretix-loopback.conf:ro
+      # /pretix is the image's home for pretixuser and is not a volume, so a
+      # file mounted here is visible and writable by nobody.
+      - ./panelalpha-admin-password.py:/pretix/panelalpha-admin-password.py:ro
+
+    # curl is in the image (python:3.13-trixie). 127.0.0.1 is deliberate: that
+    # is the loopback vhost the mounted config adds, so this asks the same
+    # question AppHealth's port probe asks, in the same words.
+    #
+    # start_period covers the first boot -- the migrations take about a minute
+    # on an idle machine and several on a busy one -- during which a failing
+    # check neither counts against retries nor marks the container unhealthy.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "--max-time", "5", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 10s
+      retries: 45
+      start_period: 420s
+
+    # Replaces the hardener's 384m default for an app-role service, which two
+    # gunicorn workers and an nginx do not fit in. 1792m + 64m inside a 2500m
+    # account.
+    mem_limit: 1792m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be finished
+  # when that returns -- at which point pretix has been *started*, not yet
+  # *answered*: its first boot runs those ~350 migrations before anything binds
+  # port 80, which is the `Recv failure: Connection reset by peer` this recipe
+  # exists to fix. Compose does block on a depends_on health condition, so a
+  # service that waits on the app's healthcheck is what makes `up -d` return
+  # only once the site actually answers. A clean exit 0 is explicitly not a
+  # crash loop as far as AppHealth is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

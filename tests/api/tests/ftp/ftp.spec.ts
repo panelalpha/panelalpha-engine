@@ -1,5 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { ftpAccountListSchema } from '@/schemas';
+import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 import {
   CHATTY_BANNER_PATTERN,
   QUOTA_TEST_SIZE_MB,
@@ -10,12 +12,13 @@ import {
   withFtpClient,
 } from '@/helpers/ftp-helpers';
 import { rand } from '@/helpers/random';
-import { delay, waitForCondition } from '@/helpers/retry';
+import { delay } from '@/helpers/retry';
 import { requireEngineConnectHost } from '@/helpers/engine-host';
 
 test.describe('FTP accounts', () => {
   test('the account list is returned', async ({ api, setupUser }) => {
-    expect(Array.isArray((await api.listFtpAccounts(setupUser.username)).data)).toBe(true);
+    const listing = await api.listFtpAccounts(setupUser.username);
+    validateParsedApiResponse(listing, ftpAccountListSchema);
   });
 
   test('a new user has no FTP accounts', async ({ api, userFactory }) => {
@@ -43,13 +46,15 @@ test.describe('FTP accounts', () => {
     let pendingCleanup = true;
 
     try {
-      await waitForCondition(
-        async () =>
-          (await api.listFtpAccounts(setupUser.username)).data.some(
-            (candidate) => candidate.user === account
-          ),
-        { timeout: settings.timing.propagationDelay, interval: 500 }
-      );
+      await expect
+        .poll(
+          async () =>
+            (await api.listFtpAccounts(setupUser.username)).data.some(
+              (candidate) => candidate.user === account
+            ),
+          { timeout: settings.timing.propagationDelay, intervals: [500] }
+        )
+        .toBe(true);
 
       await test.step('the original credentials work', async () => {
         await ftpLoginAndList({
@@ -63,13 +68,17 @@ test.describe('FTP accounts', () => {
         password: UPDATED_FTP_PASSWORD,
         unlimited_quota: true,
       });
-      await delay(settings.timing.propagationDelay);
 
       await test.step('the new password works and the old one does not', async () => {
-        await ftpLoginAndList({
-          host,
-          user: account,
-          password: UPDATED_FTP_PASSWORD,
+        await expect(async () => {
+          await ftpLoginAndList({
+            host,
+            user: account,
+            password: UPDATED_FTP_PASSWORD,
+          });
+        }).toPass({
+          timeout: settings.timing.propagationDelay,
+          intervals: [500],
         });
 
         expect(

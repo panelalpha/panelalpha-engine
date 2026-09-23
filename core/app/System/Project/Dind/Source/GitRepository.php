@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind\Source;
 
 use App\System\Project\Git\Exception as GitException;
+use App\System\Project\Git\FastForwardPull;
 use App\System\Project\Git\Path as GitPath;
 use App\System\Project\Git\Ref as GitRef;
 use App\Lib\Deploy\Source\GitUrl;
@@ -17,6 +18,8 @@ use Illuminate\Support\Facades\Log;
  */
 class GitRepository
 {
+    use FastForwardPull;
+
     public const STRATEGY_FF = 'ff';
     public const STRATEGY_FORCE = 'force';
     public const STRATEGY_PUSH_FIRST = 'push_first';
@@ -215,6 +218,96 @@ class GitRepository
         } catch (GitException) {
             return null;
         }
+    }
+
+    /**
+     * The checkout's local exclude file, wherever git keeps it — a gitfile's
+     * git directory included. Null when this path is not the top of a work
+     * tree: no repository, or a directory inside someone else's.
+     */
+    public function localExcludePath(): ?string
+    {
+        try {
+            $out = $this->git(['rev-parse', '--show-prefix', '--git-path', 'info/exclude']);
+        } catch (GitException) {
+            return null;
+        }
+
+        // `--show-prefix` prints an empty line at the top of the work tree.
+        $lines = explode("\n", str_replace("\r", '', $out));
+        $path = trim($lines[1] ?? '');
+        if ($lines[0] !== '' || $path === '') {
+            return null;
+        }
+
+        return preg_match('#^(/|[A-Za-z]:[\\\\/])#', $path) === 1
+            ? $path
+            : $this->absolutePath . '/' . $path;
+    }
+
+    /** Whether this path is inside a git work tree at all — no throw either way. */
+    public function hasRepository(): bool
+    {
+        return $this->repositoryExistsLenient();
+    }
+
+    /**
+     * Whether $relativePath (checkout-relative) differs from what HEAD has.
+     * Always false for a path the repository does not track — nothing to
+     * compare against, so "no change to revert" is the right reading.
+     */
+    public function fileDiffersFromHead(string $relativePath): bool
+    {
+        if ($this->trackedAmong([$relativePath]) === []) {
+            return false;
+        }
+
+        return trim($this->git(['diff', '--name-only', 'HEAD', '--', $relativePath])) !== '';
+    }
+
+    /**
+     * Restore $relativePath (checkout-relative) to what HEAD has. Caller's
+     * responsibility to have confirmed it is worth doing first — see
+     * {@see fileDiffersFromHead()}.
+     */
+    public function restoreFromHead(string $relativePath): void
+    {
+        $this->git(['checkout', 'HEAD', '--', $relativePath]);
+    }
+
+    /** $relativePath's content at HEAD, or null when HEAD has no such path. */
+    public function readFromHead(string $relativePath): ?string
+    {
+        try {
+            return $this->git(['show', 'HEAD:' . $relativePath]);
+        } catch (GitException) {
+            return null;
+        }
+    }
+
+    /**
+     * @param list<string> $paths checkout-relative
+     * @return list<string> the ones the repository tracks, as git spells them
+     */
+    public function trackedAmong(array $paths): array
+    {
+        if ($paths === []) {
+            return [];
+        }
+
+        $out = $this->git(['-c', 'core.quotepath=off', '--literal-pathspecs', 'ls-files', '--', ...$paths]);
+        $tracked = [];
+        foreach (explode("\n", str_replace("\r", '', $out)) as $line) {
+            if ($line === '') {
+                continue;
+            }
+            // Names with a quote, backslash or control character come back C-quoted.
+            $tracked[] = str_starts_with($line, '"') && str_ends_with($line, '"')
+                ? stripcslashes(substr($line, 1, -1))
+                : $line;
+        }
+
+        return $tracked;
     }
 
     public function status(bool $fetch = false): array
@@ -487,19 +580,23 @@ class GitRepository
         GitRef::assertName($branch);
         $token = $siteGit['token'] ?? null;
 
-        if ($strategy === self::STRATEGY_FF && $this->hasWorkingTreeChanges()) {
-            throw new GitException('Working tree is dirty.', 422);
-        }
-
         $this->git(['fetch', 'origin'], $token);
         $this->createBackup();
+
+        // ff is git's call, not ours (see FastForwardPull), and a refusal leaves
+        // the tree untouched -- so it must bypass restoreBackup below, which
+        // would wipe the untracked files and local edits git just spared.
+        if ($strategy === self::STRATEGY_FF) {
+            $this->fastForwardOnly($branch);
+            $this->setUpstreamTracking($branch);
+
+            return $this->status();
+        }
 
         try {
             if ($strategy === self::STRATEGY_FORCE) {
                 $this->git(['reset', '--hard', 'origin/' . $branch]);
                 $this->git(['clean', '-fd']);
-            } elseif ($strategy === self::STRATEGY_FF) {
-                $this->git(['merge', '--ff-only', 'origin/' . $branch]);
             } else {
                 $this->pullPushFirst($branch, $token);
             }
@@ -725,7 +822,8 @@ class GitRepository
         $askPassPath = null;
 
         try {
-            $cmd = $gitCommand;
+            // Guarded either way: the tokenless case is the one that prompts.
+            $cmd = GitUrl::withoutPrompts($gitCommand);
             if ($token !== null && $token !== '') {
                 [$askPassTemp, $askPassPath] = $this->installAskPass($system, $token, $gitCommand);
                 $cmd = GitUrl::withAskPass($gitCommand, $askPassPath);

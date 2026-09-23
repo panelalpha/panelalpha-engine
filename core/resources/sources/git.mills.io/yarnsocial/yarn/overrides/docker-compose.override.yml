@@ -1,0 +1,22 @@
+# Layers over the compose the dockerfile strategy generates for the `app`
+# service (image built from the FROM-only Dockerfile = prologic/yarnd). The
+# override reaches Docker as written, so ${...} interpolates from ~/project/.env
+# (written by hooks/prepare.sh) at `docker compose up`.
+services:
+  app:
+    # No `user:` override: the image's /init entrypoint must run as root to
+    # su-exec down to the pod user. The prepare hook records the account uid/gid
+    # and passes them as PUID/PGID, so /init chowns /data and runs yarnd as the
+    # account that owns the persistent bind mount below.
+    environment:
+      PUID: "${CONTAINER_UID}"
+      PGID: "${CONTAINER_GID}"
+    # ~/.panelalpha/yarn (relative to the compose dir ~/project) -> /data. Holds
+    # the bitcask db, every twtxt feed, avatars/media, the index, the instance
+    # config and the pod secrets — all of yarnd's state, surviving the per-deploy
+    # ~/project wipe (engine#173).
+    volumes:
+      - "../.panelalpha/yarn:/data"
+    # Seed the admin and reuse persistent secrets before yarnd takes over.
+    command: ["/usr/local/bin/pa-run.sh"]
+    mem_limit: 1g

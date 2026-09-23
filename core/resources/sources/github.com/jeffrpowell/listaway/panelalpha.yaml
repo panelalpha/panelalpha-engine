@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Listaway is a self-hosted list-management app: a single Go binary (gorilla
+  mux + sessions) that serves its own HTML UI and API on :8080, with PostgreSQL
+  for storage. Authenticated users create lists and items and can opt a list or
+  collection into a public, read-only link carrying a random share code.
+
+  The repository builds cleanly from its own root Dockerfile, but a published
+  release image already exists (ghcr.io/jeffrpowell/listaway, the same tag the
+  README's compose uses), so this recipe runs that image rather than rebuilding
+  it, with a postgres:16-alpine sidecar beside it. It is shipped as a REPLACE
+  compose (overrides/docker-compose.yml, no platform block) so the compose
+  strategy's ComposePlaceholders rewrites APP_URL from localhost to the
+  account's public https URL — the value Listaway builds password-reset links
+  and share URLs against.
+
+  Two things the plain image cannot do for itself are handled here. The app's
+  embedded init.sql only issues `CREATE TABLE ... listaway.<t>`; the `listaway`
+  schema itself must pre-exist or the binary log.Fatal's at boot (the README
+  has the operator create it by hand), so the prepare hook drops a
+  first-init script into the postgres sidecar. And LISTAWAY_AUTH_KEY (the AES
+  cookie-session key, which must be 16/24/32 bytes) plus the database password
+  are generated once into ~/.panelalpha/listaway/secrets.env and reused on
+  every redeploy, so a rebuild neither logs everyone out nor locks the app out
+  of its existing data volume.
+
+  First admin is owner-registers-first: every path 303-redirects to
+  /admin/register until an instance admin exists, and the app then refuses all
+  further registration (403). The operator hands the URL to the account owner,
+  who registers first and thereby closes it; there is no env-seed and no
+  post-start hook to drive it non-interactively.

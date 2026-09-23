@@ -1,0 +1,41 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about everything it says -- the shared PHP base image, ~/project bind-mounted
+# at /app, the account's own uid, Apache on 8000, PA_DOCROOT=/app/src -- and
+# says nothing about where a start page keeps the links it was configured
+# with, because a checkout cannot say that.
+#
+# An override rather than a replacement compose file: an
+# overrides/docker-compose.yml is written into the checkout *before* detection,
+# and a docker-compose.yml in the project root would make Homepage look like a
+# compose project and take the php strategy -- with it the bind mount, the
+# document root and PA_DOCROOT -- off the table entirely.
+services:
+  app:
+    volumes:
+      # ~/.panelalpha/homepage. The two things this account accumulates, and
+      # the only two things in the tree that are not upstream's:
+      #
+      #   /data/config.json   the whole configuration -- title, clock format,
+      #                       every link, and `protected`, which holds the
+      #                       Unsplash client id and any headers a custom
+      #                       background URL needs. 0600.
+      #   /data/img/          images named by `img` items, plus upstream's own
+      #                       sayagata-400px.png (main.css:2 tiles it as the
+      #                       page background), copied in by hooks/prepare.sh
+      #                       before this mount hides the checkout's copy.
+      #
+      # Both live inside the checkout upstream -- src/config.json and
+      # src/hp_assets/img/ -- and both are in src/.gitignore, so a redeploy,
+      # which clears and re-clones ~/project (engine#173), would delete the
+      # account's entire configuration. index.php reads `config.json` as a
+      # relative path with no way to redirect it, so prepare.sh symlinks
+      # src/config.json at /data/config.json rather than moving it: the
+      # application still finds the file where its README says it is.
+      #
+      # ~ itself is root-owned 0755 and nothing can be created in it;
+      # ~/.panelalpha is created with the account and belongs to it, which is
+      # why the data directory is a child of that one. hooks/prepare.sh creates
+      # both of these before the mount is made, so Docker never gets to create
+      # them as root.
+      - ../.panelalpha/homepage:/data
+      - ../.panelalpha/homepage/img:/app/src/hp_assets/img

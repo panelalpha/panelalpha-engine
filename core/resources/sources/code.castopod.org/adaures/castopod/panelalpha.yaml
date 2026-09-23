@@ -1,0 +1,183 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Castopod is a podcast hosting platform: CodeIgniter 4.7 over MySQL, a Vite and
+  Tailwind frontend, an admin area at /cp-admin, ActivityPub federation, and an
+  RSS feed per podcast at /@<handle>/feed.xml. Detection read the repository
+  correctly -- composer.json and no artisan, so the `php` strategy, PHP 8.5
+  against `"php": "^8.5"`, the shared Apache base image with ~/project
+  bind-mounted, `composer install` on the host, `public/` as the document root,
+  and `pnpm run build` after it because package.json declares a `build` script.
+  The build is clean: 57 Composer packages, 1,240 pnpm packages, `tsc && vite
+  build` produces public/.vite/manifest.json and the whole asset tree in 22
+  seconds, and the deploy reports success. Every request then answers HTTP 500
+  with an empty body, which is the `serving-error_page` verdict this recipe
+  exists to fix.
+
+  **The 500 is one line of a file the engine copied in.** Castopod's .env is
+  gitignored, so the clone has none, and ProjectEnvironment::apply() falls back
+  to `.env.example` -- "Using default environment variables (source:
+  .env.example)" in the deploy log. That file is not a set of defaults; it is a
+  worked example with the values spelled out in capitals for a human to
+  replace, and the first of them is `app.baseURL="https://YOUR_DOMAIN_NAME/"`.
+  CodeIgniter validates it on the way to building the request object and throws
+  before a single route is looked at:
+
+      CodeIgniter\Exceptions\ConfigException: Config\App::$baseURL
+      "https://YOUR_DOMAIN_NAME/" is not a valid URL.
+        system/HTTP/SiteURI.php:200  (normalizeBaseURL)
+
+  (`YOUR_DOMAIN_NAME` has underscores in it, so it is not a valid host, so
+  FILTER_VALIDATE_URL rejects the string outright.) The empty body is the
+  second half of the same fault and is worth naming, because it is what makes
+  this invisible from outside: CodeIgniter's own exception handler calls
+  `service('request')` on its first line (system/Debug/Exceptions.php:117),
+  which is the construction that just failed, so the handler re-throws the
+  ConfigException while handling it. Nothing is rendered and nothing is logged
+  -- `Content-Length: 0` and an Apache access log with no error beside it. The
+  error is only readable with CI_ENVIRONMENT=development, because
+  app/Config/Boot/production.php sets `display_errors = 0` itself; this is the
+  one application where engine#185's platform-wide `display_errors = 1` is not
+  what shows, and `X-Powered-By: PHP/8.5.10` on the 500 is the rest of that
+  defect still visible.
+
+  So the whole of this recipe is: give Castopod a real .env, and then the four
+  things that .env implies.
+
+  **A database, which nothing could have guessed.** Castopod is MySQL or
+  nothing -- Config\Database's default group is `MySQLi` and its migrations are
+  MySQL DDL -- and the checkout has no compose file, no DATABASE_URL and no
+  service to point at. `database: mysql` is the manifest key that asks for one
+  (Matomo's and Thelia's, for the same reason): the engine provisions a
+  database and user on the account's own MySQL server, visible in the panel,
+  openable in phpMyAdmin, inside the account's backup, and hands the container
+  DB_HOST/DB_PORT/DB_DATABASE/DB_USERNAME/DB_PASSWORD. It also brings mysqli
+  into the image, which PhpExtensions would not have installed otherwise.
+
+  **Four things Composer was not allowed to generate, and one of them is every
+  page.**
+  PhpHostBuild::SAFE_INSTALL_FLAGS carries `--no-scripts` always, and the
+  manifest's follow-up step runs `composer run-script post-autoload-dump` --
+  which this project does not define. Castopod hangs its generators off
+  `post-install-cmd` instead, so the deploy log says `Script
+  "post-autoload-dump" is not defined in this package` and moves on, leaving
+  `Opawg\UserAgentsV2Php\UserAgentsRSS`, `Opawg\UserAgentsV2Php\UserAgents` and
+  `AdAures\Ipcat\IpDb` as files that do not exist. The first is used by
+  App\Controllers\FeedController, so *the RSS feed itself* is a fatal error --
+  a podcast host that cannot serve a feed -- and the other two are in
+  Modules\Analytics' helper, on every public podcast page and every episode
+  audio hit. files/panelalpha/castopod-setup.sh runs each generator in the
+  account's own container on the install stage and, when the dataset download
+  fails, writes a stub of the same class rather than the empty file a failed
+  redirect would leave: analytics that identify nothing beat a site that does
+  not answer. (engine#168 is not what bites here: adaures/castopod does commit
+  a composer.lock, and its only allowed plugin is a dev-time phpstan installer.
+  This is `--no-scripts`, which no lock lifts.)
+
+  The fourth is `php-icons init && php-icons scan`, and it is the one that
+  makes the whole site 500 a second time. `icon()` reads
+  `PHPIcons\Icons::DATA`, and that class is a *file the scanner writes* --
+  vendor/yassinedoghri/php-icons/src/Icons.php, filled from the icon names it
+  finds in app/, themes/ and resources/. Without it the first icon on a page is
+  `Error: Class "PHPIcons\Icons" not found`
+  (vendor/yassinedoghri/php-icons/src/PHPIcons.php:62, from
+  themes/cp_app/home.php line 32), so the home page, the admin area and the
+  login form are all HTTP 500 -- while /health answers 200, because it renders
+  no view. That is why the healthcheck in the compose override asks for `/` and
+  `/cp-auth/login` as well as /health: a check that passes while every page is
+  a 500 does not just fail to help, it turns a broken deploy into a successful
+  one. The scan is a second's work (385 files, 161 icons) and has to run on
+  every deploy, because the file it writes is inside vendor/, which the build
+  rewrites from scratch.
+
+  **The first superadmin.** Castopod's wizard is first-visitor-wins. With a
+  complete .env and a reachable database, Modules\Install\Controllers\
+  InstallController::index() runs the migrations and the seeds and then renders
+  the create-superadmin form to whoever asked for /cp-install, and
+  createSuperAdminAction() writes that visitor in with `is_owner => true`.
+  There is no authentication in front of any of it, and on an account that has
+  just been given a public HTTPS name the window is open to anyone who knows
+  the address -- the hole found in Koillection, Outline, NocoDB, Mattermost,
+  Shopware and XBackBone. The install stage closes it before Apache binds by
+  running Castopod's own `install:init-database` and `install:create-superadmin`
+  with a password generated per account into ~/.panelalpha/castopod/
+  admin-credentials (0600); the same controller then throws
+  PageNotFoundException and /cp-install answers 404. Self-registration needed
+  nothing: Modules\Auth\Config\Auth sets `allowRegistration = false`.
+
+  The address that owner is created with is the account's own hostname, and
+  that is not cosmetic. Shield validates it with CodeIgniter's `valid_email`,
+  which is filter_var(FILTER_VALIDATE_EMAIL) and wants a dot in the domain, so
+  `admin@localhost` -- the obvious placeholder, and the one XBackBone's recipe
+  uses -- is rejected and the command aborts with `Super admin creation
+  aborted`. Measured: the deploy carried on and published a site whose
+  /cp-install was open to anyone. So the setup script reads the command's
+  output rather than its exit status, treats anything that is neither "created"
+  nor "already created" as fatal, and exits -- and because the entrypoint execs
+  Apache as its last line, exiting means nothing is served at all. A deploy that
+  serves nothing is better than one that serves the install wizard.
+
+  **And an episode is an audio file.** The shared PHP image loads no php.ini at
+  all (engine#185), so what is in force is PHP's compiled-in
+  `upload_max_filesize = 2M` and `post_max_size = 8M` -- and a POST over
+  post_max_size is discarded before PHP is entered, so $_POST and $_FILES both
+  arrive empty and Castopod's episode form reports "the audio file is required"
+  about a request that carried one. Measured: a 12 MB MP3 is rejected without
+  the ini file and accepted with it. The image's conf.d is not writable by the
+  account uid, so the compose override sets PHP_INI_SCAN_DIR to that directory
+  plus one inside the checkout and files/panelalpha/php/zz-castopod.ini is read
+  from it, by the Apache module and the CLI both. The values are upstream's own,
+  from the ARGs in docker/production/Dockerfile.
+
+  Where the data lives is the other thing a checkout cannot say, and for a
+  podcast host it is the whole question. Modules\Media\Config\Media hard-codes
+  `$storage = ROOTPATH . 'public'` and `$root = 'media'`, so every episode's
+  audio, every cover and every avatar is written inside the checkout -- which a
+  redeploy clears and re-clones (engine#173), while the database rows that point
+  at those files survive, so the feed would go on advertising audio that is no
+  longer there. hooks/prepare.sh replaces public/media with a symlink to /data,
+  which the compose override bind-mounts from ~/.panelalpha/castopod; a symlink
+  rather than `media.storage` because the URL a podcast client fetches has to
+  keep resolving under the document root, and public/.htaccess already sets
+  `Options +FollowSymlinks`. The analytics salt and the generated administrator
+  password live beside it, for the same reason and because .env.default is a
+  world-readable copy of whatever the clone ends with (engine#173) -- which is
+  why the real .env is written by the install stage, inside the container, after
+  that copy has been taken.
+
+  Two things are left as upstream has them. There is no cron on a hosting
+  account and Castopod's scheduled tasks (analytics rollups, the fediverse
+  outbox) are run by supercronic in upstream's own image, so on this platform
+  they do not run: the site, the admin area, publishing and the feed are
+  unaffected, and the analytics graphs fill in only as far as the request-time
+  code goes. And the base image has no ffmpeg, so Modules\MediaClipper's video
+  clips do not render; audio, artwork and the feed do not need it.
+extends: php
+# public/index.php is Castopod's front controller and public/.htaccess carries
+# its rewrite. PhpDocroot probes `public` first so it would reach the same
+# answer, but the answer decides which files are web-reachable -- with the
+# checkout root served, .env, .env.default and the account's MySQL password
+# would all be one request away -- and that is not something to leave to a
+# probe order.
+docroot: public
+# Castopod is MySQL or nothing: Config\Database's default group is MySQLi, its
+# migrations are MySQL DDL, and the checkout has no compose file and no
+# DATABASE_URL to point the engine at one. This is also what puts mysqli in the
+# image.
+database: mysql
+commands:
+  - id: castopod-setup
+    stage:
+      - install
+      - upgrade
+    timeout: 1800
+    description: >-
+      Writes the .env Castopod is configured from -- the account's public URL,
+      the database the engine provisioned and the analytics salt -- puts back
+      the three dataset classes Composer's own post-install scripts would have
+      generated, runs Castopod's migrations and seeds, and creates the instance
+      owner with a generated password so that the first visitor to /cp-install
+      cannot. Idempotent: on an account that already has an owner it re-points
+      .env at the current credentials, brings the schema up to date and leaves
+      the user alone, which is what the upgrade stage replays on every redeploy.
+      On the build stage it would not run at all (engine#171).
+    run: 'sh panelalpha/castopod-setup.sh'

@@ -1,0 +1,131 @@
+# The stack for the repository, which ships none Docker would load: its compose
+# files are dev/examples/docker-compose.yml (an illustration in the docs, not a
+# deployable stack) and dev/containers/docker-compose.yml (a devcontainer),
+# names neither Docker nor the engine's compose probe ever looks at.
+#
+# Wiki.js runs from its published image rather than from this checkout. The
+# repository is the source tree: package.json has a `start` of `node server`,
+# which is why detection read it as `express`, but `server/` alone is not a
+# runnable Wiki.js. `assets/` is webpack output and is gitignored, so the
+# express strategy started a server whose views render against assets that do
+# not exist; there is no config.yml either (only config.sample.yml, pointed at
+# a PostgreSQL on localhost), so `node server` exits 1 on "Unable to read
+# configuration file" and the container restart-looped. Building the repo
+# instead is dev/build/Dockerfile, which is not at the root -- so detection
+# would never pick it -- and is a two-stage node:24-alpine build that runs a
+# full yarn install twice plus a webpack production build to arrive at an
+# image upstream already publishes. The failing run spent 248s on the host
+# compile alone and still ended with nothing listening.
+services:
+  db:
+    # Not optional. Wiki.js 2.5 dropped SQLite from its supported engines --
+    # sqlite3 is still in package.json and dev/build/Dockerfile still apk-adds
+    # sqlite, but upstream's own example compose, its Helm chart and its docs
+    # all say PostgreSQL. 15-alpine is the tag dev/examples/docker-compose.yml
+    # uses.
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wiki
+      POSTGRES_USER: wikijs
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wikijs -d wiki"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+    mem_limit: 384m
+
+  wiki:
+    # Pinned to the major rather than derived from the checkout: package.json
+    # on `main` carries version 2.0.0 and releaseDate 2026-01-01T01:01:01.000Z,
+    # placeholders CI substitutes at release time, so the checkout cannot say
+    # which 2.5.x it is. `2` is the tag upstream's own example compose uses.
+    image: ${WIKI_IMAGE:-ghcr.io/requarks/wiki:2}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The image's config.yml is a template of $(VAR) placeholders
+      # (dev/build/config.yml); these are the names it substitutes. Wiki.js
+      # does *not* read arbitrary env vars -- server/core/config.js reads one
+      # YAML file and nothing else -- which is why the site URL below has to go
+      # in through the setup wizard rather than through the environment.
+      DB_TYPE: postgres
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: wikijs
+      DB_PASS: ${POSTGRES_PASSWORD}
+      DB_NAME: wiki
+      # Not a real address, and not meant to survive: ComposePlaceholders
+      # rewrites a bare http://localhost under a *_URL-shaped key to the
+      # account's public https URL before the stack starts. Read only by
+      # panelalpha-setup.sh, which posts it to the wizard as `siteUrl`.
+      WIKI_SITE_URL: http://localhost
+      WIKI_ADMIN_EMAIL: ${WIKI_ADMIN_EMAIL}
+      WIKI_ADMIN_PASSWORD: ${WIKI_ADMIN_PASSWORD}
+      NODE_OPTIONS: --max-old-space-size=768
+    volumes:
+      # The one path the image declares as a VOLUME.
+      - wiki_content:/wiki/data/content
+      # See files/panelalpha-setup.sh.
+      - ./panelalpha-setup.sh:/wiki/panelalpha-setup.sh:ro
+    # The image's CMD is `node --no-deprecation server`; this is that with the
+    # setup finalizer started beside it. The finalizer has to run *against* a
+    # listening Wiki.js -- /finalize is a route of the setup wizard's own
+    # Express app -- so it cannot be a step before the server, and a separate
+    # compose service would not work either: `docker compose up -d` returns as
+    # soon as a service is started, so a sibling still finalizing would race
+    # the health probe. Backgrounded here, it is inside the thing the readiness
+    # gate waits on.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - 'bash /wiki/panelalpha-setup.sh & exec node --no-deprecation server'
+    # Two conditions, not one. `curl /healthz` alone is not enough: in setup
+    # mode the wizard's Express app answers `app.get('*')` with the setup page,
+    # so /healthz returns 200 HTML and a plain check would call the container
+    # healthy while the site is still an unconfigured wizard -- and the gate
+    # below would open in the middle of the finalize. The marker file is
+    # written by panelalpha-setup.sh once the wiki is configured and answering
+    # again, or once it has given up trying, so a finalize that fails still
+    # ends with the wizard served rather than with a deploy that hangs.
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /wiki/data/.panelalpha-ready && curl -fsS -o /dev/null --max-time 5 http://127.0.0.1:3000/healthz"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 420s
+    # Replaces the hardener's 384m default for an app-role service. Wiki.js
+    # sits around 250-400 MB resident; the headroom is for the sideloaded
+    # locale data and the search index it builds on first boot.
+    mem_limit: 1024m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be finished
+  # when that returns -- at which point Wiki.js has been *started*, not yet
+  # *answered*: its first boot runs ~30 knex migrations against an empty
+  # database, then comes up in setup mode, then gets finalized and restarts its
+  # HTTP server. The failing run without this gate probed 3000 while the
+  # container was still restart-looping and read `serving: unknown`. Compose
+  # does block on a depends_on health condition, so a service that waits on the
+  # wiki healthcheck is what makes `up -d` return only once the site really
+  # answers. A clean exit 0 is explicitly not a crash loop as far as AppHealth
+  # is concerned. The database's image, so nothing extra is pulled.
+  ready:
+    image: postgres:15-alpine
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      wiki:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  db_data: {}
+  wiki_content: {}

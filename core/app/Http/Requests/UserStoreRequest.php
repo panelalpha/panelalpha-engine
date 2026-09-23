@@ -2,12 +2,18 @@
 
 namespace App\Http\Requests;
 
-use App\Lib\Deploy\Source\GitUrl;
+use App\Http\Requests\Concerns\ReportsProblems;
+use App\Lib\Deploy\Source\GitRepoInput;
+use App\Lib\Deploy\Source\GitTokenInput;
 use App\Lib\Domains\DomainPlan;
+use App\Rules\GitAccessToken;
+use App\Rules\GitRepositoryUrl;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UserStoreRequest extends FormRequest
 {
+    use ReportsProblems;
+
     public function authorize(): bool
     {
         return true;
@@ -35,15 +41,8 @@ class UserStoreRequest extends FormRequest
 
         // Accept schemeless host/path URLs like "github.com/owner/repo".
         $gitRepo = $this->input('git_repo');
-        if (is_string($gitRepo) && $gitRepo !== '') {
-            $gitRepo = trim($gitRepo);
-            if (
-                $gitRepo !== ''
-                && !str_starts_with($gitRepo, 'git@')
-                && !preg_match('#^[a-z][a-z0-9+.-]*://#i', $gitRepo)
-            ) {
-                $this->merge(['git_repo' => 'https://' . ltrim($gitRepo, '/')]);
-            }
+        if (is_string($gitRepo) && trim($gitRepo) !== '') {
+            $this->merge(['git_repo' => GitRepoInput::normalise($gitRepo)]);
         }
     }
 
@@ -94,24 +93,17 @@ class UserStoreRequest extends FormRequest
                     }
                 },
             ],
-            'git_repo' => 'url|nullable',
+            'git_repo' => ['nullable', 'string', 'max:' . GitRepoInput::MAX_LENGTH, new GitRepositoryUrl()],
             'git_branch' => 'string|nullable|max:255',
             'git_token' => [
-                'string',
                 'nullable',
-                'max:2048',
-                function (string $attribute, mixed $value, \Closure $fail): void {
-                    if ($value === null || $value === '') {
-                        return;
-                    }
-                    $repo = $this->input('git_repo');
-                    if (!is_string($repo) || !GitUrl::isHttpsWithoutCredentials($repo)) {
-                        $fail('A Git token requires an HTTPS repository URL without embedded credentials.');
-                    }
-                },
+                'string',
+                'max:' . GitTokenInput::MAX_LENGTH,
+                new GitAccessToken(),
             ],
             'env_vars' => 'array|nullable|max:200',
             'env_vars.*' => 'string|nullable|max:8192',
+            'password' => 'string|nullable|min:1|max:255',
             // Shape only. What makes a stage's commands legal is the manifest
             // grammar, checked by DeployPlanInput -- see the note there.
             'stages' => 'array|nullable',

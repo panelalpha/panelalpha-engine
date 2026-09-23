@@ -8,6 +8,8 @@ import {
   waitForServedPhpVersion,
 } from '@/helpers/php-helpers';
 import { rand } from '@/helpers/random';
+import { phpVersionsListSchema } from '@/schemas';
+import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 
 /**
  * Switching a domain's PHP version has to change what the webserver actually
@@ -21,8 +23,9 @@ import { rand } from '@/helpers/random';
  */
 test.describe('PHP version switching', () => {
   test('the available versions are listed', async ({ api }) => {
-    const { data } = await api.getAvailablePhpVersions();
-    expect(Array.isArray(data)).toBe(true);
+    const listing = await api.getAvailablePhpVersions();
+    validateParsedApiResponse(listing, phpVersionsListSchema);
+    expect(listing.data.length).toBeGreaterThan(0);
   });
 
   test('a phpinfo script can be written to the document root', async ({ api, setupUser }) => {

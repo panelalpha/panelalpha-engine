@@ -372,7 +372,8 @@ class AppHealth
                 return new ProbedResponse(
                     $code,
                     is_string($result['body'] ?? null) ? $result['body'] : '',
-                    "{$scheme}://127.0.0.1:{$result['port']}/"
+                    "{$scheme}://127.0.0.1:{$result['port']}/",
+                    is_numeric($result['time'] ?? null) ? (float) $result['time'] : 0.0
                 );
             }
         }

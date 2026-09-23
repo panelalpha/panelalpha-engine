@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tolgee is an open-source, developer- and translator-friendly localization
+  platform: a Kotlin/Spring Boot backend and a React SPA that manage translation
+  keys, languages, screenshots and machine/AI translation, exposed to apps
+  through REST API keys. The one all-in-one image serves the React UI and the
+  API on a single port (8080), so this is one product on one origin behind a
+  login -- anonymous access to projects, the admin area and the API is refused
+  (401/403).
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes tolgee/tolgee on
+  Docker Hub and tags every release; this recipe pins the current stable release
+  v3.224.5. The repository builds a Gradle/JVM backend plus a Node SPA from
+  source, which is slow and fragile; the published image already contains both,
+  so nothing is built from the clone. Seeding a Hub image also sidesteps
+  engine#229 (image-seed NotFound).
+
+  WHY COMPOSE-REPLACE. Tolgee needs PostgreSQL, which the schema's MySQL-only
+  `database:` cannot provide. The all-in-one image can autostart an EMBEDDED
+  Postgres inside the app container, but that stores the whole database in the
+  app's own data dir and couples the DB lifecycle to the app -- fragile for a
+  durable host. So this override disables the embedded Postgres
+  (TOLGEE_POSTGRES_AUTOSTART_ENABLED=false) and runs an external
+  postgres:17-alpine sidecar on a named volume, pointing Tolgee at it via
+  SPRING_DATASOURCE_URL. Only the app publishes a port (8080), taken as the
+  primary by the port scan; the DB has no host port. Tolgee runs Liquibase
+  migrations itself on start, so no migrate stage is needed.
+
+  AUTH IS OFF BY DEFAULT UNDER DOCKER. Tolgee's Docker image ships with
+  TOLGEE_AUTHENTICATION_ENABLED defaulting to false (open instance), so this
+  recipe sets it to true explicitly, keeps native username/password login on,
+  and disables self-registration (TOLGEE_AUTHENTICATION_REGISTRATIONS_ALLOWED=
+  false) so strangers cannot sign up on a single-owner instance. An operator can
+  re-enable registration or wire SSO from the config.
+
+  SECRETS + PERSISTENCE. hooks/prepare.sh generates three secrets once and keeps
+  them in ~/.panelalpha/tolgee/ (0600 in 0700), the only writable place a
+  redeploy does not delete, and re-materialises the env_files the compose reads
+  on every deploy: the Postgres password (baked into the pgdata volume), the JWT
+  secret (TOLGEE_AUTHENTICATION_JWT_SECRET -- rotating it logs everyone out), and
+  the initial admin password (TOLGEE_AUTHENTICATION_INITIAL_PASSWORD -- set
+  explicitly so Tolgee never generates one to a file the operator cannot see).
+  The admin login is written to credentials.txt. Tolgee's file storage
+  (screenshots, imports) lives on a named volume at /data. The public app URL is
+  passed as a localhost placeholder in TOLGEE_FRONT_END_URL and rewritten to the
+  real https origin at deploy, so links in exports/emails are correct without the
+  domain being known at build time; core UI + API work same-origin regardless.

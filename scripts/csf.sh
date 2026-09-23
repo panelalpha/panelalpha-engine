@@ -36,8 +36,10 @@ install_csf() {
     #     echo "Detected Docker IPv6 network: $docker_network6"
     # fi
 
-    # Allow Docker network in CSF
+    # Allow Docker network in CSF. A reinstall can put the network on another
+    # subnet; the entry an earlier install wrote would otherwise stay allowed.
     echo "Allowing Docker network: $docker_network"
+    drop_stale_docker_networks /etc/csf/csf.allow "$docker_network"
     if ! grep -q "^$docker_network" /etc/csf/csf.allow; then
         echo "$docker_network # docker internal network" >>/etc/csf/csf.allow
     fi
@@ -72,6 +74,7 @@ install_csf() {
     sed -i 's/^UI_PORT = ".*/UI_PORT = "2012"/' /etc/csf/csf.conf
     sed -i 's/^UI_USER = ".*/UI_USER = "panelalpha"/' /etc/csf/csf.conf
     sed -i "s/^UI_PASS = \".*/UI_PASS = \"$CSF_UI_PASSWORD\"/" /etc/csf/csf.conf
+    drop_stale_docker_networks /etc/csf/ui/ui.allow "$docker_network"
     if ! grep -q "^$docker_network" /etc/csf/ui/ui.allow; then
         echo "$docker_network # docker internal network" >>/etc/csf/ui/ui.allow
     fi
@@ -81,14 +84,32 @@ install_csf() {
     # CSF's own installer enables the units but never starts them, and the
     # TESTING = 0 above only takes effect once the ruleset is applied — so an
     # install used to leave the host with no firewall until its next reboot.
-    # csf.service is a RemainAfterExit oneshot around `csf --initup`, so a
-    # restart both loads the rules and leaves the unit reporting active.
+    #
+    # Not a plain restart: with FASTSTART (CSF's default) stopping saves the live
+    # ruleset and `csf --initup` restores that snapshot instead of reading the
+    # config. On a host where CSF already ran, every edit above was ignored --
+    # measured: a reinstall kept the previous install's docker network and not
+    # the current one, so the proxy could reach an app only on 80 and 8000
+    # (engine#271). Dropping the snapshot between stop and start makes start
+    # build from the config; the unit still ends up active.
     if [ -f /etc/csf/csf.disable ]; then
         echo "csf: /etc/csf/csf.disable is present, leaving the firewall down"
     else
-        systemctl restart csf || csf -r || true
+        systemctl stop csf || true
+        rm -f /var/lib/csf/csf.4.saved /var/lib/csf/csf.6.saved /var/lib/csf/csf.4.ipsets /var/lib/csf/csf.6.ipsets
+        systemctl start csf || csf -r || true
         systemctl restart lfd || service lfd restart || true
     fi
+}
+
+# Remove `# docker internal network` lines naming any network but $2.
+drop_stale_docker_networks() {
+    local file="$1" keep="$2"
+    [ -f "$file" ] || return 0
+    awk -v keep="$keep" '
+        / # docker internal network$/ && $1 != keep { next }
+        { print }
+    ' "$file" >"$file.tmp" && cat "$file.tmp" >"$file" && rm -f "$file.tmp"
 }
 
 # CSF is told about the compose bridge above (DOCKER_DEVICE / DOCKER_NETWORK4)

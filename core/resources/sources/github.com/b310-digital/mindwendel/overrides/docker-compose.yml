@@ -1,0 +1,97 @@
+# Replaces Mindwendel's operator-template compose (SSL-only postgres needing a
+# hand-made cert, a minio object store, and every secret left blank with `:?`)
+# with a working stack. The app is the official prebuilt image; nothing is built
+# from the clone.
+services:
+  db:
+    # Pinned major: Postgres cannot migrate a datadir backwards, so a floating
+    # tag would break the named volume the first time the major moves.
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, written once by hooks/prepare.sh into
+    # ~/.panelalpha/mindwendel/. The database never sees SECRET_KEY_BASE.
+    env_file:
+      - ../.panelalpha/mindwendel/db.env
+    environment:
+      POSTGRES_DB: mindwendel
+      POSTGRES_USER: mindwendel
+      # A named volume is not always empty (lost+found); postgres refuses to
+      # init into a non-empty dir, so give it a clean subdir.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mindwendel -d mindwendel -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  mindwendel:
+    image: ${MINDWENDEL_IMAGE:-ghcr.io/b310-digital/mindwendel:latest}
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+    # .env carries the account-overridable defaults (locale, feature flags)
+    # seeded by prepare.sh; app.env carries the persisted secrets
+    # (SECRET_KEY_BASE and the DB password).
+    env_file:
+      - .env
+      - ../.panelalpha/mindwendel/app.env
+    environment:
+      # Discrete DB coordinates (runtime.exs reads these, not a DSN). The
+      # password comes from app.env. DATABASE_SSL=false: the sidecar speaks plain
+      # TCP, and runtime.exs defaults this to "true" which would fail the connect.
+      DATABASE_HOST: db
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: mindwendel
+      DATABASE_USER: mindwendel
+      DATABASE_SSL: "false"
+      # runtime.exs binds MW_ENDPOINT_HTTP_PORT (or PORT); named so the published
+      # port and the healthcheck cannot drift from it.
+      MW_ENDPOINT_HTTP_PORT: "4000"
+      PORT: "4000"
+      # The public origin: https on 443. runtime.exs already defaults to these,
+      # set explicitly so links and LiveView check_origin are correct.
+      URL_PORT: "443"
+      URL_SCHEME: https
+      # Rewritten to the account's public https address before the stack starts
+      # (ComposePlaceholders rewrites a localhost value whose key ends in _URL).
+      # /pa/entrypoint.sh strips the scheme into URL_HOST, which runtime.exs
+      # requires as a bare hostname for URL generation and LiveView check_origin.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      - ./panelalpha/mindwendel:/pa:ro
+    entrypoint: ["/bin/sh", "/pa/entrypoint.sh"]
+    healthcheck:
+      # The production image ships neither curl nor wget (Debian slim runner),
+      # but it does ship bash. A successful TCP connect to 4000 means Phoenix is
+      # listening, which only happens after /app/bin/server has waited for the
+      # db and run the migrations. That is exactly the "site answers" gate.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/4000' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1024m
+
+  # Starts nothing, exits 0, waits on the app's healthcheck. The engine runs
+  # `docker compose up -d` with no --wait, so without this gate the deploy is
+  # "done" the moment containers start and the probe lands while the Elixir
+  # release is still booting and migrating. depends_on a health condition makes
+  # `up -d` block until the site actually answers.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      mindwendel:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}

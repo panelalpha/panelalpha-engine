@@ -1,0 +1,82 @@
+# Full replacement stack for Zero-TOTP. The repository ships no runnable root
+# compose file, so this is authored from scratch on the project's own official
+# images. Secrets and the DB password are interpolated from ~/project/.env,
+# which hooks/prepare.sh writes from the values it persists in
+# ~/.panelalpha/zero-totp. PUBLIC_URL is left at http://localhost on purpose:
+# the engine rewrites any local *_URL value to the account's real https origin,
+# and the api service turns it into the config.yml `domain`.
+services:
+  # The only service that publishes a port, so the engine routes the account's
+  # public domain here. The frontend image's baked nginx serves the SPA but
+  # does not proxy /api (its CSP is connect-src 'self'), and the SPA calls its
+  # API same-origin, so this nginx joins the two on one origin.
+  web:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - api
+    volumes:
+      - ./proxy/default.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+    mem_limit: 128m
+
+  frontend:
+    image: ghcr.io/seaweedbraincy/zero-totp-frontend:2.1.0
+    restart: unless-stopped
+    environment:
+      USER_UID: "101"
+      USER_GID: "101"
+    mem_limit: 128m
+
+  api:
+    image: ghcr.io/seaweedbraincy/zero-totp-api:2.1.0
+    restart: unless-stopped
+    # Render config.yml from the environment, then hand off to the image's own
+    # entrypoint with auto-upgrade so alembic migrates the schema on boot.
+    command: ["sh", "/usr/local/bin/render-config.sh"]
+    environment:
+      USER_UID: "1001"
+      USER_GID: "1001"
+      # Rewritten to https://<account-domain> by the engine; the render script
+      # strips the scheme to get the bare host config.yml wants.
+      PUBLIC_URL: "http://localhost"
+      ZT_DB_NAME: "${ZT_DB_NAME}"
+      ZT_DB_USER: "${ZT_DB_USER}"
+      ZT_DB_PASSWORD: "${ZT_DB_PASSWORD}"
+      ZT_FLASK_SECRET_KEY: "${ZT_FLASK_SECRET_KEY}"
+      ZT_SSE_KEY: "${ZT_SSE_KEY}"
+    volumes:
+      - ./api/render-config.sh:/usr/local/bin/render-config.sh:ro
+      - zt_config:/api/config
+      - zt_secret:/api/secret
+      - zt_logs:/api/logs
+    depends_on:
+      database:
+        condition: service_healthy
+    mem_limit: 512m
+
+  database:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: "${ZT_DB_NAME}"
+      MARIADB_USER: "${ZT_DB_USER}"
+      MARIADB_PASSWORD: "${ZT_DB_PASSWORD}"
+      MARIADB_ROOT_PASSWORD: "${ZT_DB_ROOT_PASSWORD}"
+    volumes:
+      - zt_db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    mem_limit: 512m
+
+volumes:
+  zt_db:
+  zt_config:
+  zt_secret:
+  zt_logs:

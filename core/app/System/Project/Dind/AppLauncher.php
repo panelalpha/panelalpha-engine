@@ -24,6 +24,8 @@ final class AppLauncher
 
     private const FAILURE_LOG_TIMEOUT_SECONDS = 30;
 
+    private const PS_TIMEOUT_SECONDS = 30;
+
     public function __construct(
         private DindProject $project,
     ) {
@@ -60,7 +62,31 @@ final class AppLauncher
         }
 
         if ($process->getExitCode() === 0) {
+            $failure = $this->gateFailure();
+            if ($failure !== null) {
+                $this->recordContainerOutput();
+
+                return [
+                    'stdout' => $process->getOutput(),
+                    'stderr' => $failure,
+                    'exit_code' => 1,
+                ];
+            }
             $this->project->alignAppPort();
+            // Advisory: the deploy has already succeeded, this only says
+            // whether the application behind it answers. See {@see AppHealth}.
+            $this->project->appHealth()->report();
+            // `up` returning 0 is not the only way to end up with nothing
+            // serving: a container that starts and then dies on its own
+            // configuration finishes `partial`. The health report has just
+            // named the container; this pastes what it printed.
+            if ($this->healthSawARestartLoop()) {
+                $this->recordContainerOutput();
+            }
+            // Same contract, for the certificate the app's URL depends on:
+            // recorded so a caller reporting the deploy does not have to
+            // assume what "https://" got it. See {@see AppCertificate}.
+            $this->project->appCertificate()->remember();
         }
 
         return [
@@ -68,6 +94,106 @@ final class AppLauncher
             'stderr' => $process->getErrorOutput(),
             'exit_code' => $process->getExitCode(),
         ];
+    }
+
+    /**
+     * A service that ran, failed, and left `up -d` exiting 0.
+     *
+     * Without `--wait`, `up -d` returns once containers are created and
+     * started and does not care what exit code a one-shot service produces.
+     * So a gate service -- one whose whole job is to refuse the deploy if a
+     * post-condition does not hold -- can run, print its refusal, exit 1, and
+     * the deploy is still reported successful.
+     *
+     * Measured on Manticore (supported-apps#297) with authentication
+     * deliberately switched off: `ready` exited 1, `up -d` exited 0, the
+     * rebuild endpoint returned success, and the account was published with
+     * an unauthenticated writable search engine on it. The thing the gate
+     * existed to prevent is exactly what shipped. Baikal (#274), Mattermost
+     * (#47) and Dolibarr (#307) all rely on a gate to close a
+     * first-visitor-wins installer before the port opens.
+     *
+     * Reading exit codes after the fact rather than passing `--wait`: `--wait`
+     * also waits on health checks, so any service with a slow or wrong one
+     * would start delaying or failing deploys that pass today. That is a
+     * change worth measuring against real projects first, and it is not
+     * needed to close this -- the exit codes are already there to read.
+     */
+    private function gateFailure(): ?string
+    {
+        $shell = $this->project->shell();
+        try {
+            $output = $shell->execAsUserQuiet(
+                $this->project->userAppComposeCommand(['ps', '--all', '--format', 'json']),
+                [],
+                self::PS_TIMEOUT_SECONDS
+            );
+        } catch (\Throwable) {
+            // Never turn "could not ask" into "failed": that would be the same
+            // defect pointed the other way.
+            return null;
+        }
+
+        $failed = self::failedServices($output);
+        if ($failed === []) {
+            return null;
+        }
+
+        $logger = $shell->logger();
+        foreach ($failed as $service => $code) {
+            $logger?->info("Service {$service} exited with code {$code}; the deploy is not successful");
+        }
+
+        $described = [];
+        foreach ($failed as $service => $code) {
+            $described[] = "{$service} (exit {$code})";
+        }
+
+        return 'A service exited non-zero after the stack came up: ' . implode(', ', $described);
+    }
+
+    /**
+     * Services that exited non-zero, name => exit code.
+     *
+     * Its own function, over `docker compose ps --format json`, so the rule
+     * can be tested against real compose output with no daemon. Compose
+     * writes either one JSON array or one object per line depending on the
+     * version, and both are read here.
+     *
+     * Only `exited`: a service that is running, restarting or created has not
+     * reported anything yet, and a one-shot that exited 0 did its job.
+     *
+     * @return array<string, int>
+     */
+    public static function failedServices(string $psOutput): array
+    {
+        $rows = [];
+        $whole = json_decode(trim($psOutput), true);
+        if (is_array($whole) && array_is_list($whole)) {
+            $rows = $whole;
+        } else {
+            foreach (preg_split('/\R/', $psOutput) ?: [] as $line) {
+                $decoded = json_decode(trim($line), true);
+                if (is_array($decoded)) {
+                    $rows[] = $decoded;
+                }
+            }
+        }
+
+        $failed = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $state = strtolower((string) ($row['State'] ?? ''));
+            $code = $row['ExitCode'] ?? null;
+            $name = (string) ($row['Service'] ?? $row['Name'] ?? '');
+            if ($name !== '' && $state === 'exited' && is_int($code) && $code !== 0) {
+                $failed[$name] = $code;
+            }
+        }
+
+        return $failed;
     }
 
     /**
@@ -132,6 +258,18 @@ final class AppLauncher
         $innerDocker->reclaimStorage(true);
 
         return $this->run($command);
+    }
+
+    private function healthSawARestartLoop(): bool
+    {
+        $details = $this->project->userModel()->getDetails();
+        foreach ((array) ($details[AppHealth::DETAIL_CHECKS] ?? []) as $check) {
+            if (is_array($check) && ($check['id'] ?? null) === AppHealth::CHECK_RESTART_LOOPING) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function recordContainerOutput(): void

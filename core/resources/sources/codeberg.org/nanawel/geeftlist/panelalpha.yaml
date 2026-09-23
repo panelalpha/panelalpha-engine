@@ -1,0 +1,81 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Geeftlist is a self-hosted collaborative gift-list manager: a PHP application
+  on the Fat-Free Framework, served by Apache out of src/pub/, with MariaDB for
+  data and Redis for its cache pool
+  (app.ini: RESOURCE_CACHE.pool=Cache\Adapter\Redis\RedisCachePool, so Redis is
+  required, not optional). Users register, create gift lists, add gifts, and
+  reserve each other's gifts inside families/circles; visibility is per-user
+  and reservations are hidden from the gift's owner.
+
+  This is a "custom multi-image build" only for developers. The root Dockerfile
+  is a three-stage build (a theme-builder yarn image, a composer vendor image,
+  then the runtime) whose first two FROMs reference locally-built base images
+  (geeftlist-theme-builder, geeftlist-base-web) that exist nowhere but the
+  repository's own Makefile — it cannot be built by the dockerfile strategy,
+  which builds one Dockerfile from published bases. There is no need to: the
+  project's CI (.gitlab-ci.yml release-image jobs) publishes the finished
+  all-in-one image to Docker Hub as nanawel/geeftlist, and the repository's own
+  production guide (support/docker/production/) deploys exactly that image with
+  a MariaDB + Redis compose stack. This recipe runs that published image
+  (nanawel/geeftlist:latest, 0.51.1 at time of writing) — the author's own
+  artifact, same software already built — so no theme/composer build runs at
+  deploy time.
+
+  Shape: overrides/docker-compose.yml REPLACES the project compose (the repo
+  ships four dev/ci compose files, none a hosting stack). With no platform
+  block, detection reaches the compose strategy by walk (compose priority 980)
+  and UserComposeStrategy runs the file as written, so ComposePlaceholders runs
+  and engine#221 (the fromSource platform-declaration trap) does not bite. The
+  app's public address is the one value the checkout cannot supply:
+  app__BASE_URL is set to http://localhost/ in the webapp environment block,
+  where ComposePlaceholders::isLocalPublicUrl() rewrites it to the account's
+  public https URL before the stack starts (the key ends in _URL, the value is
+  a bare localhost, port 80 is on the allowlist). The app rtrims the trailing
+  slash itself (Url\Builder::cleanupUrlPart), so the slash-less rewritten value
+  is correct.
+
+  Persistence. The account's own MySQL is not reachable under the compose
+  strategy (database: mysql is read only by runtime: php), so the DB is a
+  MariaDB sidecar. Its datadir is a named volume (geeftlist_db) — the
+  established pattern (tandoor, koillection) and verified to survive
+  project_rebuild: the only paths that prune volumes are account teardown
+  (docker compose down -v / system prune --volumes in AccountTeardown), never a
+  redeploy, which is a re-clone plus `docker compose up -d`. Uploaded gift
+  images (src/pub/userdata) are a named volume too (geeftlist_userdata), not a
+  ~/.panelalpha bind mount: the prebuilt image writes them as a fixed uid 33
+  (www-data) that is not the account uid (1001), and the image ships the dir
+  root:root 0755, so the volume is chowned to 33 once at boot by the webapp
+  command wrapper (what upstream's own guide does: chown -R 33:33). Chowning a
+  host bind mount to 33 from inside the container (sysbox userns) would instead
+  take the directory out of the account's ownership. Named-volume survival
+  across project_rebuild is verified here as with the DB (engine#173 is why
+  ~/project itself cannot hold it).
+
+  Secrets are generated once by hooks/prepare.sh and kept in
+  ~/.panelalpha/geeftlist/geeftlist.env, then written into ~/project/.env for
+  compose interpolation: the DB password/root password and the two app signing
+  keys (AUTHENTICATION_JWT_SECRET_KEY 48+ chars, GEEFTER_SESSION_SECRET_KEY —
+  rotating the session key logs everyone out, so it must be stable across
+  redeploys). The compose leaves those as ${VAR}, which ComposePlaceholders
+  passes through untouched (they are not repo placeholders), and compose
+  interpolates them from .env.
+
+  Database initialisation is not idempotent in the app: setup/install refuses
+  once a schema exists. So a one-shot `installer` service runs
+  `setup/isInstalled ? setup/upgrade : setup/install` (RETURN_YES=0/RETURN_NO=
+  200), gating the webapp on its clean completion; a `ready` service then gates
+  `docker compose up -d` on the webapp's healthcheck (engine#204: up -d returns
+  without --wait, so without this the deploy is called done before the site
+  answers).
+
+  Security. There is no admin role or seeded login — the app has no admin
+  interface (upstream roadmap item), the first registrant is an ordinary
+  geefter, and install seeds no default credentials. So there is nothing to
+  seed and no default password to rotate. Open registration IS the product (a
+  collaborative multi-user app whose invitees must register), so it is left
+  enabled — but the shipped signup CAPTCHA (a self-contained GD image captcha,
+  no external service) is kept on to stop bot signups. Email is disabled
+  (EMAIL_ENABLED=0) and email confirmation skipped (a fresh account has no
+  SMTP), so registration completes without a mail round-trip. F3__DEBUG=0 so no
+  stack traces leak. Private gift lists are refused to anonymous visitors.

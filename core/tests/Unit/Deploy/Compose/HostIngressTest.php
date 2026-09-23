@@ -99,7 +99,7 @@ final class HostIngressTest extends TestCase
         $path = sys_get_temp_dir() . '/host-ingress-' . bin2hex(random_bytes(4)) . '.yml';
         file_put_contents($path, Yaml::dump(ComposeHarden::withoutHostIngress(self::traefikStack())['compose'], 6, 2));
         try {
-            $this->assertSame(['all' => [3000], 'primary' => 3000], ComposePortScan::of($path));
+            $this->assertSame(['all' => [3000], 'primary' => 3000, 'refused' => []], ComposePortScan::of($path));
         } finally {
             unlink($path);
         }

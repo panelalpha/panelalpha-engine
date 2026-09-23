@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Libredesk is a modern, open-source, self-hosted omnichannel customer support
+  desk -- shared inbox, live chat, email, help center, SLAs, automations and
+  role-based access -- written in Go with a Vue 3 SPA, backed by PostgreSQL and
+  Redis. The single Go binary serves both the built SPA and the JSON API on one
+  port (9000), so this is one product on one origin. The agent/admin console and
+  its API sit behind a login (anonymous API calls return 401/403); the help
+  center and live-chat widget are public by design once an operator publishes
+  them, which is the intended behaviour for a helpdesk, not an exposure.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes libredesk/libredesk
+  on Docker Hub and tags every release; this recipe pins the current stable
+  release v2.8.0 (v2.9.0 exists only as release candidates on Docker Hub at time
+  of writing, so it is not used). Seeding a Hub image also sidesteps engine#229
+  (image-seed NotFound). The image is Alpine 3.18 with the Go binary and the
+  baked-in SPA -- nothing is built from the clone.
+
+  WHY COMPOSE-REPLACE. Libredesk needs Postgres and Redis beside it, which the
+  schema's MySQL-only `database:` cannot provide, so the datastore is a compose
+  concern. Upstream's own docker-compose.yml is close but bind-mounts ./uploads
+  and ./config.toml into the project dir a redeploy wipes (engine#173), publishes
+  Postgres and Redis on the host, and runs install+upgrade+serve in one command
+  with no gate. This override supplies the durable stack: postgres:17-alpine and
+  redis:7-alpine on named volumes with no host ports, uploads on a named volume,
+  secrets from ~/.panelalpha/libredesk, and only the app publishes a port (9000,
+  taken as the primary by the port scan).
+
+  INSTALL + ADMIN. A one-shot `install` service runs `./libredesk --install
+  --idempotent-install --yes` (which creates the schema and the `System` admin
+  user, reading LIBREDESK_SYSTEM_USER_PASSWORD from the seeded env and enforcing
+  its strength) then `--upgrade --yes`, and the app waits on it with
+  service_completed_successfully -- so a failed install fails the deploy instead
+  of publishing a broken site, and a redeploy is idempotent (the schema and the
+  admin password are never reset). A `ready` gate waits on the app's healthcheck
+  (engine#204) so the deploy turns green only once the site answers.
+
+  CONFIG + SECRETS. config.toml (which upstream expects the operator to create
+  from config.sample.toml) is rendered by hooks/prepare.sh, with env=prod and
+  secure cookies on -- the engine terminates TLS in front of the app. The
+  Postgres password (baked into the pgdata volume), the 32-char encryption_key
+  and the generated System-user password are written once into
+  ~/.panelalpha/libredesk/ (0600 in 0700), the only writable place a redeploy
+  does not delete, and reused on every rebuild. The admin login goes in
+  credentials.txt. The public app URL used in email/help-center/widget links is
+  set from the console after first login (stored in the DB), so no build-time
+  URL is baked. SSO (Google/Microsoft/OIDC) and email are optional and left for
+  the operator to configure in the console.

@@ -17,6 +17,16 @@ class Helper
         if ($base === null) {
             return null;
         }
+
+        return self::generateUsernameFrom($base);
+    }
+
+    /**
+     * The name itself when it is free, else the same stem with a random
+     * suffix. Null when ten suffixes were all taken.
+     */
+    public static function generateUsernameFrom(string $base): ?string
+    {
         if (self::usernameAvailable($base)) {
             return $base;
         }

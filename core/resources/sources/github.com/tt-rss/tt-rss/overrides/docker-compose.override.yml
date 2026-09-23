@@ -1,0 +1,256 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the app -- the shared PHP base image, ~/project bind-mounted at /app,
+# the account's own uid, Apache on 8000, the staged entrypoint -- and knows
+# nothing about tt-rss's database, because nothing in the checkout says there
+# is one.
+#
+# An override rather than a replacement compose file, and that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# before detection runs, so a compose file in the project root would make
+# tt-rss look like a compose project and take the php strategy -- the bind
+# mount, the staged entrypoint, the install-stage schema load -- off the table
+# entirely. It would also hand the account the repository's own compose file's
+# job, which its header says is local development only.
+services:
+  app:
+    # Everything tt-rss needs to find its database, and the generated file has
+    # none of it. Compose merges `environment` maps across files, so this adds
+    # to what the strategy wrote rather than replacing it.
+    #
+    # Config::_DEFAULTS (classes/Config.php) is read through
+    # `getenv("TTRSS_" . $name)`, so these are the configuration file: the
+    # repository's config.php stays absent, which is the point -- it would be
+    # a file in the document root holding the database password.
+    environment:
+      # tt-rss is PostgreSQL and nothing else. classes/Config.php marks
+      # DB_TYPE @deprecated with "default (and only) value: pgsql", sql/ holds
+      # a pgsql directory and no mysql one, and update.php --gen-search-idx
+      # emits Postgres full-text SQL. Stated anyway because the constant still
+      # exists and a future default is not this recipe's to assume.
+      TTRSS_DB_TYPE: pgsql
+      TTRSS_DB_HOST: ttrss-db
+      TTRSS_DB_PORT: "5432"
+      TTRSS_DB_NAME: ttrss
+      TTRSS_DB_USER: ttrss
+      # Both containers are on the account's own compose network and nothing
+      # else can reach it; `prefer` would negotiate TLS against a server that
+      # has no certificate and fall back anyway, one round trip per connection.
+      TTRSS_DB_SSLMODE: disable
+
+      # tt-rss serves from its repository root: index.php, public.php,
+      # backend.php and prefs.php are all at the top and there is no public/,
+      # web/ or webroot/ directory. PhpDocroot probes exactly those names and
+      # then falls back to the root, so it reaches the same answer -- but
+      # `docroot: .` in a manifest is folded away rather than honoured (engine
+      # #172), and this is the value that actually decides which files are one
+      # GET away. Said explicitly so it is not a probe order away from
+      # changing.
+      PA_DOCROOT: /app
+
+      # A login form, on purpose. SINGLE_USER_MODE skips authentication
+      # entirely and logs every visitor in as the admin; on an account with a
+      # public HTTPS domain that is the whole application, open. The default
+      # is already false -- this is here so that it is a decision in the file
+      # rather than an inherited one.
+      TTRSS_SINGLE_USER_MODE: "false"
+      # There is no ENABLE_REGISTRATION to set: this version has no
+      # registration at all. include/login_form.php still links to
+      # register.php, but no such file exists in the tree and no route serves
+      # it, so the link 404s and there is no self-signup form to close.
+      # Accounts are created by the administrator in Preferences -> Users.
+
+      # auth_internal is the only authentication module installed, and
+      # Config::sanity_check() refuses to run without one. `note` is the
+      # per-article notes plugin every stock tt-rss has. nginx_xaccel, the
+      # third in upstream's container default, is deliberately absent: it
+      # exists to hand cache/ off to nginx's `internal` location, and this
+      # stack is Apache with that directory denied outright.
+      TTRSS_PLUGINS: "auth_internal, note"
+
+      # Where PHP is. Config's default is /usr/bin/php, which is right for a
+      # distro package and wrong for every official php Docker image, where
+      # the binary is /usr/local/bin/php -- and the shared base image is
+      # `php:{version}-apache-bookworm` (config/core/images.yaml). It matters
+      # because `update.php --daemon` does not fetch feeds in-process: it
+      # forks one child per feed through PHP_EXECUTABLE. With the default the
+      # fork fails and tt-rss records it as
+      #
+      #   last_error: Update process failed with exit code: 127
+      #
+      # on every feed, while the web interface stays perfectly healthy and
+      # answers 200 -- an account whose deploy, health probe and HTTP check
+      # all pass and whose feeds never once update. Measured on this host, and
+      # the reason upstream's own Dockerfile sets TTRSS_PHP_EXECUTABLE too.
+      TTRSS_PHP_EXECUTABLE: /usr/local/bin/php
+
+      # The updater runs in this container beside Apache, one job at a time,
+      # inside the account's memory cap. The upstream defaults assume a
+      # container of its own.
+      TTRSS_DAEMON_MAX_JOBS: "1"
+      TTRSS_DAEMON_FEED_LIMIT: "20"
+
+      # Corrections, not configuration. tt-rss reads none of these -- Config
+      # only ever asks for `TTRSS_*` -- but the engine puts them in the app's
+      # environment anyway: having mined ttrss-db out of this file, it hands
+      # the application that sidecar's connection settings under every
+      # spelling it knows (SidecarCredentials::envForSidecar). The password it
+      # uses is the literal `app` that resolvedComposeValue() substituted for
+      # a value it could not resolve, so left alone the container advertises a
+      # DSN that does not work. Restated here from the same variable the
+      # database is started with, so anything an operator or a future plugin
+      # reads out of the environment is true.
+      POSTGRES_PASSWORD: ${PA_TTRSS_DB_PASSWORD}
+      POSTGRES_URL: postgres://ttrss:${PA_TTRSS_DB_PASSWORD}@ttrss-db:5432/ttrss
+      DB_PASSWORD: ${PA_TTRSS_DB_PASSWORD}
+      DATABASE_URL: postgres://ttrss:${PA_TTRSS_DB_PASSWORD}@ttrss-db:5432/ttrss
+
+    # The two secrets the application itself needs, by a path that climbs out
+    # of the document root. ~/.panelalpha survives the clone; ~/project does
+    # not (engine #173), and hooks/prepare.sh rewrites this file on every
+    # deploy before compose runs.
+    #
+    # env_file rather than `environment:` because nothing else sets these two
+    # keys -- see the note on ttrss-db for the one place where that is not
+    # true and a variable has to be used instead. ComposeEnvFiles refuses a
+    # path with a `..` segment, so the engine does not try to create it on the
+    # stack's behalf; the hook is what guarantees it exists.
+    env_file:
+      - ../.panelalpha/tt-rss-app.env
+
+    depends_on:
+      ttrss-db:
+        condition: service_healthy
+
+    # Apache with mod_php, plus the update daemon and whatever a feed fetch
+    # pulls into memory. The hardener's figure for an unlisted service would
+    # be lower; 1024 + 512 + 64 fits the 2000 MB this was tested at.
+    mem_limit: 1024m
+
+    # The engine runs `docker compose up -d` without `--wait` and probes as
+    # soon as it returns (engine #90), which here is while the install stage
+    # is still loading a 150-migration schema into an empty database. Without
+    # this the probe reads `Failed to connect to 127.0.0.1 port 8000`.
+    #
+    #   1. /public.php?op=healthcheck   Handler_Public::healthcheck prints OK,
+    #                                   and public.php calls
+    #                                   Config::sanity_check() before it,
+    #                                   which opens the database (Db::pdo())
+    #                                   and checks cache/images is writable.
+    #                                   A 200 here is a real round trip, not a
+    #                                   liveness ping.
+    #   2. /  grepped, not trusted for its status.  index.php answers 200 with
+    #         the login form; it would also answer 200 with an error page, and
+    #         `type="password"` is on the form (include/login_form.php:141)
+    #         and not on the error page.  Rendering it means sessions, the
+    #         schema and the Dojo layout all work.
+    #
+    # curl is in the shared base image. No -L: nothing here redirects.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null --max-time 30 'http://127.0.0.1:8000/public.php?op=healthcheck' &&
+          curl -fsS --max-time 30 http://127.0.0.1:8000/ | grep -q 'type="password"'
+      interval: 10s
+      timeout: 40s
+      retries: 30
+      # Schema load plus `composer install` on a shared host.
+      start_period: 300s
+
+  # tt-rss cannot use the account's own database server. `database: mysql` is
+  # the manifest key that provisions one -- panel-visible, in phpMyAdmin,
+  # inside the account's backup, costing no container -- and
+  # PlatformManifest::DATABASES is `['mysql']`, the only value the engine has.
+  # There is no MySQL port of tt-rss to point it at: sql/ contains pgsql/ and
+  # nothing else, and the MySQL support that used to be there was removed
+  # upstream. So this is a sidecar, and the cost is honest: a second container
+  # and a volume the panel does not manage.
+  ttrss-db:
+    # 17, not 18. Postgres 18 moved PGDATA to /var/lib/postgresql/18/docker and
+    # its entrypoint refuses to start when /var/lib/postgresql/data is a mount
+    # point (docker-library/postgres#1259).
+    image: postgres:17-alpine
+    restart: unless-stopped
+    # These three have to be `environment:` with a compose variable, and that
+    # is worth explaining, because `env_file:` would be the tidier way to keep
+    # a password out of the checkout and it does not work here.
+    #
+    # RuntimeSidecars mines this file -- `exampleComposeFilenames()` globs
+    # `docker-compose.*.yml` in the project directory and
+    # `docker-compose.override.yml` matches it -- and copies this service into
+    # the generated compose with `SidecarCredentials::pinSidecarCredentials()`
+    # applied. That fills in every one of the engine's `init_vars`
+    # (POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD) from whatever
+    # `environment:` says, and `resolvedComposeValue()` turns an absent or
+    # unresolvable value into the literal string `app`. So the generated file
+    # ends up declaring `POSTGRES_PASSWORD: app` as `environment:`, compose
+    # gives `environment:` precedence over `env_file:`, and the database would
+    # initialise with a password the application was never told -- measured:
+    # `password authentication failed for user "ttrss"`.
+    #
+    # Naming them here fixes it, because this file is the *last* `-f` compose
+    # is given, so its `environment:` wins the merge, and `${...}` is
+    # interpolated from the project's own `.env` at that point rather than by
+    # the engine. The password is therefore in `.env` -- and, through
+    # ProjectEnvironment::apply(), in `.env.default` at mode 644 (engine #173)
+    # -- which the generated vhost denies along with every other dotfile. The
+    # admin password, which is a login credential rather than an internal one,
+    # stays out of both and travels by env_file above.
+    environment:
+      POSTGRES_DB: ttrss
+      POSTGRES_USER: ttrss
+      POSTGRES_PASSWORD: ${PA_TTRSS_DB_PASSWORD}
+    # No `ports`. Nothing outside the account's compose network has any
+    # business reaching 5432, and ComposePortScan would have to be told to
+    # ignore it.
+    volumes:
+      - ttrss_pgdata:/var/lib/postgresql/data
+    # A stock postgres sizes itself for a machine of its own. This one shares
+    # the account with Apache, mod_php and the updater.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - max_connections=30
+    healthcheck:
+      # -U and -d rather than a bare pg_isready: the bare form asks whether the
+      # postmaster accepts connections, which is true during initdb, before the
+      # role and the database exist.
+      test: ["CMD-SHELL", "pg_isready -U ttrss -d ttrss"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
+    mem_limit: 512m
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # gated on the app is what makes `up -d` return only once tt-rss has loaded
+  # its schema, rotated the admin password and answered a request. A clean
+  # exit 0 is not a crash loop as far as AppHealth is concerned. This is the
+  # engine #90 workaround.
+  #
+  # alpine:3, and the image is load-bearing rather than a size preference.
+  # Reusing postgres:17-alpine here -- already being pulled for this stack --
+  # made `ServiceRole::isKnownDatastore()` recognise this service as a database
+  # too, so the miner above kept it as a second sidecar, the generated compose
+  # gave `app` a `depends_on: [ttrss-db, ready]`, and this service's own
+  # `depends_on: app` closed the loop:
+  #
+  #   Deploy failed: Failed to start app: dependency cycle detected:
+  #   app -> ready -> app
+  #
+  # With alpine:3 the miner drops the service entirely, it exists only in this
+  # file, and nothing depends on it.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  ttrss_pgdata: {}

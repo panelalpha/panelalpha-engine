@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  tube is a self-hosted YouTube-like video-sharing app in Go: upload a video and
+  it auto-transcodes to MP4 H.264/AAC with ffmpeg, generates a thumbnail, lists
+  it and publishes an RSS feed (/feed.xml). No database — video metadata lives in
+  the files and a bitcask index — and ALL of its state (the videos, thumbnails,
+  the tube.db index) sits under one data dir. It listens on :8000.
+
+  Nothing from the checkout is built or run. The repository's own Dockerfile
+  compiles the Go binary from source (golang:alpine, ffmpeg-dev, `make server`);
+  the project publishes that exact build as an official multi-arch image
+  (prologic/tube on Docker Hub, tag `latest` @ 2024-12-24) with the whole ffmpeg
+  transcoding toolchain baked in, so the recipe runs the image instead of
+  rebuilding it. A source recipe cannot use the compose strategy
+  (PlatformSelector::fromSource() describes without probe data, so
+  DeployabilityCheck fails "Compose strategy selected but compose file is
+  missing"), so it ships a one-line `FROM` Dockerfile through the dockerfile
+  strategy: no build steps run, the published image is pulled, and the hosting
+  shape is layered through the compose override. The image is pinned by digest
+  for a reproducible deploy.
+
+  Public URL. tube writes absolute RSS/enclosure links only from its config
+  (feed.external_url); there is NO BASE_URL (or any URL) env var in the Go source
+  despite what the README's compose snippet implies. So the boot wrapper renders
+  config.json at start-up with the account's public https URL — which the
+  dockerfile strategy injects as BASE_URL (PublicUrlEnvironment) — as
+  external_url, and the feed carries the account domain. The web UI itself uses
+  relative links and works on any host.
+
+  Persistence. -c points tube at /data for the library, uploads and the tube.db
+  index, and ~/project is wiped every redeploy (engine#173), so /data is
+  bind-mounted to the account's persistent ~/.panelalpha/tube (the only writable,
+  rebuild-surviving dir). Uploaded videos are LARGE and are all the state; a
+  named-style persistent bind keeps them across rebuilds — verified: an uploaded,
+  transcoded video is still listed and streams back after a rebuild. The image's
+  /init entrypoint runs as root, remaps its `tube` user to the account uid/gid
+  (usermod/groupmod) and su-execs down; the prepare hook records the account
+  uid/gid and the override passes them as PUID/PGID so the process runs as — and
+  /data stays owned by — the account that wrote the bind mount.
+
+  SECURITY — upload gate. This is the load-bearing decision for a public video
+  host. tube gates POST /upload behind HTTP basic auth (username "uploader")
+  ONLY when auth_password is set; unset, upload is fully anonymous — anyone can
+  fill the owner's disk. The prepare hook generates a 32-char password ONCE into
+  ~/.panelalpha/tube/secrets.env (0600, never in ~/project) and the boot wrapper
+  exports it (as both auth_password and AUTH_PASSWORD, robust across image
+  builds) before tube starts, so /upload is gated out of the box — verified:
+  anonymous upload is refused 401, uploader:<pw> is 200. The owner password is
+  written to ~/.panelalpha/tube/panelalpha-credentials.txt (0600).
+
+  RESIDUAL RISK — /import is NOT gated. tube's other write route, POST /import
+  (import a YouTube/Vimeo video by URL), has no auth wrapper in upstream source
+  and stays open to anonymous POST (verified: returns 500, not 401). It is bounded
+  — the importer only accepts youtube.com/vimeo.com URLs, so it is an anonymous
+  disk-fill vector, not an arbitrary-URL SSRF — and the bundled ytdl/vimeodl
+  libraries are frequently broken against today's YouTube, so it often fails at
+  runtime. Closing it would require patching upstream source, which is out of
+  scope for a source recipe (configure and secure, not repair). Documented as a
+  limitation: an operator who cares about anonymous writes should keep this behind
+  a front auth or trusted network. The engine offers no per-app basic-auth proxy
+  layer to gate it here.
+
+  The recipe states dockerfile/port_hint because a source recipe is applied
+  before the probes run and neither would otherwise be known.
+extends: dockerfile
+extra:
+  # A source recipe is applied without probe data (PlatformSelector::fromSource()
+  # calls describe() with none), so the dockerfile probe's dockerfile/port_hint
+  # would be null/80 and DeployabilityCheck would fail "Dockerfile strategy
+  # selected but Dockerfile is missing." Name what the probe would have found:
+  # the FROM-image Dockerfile this recipe ships, and the port tube listens on.
+  dockerfile: Dockerfile
+  port_hint: 8000

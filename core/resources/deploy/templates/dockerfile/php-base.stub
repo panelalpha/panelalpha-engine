@@ -2,8 +2,11 @@ FROM {{ php_image }}
 LABEL panelalpha.base="php"
 LABEL panelalpha.runnable="1"
 COPY --from={{ installer_image }} /usr/bin/install-php-extensions /usr/local/bin/
+# The DB clients are for Laravel's schema:dump replay: MySqlSchemaState and
+# its Postgres twin shell out to a bare mysql/psql, so an app shipping a
+# squashed schema crash-loops at deploy without these.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git unzip \
+ && apt-get install -y --no-install-recommends git unzip default-mysql-client postgresql-client \
  && rm -rf /var/lib/apt/lists/*
 RUN install-php-extensions {{ extensions }}
 {{# extras }}
@@ -40,6 +43,12 @@ PA_PORTS
 RUN cat > {{ vhost_path }} <<'PA_VHOST'
 {{ vhost_conf }}
 PA_VHOST
+# The official php image loads no php.ini at all -- both templates sit unused
+# in $PHP_INI_DIR -- so without this every account runs on the compiled-in
+# defaults and prints its notices into the response body of every page.
+RUN cat > {{ php_ini_path }} <<'PA_PHP_INI'
+{{ php_ini }}
+PA_PHP_INI
 # The proxy prelude lives in the image, not in /app: /app is the customer's
 # own directory now, and a file the engine needs must not be one they can
 # delete over SFTP.
@@ -53,6 +62,10 @@ PA_PROXY_INI
 # How a document root becomes a running server. A manifest declares
 # `docroot:`; turning that into Apache is the image's job, not fourteen copies
 # of the same shell snippet in fourteen recipes.
+# Where the serve script points Apache when the checkout has no front
+# controller at all. Root-owned and empty: /app is the customer's directory,
+# and serving it published every .php in the tree.
+RUN mkdir -p {{ empty_docroot }}
 RUN cat > {{ serve_path }} <<'PA_SERVE'
 {{ serve_script }}
 PA_SERVE

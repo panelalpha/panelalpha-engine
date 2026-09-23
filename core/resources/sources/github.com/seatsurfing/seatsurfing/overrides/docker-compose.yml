@@ -1,0 +1,53 @@
+# Replaces the repository's build-from-source docker-compose.yaml with the
+# upstream prebuilt all-in-one image and a Postgres 18 sidecar. Secrets are
+# interpolated from the .env the prepare hook writes into ~/project.
+services:
+  server:
+    image: ghcr.io/seatsurfing/backend:1.127.9
+    restart: always
+    mem_limit: 1g
+    ports:
+      - 8080:8080
+    environment:
+      POSTGRES_URL: "postgres://seatsurfing:${DB_PASSWORD}@db/seatsurfing?sslmode=disable"
+      # Encrypts sensitive columns; must be exactly 32 bytes or the server aborts.
+      CRYPT_KEY: "${CRYPT_KEY}"
+      # First-boot bootstrap of the org + org-admin. INIT_ORG_PASS replaces the
+      # published default so admin@seatsurfing.local never has a guessable password.
+      INIT_ORG_NAME: "Seatsurfing"
+      INIT_ORG_USER: "admin"
+      INIT_ORG_DOMAIN: "localhost"
+      INIT_ORG_PASS: "${INIT_ORG_PASS}"
+      # The proxy terminates TLS on 443; tell the app its external scheme/port
+      # so generated links and cookies are correct (these are also the defaults).
+      PUBLIC_SCHEME: "https"
+      PUBLIC_PORT: "443"
+      # Hosted install: do not phone home.
+      DISABLE_VERSION_CHECK: "1"
+      DISABLE_ANONYMOUS_USAGE_STATS: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+    # The distroless image ships its own HEALTHCHECK (/app/healthcheck), so the
+    # engine's readiness gate follows the container's own health.
+  db:
+    image: postgres:18
+    restart: always
+    mem_limit: 1g
+    volumes:
+      # postgres:18 hard-errors on a mount at .../data (old convention) and
+      # requires the mount one level up; PGDATA then lives in a versioned subdir.
+      - db:/var/lib/postgresql
+    environment:
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
+      POSTGRES_USER: "seatsurfing"
+      POSTGRES_DB: "seatsurfing"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seatsurfing -d seatsurfing"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  db:

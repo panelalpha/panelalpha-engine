@@ -1,0 +1,85 @@
+# Layers over the compose file the dockerfile strategy generates. That file is
+# right about the app -- it builds files/Dockerfile, publishes 80 and reads
+# env_file: .env -- and it knows nothing about a database, because `database:
+# mysql` in a manifest is read only under `runtime: php`
+# (Php/PhpEnvironment.php:90) and a Dockerfile project never reaches it.
+services:
+  app:
+    # .env first so the engine's own file still wins where it says anything;
+    # the second carries the database password and the first login, and lives
+    # outside ~/project, which every deploy empties. Both are read when the
+    # container is created, and hooks/prepare.sh has written the second by then.
+    env_file:
+      - .env
+      - ../.panelalpha/sogo/sogo.env
+    depends_on:
+      db:
+        condition: service_healthy
+      memcached:
+        condition: service_started
+    volumes:
+      # Drafts being composed and attachments being uploaded. Not the calendars
+      # or the contacts -- those are rows in MySQL -- but losing a half-written
+      # message on a redeploy is still a bug.
+      - sogo-spool:/var/spool/sogo
+    # sogod with three workers plus nginx. Measured around 260 MB resident with
+    # a session open; 512m leaves room for a large attachment.
+    mem_limit: 512m
+
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    # MARIADB_* by name, so mariadb's own entrypoint reads the same file the app
+    # does. Compose's ${...} interpolation cannot be used here: it reads the
+    # shell and ./.env, never an env_file.
+    env_file:
+      - ../.panelalpha/sogo/sogo.env
+    volumes:
+      - sogo-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 512m
+
+  memcached:
+    # Not a cache SOGo can do without: SOGoCache.m is where sessions live, and
+    # sogod refuses to authenticate anybody when it cannot reach a server.
+    image: memcached:1.6-alpine
+    restart: unless-stopped
+    command: ["-m", "64"]
+    mem_limit: 96m
+
+  # `docker compose up -d` runs without --wait, so the deploy would otherwise be
+  # called finished the moment the containers were *created* -- while sogod is
+  # still opening its first connection and creating its tables. `probe` polls
+  # until SOGo actually answers.
+  #
+  # Exits 0 even when the wait runs out: a site that is up but wrong belongs to
+  # the health probe, not to a failed deploy stage.
+  probe:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["timeout 240 sh -c 'until wget -q -T 5 -O /dev/null http://app:80/SOGo/; do sleep 2; done'; exit 0"]
+    restart: "no"
+    depends_on:
+      - app
+    mem_limit: 64m
+
+  # Does nothing and exits 0. It is the service `up -d` actually waits on: a
+  # service_completed_successfully dependency blocks compose until `probe` has
+  # exited, and nothing else in the file would.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      probe:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  sogo-db:
+  sogo-spool:

@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kresus is a self-hosted personal finance / budget manager: a Node/Express
+  server (TypeScript) that serves its own SPA and, through the Python "woob"
+  library, can scrape bank statements. supported-apps#1074. It listens on 9876
+  (HOST already 0.0.0.0 in the image) and gates the ENTIRE app behind HTTP Basic
+  Auth when KRESUS_AUTH=<user>:<pass> is set (server/index.ts mounts
+  express-basic-auth before every route, challenge on).
+
+  Nothing from the checkout is built or run. The repository ships the Kresus
+  source, a from-source Dockerfile (support/docker/, which apt-installs a large
+  woob toolchain, rustup and pip deps, then `yarn global add kresus`), and a
+  traefik-fronted dev compose. Upstream publishes that exact build as the
+  official multi-arch image bnjbvr/kresus on Docker Hub, so this recipe runs the
+  image (pinned to the stable tag 0.25.4) via a compose-replace rather than
+  rebuilding it on a 2-core host. This is the jetlog / mixpost pattern: a
+  description-only recipe whose overrides/docker-compose.yml is picked up by the
+  compose-usable probe, so the deploy runs the replacement stack as-is.
+
+  DATABASE. Kresus supports sqlite or postgres but "strongly discourages" sqlite
+  because it cannot handle certain migrations, and the stable image self-upgrades
+  kresus at boot (so migrations really do run on a redeploy). The recipe
+  therefore uses a postgres:16 sidecar — upstream's recommended, migration-safe
+  store — on a named volume (kresus_db) that survives redeploy and storage
+  reclaim. Kresus's own runtime dir (/home/user/data: woob modules, sources
+  list, logs) sits on a second named volume (kresus_data). ~/project is wiped
+  every redeploy (engine#173) and holds neither.
+
+  BOOT DETERMINISM. The stable image's entrypoint runs `yarn global upgrade
+  kresus` on every boot unless IS_NIGHTLY is set. The recipe sets IS_NIGHTLY=1 to
+  pin kresus to the version baked into the 0.25.4 image: reproducible deploys, no
+  npm version drift, and much faster boots on a small host. This is provisioning
+  a current maintained release, not a source patch (no upstream file is touched).
+  woob is still refreshed at boot (the entrypoint does not gate that).
+
+  SECURITY. Kresus ships no built-in login for a bare instance — exposure is
+  gated entirely by KRESUS_AUTH. The prepare hook generates a 32-char,
+  colon-free basic-auth password ONCE into ~/.panelalpha/kresus/secrets.env
+  (0600), reuses it on every redeploy, and records it for the owner in
+  ~/.panelalpha/kresus/panelalpha-credentials.txt (0600, SFTP-reachable). It also
+  generates the postgres password and a stable KRESUS_SALT (export encryption)
+  once. The upstream dev compose's known default (kresus:foobar / apr1 hash) is
+  never used. Anonymous requests get 401; the generated credentials are the only
+  way in.
+
+  PERSISTENCE. Secrets live in ~/.panelalpha/kresus and are materialised into
+  ~/project/.env by the prepare hook; compose interpolates ${KRESUS_AUTH},
+  ${KRESUS_DB_PASSWORD} and ${KRESUS_SALT} from there. The engine merges its own
+  keys onto that .env without dropping the recipe's (EnvFile::merge).
+
+  The published port is declared explicitly (9876) so the proxy has an app port
+  to target (engine#234); a no-op `ready` service gated on the kresus
+  healthcheck makes `compose up` block until Kresus actually answers (engine#90).

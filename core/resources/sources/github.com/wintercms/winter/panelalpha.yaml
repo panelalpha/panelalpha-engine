@@ -1,0 +1,124 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Winter CMS is a Laravel-based content management system, the maintained fork
+  of October CMS. Detection reads it as `laravel` and is right about the
+  runtime -- composer.json, artisan, Laravel 9 -- and wrong about three things
+  that matter, which is the `serving-unknown` verdict this recipe fixes.
+
+  The first is fatal on its own. The laravel recipe's install stage runs
+  `php artisan migrate --force --no-interaction`, and Winter registers its own
+  `System\Console\WinterUp` under the aliases `october:up` and **`migrate`**
+  (modules/system/console/WinterUp.php). An eagerly registered Symfony command
+  beats Laravel's lazily loaded one, so `migrate` resolves to WinterUp, whose
+  signature is `winter:up {--seed}` and nothing else:
+
+      The "--force" option does not exist.
+
+  `set -e` in the generated entrypoint turns that into exit 1 on `install` and
+  on every restart after it. Nothing ever listened on 8000.
+
+  There is no way to *replace* a command an extended recipe declares -- an app
+  config's `commands:` are merged with the manifest's, never matched by id --
+  so this file states the whole manifest rather than `extends: laravel`, and
+  runs `php artisan winter:up`, which is the same migration under the name
+  Winter answers to. `strategy: laravel` keeps everything else the strategy
+  does: the shared PHP base image, ~/project bind-mounted at /app, the
+  account's uid, Composer on the host, pdo_sqlite in the image, the public
+  https URL in APP_URL.
+
+  The second is the document root. Winter serves from the repository root --
+  `index.php` and a complete `.htaccess` are both committed there, and `public`
+  is in .gitignore because it is *generated* by `winter:mirror public`, which
+  nothing in a deploy runs. `docroot: .` says so. The base image's own fallback
+  would have found the root anyway, but only after logging that the declared
+  document root does not exist. The committed .htaccess is what protects the
+  tree, and the shipped vhost gives it `AllowOverride All` and mod_rewrite:
+  measured on this deploy, `/storage/database.sqlite` and `/composer.json`
+  answer 404 (rewritten into index.php) and `/.env` 403.
+
+  The third is the database. `.env.example` says `DB_CONNECTION=mysql`, and
+  `EnvSidecars::specFromDbConnection()` reads exactly that and adds a mariadb:11
+  sidecar -- a container and a volume for an application that migrates onto
+  SQLite in under a second and does not need either, on a host where the whole
+  account is capped at 1800 MB. hooks/prepare.sh writes `.env` first (the
+  engine only copies `.env.example` when no `.env` exists, and EnvSidecars
+  reads `.env` over `.env.example`), so no sidecar is inferred and the strategy
+  reaches its SQLite branch on its own.
+
+  Heimdall's `database_path()` trap does not apply here: Winter's
+  config/database.php reads `env('DB_DATABASE', storage_path('database.sqlite'))`
+  with no wrapping, so an absolute path is used as given. What does apply is
+  that nothing creates the file. Laravel 9's SQLiteConnector refuses to:
+
+      Database file at path [/app/storage/database.sqlite] does not exist.
+
+  The prepare hook creates it, and `DB_DATABASE` below points at
+  `storage/`, which exists in the checkout, rather than at the engine's default
+  `/app/database/database.sqlite`, which does not.
+
+  The fourth thing, found on the first deploy of this recipe rather than read
+  out of the source: `artisan key:generate` cannot set APP_KEY here. The
+  generated service loads `.env` through `env_file:`, Compose reads that at
+  container *creation*, and an `APP_KEY=` line therefore becomes a real empty
+  environment variable — which Laravel's immutable Dotenv will not overwrite.
+  key:generate wrote a good key into .env and every request still answered
+  `MissingAppKeyException`, with `printenv APP_KEY` printing an empty line and
+  the file printing the key. The prepare hook generates it instead, on the
+  host, before the container exists.
+
+  The admin account is seeded by `Backend\Database\Seeds\DatabaseSeeder` with a
+  random 22-character password that it prints to the console and stores
+  nowhere. That is safe -- unlike four of the apps tested before it, a fresh
+  Winter is *not* open to whoever finds the address -- but it is also unusable,
+  and the one copy of it is sitting in the deploy log. So
+  files/panelalpha/set-admin-password.sh generates another, records it in
+  ~/project/.panelalpha-admin-password (0600) and sets it with Winter's own
+  `winter:passwd`, and does nothing at all once that file exists.
+id: wintercms
+label: Winter CMS
+strategy: laravel
+runtime: php
+port: 8000
+# index.php and .htaccess are both committed at the root; `public` is generated
+# by `winter:mirror` and gitignored. See the description.
+docroot: .
+requires:
+  php: runtime
+env:
+  # .env.example ships APP_DEBUG=true, and `environment:` outranks `env_file:`,
+  # so this is where it has to be corrected. Winter's debug page prints the
+  # configuration and a full stack trace to the visitor.
+  APP_DEBUG: 'false'
+  # config/database.php uses this verbatim. storage/ is in the checkout and is
+  # Winter's own default location for the file; /app/database/, which the
+  # engine's SQLite fallback names, is not a directory Winter has.
+  DB_CONNECTION: sqlite
+  DB_DATABASE: /app/storage/database.sqlite
+commands:
+  - id: composer-install
+    stage: build
+    role: dependencies
+    description: 'Runs on the host, in the image the app will be served from, so Composer checks the real PHP version and extension set. --no-plugins because a plugin is arbitrary PHP out of the customer repository and this runs on the host daemon.'
+    run: 'composer install --no-dev --no-interaction --no-scripts --no-plugins --optimize-autoloader'
+  # No `key:generate`. APP_KEY is generated by hooks/prepare.sh, on the host,
+  # before the container exists — `env_file:` is read at container creation, so
+  # an empty APP_KEY= line becomes a real empty environment variable that
+  # Laravel's immutable Dotenv will not overwrite, and a key written into .env
+  # afterwards is never seen. See the prepare hook.
+  - id: winter-up
+    stage:
+      - install
+      - upgrade
+    description: 'Winter''s migration, which also seeds the modules on a first run — UpdateManager::update() migrates system, backend and cms plus every plugin, then calls each module''s DatabaseSeeder when the schema was empty. This is what `migrate` is an alias for, and the name that takes no --force.'
+    run: 'php artisan winter:up'
+    timeout: 600
+  - id: winter-admin-password
+    stage:
+      - install
+      - upgrade
+    description: 'Replaces the random password DatabaseSeeder printed to the deploy log with one recorded in ~/project/.panelalpha-admin-password (0600), and leaves a password an operator later chose alone.'
+    run: 'sh panelalpha/set-admin-password.sh'
+    # A site that would otherwise serve is never held back by this step. The
+    # cost of it failing is an admin account whose only password is in the
+    # deploy log, which the script says loudly on stderr.
+    optional: true

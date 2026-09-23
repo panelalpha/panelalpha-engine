@@ -8,7 +8,7 @@
 # letsencrypt-renew.sh renews only when a lineage is inside its window,
 # reinstalls only what changed, and keeps serving what was being served -- the
 # gaps in the old scripts were exactly here (no cron, no reinstall, no
-# core-http restart), so this is the test that would have caught them.
+# nginx reload), so this is the test that would have caught them.
 #
 # Needs bash, openssl and coreutils; no root, no network.
 set -uo pipefail
@@ -121,7 +121,9 @@ check "served key is a real file, mode 600" "[ ! -L '$(crt server.key)' ] && [ \
 check "cert_domain setting records the name" "[ \"\$(cat '$FAKE_SETTINGS_DIR/cert_domain')\" = 203-0-113-7.panelalpha.direct ]"
 check "webserver stopped for the challenge and stack restored" \
     "grep -q 'down sites-http' '$FAKE_DOCKER_LOG' && grep -q 'up -d' '$FAKE_DOCKER_LOG'"
-check "core-http restarted so nginx loads the new pair" "grep -q 'restart core-http' '$FAKE_DOCKER_LOG'"
+check "core's nginx reloaded so it loads the new pair" "grep -q 'exec -T core nginx -s reload' '$FAKE_DOCKER_LOG'"
+check "core is never restarted" "! grep -qE 'restart( [a-z-]+)* core( |\$)' '$FAKE_DOCKER_LOG'"
+check "queue workers told to reread APP_URL" "grep -q 'exec -T core php artisan queue:restart' '$FAKE_DOCKER_LOG'"
 check "renewal scheduled" "grep -q 'letsencrypt-renew.sh' '$LE_CRON_FILE'"
 check "APP_URL moved off the bare IP onto the served name" \
     "grep -qx 'APP_URL=https://203-0-113-7.panelalpha.direct:2011' '$LE_ENGINE_DIR/.env-core'"
@@ -170,7 +172,7 @@ run_as_root letsencrypt-request-cert.sh --ip 203.0.113.7 --skip-dns-check
 run_as_root letsencrypt-renew.sh
 check "fresh lineages: renew does not stop the webserver" \
     "! grep -q 'renew' '$FAKE_DOCKER_LOG' && ! grep -q 'down sites-http' '$FAKE_DOCKER_LOG'"
-check "fresh lineages: nothing reinstalled" "! grep -q 'restart core-http' '$FAKE_DOCKER_LOG'"
+check "fresh lineages: nothing reinstalled" "! grep -q 'nginx -s reload' '$FAKE_DOCKER_LOG'"
 
 # A lineage inside its window: renewal runs and the served pair follows.
 FAKE_CERT_DAYS=6 run_as_root letsencrypt-request-ip-cert.sh 203.0.113.7 --force-renewal
@@ -190,7 +192,7 @@ check "due lineage: certbot renew runs with the webserver stopped" \
 check "renewed domain cert is reinstalled and served" \
     "[ \"\$(md5sum <'$(crt server.cert)')\" != '$served_before' ] && same_file '$(live panelalpha-engine-cert)/fullchain.pem' '$(crt server.cert)'"
 check "renewed IP cert refreshed beside it" "same_file '$(live panelalpha-engine-ip-cert)/fullchain.pem' '$(crt server-ip.cert)'"
-check "core-http restarted after reinstall" "grep -q 'restart core-http' '$FAKE_DOCKER_LOG'"
+check "core's nginx reloaded after reinstall" "grep -q 'exec -T core nginx -s reload' '$FAKE_DOCKER_LOG'"
 
 # --- 6. renewal falls back to the IP lineage when there is no domain one ------------------------------
 

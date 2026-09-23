@@ -1,0 +1,128 @@
+# Replaces Mobilizon's operator-template docker/production files (a Dockerfile +
+# an entrypoint that assume secrets and a running PostGIS already exist, no
+# runnable compose) with a working stack. The app is the official prebuilt
+# image; nothing is built from the clone and no second source repo is pulled.
+services:
+  db:
+    # PostGIS, NOT plain postgres: Mobilizon's first migration runs
+    # `CREATE EXTENSION postgis` and stores every event address as a PostGIS
+    # geometry. Pinned major: Postgres cannot migrate a datadir backwards, so a
+    # floating tag would break the named volume the first time the major moves.
+    image: docker.io/postgis/postgis:16-3.5
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, written once by hooks/prepare.sh into
+    # ~/.panelalpha/mobilizon/. The database never sees the app signing secrets.
+    env_file:
+      - ../.panelalpha/mobilizon/db.env
+    environment:
+      POSTGRES_DB: mobilizon
+      POSTGRES_USER: mobilizon
+      # A named volume is not always empty (lost+found); postgres refuses to
+      # init into a non-empty dir, so give it a clean subdir.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mobilizon -d mobilizon -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  # One-shot: migrate to completion and seed the confirmed admin BEFORE the app
+  # is allowed to start, so exactly one Mobilizon node is ever alive at seed
+  # time. `app` waits on this with service_completed_successfully, so a failed
+  # migration or a failed seed stops the deploy instead of publishing a broken
+  # site. mobilizon_ctl users.new defaults to RPC-into-a-running-node for
+  # non-migrate commands; MOBILIZON_CTL_RPC_DISABLED makes it run in its own
+  # eval instance (serve_endpoints=false, no port bind).
+  init:
+    image: ${MOBILIZON_IMAGE:-docker.io/kaihuri/mobilizon:5.2.4}
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    # .env carries account-overridable defaults; app.env carries the persisted
+    # DB password + signing secrets; admin.env carries the seeded admin password
+    # and never reaches the long-running app container.
+    env_file:
+      - .env
+      - ../.panelalpha/mobilizon/app.env
+      - ../.panelalpha/mobilizon/admin.env
+    environment:
+      MOBILIZON_DATABASE_HOST: db
+      MOBILIZON_DATABASE_PORT: "5432"
+      MOBILIZON_DATABASE_USERNAME: mobilizon
+      MOBILIZON_DATABASE_DBNAME: mobilizon
+      MOBILIZON_CTL_RPC_DISABLED: "true"
+      # Rewritten to the account's public https URL before the stack starts
+      # (ComposePlaceholders rewrites a localhost value whose key ends in _URL).
+      # init derives the admin email admin@<host> from it.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      - ./panelalpha/mobilizon:/pa:ro
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    mem_limit: 1024m
+
+  app:
+    image: ${MOBILIZON_IMAGE:-docker.io/kaihuri/mobilizon:5.2.4}
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - ../.panelalpha/mobilizon/app.env
+    environment:
+      MOBILIZON_DATABASE_HOST: db
+      MOBILIZON_DATABASE_PORT: "5432"
+      MOBILIZON_DATABASE_USERNAME: mobilizon
+      MOBILIZON_DATABASE_DBNAME: mobilizon
+      # config/docker.exs binds MOBILIZON_INSTANCE_PORT (default 4000); named so
+      # the published port and the healthcheck cannot drift from it.
+      MOBILIZON_INSTANCE_PORT: "4000"
+      # Rewritten to the account's public https URL before the stack starts.
+      # /pa/entrypoint.sh strips the scheme into MOBILIZON_INSTANCE_HOST, which
+      # config/docker.exs requires as a BARE hostname for URL/redirect/federation
+      # generation, and derives MOBILIZON_INSTANCE_EMAIL if unset.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      - ./panelalpha/mobilizon:/pa:ro
+      # Uploaded media (event pictures, avatars, participant exports). The image
+      # creates this path owned nobody:nobody and runs as nobody, so a fresh
+      # named volume inherits the ownership and is writable with no chown.
+      - uploads:/var/lib/mobilizon/uploads
+    entrypoint: ["/bin/sh", "/pa/entrypoint.sh"]
+    healthcheck:
+      # The homepage is public and returns 200 for an anonymous visitor. The
+      # image ships curl (installed in the Dockerfile). config/docker.exs binds
+      # 0.0.0.0:4000, so 127.0.0.1 reaches it.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:4000/ || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 90s
+    mem_limit: 1536m
+
+  # Starts nothing, exits 0, waits on the app's healthcheck. The engine runs
+  # `docker compose up -d` with no --wait, so without this gate the deploy is
+  # "done" the moment containers start and the probe lands while the Elixir
+  # release is still booting and migrating. depends_on a health condition makes
+  # `up -d` block until the site actually answers.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}
+  uploads: {}

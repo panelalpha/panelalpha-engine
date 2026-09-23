@@ -1,0 +1,26 @@
+# Installed by PanelAlpha.
+#
+# mw-config/ is MediaWiki's web installer, and it is first-visitor-wins.
+# mw-config/index.php:20 defines MW_CONFIG_CALLBACK before including
+# WebStart.php, which is how it runs *without* loading LocalSettings.php at
+# all; it then hands the request to WebInstaller, whose page sequence
+# (WebInstaller.php:70) is Language, ExistingWiki, Welcome, DBConnect,
+# Upgrade, DBSettings, Name, Options, Install, Complete.
+#
+# WebInstallerExistingWiki::execute() is the only thing between a stranger and
+# that sequence: it returns 'skip' outright when
+# Installer::getExistingLocalSettings() finds no settings file
+# (WebInstallerExistingWiki.php:20-22), and otherwise asks for $wgUpgradeKey.
+# On an account that has just been handed a public HTTPS name, a form on the
+# open internet that creates a wiki and its bureaucrat is not something to
+# leave to an upgrade key.
+#
+# This wiki was installed from the deploy instead, by MediaWiki's own
+# `maintenance/run.php install` running in the container before Apache bound,
+# and `maintenance/run.php update` runs on every deploy after that -- so
+# nothing that mw-config/ does is still needed here. Deleting the directory is
+# what upstream's INSTALL file tells an administrator to do at this point; it
+# is denied rather than deleted so that a `git pull` does not quietly bring it
+# back.
+Require all denied
+Satisfy All

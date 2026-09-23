@@ -1,0 +1,38 @@
+# Layers over the compose the dockerfile strategy generates for the `app`
+# service (image = files/Dockerfile, i.e. the official Conduit image with a
+# busybox wrapper). The generated file already publishes 6167, reads env_file
+# .env and injects the public URL (PUBLIC_URL/SERVER_NAME) the wrapper reads;
+# this adds the persistent volume, the account uid, and the CONDUIT_* settings
+# that do not depend on the runtime host. ${...} interpolates from ~/project/.env,
+# which hooks/prepare.sh has written by the time compose runs.
+services:
+  app:
+    # Run as the account uid (recorded by the prepare hook) so the bind mount,
+    # owned by the account, is writable. The image otherwise runs as root.
+    user: "${CONTAINER_UID}:${CONTAINER_UID}"
+    # ${CDT_DATA_DIR} = ~/.panelalpha/conduit/data - survives the per-deploy
+    # ~/project wipe. Holds the RocksDB (accounts, rooms, messages, media) and
+    # the frozen .server_name.
+    volumes:
+      - "${CDT_DATA_DIR}:/data"
+    environment:
+      # server_name and well-known delegation are set by the wrapper from the
+      # injected public host; everything here is host-independent.
+      CONDUIT_DATABASE_PATH: "/data"
+      CONDUIT_DATABASE_BACKEND: "rocksdb"
+      CONDUIT_ADDRESS: "0.0.0.0"
+      CONDUIT_PORT: "6167"
+      CONDUIT_MAX_REQUEST_SIZE: "20000000"
+      # Conduit panics unless CONDUIT_CONFIG exists; empty = env-only, no toml.
+      CONDUIT_CONFIG: ""
+      # Token-gated registration: signups require the token below, and one
+      # without it is refused. The token is generated once by the prepare hook
+      # into ~/.panelalpha/conduit/ and reused across redeploys.
+      CONDUIT_ALLOW_REGISTRATION: "true"
+      CONDUIT_REGISTRATION_TOKEN: "${CDT_REG_TOKEN}"
+      # Federation on is normal for a Matrix homeserver.
+      CONDUIT_ALLOW_FEDERATION: "true"
+      # No phone-home from a hosted instance.
+      CONDUIT_ALLOW_CHECK_FOR_UPDATES: "false"
+    # RocksDB plus the Rust server; a few hundred MB resident idle.
+    mem_limit: 1g

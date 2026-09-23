@@ -1,0 +1,162 @@
+# Replaces the repository's local-dev compose with Bar Assistant's own
+# supported production stack, seeded from Docker Hub: the Laravel API
+# (barassistant/server, pinned 6.8.0), Meilisearch (getmeili/meilisearch:v1.50)
+# and the Salt Rim SPA (barassistant/salt-rim, pinned 5.7.0), which doubles as
+# the single public origin. Only salt-rim publishes a host port, so the
+# engine's port scan takes it as the primary app (engine#231/#234); no other
+# service declares ports or expose. Secrets come from env_files that
+# hooks/prepare.sh writes into ~/.panelalpha/bar-assistant (../.panelalpha
+# resolves from ~/project).
+services:
+  meilisearch:
+    image: getmeili/meilisearch:v1.50
+    restart: unless-stopped
+    # MEILI_MASTER_KEY is baked into the search index on first boot; never
+    # rotated (bar:setup-meilisearch and every browser search token derive from
+    # it). MEILI_ENV=production requires a master key and disables the web UI.
+    env_file:
+      - ../.panelalpha/bar-assistant/meili.env
+    environment:
+      MEILI_ENV: "production"
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meilisearch_data:/meili_data
+    healthcheck:
+      # /health is key-free and reports readiness; image is Alpine (has wget).
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:7700/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    mem_limit: 1g
+
+  bar-assistant:
+    image: barassistant/server:6.8.0
+    restart: unless-stopped
+    depends_on:
+      meilisearch:
+        condition: service_healthy
+    # APP_KEY + MEILISEARCH_KEY only; kept out of the compose so the placeholder
+    # filler never sees them.
+    env_file:
+      - ../.panelalpha/bar-assistant/app.env
+    environment:
+      # Rewritten to the real https origin at deploy (key ends in _URL, value is
+      # a bare localhost placeholder). api-entrypoint.sh derives APP_URL as
+      # <origin>/bar from it, because the /bar path a subpath needs does not
+      # survive ComposePlaceholders (it anchors after host[:port]).
+      PA_PUBLIC_URL: "http://localhost"
+      APP_ENV: "production"
+      APP_DEBUG: "false"
+      # Meilisearch reached by service name on the compose network.
+      SCOUT_DRIVER: "meilisearch"
+      MEILISEARCH_HOST: "http://meilisearch:7700"
+      DB_CONNECTION: "sqlite"
+      DB_FOREIGN_KEYS: "true"
+      # Redis dropped: file cache + file sessions, sync queue (upstream's own
+      # production compose leaves the queue on sync). No datastore sidecar, so
+      # nothing unauthenticated is in the stack.
+      CACHE_DRIVER: "file"
+      SESSION_DRIVER: "file"
+      QUEUE_CONNECTION: "sync"
+      # The account's nginx proxy sets X-Forwarded-Proto/Host; trust the hop in
+      # front so the app reads the request as https.
+      TRUSTED_PROXIES: "*"
+      LOG_CHANNEL: "stderr"
+      # Signup closed: the endpoint 404s; the owner is seeded server-side.
+      ALLOW_REGISTRATION: "false"
+      MAIL_REQUIRE_CONFIRMATION: "false"
+    # Wrapper derives APP_URL=<origin>/bar, then execs the image's own
+    # entrypoint chain (ENTRYPOINT docker-php-serversideup-entrypoint + CMD
+    # /init); a compose entrypoint clears the image CMD, so it is reproduced.
+    entrypoint: ["/bin/bash", "/pa/api-entrypoint.sh"]
+    volumes:
+      - ./panelalpha/bar-assistant/api-entrypoint.sh:/pa/api-entrypoint.sh:ro
+      # SQLite (WAL), uploads, catalog and backups; survives a redeploy.
+      - bar_data:/var/www/cocktails/storage/bar-assistant
+    healthcheck:
+      # Public, no-auth version endpoint through the server's own nginx (:8080).
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/api/server/version >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 240s   # first boot: migrate + starter-media + meili setup
+    mem_limit: 1g
+
+  # One-shot: create the operator's owner with the generated password before the
+  # site is handed over, bypassing the closed HTTP registration by calling the
+  # app's own UserService. Idempotent (skips if the email already exists).
+  init:
+    image: barassistant/server:6.8.0
+    restart: "no"
+    depends_on:
+      bar-assistant:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/bar-assistant/app.env
+      - ../.panelalpha/bar-assistant/owner.env
+    environment:
+      APP_ENV: "production"
+      APP_DEBUG: "false"
+      DB_CONNECTION: "sqlite"
+      DB_FOREIGN_KEYS: "true"
+      CACHE_DRIVER: "file"
+      SESSION_DRIVER: "file"
+      QUEUE_CONNECTION: "sync"
+      SCOUT_DRIVER: "meilisearch"
+      MEILISEARCH_HOST: "http://meilisearch:7700"
+    working_dir: /var/www/cocktails
+    entrypoint: ["php", "/pa/seed-owner.php"]
+    volumes:
+      - ./panelalpha/bar-assistant/seed-owner.php:/pa/seed-owner.php:ro
+      - bar_data:/var/www/cocktails/storage/bar-assistant
+    mem_limit: 512m
+
+  # Primary published service: the SPA at /, and the single public origin. Its
+  # nginx (salt-rim.conf) also proxies /bar/ -> server:8080 and /search/ ->
+  # meilisearch:7700. salt-rim-entrypoint.sh derives API_URL=<origin>/bar and
+  # MEILISEARCH_URL=<origin>/search from PA_PUBLIC_URL, then runs the image's
+  # entrypoint chain (nginxinc /docker-entrypoint.sh + the image's config.js
+  # envsubst entrypoint), which bakes those into the browser config.js.
+  salt-rim:
+    image: barassistant/salt-rim:5.7.0
+    restart: unless-stopped
+    depends_on:
+      bar-assistant:
+        condition: service_healthy
+    environment:
+      PA_PUBLIC_URL: "http://localhost"
+      ALLOW_REGISTRATION: "false"
+      SALT_RIM_ENV: "production"
+      MAILS_ENABLED: "false"
+    entrypoint: ["/bin/sh", "/pa/salt-rim-entrypoint.sh"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./panelalpha/bar-assistant/salt-rim-entrypoint.sh:/pa/salt-rim-entrypoint.sh:ro
+      - ./panelalpha/bar-assistant/salt-rim.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+    mem_limit: 192m
+
+  # Starts nothing, exits 0. `docker compose up -d` runs without --wait
+  # (engine#204), so this gates the deploy on the site actually answering AND
+  # the owner being seeded, not merely on containers having been started.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      salt-rim:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  bar_data: {}
+  meilisearch_data: {}

@@ -1,0 +1,111 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  pretix is ticket sales and event management: a Django application served by
+  gunicorn behind an nginx that also serves the static bundle, with a celery
+  worker for the background queue and PostgreSQL or SQLite underneath. The
+  repository ships a root Dockerfile and no compose file, so detection read it
+  as `dockerfile`, built it correctly in about four and a half minutes, and
+  started it alone with an empty .env. The published port then answered
+  `Recv failure: Connection reset by peer` -- the `serving-unknown` this recipe
+  exists to turn into a served page.
+
+  Nothing was wrong with the image, and unlike Ghost or paperless-ngx this
+  recipe keeps building it: it is what upstream publishes as pretix/standalone
+  and a fresh clone builds it cleanly. The container was up and busy. Its
+  entrypoint runs `pretix migrate` before it starts anything that listens, and
+  pretix has about 350 migrations to apply to an empty SQLite file; `docker
+  compose up -d` runs without `--wait`, so the deploy was called finished while
+  the migration was still going and nothing had ever bound port 80. A no-op
+  `ready` service gated on the app's healthcheck is what makes `up -d` return
+  only once the site answers.
+
+  Waiting longer would not have been enough on its own. The image's CMD is
+  `all`, which starts a celery taskworker beside gunicorn -- but with no
+  [celery] broker configured pretix sets CELERY_TASK_ALWAYS_EAGER and runs
+  tasks in the web process, so that worker only retries celery's
+  amqp://localhost default forever and restarts under supervisord while doing
+  it. And `pretix.bash` sizes gunicorn at `2 * $(nproc)` workers, where nproc
+  is the host's whole core count rather than the account's slice: sixteen
+  Django processes, several gigabytes, in an account capped at 2.5 GB. The
+  override runs `web` with NUM_WORKERS=2 instead.
+
+  SQLite rather than PostgreSQL: it is pretix's own default when no [database]
+  backend is configured, one account's event is not what a database server is
+  for, and the ~400 MB a sidecar wants is memory the web workers want more. No
+  Redis either -- it is a cache and a celery broker, both optional, and adding
+  one would mean running the taskworker this recipe deliberately does not.
+
+  The value the recipe cannot generate is pretix's site URL, which has to be
+  the account's public address. pretix is multi-tenant by hostname:
+  MultiDomainMiddleware compares every request's Host against that URL and
+  against the KnownDomain table, and anything matching neither gets a 400
+  "Unknown host" page rather than the site -- ALLOWED_HOSTS is ['*'], so this
+  is pretix's own check and not Django's. It is also the sole source of
+  CSRF_TRUSTED_ORIGINS, so the login form depends on it too. The generated
+  compose file already carries the account's https URL, written by
+  PublicUrlEnvironment under SITE_URL and six other aliases pretix reads none
+  of, so the override's start command copies it into PRETIX_PRETIX_URL --
+  compose cannot interpolate one service's variable from another, and the
+  generated file is not an app config's to edit.
+
+  The same Host routing is why files/pretix-loopback.conf exists. AppHealth's
+  port probe curls http://127.0.0.1:8080/ from inside the account with no Host
+  header, so pretix sees an unknown host and the probe reads a 400 error page
+  while the domain answers 200 -- a confusing way to fail. The file adds one
+  nginx server block, selected by server_name for loopback requests only, that
+  proxies with `Host: localhost`; pretix's LOCAL_HOST_NAMES is exactly
+  ('testserver', 'localhost'), so the probe is served the same page a visitor
+  gets. The image's own vhost is untouched: its `location /` pins
+  `proxy_set_header Host $http_host`, and nginx inherits proxy_set_header only
+  where the current level sets none, so a conf.d snippet cannot change it.
+
+  hooks/prepare.sh writes one secret, an admin password, and it is a security
+  fix rather than a convenience. pretixbase/0001_initial.py is not only tables:
+  its `initial_user` data migration creates admin@localhost with
+  `make_password('admin')` and is_staff set, so a pretix that has only been
+  migrated is already open to anyone who has read its repository -- and
+  `createsuperuser` for that address does not work either, it exits 1 with
+  "That Email is already taken". So the start command runs
+  files/panelalpha-admin-password.py through `pretix shell` between the
+  migration and gunicorn, replacing that password with the generated one and
+  only while it is still the shipped default, so that a password an operator
+  later chooses in the web interface is not reset under them by a redeploy.
+  SECRET_KEY is not generated here: pretix writes its own to /data/.secret on
+  first boot and reads it back from the same volume the database is on.
+
+  Mail is left unconfigured. pretix boots, the control panel works and events
+  can be created without it, but order confirmations, ticket delivery and
+  password resets need an SMTP server the engine does not provide; point
+  PRETIX_MAIL_HOST and friends at one of your own.
+extends: dockerfile
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so
+  # the dockerfile probe's dockerfile/port_hint would be null even though the
+  # repository ships a root Dockerfile -- and the deployability check then
+  # fails with "Dockerfile strategy selected but Dockerfile is missing." State
+  # what the probe would have found. 80 is what the Dockerfile EXPOSEs (nginx),
+  # which DeployCompose publishes on 8080 because 80 is the proxy's own port.
+  dockerfile: Dockerfile
+  port_hint: 80
+env:
+  # Settings with no secret in them, so they read the same in the generated
+  # compose file as in the deploy log.
+  #
+  # AUTOMIGRATE is not skipping the migration -- the override's command runs
+  # `pretix migrate` itself, one line earlier, so that the admin-password step
+  # lands between the migration and gunicorn. Left at its default, pretix.bash
+  # would run it again on every process the entrypoint starts.
+  AUTOMIGRATE: skip
+  # `2 * $(nproc)` by default, and nproc inside the account is the host's whole
+  # core count.
+  NUM_WORKERS: '2'
+  # Both default to off in pretix, which behind the engine's TLS-terminating
+  # proxy means http:// links inside https pages, no SECURE_PROXY_SSL_HEADER,
+  # and every client logged as the proxy. The only thing that can reach this
+  # container is that proxy.
+  PRETIX_PRETIX_TRUST_X_FORWARDED_PROTO: 'on'
+  PRETIX_PRETIX_TRUST_X_FORWARDED_FOR: 'on'
+  # Otherwise every page of a self-hosted installation is titled "pretix.de",
+  # which is the hosted product, not this one.
+  PRETIX_PRETIX_INSTANCE_NAME: pretix

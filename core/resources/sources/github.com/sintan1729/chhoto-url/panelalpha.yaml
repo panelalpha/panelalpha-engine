@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Chhoto URL is a small, fast self-hosted URL shortener written in Rust/Actix
+  (a fork of simply-shorten), published as the official sintan1729/chhoto-url
+  image on Docker Hub. One container serves the frontend, a JSON API and the
+  redirects on 0.0.0.0:4567, and keeps its links in a SQLite file. This is the
+  access-controlled case: the redirects are meant to be public, but creating,
+  listing, editing and deleting links must sit behind auth.
+
+  WHY COMPOSE-REPLACE ON THE OFFICIAL DOCKER HUB IMAGE. Upstream ships clean
+  multi-arch images on Docker Hub (sintan1729/chhoto-url:7.8.1 and :7.8.1-alpine,
+  the latest release), which the engine seeds fine (Docker Hub, not the GHCR
+  case of engine#229). The `dockerfile` strategy is not usable: a hosted deploy
+  needs a persistent SQLite path, the admin password and the public site URL
+  wired in, which are compose concerns, not source changes. The repo's own
+  deploy/compose.yaml is the `image + one volume` example; this override is that
+  same shape plus what a hosted deploy needs -- the admin password generated and
+  fed in, the public origin filled in at deploy time, and the db on a named
+  volume so short links survive a redeploy. The `:7.8.1-alpine` tag is chosen
+  over the default `:7.8.1` (which is FROM scratch and has no shell) only so the
+  container can run its own wget healthcheck; both are official released images.
+
+  SECURITY: NO PASSWORD == PUBLIC API. config.rs warns "No password was
+  provided. The API will be accessible to the public." when CHHOTO_PASSWORD is
+  empty -- anyone could then create and delete links. This recipe generates a
+  strong CHHOTO_PASSWORD once and feeds it in, so /api/new, /api/all,
+  /api/del/* and /api/edit require either a web login (session cookie) or the
+  X-API-Key header (auth.rs). CHHOTO_PUBLIC_MODE is left Disable, so this is a
+  private single-owner shortener: every link creation needs the password/API
+  key. A CHHOTO_API_KEY is also generated for programmatic (CLI/JSON) access;
+  the app scores it and would warn if it were weak.
+
+  PUBLIC ORIGIN. CHHOTO_SITE_URL is the base the API stamps onto generated short
+  links (post.rs: format!("{url}/{shortlink}")). It is unknown at deploy time,
+  so it is set to the placeholder http://localhost, which ComposePlaceholders
+  rewrites to the account's public https origin (the key ends in _URL).
+
+  PERSISTENCE. The SQLite db lives on a named Docker volume at /data
+  (CHHOTO_DB_URL=/data/urls.sqlite), so links survive redeploy and storage
+  reclaim; WAL mode is enabled as upstream recommends for a directory mount. The
+  generated password and API key are written once into ~/.panelalpha/chhoto-url/
+  (0600 in 0700), the only writable place a deploy does not wipe, and reused on
+  every redeploy.
+
+  PORT. The app listens on 4567 (CHHOTO_LISTEN_PORT default; a separate health
+  server binds 127.0.0.1:1729 for /healthz, used only by the container's own
+  healthcheck). Published as 4567:4567 -- the only service that publishes a port
+  (engine#234).

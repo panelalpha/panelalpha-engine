@@ -1,0 +1,85 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Funkwhale is a multi-user music and audio server: a Django/DRF API served by
+  gunicorn, a Celery worker (plus beat) for background work, a compiled Vue
+  frontend, and PostgreSQL + Redis behind them. The public surface is a single
+  origin -- the Vue SPA at /, the API under /api/, and audio/media served
+  through nginx -- and upstream ships two official images for it,
+  funkwhale/api and funkwhale/front, plus a documented docker-compose.yml under
+  deploy/. This recipe pulls those images rather than building: the repository's
+  own build is a multi-stage yarn+poetry affair and the published image is what
+  upstream's install docs deploy, so a pull gets the same application without a
+  build the account would pay for on every redeploy.
+
+  Strategy is compose-REPLACE. The repository ships two compose files Docker
+  would load -- a root compose.yml and deploy/docker-compose.yml -- both written
+  for a specific operator's machine: the root one extends per-service fragments
+  under compose/, bind-mounts ../api into the container for live reload
+  (isLocalDevCompose would flag it) and wires Traefik by label; the deploy one
+  bind-mounts host directories under ./data and expects a hand-edited .env. Both
+  are unusable as-is here, so overrides/docker-compose.yml replaces them with a
+  self-contained stack of named volumes and the two official images. It carries
+  no platform block, so detection is fromWalk over the replaced compose file.
+
+  What the bare repository does without this recipe (measured on a control
+  deploy of the clone): detection reads the root compose.yml and runs it. That
+  file's `api`/`worker` services `build`+bind-mount `../api` for live reload --
+  the workstation shape ComposeFileInspector is meant to decline -- but they
+  reach it through compose `extends:` into compose/app.django.yml, and the
+  inspector does not resolve extends, so the top-level services look like bare
+  `extends:` stanzas with no build and no bind and are not flagged. The engine
+  therefore accepts the dev compose and `docker compose up` builds funkwhale-api
+  from source (a multi-minute poetry install) and starts the development stack:
+  uvicorn --reload, a Vite dev server for the frontend, a plain nginx on the dev
+  template, Traefik routing labels and typesense. FUNKWHALE_HOSTNAME comes out as
+  project.funkwhale.test (the compose default for an unset ${FUNKWHALE_DOMAIN}),
+  there is no migration or superuser gating, and the engine ends up proxying the
+  Vite dev port. Measured endpoint: 502 Bad Gateway on the account's domain (the
+  dev nginx never gets a served API behind it), against HTTPS 200 with this
+  recipe. The replacement is what turns the Git URL into a running Funkwhale.
+
+  Four things the images cannot know, all supplied here:
+
+  1. DJANGO_SECRET_KEY (config/settings/production.py:16 reads it with no
+  default and raises ImproperlyConfigured without it). Generated once into
+  ~/.panelalpha/funkwhale/ and reused: a new key logs every session out and
+  invalidates every password-reset and email-confirmation token in flight.
+
+  2. The database password. config/settings/common.py:404-434 builds
+  DATABASE_URL from DATABASE_PASSWORD; the value lives in the pgdata volume
+  after postgres' first boot, so a regenerated one locks the app out of its own
+  database. Generated once alongside the secret key.
+
+  3. FUNKWHALE_HOSTNAME and FUNKWHALE_PROTOCOL (common.py:152-181). The account's
+  public name is not known at authoring time. PA_PUBLIC_URL is set to
+  http://localhost in the compose file and rewritten to the account's public
+  https address by ComposePlaceholders (PUBLIC_URL_KEY_PATTERN, engine key ends
+  in _URL); env.sh splits it into the hostname and scheme every service needs.
+  ALLOWED_HOSTS is FUNKWHALE_HOSTNAME plus DJANGO_ALLOWED_HOSTS
+  (common.py:222); localhost/127.0.0.1 are added there so the internal
+  healthcheck is not answered 400 DisallowedHost.
+
+  4. The superuser. Funkwhale ships no default account and its API is unusable
+  until one exists. The init one-shot creates it non-interactively with
+  `funkwhale-manage fw users create --superuser` before the api serves,
+  idempotent on a re-run, password generated once into ~/.panelalpha/funkwhale/.
+
+  Persistence lives in named volumes only, never ~/project (emptied before every
+  clone, engine#173): pgdata for PostgreSQL, redisdata for the broker, media for
+  uploaded and transcoded audio (MEDIA_ROOT=/data/media, shared read-write with
+  the worker and read-only with the front), and static for the collected Django
+  assets. The front image is upstream's own nginx: it serves the SPA, proxies
+  /api/ to gunicorn, serves the whitelisted /media/ subtrees and answers the
+  /_protected/media internal-redirect that Django uses to stream an authorised
+  track (REVERSE_PROXY_TYPE=nginx, X-Accel-Redirect). A one-shot init migrates
+  and collectstatic before anything listens, and a `ready` gate holds `up -d`
+  until the API answers through the front (engine#204).
+
+  Registration is closed and email verification off by default (Funkwhale's own
+  defaults: registration is a DB preference, ACCOUNT_EMAIL_VERIFICATION_ENFORCE
+  defaults False, EMAIL_CONFIG defaults to consolemail://), so the owner needs
+  no SMTP. Opening public registration with email confirmation, or any outbound
+  system mail, needs an operator-supplied EMAIL_CONFIG in the account env_vars;
+  inbound mail is out of scope. Object storage (S3/minio) and in-place music
+  import are supported by the images but left off -- local disk on the media
+  volume is the default here.

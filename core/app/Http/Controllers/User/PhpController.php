@@ -27,7 +27,7 @@ class PhpController extends Controller
             new OA\Response(response: 200, description: 'Custom INI settings', content: new OA\JsonContent(ref: '#/components/schemas/PhpIniSettings')),
         ],
     )]
-    public function listCustomIniSettings(string $username, UserPhpListCustomIniSettingsRequest $request): JsonResponse
+    public function listCustomIniSettings(string $username, UserPhpListCustomIniSettingsRequest $request, EngineSystem $system): JsonResponse
     {
         $user = User::findByUsername($username);
         if(!$user) {
@@ -36,7 +36,6 @@ class PhpController extends Controller
 
         /** @var array{php_version: string} */
         $params = $request->validated();
-        $system = new EngineSystem();
         $versions = $system->php()->listAvailablePhpVersions();
         if (!in_array($params['php_version'], $versions)) {
             throw ValidationException::withMessages([
@@ -68,7 +67,7 @@ class PhpController extends Controller
             new OA\Response(response: 200, description: 'INI settings updated', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
         ],
     )]
-    public function updateCustomIniSettings(string $username, UserPhpUpdateCustomIniSettingsRequest $request): JsonResponse
+    public function updateCustomIniSettings(string $username, UserPhpUpdateCustomIniSettingsRequest $request, EngineSystem $system): JsonResponse
     {
         $user = User::findByUsername($username);
         if(!$user) {
@@ -77,7 +76,6 @@ class PhpController extends Controller
 
         /** @var array{php_version: string, settings: array<string,string>} */
         $params = $request->validated();
-        $system = new EngineSystem();
         $versions = $system->php()->listAvailablePhpVersions();
         if (!in_array($params['php_version'], $versions)) {
             throw ValidationException::withMessages([
@@ -86,10 +84,9 @@ class PhpController extends Controller
         }
 
         try {
-            $php = $user->project()->php();
-            foreach ($versions as $phpVersion) {
-                $php->updateCustomIniSettings($phpVersion, $params['settings']);
-            }
+            // The version in the body is the identity of the set. Other
+            // installed versions keep whatever they already have.
+            $user->project($system)->php()->updateCustomIniSettings($params['php_version'], $params['settings']);
         } catch (\Exception $e) {
             throw ValidationException::withMessages([
                 'settings' => 'Could not set php.ini directives. ' . $e->getMessage(),

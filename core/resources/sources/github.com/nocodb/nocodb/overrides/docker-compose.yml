@@ -1,0 +1,113 @@
+# The stack for the repository, which ships none Docker would load: every
+# compose file it has lives under docker-compose/ (an installer's golden test
+# fixtures, plus examples/ for external Postgres and Traefik), and .github/uffizzi
+# is a CI preview environment. None of those are at a name compose auto-loads.
+#
+# NocoDB runs from its published image because the checkout cannot be built at
+# all: there is no Dockerfile anywhere in the repository -- not at the root, not
+# under packages/ -- so there is nothing for the dockerfile strategy to pick
+# even if it looked deeper. The repository is a 10-package pnpm workspace whose
+# root package.json has no start script, which is why detection fell through to
+# Railpack; Railpack installed the workspace and then said "No start command
+# detected", generated a basic compose around nginx:alpine and served the
+# placeholder. nocodb/nocodb is the artifact upstream ships, and upstream's own
+# README quickstart is one container of it.
+services:
+  nocodb:
+    # Tag written by hooks/prepare.sh from packages/nocodb/package.json, after
+    # confirming that tag exists on Docker Hub -- develop carries the next
+    # version, which may not be published yet. Falls back to :latest.
+    image: ${NOCODB_IMAGE:-nocodb/nocodb:latest}
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Not a real address, and not meant to survive: ComposePlaceholders
+      # rewrites a bare http://localhost under a *_URL-shaped key to the
+      # account's public https URL before the stack starts. NocoDB reads it as
+      # NC_SITE_URL (utils/envs.ts) and builds invitation links, password
+      # resets, webhook callbacks and OAuth redirects from it; mail.service.ts
+      # refuses to send at all when it is unset.
+      NC_SITE_URL: http://localhost
+      # initAdminFromEnv.ts. Without these the first stranger to find the URL
+      # gets `org-level-creator,super`. See hooks/prepare.sh.
+      NC_ADMIN_EMAIL: ${NC_ADMIN_EMAIL}
+      NC_ADMIN_PASSWORD: ${NC_ADMIN_PASSWORD}
+      # Noco.ts persists a uuidv4 into nc_store when this is unset; a real key
+      # is better and lives outside the database.
+      NC_AUTH_JWT_SECRET: ${NC_AUTH_JWT_SECRET}
+      # encryptDecrypt.ts: encrypts the credentials of every external data
+      # source the customer connects. Never rotated once data exists.
+      NC_CONNECTION_ENCRYPT_KEY: ${NC_CONNECTION_ENCRYPT_KEY}
+      # No NC_DB: unset means the sqlite3 meta database at
+      # ${NC_APP_DATA_DIR}/noco.db (nc-config/NcConfig.ts, helpers.ts), which is
+      # the configuration upstream's README leads with. A Postgres sidecar is
+      # the other supported shape -- see README.md for when it is worth one.
+      NC_APP_DATA_DIR: /usr/app/data
+      # Upstream recommends this for self-hosted (helm values.yaml,
+      # noco.sh): NocoDB's HTTP/2 multiplexer in front of a reverse proxy that
+      # is already doing that job.
+      NC_DISABLE_MUX: "true"
+      NC_DISABLE_TELE: "true"
+      NODE_OPTIONS: --max-old-space-size=1024
+    volumes:
+      # Everything stateful: noco.db, attachments, thumbnails.
+      - nocodb_data:/usr/app/data
+    # Upstream's own healthcheck from docker-compose/examples, on 127.0.0.1 and
+    # with a tighter interval. /api/v1/health is unauthenticated
+    # (utils.controller.ts has no guard on it), and the image has busybox wget
+    # but no curl.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 --spider http://127.0.0.1:8080/api/v1/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    # Replaces the hardener's default for an app-role service. NocoDB is a Nest
+    # app that runs its meta migrations on boot and carries sharp for
+    # thumbnails; resident is a few hundred MB, the rest is headroom for the
+    # heap ceiling above.
+    mem_limit: 1536m
+
+  # Turns off open registration once NocoDB answers. Not a convenience: a fresh
+  # instance accepts a signup from anyone who reaches the account's public name
+  # (DEFAULT_APP_SETTINGS.invite_only_signup is false), and the setting lives in
+  # nc_store rather than in the environment, so an API call is the only way to
+  # change it. See files/panelalpha-setup.cjs -- it always exits 0.
+  setup:
+    image: ${NOCODB_IMAGE:-nocodb/nocodb:latest}
+    restart: "no"
+    depends_on:
+      nocodb:
+        condition: service_healthy
+    environment:
+      NC_ADMIN_EMAIL: ${NC_ADMIN_EMAIL}
+      NC_ADMIN_PASSWORD: ${NC_ADMIN_PASSWORD}
+    volumes:
+      - ./panelalpha-setup.cjs:/panelalpha-setup.cjs:ro
+      # For the marker that keeps this from overriding a later choice.
+      - nocodb_data:/usr/app/data
+    entrypoint: ["node", "/panelalpha-setup.cjs"]
+    mem_limit: 256m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be finished
+  # when that returns -- at which point NocoDB's container has been *started*,
+  # not yet *answered*: first boot runs its whole meta migration set against an
+  # empty sqlite file. Compose does block on depends_on conditions, so this
+  # waits for the setup service to exit, which in turn waits for NocoDB to be
+  # healthy, and `up -d` returns only once the site really answers and
+  # registration is closed. A clean exit 0 is explicitly not a crash loop as
+  # far as AppHealth::isCrashing() is concerned. Same image, so nothing extra
+  # is pulled.
+  ready:
+    image: ${NOCODB_IMAGE:-nocodb/nocodb:latest}
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  nocodb_data: {}

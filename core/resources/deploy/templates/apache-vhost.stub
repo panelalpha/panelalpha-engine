@@ -44,8 +44,20 @@ ServerName localhost
 # these since it was written; this is the same rule for the Apache path, where
 # a flat-PHP app serving from the repository root put both of them one request
 # away.
-<FilesMatch "^(?:docker-compose\.ya?ml|panelalpha[-.])">
-    Require all denied
+#
+# A prefix rather than a list of names: the override the engine writes beside
+# the compose file is `docker-compose.override.yml`, which `docker-compose\.ya?ml`
+# did not match, and the stashed original is `docker-compose.yml.panelalpha-local`.
+#
+# `Require expr !-f` rather than `Require all denied`, because <FilesMatch>
+# matches the last segment of the *request*, not a file that exists, and it is
+# evaluated before mod_rewrite's per-directory pass. Under a front controller
+# every page is a virtual path, so the flat denial 403'd any customer page
+# whose slug began "panelalpha-" -- to its author as well, with nothing in any
+# log to explain it. Denying only what is actually on disk keeps the rule doing
+# its job and gives the slug back.
+<FilesMatch "^(?:docker-compose\.|compose\.|panelalpha[-.])">
+    Require expr !-f %{REQUEST_FILENAME}
 </FilesMatch>
 
 # Logs go to the container's own streams, so `docker logs` and the deploy log
@@ -54,5 +66,15 @@ ErrorLog /dev/stderr
 TransferLog /dev/stdout
 
 <VirtualHost *:{{ port }}>
+    # Apache's default is Off, which 404s any path containing %2F from inside
+    # the server -- before mod_rewrite and before ErrorDocument, so neither the
+    # application nor a recipe ever sees the request. An app that puts an
+    # encoded segment in a URL then works on nginx and has one inexplicably
+    # broken URL here. NoDecode rather than On: the encoded form is passed
+    # through untouched, which is what nginx does and what a front controller
+    # expects; On would decode it to `/` before matching and change which
+    # location a request reaches. Only valid in server or vhost context, so a
+    # recipe cannot supply it.
+    AllowEncodedSlashes NoDecode
     DocumentRoot "${PA_DOCROOT}"
 </VirtualHost>

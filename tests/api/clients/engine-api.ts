@@ -29,6 +29,7 @@ import { ProxyRulesApi } from './resources/proxy-rules.api';
 import { SftpApi } from './resources/sftp.api';
 import { SystemApi } from './resources/system.api';
 import { UsersApi } from './resources/users.api';
+import { VaultApi } from './resources/vault.api';
 import { WpCliApi } from './resources/wpcli.api';
 
 /** TypeScript surface: all domain methods available on {@link EngineApi}. */
@@ -61,7 +62,8 @@ export interface EngineApi
     TunnelsApi,
     ProjectSettingsApi,
     TasksApi,
-    BugReportsApi {}
+    BugReportsApi,
+    VaultApi {}
 
 /**
  * Full Engine API client composed from domain-specific API classes.
@@ -101,6 +103,7 @@ export class EngineApi extends EngineApiBase {
     projectSettings: ProjectSettingsApi;
     tasks: TasksApi;
     bugReports: BugReportsApi;
+    vault: VaultApi;
   };
 
   constructor(transport: ApiTransport) {
@@ -135,6 +138,7 @@ export class EngineApi extends EngineApiBase {
       projectSettings: new ProjectSettingsApi(transport),
       tasks: new TasksApi(transport),
       bugReports: new BugReportsApi(transport),
+      vault: new VaultApi(transport),
     };
 
     for (const client of Object.values(this.clients)) {

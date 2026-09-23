@@ -1,11 +1,10 @@
 FROM debian:trixie-slim AS php_prod
 
-ADD ./ioncube/ioncube_loader_lin_8.3.so.tar.gz /tmp/
-
 RUN apt-get update -y \
     && apt-get install -y \
         lsb-release \
         zip \
+        unzip \
         libzip-dev \
         wget \
         lftp \
@@ -17,27 +16,25 @@ RUN apt-get update -y \
         curl \
         git \
         rsync \
+        sqlite3 \
     && wget -O /etc/apt/trusted.gpg.d/php.gpg https://packages.sury.org/php/apt.gpg \
     && echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" >/etc/apt/sources.list.d/php.list \
     && apt-get update -y \
     && apt-get install -y \
-        php8.3 \
-        php8.3-cli \
-        php8.3-ftp \
-        php8.3-mysql \
-        php8.3-opcache \
-        php8.3-pdo \
-        php8.3-zip \
-        php8.3-redis \
-        php8.3-imagick \
-        php8.3-ssh2 \
-        php8.3-curl \
-        php8.3-xml \
-        php8.3-mbstring \
-        php8.3-sqlite3 \
-    && mkdir -p /etc/php/ext/ioncube/ \
-    && mv /tmp/ioncube_loader_lin_8.3.so /etc/php/ext/ioncube/ \
-    && echo 'zend_extension = /etc/php/ext/ioncube/ioncube_loader_lin_8.3.so' > /etc/php/8.3/cli/conf.d/00-ioncube.ini \
+        php8.4 \
+        php8.4-cli \
+        php8.4-ftp \
+        php8.4-mysql \
+        php8.4-opcache \
+        php8.4-pdo \
+        php8.4-zip \
+        php8.4-redis \
+        php8.4-imagick \
+        php8.4-ssh2 \
+        php8.4-curl \
+        php8.4-xml \
+        php8.4-mbstring \
+        php8.4-sqlite3 \
     && sed -i "s/dc_eximconfig_configtype='local'/dc_eximconfig_configtype='internet'/" /etc/exim4/update-exim4.conf.conf \
     && update-exim4.conf
 
@@ -61,30 +58,13 @@ RUN apt-get clean autoclean \
 
 WORKDIR /var/www/html
 
-FROM php_prod AS php_cron_prod
-
-RUN apt-get update -y && apt-get install -y cron jq logrotate
-RUN apt-get clean autoclean && apt-get autoremove -y
-
-# disable apt-compat cron job (it sleeps up to 30min and blocks /etc/cron.daily)
-RUN chmod -x /etc/cron.daily/apt-compat 2>/dev/null || true \
-  && mkdir -p /etc/apt/apt.conf.d \
-  && echo 'APT::Periodic::RandomSleep "0";' > /etc/apt/apt.conf.d/99disable-random-sleep
-
-RUN echo "* * * * * www-data cd /var/www/html && php artisan schedule:run >> /dev/null 2>&1" >> /etc/crontab
-RUN echo "#!/bin/bash" >> /docker-entrypoint.sh
-RUN echo "printenv > /etc/environment" >> /docker-entrypoint.sh
-RUN echo "cron -f" >> /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
-ENTRYPOINT ["/docker-entrypoint.sh"]
-
 FROM php_prod AS php_debug
 
 RUN apt-get update -y \
     && apt-get install -y \
         nano \
-        php8.3-xdebug \
-    && echo 'xdebug.mode = coverage' > /etc/php/8.3/cli/conf.d/docker-xdebug.ini
+        php8.4-xdebug \
+    && echo 'xdebug.mode = coverage' > /etc/php/8.4/cli/conf.d/docker-xdebug.ini
 
 FROM php_prod AS php_nginx_prod
 
@@ -107,11 +87,10 @@ RUN echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
 
 RUN apt-get update -y \
     && apt-get install -y \
-        php8.3-fpm \
+        php8.4-fpm \
         nginx \
     && apt-get clean autoclean \
-    && apt-get autoremove -y \
-    && echo 'zend_extension = /etc/php/ext/ioncube/ioncube_loader_lin_8.3.so' > /etc/php/8.3/fpm/conf.d/00-ioncube.ini 
+    && apt-get autoremove -y
 
 EXPOSE 80
 
@@ -122,6 +101,6 @@ FROM php_nginx_prod AS php_nginx_debug
 RUN apt-get update -y \
     && apt-get install -y \
         nano \
-        php8.3-xdebug \
-    && echo 'xdebug.mode = coverage' > /etc/php/8.3/cli/conf.d/docker-xdebug.ini \
-    && echo 'xdebug.mode = coverage' > /etc/php/8.3/fpm/conf.d/docker-xdebug.ini
+        php8.4-xdebug \
+    && echo 'xdebug.mode = coverage' > /etc/php/8.4/cli/conf.d/docker-xdebug.ini \
+    && echo 'xdebug.mode = coverage' > /etc/php/8.4/fpm/conf.d/docker-xdebug.ini

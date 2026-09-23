@@ -1,0 +1,76 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bar Assistant is a self-hosted home-bar manager: a Laravel 11 API
+  (barassistant/server) with SQLite storage and Meilisearch full-text search,
+  and a separate static Vue SPA client, Salt Rim (barassistant/salt-rim). Real
+  accounts (Sanctum bearer tokens), each user owning their own bars, cocktails
+  and ingredients. This is the access-controlled case, not a public viewer.
+
+  SEED THE OFFICIAL IMAGES, DO NOT BUILD. Both halves are published on Docker
+  Hub and tagged per release: barassistant/server (pinned 6.8.0) and
+  barassistant/salt-rim (pinned 5.7.0). The server image bakes composer
+  install, the starter-media data repo and the s6/nginx/php-fpm wiring; the
+  salt-rim image bakes the built SPA. Building the server from the clone would
+  reinstall composer and re-download the data repo on every deploy, and the
+  clone has no Salt Rim source at all (a different repository). Docker Hub is
+  pulled normally, which also sidesteps engine#229 (the GHCR/quay seed stub).
+
+  WHY COMPOSE-REPLACE. Detection reads the repo as `laravel` (composer.json +
+  artisan), and the repo's only compose file is a local dev stack (build:
+  target dev, source bind-mounted at /var/www/cocktails, host-published
+  redis/meili/rustfs) that ComposeUsableProbe rejects as isLocalDevCompose --
+  so the laravel strategy would take it, serve the checkout from the shared PHP
+  base and drop the dev sidecars beside it, and nothing would come up. This
+  override is written before detection runs, so by the time ComposeUsableProbe
+  reads it it is simply "the repository's compose file": no build, no
+  project-root bind mount, one published port, so the compose strategy claims
+  the project and runs the real multi-container app as upstream ships it.
+
+  ONE ORIGIN. Bar Assistant's own supported topology (docs.barassistant.app)
+  is Salt Rim at / with the API and Meilisearch proxied under subpaths on one
+  origin -- the browser talks to API_URL and MEILISEARCH_URL directly, so they
+  must be public. Salt Rim is itself an nginx serving the SPA, so rather than
+  add a fourth container it IS the gateway: files/.../salt-rim.conf serves the
+  SPA at / and proxies /bar/ to the server (:8080) and /search/ to Meilisearch
+  (:7700), each with its prefix stripped. Only Salt Rim publishes a port, so
+  the engine's scan takes it as the primary app (engine#231/#234); the server,
+  Meilisearch and the seeder declare no ports and no expose.
+
+  RUNTIME-DERIVED SUBPATH URLS. The three public URLs (server APP_URL, and Salt
+  Rim's API_URL + MEILISEARCH_URL) must be <origin>/bar and <origin>/search,
+  but ComposePlaceholders only rewrites a bare-localhost *_URL value to the
+  account origin and does NOT preserve a path suffix (isLocalPublicUrl anchors
+  after host[:port]). So each of the two app services carries one PA_PUBLIC_URL
+  placeholder (http://localhost, a _URL key the engine rewrites to the real
+  https origin) and a thin wrapper entrypoint derives the /bar and /search
+  subpaths from it before the image's own entrypoint runs. APP_URL must carry
+  /bar because the server builds upload/image URLs as APP_URL . '/uploads'
+  (config/filesystems.php), served by the server's nginx and reached back
+  through the /bar/ proxy. Because the SPA, the API and Meilisearch are all one
+  origin, the browser makes only same-origin calls -- no CORS surface.
+
+  OWNER + SIGNUP. Registration is POST /api/auth/register, gated by
+  ALLOW_REGISTRATION; there is no first-user-is-admin concept (each user owns
+  their own bars) and no artisan create-user command. This recipe sets
+  ALLOW_REGISTRATION=false everywhere (the endpoint 404s and the SPA hides the
+  form) and seeds the operator's owner server-side: a one-shot boots the
+  framework and calls the app's own UserService (files/.../seed-owner.php),
+  which bypasses the HTTP flag -- the documented "add a user via artisan" path,
+  configuration not repair. tinker is stripped by composer --no-dev, so the
+  seeder bootstraps the kernel over the optimized autoloader rather than
+  through tinker. The generated owner password is written to credentials.txt.
+
+  SECRETS + PERSISTENCE. hooks/prepare.sh generates APP_KEY (base64:<32 bytes>,
+  encrypts sessions/cookies), the Meilisearch master key and the owner password
+  once, keeps them in ~/.panelalpha/bar-assistant/ (0600 in 0700) -- the only
+  writable place a redeploy does not delete -- and writes the env_files the
+  compose reads. Rotating any of them breaks the running instance, so they are
+  generated only on the first deploy and reused. SQLite (WAL), uploads and
+  backups live on the bar_data named volume mounted at
+  storage/bar-assistant; Meilisearch data on meilisearch_data. The server's
+  init runs migrate --force and bar:setup-meilisearch on boot, so the owner,
+  cocktails and the search index survive a redeploy. Redis is dropped (cache
+  and session set to file, queue stays sync as upstream's own prod does), so
+  there is no unauthenticated datastore in the stack at all. A no-op `ready`
+  service gated on Salt Rim healthy AND the owner seeded makes `docker compose
+  up -d` (run without --wait, engine#204) return only once the site answers.

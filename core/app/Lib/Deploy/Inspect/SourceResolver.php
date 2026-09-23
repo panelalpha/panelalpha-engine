@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Inspect;
 
+use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
 use Symfony\Component\Process\Process;
 
@@ -18,13 +19,6 @@ final class SourceResolver
 
     /** @var list<string> */
     public const TYPES = [self::TYPE_GIT, self::TYPE_PATH, self::TYPE_PROJECT];
-
-    /**
-     * `file://` is absent: a local checkout is what the `path` type is for.
-     *
-     * @var list<string>
-     */
-    private const GIT_SCHEMES = ['http', 'https', 'ssh', 'git'];
 
     /**
      * How long a workspace may sit in the temp root before it is assumed to belong
@@ -75,33 +69,21 @@ final class SourceResolver
     /** The repository URL a caller meant, with the scheme they left out. */
     public static function normaliseGitUrl(string $source): string
     {
-        $source = trim($source);
-        if ($source === '' || str_starts_with($source, 'git@')) {
-            return $source;
-        }
-        if (preg_match('#^[a-z][a-z0-9+.-]*://#i', $source) === 1) {
-            return $source;
-        }
-
-        return 'https://' . ltrim($source, '/');
+        return GitRepoInput::normalise($source);
     }
 
     /**
+     * The same question POST /projects asks of `git_repo`, from the same
+     * place. Carried whole rather than flattened to a sentence, so the
+     * suggestion survives.
+     *
      * @throws InspectException when the URL is not one this may clone
      */
     public static function assertCloneable(string $repoUrl): void
     {
-        if (str_starts_with($repoUrl, 'git@')) {
-            return;
-        }
-        $scheme = strtolower((string) parse_url($repoUrl, PHP_URL_SCHEME));
-        if (!in_array($scheme, self::GIT_SCHEMES, true)) {
-            throw new InspectException(
-                'Unsupported repository URL. Use http, https, ssh or git.'
-            );
-        }
-        if (parse_url($repoUrl, PHP_URL_HOST) === null) {
-            throw new InspectException('Repository URL has no host.');
+        $problem = GitRepoInput::problem('source', $repoUrl);
+        if ($problem !== null) {
+            throw InspectException::ofProblem($problem);
         }
     }
 
@@ -151,6 +133,7 @@ final class SourceResolver
             }
 
             $this->run($command, 'Could not clone the repository', $root);
+            $this->initSubmodules($target, $askPass);
         } catch (\Throwable $e) {
             (new ResolvedSource(self::TYPE_GIT, $repoUrl, $root, [], $root))->release();
             throw $e;
@@ -335,6 +318,50 @@ final class SourceResolver
      * @param ?string $redact a path that must not appear in the error message
      * @throws InspectException
      */
+    /**
+     * Fetch submodules, the way the deploy path already does.
+     *
+     * The two clones disagreed about this, and the disagreement was visible to
+     * an operator: for a meta repository whose application lives in a
+     * submodule, inspect saw empty directories, found no composer.json and no
+     * .php anywhere, and answered `deployable: false` with
+     * "Runtime 'php' is required but could not be resolved" — while the very
+     * next deploy of the same URL with the same recipe came up in 120 s
+     * (ESMira, supported-apps#1216).
+     *
+     * Guarded on `.gitmodules`, so a repository without submodules — nearly
+     * all of them — pays one stat. Best effort: a submodule that needs a
+     * credential this request does not have leaves the parent checkout as it
+     * was, which is strictly better than the empty directories, and never
+     * turns a readable repository into a failed inspect.
+     */
+    private function initSubmodules(string $target, ?string $askPass): void
+    {
+        if (!is_file($target . '/.gitmodules')) {
+            return;
+        }
+
+        $command = [
+            'git',
+            '-c', 'safe.directory=*',
+            '-c', 'credential.helper=',
+            '-c', 'core.askpass=',
+            '-C', $target,
+            // Shallow, to match the --depth=1 clone: inspect reads a tree, not
+            // a history. Measured on ESMira at 3.9 s / 11.8 MB.
+            'submodule', 'update', '--init', '--recursive', '--depth=1',
+        ];
+        if ($askPass !== null) {
+            $command = GitUrl::withAskPass($command, $askPass);
+        }
+
+        try {
+            $this->run($command, 'Could not fetch submodules', $target);
+        } catch (InspectException) {
+            // Deliberately swallowed -- see the docblock.
+        }
+    }
+
     private function run(array $command, string $failure, ?string $redact = null): void
     {
         $process = new Process($command, null, [

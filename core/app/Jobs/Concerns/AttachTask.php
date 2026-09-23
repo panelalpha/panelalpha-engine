@@ -56,9 +56,10 @@ trait AttachTask
             return;
         }
 
+        // The payload uuid, not getJobId(): a database job's id is its row id.
         $jobId = null;
-        if (isset($this->job) && is_object($this->job) && method_exists($this->job, 'getJobId')) {
-            $jobId = $this->job->getJobId();
+        if (isset($this->job) && is_object($this->job) && method_exists($this->job, 'uuid')) {
+            $jobId = $this->job->uuid();
         }
         $task->markRunning(is_string($jobId) ? $jobId : null);
     }

@@ -1,0 +1,217 @@
+# syntax=docker/dockerfile:1
+#
+# The Centreon Central, built the way Centreon's own CI builds it.
+#
+# This is .github/docker/centreon-web/alma9/Dockerfile from this very checkout,
+# with one change: where upstream installs RPMs that its pipeline has just
+# built and bind-mounted in (`--mount=type=bind,src=packages-centreon`), this
+# installs the same packages from packages.centreon.com, which is public. That
+# is the branch upstream's own Dockerfile takes when STABILITY=stable; the
+# repository is simply not at a stable version, so the packages come from the
+# series repository the base image already has configured.
+#
+# Nothing is patched and no source from the checkout is compiled: centreon-web
+# is PHP+Symfony, centreon-engine and centreon-broker are C++, and all three
+# are packaged upstream. What the checkout does contribute -- and the reason
+# the build context is the repository rather than a directory of our own -- is
+# the container entrypoint under .github/docker/centreon-web/alma9/, which is
+# the only unattended installer Centreon has.
+ARG CENTREON_BASE=ghcr.io/centreon/centreon/centreon-web-dependencies-collect:26.11-alma9
+FROM ${CENTREON_BASE}
+
+# The three packages upstream's Dockerfile installs. Overridable so an operator
+# can pin an exact build from the series repository; unpinned, dnf takes the
+# newest, which is what a redeploy should pick up.
+ARG CENTREON_WEB_PACKAGES="centreon-web centreon-poller centreon-trap"
+ARG CENTREON_TZ=Etc/UTC
+
+# Upstream's own layout, in upstream's own order: the entrypoint first, then
+# the installer's answer files, then the packages.
+COPY --chmod=755 ./.github/docker/centreon-web/alma9/entrypoint /usr/share/centreon
+COPY --chown=apache:apache ./.github/docker/centreon-web/alma9/configuration /usr/share/centreon/www/install/tmp
+COPY ./.github/docker/centreon-web/sql/* /usr/local/src/sql/data/
+
+RUN bash -e <<'PAEOF'
+grep -q '^tsflags=nodocs' /etc/dnf/dnf.conf || echo 'tsflags=nodocs' >> /etc/dnf/dnf.conf
+
+dnf install -y ${CENTREON_WEB_PACKAGES}
+
+sed -i -E "s#^date\.timezone.+#date.timezone = ${CENTREON_TZ}#g" /etc/php.d/20-timezone.ini
+
+touch /var/log/centreon/prod.web.log
+chown apache:apache /var/log/centreon/prod.web.log
+
+# One account, not a CI runner: ondemand workers, and five of them. php-fpm's
+# default `dynamic` pool starts five idle children and grows to fifty, which on
+# a 2 GB account is most of the budget held by processes serving nothing.
+sed -i 's/^pm = .*/pm = ondemand/' /etc/php-fpm.d/*.conf
+sed -i 's/^pm\.max_children = .*/pm.max_children = 5/' /etc/php-fpm.d/*.conf
+if grep -Eq '^[;[:space:]]*pm\.process_idle_timeout\s*=' /etc/php-fpm.d/www.conf; then
+  sed -Ei 's|^[;[:space:]]*pm\.process_idle_timeout\s*=.*|pm.process_idle_timeout = 10s|' /etc/php-fpm.d/www.conf
+else
+  echo 'pm.process_idle_timeout = 10s' >> /etc/php-fpm.d/www.conf
+fi
+
+# The image's systemctl is a shim; the RPM scriptlets started things anyway.
+systemctl stop gorgoned; systemctl stop centengine; systemctl stop cbd
+systemctl stop httpd; systemctl stop php-fpm; systemctl stop snmpd; systemctl stop crond
+
+dnf clean all
+PAEOF
+
+# ---------------------------------------------------------------------------
+# The four changes PanelAlpha makes to upstream's startup sequence. All four
+# are edits to the container.d scripts, which are shell and run in filename
+# order; none of them touch Centreon itself.
+# ---------------------------------------------------------------------------
+
+# 1. Apache no longer starts here. Upstream starts httpd at step 06 and
+#    installs Centreon at step 15, so for the couple of minutes the install
+#    takes, port 80 serves the installation wizard -- on a public name, with a
+#    published port, to anybody. Moved to step 97 (below), after the install and
+#    after the credentials are in place.
+RUN cat > /usr/share/centreon/container.d/06-apache_background.sh <<'PAEOF'
+#!/bin/sh
+# PanelAlpha: httpd is started by 97-panelalpha-apache.sh instead, so the
+# published port stays closed until Centreon is installed and the admin
+# password is this account's own. Upstream started it here.
+echo "Apache start deferred to 97-panelalpha-apache.sh (PanelAlpha)."
+PAEOF
+
+# 2. The credentials. Upstream ships www/install/tmp/admin.json holding the
+#    bcrypt hash of "Centreon!2021" and database.json holding root/centreon and
+#    centreon/centreon -- all three published in this repository, and the
+#    installer writes them verbatim. This replaces the answer files with the
+#    account's own before the installer reads them, so no Centreon this recipe
+#    deploys is ever, at any instant, on a shipped password.
+#
+#    It is sourced by container.sh, so `exit 1` here stops the container: no
+#    generated credentials means no install, no Apache, and a deploy that fails.
+RUN cat > /usr/share/centreon/container.d/14-panelalpha-credentials.sh <<'PAEOF'
+#!/bin/sh
+PA_DIR=/panelalpha
+TMP=/usr/share/centreon/www/install/tmp
+
+if [ ! -d "$TMP" ]; then
+  # A rebuild of an account that is already installed: the answer files are
+  # not read again, and the password the customer has is theirs to keep.
+  echo "[panelalpha] Centreon already installed; leaving credentials alone."
+else
+  for f in admin.json database.json; do
+    if [ ! -s "$PA_DIR/$f" ]; then
+      echo "[panelalpha] refusing to install: $PA_DIR/$f is missing or empty." >&2
+      echo "[panelalpha] hooks/prepare.sh generates it; without it Centreon would" >&2
+      echo "[panelalpha] install on the password published in its own repository." >&2
+      exit 1
+    fi
+    cp "$PA_DIR/$f" "$TMP/$f"
+    chown apache:apache "$TMP/$f"
+    chmod 600 "$TMP/$f"
+  done
+
+  # The published hash of "Centreon!2021", from
+  # .github/docker/centreon-web/alma9/configuration/admin.json. If it is still
+  # what we are about to install with, the generation step did not happen.
+  if grep -q 'N3j.O9U4xEFfJMfB/g3qo' "$TMP/admin.json"; then
+    echo "[panelalpha] refusing to install: admin.json still holds Centreon's shipped hash." >&2
+    exit 1
+  fi
+
+  echo "[panelalpha] installing with this account's own admin and database passwords."
+fi
+PAEOF
+
+# 3. Upstream's step 20 runs Centreon's CLI as admin with the literal password
+#    "Centreon!2021" to generate and push the poller configuration. With the
+#    password rotated, it has to read the real one. Same two commands otherwise.
+RUN cat > /usr/share/centreon/container.d/20-configuration_files.sh <<'PAEOF'
+#!/bin/sh
+# PanelAlpha: identical to upstream's 20-configuration_files.sh except that the
+# admin password is read from /panelalpha/admin-password rather than hardcoded.
+PA_PASS="$(cat /panelalpha/admin-password 2>/dev/null)"
+if [ -z "$PA_PASS" ]; then
+  echo "[panelalpha] /panelalpha/admin-password is missing; cannot generate poller configuration." >&2
+  exit 1
+fi
+
+echo "Generating poller configuration files..."
+su apache -s /bin/bash -c "centreon -u admin -p '$PA_PASS' -a POLLERGENERATE -v 1" 2>&1 | grep -v "^Cannot set configuration file owner"
+
+echo "Copying configuration files to engine/broker directories..."
+su apache -s /bin/bash -c "centreon -u admin -p '$PA_PASS' -a CFGMOVE -v 1"
+PAEOF
+
+# 4. Apache, last. Everything between 15 and 96 -- the install, the credential
+#    rotation, the poller configuration, the broker and engine start -- has
+#    happened by now, and 99-logs.sh (upstream's) touches /tmp/docker.ready
+#    immediately after and then tails, which is what keeps the container alive
+#    and what the healthcheck reads.
+RUN cat > /usr/share/centreon/container.d/97-panelalpha-apache.sh <<'PAEOF'
+#!/bin/sh
+echo "Starting Apache (httpd)..."
+systemctl start httpd
+echo "Apache (httpd) started."
+PAEOF
+
+# 5. Upstream's step 70 appends the Docker network to gorgone's list of API
+#    callers with an unguarded `sed -i '/127.0.0.1/a ...'`. That is written for
+#    a CI container whose /etc/centreon-gorgone is thrown away every run; here
+#    the directory is a named volume, so the line would be appended again on
+#    every redeploy. Same two edits and the same start, with the first one
+#    made conditional. The awk block below is upstream's, unchanged -- it
+#    already checks before it writes.
+RUN cat > /usr/share/centreon/container.d/70-gorgone_background.sh <<'PAEOF'
+#!/bin/sh
+G=/etc/centreon-gorgone/config.d/40-gorgoned.yaml
+
+# PanelAlpha: guarded. Upstream appends unconditionally, which is correct for a
+# throwaway CI container and not for a persisted /etc/centreon-gorgone.
+if ! grep -q '172.0.0.0/8' "$G"; then
+  sed -i '/127.0.0.1/a\          - 172.0.0.0\/8' "$G"
+fi
+
+# enable the proxy module's httpserver: required for the "create poller"
+# API/UI to generate an install command. Idempotent: skip if already present.
+if ! awk '/gorgone::modules::core::proxy::hooks/{f=1} f && /httpserver:/{found=1} END{exit !found}' "$G"; then
+  awk '
+    /gorgone::modules::core::proxy::hooks/ { in_proxy=1 }
+    in_proxy && /enable: true/ && !done {
+      print
+      print "      httpserver:"
+      print "        enable: true"
+      print "        ssl: false"
+      print "        address: \"localhost\""
+      print "        port: 8087"
+      done=1
+      in_proxy=0
+      next
+    }
+    { print }
+  ' "$G" > /tmp/40-gorgoned.yaml.new && mv /tmp/40-gorgoned.yaml.new "$G"
+fi
+
+echo "Starting Gorgone daemon..."
+systemctl start gorgoned
+echo "Gorgone daemon started."
+PAEOF
+
+RUN chmod 755 /usr/share/centreon/container.d/*.sh
+
+# The account's own installer answer files, written by hooks/prepare.sh into
+# ~/project/panelalpha/ and read by step 14 above. Last, so every layer over
+# the 1.2 GB of packages stays cached when only these change; and copied rather
+# than bind-mounted, because a compose service that both builds and bind-mounts
+# a path under ./ is read as a workstation file and loses the strategy -- the
+# note on `volumes:` in overrides/docker-compose.yml has the measurement.
+#
+# These are secrets in an image layer. The image is built by the account's own
+# dockerd, never pushed, and holds the same three passwords that ~/project/.env
+# and /etc/centreon/centreon.conf.php already hold inside the same account, so
+# it widens nothing.
+COPY panelalpha/ /panelalpha/
+
+EXPOSE 80
+ENTRYPOINT ["/usr/share/centreon/container.sh"]
+
+ENV CENTREON_DATASET="1"
+ENV CENTREON_LANG="en_US"

@@ -73,7 +73,8 @@ class Cloudflare
         // better, so it goes first and the scoping advice follows it.
         if ($refused !== null) {
             throw new CloudflareException(
-                'Cloudflare rejected this API token: ' . $refused->getMessage()
+                'Cloudflare rejected this API token: ' . $refused->getMessage(),
+                previous: $refused
             );
         }
 
@@ -454,12 +455,14 @@ class Cloudflare
      * Build ingress list with catch-all, replacing any existing rule for hostname.
      *
      * @param list<array<string, mixed>> $existing
+     * @param array<string, mixed>|\stdClass $originRequest
      * @return list<array<string, mixed>>
      */
     public static function upsertHostnameIngress(
         array $existing,
         string $hostname,
-        string $service
+        string $service,
+        array|\stdClass $originRequest = new \stdClass(),
     ): array {
         $hostname = strtolower(trim($hostname));
         $rules = [];
@@ -479,7 +482,7 @@ class Cloudflare
         $rules[] = [
             'hostname' => $hostname,
             'service' => $service,
-            'originRequest' => new \stdClass(),
+            'originRequest' => $originRequest,
         ];
         $rules[] = ['service' => 'http_status:404'];
 

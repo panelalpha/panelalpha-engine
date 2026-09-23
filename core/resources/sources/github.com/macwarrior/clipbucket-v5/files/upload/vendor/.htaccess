@@ -1,0 +1,42 @@
+# Written by PanelAlpha.
+#
+# vendor/ is inside the document root and cannot simply be denied: ClipBucket
+# installs three of its frontend libraries with Composer and links them
+# straight out of vendor/ on every page and in the admin area --
+#
+#   vendor/components/jquery/jquery.min.js
+#   vendor/select2/select2/dist/{css,js}/select2.min.*
+#   vendor/fortawesome/font-awesome/css/font-awesome.min.css  (+ its fonts)
+#
+# -- so `Require all denied` here would strip the site of jQuery and every
+# icon. Measured on a live deploy before this file existed:
+#
+#   GET /vendor/composer/installed.json           200, 35,941 bytes -- the
+#       exact installed version of every dependency, which is a CVE shopping
+#       list for whoever asks;
+#   GET /vendor/smarty/smarty/composer.json       200;
+#   GET /vendor/filp/whoops/src/Whoops/Run.php    500 with an empty body --
+#       which is Apache *executing* a library file out of context, not serving
+#       it. Nothing in this tree is meant to be entered from the network.
+#
+# So this is an allow-list rather than a deny-list: a request under vendor/ is
+# served only if it ends in an extension a browser asks for as an asset, and
+# everything else is 403. A deny-list would have to guess at every extension a
+# Composer package might ship (.php, .phar, .inc, .lock, .json, .md, .dist,
+# .yml, .neon, .xml.dist, .twig, ...) and would be wrong on the next dependency.
+#
+# mod_rewrite is enabled in the shared base image
+# (PhpApacheConfig::MODULES = ['rewrite', 'headers']), and a RewriteEngine in a
+# subdirectory replaces the parent .htaccess's rules for this directory rather
+# than adding to them -- which is what is wanted here: none of upstream's
+# front-controller rewriting applies under vendor/.
+RewriteEngine On
+RewriteRule !\.(?:css|js|mjs|map|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|eot|otf)$ - [F]
+
+# Belt and braces for the one that matters, in case a future base image drops
+# mod_rewrite: a PHP file here is never a page.
+<FilesMatch "\.(?:php[0-9]?|phtml|phar|pht|inc)$">
+    Require all denied
+</FilesMatch>
+
+Options -Indexes

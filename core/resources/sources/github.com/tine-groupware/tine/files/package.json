@@ -1,0 +1,13 @@
+{
+  "name": "panelalpha-tine-frontend-build",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Not tine's package.json. It exists so the engine's host frontend pass has something to run: HostCompile::runForPhp() reads package.json in the checkout root and needs a `build` script in it, and tine's own package.json is four levels down in tine20/Tinebase/js. No dependencies: `npm install` here installs nothing and panelalpha-build.sh does the real install where the real manifest is.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "prebuild": "git config --global --add safe.directory '*'; git submodule update --init --recursive --depth 1 || true",
+    "build": "sh panelalpha-build.sh"
+  }
+}

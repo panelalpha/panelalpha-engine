@@ -9,11 +9,11 @@
 | recovered signals and bug reports described in docs/08-telemetry/what-is-collected.md. All of it
 | arrives on one shared event route, told apart by the event `type`.
 |
-| Deliberately not `config('hub.url')`. The hub is an integration the engine
+| Deliberately not `config('connect.url')`. Connect is an integration the engine
 | *calls* — WithoutDNS names, licensing — and this is a sink it reports to.
 | Two services, deployed separately, and an install can have one without the
 | other. Collapsing them into one variable is a mistake this codebase has
-| already made once: telemetry was addressed to the hub, which does not serve
+| already made once: telemetry was addressed to Connect, which does not serve
 | the ingest and answers 405 to every report.
 |
 | `https`, since the day the host started serving it. It was `http` for as

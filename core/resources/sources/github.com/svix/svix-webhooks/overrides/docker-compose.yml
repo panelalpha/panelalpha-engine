@@ -1,0 +1,246 @@
+# The stack for the repository, which ships none at a name Docker or the engine
+# would load. svix/svix-webhooks is a polyglot monorepo: its root holds the
+# client SDKs (csharp/, go/, java/, javascript/, kotlin/, php/, python/, ruby/,
+# rust/, plus codegen/ and svix-cli/) and a composer.json that says
+# `"type": "library"`, `"description": "Svix PHP Library"`. The server is one
+# directory down, and so is its compose file -- server/docker-compose.yml.
+#
+# One directory down is out of reach for every compose lookup the engine has:
+# ComposeFileInspector::COMPOSE_FILE_CANDIDATES is four basenames joined to the
+# project root with a single '/', and the only glob, in RuntimeSidecars, is
+# `$projectDir . '/docker-compose.*.yml'` and three siblings -- no `**`. So
+# nothing in the repository is mined, nothing is auto-loaded, and detection
+# reads the root, finds an SDK and no entry point. That is the whole of the
+# `serving-missing_entry` verdict and the `php` strategy on issue #693.
+#
+# Svix runs from its published image rather than from a build. server/Dockerfile
+# is a cargo-chef multi-stage on rust:1.96-slim-trixie that runs
+# `cargo chef cook --release` and then `cargo build --release` over a two-crate
+# workspace with hyper patched from a git fork; that is a linker and a rustc the
+# size of an account's whole memory limit, for a binary upstream already
+# publishes as svix/svix-server (264 tags, v1.101.0 and latest pushed
+# 2026-08-26). hooks/prepare.sh pins the tag from server/Cargo.toml.
+#
+# This is the shape of upstream's own server/docker-compose.yml minus pgbouncer.
+# pgbouncer is there to multiplex a SaaS-scale connection count in front of one
+# Postgres; a single account has one Svix process, which talks to Postgres
+# directly over SVIX_DB_DSN. Dropping it is not free by itself -- Svix's own
+# default is `db_pool_max_size = 100`, which is what pgbouncer was absorbing --
+# so the pool is capped below, not left at the default.
+services:
+  # Svix's only durable store: applications, endpoints, messages and every
+  # delivery attempt. Upstream pins postgres:13.4, which went end-of-life in
+  # November 2025; 16-alpine is what this recipe was measured against -- the
+  # migration set runs clean on it and /api/v1/health reports
+  # `"database":{"status":"ok"}`. The tag floats within the major on purpose:
+  # a major change would leave the volume unreadable.
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    # The password is not in this file and not in ~/project/.env, because the
+    # engine copies .env to .env.default at mode 644 (engine#173). It is in
+    # ~/.panelalpha/svix-db.env at 0600, written by hooks/prepare.sh, and the
+    # path is relative to the project directory -- so `..` is the account's
+    # home. The same file survives the clone that empties ~/project.
+    env_file:
+      - ../.panelalpha/svix-db.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U svix -d svix"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 10s
+    mem_limit: 320m
+
+  # The message queue. Svix's worker pulls from it, and `queue_type = "redis"`
+  # is the default for a reason its own config file states: the memory queue
+  # loses everything not yet delivered on a restart. Persistence is upstream's
+  # own line from server/docker-compose.yml, kept verbatim.
+  #
+  # maxmemory is set with noeviction rather than left unbounded: this Redis is a
+  # queue, not a cache, and an eviction policy that drops keys under pressure
+  # would silently drop undelivered webhooks. Refusing the write instead makes
+  # the failure visible. (The cache is not here at all -- see SVIX_CACHE_TYPE.)
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --save
+      - "60"
+      - "500"
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 96mb
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 5s
+    mem_limit: 128m
+
+  backend:
+    # Tag written by hooks/prepare.sh from server/Cargo.toml's
+    # [workspace.package] version, confirmed published before it is used.
+    image: ${SVIX_IMAGE:-svix/svix-server:latest}
+    restart: unless-stopped
+    # The port upstream publishes and the one config.default.toml listens on
+    # (`listen_address = "0.0.0.0:8071"`). ComposePortScan finds it here, and it
+    # is the only published port in the stack, so it becomes the account's
+    # primary port and the domain proxies to it.
+    ports:
+      - "8071:8071"
+    # SVIX_JWT_SECRET, SVIX_MAIN_SECRET, SVIX_DB_DSN and SVIX_REDIS_DSN.
+    #
+    # In a file rather than in `environment:` for two separate reasons. The
+    # first is engine#173: anything in ~/project/.env is republished as
+    # .env.default at 644. The second is that ComposePlaceholders and the
+    # sidecar miner both read `services.<name>.environment` and nothing else --
+    # SVIX_JWT_SECRET matches its secret-key pattern and SVIX_DB_DSN is exactly
+    # the shape of connection string it rewrites, and neither should be touched
+    # here, because the values are real and the JWTs they signed outlive the
+    # checkout.
+    env_file:
+      - ../.panelalpha/svix.env
+    environment:
+      # scripts/launch-svix-server turns this into `--wait-for 15`, which blocks
+      # on Postgres and Redis before the process starts. Belt and braces next to
+      # depends_on: condition: service_healthy, and it costs nothing when both
+      # are already up.
+      WAIT_FOR: "true"
+      # Upstream's default, restated because the queue is the one part of this
+      # stack whose backend choice changes what a restart loses.
+      SVIX_QUEUE_TYPE: redis
+      # Also upstream's default, and correct here for a reason that stops being
+      # true at scale: the memory cache is only safe with a single API process,
+      # which is what an account runs. It saves a second Redis connection pool
+      # and the memory behind it.
+      SVIX_CACHE_TYPE: memory
+      # This is what replaces pgbouncer. config.default.toml ships
+      # `db_pool_max_size = 100` against a Postgres whose own default
+      # max_connections is 100 -- workable only because upstream puts a pooler
+      # in between. With the pooler gone, one Svix process asking for 100
+      # connections would take the entire server. 10 is the configured minimum
+      # and is far more than one account's API plus worker use.
+      SVIX_DB_POOL_MAX_SIZE: "10"
+      # Same reasoning, same floor.
+      SVIX_REDIS_POOL_MAX_SIZE: "10"
+      # config.default.toml ships "dev". This is a customer's instance on a
+      # public HTTPS name.
+      SVIX_ENVIRONMENT: prod
+      SVIX_LOG_LEVEL: info
+      # Deliberately not set: SVIX_WHITELIST_SUBNETS. Left unset, Svix refuses
+      # to dispatch a webhook to an endpoint that resolves into private address
+      # space -- the attempt is recorded with
+      # `"requests to this IP range are blocked (see the server configuration)"`
+      # and status 2. That default is the only thing standing between a webhook
+      # URL a customer can type and an SSRF into the engine's own network, so
+      # it stays. An operator who wants to deliver to a private address sets
+      # SVIX_WHITELIST_SUBNETS in ~/.panelalpha/svix.env and knows why.
+      #
+      # Also deliberately not set: SVIX_OPERATIONAL_WEBHOOK_ADDRESS. It makes
+      # the instance send its own operational events to a second Svix API, which
+      # a single-account deployment does not have.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Upstream's own probe, and not a plain curl: `svix-server healthcheck` HEADs
+    # /api/v1/health, which answers only once the database, the queue and the
+    # cache have each been reached. The image is debian-trixie-slim with no curl
+    # and no wget, so the binary's own subcommand is also the only probe there
+    # is. Migrations run before the server listens (--run-migrations in
+    # scripts/launch-svix-server), so this is the gate that says they finished.
+    healthcheck:
+      test: ["CMD", "svix-server", "healthcheck", "http://127.0.0.1:8071"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 768m
+
+  # The account's first and only credential.
+  #
+  # Svix has no users, no sign-up and no setup wizard: every request is
+  # authenticated by a bearer JWT signed with jwt_secret, and there is no way to
+  # obtain one over the network. cfg.rs refuses to start without that secret at
+  # all (`if !figment.contains("jwt_secret") { bail!("missing field
+  # `jwt_secret`") }`), so there is no default to inherit and no first-visitor
+  # window to close -- unlike most of the applications in this catalogue. What
+  # there is instead is a CLI: `svix-server jwt generate` mints an org token
+  # valid for ten years, and it needs the config rather than the database, which
+  # is why this can be a container of its own rather than an API call.
+  #
+  # Guarded on the file being non-empty, so a redeploy does not hand the account
+  # a second token and overwrite the one its owner was given. Always exits 0:
+  # `ready` gates on this completing, and a credential that could not be minted
+  # must not take a working deploy down with it.
+  token:
+    image: ${SVIX_IMAGE:-svix/svix-server:latest}
+    restart: "no"
+    # The account's own uid:gid, from hooks/prepare.sh. The image runs as 1001
+    # by default, which cannot write into a 0700 directory on the account's
+    # filesystem. The file is pre-created at 0600 by prepare.sh and truncated
+    # rather than replaced here, so its mode and owner survive either way.
+    user: "${SVIX_RUN_AS:-0:0}"
+    env_file:
+      - ../.panelalpha/svix.env
+    volumes:
+      - ../.panelalpha/svix:/pa
+    depends_on:
+      backend:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -u
+        if [ -s /pa/admin-token ]; then
+            echo "[svix] this account already has an API token"
+            exit 0
+        fi
+        svix-server jwt generate 2>/tmp/err \
+            | sed -n 's/^Token (Bearer): //p' > /pa/admin-token || true
+        if [ -s /pa/admin-token ]; then
+            echo "[svix] wrote the account API token to ~/.panelalpha/svix/admin-token"
+        else
+            echo "[svix] could not mint an API token; run 'svix-server jwt generate' by hand"
+            cat /tmp/err 2>/dev/null || true
+        fi
+        exit 0
+    mem_limit: 96m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be finished
+  # when that returns -- which is when the containers have been started, not
+  # when any of them answers. Here the gap is the whole of Svix's first boot:
+  # Postgres initdb's a cluster, then svix-server runs its full migration set
+  # against an empty database before it listens. `ready` waits for `token`,
+  # which waits for the backend's healthcheck, which answers only once
+  # /api/v1/health reports the database, the queue and the cache all reachable.
+  # So `up -d` returns once the API really answers and the account has its
+  # credential. A clean exit 0 is explicitly not a crash loop to
+  # AppHealth::isCrashing().
+  ready:
+    image: ${SVIX_IMAGE:-svix/svix-server:latest}
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      token:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  postgres_data: {}
+  redis_data: {}

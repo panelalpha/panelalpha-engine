@@ -1,0 +1,6 @@
+# Written by PanelAlpha. docgen.php, gettext.php and triggers.php are the
+# developer scripts upstream runs from a shell in the checkout -- they take no
+# argument, check no permission, and resolve their includes relative to the
+# working directory, so over HTTP they answer 200 with a PHP fatal error and
+# the container's paths in it. Nothing links to this directory.
+Require all denied

@@ -1,0 +1,61 @@
+# Replaces the repo's deploy/compose.yaml (image + one named volume) with the
+# same single-container stack plus what a hosted deploy needs: the admin
+# password and API key fed in from a redeploy-surviving store, the public origin
+# filled in at deploy time, and the SQLite db on a named volume.
+#
+# The app image is the official Docker Hub release, pulled (not built), so there
+# is no build+bind-mount pair and detection keeps resolving to `compose`.
+services:
+  app:
+    # Latest published release. The `-alpine` variant (not the default scratch
+    # `:7.8.1`) is used only so the image has a shell + busybox wget for the
+    # healthcheck below; both are official released images. Pinned, not :latest,
+    # so a redeploy is reproducible.
+    image: docker.io/sintan1729/chhoto-url:7.8.1-alpine
+    restart: unless-stopped
+    # The app (frontend + JSON API + redirects) listens on 4567. Only this
+    # service publishes a port (engine#234); the engine's scan takes it as the
+    # primary.
+    ports:
+      - "4567:4567"
+    env_file:
+      # Account env_vars, merged in by the platform (created by hooks/prepare.sh
+      # if the platform has not written it yet), then the generated secrets.
+      # CHHOTO_PASSWORD / CHHOTO_API_KEY come from here, NOT from `environment:`,
+      # so they are never rewritten and never appear in the recipe. ~/project is
+      # the compose dir and it is ~, so .. is ~.
+      - .env
+      - ../.panelalpha/chhoto-url/app.env
+    environment:
+      # Base for generated short links; unknown at deploy time. ComposePlaceholders
+      # rewrites this localhost value to the account's public https origin because
+      # the key ends in _URL. Kept on its own line, unquoted, so the rewrite fires.
+      CHHOTO_SITE_URL: http://localhost
+      # SQLite db on the named volume, so links survive redeploy/storage reclaim.
+      CHHOTO_DB_URL: /data/urls.sqlite
+      # WAL journaling is recommended by upstream for a directory (not bare-file)
+      # mount, which is what the named volume gives us.
+      CHHOTO_SQLITE_USE_WAL_MODE: "True"
+      # Be explicit about the bind so the published 4567 always matches.
+      CHHOTO_LISTEN_ADDRESS: 0.0.0.0
+      CHHOTO_LISTEN_PORT: "4567"
+      # Private single-owner shortener: every link creation needs the password /
+      # API key. `Enable` would let anyone create links; `Disable` keeps it shut.
+      CHHOTO_PUBLIC_MODE: Disable
+    volumes:
+      # Links (and, with WAL, its sidecar files) live under /data on a named
+      # volume. A fresh volume is root-owned and the container runs as root, so
+      # it can create /data/urls.sqlite on first boot.
+      - chhoto_data:/data
+    healthcheck:
+      # The app runs a tiny health server on 127.0.0.1:1729 (/healthz), reachable
+      # only from inside the container. busybox wget ships in the alpine image.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:1729/healthz || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    mem_limit: 256m
+
+volumes:
+  chhoto_data: {}

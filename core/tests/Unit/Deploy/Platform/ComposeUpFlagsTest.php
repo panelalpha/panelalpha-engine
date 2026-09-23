@@ -118,6 +118,21 @@ class ComposeUpFlagsTest extends TestCase
     }
 
     /**
+     * Nitro deletes `.output` and writes a new one on every build. A container
+     * that is not recreated keeps a bind mount of the deleted directory: the
+     * server already in memory answers `/`, every static file answers 500.
+     */
+    public function test_nitro_output_must_replace_its_container(): void
+    {
+        foreach ([Strategies::NUXT, Strategies::TANSTACK] as $strategy) {
+            $this->assertTrue(
+                DeployCompose::forceRecreate($strategy, PlatformManifest::RUNTIME_NODE),
+                "{$strategy} must be recreated or it keeps the deleted .output mounted"
+            );
+        }
+    }
+
+    /**
      * Everything else either builds an image — which recreates the container
      * on its own — or serves prebuilt output that a restart would not change.
      */
@@ -126,10 +141,8 @@ class ComposeUpFlagsTest extends TestCase
         $runtimes = [
             Strategies::RAILPACK => null,
             Strategies::STATIC => PlatformManifest::RUNTIME_NGINX,
+            // Vite empties `dist/` but keeps the directory, so the mount holds.
             Strategies::VITE => PlatformManifest::RUNTIME_NGINX,
-            // Not nextjs: it runs the mounted project, so its container has to
-            // be recreated for a new build to be the one being served.
-            Strategies::NUXT => PlatformManifest::RUNTIME_NODE,
         ];
         foreach ($runtimes as $strategy => $runtime) {
             $this->assertFalse(DeployCompose::forceRecreate($strategy, $runtime), $strategy);

@@ -1,0 +1,11 @@
+services:
+  app:
+    volumes:
+      # The document root is a directory the owner fills, and it has to outlive
+      # ~/project: a rebuild clears ~/project whole
+      # (ProjectTree::clearContents) and here those files ARE the site.
+      # ~/.panelalpha is created by the engine (Project.php:814), owned by the
+      # account, and untouched by a rebuild -- and it is the only writable
+      # place outside ~/project, because the home itself is root:root.
+      # Upstream's own compose does the same thing with ./share.
+      - '../.panelalpha/apaxy/files:/usr/local/apache2/htdocs'

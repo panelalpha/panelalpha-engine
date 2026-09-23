@@ -56,7 +56,10 @@ class DetectAppPort
     }
 
     /**
-     * @return array{all: list<int>, primary?: int} public ports, best first
+     * Public ports, best first, plus the bindings detection refused and why
+     * ({@see ComposePortScan}).
+     *
+     * @return array{all: list<int>, primary?: int, refused: list<array{port: int, reason: string, service: string}>}
      */
     public static function detectAllPorts(string $composePath): array
     {

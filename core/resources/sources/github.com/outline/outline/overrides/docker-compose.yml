@@ -1,0 +1,177 @@
+# The stack for the repository, replacing a compose file that is not one.
+#
+# outline/outline ships a root docker-compose.yml holding a postgres and a
+# redis and no Outline at all -- it is what `yarn dev` connects to on the
+# author's laptop, which is why both services publish themselves on
+# 127.0.0.1. ComposeFileInspector reads it for exactly what it is
+# (isSidecarsOnlyComposeYaml: every service a known datastore, none with a
+# build) and refuses to run it as the project, so detection fell through to
+# the root Dockerfile and started Outline alone with an empty .env. That is
+# the restart loop this file replaces: no database, no redis, no SECRET_KEY.
+#
+# Outline runs from its published image rather than from that Dockerfile
+# because the Dockerfile does not build this checkout -- see hooks/prepare.sh.
+services:
+  postgres:
+    # Outline speaks PostgreSQL and nothing else. Its migrations also install
+    # four extensions (uuid-ossp, pg_trgm, unaccent, btree_gin), all of them
+    # in postgres-contrib and so present in this image -- but CREATE EXTENSION
+    # is a superuser operation, which is why the role below is the image's own
+    # POSTGRES_USER (a superuser) rather than one created beside it.
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: outline
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: outline
+      PGDATA: /var/lib/postgresql/data/pgdata
+    # Sized for one account rather than for a dedicated host: this database
+    # holds one team's documents, not a fleet's.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - effective_cache_size=192MB
+      - -c
+      - max_connections=30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U outline -d outline"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    shm_size: 64mb
+    mem_limit: 256m
+
+  redis:
+    # Not a cache that can be dropped: Outline runs its background queues on
+    # BullMQ and its websocket/collaboration fan-out on redis pub/sub, and
+    # /_health pings it before answering. The server exits on a missing
+    # REDIS_URL the same way it exits on a missing database.
+    image: redis:7-alpine
+    restart: unless-stopped
+    # `noeviction` on purpose: BullMQ keeps job state in redis and an eviction
+    # policy would silently drop queued work. `--save ""` because nothing here
+    # is worth restoring across a restart -- the queues are rebuilt from the
+    # database -- and an RDB dump inside the account's memory budget is a cost
+    # with no matching benefit.
+    command: ["redis-server", "--save", "", "--maxmemory", "96mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    mem_limit: 128m
+
+  outline:
+    # Tag written by hooks/prepare.sh from the checkout's own package.json.
+    image: ${OUTLINE_IMAGE:-outlinewiki/outline:1.10}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # The account's own env_vars are merged into this file by
+    # ProjectEnvironment after the recipe has run, and it is the only way an
+    # operator can add SMTP_*, OIDC_* or any other key the recipe deliberately
+    # leaves unset. `environment:` below outranks it, so nothing the recipe
+    # has settled can be broken from here -- and nothing it has left open is
+    # out of reach.
+    env_file:
+      - .env
+    environment:
+      # Not a real address, and not meant to survive: ComposePlaceholders
+      # rewrites a bare http://localhost under a key matching
+      # /(^|_)(URL|ORIGIN|ENDPOINT|DOMAIN)$/ to the account's public https URL
+      # before the stack starts, and `URL` is that key exactly. It is also the
+      # one value the recipe cannot generate -- the domain does not exist when
+      # the prepare hook runs -- and Outline builds every link, redirect,
+      # websocket origin and passkey relying-party id from it. DATABASE_URL
+      # and REDIS_URL match the same key pattern but their values are not
+      # localhost, so they are left alone.
+      URL: http://localhost
+      PORT: "3000"
+      NODE_ENV: production
+      SECRET_KEY: ${SECRET_KEY}
+      UTILS_SECRET: ${UTILS_SECRET}
+      DATABASE_URL: postgres://outline:${POSTGRES_PASSWORD}@postgres:5432/outline
+      # Required, not cosmetic: node-postgres defaults to negotiating TLS and
+      # storage/database.ts fails with "The database does not support SSL
+      # connections. Set the PGSSLMODE environment variable to disable" when
+      # the server is the plain sidecar next door.
+      PGSSLMODE: disable
+      REDIS_URL: redis://redis:6379
+      # Attachments and avatars on a named volume. The image already declares
+      # /var/lib/outline/data a VOLUME and chmods it 1777 for its uid 1001
+      # user; naming it is what keeps the data across a recreate instead of in
+      # an anonymous volume nobody can find.
+      FILE_STORAGE: local
+      FILE_STORAGE_LOCAL_ROOT_DIR: /var/lib/outline/data
+      # TLS is the proxy's, and the container is only ever reached over the
+      # loopback. Left at its default (true), koa-force-ssl would 301 every
+      # request that arrives without X-Forwarded-Proto -- which is every
+      # request the engine's own health probe makes -- so the container would
+      # answer a redirect while the site answered a page, and the probe's
+      # app-versus-edge body comparison would be comparing two different
+      # things. PROXY_HEADERS_TRUSTED stays at its default true, so
+      # ctx.request.secure still reads X-Forwarded-Proto and session and CSRF
+      # cookies are still issued Secure for real traffic.
+      FORCE_HTTPS: "false"
+      # One web process. The default is one per CPU, and each one loads the
+      # whole Sequelize model graph; the collaboration service pins it to 1
+      # anyway unless REDIS_COLLABORATION_URL is set, which it is not.
+      WEB_CONCURRENCY: "1"
+      # The default four plus `cron`, which is what schedules Outline's
+      # periodic tasks (cleanup, exports, deliveries). Without it they only
+      # run when something outside calls the /api/cron.<UTILS_SECRET>
+      # endpoint, and the engine has no cron of its own to call it with.
+      SERVICES: collaboration,websockets,worker,web,cron
+      # Set here rather than left to ServiceHardener, which would size the
+      # heap from mem_limit anyway; stated so the number is visible beside the
+      # limit it belongs to.
+      NODE_OPTIONS: --max-old-space-size=768
+    volumes:
+      - outline-data:/var/lib/outline/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # /_health is Outline's own readiness endpoint (server/main.ts): SELECT 1
+    # against PostgreSQL, PING against redis, then the string OK. It answers
+    # only after the master process has run the pending migrations, which on
+    # an empty database is some 200 of them, so it is exactly the signal
+    # `ready` below needs. wget is in the image -- its Dockerfile installs it
+    # for this purpose -- and this is upstream's own HEALTHCHECK line with a
+    # usable interval on it.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/_health | grep -q OK"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 180s
+    mem_limit: 1024m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be
+  # finished when that returns -- at which point Outline's container has been
+  # *started*, not yet *answered*: its first boot runs every migration against
+  # an empty database before it binds 3000. Compose does block on a
+  # depends_on health condition, so a service that waits on Outline's
+  # healthcheck is what makes `up -d` return only once the site actually
+  # answers. A clean exit 0 is explicitly not a crash loop as far as AppHealth
+  # is concerned. The redis image, not Outline's, so nothing extra is pulled.
+  ready:
+    image: redis:7-alpine
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      outline:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  postgres-data: {}
+  outline-data: {}

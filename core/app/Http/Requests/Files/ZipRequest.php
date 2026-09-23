@@ -26,6 +26,9 @@ class ZipRequest extends FormRequest
         return [
             'zip_path' => 'string|required',
             'path' => 'string|required',
+            'compression_level' => 'nullable|integer|min:0|max:9',
+            'from_date' => 'nullable|string',
+            'ignore_empty' => 'boolean',
         ];
     }
 }

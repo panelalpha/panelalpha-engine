@@ -102,7 +102,9 @@ export class DomainsApi extends EximApi {
     username: string,
     domain: string
   ): Promise<ApiResponse<SslCertificate>> {
-    const response = await this.api.get(`projects/${username}/domains/${domain}/installed-ssl-cert`);
+    const response = await this.api.get(
+      `projects/${username}/domains/${domain}/installed-ssl-cert`
+    );
     await this.assertStatus(response, 200);
     return response.json();
   }
@@ -112,9 +114,12 @@ export class DomainsApi extends EximApi {
     domain: string,
     options: { staging?: boolean; dry_run?: boolean } = {}
   ): Promise<ApiResponse<unknown>> {
-    const response = await this.api.post(`projects/${username}/domains/${domain}/request-ssl-cert`, {
-      data: options,
-    });
+    const response = await this.api.post(
+      `projects/${username}/domains/${domain}/request-ssl-cert`,
+      {
+        data: options,
+      }
+    );
     await this.assertStatus(response, 200);
     return response.json();
   }
@@ -124,9 +129,12 @@ export class DomainsApi extends EximApi {
     domain: string,
     options: { staging?: boolean; dry_run?: boolean } = {}
   ): Promise<{ status: number; body: unknown }> {
-    const response = await this.api.post(`projects/${username}/domains/${domain}/request-ssl-cert`, {
-      data: options,
-    });
+    const response = await this.api.post(
+      `projects/${username}/domains/${domain}/request-ssl-cert`,
+      {
+        data: options,
+      }
+    );
     return this.rawCall(response);
   }
 }

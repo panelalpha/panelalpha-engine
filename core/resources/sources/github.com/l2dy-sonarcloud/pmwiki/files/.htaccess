@@ -1,0 +1,15 @@
+# PanelAlpha root .htaccess for PmWiki. The base image serves docroot "." with
+# AllowOverride All, so these rules apply.
+
+DirectoryIndex index.php
+
+# Never serve the flat-file page stores raw: wiki.d holds the user's pages,
+# page history and the lock file (symlinked to ~/.panelalpha; a URL rule blocks
+# it regardless), and wikilib.d holds the bundled page library (raw wiki markup
+# a stock deploy serves with HTTP 200). Also deny the clone's VCS metadata and
+# the deploy tooling.
+RedirectMatch 403 (?i)/wiki\.d(/|$)
+RedirectMatch 403 (?i)/wikilib\.d(/|$)
+RedirectMatch 403 (?i)/\.git(/|$)
+RedirectMatch 403 (?i)/panelalpha(/|$)
+RedirectMatch 403 (?i)/\.pa-php(/|$)

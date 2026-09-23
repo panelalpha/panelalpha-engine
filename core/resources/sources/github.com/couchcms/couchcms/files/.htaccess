@@ -1,0 +1,23 @@
+# Written by PanelAlpha, and small on purpose.
+#
+# CouchCMS is served from the root of the checkout, so every file the deploy
+# leaves beside the application is a URL. The generated vhost already denies
+# the ones it knows about -- dotfiles (.git, .env, the admin password),
+# `docker-compose.yml` and anything named `panelalpha-*` -- but its rule reads
+#
+#     ^(?:docker-compose\.ya?ml|panelalpha[-.])
+#
+# which does not match `docker-compose.override.yml`, the file the engine
+# writes from a recipe's overrides/. Served as plain text it publishes the
+# deploy's own arrangement, and a recipe that put a value in it would publish
+# that too.
+#
+# Anchored on the name rather than on a wildcard, so a page called
+# `compose-guide.yml` is still the site's to serve.
+<FilesMatch "^docker-compose\.">
+    Require all denied
+</FilesMatch>
+
+# CouchCMS generates its own .htaccess for Pretty URLs -- couch/gen_htaccess.php
+# writes one and tells you to put it in the root of your site, which is this
+# file. If you do that, keep the block above.

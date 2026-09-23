@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Servers;
 
+use App\Auth\TokenAbilities;
 use App\Mcp\ToolPolicy;
 use App\Mcp\Tools\MetricsLatestTool;
 use App\Mcp\Tools\ProjectListSummaryTool;
@@ -108,5 +109,11 @@ class EngineServer extends Server
         // switches off is absent from the server, so calling it by name fails
         // rather than merely being hidden from tools/list.
         $this->tools = (new ToolPolicy())->filter($this->tools);
+
+        // Then what this token may reach. The package resolves this class
+        // inside the route's own middleware pipeline, so the caller is already
+        // authenticated here — which is what makes a per-token tools/list
+        // possible rather than one list for everyone and a refusal later.
+        $this->tools = TokenAbilities::forCurrentRequest()->filterTools($this->tools);
     }
 }

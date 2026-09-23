@@ -21,15 +21,19 @@ use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\PlatformStage;
+use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Deploy\Source\GitUrl;
-use App\Integrations\Tunnels\PanelAlphaHub;
+use App\Lib\Deploy\ProjectName;
+use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Domains\DomainAllocationException;
 use App\Lib\Domains\DomainAllocator;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Domains\PublicUrl;
+use App\Lib\Vault\GlobalVault;
 use App\Lib\Vault\RequestVault;
 use App\Models\Domain;
 use App\Models\ProxyRule;
+use App\Models\SecretVaultEntry;
 use App\Models\Setting;
 use App\Models\Task;
 use App\Models\Tunnel;
@@ -134,9 +138,19 @@ class UserController extends Controller
         summary: 'Create a new hosting project (async)',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
-            required: ['email'],
+            // Nothing is required: validation has never demanded an email, and
+            // a create whose every detail is generated has nothing to demand.
             properties: [
-                new OA\Property(property: 'username', type: 'string', example: 'johndoe', nullable: true),
+                new OA\Property(
+                    property: 'username',
+                    type: 'string',
+                    example: 'johndoe',
+                    nullable: true,
+                    description: 'The project account name. Generated when omitted: from the repository '
+                        . 'name, else the domain, else the recipe, else "app" -- with a random numeric '
+                        . 'suffix when that name is taken. 3-15 lowercase letters and digits, starting '
+                        . 'with a letter.'
+                ),
                 new OA\Property(
                     property: 'domain',
                     type: 'string',
@@ -183,7 +197,16 @@ class UserController extends Controller
                         . 'which can only be set once the project exists -- create it, PUT '
                         . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.'
                 ),
-                new OA\Property(property: 'git_repo', type: 'string', nullable: true),
+                new OA\Property(
+                    property: 'git_repo',
+                    type: 'string',
+                    nullable: true,
+                    example: 'https://github.com/owner/repo.git',
+                    description: 'HTTPS clone URL. SSH remotes (git@host:owner/repo.git, ssh://...) are '
+                        . 'not supported: the engine clones anonymously or with `git_token` and holds no '
+                        . 'SSH keys -- a 422 names the HTTPS spelling to use instead. A schemeless '
+                        . 'github.com/owner/repo is accepted and has the scheme filled in.'
+                ),
                 new OA\Property(property: 'git_branch', type: 'string', nullable: true),
                 new OA\Property(
                     property: 'git_token',
@@ -285,9 +308,19 @@ class UserController extends Controller
         summary: 'Create a new hosting user (synchronous)',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
-            required: ['email'],
+            // Nothing is required: validation has never demanded an email, and
+            // a create whose every detail is generated has nothing to demand.
             properties: [
-                new OA\Property(property: 'username', type: 'string', example: 'johndoe', nullable: true),
+                new OA\Property(
+                    property: 'username',
+                    type: 'string',
+                    example: 'johndoe',
+                    nullable: true,
+                    description: 'The project account name. Generated when omitted: from the repository '
+                        . 'name, else the domain, else the recipe, else "app" -- with a random numeric '
+                        . 'suffix when that name is taken. 3-15 lowercase letters and digits, starting '
+                        . 'with a letter.'
+                ),
                 new OA\Property(
                     property: 'domain',
                     type: 'string',
@@ -334,7 +367,16 @@ class UserController extends Controller
                         . 'which can only be set once the project exists -- create it, PUT '
                         . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.'
                 ),
-                new OA\Property(property: 'git_repo', type: 'string', nullable: true),
+                new OA\Property(
+                    property: 'git_repo',
+                    type: 'string',
+                    nullable: true,
+                    example: 'https://github.com/owner/repo.git',
+                    description: 'HTTPS clone URL. SSH remotes (git@host:owner/repo.git, ssh://...) are '
+                        . 'not supported: the engine clones anonymously or with `git_token` and holds no '
+                        . 'SSH keys -- a 422 names the HTTPS spelling to use instead. A schemeless '
+                        . 'github.com/owner/repo is accepted and has the scheme filled in.'
+                ),
                 new OA\Property(property: 'git_branch', type: 'string', nullable: true),
                 new OA\Property(
                     property: 'git_token',
@@ -478,17 +520,23 @@ class UserController extends Controller
             $params['domain'] = Str::after($params['domain'], 'www.');
         }
 
-        if (
-            empty($params['username'])
-            && !empty($params['git_repo'])
-        ) {
-            $params['username'] = Helper::generateUsername($params['git_repo']);
+        // Nothing here is required of the caller: a create with no body at all
+        // names itself after whatever the request does carry -- the repository,
+        // the domain, the recipe -- and takes a plain "app" when it carries
+        // nothing. The one-line installer (`--repo`) relies on it, and so does
+        // every agent that has a repository and no opinion about the name.
+        if (empty($params['username'])) {
+            $params['username'] = Helper::generateUsernameFrom(ProjectName::base(
+                $params['git_repo'] ?? null,
+                $params['domain'] ?? null,
+                $params['recipe'] ?? null,
+            ));
         }
         if (empty($params['username'])) {
             throw ProblemException::one(
                 'username',
                 'username_required',
-                'The username field is required.'
+                'No username was given and none could be generated; pass `username`.'
             );
         }
 
@@ -547,6 +595,26 @@ class UserController extends Controller
 
         if ($problems !== []) {
             throw ProblemException::of($problems);
+        }
+
+        // After the local checks because it is the only one that leaves the
+        // machine; before the allocator because everything past it spends a
+        // panelalpha.online label, and those are never released.
+        if (!empty($params['git_repo'])) {
+            $probe = (new GitRemoteProbe())->problem(
+                'git_repo',
+                $params['git_repo'],
+                // The token the clone will actually use, which is not always
+                // the one being stored: a create that sends none inherits the
+                // engine's, and probing without it would refuse a private
+                // repository the deploy would then have read fine. Used here
+                // and dropped -- `git_token` above stays absent, so the
+                // project keeps inheriting and a rotation still reaches it.
+                GlobalVault::effective($params['git_token'] ?? null, SecretVaultEntry::TYPE_GIT_TOKEN)
+            );
+            if ($probe !== null) {
+                throw ProblemException::of([$probe]);
+            }
         }
 
         // The name, and everything about it worth reporting. Chosen before
@@ -627,6 +695,14 @@ class UserController extends Controller
             ],
         ]);
 
+        if (!empty($params['password']) && is_string($params['password'])) {
+            $details = $user->getDetails();
+            $details['site_password_enabled'] = true;
+            $details['site_password_hash'] = password_hash($params['password'], PASSWORD_BCRYPT);
+            $details['site_password_version'] = 1;
+            $user->details = $details;
+        }
+
         // Asked again with the username on the model, which the check above
         // cannot see: that one builds a fresh `System` from `$params` while
         // this row is only in memory, so a username that already has a home
@@ -691,7 +767,7 @@ class UserController extends Controller
         // project's own domain by construction, which is the one arrangement
         // where the Host the proxy forwards is the name a visitor typed.
         if ($allocated->tunnelProvider === Tunnel::PROVIDER_PANELALPHA && $allocated->allocation !== null) {
-            PanelAlphaHub::recordPanelAlphaTunnel($user, $domain, $allocated->allocation);
+            PanelAlphaConnect::recordPanelAlphaTunnel($user, $domain, $allocated->allocation);
         }
 
         return $user;
@@ -706,6 +782,30 @@ class UserController extends Controller
      * client had to read English to tell "pin a PHP image" from "the
      * repository needs a token".
      */
+    /**
+     * An archive cannot replace a project that deploys from git (engine#269).
+     *
+     * The deploy treated the uploaded tree as the repository's checkout -- its
+     * recipe, its app config, its HEAD -- found no .git, and failed only after
+     * the archive had already replaced ~/project. A deploy-managed repository
+     * cannot be disconnected either, so say what can be done instead, before
+     * anything is touched.
+     */
+    private static function refuseArchiveOnGitProject(User $user): void
+    {
+        if (!$user->hasGitProject()) {
+            return;
+        }
+
+        throw ProblemException::one(
+            'zip_path',
+            'archive_on_git_project',
+            "Project '{$user->username}' deploys from its git repository, so an archive cannot replace it. "
+            . 'Push the change to the repository and rebuild, or deploy the archive into a project created without a repository.',
+            ['git_repo' => GitUrl::sanitize((string) $user->getGitRepo())]
+        );
+    }
+
     private static function deployProblem(string $code, string $message, ?string $stage): ProblemException
     {
         return ProblemException::one('deploy', $code, $message, array_filter([
@@ -884,9 +984,7 @@ class UserController extends Controller
                 implode(' | ', $warnings)
             );
         } else {
-            $user->setDetails([
-                'deployment_status' => 'success'
-            ]);
+            $user->markDeploySucceeded();
             $user->save();
             $deployLogger?->finish(DeployLogger::STATUS_SUCCESS);
         }
@@ -1167,6 +1265,7 @@ class UserController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'User rebuilt', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'User not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'Rebuild failed', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
@@ -1190,6 +1289,9 @@ class UserController extends Controller
             'stages' => 'array|nullable',
             'recipe' => 'string|nullable|max:64',
         ]);
+        if (($params['zip_path'] ?? '') !== '') {
+            self::refuseArchiveOnGitProject($user);
+        }
         DeployPlanInput::arm($request);
         RecipeChoiceInput::arm($request);
         if (array_key_exists('env_vars', $params)) {
@@ -1201,29 +1303,72 @@ class UserController extends Controller
         $zipPath = $params['zip_path'] ?? null;
 
         $deployLogger = null;
-        if ($user->getTemplate() === 'dind' && $this->wantsDeployStream($request)) {
-            // Created here (not inside User::rebuild) so the stream can attach
-            // its backlog/start frames before the pipeline runs.
+        $stream = false;
+        if ($user->getTemplate() === 'dind') {
+            // Created here rather than inside the workflow, which would open
+            // the same one: a failure then knows its stage (the plain response
+            // used to be the only deploy answer without one), and the stream
+            // can attach its backlog/start frames before the pipeline runs.
             $deployLogger = DeployLogger::resumeRunningOrStartSafely($user->username);
+            $stream = $this->wantsDeployStream($request);
         }
 
-        if ($deployLogger !== null) {
+        // One closure for both shapes, so the streamed and the plain response
+        // cannot drift -- which is how this endpoint came to be the only
+        // deploy entry point with no handler at all. A rebuild whose compose
+        // dependency failed answered `500 {"message":"Server Error"}`: no
+        // problem code, no stage, no offset, and nothing to tell a client
+        // "your compose file is wrong" from "the engine is broken". The deploy
+        // log for the same run already had the real error in it.
+        $rebuild = function () use ($user, $deployLogger, $zipPath): void {
+            try {
+                $this->runProjectRebuild($user->project(), $deployLogger, $zipPath);
+                $user->project()->system()->webserver()->rebuildDomains();
+                $this->recordRebuildSucceeded($user);
+            } catch (DeployCancelledException $e) {
+                $stage = $deployLogger?->currentStage();
+                $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
+                throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
+            } catch (ValidationException $e) {
+                // ProblemException is one of these, so anything already in the
+                // documented shape passes through rather than being re-wrapped.
+                throw $e;
+            } catch (\Exception $e) {
+                throw $this->rebuildFailure($e, $deployLogger);
+            }
+        };
+
+        if ($stream && $deployLogger !== null) {
             return $this->respondWithDeployStream(
-                function () use ($user, $deployLogger, $zipPath) {
-                    $this->runProjectRebuild($user->project(), $deployLogger, $zipPath);
-                    $user->project()->system()->webserver()->rebuildDomains();
-                    $this->recordRebuildSucceeded($user);
-                },
+                $rebuild,
                 $deployLogger,
                 static fn () => ['username' => $user->username, 'domain' => $user->domain]
             );
         }
 
-        $this->runProjectRebuild($user->project(), null, $zipPath);
-        $user->project()->system()->webserver()->rebuildDomains();
-        $this->recordRebuildSucceeded($user);
+        $rebuild();
 
         return new UserResource($user);
+    }
+
+    /**
+     * A failed rebuild, in the shape every other deploy endpoint answers in.
+     *
+     * Its own method so it can be exercised without a request: the defect was
+     * that this translation did not exist here at all, and a test that has to
+     * stand up a controller to see it would not have caught that either.
+     */
+    private function rebuildFailure(\Exception $e, ?DeployLogger $deployLogger): ProblemException
+    {
+        $deployLogger?->recordFailureOutput($e->getMessage());
+        // The same slug deploy telemetry reports, so a client and a dashboard
+        // name one failure the same way.
+        $match = DeployFailureExplainer::match($e->getMessage());
+        $message = $match['message'] ?? $e->getMessage();
+        $stage = $deployLogger?->currentStage();
+        $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
+
+        return self::deployProblem($match['rule'] ?? 'rebuild_failed', $message, $stage);
     }
 
     /**
@@ -1285,7 +1430,7 @@ class UserController extends Controller
         if ($user->getDeploymentStatus() === 'success' && ($user->getDetails()['deployment_warnings'] ?? []) === []) {
             return;
         }
-        $user->setDetails(['deployment_status' => 'success', 'deployment_warnings' => []]);
+        $user->markDeploySucceeded();
         $user->save();
     }
 
@@ -1357,6 +1502,7 @@ class UserController extends Controller
             'stages' => 'array|nullable',
             'recipe' => 'string|nullable|max:64',
         ]);
+        self::refuseArchiveOnGitProject($user);
         DeployPlanInput::arm($request);
         RecipeChoiceInput::arm($request);
         if (array_key_exists('env_vars', $params)) {
@@ -1372,20 +1518,7 @@ class UserController extends Controller
 
         $run = function () use ($user, $zipPath, $deployLogger): void {
             try {
-                $deployLogger?->stage(DeployLogger::STAGE_CLONING);
-                $project = $user->project();
-                $project->importProjectArchive($zipPath);
-                $project->prepareUserAppFromSources();
-                $deployLogger?->stage(DeployLogger::STAGE_RUNNING);
-                $result = $project->startUserApp();
-                if ($result['exit_code'] !== 0) {
-                    $full = $this->startFailureMessage(
-                        $result['stderr'] ?: $result['stdout'],
-                        $deployLogger
-                    );
-                    $deployLogger?->finish(DeployLogger::STATUS_FAILED, $full);
-                    throw new \Exception($full);
-                }
+                $user->project()->deployment()->deployFromArchive($deployLogger, $zipPath);
                 // The vhosts were rendered when the account was created, against
                 // the welcome app's port. Detection has just re-pointed app_port
                 // at what the archive really serves on (8000 for PHP, 3000 for
@@ -1393,9 +1526,7 @@ class UserController extends Controller
                 // rebuild() does it — or every non-8080 app answers 502 behind
                 // a green deploy.
                 $user->project()->system()->webserver()->rebuildDomains();
-                $user->setDetails(['deployment_status' => 'success']);
-                $user->save();
-                $deployLogger?->finish(DeployLogger::STATUS_SUCCESS);
+                $this->recordRebuildSucceeded($user);
             } catch (DeployCancelledException $e) {
                 $stage = $deployLogger?->currentStage();
                 $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());

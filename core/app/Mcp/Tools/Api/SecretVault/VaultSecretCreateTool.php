@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Create a vault slot for a secret that will be pasted in a browser
 
-    Mints a one-use-per-secret paste slot. Returns `ref` (`vault:<id>`, pass it where the secret would go -- e.g. the `git_token` field of project_create or source_inspect) and `url` (the form the customer opens and pastes the secret into). The entry is reusable until it expires (`expires_in` seconds), then gone; a paste can be repeated while it lives. **The secret never passes through the API caller** -- that is this mechanism's whole purpose, for agents that must not relay a private-repository token through a conversation.
+    Mints a one-use-per-secret paste slot. Returns `ref` (`vault:<id>`, pass it where the secret would go -- e.g. the `git_token` field of project_create or source_inspect) and `url` (the form the customer opens and pastes the secret into). The entry is reusable until it expires (`expires_in` seconds), then gone; a paste can be repeated while it lives. **The secret never passes through the API caller** -- that is this mechanism's whole purpose, for agents that must not relay a private-repository token through a conversation. Pass `scope: global` instead to store it as the engine's own secret of that type, which does not expire and which every project created without one of its own uses -- ask once, not at every project. Give `purpose` so the entry can be recognised later: the secret is never readable again, so the listing is all you have. **A pasted secret is final** -- it cannot be overwritten from the form or by minting over it; to replace one, delete it and create a new link. The form checks a `git_token` or `cloudflare_api_token` before saving it, with the same calls the engine makes when it uses one: a git token against `verify_with.repo_url` (required for the check), a Cloudflare token for its account and Tunnel access, plus the zone of `verify_with.hostname` when given. A refused token is not stored and the link stays open. `verification` on status then says whether it was checked.
 
     Calls POST /api/vault/secrets. This changes server state.
     MARKDOWN)]
@@ -40,6 +40,9 @@ class VaultSecretCreateTool extends ApiTool
     {
         return [
             'type',
+            'scope',
+            'purpose',
+            'verify_with',
         ];
     }
 
@@ -50,6 +53,9 @@ class VaultSecretCreateTool extends ApiTool
     {
         return [
             'type' => $schema->string()->description('The request field the reference will be passed in (e.g. `git_token`, `env_vars`). Free-form snake_case -- the field the caller will send `vault:<ref>` in. The paste form shows help from `resources/vault/<type>.md` when that file exists, else the default help. Example: git_token.')->required(),
+            'scope' => $schema->string()->description('`request` (the default) is one secret for the calls you are about to make; it expires in an hour. `global` stores it as **the engine\'s** secret of that type: there is one per type, it does not expire, and every project created without a secret of its own uses it -- so ask the customer for a Git or Cloudflare token once rather than at each project. Minting `global` for a type that already has one re-opens the paste form so the secret can be replaced; the stored secret keeps working until it is. Pass `vault:global` in a field to use it explicitly. One of: request, global.'),
+            'purpose' => $schema->string()->description('What this secret is for, in your words -- "deploy key for the shop repo", "Cloudflare token for the staging zone". Shown on the paste form, so the person handing over a credential can see why, and returned by `list`. Several entries share one `type`, and the secret can never be read back, so this is what tells them apart later when deciding which to delete. Example: Deploy key for the shop repo.'),
+            'verify_with' => $schema->object()->description('What the pasted secret is checked against before it is saved. `git_token`: `repo_url`, the HTTPS repository the token must be able to read. `cloudflare_api_token`: `hostname` (optional), a domain whose zone the token must see. A refused token is not stored and the form asks again; an unreachable host saves it unchecked.'),
         ];
     }
 }

@@ -1,0 +1,9 @@
+# Persist SPIP's config dir (connect.php + cles.php + mes_options.php, via
+# SPIP_ETC_DIR) and IMG/ (uploaded media) across the redeploy that empties
+# ~/project (engine#173). The account home survives, so mount ~/.panelalpha
+# (../.panelalpha relative to this file, which sits in ~/project) into the app
+# container; spip-setup.sh writes under /pa-data.
+services:
+  app:
+    volumes:
+      - '../.panelalpha:/pa-data'

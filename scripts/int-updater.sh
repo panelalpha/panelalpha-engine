@@ -166,8 +166,9 @@ check_version() {
 }
 
 request_download_token() {
-    # Hub package host resolves the caller by IP and returns a short-lived download token.
-    CURL_RESULTS=$(curl --http1.1 "https://${PACKAGE_HOST}/api/verify/request-download")
+    # Connect resolves the caller by IP and returns a short-lived download token.
+    CURL_RESULTS=$(curl --http1.1 -H "X-Engine-App-UID: ${APP_UID}" \
+        "https://${PACKAGE_HOST}/api/verify/request-download")
 
     TOKEN=$(echo "$CURL_RESULTS" | jq -r '.["license"].download_token // empty')
     DOWNLOAD_STATUS=$(echo "$CURL_RESULTS" | jq -r '.["license"].status // empty')
@@ -189,7 +190,7 @@ download_panelalpha_engine() {
     PACKAGE_URL+=$PANELALPHA_ENGINE_VERSION
 
     while true; do
-        STATUS=$(cd ''$INSTALL_DIR'' && curl --http1.1 -o app.zip -w '%{http_code}' ''$PACKAGE_URL'' --header 'Download-Token:'$TOKEN'')
+        STATUS=$(cd ''$INSTALL_DIR'' && curl --http1.1 -o app.zip -w '%{http_code}' ''$PACKAGE_URL'' --header 'Download-Token:'$TOKEN'' --header "X-Engine-App-UID: ${APP_UID}")
         if [ $STATUS -eq 200 ]; then
             echo_info "Success! Package has been downloaded"
             break
@@ -218,9 +219,9 @@ unzip_panelalpha_engine() {
 }
 
 # Every artisan call talks to the core database, and it is not always ready when
-# we ask: MySQL is still running initdb right after 'up -d', and any Docker
-# restart takes the whole stack down with it. Bounded, so a stack that never
-# comes up fails the run instead of hanging on it forever.
+# we ask: the core container is still starting up right after 'up -d', and any
+# Docker restart takes the whole stack down with it. Bounded, so a stack that
+# never comes up fails the run instead of hanging on it forever.
 wait_for_database() {
     local timeout=${1:-600}
     local waited=0
@@ -302,6 +303,9 @@ prepare_config_files() {
     chmod +x /opt/panelalpha/shared-hosting/config/pure-ftpd/entrypoint.sh
     mkdir -p /opt/panelalpha/shared-hosting/config/sftp
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/sftp/. /opt/panelalpha/shared-hosting/config/sftp/.
+    # Scripts are engine code, not host state: -n kept every host on the copy it
+    # was installed with, bugs included (engine#243).
+    cp /opt/panelalpha/shared-hosting/templates/config/sftp/{entrypoint.sh,sync-logins.sh} /opt/panelalpha/shared-hosting/config/sftp/
     if [ ! -f /opt/panelalpha/shared-hosting/config/sftp/ssh_host_ed25519_key ]; then
         ssh-keygen -t ed25519 -N "" -f /opt/panelalpha/shared-hosting/config/sftp/ssh_host_ed25519_key < /dev/null
     fi
@@ -337,9 +341,86 @@ EOF
     fi
 }
 
+# A host still running core-db predates the sqlite migration and has real
+# data in it; a fresh install never had core-db to begin with. Must run
+# before cp -Rf replaces docker-compose.yml with the new release's copy,
+# which is the last point the old file (and the service it did or didn't
+# define) can still be read. Sets LEGACY_CORE_DB for the rest of
+# update_files(), including backup_database().
+detect_legacy_core_db() {
+    if [ -f /opt/panelalpha/shared-hosting/docker-compose.yml ] &&
+        grep -q '^  core-db:' /opt/panelalpha/shared-hosting/docker-compose.yml; then
+        LEGACY_CORE_DB=1
+    else
+        LEGACY_CORE_DB=0
+    fi
+}
+
+# Backfills what a MySQL-backed core needs: the CORE_DB_* overrides
+# docker-compose.yml's core/metrics services read (config/database.php's
+# mysql connection takes it from there), and the legacy-mysql-core profile
+# so `up -d` actually manages core-db instead of leaving it running
+# unmanaged under its old image. Two ways in: LEGACY_CORE_DB=1 (an existing
+# core-db host, detected above) backfills the profile itself; an operator
+# who has already put legacy-mysql-core in COMPOSE_PROFILES by hand (a
+# fresh install choosing MySQL on purpose) only needs the connection vars --
+# the profile is already exactly what they asked for. Runs after the
+# COMPOSE_PROFILES=full backfill below so it only ever appends to an
+# already-decided list -- never decides between 'full' and this host's own
+# trimmed list itself. See docs/internal/core-db.md.
+keep_legacy_core_db_on_mysql() {
+    local profiles profile_wants_mysql=0
+    profiles=$(grep '^COMPOSE_PROFILES=' /opt/panelalpha/shared-hosting/.env | cut -d '=' -f2-)
+    case ",${profiles}," in
+    *,legacy-mysql-core,*) profile_wants_mysql=1 ;;
+    esac
+
+    [ "$LEGACY_CORE_DB" = "1" ] || [ "$profile_wants_mysql" = "1" ] || return 0
+
+    if ! grep -q '^CORE_DB_CONNECTION=' /opt/panelalpha/shared-hosting/.env; then
+        echo_info "Core database is MySQL; backfilling CORE_DB_* in .env"
+        if [ -n "$(tail -c1 /opt/panelalpha/shared-hosting/.env)" ]; then
+            echo "" >>/opt/panelalpha/shared-hosting/.env
+        fi
+        cat >>/opt/panelalpha/shared-hosting/.env <<'EOF'
+CORE_DB_CONNECTION=mysql
+CORE_DB_HOST=database-core.shared-hosting.palocal
+CORE_DB_DATABASE=core
+CORE_DB_USERNAME=core
+EOF
+    fi
+
+    # A LEGACY_CORE_DB=1 host already has a real CORE_MYSQL_PASSWORD from
+    # its original install -- core-db is already running with it, so this
+    # must never overwrite a non-empty value. Only a host switching to
+    # legacy-mysql-core for the first time (no core-db provisioned yet)
+    # needs one generated.
+    if ! grep -q '^CORE_MYSQL_PASSWORD=.\+' /opt/panelalpha/shared-hosting/.env; then
+        local core_mysql_password
+        core_mysql_password=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+        if grep -q '^CORE_MYSQL_PASSWORD=' /opt/panelalpha/shared-hosting/.env; then
+            sed -i "s/^CORE_MYSQL_PASSWORD=.*/CORE_MYSQL_PASSWORD=${core_mysql_password}/" /opt/panelalpha/shared-hosting/.env
+        else
+            if [ -n "$(tail -c1 /opt/panelalpha/shared-hosting/.env)" ]; then
+                echo "" >>/opt/panelalpha/shared-hosting/.env
+            fi
+            echo "CORE_MYSQL_PASSWORD=${core_mysql_password}" >>/opt/panelalpha/shared-hosting/.env
+        fi
+    fi
+
+    if [ "$profile_wants_mysql" = "0" ]; then
+        if [ -z "$profiles" ]; then
+            sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=legacy-mysql-core/' /opt/panelalpha/shared-hosting/.env
+        else
+            sed -i "s/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=${profiles},legacy-mysql-core/" /opt/panelalpha/shared-hosting/.env
+        fi
+    fi
+}
+
 update_files() {
 
     echo_info "Updating files..."
+    detect_legacy_core_db
 
     # --preserve=mode repairs files a previous install left root-only.
     cp -Rf --preserve=mode /opt/panelalpha/tmp/engine/app/. /opt/panelalpha/shared-hosting/.
@@ -373,9 +454,14 @@ update_files() {
         echo "COMPOSE_PROFILES=full" >>/opt/panelalpha/shared-hosting/.env
     fi
 
+    keep_legacy_core_db_on_mysql
+
     # This also clears the containers left by the compose service rename (nginx ->
     # core-http, webserver -> sites-http, ...): their service key is gone from the
     # file, so compose sees them as project orphans and --remove-orphans drops them.
+    # core-db is not among them for a host keep_legacy_core_db_on_mysql just
+    # opted in above -- its profile makes it a defined-but-filtered service,
+    # not an orphan, so down leaves it running untouched either way.
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml down --remove-orphans
     docker image prune -af || true
     docker builder prune -af || true
@@ -389,6 +475,10 @@ update_files() {
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:set package_host "${PACKAGE_HOST}"
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan settings:set package_version "${PANELALPHA_ENGINE_VERSION}"
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:modsec:rebuild || true
+    # ADR-0001: move every DinD account onto the reserved run-file layout
+    # before the rebuild below regenerates anything from it. Idempotent and
+    # never restarts a container, so it is safe to run on every update.
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan users:migrate-engine-artifacts --all
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan users:rebuild --all --wipe-vhosts-dir
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan users:add-missing-www-domain-aliases --all
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan users:fix-file-permissions --all
@@ -430,19 +520,40 @@ restart_webserver_if_config_loads() {
 # operator's next decision depends on whether it exists.
 backup_database() {
     local target="/opt/panelalpha/backups"
-    local file="$target/core-db-$(date +%Y%m%d-%H%M%S).sql"
 
     mkdir -p "$target"
 
-    # mysqldump is not in the image; the MariaDB client ships `mariadb-dump`,
-    # and the old name fails to a 0-byte file that looks like a backup.
-    if docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core-db \
-        bash -lc 'mariadb-dump -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" --single-transaction --routines "$MYSQL_DATABASE"' \
-        >"$file" 2>/dev/null && [ -s "$file" ]; then
+    # LEGACY_CORE_DB is set by detect_legacy_core_db(), earlier in the same
+    # update_files() call -- a host int-updater.sh kept on MySQL still has
+    # its data in core-db, not in core.sqlite.
+    if [ "$LEGACY_CORE_DB" = "1" ]; then
+        local file="$target/core-db-$(date +%Y%m%d-%H%M%S).sql"
+        # mysqldump is not in the image; the MariaDB client ships `mariadb-dump`,
+        # and the old name fails to a 0-byte file that looks like a backup.
+        if docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core-db \
+            bash -lc 'mariadb-dump -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" --single-transaction --routines "$MYSQL_DATABASE"' \
+            >"$file" 2>/dev/null && [ -s "$file" ]; then
+            echo_info "Database backed up to $file" | log_file_echo
+            ls -1t "$target"/core-db-*.sql 2>/dev/null | tail -n +3 | xargs -r rm -f
+        else
+            rm -f "$file"
+            echo_warning "Could not back up the database; continuing without one" | log_file_echo
+        fi
+        return
+    fi
+
+    local file="$target/core-db-$(date +%Y%m%d-%H%M%S).sqlite"
+    # core's data is core.sqlite on core-storage. `.backup` runs inside the
+    # core container so it snapshots the live WAL-mode file instead of
+    # copying it mid-write, and core mounts /opt/panelalpha 1:1 with the
+    # host, so it can write $file directly.
+    if docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+        sqlite3 /var/www/html/storage/database/core.sqlite ".backup '$file'" \
+        2>/dev/null && [ -s "$file" ]; then
         echo_info "Database backed up to $file" | log_file_echo
         # Two is enough to cover "the last update broke it" without turning
         # /opt into an archive nobody prunes.
-        ls -1t "$target"/core-db-*.sql 2>/dev/null | tail -n +3 | xargs -r rm -f
+        ls -1t "$target"/core-db-*.sqlite 2>/dev/null | tail -n +3 | xargs -r rm -f
     else
         rm -f "$file"
         echo_warning "Could not back up the database; continuing without one" | log_file_echo
@@ -490,6 +601,41 @@ post_install_config() {
     # Build the shared PHP base images now, in the background: without this the
     # ~150s per PHP minor is paid by whichever customer deploys that minor first.
     bash /opt/panelalpha/shared-hosting/scripts/prewarm-images.sh || echo_warning "Could not start image prewarm"
+}
+
+# APP_UID identifies this install to Connect and to monitoring (X-Engine-App-UID).
+# A value already in .env-core wins, then one a provisioning script exported as
+# APP_UID; only when neither exists is one generated. Never overwritten.
+read_app_uid() {
+    [ -f "$1" ] || return 0
+    { grep '^APP_UID=' "$1" || true; } | tail -n1 | cut -d '=' -f2- | tr -d "\"' \r"
+}
+
+resolve_app_uid() {
+    local existing
+    existing=$(read_app_uid /opt/panelalpha/shared-hosting/.env-core)
+    if [ -n "$existing" ]; then
+        APP_UID="$existing"
+    elif [ -z "${APP_UID:-}" ]; then
+        APP_UID=$(cat /proc/sys/kernel/random/uuid)
+    fi
+    if ! [[ "$APP_UID" =~ ^[A-Za-z0-9._:-]{1,128}$ ]]; then
+        # cleared first: the exit trap reports with this header
+        local bad="$APP_UID"
+        APP_UID=''
+        echo_error "APP_UID must be 1-128 characters from A-Z a-z 0-9 . _ : - (got '${bad}')" 109
+    fi
+}
+
+persist_app_uid() {
+    local env_core=/opt/panelalpha/shared-hosting/.env-core
+    [ -n "$(read_app_uid "$env_core")" ] && return 0
+    if grep -q '^APP_UID=' "$env_core"; then
+        sed -i "s|^APP_UID=.*|APP_UID=${APP_UID}|" "$env_core"
+    else
+        [ -z "$(tail -c1 "$env_core")" ] || echo "" >>"$env_core"
+        echo "APP_UID=${APP_UID}" >>"$env_core"
+    fi
 }
 
 send_update_status() {
@@ -559,6 +705,7 @@ send_update_status() {
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
             -H "User-Agent: PanelAlpha-Engine/updater" \
+            ${APP_UID:+-H} ${APP_UID:+"X-Engine-App-UID: ${APP_UID}"} \
             -d @- >/dev/null 2>&1 || true
     } || true
 }
@@ -628,6 +775,11 @@ fi
 update_progress 5 "Checking current version"
 echo_info "Checking current version"
 check_version
+
+# Written now, not with the other files: a run that stops before the restart
+# must not mint a second UID next time. Core picks it up on that restart.
+resolve_app_uid
+persist_app_uid
 
 update_progress 10 "Requesting the download token"
 echo_info "Requesting the download token"

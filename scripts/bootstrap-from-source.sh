@@ -16,7 +16,34 @@
 set -euo pipefail
 
 ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:20260908'
+COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.0.1'
+
+# Tagged with the engine version, not a build date, so the tag moves whenever
+# core/composer.json's PHP constraint does -- an unpublished tag does not pull
+# and Dockerfile-composer is built instead. This stays as the second guard, for
+# a published tag whose PHP is older than core asks for: `composer install`
+# would abort on every platform requirement and leave no vendor/ at all. The
+# pull is still preferred, but only kept when its PHP satisfies the constraint.
+resolve_composer_image() {
+    local want image_php
+    want=$(sed -n 's/.*"php"[[:space:]]*:[[:space:]]*"[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$1/composer.json" | head -1)
+
+    docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 || docker pull "$COMPOSER_IMAGE" || true
+
+    if [ -n "$want" ] && docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1; then
+        image_php=$(docker run --rm "$COMPOSER_IMAGE" php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null || echo 0)
+        # sort -V puts the lower version first; if that is not $want the image is older.
+        if [ "$(printf '%s\n%s\n' "$want" "$image_php" | sort -V | head -1)" != "$want" ]; then
+            echo ">>> $COMPOSER_IMAGE ships PHP ${image_php}, core requires >= ${want} -- building from dockerfiles/Dockerfile-composer" >&2
+            COMPOSER_IMAGE='panelalpha/engine-composer:local'
+            docker build --tag "$COMPOSER_IMAGE" - <"$2/dockerfiles/Dockerfile-composer"
+            return
+        fi
+    fi
+
+    docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 ||
+        docker build --tag "$COMPOSER_IMAGE" - <"$2/dockerfiles/Dockerfile-composer"
+}
 
 PUBLIC_IP=''
 INSTALL_SYSBOX=1
@@ -102,8 +129,6 @@ step "Using host address ${PUBLIC_IP}"
 step "Preparing .env and .env-core"
 cp -n .env.example .env
 cp -n .env-core.example .env-core
-grep -q '^CORE_MYSQL_PASSWORD=.\+' .env ||
-    sed -i "s/^CORE_MYSQL_PASSWORD=.*/CORE_MYSQL_PASSWORD=$(rand)/" .env
 grep -q '^USERS_MYSQL_ROOT_PASSWORD=.\+' .env ||
     sed -i "s/^USERS_MYSQL_ROOT_PASSWORD=.*/USERS_MYSQL_ROOT_PASSWORD=$(rand)/" .env
 # Append when the line is absent rather than only rewriting one that exists:
@@ -119,8 +144,8 @@ else
     [ -z "$(tail -c1 .env-core)" ] || echo "" >>.env-core
     echo "APP_URL=https://${PUBLIC_IP}:2011" >>.env-core
 fi
-# Before the stack starts: Horizon keeps whatever APP_KEY it booted with, so a
-# key written after `up` never reaches core-queue until it restarts.
+# Before the stack starts: queue workers keep whatever APP_KEY they booted with, so a
+# key written after `up` never reaches them until core restarts.
 if ! grep -q '^APP_KEY=.\+' .env-core; then
     APP_KEY="base64:$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
     if grep -q '^APP_KEY=' .env-core; then
@@ -130,10 +155,22 @@ if ! grep -q '^APP_KEY=.\+' .env-core; then
         echo "APP_KEY=${APP_KEY}" >>.env-core
     fi
 fi
+# APP_UID identifies this install to Connect and monitoring. Kept once set; an
+# exported APP_UID is used instead of a generated one.
+if ! grep -q '^APP_UID=[^"'"'"' ]' .env-core; then
+    APP_UID="${APP_UID:-$(cat /proc/sys/kernel/random/uuid)}"
+    [[ "$APP_UID" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || { echo "APP_UID must be 1-128 of A-Z a-z 0-9 . _ : -" >&2; exit 1; }
+    if grep -q '^APP_UID=' .env-core; then
+        sed -i "s|^APP_UID=.*|APP_UID=${APP_UID}|" .env-core
+    else
+        [ -z "$(tail -c1 .env-core)" ] || echo "" >>.env-core
+        echo "APP_UID=${APP_UID}" >>.env-core
+    fi
+fi
 
 # Optional services sit behind compose profiles; see .env.example for the list.
-# --core-only (empty) leaves just the control plane: core, cron, database-core
-# and nginx. Untouched, .env.example's default of 'full' gives the whole stack.
+# --core-only (empty) leaves just the control plane: core (which also serves
+# :2011). Untouched, .env.example's default of 'full' gives the whole stack.
 if [ "$SET_PROFILES" = 1 ]; then
     if grep -q '^COMPOSE_PROFILES=' .env; then
         sed -i "s#^COMPOSE_PROFILES=.*#COMPOSE_PROFILES=${PROFILES}#" .env
@@ -196,6 +233,8 @@ cp -Rn templates/webserver-config/. webserver-config/
 cp -Rn templates/config/pure-ftpd/. config/pure-ftpd/
 chmod +x config/pure-ftpd/entrypoint.sh
 cp -Rn templates/config/sftp/. config/sftp/
+# Scripts are engine code, not host state: -n would keep the installed copy.
+cp templates/config/sftp/{entrypoint.sh,sync-logins.sh} config/sftp/
 cp -Rn templates/config/logrotate/. config/logrotate/
 cp -Rn templates/config/exim/. config/exim/
 cp -Rn templates/config/modsecurity/. config/modsecurity/
@@ -228,9 +267,7 @@ docker network inspect pash-default-network >/dev/null 2>&1 || {
 # ----------------------------------------------------------------------- vendor
 if [ "$FORCE_COMPOSER" = 1 ] || [ ! -d core/vendor ]; then
     step "Installing composer dependencies"
-    docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 ||
-        docker pull "$COMPOSER_IMAGE" ||
-        docker build --tag "$COMPOSER_IMAGE" - <dockerfiles/Dockerfile-composer
+    resolve_composer_image "${ENGINE_DIR}/core" "${ENGINE_DIR}"
     docker run --rm -v "${ENGINE_DIR}/core:/app" -w /app "$COMPOSER_IMAGE" composer install
 fi
 
@@ -326,9 +363,8 @@ fi
 # release. `up` does fall back to the build section on a failed pull, but doing it here
 # keeps the "not found" noise out of the startup step. The layer cache makes re-runs cheap.
 step "Ensuring the core images exist"
-# `core-cron`, not `cron`: the compose service carries the prefix. Naming a
-# service that does not exist made `docker compose build` exit "no such
-# service", and under `set -e` that aborted the whole bootstrap here --
+# Only services that exist: naming one that does not made `docker compose
+# build` exit "no such service", and under `set -e` that aborted the whole bootstrap here --
 # skipping the stack start, the migrations and pae-artisan, while the rsync
 # above had already put the new source on the host. An engine left in that
 # state runs new code against an unmigrated database and never rereads
@@ -338,7 +374,7 @@ step "Ensuring the core images exist"
 # a prefetch that keeps "not found" noise out of the startup step, and `up`
 # falls back to the build section on its own. It is not worth the whole
 # deploy.
-for svc in core core-cron; do
+for svc in core; do
     docker compose config --services 2>/dev/null | grep -qx "$svc" || {
         warn "No compose service '$svc' — skipping its image"
         continue

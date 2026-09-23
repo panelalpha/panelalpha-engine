@@ -25,10 +25,12 @@ class CheckoutRedeploy
         $project->system()->webserver()->rebuildDomains();
 
         $user = $project->userModel();
-        if ($user->getDeploymentStatus() === 'success') {
+        // rebuildFromCheckout() already recorded its own verdict; a partial one must not be
+        // turned into a success here.
+        if (in_array($user->getDeploymentStatus(), ['success', 'partial'], true)) {
             return;
         }
-        $user->setDetails(['deployment_status' => 'success']);
+        $user->markDeploySucceeded();
         if ($user->exists) {
             $user->save();
         }

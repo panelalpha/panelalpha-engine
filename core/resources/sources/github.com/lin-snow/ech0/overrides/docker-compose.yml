@@ -1,0 +1,106 @@
+# Compose-replace: the repository ships a from-source Dockerfile and a compose
+# file with a hard-coded JWT secret; upstream publishes the same app as
+# sn0wl1n/ech0 on Docker Hub, so this runs the official image directly. Pinned
+# to the current stable release v5.7.0 (Hub `latest` at time of writing). Single
+# app service -- Ech0 is one Go binary with the frontend embedded and SQLite
+# in-process, no datastore sidecar.
+services:
+  app:
+    image: sn0wl1n/ech0:v5.7.0
+    restart: unless-stopped
+    # .env is the platform-merged account env (touched by the prepare hook so
+    # `up` never aborts on a missing file); ech0.env carries the JWT secret and
+    # the generated Owner creds the hook wrote once and keeps stable across
+    # redeploys. Paths are relative to ~/project, where the engine runs this.
+    env_file:
+      - .env
+      - ../.panelalpha/ech0/ech0.env
+    environment:
+      # config defaults already put the SQLite DB (data/ech0.db), uploads
+      # (data/files/...) and logs under /app/data (WORKDIR /app), which the
+      # named volume below persists -- no path overrides needed.
+      # Seed the system default so public self-registration is closed; the Owner
+      # is created out-of-band via POST /api/init/owner by the init-owner service.
+      ECH0_SETTING_ALLOW_REGISTER: "false"
+      # Absolute base URL for RSS/federation links. Rewritten from http://localhost
+      # to the account's public https URL by ComposePlaceholders (key ends _URL,
+      # localhost value).
+      ECH0_SETTING_SERVER_URL: http://localhost
+      TZ: UTC
+    volumes:
+      - ech0-data:/app/data
+    # The binary EXPOSEs and listens on 6277; publish it so the port scan takes
+    # it as the primary (engine#231/#234). No other service publishes a port.
+    ports:
+      - "6277:6277"
+    healthcheck:
+      # /api/init/status is a public, unauthenticated endpoint that returns 200
+      # even before the Owner is seeded. The alpine-based image has busybox wget
+      # but no curl. A 200 means the binary is serving and SQLite opened.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:6277/api/init/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+    # Ech0 is a small Go binary + SQLite; 512m is ample and leaves headroom
+    # under a constrained account memory cap.
+    mem_limit: 512m
+
+  # One-shot Owner seeder. Waits for the app to be healthy, then claims the
+  # single-shot public POST /api/init/owner with the generated creds so no
+  # random first visitor can seize the instance. Uses curl (not the app image's
+  # busybox wget: wget --post-data forces Content-Type form-urlencoded, which
+  # huma rejects with 400 -- the endpoint only accepts application/json).
+  # Idempotent: on redeploy the Owner already exists on the volume and this is a
+  # no-op. Exits non-zero if the Owner is not in place, which -- via the `ready`
+  # gate below -- fails the deploy rather than leaving an unclaimed instance.
+  init-owner:
+    image: curlimages/curl:8.22.0
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/ech0/ech0.env
+    # $$ escapes so compose passes a literal $ to the container shell (the vars
+    # come from ech0.env at runtime, not from compose interpolation).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        API=http://app:6277/api
+        st=$$(curl -fsS "$$API/init/status" || echo '')
+        echo "init status (pre): $$st"
+        case "$$st" in
+          *'"owner_exists":true'*) echo "Owner already exists; skipping seed"; exit 0;;
+        esac
+        EMAIL=$${ECH0_OWNER_EMAIL:-owner@ech0.local}
+        code=$$(curl -s -o /tmp/resp -w '%{http_code}' -X POST "$$API/init/owner" \
+          -H 'Content-Type: application/json' \
+          -d "{\"username\":\"$$ECH0_OWNER_USERNAME\",\"password\":\"$$ECH0_OWNER_PASSWORD\",\"email\":\"$$EMAIL\"}")
+        echo "init/owner HTTP $$code: $$(cat /tmp/resp 2>/dev/null)"
+        st2=$$(curl -fsS "$$API/init/status" || echo '')
+        echo "init status (post): $$st2"
+        case "$$st2" in
+          *'"owner_exists":true'*) echo "Owner seeded"; exit 0;;
+          *) echo "ERROR: owner not seeded"; exit 1;;
+        esac
+    mem_limit: 128m
+
+  # Ready gate. Starts nothing, exits 0, but only after init-owner has completed
+  # SUCCESSFULLY. `docker compose up -d` blocks on a service_completed_successfully
+  # dependency and errors if it failed, so this makes the engine's deploy return
+  # only once Ech0 answers AND the Owner is seeded, and turns a failed seed into
+  # a failed deploy (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      init-owner:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  ech0-data: {}

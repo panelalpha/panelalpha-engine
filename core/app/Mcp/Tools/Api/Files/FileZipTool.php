@@ -49,6 +49,9 @@ class FileZipTool extends ApiTool
         return [
             'zip_path',
             'path',
+            'compression_level',
+            'from_date',
+            'ignore_empty',
         ];
     }
 
@@ -71,6 +74,9 @@ class FileZipTool extends ApiTool
             'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
             'zip_path' => $schema->string()->description('Example: /public_html/backup.zip.')->required(),
             'path' => $schema->string()->description('Example: /public_html/dir.')->required(),
+            'compression_level' => $schema->integer()->description('Example: 6.'),
+            'from_date' => $schema->string()->description('Example: 2026-01-01.'),
+            'ignore_empty' => $schema->boolean()->description('Example: .'),
         ];
     }
 }

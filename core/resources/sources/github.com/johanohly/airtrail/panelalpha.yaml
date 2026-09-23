@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  AirTrail is a self-hosted personal flight tracker: SvelteKit on
+  @sveltejs/adapter-node in front of a PostgreSQL database, published by
+  upstream as johly/airtrail on Docker Hub. The repository's
+  docker/production/compose.yml is a real two-service deployment -- the
+  published image plus a postgres:16-alpine sidecar on a named volume -- so this
+  recipe keeps that shape with a compose-replace on the official image rather
+  than building the from-source (bun + node) Dockerfile per account. The image's
+  entrypoint runs the Prisma-style migration runner (docker/migrate.js) on every
+  boot, so schema upgrades are automatic and :latest is safe across a redeploy.
+
+  Three things a hosting account changes. First, ORIGIN. adapter-node needs
+  ORIGIN set to the site's public https URL or every form POST is rejected as a
+  cross-site request, and AirTrail also keys its session cookie's Secure flag off
+  `ORIGIN.startsWith('https://')` (src/lib/server/auth.ts). The account's public
+  address is not known at authoring time, so overrides/docker-compose.yml carries
+  `ORIGIN: http://localhost` in the app's environment block, where
+  ComposePlaceholders rewrites an ORIGIN/_URL-shaped key with a bare-localhost
+  value to the account's real https origin before the stack starts.
+
+  Second, persistence and secrets. ~/project is re-cloned and wiped on every
+  redeploy (engine#173), so the generated PostgreSQL password and the owner
+  password are written once by hooks/prepare.sh into ~/.panelalpha/airtrail
+  (0600 in a 0700 dir) -- the one account-owned, rebuild-surviving place -- and
+  fed to the containers through env_file, never through the world-readable 0644
+  compose file. They are generated only on the first deploy and reused
+  thereafter, so a redeploy never invalidates a database that survived it. The
+  PostgreSQL data lives on the db_data named volume and uploaded airline icons on
+  the uploads named volume; both survive a redeploy.
+
+  Third, the owner. AirTrail has no open registration: the only unauthenticated
+  account-creation path is POST /api/users/setup, which makes the first user the
+  owner and then closes itself as soon as any owner exists
+  (src/routes/api/users/setup/+server.ts). A stock deploy on a public HTTPS name
+  is therefore first-visitor-wins. A wrapped entrypoint (files/panelalpha) runs
+  the migration runner, then an idempotent seed that inserts the owner --
+  username admin, a generated password, argon2id with AirTrail's own hashing
+  parameters -- directly into the user table before `node build` binds, so the
+  setup window is already closed on the very first request the public can make.
+  The seed is a no-op once an owner exists, so a redeploy never creates a second
+  account. There is no separate auth secret to persist: Lucia keeps sessions in
+  the PostgreSQL session table, which is on the db_data volume.
+
+  A `ready` service gates the deploy: `docker compose up -d` returns before the
+  app is up (engine#90), and AirTrail's server init synchronously downloads and
+  loads airport/airline reference data before it serves, so the app's own
+  /api/ping healthcheck (200 "pong") is what `ready` waits on before the engine
+  calls the deploy finished (engine#204). Only the app publishes a port, 3000.
+  OAuth and SMTP are left unconfigured; both are optional and set from the admin
+  UI, and neither opens a registration path on their own (OAuth auto-register is
+  inert until an OAuth provider is configured).

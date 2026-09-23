@@ -1,0 +1,28 @@
+{
+  "object_kind": "push",
+  "event_name": "push",
+  "before": "95790bf891e76fee5e1747ab589903a6a1f80f22",
+  "after": "0000000000000000000000000000000000000000",
+  "ref": "refs/heads/main",
+  "ref_protected": true,
+  "checkout_sha": null,
+  "user_id": 4,
+  "user_name": "John Smith",
+  "user_username": "jsmith",
+  "project_id": 15,
+  "project": {
+    "id": 15,
+    "name": "Diaspora",
+    "web_url": "http://example.com/mike/diaspora",
+    "git_http_url": "http://example.com/mike/diaspora.git",
+    "path_with_namespace": "mike/diaspora",
+    "default_branch": "main"
+  },
+  "commits": [],
+  "total_commits_count": 0,
+  "push_options": {},
+  "repository": {
+    "name": "Diaspora",
+    "git_http_url": "http://example.com/mike/diaspora.git"
+  }
+}

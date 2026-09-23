@@ -1,0 +1,125 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Baikal is a CalDAV and CardDAV server: a thin admin UI and a `sabre/dav`
+  server over SQLite or MySQL. Detection reads the checkout correctly -- a
+  composer.json with no artisan, so the `php` platform on the `php` strategy,
+  and PhpRuntime picks 8.2 out of `require.php: ^8.2` -- Composer resolves the
+  dependency tree on the host in 15 s, and every request then answers 403:
+  `serving-missing_entry`. Three things fix it, and only the first is the
+  document root.
+
+  **The document root is `html/`, and the probe cannot reach it.**
+  `PhpDocroot::CANDIDATES` is `['public', 'web', 'public_html', 'webroot']`
+  (app/Lib/Deploy/Platform/Runtime/Php/PhpDocroot.php:25), then the repository
+  root, then `src/` for an index.php only. Baikal serves from `html/`, which is
+  on none of those lists, and the repository root holds `Makefile`, `README.md`,
+  `composer.json`, `phpstan.neon`, `run_tests.py` and no index at all -- so
+  `detect()` falls through every candidate, emits no `PA_DOCROOT`, the base
+  image serves `/app`, and Apache answers 403. `docroot: html` is a plain
+  relative path, so unlike `.` it survives `PlatformManifest::readDocroot()`
+  and engine #172 does not bite.
+
+  Serving `html/` is also what makes this application safe to host. `Core/`
+  (the whole framework, including the admin controllers), `config/`,
+  `Specific/`, `vendor/`, `tests/`, `composer.json` and the engine's own
+  `docker-compose.yml`, `.env` and `.env.default` are all *siblings* of the
+  document root and unreachable over HTTP by construction rather than by an
+  `.htaccess` rule. What is inside `html/` is four entry points and two
+  symlinks -- `html/admin/index.php` and `html/admin/install/index.php` point
+  into `Core/Frameworks/BaikalAdmin/WWWRoot/`, and `html/res/core` points at
+  `Core/Resources/Web/`. They work here because apache-vhost.stub gives the
+  document root `Options -Indexes +FollowSymLinks`; Apache matches its
+  `<Directory>` blocks on the request path rather than on the symlink target,
+  so the `<Directory />` `Require all denied` above them does not apply.
+  Measured: `/admin/` renders.
+
+  **The install wizard is first-visitor-wins, and it is the whole of the
+  security story.** A deployed Baikal with no `config/baikal.yaml` sends
+  *every* entry point -- index.php, dav.php, admin/index.php -- to
+  `/admin/install/` (`Baikal\Framework::installTool()`, Core/Frameworks/Baikal/
+  Framework.php:51), and that page takes an admin password from whoever asks
+  first, with no authentication of any kind. On an account with a public HTTPS
+  domain the window is however long it takes the owner to open a browser.
+  files/panelalpha-baikal-setup.php closes it on the install stage, before
+  Apache binds: it writes the configuration, loads the schema, and creates
+  `Specific/INSTALL_DISABLED`, which is the file the wizard's own last branch
+  checks before it will render anything.
+
+  It does that by calling the wizard's code rather than by reimplementing it.
+  `BaikalAdmin\Controller\Install\Initialize` and `...\Install\Database` are
+  `\Formal\Form` machinery wrapped around a POST, so what is reused is the two
+  models underneath -- `Baikal\Model\Config\Standard`, whose `set()` is what
+  hashes the admin password, and `Baikal\Model\Config\Database` -- plus the
+  schema loop, which reads `Core/Resources/Db/SQLite/db.sql` out of the
+  repository and splits it on `;` exactly as the controller does. The version
+  upgrade, which is the part with real migration logic in it, is not copied at
+  all: `BaikalAdmin\Controller\Install\VersionUpgrade` is instantiated and
+  rendered unchanged.
+
+  **SQLite, and it costs the account nothing.** Baikal's installer defaults to
+  SQLite when `pdo_sqlite` is present (Install/Initialize.php:85), the schema
+  ships as `Core/Resources/Db/SQLite/db.sql`, and `pdo_sqlite` is baked into
+  the shared base image (`PhpBaseImage::EXTENSIONS`). So there is no sidecar,
+  no second container, and no volume the panel cannot see -- the account's
+  calendars are one 110 KB file. `database: mysql` was the alternative and is
+  a worse fit here: it would provision a panel-visible database, but at the
+  price of a MySQL wait and a second service for an application whose upstream
+  treats SQLite as the default rather than as the fallback.
+
+  **The one file that matters is not in the checkout, and upstream already has
+  an answer for that.** `Flake\Framework::bootstrap()` reads
+  `BAIKAL_PATH_CONFIG` and `BAIKAL_PATH_SPECIFIC` from the environment and, only
+  failing those, falls back to `config/` and `Specific/` inside the repository
+  (Core/Frameworks/Flake/Framework.php:180-195). The engine empties `~/project`
+  before every clone (engine #173), so the in-repository default would destroy
+  the configuration *and every calendar in the account* on each redeploy. The
+  compose override points both at `/data`, a bind mount from
+  `~/.panelalpha/baikal` -- so persistence here is upstream's own mechanism
+  rather than a symlink or a copy-back, and the SQLite file is somewhere the
+  account owner can find, read and copy.
+
+  **No php.ini reaches this image** (engine #185): `php --ini` answers "Loaded
+  Configuration File: (none)", so `display_errors` is On, `expose_php` is On and
+  `post_max_size` is 8M. Baikal's `index.php` and `dav.php` each set
+  `display_errors` to 0 themselves, but `admin/index.php` and
+  `admin/install/index.php` do not and set `error_reporting(E_ALL)` instead --
+  so the admin interface is the one that would print the account's paths into
+  the page. files/panelalpha/php/zz-baikal.ini fixes that and raises the body
+  limit for vCard photos, and the override names it with `PHP_INI_SCAN_DIR`.
+
+  Licence: GPL-3.0-only (`LICENSE`, and `composer.json` says so too). No
+  additional network-service condition, no badgeware clause. Hosting for third
+  parties is unambiguously permitted and the application is shipped unmodified.
+extends: php
+# Baikal serves from html/. See the note above: this key is the only thing that
+# can say so, the probe cannot reach it, and `html` (unlike `.`) survives
+# readDocroot().
+docroot: html
+commands:
+  # No `id:`, deliberately. A stale detection cache drops every stage command
+  # from a recipe that carries one while the log still reports "Recipe named by
+  # ..." (engine #169); omitting it and extending a shipped manifest is the
+  # mitigation.
+  #
+  # Declaring `commands:` replaces what php.yaml declared, top level by top
+  # level (SourceRecipes::fromAppConfig uses array_merge), so `composer-install`
+  # is gone from here. That is safe and checked: PhpHostBuild::script() falls
+  # back to DEFAULT_INSTALL whenever the manifest names no dependency-role
+  # build command and the project ships a composer.json
+  # (PhpHostBuild.php:159), which is this case. Verified on the deploy --
+  # "Resolving PHP dependencies on host", and vendor/ present in the account.
+  - stage:
+      - install
+      - upgrade
+    description: >-
+      Finishes the install the way the wizard would, before Apache binds:
+      writes config/baikal.yaml through Baikal's own configuration models,
+      loads Core/Resources/Db/SQLite/db.sql into the account's SQLite file,
+      runs upstream's VersionUpgrade controller when the checkout has moved
+      past the configured version, and creates Specific/INSTALL_DISABLED.
+      Idempotent: on the upgrade stage a database that is already complete and
+      a config that already carries an admin password cost one SELECT and
+      nothing else, which is what makes a redeploy safe. On the build stage it
+      would not run at all (engine #171).
+    run: 'php /app/panelalpha-baikal-setup.php'
+    timeout: 300

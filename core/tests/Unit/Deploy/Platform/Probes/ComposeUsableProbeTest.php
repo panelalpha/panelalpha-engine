@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Deploy\Platform\Probes;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Platform\DockerfileBuilder;
 use App\Lib\Deploy\Platform\Probes\ComposeUsableProbe;
@@ -96,6 +97,26 @@ class ComposeUsableProbeTest extends ProbeTestCase
         YAML);
 
         $this->assertFalse($this->probe()->evaluate($this->context()));
+    }
+
+    public function test_a_clients_static_nginx_stack_is_the_one_to_deploy(): void
+    {
+        // Same image as the bootstrap, but serving a directory the client
+        // chose. Skipping it served the placeholder instead of their site.
+        $this->write('docker-compose.yml', <<<'YAML'
+        services:
+          web:
+            image: nginx:alpine
+            ports:
+              - "8080:80"
+            volumes:
+              - ./html:/usr/share/nginx/html:ro
+        YAML);
+
+        $this->assertSame(
+            ['compose_path' => $this->dir . '/docker-compose.yml'],
+            $this->probe()->evaluate($this->context())
+        );
     }
 
     public function test_a_local_dev_stack_that_bind_mounts_the_source_is_skipped(): void
@@ -201,6 +222,23 @@ class ComposeUsableProbeTest extends ProbeTestCase
         $this->write('package.json', '{}');
 
         $this->assertFalse($this->probe()->evaluate($this->context()));
+    }
+
+    /**
+     * ADR-0001: an app config's `replace`-mode compose is written under its
+     * own reserved name, ahead of the repository's — {@see
+     * \App\System\Project\Dind\Strategy\AppConfigBootstrap} writes it before
+     * detection runs, expecting detection to pick it up here.
+     */
+    public function test_an_app_configs_reserved_compose_wins_over_the_repositorys_own(): void
+    {
+        $this->write('docker-compose.yml', self::APP_STACK);
+        $this->write(EngineArtifacts::APP_CONFIG_COMPOSE, self::APP_STACK);
+
+        $this->assertSame(
+            $this->dir . '/' . EngineArtifacts::APP_CONFIG_COMPOSE,
+            $this->probe()->evaluate($this->context())['compose_path']
+        );
     }
 
     public function test_a_directory_named_like_a_compose_file_is_not_one(): void

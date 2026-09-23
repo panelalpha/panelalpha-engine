@@ -1,0 +1,36 @@
+# Written by PanelAlpha. Bolt runs behind a TLS-terminating reverse proxy.
+#
+# The repository's .env already carries
+# `TRUSTED_PROXIES=127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` and
+# nothing reads it: config/packages/framework.yaml configures `trusted_hosts`
+# and no `trusted_proxies`, so Symfony trusts no X-Forwarded-* header and
+# reads the scheme and port off the Apache it is actually listening on. Every
+# absolute URL Bolt generates then comes out as `http://<domain>:8000/` -- the
+# canonical link on every page, the sitemap, the redirect after a form post --
+# an unencrypted URL on a port nothing publishes, inside an https page.
+#
+# The engine's proxy sends what is needed. templates/dind/virtualHost-nginx-
+# proxy.blade.php sets Host, X-Real-IP, X-Forwarded-For, X-Forwarded-Proto,
+# X-Forwarded-Host and X-Forwarded-Port on both the http and the https server
+# block; X-Forwarded-Port is $server_port, so 443 on the TLS one, which is why
+# the port disappears from the URL rather than becoming an explicit :443.
+#
+# Loaded because Kernel::configureContainer() globs config/packages/*, and the
+# repository's own framework.yaml is left exactly as it shipped.
+parameters:
+  # Symfony's own name for "the RFC 1918 ranges plus loopback"
+  # (Request::setTrustedProxies). Used only when TRUSTED_PROXIES is unset --
+  # an operator who empties it is not silently left trusting everything.
+  panelalpha.default_trusted_proxies: private_ranges
+
+framework:
+  trusted_proxies: '%env(default:panelalpha.default_trusted_proxies:TRUSTED_PROXIES)%'
+  # Named rather than left to the default, which is for-, port- and proto- only:
+  # without x-forwarded-host a request whose Host the proxy rewrote would build
+  # the wrong absolute URL. FrameworkExtension applies trusted_proxies only when
+  # trusted_headers is also non-empty, so the two belong together.
+  trusted_headers:
+    - x-forwarded-for
+    - x-forwarded-host
+    - x-forwarded-proto
+    - x-forwarded-port

@@ -1,0 +1,34 @@
+# Layers over the compose the dockerfile strategy generates for the `app`
+# service (image = files/Dockerfile, i.e. the official Continuwuity image with a
+# busybox wrapper). The generated file already publishes 8008, reads env_file
+# .env and injects the public URL (PUBLIC_URL/SERVER_NAME) the wrapper reads;
+# this adds the persistent volume, the account uid, and the CONTINUWUITY_*
+# settings that do not depend on the runtime host. ${...} interpolates from
+# ~/project/.env, which hooks/prepare.sh has written by the time compose runs.
+services:
+  app:
+    # Run as the account uid (recorded by the prepare hook) so the bind mount,
+    # owned by the account, is writable. The image otherwise runs as root.
+    user: "${CONTAINER_UID}:${CONTAINER_UID}"
+    # ${CWUITY_DATA_DIR} = ~/.panelalpha/continuwuity/data - survives the
+    # per-deploy ~/project wipe. Holds the RocksDB (accounts, rooms, messages,
+    # media) and the frozen .server_name.
+    volumes:
+      - "${CWUITY_DATA_DIR}:/data"
+    environment:
+      # server_name and well-known delegation are set by the wrapper from the
+      # injected public host; everything here is host-independent.
+      CONTINUWUITY_DATABASE_PATH: "/data"
+      CONTINUWUITY_ADDRESS: "0.0.0.0"
+      CONTINUWUITY_PORT: "8008"
+      # Token-gated registration: signups require the token below, and one
+      # without it is refused. The token is generated once by the prepare hook
+      # into ~/.panelalpha/continuwuity/ and reused across redeploys.
+      CONTINUWUITY_ALLOW_REGISTRATION: "true"
+      CONTINUWUITY_REGISTRATION_TOKEN: "${CWUITY_REG_TOKEN}"
+      # Federation on is normal for a Matrix homeserver.
+      CONTINUWUITY_ALLOW_FEDERATION: "true"
+      # No phone-home from a hosted instance.
+      CONTINUWUITY_ALLOW_CHECK_FOR_UPDATES: "false"
+    # RocksDB plus the Rust server; measured a few hundred MB resident idle.
+    mem_limit: 1g

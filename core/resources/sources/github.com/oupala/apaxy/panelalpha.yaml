@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: 'Apaxy is an Apache mod_autoindex theme served as a file-share site: the document root is the account''s own ~/.panelalpha/apaxy/files directory, and the listing of it is the whole application.'
+extends: dockerfile
+extra:
+  # A source recipe is applied before the probes run
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so
+  # the dockerfile probe's `dockerfile` and `port_hint` would be null and 80.
+  # Upstream's Dockerfile listens on 8080 -- it moves Apache off :80 so a
+  # non-root user can bind it -- and the deployability check fails outright
+  # without the file name. State what the probe would have found.
+  dockerfile: Dockerfile
+  port_hint: 8080

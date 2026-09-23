@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Wastebin is a minimal, fast self-hosted pastebin with an SQLite backend,
+  written in Rust (axum). Reading a paste by its link is public by design (a
+  pastebin's links are meant to be shared) and creating a paste is open -- this
+  is a PUBLIC-BY-DESIGN paste service, like any public pastebin, not a
+  no-auth-private-data reject. Upstream states plainly that user authentication
+  and admin functionality are non-features and offers no way to gate creation
+  without also gating reading (there is no instance password / HTTP basic auth in
+  wastebin; WASTEBIN_PASSWORD_SALT only salts OPTIONAL per-paste password
+  encryption). So this recipe keeps creation open (the design) and instead bounds
+  the abuse surface: a modest WASTEBIN_MAX_BODY_SIZE and a short default paste
+  expiry, plus the two secrets below seeded once so they survive a redeploy.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes the app as
+  quxfoo/wastebin on Docker Hub and tags every release; this recipe runs that
+  official image with a compose-replace, pinned to the current stable release
+  3.7.2. Building from source would compile a Rust binary on the host for no
+  gain, and a Docker Hub seed also sidesteps engine#229 (image-seed NotFound is
+  the GHCR/registry-save case, not Hub). The final image is FROM scratch (uid
+  10001, no shell), so all health probing is done by an external curl sidecar and
+  a fresh named volume is chowned by a one-shot init before the app starts.
+
+  WHY COMPOSE-REPLACE. The bare image gives no persistence and no public origin.
+  A hosted deploy needs four things detection cannot give: (1) the SQLite db on a
+  named volume -- WASTEBIN_DATABASE_PATH defaults to :memory:, so WITHOUT this
+  every paste vanishes on restart; this recipe sets it to /data/state.db on a
+  named volume; (2) the public origin filled in at deploy time, so returned links
+  / QR codes are correct; (3) WASTEBIN_SIGNING_KEY generated once -- it signs the
+  cookies that authorize deleting/editing your own pastes, so a rotation on every
+  rebuild would invalidate every outstanding deletion cookie; (4) a stable
+  WASTEBIN_PASSWORD_SALT (the upstream default is the well-known "somesalt") so
+  per-paste password encryption is not salted with a public constant.
+
+  PUBLIC ORIGIN. WASTEBIN_BASE_URL is the origin the app stamps onto paste links
+  and QR codes. It is unknown at deploy time, so it is left as the localhost
+  placeholder, which ComposePlaceholders rewrites to the account's public https
+  origin because the key ends in _URL. On an account with no domain yet it stays
+  localhost.
+
+  PERSISTENCE. The SQLite db lives at /data/state.db on a named Docker volume, so
+  pastes survive redeploy and storage reclaim (~/project is wiped every deploy,
+  engine#173). WASTEBIN_SIGNING_KEY and WASTEBIN_PASSWORD_SALT are generated once
+  into ~/.panelalpha/wastebin/ (0600 in 0700), the only writable place a deploy
+  does not wipe, and fed in via env_file so they never appear in the recipe and
+  are never rewritten across redeploys.
+
+  PORT. The app serves the UI, paste creation and retrieval on 8088
+  (WASTEBIN_ADDRESS_PORT); published as 8088:8088, the only service that
+  publishes a port (engine#234). A curl health sidecar plus a `ready` gate make
+  `docker compose up` block until wastebin actually answers (engine#204), since
+  the scratch image has no shell to run its own healthcheck.

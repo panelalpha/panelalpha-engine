@@ -125,7 +125,7 @@ Two different things, and the difference explains some confusing results.
 
 **Detected frameworks** are Next.js, Laravel, Django and the rest. The engine works these out from the files in your repository: [How detection works](../07-supported-projects/how-detection-works.md).
 
-**Known apps** are WordPress, Matomo, phpBB, Magento, Passbolt and others. These get extra handling because the general-purpose approach would get something wrong, such as serving the wrong folder or missing a database.
+**Known apps** are WordPress, Matomo, phpBB, Magento, Passbolt, OpenCart, osTicket, Flarum, SuiteCRM, Chamilo, MantisBT, Easy!Appointments, Adminer, and phpMyAdmin. These get extra handling because the general-purpose approach would get something wrong, such as serving the wrong folder or missing a database.
 
 To see what the engine will pick for a given repository, and whether another type could also run it:
 
@@ -140,6 +140,10 @@ A few other known apps worth knowing:
 - **Magento** from its official repository gets a search engine and a first-run install. Ask your assistant for the admin address when it finishes. It does not offer the one-click login that WordPress does.
 - **Matomo** and **phpBB** are set up so their own browser installer can finish; the engine prepares the database and writable folders, and you complete the install in the browser.
 - **Passbolt** gets a database and the keys it needs to start. The first user is created on Passbolt's own registration page, not by the engine.
+- **Flarum, SuiteCRM, and Chamilo** get a database, and you finish their own installer in the browser.
+- **MantisBT and Easy!Appointments** get a database and a configuration file written from it, so you are not asked for credentials the engine already has.
+- **Adminer** is built into a single page you can open. It does not get a database of its own.
+- **phpMyAdmin** deployed from its repository is a project that signs in to that project's database. The sign-on link on [Databases](databases.md#phpmyadmin) is different: it opens the engine's own phpMyAdmin for a project you already have.
 
 ## Troubleshooting
 

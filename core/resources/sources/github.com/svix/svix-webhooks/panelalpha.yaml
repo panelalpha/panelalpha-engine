@@ -1,0 +1,94 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Svix is a webhook-sending service: an HTTP API over Postgres and Redis that
+  takes a message for an application, fans it out to that application's
+  endpoints, signs each request, retries on a schedule and records every
+  delivery attempt. It has no web interface, no users and no sign-up. The
+  repository is a polyglot monorepo whose root holds the client SDKs --
+  csharp/, go/, java/, javascript/, kotlin/, php/, python/, ruby/, rust/, plus
+  codegen/ and svix-cli/ -- and a composer.json that reads `"type": "library"`,
+  `"description": "Svix PHP Library"`. Detection read that root, chose the php
+  strategy, found no index.php and reported serving-missing_entry. The server is
+  server/: a Rust workspace with its own Cargo.toml, Dockerfile, compose file
+  and openapi.json, MIT-licensed.
+
+  One directory down is out of reach for every compose lookup the engine has.
+  ComposeFileInspector::COMPOSE_FILE_CANDIDATES is four basenames joined to the
+  project root with a single '/', and the only glob is RuntimeSidecars'
+  `$projectDir . '/docker-compose.*.yml'` and three siblings, with no `**`. So
+  server/docker-compose.yml is neither auto-loaded nor mined -- engine#166 does
+  not arise here, because there is nothing at the root for it to be greedy
+  about. overrides/docker-compose.yml supplies the stack instead.
+
+  It runs the published image rather than building the checkout, and that is not
+  a close call: server/Dockerfile is a cargo-chef multi-stage on
+  rust:1.96-slim-trixie that runs `cargo chef cook --release` and then
+  `cargo build --release` across a two-crate workspace with hyper patched from a
+  git fork. That is a rustc and a linker sized like the whole account, for a
+  binary upstream publishes as svix/svix-server -- 264 tags, v1.101.0 and latest
+  pushed 2026-08-26. hooks/prepare.sh reads server/Cargo.toml's
+  [workspace.package] version, confirms `v<version>` is published, and falls
+  back to :latest for a clone of main between releases.
+
+  The stack is upstream's own server/docker-compose.yml minus pgbouncer, which
+  exists to multiplex a SaaS-scale connection count in front of one Postgres;
+  a single account has one Svix process and talks to Postgres directly over
+  SVIX_DB_DSN. Dropping it is not free by itself -- Svix ships
+  `db_pool_max_size = 100` against a Postgres whose own max_connections default
+  is 100, workable only with a pooler in between -- so the pool is capped at 10,
+  the configured minimum and far more than one account uses. Postgres is 16
+  rather than the 13.4 upstream pins, which reached end-of-life in November
+  2025.
+
+  The question this recipe existed to answer is whether a headless API can
+  satisfy the catalogue's serving criterion without a fake index page, and it
+  can, for a reason that is Svix's and not a workaround. `GET /` answers 307
+  with `Location: /docs`, and AppHealth::probeScript() follows relative
+  redirects up to five hops; /docs is a 200 ReDoc page carrying none of the
+  baseline checks' needles. And the check that would have been the risk says so
+  itself: checks/_baseline/no-server-error.yaml is written as "4xx deliberately
+  stays healthy here... an API that answers 401 to an unauthenticated probe is
+  working." With `runtime: compose` the baseline group is the whole of what
+  runs, so nothing asks for an entry document. Nothing in this recipe declares a
+  `check:` -- deliberately: AppHealth::declaredChecks() resolves the account's
+  platform id against PlatformRegistry::all(), which reads resources/platforms/
+  and resources/apps/ only, so a source recipe's `check:` list and its checks/
+  directory are both inert at health time.
+
+  The credential story is the opposite of most of this catalogue's. There is no
+  installer to race and no first-visitor window to close: every request is
+  authenticated by a bearer JWT signed with jwt_secret, no endpoint issues one,
+  and cfg.rs refuses to start the server at all when the secret is absent --
+  `if !figment.contains("jwt_secret") { bail!("missing field `jwt_secret`") }`.
+  So there is no default to inherit. hooks/prepare.sh generates that secret per
+  account, and a one-shot `token` service runs `svix-server jwt generate` once
+  and writes a ten-year organisation token to ~/.panelalpha/svix/admin-token at
+  0600. Two more values are generated with it: SVIX_MAIN_SECRET, without which
+  Encryption defaults to new_noop() and every endpoint signing secret is stored
+  in Postgres in the clear, and the Postgres password. All three live in
+  ~/.panelalpha/ rather than in ~/project, because every deploy empties the
+  checkout and the engine republishes its .env at 644 (engine#173).
+
+  Nothing here is derived from the account's filesystem path (engine#175). Svix
+  reads config.toml relative to its own working directory, which in the
+  published image is / and not the /app every account is mounted at, and this
+  recipe does not bind-mount the checkout into the server container at all.
+  Every secret is random per account.
+
+  Deliveries into private address space are blocked, and SVIX_WHITELIST_SUBNETS
+  is deliberately left unset. An endpoint whose URL resolves into private space
+  records its attempts as failed with "requests to this IP range are blocked" --
+  which is the only thing between a webhook URL a customer can type and an SSRF
+  into the network the account is hosted on. An operator can relax it in
+  ~/.panelalpha/svix.env.
+
+  One service is a no-op that exits 0, for the usual reason: the engine runs
+  `docker compose up -d` without --wait and calls the deploy finished when that
+  returns. `ready` waits for `token`, which waits for the backend's healthcheck,
+  which answers only once /api/v1/health reports the database, the queue and the
+  cache reachable -- after the migration set has run against an empty database.
+
+  Mail is not involved; Svix sends HTTP, not email. What is missing is the
+  consumer-facing App Portal, which is not part of the open-source server: the
+  dashboard-access endpoint hands back a link to app.svix.com, which this
+  instance is not. The API, the SDKs and the API reference are all served here.

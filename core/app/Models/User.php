@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Lib\Vault\GlobalVault;
 use App\System\Project as AppSystemProject;
 use App\System\Services\Webserver\AbstractWebserver;
 use Illuminate\Database\Eloquent\Collection;
@@ -285,6 +286,9 @@ class User extends Authenticatable
         if (isset($details['cloudflare_tunnel_token']) && is_string($details['cloudflare_tunnel_token'])) {
             $details['cloudflare_tunnel_token'] = $this->decryptSecretString($details['cloudflare_tunnel_token']);
         }
+        if (isset($details['site_password_hash']) && is_string($details['site_password_hash'])) {
+            $details['site_password_hash'] = $this->decryptSecretString($details['site_password_hash']);
+        }
         if (isset($details['site_git']) && is_array($details['site_git'])) {
             foreach ($details['site_git'] as $key => $entry) {
                 if (!is_array($entry)) {
@@ -324,6 +328,9 @@ class User extends Authenticatable
         }
         if (isset($details['cloudflare_tunnel_token']) && is_string($details['cloudflare_tunnel_token']) && $details['cloudflare_tunnel_token'] !== '') {
             $details['cloudflare_tunnel_token'] = $this->encryptSecretString($details['cloudflare_tunnel_token']);
+        }
+        if (isset($details['site_password_hash']) && is_string($details['site_password_hash']) && $details['site_password_hash'] !== '') {
+            $details['site_password_hash'] = $this->encryptSecretString($details['site_password_hash']);
         }
         if (isset($details['site_git']) && is_array($details['site_git'])) {
             foreach ($details['site_git'] as $key => $entry) {
@@ -490,6 +497,11 @@ class User extends Authenticatable
         return $this->hasMany(MysqlSsoToken::class);
     }
 
+    public function deployHooks(): HasMany
+    {
+        return $this->hasMany(DeployHook::class);
+    }
+
     public function assignedIpAddresses(): HasMany
     {
         return $this->hasMany(IpAssigned::class);
@@ -539,9 +551,9 @@ class User extends Authenticatable
         return $names;
     }
 
-    public function project(): AppSystemProject
+    public function project(?\App\System $system = null): AppSystemProject
     {
-        return (new \App\System())->project($this);
+        return ($system ?? new \App\System())->project($this);
     }
 
     public function getDiskSpaceLimit(): ?int
@@ -1357,26 +1369,46 @@ class User extends Authenticatable
         return $branch !== '' ? $branch : null;
     }
 
+    /**
+     * This project's Git token, or the engine's own when it has none.
+     *
+     * The fallback is what makes a token pasted once work for every project
+     * afterwards ({@see GlobalVault}); a project that was given its own still
+     * uses that, so nothing set by hand is replaced from underneath, and an
+     * engine set to keep tokens per project never reaches for the global at
+     * all. {@see getOwnGitToken()} for the project's own, without inheriting.
+     */
     public function getGitToken(): ?string
     {
-        $details = $this->getDetails();
-        if (empty($details['git_token']) || !is_string($details['git_token'])) {
-            return null;
-        }
-        $token = trim($details['git_token']);
-
-        return $token !== '' ? $token : null;
+        return $this->getOwnGitToken() ?? GlobalVault::secret(SecretVaultEntry::TYPE_GIT_TOKEN);
     }
 
+    /** This project's own Git token -- null where it inherits the engine's. */
+    public function getOwnGitToken(): ?string
+    {
+        return self::trimmed($this->getDetails()['git_token'] ?? null);
+    }
+
+    /** This project's Cloudflare API token, or the engine's own. {@see getGitToken()} */
     public function getCloudflareApiToken(): ?string
     {
-        $details = $this->getDetails();
-        if (empty($details['cloudflare_api_token']) || !is_string($details['cloudflare_api_token'])) {
+        return $this->getOwnCloudflareApiToken() ?? GlobalVault::secret(SecretVaultEntry::TYPE_CLOUDFLARE_API_TOKEN);
+    }
+
+    /** This project's own Cloudflare API token -- null where it inherits the engine's. */
+    public function getOwnCloudflareApiToken(): ?string
+    {
+        return self::trimmed($this->getDetails()['cloudflare_api_token'] ?? null);
+    }
+
+    /** A details value that is a non-empty string once trimmed, else null. */
+    private static function trimmed(mixed $value): ?string
+    {
+        if (!is_string($value)) {
             return null;
         }
-        $token = trim($details['cloudflare_api_token']);
 
-        return $token !== '' ? $token : null;
+        return ($trimmed = trim($value)) !== '' ? $trimmed : null;
     }
 
     public function getCloudflareAccountId(): ?string
@@ -1603,6 +1635,20 @@ class User extends Authenticatable
     public function hasDeploymentWarnings(): bool
     {
         return !empty($this->getDeploymentWarnings());
+    }
+
+    /**
+     * Record a clean deploy: the status and an empty warnings list, together.
+     * The API reports deployment_warnings as a list once a deploy has finished,
+     * and setDetails() merges, so a list left by an earlier partial run has to
+     * be overwritten rather than left in place. Does not save.
+     */
+    public function markDeploySucceeded(): void
+    {
+        $this->setDetails([
+            'deployment_status' => 'success',
+            'deployment_warnings' => [],
+        ]);
     }
 
     public function delete()

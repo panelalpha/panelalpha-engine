@@ -1,0 +1,193 @@
+# Replaces the repo's dev/CI compose files with the real stack Foodsoft needs.
+# The app image is built from the repository's own Dockerfile locally in DinD;
+# mariadb, redis, the ready gate and the chown helper are the only pulled images.
+#
+# Detection re-reads this file after it is written and must keep resolving to
+# `compose`, so no service both `build:`s and bind-mounts a `./` path (that is
+# the local-dev heuristic in ComposeFileInspector). The dedicated `build`
+# service builds the image with no mounts; web/worker/cron/init reference the
+# tag. Only the web service publishes a host port, so the engine's port scan
+# takes 3000 as the primary (engine#231).
+services:
+  # Builds the app image from the repo Dockerfile and exits. No bind mount, so
+  # the file is not read as a workstation compose. imageRefs recognises a
+  # same-file-built tag, so nothing triggers a registry pull for it.
+  build:
+    image: foodsoft-local:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    mem_limit: 128m
+
+  db:
+    # Pinned major: a datadir cannot be migrated backwards, so a floating latest
+    # would break the named volume the first time the major moves. mysql2 speaks
+    # to MariaDB fine; utf8mb4 is the app's encoding.
+    image: docker.io/library/mariadb:11.4
+    restart: unless-stopped
+    # MYSQL_ROOT_PASSWORD and MYSQL_PASSWORD are written once by hooks/prepare.sh
+    # and baked into the datadir volume; never regenerated.
+    env_file:
+      - ../.panelalpha/foodsoft/db.env
+    environment:
+      MYSQL_DATABASE: foodsoft
+      MYSQL_USER: foodsoft
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+    mem_limit: 1024m
+
+  redis:
+    # Resque's broker. Persisted so queued jobs survive a redeploy.
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 256m
+
+  # One-shot, run to completion before web/worker/cron serve. Runs as root only
+  # to chown the named storage volume to the image's `nobody` user (a named
+  # volume mounts root-owned and shadows the image's build-time chown), then
+  # loads the schema and seeds the admin. web/worker/cron wait on this with
+  # service_completed_successfully, so a failed migration fails the deploy
+  # instead of publishing a 500 site, and the admin exists before any request.
+  init:
+    image: foodsoft-local:latest
+    user: "0:0"
+    restart: "no"
+    depends_on:
+      build:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+      - ../.panelalpha/foodsoft/app.env
+    environment:
+      RAILS_ENV: production
+      FOODSOFT_DB_HOST: db
+      FOODSOFT_DB_NAME: foodsoft
+      FOODSOFT_DB_USER: foodsoft
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./panelalpha/foodsoft:/pa:ro
+      - storage:/usr/src/app/storage
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    mem_limit: 1536m
+
+  web:
+    image: foodsoft-local:latest
+    restart: unless-stopped
+    # Puma binds :3000 (Procfile `web`, PORT=3000 in the image). Publish it on
+    # 3000 so the engine's port scan takes 3000 as the primary (engine#231).
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - ../.panelalpha/foodsoft/app.env
+    environment:
+      RAILS_ENV: production
+      FOODSOFT_DB_HOST: db
+      FOODSOFT_DB_NAME: foodsoft
+      FOODSOFT_DB_USER: foodsoft
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - storage:/usr/src/app/storage
+    # ENTRYPOINT+CMD from the image start `./proc-start web` (Puma).
+    healthcheck:
+      # The slim image has curl (used by the Dockerfile). force_ssl is on, so a
+      # plain http probe would be bounced to https; spoof X-Forwarded-Proto so
+      # Rails treats it as secure and answers. /f/login renders the login page
+      # through the DB, so a 200 proves the app, its database and the schema.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null -H 'X-Forwarded-Proto: https' -H 'Host: 127.0.0.1' http://127.0.0.1:3000/f/login"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 40s
+    mem_limit: 2048m
+
+  worker:
+    image: foodsoft-local:latest
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - ../.panelalpha/foodsoft/app.env
+    environment:
+      RAILS_ENV: production
+      FOODSOFT_DB_HOST: db
+      FOODSOFT_DB_NAME: foodsoft
+      FOODSOFT_DB_USER: foodsoft
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - storage:/usr/src/app/storage
+    # Resque worker (Procfile `worker`); without it, jobs like sending order
+    # results to suppliers never run.
+    command: ["./proc-start", "worker"]
+    mem_limit: 1024m
+
+  cron:
+    image: foodsoft-local:latest
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - ../.panelalpha/foodsoft/app.env
+    environment:
+      RAILS_ENV: production
+      FOODSOFT_DB_HOST: db
+      FOODSOFT_DB_NAME: foodsoft
+      FOODSOFT_DB_USER: foodsoft
+      REDIS_URL: redis://redis:6379/0
+    # supercronic runs the crontab generated at build time (Procfile `cron`):
+    # periodic task creation, stats refresh, etc.
+    command: ["./proc-start", "cron"]
+    mem_limit: 512m
+
+  # Starts nothing, exits 0, waits on web's healthcheck. `docker compose up -d`
+  # blocks on a depends_on health condition, so this makes `up` return only once
+  # the site actually answers, rather than the moment containers start
+  # (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  dbdata: {}
+  redisdata: {}
+  storage: {}

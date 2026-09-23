@@ -2,6 +2,7 @@ import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
 import { waitForWpCliReady } from '@/helpers/wp-cli-helpers';
 import { wpCliUnavailableReason, wpPath } from '@/helpers/wpcli-helpers';
+import { fetchSite } from '@/helpers/webserver-helpers';
 
 const SOAP_PLUGIN_SLUG = 'revolut-gateway-for-woocommerce';
 
@@ -61,9 +62,9 @@ test('SoapClient is available to WP-CLI and over HTTP', async ({
 
     await api.putFileContents(setupUser.username, checkPath, SOAP_CHECK_PHP);
 
-    const response = await anonymousRequest.get(
-      `https://${setupUser.domain}/soap-check.php?t=${Date.now()}`,
-      { ignoreHTTPSErrors: true }
+    const response = await fetchSite(
+      anonymousRequest,
+      `https://${setupUser.domain}/soap-check.php?t=${Date.now()}`
     );
     const body = await response.text();
 

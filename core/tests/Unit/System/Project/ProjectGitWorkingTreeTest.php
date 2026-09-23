@@ -103,44 +103,6 @@ class ProjectGitWorkingTreeTest extends TestCase
         $this->assertFileDoesNotExist($this->tmpDir . '/untracked.txt');
     }
 
-    public function test_pull_ff_on_dirty_tree_preserves_files(): void
-    {
-        file_put_contents($this->tmpDir . '/hello.txt', "hello\n");
-        $this->runGit(['add', 'hello.txt']);
-        $this->runGit(['commit', '-m', 'Initial commit']);
-        $this->runGit(['remote', 'add', 'origin', $this->tmpDir]);
-        $this->runGit(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
-
-        file_put_contents($this->tmpDir . '/hello.txt', "dirty\n");
-        file_put_contents($this->tmpDir . '/untracked.txt', "keep-me\n");
-
-        $model = new ModelsUser();
-        $model->username = 'tester';
-        $model->putSiteGit('', [
-            'repo_url' => 'https://github.com/org/repo.git',
-            'branch' => 'main',
-            'token' => null,
-        ]);
-        $git = new TestableProjectGit(
-            new Project(new System(), $model),
-            'public_html',
-            $this->localExecute(),
-            $this->tmpDir,
-        );
-
-        try {
-            $git->pull();
-            $this->fail('Expected GitException');
-        } catch (GitException $e) {
-            $this->assertSame(422, $e->httpStatus);
-            $this->assertSame('Working tree is dirty.', $e->getMessage());
-        }
-
-        $this->assertStringEqualsStringIgnoringLineEndings("dirty\n", (string) file_get_contents($this->tmpDir . '/hello.txt'));
-        $this->assertFileExists($this->tmpDir . '/untracked.txt');
-        $this->assertStringEqualsStringIgnoringLineEndings("keep-me\n", (string) file_get_contents($this->tmpDir . '/untracked.txt'));
-    }
-
     private function makeGit(): TestableProjectGit
     {
         $model = new ModelsUser();

@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Seatsurfing is a desk/room booking system shipped as a single all-in-one
+  image (ghcr.io/seatsurfing/backend): a Go server that also serves the built
+  Next.js admin + booking UI from /app/ui, listening on 8080. Only Postgres
+  sits beside it, so this is a single public origin — no fronting proxy is
+  needed. The repository's own docker-compose.yaml builds from source; this
+  recipe replaces it with the upstream prebuilt image plus a Postgres 18
+  sidecar on a named volume.
+
+  The prepare hook generates the three secrets the app needs and stores them
+  in ~/.panelalpha/seatsurfing/ so they survive the redeploy wipe of ~/project:
+  the Postgres password, CRYPT_KEY (must be exactly 32 bytes — the server calls
+  log.Fatalln otherwise, see server/config/config.go), and the initial admin
+  password. On an empty database the server bootstraps one organization and an
+  org-admin user admin@seatsurfing.local (INIT_ORG_USER@INIT_ORG_DOMAIN, and
+  the localhost domain is rewritten to seatsurfing.local in app/app.go
+  InitializeDefaultOrg); INIT_ORG_PASS carries the generated password so the
+  published default (Sea!surf1ng) is never live. That bootstrap runs only when
+  numOrgs == 0, so the admin credential and all data persist across redeploys
+  in the Postgres volume. The login UI resolves the single org through the
+  /auth/single-org endpoint, so admin login works on any public hostname
+  without the org domain having to match. PUBLIC_SCHEME/PUBLIC_PORT default to
+  https/443, which is exactly what the TLS-terminating proxy fronts.

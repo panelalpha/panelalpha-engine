@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SOGo is Objective-C groupware on GNUstep and SOPE - calendars, contacts and an
+  IMAP webmail client, with CalDAV, CardDAV, GroupDAV and ActiveSync in front of
+  them. It is a mail *client*, never a destination MTA: it reads mailboxes over
+  IMAP through NGImap4Client (SoObjects/Mailer/SOGoMailBaseObject.m:30) and
+  submits over SMTP through SOGoSMTPServer, whose only accepted mechanism is
+  `smtp` (SoObjects/SOGo/SOGoDomainDefaults.m:302-334); nothing in the tree binds
+  port 25 or 143, and `sogod` listens on one HTTP port only. That is the same
+  basis b1gMail and tine were kept on. The repository has no web root, no
+  Dockerfile and no compose file, so detection fell through to a PHP-shaped
+  strategy over the repository root and every request answered 403 -
+  `serving-missing_entry`, which is what this recipe replaces. It is buildable
+  here and cheaply so, which is the surprise: the repository vendors only the two
+  SOGo-specific SOPE subprojects (SOPE/NGCards, SOPE/GDLContentStore), and the
+  rest of SOPE plus libsbjson come as upstream's own bookworm packages from
+  packages.sogo.nu - exactly the Build-Depends list packaging/debian/control
+  already names. With those installed, `./configure && make -j4 && make install`
+  compiles the whole checkout in about 45 seconds and peaks far below an
+  account's build budget. files/Dockerfile does that in a build stage and copies
+  the three installed trees into a runtime stage. Everything SOGo needs that a
+  tenant account cannot hand it is supplied rather than assumed. Its user
+  directory is an SQL source (SoObjects/SOGo/SQLSource.m:59-77) over a table this
+  recipe creates, not LDAP. Its database and its memcached are sidecars in the
+  override, because `database: mysql` is only read under `runtime: php`
+  (PhpEnvironment.php:90) and says nothing under a Dockerfile. Its web server is
+  nginx inside the image, which is the only way to reach `sogod` on 20000: the
+  engine creates HTTP proxy rules only. IMAP and SMTP are left pointed at
+  SOGO_IMAP_SERVER and SOGO_SMTP_SERVER, empty by default - the account owner
+  names their own mail provider, and calendars and contacts work fully without
+  either.
+extends: dockerfile
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe's dockerfile/port_hint would be null and the deployability
+  # check would fail with "Dockerfile strategy selected but Dockerfile is
+  # missing." State what the probe would have found once files/Dockerfile is in
+  # place. 80 is nginx inside the image, not sogod's 20000.
+  dockerfile: Dockerfile
+  port_hint: 80

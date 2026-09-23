@@ -33,11 +33,11 @@ PANELALPHA_ENGINE_VERSION="${PANELALPHA_ENGINE_VERSION:-}"
 PACKAGE_HOST='connect.panelalpha.com'
 MONITORING_HOST="${PANELALPHA_MONITORING_HOST:-monitoring.panelalpha.com}"
 STARTED_AT=$(date +%s || echo 0)
-# Installed when the version lookup fails (legacy hub path only). Bump at release.
-FALLBACK_ENGINE_VERSION='2.0.0'
+# Installed when the version lookup fails (legacy Connect path only). Bump at release.
+FALLBACK_ENGINE_VERSION='2.0.1'
 # Git URL for the engine tree. Default is the public GitHub mirror. Credentials may
-# be embedded (https://user:token@host/...). Empty string forces the legacy hub package path.
-# "unset" vs empty: get.sh always exports a default; clearing the var opts into hub.
+# be embedded (https://user:token@host/...). Empty string forces the legacy Connect package path.
+# "unset" vs empty: get.sh always exports a default; clearing the var opts into Connect.
 if [ "${PANELALPHA_ENGINE_REPO+x}" = x ]; then
     ENGINE_REPO="${PANELALPHA_ENGINE_REPO}"
 else
@@ -49,7 +49,34 @@ REPO_PROJECT="${PANELALPHA_REPO_PROJECT:-panelalpha/engine}"
 REPO_REF="${PANELALPHA_REPO_REF:-development-2.0.0}"
 REPO_TOKEN="${PANELALPHA_REPO_TOKEN:-}"
 # A repository clone carries no vendor directory; a release package does.
-COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:20260908'
+COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.0.1'
+
+# Tagged with the engine version, not a build date, so the tag moves whenever
+# core/composer.json's PHP constraint does -- an unpublished tag does not pull
+# and Dockerfile-composer is built instead. This stays as the second guard, for
+# a published tag whose PHP is older than core asks for: `composer install`
+# would abort on every platform requirement and leave no vendor/ at all. The
+# pull is still preferred, but only kept when its PHP satisfies the constraint.
+resolve_composer_image() {
+    local want image_php
+    want=$(sed -n 's/.*"php"[[:space:]]*:[[:space:]]*"[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$1/composer.json" | head -1)
+
+    docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 || docker pull "$COMPOSER_IMAGE" || true
+
+    if [ -n "$want" ] && docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1; then
+        image_php=$(docker run --rm "$COMPOSER_IMAGE" php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null || echo 0)
+        # sort -V puts the lower version first; if that is not $want the image is older.
+        if [ "$(printf '%s\n%s\n' "$want" "$image_php" | sort -V | head -1)" != "$want" ]; then
+            echo ">>> $COMPOSER_IMAGE ships PHP ${image_php}, core requires >= ${want} -- building from dockerfiles/Dockerfile-composer" >&2
+            COMPOSER_IMAGE='panelalpha/engine-composer:local'
+            docker build --tag "$COMPOSER_IMAGE" - <"$2/dockerfiles/Dockerfile-composer"
+            return
+        fi
+    fi
+
+    docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 ||
+        docker build --tag "$COMPOSER_IMAGE" - <"$2/dockerfiles/Dockerfile-composer"
+}
 DEBUG_MODE=0
 NO_LOCAL_IP=0
 ENABLE_NAT=0
@@ -80,12 +107,26 @@ RUN_DIR=''
 CONFIGURE_MODE=0
 # install | update — set from --software-op or detected from an existing tree.
 ENGINE_OP=''
+# The repository the one-liner was asked to put on this host (--repo), and how
+# to clone it. Empty means an engine install with nothing deployed into it.
+DEPLOY_REPO=''
+DEPLOY_BRANCH=''
+DEPLOY_GIT_TOKEN=''
+# owner/repo, for the lines an operator reads. Filled from DEPLOY_REPO.
+DEPLOY_REPO_LABEL=''
+# 1 when an engine is already here: then --repo is a project to create through
+# the CLI, not a reason to install the whole engine over the top of itself.
+DEPLOY_ONLY=0
+# Filled by deploy_repository from what `pae project:create` reports back.
+DEPLOY_PROJECT_NAME=''
+DEPLOY_PROJECT_URL=''
+DEPLOY_FAILED=0
 
 usage() {
     cat <<'USAGE'
 Usage: bash installer.sh [options]
 
-  -v, --version REF        git ref / release (default: main with ENGINE_REPO, else newest hub release)
+  -v, --version REF        git ref / release (default: main with ENGINE_REPO, else newest Connect release)
   -host, --hostname HOST   hostname to install under
       --domain FQDN        serve the engine on your own name. Point an A
                            record at this host first; the certificate is
@@ -99,7 +140,16 @@ Usage: bash installer.sh [options]
                            later -- for when DNS is not pointing here yet.
       --cert-email ADDR    Let's Encrypt account email (expiry warnings)
       --email ADDR         Contact/monitoring email (settings:set email)
-  -p, --package-host HOST  package host (legacy hub path only)
+      --repo REPO          deploy a repository once the engine is up: a clone
+                           URL, host/owner/repo, or a bare owner/repo, which
+                           means GitHub unless the engine's default_git_host
+                           setting says otherwise. The project name and the
+                           domain are generated. Where an engine is already
+                           installed, only the project is created -- the engine
+                           is left alone.
+      --branch REF         branch, tag or commit for --repo
+      --git-token TOKEN    HTTPS access token for a private --repo
+  -p, --package-host HOST  package host (legacy Connect path only)
       --monitoring-host H  monitoring host for install status (default: monitoring.panelalpha.com)
   -d, --debug              set -x
       --no-local-ip        resolve the public IP when the default route is private
@@ -187,6 +237,33 @@ while true; do
         ;;
     --email=*)
         INSTALL_EMAIL="${1#*=}"
+        shift
+        ;;
+    --repo)
+        DEPLOY_REPO="$2"
+        shift
+        shift
+        ;;
+    --repo=*)
+        DEPLOY_REPO="${1#*=}"
+        shift
+        ;;
+    --branch)
+        DEPLOY_BRANCH="$2"
+        shift
+        shift
+        ;;
+    --branch=*)
+        DEPLOY_BRANCH="${1#*=}"
+        shift
+        ;;
+    --git-token)
+        DEPLOY_GIT_TOKEN="$2"
+        shift
+        shift
+        ;;
+    --git-token=*)
+        DEPLOY_GIT_TOKEN="${1#*=}"
         shift
         ;;
     --no-cert-request)
@@ -298,6 +375,41 @@ echo_error() {
     exit 101
 }
 
+# APP_UID identifies this install to Connect and to monitoring (X-Engine-App-UID).
+# A value already in .env-core wins, then one a provisioning script exported as
+# APP_UID; only when neither exists is one generated. Never overwritten.
+read_app_uid() {
+    [ -f "$1" ] || return 0
+    { grep '^APP_UID=' "$1" || true; } | tail -n1 | cut -d '=' -f2- | tr -d "\"' \r"
+}
+
+resolve_app_uid() {
+    local existing
+    existing=$(read_app_uid /opt/panelalpha/shared-hosting/.env-core)
+    if [ -n "$existing" ]; then
+        APP_UID="$existing"
+    elif [ -z "${APP_UID:-}" ]; then
+        APP_UID=$(cat /proc/sys/kernel/random/uuid)
+    fi
+    if ! [[ "$APP_UID" =~ ^[A-Za-z0-9._:-]{1,128}$ ]]; then
+        # cleared first: the exit trap reports with this header
+        local bad="$APP_UID"
+        APP_UID=''
+        echo_error "APP_UID must be 1-128 characters from A-Z a-z 0-9 . _ : - (got '${bad}')"
+    fi
+}
+
+persist_app_uid() {
+    local env_core=/opt/panelalpha/shared-hosting/.env-core
+    [ -n "$(read_app_uid "$env_core")" ] && return 0
+    if grep -q '^APP_UID=' "$env_core"; then
+        sed -i "s|^APP_UID=.*|APP_UID=${APP_UID}|" "$env_core"
+    else
+        [ -z "$(tail -c1 "$env_core")" ] || echo "" >>"$env_core"
+        echo "APP_UID=${APP_UID}" >>"$env_core"
+    fi
+}
+
 # Report install/update outcome to monitoring (Engine emails / probes).
 send_update_status() {
     local exit_code=${1:-0}
@@ -356,6 +468,7 @@ send_update_status() {
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
             -H "User-Agent: PanelAlpha-Engine/installer" \
+            ${APP_UID:+-H} ${APP_UID:+"X-Engine-App-UID: ${APP_UID}"} \
             -d @- >/dev/null 2>&1 || true
     } || true
 }
@@ -383,7 +496,7 @@ resolve_engine_version() {
         return
     fi
 
-    # Legacy hub path (ENGINE_REPO explicitly cleared).
+    # Legacy Connect path (ENGINE_REPO explicitly cleared).
     if [ -n "$REPO_TOKEN" ]; then
         PANELALPHA_ENGINE_VERSION="$REPO_REF"
         echo_info "Installing PanelAlpha Engine ${PANELALPHA_ENGINE_VERSION} from ${REPO_PROJECT}"
@@ -392,7 +505,7 @@ resolve_engine_version() {
 
     echo_info "Resolving the latest release"
     PANELALPHA_ENGINE_VERSION=$(curl --http1.1 -fsSL --max-time 15 \
-        "https://${PACKAGE_HOST}/engine-latest" 2>/dev/null | tr -d ' \t\r\n' || true)
+        -H "X-Engine-App-UID: ${APP_UID}" "https://${PACKAGE_HOST}/engine-latest" 2>/dev/null | tr -d ' \t\r\n' || true)
 
     case "$PANELALPHA_ENGINE_VERSION" in
     '' | *[!0-9A-Za-z.-]*)
@@ -565,8 +678,9 @@ get_hostname() {
 }
 
 request_download_token() {
-    # Hub package host resolves the caller by IP and returns a short-lived download token.
-    CURL_RESULTS=$(curl --http1.1 "https://${PACKAGE_HOST}/api/verify/request-download")
+    # Connect resolves the caller by IP and returns a short-lived download token.
+    CURL_RESULTS=$(curl --http1.1 -H "X-Engine-App-UID: ${APP_UID}" \
+        "https://${PACKAGE_HOST}/api/verify/request-download")
 
     TOKEN=$(echo "$CURL_RESULTS" | jq -r '.["license"].download_token // empty')
     DOWNLOAD_STATUS=$(echo "$CURL_RESULTS" | jq -r '.["license"].status // empty')
@@ -599,7 +713,7 @@ install_docker_engine() {
 }
 
 # Git URL for the engine tree. Prefer PANELALPHA_ENGINE_REPO (credentials may be
-# embedded). Empty string forces the legacy hub package path.
+# embedded). Empty string forces the legacy Connect package path.
 download_engine_from_repository() {
     local safe
     safe=$(redact_repo_url "$ENGINE_REPO")
@@ -620,10 +734,7 @@ download_engine_from_repository() {
 
 # What the release package ships prebuilt and a repository archive does not.
 install_composer_dependencies() {
-    if ! docker image inspect "$COMPOSER_IMAGE" >/dev/null 2>&1 &&
-        ! docker pull "$COMPOSER_IMAGE"; then
-        docker build --tag "$COMPOSER_IMAGE" - <"$PANELALPHA_DIR/shared-hosting/dockerfiles/Dockerfile-composer"
-    fi
+    resolve_composer_image "$PANELALPHA_DIR/shared-hosting/core" "$PANELALPHA_DIR/shared-hosting"
     docker run --rm -v "$PANELALPHA_DIR/shared-hosting/core:/app" -w /app \
         "$COMPOSER_IMAGE" composer install --no-interaction --no-progress
 }
@@ -668,7 +779,7 @@ download_panelalpha_engine() {
     PACKAGE_URL+=$PANELALPHA_ENGINE_VERSION
 
     while true; do
-        STATUS=$(cd ''$INSTALL_DIR'' && curl --http1.1 -o app.zip -w '%{http_code}' ''$PACKAGE_URL'' --header 'Download-Token:'$TOKEN'')
+        STATUS=$(cd ''$INSTALL_DIR'' && curl --http1.1 -o app.zip -w '%{http_code}' ''$PACKAGE_URL'' --header 'Download-Token:'$TOKEN'' --header "X-Engine-App-UID: ${APP_UID}")
         if [ $STATUS -eq 200 ]; then
             echo_info "Success! Package has been downloaded"
             break
@@ -789,6 +900,8 @@ prepare_config_files() {
     chmod +x /opt/panelalpha/shared-hosting/config/pure-ftpd/entrypoint.sh
     mkdir -p /opt/panelalpha/shared-hosting/config/sftp
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/sftp/. /opt/panelalpha/shared-hosting/config/sftp/.
+    # Scripts are engine code, not host state: -n would keep the installed copy.
+    cp /opt/panelalpha/shared-hosting/templates/config/sftp/{entrypoint.sh,sync-logins.sh} /opt/panelalpha/shared-hosting/config/sftp/
     if [ ! -f /opt/panelalpha/shared-hosting/config/sftp/ssh_host_ed25519_key ]; then
         ssh-keygen -t ed25519 -N "" -f /opt/panelalpha/shared-hosting/config/sftp/ssh_host_ed25519_key < /dev/null
     fi
@@ -847,7 +960,7 @@ harden_host() {
 }
 
 remove_renamed_containers() {
-    for old in nginx cron database-core webserver database-users phpmyadmin-users dns-proxy exim pure-ftpd; do
+    for old in nginx cron database-core webserver database-users phpmyadmin-users dns-proxy exim pure-ftpd redis core-redis queue-worker core-queue core-cron core-http; do
         ids=$(docker ps -aq \
             --filter "label=com.docker.compose.project=shared-hosting" \
             --filter "label=com.docker.compose.service=${old}" 2>/dev/null || true)
@@ -885,12 +998,39 @@ install_panelalpha_engine() {
         echo "COMPOSE_PROFILES=full" >>/opt/panelalpha/shared-hosting/.env
     fi
 
-    # generate core mysql password if not set
-    CORE_MYSQL_PASSWORD=$(grep ^CORE_MYSQL_PASSWORD= /opt/panelalpha/shared-hosting/.env | cut -d '=' -f2-)
-    if [ -z "${CORE_MYSQL_PASSWORD}" ]; then
-        CORE_MYSQL_PASSWORD=$(random-string 12)
-        sed -i 's/CORE_MYSQL_PASSWORD=/CORE_MYSQL_PASSWORD='$CORE_MYSQL_PASSWORD'/' /opt/panelalpha/shared-hosting/.env
-    fi
+    # core's own data lives in core.sqlite by default. An operator who put
+    # legacy-mysql-core in COMPOSE_PROFILES above (hand-edited .env before
+    # running this installer) gets core-db instead -- same profile
+    # int-updater.sh uses to keep an existing host on MySQL, so this is the
+    # one place both paths land the connection vars docker-compose.yml's
+    # core/metrics services read. See docs/internal/core-db.md.
+    CORE_PROFILES=$(grep '^COMPOSE_PROFILES=' /opt/panelalpha/shared-hosting/.env | cut -d '=' -f2-)
+    case ",${CORE_PROFILES}," in
+    *,legacy-mysql-core,*)
+        if ! grep -q '^CORE_DB_CONNECTION=' /opt/panelalpha/shared-hosting/.env; then
+            if [ -n "$(tail -c1 /opt/panelalpha/shared-hosting/.env)" ]; then
+                echo "" >>/opt/panelalpha/shared-hosting/.env
+            fi
+            cat >>/opt/panelalpha/shared-hosting/.env <<'EOF'
+CORE_DB_CONNECTION=mysql
+CORE_DB_HOST=database-core.shared-hosting.palocal
+CORE_DB_DATABASE=core
+CORE_DB_USERNAME=core
+EOF
+        fi
+
+        # core-db's own password (MYSQL_PASSWORD in its compose environment,
+        # unrelated to USERS_MYSQL_ROOT_PASSWORD below). An existing legacy
+        # host already has one from before this profile existed; a fresh
+        # install choosing this profile needs one generated, the same way
+        # this always worked before core.sqlite existed.
+        CORE_MYSQL_PASSWORD=$(grep ^CORE_MYSQL_PASSWORD= /opt/panelalpha/shared-hosting/.env | cut -d '=' -f2-)
+        if [ -z "${CORE_MYSQL_PASSWORD}" ]; then
+            CORE_MYSQL_PASSWORD=$(random-string 12)
+            sed -i 's/CORE_MYSQL_PASSWORD=/CORE_MYSQL_PASSWORD='$CORE_MYSQL_PASSWORD'/' /opt/panelalpha/shared-hosting/.env
+        fi
+        ;;
+    esac
 
     # generate users mysql root password if not set
     USERS_MYSQL_ROOT_PASSWORD=$(grep ^USERS_MYSQL_ROOT_PASSWORD= /opt/panelalpha/shared-hosting/.env | cut -d '=' -f2-)
@@ -908,9 +1048,9 @@ install_panelalpha_engine() {
         sed -i 's#APP_URL=#APP_URL='$CORE_URL'#' /opt/panelalpha/shared-hosting/.env-core
     fi
 
-    # Generate the Laravel key before the stack starts. Horizon reads the empty
-    # APP_KEY at boot and passes it on to its workers, so a key written after
-    # `up -d` never reaches core-queue until that container restarts.
+    # Generate the Laravel key before the stack starts. Queue workers read the
+    # empty APP_KEY at boot and keep it, so a key written after
+    # `up -d` never reaches them until core restarts.
     if ! grep -q '^APP_KEY=.\+' /opt/panelalpha/shared-hosting/.env-core; then
         APP_KEY="base64:$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
         if grep -q '^APP_KEY=' /opt/panelalpha/shared-hosting/.env-core; then
@@ -922,6 +1062,8 @@ install_panelalpha_engine() {
             echo "APP_KEY=${APP_KEY}" >>/opt/panelalpha/shared-hosting/.env-core
         fi
     fi
+
+    persist_app_uid
 
     # how account containers are isolated; empty leaves the app default (sysbox)
     if [ -n "$DIND_RUNTIME" ]; then
@@ -1117,6 +1259,97 @@ post_install_config() {
     bash /opt/panelalpha/shared-hosting/scripts/prewarm-images.sh || echo_warning "Could not start image prewarm"
 }
 
+# owner/repo out of whatever spelling was passed, for the lines an operator
+# reads. Credentials in a URL are dropped with the rest of it.
+repo_label() {
+    printf '%s' "$1" |
+        sed -E 's#^[a-z][a-z0-9+.-]*://##; s#^[^/@]+@##; s#\.git$##; s#/+$##' |
+        awk -F/ '{ if (NF >= 2) printf "%s/%s", $(NF-1), $NF; else printf "%s", $0 }'
+}
+
+# One field out of `project:create --json`. jq where the host has it (the
+# installer installs it), a narrow sed where a deploy-only run on an older
+# host does not.
+json_field() { # json_field <name> <json>
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "$2" | jq -r --arg k "$1" '.data[$k] // empty' 2>/dev/null
+        return 0
+    fi
+    printf '%s' "$2" | sed -n "s/.*\"$1\":\"\\([^\"]*\\)\".*/\\1/p" | head -n1
+}
+
+# The repository the one-liner asked for, deployed into a project of its own.
+# Everything the project needs beyond the repository -- the account name, the
+# domain, the template -- is generated by the API, so nothing is invented here.
+#
+# A failed deploy is reported, not fatal: on an install the engine itself is up
+# and usable, and saying so beats rolling it back over a bad repository URL.
+deploy_repository() {
+    local args=(project:create "--repo=${DEPLOY_REPO}" --json)
+    if [ -n "$DEPLOY_BRANCH" ]; then
+        args+=("--branch=${DEPLOY_BRANCH}")
+    fi
+    if [ -n "$DEPLOY_GIT_TOKEN" ]; then
+        args+=("--git-token=${DEPLOY_GIT_TOKEN}")
+    fi
+    if [ -n "$INSTALL_EMAIL" ]; then
+        args+=("--email=${INSTALL_EMAIL}")
+    fi
+
+    # stdout only: `project:create --json` keeps the JSON there and puts the
+    # deploy log on stderr, so the operator watches the deploy happen while
+    # this still captures something parseable.
+    local result=''
+    if ! result=$(docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+        php artisan "${args[@]}"); then
+        DEPLOY_FAILED=1
+        echo_warning "Could not deploy ${DEPLOY_REPO_LABEL}:"
+        printf '%s\n' "$result" >&2
+        return 0
+    fi
+
+    # The JSON line out of whatever else the deploy wrote to the terminal.
+    local json domain
+    json=$(printf '%s\n' "$result" | grep -E '^\{"data":' | tail -n1 || true)
+    DEPLOY_PROJECT_NAME=$(json_field username "$json")
+    domain=$(json_field domain "$json")
+    if [ -z "$DEPLOY_PROJECT_NAME" ] || [ -z "$domain" ]; then
+        DEPLOY_FAILED=1
+        echo_warning "Deployed ${DEPLOY_REPO_LABEL}, but could not read the project it was deployed into:"
+        printf '%s\n' "$result" >&2
+        return 0
+    fi
+    DEPLOY_PROJECT_URL="https://${domain}"
+}
+
+# Where the repository ended up — stdout for logs, and the same lines in the
+# TUI's ready screen. The outro writers live inside finish_installation, so
+# this is called from there and nowhere else.
+report_deployed_project() {
+    if [ -z "$DEPLOY_REPO" ]; then
+        return 0
+    fi
+
+    if [ "$DEPLOY_FAILED" = 1 ]; then
+        echo_warning "${DEPLOY_REPO_LABEL} was not deployed. Try again with:"
+        echo_warning "  pae project:create --repo ${DEPLOY_REPO_LABEL}"
+        outro_say 221 "${DEPLOY_REPO_LABEL} was not deployed. Try again with:"
+        outro_c 15 "  pae project:create --repo ${DEPLOY_REPO_LABEL}"
+        outro_nl
+        outro_nl
+        return 0
+    fi
+
+    echo_info "${DEPLOY_REPO_LABEL} available at: ${DEPLOY_PROJECT_URL}"
+    echo_info "Project: ${DEPLOY_PROJECT_NAME}    logs: pae project:deploy:log ${DEPLOY_PROJECT_NAME}"
+    echo_info ""
+    outro_c 15 "${DEPLOY_REPO_LABEL}"
+    outro_c 247 ' available at: '
+    outro_c 39 "${DEPLOY_PROJECT_URL}"
+    outro_nl
+    outro_nl
+}
+
 finish_installation() {
     # Stdout: verbose for --no-tui / logs / legacy sed fallback.
     # $RUN_DIR/outro: mockup-shaped ANSI body for the TUI ready screen only
@@ -1146,12 +1379,21 @@ finish_installation() {
     }
 
     echo_info ""
+    # Nothing was installed on this run, so the project is the whole report.
+    if [ "$DEPLOY_ONLY" = 1 ]; then
+        report_deployed_project
+        finish_commit
+        return
+    fi
+
     if [ "$ENGINE_OP" = update ]; then
         echo_info "PanelAlpha engine has been successfully updated!"
     else
         echo_info "PanelAlpha engine has been successfully installed!"
     fi
     echo_info ""
+
+    report_deployed_project
 
     echo_info "API URL: ${API_URL}    new token: pae api:token:create default"
     echo_info "MCP URL: ${MCP_URL}    new token: pae mcp:token:create default"
@@ -1234,8 +1476,7 @@ if [ "$CONFIGURE_MODE" = 1 ]; then
 fi
 
 define_variables
-
-resolve_engine_version
+resolve_app_uid
 
 case "$ENGINE_OP" in
 install | update) ;;
@@ -1249,6 +1490,32 @@ install | update) ;;
 esac
 
 refuse_engine_v1_to_v2_upgrade
+
+if [ -n "$DEPLOY_REPO" ]; then
+    DEPLOY_REPO_LABEL=$(repo_label "$DEPLOY_REPO")
+    if [ -f /opt/panelalpha/shared-hosting/docker-compose.yml ]; then
+        DEPLOY_ONLY=1
+    fi
+fi
+
+# An engine is already here, so --repo is a project to create through the CLI,
+# not a reason to install the engine over the top of itself.
+if [ "$DEPLOY_ONLY" = 1 ]; then
+    # before_install, which normally asks, is skipped on this path.
+    check_root
+    echo_info "PanelAlpha engine is already installed on this host"
+    update_progress 50 "Deploying ${DEPLOY_REPO_LABEL}"
+    echo_info "Deploying ${DEPLOY_REPO_LABEL}"
+    deploy_repository
+    update_progress 100 "Finishing"
+    finish_installation
+    # Neither an install nor an update happened, so there is no install status
+    # to report; the trap would send one for a run that changed no engine.
+    trap - EXIT
+    exit "$DEPLOY_FAILED"
+fi
+
+resolve_engine_version
 
 if [ "$ENGINE_OP" = update ]; then
     update_progress 5 "Preparing update"
@@ -1315,6 +1582,12 @@ clean_installer
 update_progress 90 "Applying additional configuration"
 echo_info "Applying additional configuration"
 post_install_config
+
+if [ -n "$DEPLOY_REPO" ]; then
+    update_progress 95 "Building ${DEPLOY_REPO_LABEL}"
+    echo_info "Deploying ${DEPLOY_REPO_LABEL}"
+    deploy_repository
+fi
 
 update_progress 100 "Finishing installation"
 finish_installation

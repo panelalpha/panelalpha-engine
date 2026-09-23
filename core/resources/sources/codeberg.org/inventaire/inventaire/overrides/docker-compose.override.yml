@@ -1,0 +1,84 @@
+# Layers over the compose file the dockerfile strategy generates. That file is
+# correct about the app (it builds files/Dockerfile -> inventaire/inventaire:latest,
+# env_file: .env, the image's own ENTRYPOINT). This layer adds the two datastores
+# the app blocks on at startup and the credentials/persistence that make them
+# survive a redeploy.
+#
+# COUCHDB_PASSWORD is the placeholder STRONG_DB_PASSWORD in both services: the
+# engine's ComposePlaceholders replaces the distinctive token with one secret
+# derived from the account seed (generatedSecret), the same value on both sides
+# and stable across redeploys, so the app's config and the CouchDB admin never
+# drift apart. The service names couchdb and elasticsearch are load-bearing --
+# the image's docker-entrypoint.sh hardcodes those hostnames.
+services:
+  app:
+    environment:
+      COUCHDB_USER: couchdb
+      COUCHDB_PASSWORD: STRONG_DB_PASSWORD
+    depends_on:
+      couchdb:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    volumes:
+      # The image entrypoint writes these paths into config; they hold the
+      # leveldb cache, locally stored user/group/entity images, and DB backups.
+      - inventaire-leveldb:/opt/inventaire_leveldb
+      - inventaire-media:/opt/inventaire_local_media_storage
+      - inventaire-backups:/opt/inventaire_backups
+
+  couchdb:
+    image: couchdb:3.4.2
+    restart: unless-stopped
+    environment:
+      COUCHDB_USER: couchdb
+      COUCHDB_PASSWORD: STRONG_DB_PASSWORD
+      # https://docs.couchdb.org/en/stable/maintenance/performance.html
+      ERL_FLAGS: '+A 4'
+    volumes:
+      # NOT :ro -- the couchdb image entrypoint runs
+      # `find /opt/couchdb ! -user couchdb -exec chown ...` and aborts (exit 1,
+      # before couchdb logs anything) when it cannot chown a read-only file the
+      # account user owns. Read-write lets it chown the file and boot.
+      - ./couchdb-local.ini:/opt/couchdb/etc/local.d/zzz-inventaire.ini
+      - couchdb-data:/opt/couchdb/data
+    healthcheck:
+      # require_valid_user=true makes even /_up need auth (401 otherwise), so the
+      # probe authenticates as the admin the image created from these env vars.
+      test: ["CMD-SHELL", "curl -sf http://$$COUCHDB_USER:$$COUCHDB_PASSWORD@localhost:5984/_up || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    mem_limit: 512m
+
+  elasticsearch:
+    image: elasticsearch:7.17.28
+    restart: unless-stopped
+    environment:
+      - 'discovery.type=single-node'
+      # 512 MB heap is the docker-inventaire default; measured ~857 MB RSS.
+      - 'ES_JAVA_OPTS=-Xms512m -Xmx512m'
+      - 'xpack.security.enabled=false'
+      - 'ingest.geoip.downloader.enabled=false'
+      - 'logger.org.elasticsearch=ERROR'
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s' >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    # The sidecar catalogue default is 384m (resources/sidecars/dialects.php),
+    # which OOM-kills a 512 MB-heap ES instantly; pin an explicit ceiling. The
+    # account cgroup still caps the total, so this is a per-service headroom, not
+    # an addition to the account budget.
+    mem_limit: 1152m
+
+volumes:
+  couchdb-data:
+  elasticsearch-data:
+  inventaire-leveldb:
+  inventaire-media:
+  inventaire-backups:

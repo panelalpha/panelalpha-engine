@@ -13,11 +13,8 @@ use Tests\TestCase;
  * builds that URL still exists.
  *
  * `telemetry:ship` calls {@see NotificationPreferences::sync()} after a
- * successful drain. The endpoint used to be assembled through
- * `App\Lib\PanelAlpha\Monitoring`, which was deleted when monitoring moved
- * to Integrations — so the shipper wrote a daily ERROR and monitoring never
- * saw probe targets. The assertion that would have caught it is "this
- * posts at {@see Telemetry::endpoint()}, and does not throw".
+ * successful drain. Unchanged prefs are skipped (fingerprint) so ship does
+ * not spam monitoring every five minutes.
  */
 class NotificationPreferencesTest extends TestCase
 {
@@ -30,13 +27,16 @@ class NotificationPreferencesTest extends TestCase
             'cert_domain' => 'engine.example.test',
             'license_key' => 'TEST-KEY',
             NotificationPreferences::SETTING_TELEMETRY_ENABLED => '1',
+            // Present so Setting::set updates runtime (not DB) in unit tests.
+            NotificationPreferences::SETTING_PREFS_HASH => '',
         ]);
         config([
             'monitoring.url' => 'https://monitoring.test',
-            'hub.url' => 'https://hub.example.test',
+            'connect.url' => 'https://connect.example.test',
             'telemetry.reports_path' => Telemetry::EVENTS_PATH,
             'telemetry.timeout' => 5,
             'telemetry.token' => '',
+            'app.uid' => 'install-42',
         ]);
     }
 
@@ -60,12 +60,14 @@ class NotificationPreferencesTest extends TestCase
             return $request->url() === Telemetry::endpoint()
                 && $request->url() === 'https://monitoring.test/api/v1/events'
                 && $request->hasHeader('License-Key', 'TEST-KEY')
+                && $request->hasHeader('X-Engine-App-UID', 'install-42')
                 && ($event['type'] ?? null) === 'notification.preferences'
                 && ($event['payload']['enabled'] ?? null) === true
                 && ($event['payload']['notify_email'] ?? null) === 'ops@example.test'
                 && ($event['payload']['server_probe_url'] ?? null) === 'https://engine.example.test';
         });
-        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'hub.example.test'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'connect.example.test'));
+        $this->assertNotSame('', Setting::get(NotificationPreferences::SETTING_PREFS_HASH));
     }
 
     /**
@@ -82,5 +84,53 @@ class NotificationPreferencesTest extends TestCase
         $this->assertFalse($result['ok']);
         $this->assertSame('No monitoring endpoint configured', $result['message']);
         Http::assertNothingSent();
+    }
+
+    public function test_sync_skips_http_when_preferences_unchanged(): void
+    {
+        Http::fake(['*' => Http::response(['accepted' => 1], 200)]);
+
+        $first = NotificationPreferences::sync(true);
+        $this->assertTrue($first['ok'], $first['message']);
+        $this->assertSame('Preferences synced to monitoring', $first['message']);
+        Http::assertSentCount(1);
+
+        $second = NotificationPreferences::sync(true);
+        $this->assertTrue($second['ok'], $second['message']);
+        $this->assertSame('Preferences unchanged, skipped', $second['message']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_sync_posts_again_when_email_changes(): void
+    {
+        Http::fake(['*' => Http::response(['accepted' => 1], 200)]);
+
+        NotificationPreferences::sync(true);
+        Http::assertSentCount(1);
+
+        Setting::set(NotificationPreferences::SETTING_NOTIFY_EMAIL, 'new@example.test');
+        $result = NotificationPreferences::sync(true);
+
+        $this->assertTrue($result['ok'], $result['message']);
+        $this->assertSame('Preferences synced to monitoring', $result['message']);
+        Http::assertSentCount(2);
+        Http::assertSent(function ($request) {
+            $event = $request['events'][0] ?? [];
+
+            return ($event['payload']['notify_email'] ?? null) === 'new@example.test';
+        });
+    }
+
+    public function test_force_sync_posts_even_when_hash_unchanged(): void
+    {
+        Http::fake(['*' => Http::response(['accepted' => 1], 200)]);
+
+        NotificationPreferences::sync(true);
+        Http::assertSentCount(1);
+
+        $forced = NotificationPreferences::sync(true, force: true);
+        $this->assertTrue($forced['ok'], $forced['message']);
+        $this->assertSame('Preferences synced to monitoring', $forced['message']);
+        Http::assertSentCount(2);
     }
 }

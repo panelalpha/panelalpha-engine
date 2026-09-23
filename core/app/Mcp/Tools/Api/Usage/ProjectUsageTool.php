@@ -15,7 +15,9 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('project_usage')]
 #[Description(<<<'MARKDOWN'
-    Get resource usage for a user
+    Get resource usage for a project
+
+    Includes this calendar month's transfer as bandwidth.usage (bytes) against bandwidth.maximum (the project bandwidth_limit in bytes, or null when unlimited).
 
     Calls GET /api/projects/{username}/usage.
     MARKDOWN)]

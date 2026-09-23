@@ -1,0 +1,207 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Servas is a self-hosted bookmark manager: Laravel 12, Inertia and Svelte 5
+  over Tailwind 4, with SQLite or MySQL behind it. The repository is a perfectly
+  ordinary Laravel checkout -- composer.json, artisan, public/index.php,
+  package.json with a `vite build` script -- and it also ships a Dockerfile,
+  which is the whole of why the stock deploy failed.
+
+  `platforms/dockerfile.yaml` has priority 970 and `apps/laravel` 940, so
+  detection read the Dockerfile and stopped. DockerfileStrategy is the lightest
+  strategy there is on purpose -- the author wrote that Dockerfile and their
+  choices stand -- so it builds the image, publishes the port and adds nothing.
+  What the author wrote is a FrankenPHP image whose ENTRYPOINT runs
+  `php artisan migrate --force`, has no `set -e` and no wait, and then starts
+  the server whatever happened. Beside it, `RuntimeSidecars` read `.env`,
+  found `DB_CONNECTION=mysql` and `DB_HOST=127.0.0.1` from the repository's own
+  `.env.example`, and added a `mariadb:11` service -- correctly, on its own
+  terms. The generated compose then wired the app to it with a bare
+  `depends_on: [db]`, no `condition: service_healthy`, although the sidecar it
+  had just written carries a healthcheck.
+
+  So the container came up while MariaDB was still initialising:
+
+      Starting Migration...
+      SQLSTATE[HY000] [2002] Connection refused (Connection: mysql, Host: db,
+      Port: 3306, Database: laravel, SQL: select exists (... 'migrations' ...))
+
+  and carried straight on to `config:cache`, `view:cache` and FrankenPHP. The
+  deploy reported success in 105.6s, the port answered, and every request then
+  hit `SESSION_DRIVER=database` against a database with no tables:
+
+      SQLSTATE[42S02]: Base table or view not found: 1146
+      Table 'laravel.sessions' doesn't exist
+
+  HTTP 500, `checks/_baseline/no-server-error` fails, verdict
+  `serving-error_page`. Two things made it worse than a race. `.env.example`
+  ships `APP_ENV=local` and `APP_DEBUG=true` and nothing in the dockerfile path
+  overrides them, so that page was the full Laravel debug page -- stack trace
+  and the database credentials -- on a public HTTPS address. And the
+  repository's `.dockerignore` excludes `.env`, so the key the engine generated
+  reached the container only through `env_file:`, which is the one thing that
+  did work there.
+
+  The fix is not to repair that path. `extends: laravel` states the manifest
+  and a recipe is found by its path rather than by detection, so the Dockerfile
+  stops being consulted and Servas is deployed as what it is: ~/project bind
+  mounted at /app, Composer on the host in the PHP 8.4 image its composer.json
+  asks for, `HostCompile::runForPhp()` running the repository's own
+  `vite build` into public/build, Apache on public/, and the staged entrypoint.
+  The repository's Dockerfile, Caddyfile, docker-entrypoint.sh and docker/ are
+  left where they are; none of them is under the document root and nothing
+  reads them any more.
+
+  What is left is the three things a Laravel checkout cannot say.
+
+  **Where the database lives.** Servas has no `database:` need in the hosting
+  sense -- SQLite suits a single-user bookmark manager and keeps a database
+  container off the host -- but the engine's SQLite default is
+  `/app/database/database.sqlite`, inside the checkout, and a redeploy clears
+  and re-clones ~/project (engine#173). Every bookmark would be destroyed by
+  the next deploy. overrides/docker-compose.override.yml bind-mounts
+  ~/.panelalpha/servas at /data and .env points DB_DATABASE at
+  /data/database.sqlite. engine#167 does not apply: Heimdall wraps the variable
+  in `database_path()` and doubles an absolute path, Servas's
+  config/database.php:41 reads `env('DB_DATABASE', database_path(...))` with
+  the wrapper only on the *default*, so an absolute path is used as written.
+
+  **That the schema will not load itself.** Servas squashed its first thirteen
+  migrations into `database/schema/`; the eight files left in
+  `database/migrations/` are increments (one of them, personal_access_tokens, is
+  already in the dump), and none of them creates `users`,
+  `links`, `tags` or `groups`. `php artisan migrate` loads a dump by shelling
+  out -- `SqliteSchemaState::load()` runs `sqlite3 "<db>" < <dump>`, and the
+  MySQL half runs the `mysql` client -- and the shared PHP base image has
+  pdo_sqlite and sqlite3 as *extensions* and neither binary. Either way the
+  migration dies on `sqlite3: not found` and the deploy ends with an empty
+  database, which is the same 500 by a different road. hooks/prepare.sh loads
+  the dump through PDO on the account instead, before the container exists. It
+  carries its own `INSERT INTO migrations` rows, so
+  `MigrateCommand::prepareDatabase()` then sees `hasRunAnyMigrations()` true,
+  skips `loadSchemaState()` and applies the seven remaining increments normally. The
+  sqlite dump is 36 lines of plain SQL that PDO executes directly; the mysql
+  one is mariadb-dump output that is not, which is the other half of why this
+  recipe is SQLite.
+
+  **Who owns the installation.** Servas ships no installer, no seeded user and
+  no admin role. `config/fortify.php` reads
+  `env('SERVAS_ENABLE_REGISTRATION', true)`, and that form is the only way an
+  account is ever created -- so a stock deploy on a public HTTPS address is a
+  bookmark manager whose first visitor becomes its owner, with no way to
+  remove them afterwards. prepare.sh generates a 20-character password into
+  ~/.panelalpha/servas/credentials (0600), .env sets
+  SERVAS_ENABLE_REGISTRATION=false, and panelalpha/servas-install.php creates
+  the account before Apache binds -- guarded on the users table being empty, so
+  a redeploy over a surviving database never creates a second one. Measured on
+  a deployed account, /register is 404. An operator who wants other people to
+  sign up sets the variable back to true in ~/project/.env.
+
+  The application key is the fourth thing and it is a consequence of the first.
+  `.env.example` carries an empty `APP_KEY=` -- no committed key, so
+  engine#179's class of bug does not arise -- and `ProjectEnvironment::apply()`
+  would generate one. But it generates a *new* one every deploy, because .env
+  is re-created from .env.example after every re-clone, while the database in
+  /data lives on: a redeploy would invalidate every session and make every
+  Fortify `two_factor_secret` already written undecryptable. `key:generate` is
+  install-stage and cannot fix the second deploy either. So prepare.sh keeps
+  one in ~/.panelalpha/servas/app.key and servas-install.php writes it into
+  .env on the install *and* upgrade stages -- after `key:generate`, which would
+  overwrite it, and after the engine has taken its 644 world-readable
+  .env.default copy of whatever prepare.sh left (engine#173), which is why the
+  key is never in the file prepare.sh writes.
+
+  `key:generate` is left in place and does nothing at all, which is the point.
+  The .env the hook writes carries no APP_KEY line, so
+  `KeyGenerateCommand::writeNewEnvironmentFileWith()` finds nothing to replace,
+  prints `Unable to set application key. No APP_KEY variable was found in the
+  .env file.` and returns -- exit code 0, the stage carries on, and there is no
+  moment at which .env holds a key other than this installation's. That one
+  error line in the deploy log is the whole cost, and it is cheaper than a
+  throwaway key that has to be overwritten.
+
+  Both .env and `env:` say where the database is, because the two audiences are
+  different. Apache serves this with mod_php, which does not publish the
+  container environment as $_SERVER, and Laravel's env() reads $_SERVER and
+  $_ENV -- so a web request reads .env and nothing else. `php artisan` on the
+  install stage is a CLI process, and there the compose `environment:` block
+  wins, because Dotenv never overwrites a variable that is already set. Stated
+  in one place only, the migration and the site would use different databases.
+
+  The mode of that .env is load-bearing and was measured the hard way.
+  `EnvSidecars::variableMap()` reads `.env.example` and then `.env` with plain
+  `file_get_contents()` as www-data, rather than through the account's file
+  layer that everything else in the deploy uses -- so a .env written 0600 is
+  simply invisible to it and `.env.example` wins. With it at 0600 this recipe
+  got a `mariadb:11` container of its own and `DB_CONNECTION: mysql`,
+  `DB_HOST: db` in the compose `environment:` block, where they beat `env_file`
+  for the CLI while the web request went on reading sqlite out of .env. The
+  hook leaves it 0644 -- the mode the engine writes its own .env with, and
+  there is nothing secret in it; panelalpha/servas-install.php chmods it 0600
+  when it adds the key.
+
+  Readiness was measured rather than assumed, and there is no healthcheck or
+  `ready` gate here. The install stage is `key:generate` (a no-op), a
+  `storage:link`, seven migrations over a SQLite file the hook already built,
+  one account insert and `optimize`; `docker compose up -d` returned after 1.0s
+  and the first HTTP 200 came 1.1s after that. Two clean deploys probed
+  `serving: ok` on the first try. engine#90 is real for applications that
+  migrate and seed on boot; this is not one of them, and a gate that waits on
+  nothing is a second container per account for no reason.
+
+  Two things are left as upstream has them. `php artisan optimize` fails its
+  `route:cache` step, because routes/web.php registers two closure routes
+  (`/` and `/groups`) and a closure cannot be serialised; the platform marks
+  the command optional, so the config and view caches are written, the route
+  cache is not, and the cost is a stack trace in the container log on every
+  start. And mail is unconfigured: Servas needs it only for password recovery,
+  Fortify's `resetPasswords()` feature is commented out upstream anyway, and
+  the one password there is sits in a file instead.
+extends: laravel
+# No `id:`, deliberately, the way plainpad and heimdall extend this manifest.
+# A recipe that states one becomes a manifest only SourceRecipes::all() can
+# resolve, and EntrypointWriter::write() resolves the decision's platform
+# through PlatformRegistry::find() at the end of the deploy -- which reaches
+# that walk through a per-worker cache. Measured on a worker whose cache
+# predated this file: `Recipe named by github.com/beromir/servas`, the prepare
+# hook ran, files/ were written, and then no panelalpha-entrypoint.sh was
+# written at all, `panelalpha: no /app/panelalpha-entrypoint.sh on the mount;
+# serving directly`, and every stage command -- key:generate, migrate,
+# servas-install -- was dropped in silence. This is engine#169. Inheriting the
+# laravel id keeps that lookup on a shipped manifest, where it cannot miss.
+label: Servas
+env:
+  # Restated here as well as in the .env the prepare hook writes, because the
+  # two audiences are different and the engine's default is wrong for one of
+  # them. Apache serves this with mod_php, which does not publish the container
+  # environment, so a web request reads .env -- while `php artisan` on the
+  # install stage is a CLI process that reads the compose `environment:` block
+  # first (Dotenv never overwrites a variable that is already set). Left to the
+  # strategy, PhpEnvironment::sqlite() puts /app/database/database.sqlite there
+  # and the migration would build a database inside the checkout while the site
+  # read the one on the bind mount.
+  DB_CONNECTION: sqlite
+  DB_DATABASE: /data/database.sqlite
+  DB_FOREIGN_KEYS: 'true'
+requires:
+  php: runtime
+  # Not optional, unlike the laravel manifest's. Servas commits no compiled
+  # assets -- public/build is gitignored -- so a deploy without the Vite build
+  # serves an Inertia page whose @vite directive has no manifest to read.
+  node:
+    role: build
+commands:
+  - id: servas-install
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Puts this installation's persistent application key and its public
+      address into .env, and creates the account whose password the prepare
+      hook generated -- before Apache binds, because Servas's registration
+      form is otherwise the only way in and it is the first visitor who uses
+      it. After the manifest's own commands on purpose: `key:generate` is one
+      of them and would overwrite the key. A no-op once an account exists, so
+      the upgrade stage re-running it over a database that survived the
+      redeploy changes nothing.
+    run: 'php panelalpha/servas-install.php'
+    timeout: 300

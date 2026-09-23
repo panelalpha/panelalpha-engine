@@ -26,6 +26,7 @@ http {
                       '$status $body_bytes_sent "$http_referer" '
                       '"$http_user_agent" "$http_x_forwarded_for"';
 
+    # `combined` is predefined by nginx. Defining it again makes nginx refuse to start.
     log_format bytes '[$time_local] $body_bytes_sent';
 
     access_log  /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/access.log  main;

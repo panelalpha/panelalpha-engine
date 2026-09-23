@@ -1,0 +1,68 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the app -- the shared PHP base image, ~/project bind-mounted at /app,
+# the account's own uid, Apache on 8000, APP_URL from the account's main domain
+# and DB_* from the database the engine provisioned -- and says nothing about
+# when CouchCMS is ready, because nothing in a flat PHP checkout can.
+#
+# An override rather than a replacement compose file, and here that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# *before* detection runs, so a compose file in the project root would make
+# CouchCMS look like a compose project and take the php strategy -- and with it
+# the bind mount, the docroot and the staged entrypoint -- off the table.
+#
+# There is no database service here on purpose. `database: mysql` in
+# panelalpha.yaml gets one on the account's own MySQL server: visible in the
+# panel, openable in phpMyAdmin, inside the account's backup, and costing the
+# host neither a container nor a volume. It is also what keeps this file from
+# being mined for sidecars -- RuntimeSidecars globs every `docker-compose.*` in
+# the checkout, including this one, and PhpStrategy skips that step when the
+# manifest declares a database.
+services:
+  app:
+    environment:
+      # Said out loud, because a manifest cannot say it: `docroot: .` is folded
+      # to '' by PlatformManifest::readDocroot() (app/Lib/Deploy/Platform/
+      # PlatformManifest.php:305), which means "undeclared" and sends the
+      # engine back to the probe. The probe reaches /app anyway -- files/
+      # lays an index.php in the project root and PhpDocroot tries the root
+      # before its late candidates -- but the document root decides which files
+      # are web-reachable, and that is not something to leave to a probe order.
+      PA_DOCROOT: /app
+
+    # The install stage does all of CouchCMS's setup before Apache binds: the
+    # ~50 CREATE TABLEs that are its installation, the super-admin, and the
+    # super-admin visit that registers the starter template. The engine runs
+    # `docker compose up -d` without --wait and probes as soon as it returns,
+    # which is while that is still going: nothing is listening yet and the probe
+    # reads `Failed to connect to 127.0.0.1 port 8000`.
+    #
+    # GET / is the whole check, and it is a real one: it answers 200 only once
+    # the schema exists (header.php would otherwise hand the request to the
+    # installer), the database is reachable, and the template is registered
+    # (an unregistered one redirects to the admin login, which is a 302 and
+    # fails `curl -f`).
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS -o /dev/null --max-time 20 http://127.0.0.1:8000/
+      interval: 5s
+      timeout: 25s
+      retries: 30
+      # Generous for two slow cores doing a schema install; a check that fails
+      # inside this window neither counts against retries nor marks the
+      # container unhealthy.
+      start_period: 180s
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once CouchCMS has
+  # built its schema and answered, and what the health probe then meets. A
+  # clean exit 0 is not a crash loop as far as AppHealth is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

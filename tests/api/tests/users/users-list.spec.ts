@@ -1,16 +1,13 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { userListSchema } from '@/schemas';
+import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
 
 test.describe('user listing', () => {
   test('the paged list returns well-formed entries', async ({ api }) => {
-    const { data } = await api.listUsers();
-    expect(Array.isArray(data)).toBe(true);
-
-    for (const user of data.slice(0, 1)) {
-      expect(user).toHaveProperty('id');
-      expect(user).toHaveProperty('username');
-      expect(user).toHaveProperty('domain');
-    }
+    // The schema is the field contract: id/username/domain/status and their
+    // types, for every row rather than the first one.
+    validateParsedApiResponse(await api.listUsers(), userListSchema);
   });
 
   test('the unpaged list returns an array', async ({ api }) => {

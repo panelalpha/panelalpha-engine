@@ -1,0 +1,160 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DAViCal is a CalDAV and CardDAV server: flat PHP, no Composer, no build step,
+  and PostgreSQL underneath doing a great deal of the work. Detection read the
+  checkout correctly -- .php files and no composer.json, so the `php-plain`
+  platform on the `php` strategy at PHP 8.3 -- and the deploy finished, and
+  every request answered 403: `serving-missing_entry`, which is what this recipe
+  fixes. It takes four things to fix, and only the first is the document root.
+
+  **The document root is `htdocs/`, and the probe cannot reach it.**
+  `PhpDocroot::CANDIDATES` is `['public', 'web', 'public_html', 'webroot']`
+  (app/Lib/Deploy/Platform/Runtime/Php/PhpDocroot.php:25), then the repository
+  root, then `src/` as a late candidate. DAViCal serves from `htdocs/`, which is
+  on none of those lists, and the repository root has no index file at all -- so
+  `detect()` falls through every candidate, no PA_DOCROOT is emitted, and the
+  base image falls back to `/app`. `/app` holds `README`, `INSTALL`, `Makefile`,
+  `ChangeLog` and no index, so Apache answers 403 and the report says the entry
+  point is missing. `docroot: htdocs` is a plain relative path, so unlike `.` it
+  survives `PlatformManifest::readDocroot()` and engine #172 does not bite.
+
+  **Serving `htdocs/` is also what makes this application safe to host.** Every
+  directory that matters is a *sibling* of the document root: `inc/` (the whole
+  CalDAV implementation, including the auth drivers), `config/` (which holds
+  this recipe's generated configuration), `dba/` (the schema and every patch),
+  `awl/` (the vendored library), `scripts/`, `testing/` and the engine's own
+  `docker-compose.override.yml`, `.env`, `.env.default` and `.git/` are all
+  unreachable over HTTP by construction rather than by an `.htaccess` rule.
+
+  **DAViCal is half an application until AWL is vendored beside it.**
+  `htdocs/always.php` is the first line of every entry point, and its first real
+  act is `include_once('AWLUtilities.php')`. AWL -- Andrew's Web Libraries -- is
+  a separate repository (gitlab.com/davical-project/awl) that upstream expects a
+  distribution package to have installed in `/usr/share/awl`; `debian/control`
+  pins it as `libawl-php (>= 0.65-1~), libawl-php (<< 0.66)`. When the include
+  fails, always.php tries four hard-coded paths -- `../../awl/inc`,
+  `/usr/share/awl/inc`, `/usr/share/php/awl/inc`, `/usr/local/share/awl/inc` --
+  every one of which is either an absolute path inside the image that the
+  account uid cannot create, or, resolved from the working directory (the
+  document root `/app/htdocs`), the path `/awl/inc` at the root of the container
+  filesystem. None is reachable from a bind-mounted `~/project`, and when the
+  list runs out always.php prints "Could not find the AWL libraries" and exits
+  -- for admin pages and CalDAV requests alike. The engine clones one repository
+  and there is no manifest key for a second, so hooks/prepare.sh fetches AWL
+  r0.65 into `~/.panelalpha/` once and copies it to `~/project/awl` on every
+  deploy, and files/panelalpha/php/zz-davical.ini puts `/app/awl/inc` on the
+  include_path so the first `include_once` succeeds.
+
+  **There is no configuration file in a checkout, and always.php exits without
+  one.** It looks in six places -- `/etc/davical/<SERVER_NAME>-conf.php`,
+  `/etc/davical/config.php`, the same two under `/usr/local/etc/`, then
+  `../config/config.php` and `config/config.php` relative to the working
+  directory -- and includes `davical_configuration_missing.php` and exits if it
+  finds none. The repository `.gitignore`s `config/config.php` and ships
+  `config/example-config.php` instead, so a clone never has one; the fifth
+  candidate, `../config/config.php`, is the only one an account can write.
+  hooks/prepare.sh writes it, and it holds no secret: every value that is one is
+  a `getenv()` call, so the database password is not on the account's disk in a
+  file the application reads.
+
+  **The database cannot be the account's own, and that costs the account
+  something.** `database: mysql` is the manifest key that provisions a database
+  on the account's own MySQL server -- panel-visible, openable in phpMyAdmin,
+  inside the account's backup, costing no container -- and
+  `PlatformManifest::DATABASES` is `['mysql']`, the only value the engine
+  accepts. DAViCal has no MySQL port and is not going to have one: `dba/`
+  carries 47 KB of plpgsql in `caldav_functions.sql` and 26 KB more in
+  `rrule_functions.sql`, the application's own WHERE clauses call
+  `privilege_to_bits()` and `get_permissions()`, and `INSTALL` lists
+  "PostgreSQL: 8.2 or greater" as a prerequisite rather than an option. So this
+  recipe ships a `postgres:17-alpine` sidecar, and the honest cost is a second
+  container plus a volume the panel does not manage, does not show and does not
+  back up. The tt-rss recipe pays exactly the same price for the same reason.
+
+  **The installer is a shell script this host cannot run, so the recipe replays
+  what it does.** `dba/create-database.sh` shells out to `createdb`,
+  `createlang` and `psql` for every statement, creates two PostgreSQL roles with
+  `CREATE USER`, expects to be run by a superuser, and hands the rest to
+  `dba/update-davical-database`, a Perl program needing DBI, DBD::Pg and YAML.
+  The shared PHP base image has no postgresql-client at all and a Perl with
+  neither module. What that script *does*, once the shell is removed, is a fixed
+  list of SQL files in a fixed order plus one UPDATE, and
+  files/panelalpha-davical-setup.php replays that list through PDO -- which the
+  image does have, `pdo_pgsql` being baked into panelalpha/php. Nothing
+  reimplements the schema: every statement executed comes out of the
+  repository's own `.sql` files, in create-database.sh's own order, and PDO's
+  `exec()` hands each file to the server's parser whole so the dollar-quoted
+  plpgsql bodies survive. Upstream's two-role privilege split is the one thing
+  dropped: it needs a superuser to create the roles, and this sidecar has one
+  client on a private network, so the role that owns the schema is the role that
+  connects.
+
+  **The admin account ships with the password `nimda`.**
+  `dba/base-data.sql` seeds `usr` row 1 as `'admin', '**nimda'`, and `**` is
+  AWL's marker for a plaintext password
+  (`session_validate_password`, awl/inc/AWLUtilities.php:268) -- so that is the
+  literal password "admin" backwards, on an account with a public HTTPS domain
+  and a CalDAV endpoint that accepts HTTP Basic. `create-database.sh` overwrites
+  it with a `pwgen` value and prints it to a terminal nobody is watching here.
+  panelalpha-davical-setup.php replaces it on the install stage, before Apache
+  binds, with a password generated per account into
+  `~/.panelalpha/davical-app.env` (0600 in a 0700 directory), stored as AWL's
+  salted-SHA1 form rather than as plaintext, and only while the seeded value is
+  still in place -- so a redeploy leaves a password the owner has changed alone.
+
+  **`htdocs/setup.php` embeds the whole of `phpinfo()`** in its page
+  (setup.php:497, `<div style="display:none" id="phpinfo">$phpinfo</div>`). Its
+  own gate is `$session->LoginRequired(null)` -- *any* authenticated principal,
+  meaning every calendar user the account ever creates -- unless
+  `$c->restrict_setup_to_admin` is set, which the generated config does set. But
+  that call sits inside a `try` whose `catch` installs a `setupFakeSession`
+  returning `true` from `AllowedTo()` (setup.php:215-222), and what lands in
+  that catch is always.php failing -- which is what a database that has not
+  finished starting looks like. The one state in which the page is
+  unauthenticated is the one in which something is already wrong, so
+  hooks/prepare.sh denies it in `htdocs/.htaccess` as well.
+
+  **Where the data lives, and what a redeploy does to it.** Everything --
+  principals, collections, every calendar event and every vCard -- is in the
+  PostgreSQL volume, and the volume survives a redeploy. Nothing of consequence
+  is in the checkout: DAViCal writes no uploads to disk, and the only per-deploy
+  state in `~/project` is the vendored `awl/`, the generated `config/config.php`
+  and the `.env` line compose interpolates, all three of which hooks/prepare.sh
+  recreates. That is a better position than most PHP applications on this
+  engine, and it is a property of DAViCal's design rather than of this recipe.
+  The account still cannot see or back up that volume through the panel, which
+  is the cost recorded above.
+
+  Licence: GPL-2.0-or-later (`COPYING`), with no additional condition on
+  running it as a network service and no badgeware clause. Hosting for third
+  parties is unambiguously permitted and the application is shipped unmodified.
+extends: php-plain
+# DAViCal serves from htdocs/. See the note above: this key is the only thing
+# that can say so, the probe cannot reach it, and `htdocs` (unlike `.`) survives
+# readDocroot().
+docroot: htdocs
+# No `database:` key. PlatformManifest::DATABASES accepts only `mysql` and this
+# application is PostgreSQL to its stored procedures; the connection comes from
+# the sidecar in overrides/docker-compose.override.yml instead. The side effect
+# is that PhpStrategy does mine the checkout for sidecars (engine #166), which
+# is why hooks/prepare.sh moves a compose file by name if a future release ever
+# adds one.
+commands:
+  # No `id:`, deliberately. A stale detection cache drops every stage command
+  # from a recipe that carries one while the log still reports "Recipe named by
+  # ..." (engine #169); omitting it and extending a shipped manifest is the
+  # mitigation.
+  - stage:
+      - install
+      - upgrade
+    description: >-
+      Waits for the sidecar, then replays dba/create-database.sh's own list of
+      SQL files through PDO -- AWL's tables and schema-management, DAViCal's
+      tables, the locales, views and stored functions, the base data -- applies
+      any dba/patches/ newer than the database, and replaces the `nimda`
+      password base-data.sql seeds for the built-in admin. Idempotent: the
+      upgrade stage replays it on every redeploy, and a database already at the
+      wanted revision costs one SELECT plus the CREATE OR REPLACE of the views
+      and functions, which is what makes newer code and older stored procedures
+      agree.
+    run: 'php panelalpha-davical-setup.php'

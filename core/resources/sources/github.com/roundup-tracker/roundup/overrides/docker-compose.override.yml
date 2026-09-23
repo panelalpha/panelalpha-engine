@@ -1,0 +1,9 @@
+# The tracker home (config.ini with the session secret, schema.py, the sqlite
+# db, uploaded attachments) is the data and must outlive a redeploy. Bind it to
+# ~/.panelalpha/roundup, the tree the wipe leaves alone; hooks/prepare.sh writes
+# the absolute host path to .env as ROUNDUP_DATA. The :- default is only a last
+# resort if that write did not happen; the real value comes from .env.
+services:
+  app:
+    volumes:
+      - ${ROUNDUP_DATA:-/root/.panelalpha/roundup}:/data

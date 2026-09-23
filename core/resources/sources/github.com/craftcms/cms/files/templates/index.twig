@@ -1,0 +1,37 @@
+{# The front-end home page.
+
+   Craft installs with no content and no templates: `templates/` is a directory
+   craftcms/craft ships with one placeholder in it, and a site whose
+   templates/index.twig does not exist answers 404 on `/`. That is a correct
+   404 -- there is genuinely nothing to show yet -- but it is also the first
+   thing anyone sees, and a health probe reading it cannot tell "installed,
+   empty" from "broken".
+
+   So this is a placeholder, and it says so. Delete it, or replace it with the
+   real home page, as soon as there is one. #}
+<!DOCTYPE html>
+<html lang="{{ craft.app.language }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex">
+    <title>{{ siteName }}</title>
+    <style>
+        :root { color-scheme: light dark; }
+        body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+               font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        main { max-width: 34rem; padding: 2rem; }
+        h1 { font-size: 1.6rem; margin: 0 0 .5rem; }
+        p { margin: 0 0 1rem; opacity: .8; }
+        code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>{{ siteName }}</h1>
+    <p>Craft {{ craft.app.version }} is installed and this is the placeholder
+        home page, <code>templates/index.twig</code>. Replace it with your own.</p>
+    <p><a href="{{ cpUrl() }}">Control panel</a></p>
+</main>
+</body>
+</html>

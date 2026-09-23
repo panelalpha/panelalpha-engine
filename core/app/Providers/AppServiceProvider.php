@@ -2,12 +2,21 @@
 
 namespace App\Providers;
 
+use App\Integrations\GeoLocation\DbIp;
+use App\Integrations\GeoLocation\GeoLocation;
+use App\Integrations\Statistics\Awstats;
+use App\Integrations\Statistics\Statistics;
 use App\Lib\Deploy\Platform\DeployPlanContext;
+use App\Lib\DeployHook\CheckoutSync;
+use App\Lib\DeployHook\GitCheckoutSync;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Models\PersonalAccessToken;
+use App\System;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
 use Illuminate\Http\Request;
 use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
 use Laravel\Sanctum\Sanctum;
 
 class AppServiceProvider extends ServiceProvider
@@ -15,6 +24,14 @@ class AppServiceProvider extends ServiceProvider
     public function register()
     {
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
+
+        // `revoked_at` is ours and Sanctum's validity check knows only
+        // `expires_at`, so without this a revoked token was refused at /mcp
+        // and kept working against the whole REST API.
+        Sanctum::authenticateAccessTokensUsing(
+            static fn (PersonalAccessToken $token, bool $isValid): bool => $isValid
+                && !$token->isRevoked()
+        );
 
         // One per request, which is one per deploy: the plan a deploy request
         // carried has to be readable from inside the pipeline, and the
@@ -25,6 +42,31 @@ class AppServiceProvider extends ServiceProvider
         // The same lifetime for the same reason, one question earlier: not
         // which commands this deploy runs, but which recipe it runs them from.
         $this->app->singleton(RecipeChoiceContext::class);
+
+        // What a queued Hook Delivery does to the checkout. An interface so
+        // the code around it can be tested without a Docker daemon.
+        $this->app->bind(CheckoutSync::class, GitCheckoutSync::class);
+
+        $this->app->singleton(GeoLocation::class, function (Application $app) {
+            $driver = (string) config('geolocation.driver', 'dbip');
+
+            return match ($driver) {
+                'dbip' => new DbIp($app->make(System::class)->engineDirPath()),
+                default => throw new InvalidArgumentException(
+                    "Unknown geolocation driver [{$driver}].",
+                ),
+            };
+        });
+
+        $this->app->singleton(Statistics::class, function (Application $app) {
+            $root = $app->make(System::class)->engineDirPath();
+
+            return new Awstats(
+                $root . '/awstats-data',
+                $root . '/awstats-config',
+                $app->make(GeoLocation::class),
+            );
+        });
     }
 
     public function boot()

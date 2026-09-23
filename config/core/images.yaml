@@ -109,11 +109,14 @@ runtimes:
         # compiles from source, ~3 minutes per account otherwise.
         repository: panelalpha/php
         stub: dockerfile/php-base
-        # Stamped into the tag: panelalpha/php:8.3-apache-bookworm-pa20260909.
+        # Stamped into the tag: panelalpha/php:8.3-apache-bookworm-pa20260922.
         # Bump it whenever you change what this image contains -- the stub, the
-        # baked extension list, the Apache config, the entrypoint shim. Nothing
-        # detects that for you.
-        recipe: "2026-09-10"
+        # baked extension list, the Apache config, the php.ini defaults, the
+        # serve script, the entrypoint shim. Nothing detects that for you.
+        #
+        # The date is day-granular, so a second change on a day already claimed
+        # by an unreleased one takes the next day rather than reusing it.
+        recipe: "2026-09-22"
         # There is no per-project Dockerfile behind this any more -- the base
         # image *is* the runtime -- so a deploy that cannot get it has nothing
         # to run and waits for the build rather than proceeding.

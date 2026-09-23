@@ -1,0 +1,62 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  YAFFA — a Laravel 12 personal-finance / accounting app (accounts,
+  transactions, investments, budgets, CSV/receipt import). No official image;
+  the dev compose is Laravel Sail, so this is the PHP strategy. It extends the
+  shipped `laravel` recipe, which gets docroot=public, composer install, the
+  Vite build (npm ci && npm run build on the host), key:generate, storage:link,
+  `migrate --force` and the start-stage optimize, and takes the account MySQL
+  the engine injects.
+
+  What the plain `laravel` recipe cannot know about YAFFA:
+
+  * It ships a squashed schema dump (database/schema/mysql-schema.sql), which
+    Laravel's `migrate` replays by piping the file into the `mysql` CLI. The
+    engine's PHP runtime image has pdo_mysql and mysqli but no mysql/mariadb
+    client, so migrate would die on `sh: 1: mysql: not found` and the container
+    crash-loops. files/pa-bin/mysql is a shim, put first on PATH below, that
+    feeds the dump into the database through PDO instead; it is reached only
+    when migrate loads the stored schema, i.e. only on a fresh database, and
+    on an upgrade migrate finds the migrations table and just applies the
+    incremental migrations over PDO. (Engine gap: the PHP runtime image carries
+    no mysql client, so every Laravel app that uses schema:dump hits this.)
+
+  * Its .env.example points cache, session and queue at redis, which the engine
+    does not run, and its schema dump ships no `sessions`/`cache` table — so
+    those move to file cache, file sessions and a synchronous queue (a
+    registration or import job runs inline, no worker needed).
+
+  Onboarding is open registration (Laravel `Auth::routes()`), with
+  EMAIL_VERIFICATION_REQUIRED left false so an owner can register and sign in
+  without SMTP; each user's data is isolated by user_id and every app route is
+  behind `auth`, so an anonymous visitor is refused. The `DatabaseSeeder` is
+  demo data under a published password (demo@yaffa.cc) and is never run.
+  Telescope ships in `require` and, left on, records every request in
+  production, so it is switched off. Uploads under storage/app are bind-mounted
+  (overrides/docker-compose.override.yml) to the account's rebuild-surviving
+  ~/.panelalpha area so a redeploy does not lose them; relational data lives in
+  the account MySQL and survives on its own. Operators wanting a closed
+  instance set REGISTERED_USER_LIMIT; a real SMTP mailer (MAIL_*) is an
+  operator step.
+extends: laravel
+env:
+  # env replaces the laravel recipe's env wholesale (top-level-by-top-level
+  # merge), so LOG_CHANNEL=stderr is repeated here to keep logs on Docker's
+  # stream and out of storage/logs/laravel.log.
+  APP_ENV: production
+  APP_DEBUG: 'false'
+  LOG_CHANNEL: stderr
+  # .env.example points these at redis; the engine runs none, and the schema
+  # dump has no sessions/cache table. Driverless choices instead.
+  CACHE_STORE: file
+  SESSION_DRIVER: file
+  QUEUE_CONNECTION: sync
+  # No SMTP wired by default; log keeps mail from erroring. Verification is off,
+  # so registration needs no delivered mail. A real mailer is operator work.
+  MAIL_MAILER: log
+  # Telescope is a require dependency whose recorder is on by default and whose
+  # dashboard gate trusts a single admin email. Off in production.
+  TELESCOPE_ENABLED: 'false'
+  # Put the mysql shim (files/pa-bin/mysql) first on PATH so Laravel's schema
+  # loader finds it; the rest is the runtime image's own default PATH.
+  PATH: /app/pa-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Get one vault entry by its reference
 
-    The status of one entry. `ref` is the full `vault:<id>` value `create` returned.
+    The status of one entry. `ref` is the full `vault:<id>` value `create` returned, `global:<type>` for an engine-wide secret, or `id:<n>` from `list`. The secret is never included.
 
     Calls GET /api/vault/secrets/{ref}.
     MARKDOWN)]

@@ -47,6 +47,43 @@ class RepoUrlTest extends TestCase
         );
     }
 
+    /**
+     * A GitLab subgroup adds path segments between owner and repo; they are
+     * part of the namespace, and only the last segment is the repository.
+     */
+    public function test_a_gitlab_subgroup_keeps_the_full_namespace(): void
+    {
+        $this->assertSame(
+            ['host' => 'gitlab.com', 'owner' => 'rtraceio/web', 'repo' => 'flink'],
+            RepoUrl::parse('https://gitlab.com/rtraceio/web/flink')
+        );
+        $this->assertSame(
+            'gitlab.com/rtraceio/web/flink',
+            RepoUrl::slug('https://gitlab.com/rtraceio/web/flink')
+        );
+
+        // Same repository however it is spelled, including the SCP form.
+        foreach ([
+            'https://gitlab.com/rtraceio/web/flink.git',
+            'https://gitlab.com/rtraceio/web/flink/-/tree/main',
+            'git@gitlab.com:rtraceio/web/flink.git',
+        ] as $url) {
+            $this->assertSame('gitlab.com/rtraceio/web/flink', RepoUrl::slug($url), $url);
+        }
+    }
+
+    /**
+     * The ordinary three-segment repository is unchanged: owner and repo are
+     * exactly the two segments after the host, no namespace collapsing.
+     */
+    public function test_a_plain_three_segment_repository_parses_as_before(): void
+    {
+        $this->assertSame(
+            ['host' => 'github.com', 'owner' => 'matomo-org', 'repo' => 'matomo'],
+            RepoUrl::parse('https://github.com/matomo-org/matomo')
+        );
+    }
+
     public function test_what_names_no_repository_resolves_to_nothing(): void
     {
         foreach (['', 'nonsense', 'https://github.com', 'https://github.com/owner', '/local/path'] as $url) {

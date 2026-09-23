@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bitpoll is a Django/uWSGI Doodle-style scheduling app: create a date, time or
+  general poll on an unguessable slug, share the link, participants vote. There
+  is a user login and a Django admin for managing polls; voting and viewing a
+  poll are public by its link on purpose, and polls are only listed to anonymous
+  visitors when their creator opts in (Poll.public_listening defaults False,
+  base/views.py:42), so this is the access-controlled case, not no-auth private
+  data.
+
+  BUILD THE REPO'S OWN DOCKERFILE, DO NOT SEED AN IMAGE. Upstream ships no
+  usable prebuilt image on Docker Hub that a plain clone matches, but the
+  repository's Dockerfile is a clean multi-stage Django build (uv sync
+  --extra production, collectstatic and compilemessages at build time) that
+  produces a uWSGI server on :3009 with a built-in static-map, so no nginx and
+  no runtime collectstatic are needed. This recipe therefore builds that
+  Dockerfile locally in DinD, which also sidesteps engine#229 (image-seeding
+  NotFound): the app image carries `build:` plus a local tag, and imageRefs
+  recognises a same-file-built tag and never asks Hub for it
+  (DeployCompose::imageRefs).
+
+  WHY COMPOSE-REPLACE, NOT `dockerfile`. The `dockerfile` strategy runs one
+  container with no database, and the schema's `database:` is MySQL-only while
+  Bitpoll speaks PostgreSQL (psycopg2-binary is in the production extra; there
+  is no MySQL driver). PostgreSQL therefore has to run beside the app, which is
+  a compose concern. The repo's own compose.yaml only wires an nginx and leaves
+  the app on the default sqlite in a bind mount that a redeploy wipes
+  (engine#173), so it is not usable as-is. This override supplies the real
+  stack: postgres:16-alpine on a named volume, a one-shot `init` that migrates
+  and seeds the admin before the app is allowed to answer, the app on
+  8080:3009, and a `ready` gate (engine#204) so the deploy turns green only once
+  the site actually answers.
+
+  CONFIG INJECTION. The image symlinks bitpoll/settings_local.py to
+  /opt/config/settings.py (a runtime volume, empty in the built image), so the
+  recipe mounts its own settings_local there. It reads SECRET_KEY,
+  FIELD_ENCRYPTION_KEY and the Postgres credentials from the environment, forces
+  DEBUG off, and derives ALLOWED_HOSTS + CSRF_TRUSTED_ORIGINS + BASE_URL from
+  PA_PUBLIC_URL (rewritten by the engine to the account's public https address
+  because the key ends in _URL). Without CSRF_TRUSTED_ORIGINS every poll POST
+  over the proxy would be a 403.
+
+  SECRETS AND ADMIN. SECRET_KEY, the Fernet FIELD_ENCRYPTION_KEY (a rotation
+  would strand every encrypted field), the database password and a generated
+  admin password are written once into ~/.panelalpha/bitpoll/ (0600 in 0700) --
+  the only writable place a deploy does not delete -- and reused across
+  redeploys, so a rebuild does not log everyone out, lock the app out of the
+  pgdata volume, or reset the owner account. The admin (a standard AbstractUser:
+  username/email/password) is seeded non-interactively by `init` only when it
+  does not already exist, so anonymous cannot reach /admin and the default
+  credentials never apply. Onboarding notes go in credentials.txt.

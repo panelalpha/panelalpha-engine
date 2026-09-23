@@ -11,9 +11,12 @@ use App\Http\Controllers\ModsecController;
 use App\Http\Controllers\PhpController;
 use App\Http\Controllers\SystemController;
 use App\Http\Controllers\User\CronJobController;
+use App\Http\Controllers\User\DeployHookController;
 use App\Http\Controllers\User\Domain\LogFileController;
 use App\Http\Controllers\User\DomainController as UserDomainController;
 use App\Http\Controllers\User\ProjectSettingController;
+use App\Http\Controllers\User\ProjectPasswordController;
+use App\Http\Controllers\SitePasswordGateController;
 use App\Http\Controllers\User\TunnelController;
 use App\Http\Controllers\User\FileController;
 use App\Http\Controllers\User\GitController;
@@ -59,6 +62,14 @@ Route::get('/test-connection', function (Request $request) {
     return new JsonResponse(['success' => true]);
 });
 
+// nginx-proxy auth_request + custom password form (no API bearer).
+Route::get('/internal/site-password/{username}/check', [SitePasswordGateController::class, 'check'])
+    ->withoutMiddleware('auth:api');
+Route::get('/internal/site-password/{username}/gate', [SitePasswordGateController::class, 'gate'])
+    ->withoutMiddleware('auth:api');
+Route::post('/internal/site-password/{username}/login', [SitePasswordGateController::class, 'login'])
+    ->withoutMiddleware('auth:api');
+
 Route::get('/mcp-tokens', [McpTokenController::class, 'index']);
 Route::post('/mcp-tokens', [McpTokenController::class, 'store']);
 Route::put('/mcp-tokens/{id}/revoke', [McpTokenController::class, 'revoke']);
@@ -72,9 +83,16 @@ Route::post('/mcp-activity-logs', [McpActivityLogController::class, 'store']);
  * from API calls as `vault:<ref>` in the field that would otherwise carry it
  * (git_token, env_vars values). The secret never passes through the API
  * caller -- see SecretVaultController.
+ *
+ * `/vault/config` is the other half: whether a project without a credential
+ * of its own falls back to the engine's `global` entry of that type.
  */
+Route::get('/vault/config', [SecretVaultController::class, 'config']);
+Route::put('/vault/config', [SecretVaultController::class, 'updateConfig']);
 Route::get('/vault/secrets', [SecretVaultController::class, 'index']);
 Route::post('/vault/secrets', [SecretVaultController::class, 'store']);
+// `{ref}` is the minted reference, or `global:<type>` for an engine-wide
+// secret, whose paste link is rotated and so cannot name it.
 Route::get('/vault/secrets/{ref}', [SecretVaultController::class, 'show']);
 Route::delete('/vault/secrets/{ref}', [SecretVaultController::class, 'destroy']);
 
@@ -113,9 +131,15 @@ $projectRoutes = function (): void {
     Route::put('/{username}', [UserController::class, 'update']);
     Route::put('/{username}/suspend', [UserController::class, 'suspend']);
     Route::put('/{username}/unsuspend', [UserController::class, 'unsuspend']);
+    Route::put('/{username}/password', [ProjectPasswordController::class, 'update']);
+    Route::delete('/{username}/password', [ProjectPasswordController::class, 'destroy']);
     Route::delete('/{username}', [UserController::class, 'destroy']);
 
     Route::get('/{username}/usage', [UsageController::class, 'getUsage']);
+    Route::get('/{username}/bandwidth', [UsageController::class, 'getBandwidth']);
+    Route::get('/{username}/domains/{domain}/bandwidth', [UsageController::class, 'getDomainBandwidth']);
+    Route::get('/{username}/domains/{domain}/visitors', [UsageController::class, 'getDomainVisitors']);
+    Route::get('/{username}/domains/{domain}/visitors/{dimension}', [UsageController::class, 'getDomainVisitorBreakdown']);
 
     Route::get('/{username}/domains', [UserDomainController::class, 'index']);
     Route::get('/{username}/domains/installed-ssl-certs', [UserDomainController::class, 'indexInstalledSslCerts']);
@@ -192,6 +216,9 @@ $projectRoutes = function (): void {
     Route::post('/{username}/files/mkdir', [FileController::class, 'mkdir']);
     Route::post('/{username}/files/zip', [FileController::class, 'zip']);
     Route::post('/{username}/files/unzip', [FileController::class, 'unzip']);
+    Route::post('/{username}/files/move-contents', [FileController::class, 'moveContents']);
+    Route::post('/{username}/files/fetch', [FileController::class, 'fetch']);
+    Route::put('/{username}/files/chmod', [FileController::class, 'chmod']);
     Route::put('/{username}/files/mv', [FileController::class, 'mv']);
     Route::put('/{username}/files/cp', [FileController::class, 'cp']);
     Route::put('/{username}/files/put-contents', [FileController::class, 'putContents']);
@@ -206,6 +233,10 @@ $projectRoutes = function (): void {
     Route::post('/{username}/git/pull', [GitController::class, 'pull']);
     Route::post('/{username}/git/push', [GitController::class, 'push']);
     Route::post('/{username}/git/revert', [GitController::class, 'revert']);
+    Route::post('/{username}/git/deploy-hook', [DeployHookController::class, 'create']);
+    Route::get('/{username}/git/deploy-hook', [DeployHookController::class, 'show']);
+    Route::post('/{username}/git/deploy-hook/rotate', [DeployHookController::class, 'rotate']);
+    Route::delete('/{username}/git/deploy-hook', [DeployHookController::class, 'destroy']);
 
     Route::post('/{username}/wp-cli/command', [WpCliController::class, 'run']);
 
@@ -238,8 +269,13 @@ $projectRoutes = function (): void {
     Route::delete('/{username}/app/users/{userId}', [AppUserController::class, 'destroy']);
     Route::put('/{username}/app/users/{userId}/password', [AppUserController::class, 'resetPassword']);
     Route::post('/{username}/app/users/{userId}/sso', [AppUserController::class, 'createSsoToken']);
+    // Unauthenticated: the token in the query string is the capability. The
+    // throttle is the brute-force floor the api group does not provide -- it
+    // has `throttle:api` commented out, so without this the route answers as
+    // fast as a client can ask.
     Route::get('/{username}/app/sso-token', [AppUserController::class, 'useAppSsoToken'])
-        ->withoutMiddleware('auth:api');
+        ->withoutMiddleware('auth:api')
+        ->middleware('throttle:60,1');
     Route::get('/{username}/app/health', [AppHealthController::class, 'show']);
     Route::get('/{username}/app/info', [AppUserController::class, 'info']);
     Route::get('/{username}/app/roles', [AppUserController::class, 'roles']);
@@ -264,9 +300,12 @@ Route::put('/backup-containers/{id}', [BackupContainerController::class, 'update
 Route::delete('/backup-containers/{id}', [BackupContainerController::class, 'destroy']);
 Route::post('/backup-containers/{id}/test', [BackupContainerController::class, 'test']);
 
+// Same shape, and this one hands back MySQL credentials, so it gets the same
+// floor. PmaSso is a second gate, not the only one: it reads the client address,
+// and an address is only as good as the proxy chain that produced it.
 Route::put('/mysql/phpmyadmin-sso-token', [MysqlController::class, 'usePhpmyadminSsoToken'])
     ->withoutMiddleware('auth:api')
-    ->middleware(PmaSso::class);
+    ->middleware([PmaSso::class, 'throttle:60,1']);
 
 Route::get('/proxy-rules', [ProxyRuleController::class, 'index']);
 Route::get('/proxy-rules/{id}', [ProxyRuleController::class, 'show']);
@@ -281,6 +320,8 @@ Route::post('/source/inspect', [SourceInspectionController::class, 'inspect']);
 Route::get('/php/available-versions', [PhpController::class, 'listAvailableVersions']);
 Route::get('/domains/{domain}/php-version', [DomainController::class, 'getPhpVersion']);
 Route::put('/domains/{domain}/php-version', [DomainController::class, 'setPhpVersion']);
+Route::get('/domains/{domain}/php-directives', [DomainController::class, 'getPhpDirectives']);
+Route::put('/domains/{domain}/php-directives', [DomainController::class, 'setPhpDirectives']);
 
 Route::get('/domains/{domain}/http-acme-challenges', [HttpAcmeChallengeController::class, 'index']);
 Route::post('/domains/{domain}/http-acme-challenges', [HttpAcmeChallengeController::class, 'store']);

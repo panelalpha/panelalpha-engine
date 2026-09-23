@@ -2,6 +2,8 @@
 
 namespace App\Console\Commands\Api;
 
+use App\Auth\TokenAbilities;
+use App\Console\Commands\Concerns\MintsTokens;
 use App\Mcp\ClientRegistration;
 use App\Models\Admin;
 use Illuminate\Console\Command;
@@ -9,12 +11,20 @@ use InvalidArgumentException;
 
 class McpTokensCreateCommand extends Command
 {
+    use MintsTokens;
+
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['mcp-tokens:create'];
 
-    protected $signature = 'mcp:token:create {name} {--s|short} {--no-register} {--client= : Print the registration command for one client only}';
+    protected $signature = 'mcp:token:create
+                            {name}
+                            {--s|short}
+                            {--no-register}
+                            {--client= : Print the registration command for one client only}
+                            {--api : Also let this token call the REST API directly}
+                            {--expires= : How long it lasts, e.g. 90d, 12h; omit for never}';
 
-    protected $description = 'Create an MCP token for the root admin';
+    protected $description = 'Create a token for an AI assistant';
 
     public function handle(): int
     {
@@ -31,14 +41,28 @@ class McpTokensCreateCommand extends Command
             return 1;
         }
 
-        $token = $root->createToken($name, ['mcp']);
+        $expiry = $this->expiry();
+
+        if ($expiry === false) {
+            return 1;
+        }
+
+        // `mcp` alone: this token speaks MCP, and is refused at /api unless
+        // the operator asked for that too. Tool calls still reach the API —
+        // they arrive as this engine's own dispatch, which EnsureTokenMayUseApi
+        // can tell apart from a caller presenting the same bearer.
+        $token = $root->createToken(
+            $name,
+            TokenAbilities::build(api: (bool) $this->option('api'), mcp: true),
+            $expiry
+        );
 
         if ($this->option('short')) {
             $this->line($token->plainTextToken);
             return 0;
         }
 
-        $this->info('MCP token created.');
+        $this->info(sprintf('MCP token created (%s).', $this->lifetime($expiry)));
         $this->warn("Save it — it won't be retrievable again.");
         $this->comment('=============================');
         $this->line($token->plainTextToken);

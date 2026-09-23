@@ -16,7 +16,11 @@ return new class extends Migration
         Schema::create('domains', function (Blueprint $table) {
             $table->id();
             $table->bigInteger('user_id')->index();
-            $table->string('domain')->index();
+            $domain = $table->string('domain')->index();
+            // MySQL's utf8mb4_unicode_ci makes domain lookups case-insensitive; match that on sqlite.
+            if (Schema::getConnection()->getDriverName() === 'sqlite') {
+                $domain->collation('NOCASE');
+            }
             $table->string('type');
             $table->json('details')->nullable();
             $table->timestamps();

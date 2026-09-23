@@ -1,0 +1,177 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Group Office is PHP groupware -- contacts, calendars, tasks, notes, files and
+  an IMAP mail client -- on MySQL. The repository is not the application: the
+  application is `www/`, and the repository root holds `build/` (the release
+  tooling), `scripts/` (the build scripts), `tests/`, `media/` and the licence.
+  Detection read that correctly as far as it could -- no composer.json at the
+  repository root, so the `php-plain` platform on the `php` strategy -- and the
+  deploy finished and answered 403 on every request: `serving-missing_entry`,
+  which is what this recipe fixes.
+
+  **The document root is `www/`, and no probe can reach it.**
+  `PhpDocroot::CANDIDATES` is `['public', 'web', 'public_html', 'webroot']`
+  followed by the repository root and a late `src/`
+  (app/Lib/Deploy/Platform/Runtime/Php/PhpDocroot.php:25-47). Group Office
+  serves from `www/`, which is on none of those lists, and the repository root
+  has no index file at all -- so `detect()` falls through every candidate and
+  returns `''`, no PA_DOCROOT is emitted, and the base image's
+  `panelalpha-serve.sh` falls back to `/app` because there is no `/app/public`.
+  `/app` then holds `README.md`, `CHANGELOG.md`, `LICENSE` and four directories
+  with no index among them, so Apache answers 403.
+
+  **`app_root: www`, not `docroot: www`, and the difference is the whole
+  recipe.** Both would fix the 403. Only `app_root` also fixes the three things
+  underneath it:
+
+  * *Composer.* `www/composer.json` is the application's manifest -- 30-odd
+    packages including sabre/dav, tcpdf, phpspreadsheet and the OAuth2 server
+    -- and `www/vendor/autoload.php` is the first line of every entry point.
+    The repository root has no composer.json, so with the whole checkout as the
+    application the `php-plain` platform matches, no `composer install` ever
+    runs, and every request is a fatal on the missing autoloader.
+    `PhpStrategy::build()` resolves `<app_root>/composer.json`
+    (app/System/Project/Dind/Strategy/PhpStrategy.php:163-165) and
+    `DindHostBuilder::phpBuildArgv()` runs the host build in
+    `PhpHostBuild::workingDir($appRoot)` = `/app/www`
+    (app/Lib/Deploy/Dind/DindHostBuilder.php:367), so declaring it puts
+    Composer where the manifest is.
+  * *The PHP version.* `www/composer.json` pins `config.platform.php` to 8.2
+    beside `require.php >=8.1`; read at the repository root there is no
+    manifest and the deploy takes the engine default, which is how this app was
+    reported as PHP 8.3. Resolved through `app_root` it is 8.2, and the same
+    image both resolves the tree and serves it.
+  * *What is web-reachable.* With `docroot: www` the whole checkout is still
+    bind-mounted at /app and only the vhost keeps `.git/`, the generated
+    `docker-compose.yml` and `.env.default` out of reach. With `app_root: www`
+    they are not in the container at all: /app **is** `~/project/www`, and
+    `~/project/.git` cannot be served by a rule that is missing or a docroot
+    that moves.
+
+  Once `www/` is the application root, the probe answers correctly on its own:
+  `www/index.php` exists, `PhpDocroot::detect()` returns `ROOT` and
+  `PA_DOCROOT` is `/app`. No `docroot:` key is needed, and #172 -- which folds
+  a literal `docroot: .` into "undeclared" -- never comes up.
+
+  **The frontend has to be built, and `runForPhp` will not do it for you.**
+  `.gitignore` excludes `/**/*.css`, so a checkout ships no compiled CSS at
+  all, and `views/Layout.php:16` calls `filemtime(<theme>/style.css)` on every
+  page. The theme, the GOUI bundle and the per-module stylesheets are built by
+  upstream's own `scripts/install-npm.sh`, which needs the three git submodules
+  (`www/views/goui/goui`, `www/views/goui/groupoffice-core`,
+  `Z-Push`) -- the engine already fetches those after the clone
+  (app/System/Project/Git.php:117-123), which is the one piece of this that
+  needed nothing.
+
+  The engine's own frontend pass does not fire here, for two independent
+  reasons. `HostCompile::runForPhp()` looks for `package.json` in
+  **`$projectDir`**, the checkout root, with no `app_root` applied
+  (HostCompile.php:188-190, called from PhpStrategy.php:119 -- where the line
+  above it, `runPhpBuild(..., $build->appRoot, ...)`, does apply it); and
+  `www/package.json` declares npm workspaces and no `build` script, so even
+  reached it would return false. So this recipe puts a `package.json` at the
+  checkout root whose only job is a `build` script, and
+  `files/panelalpha-build.sh` beside it runs upstream's build. Measured on
+  mariusz2: ~30s for 204 packages, the SASS pass and the GOUI esbuild bundles.
+
+  **The first administrator is created from the deploy, and the installer is
+  denied.** `www/install/` is an unauthenticated four-step wizard and the worst
+  step is not the obvious one. `install/install.php:71-85` is the familiar
+  first-visitor-wins hole -- whoever posts the form becomes the System
+  Administrator. `install/configfile.php:103-112` is worse: an unauthenticated
+  POST **rewrites `www/config.php`** from form fields, so a stranger can point
+  a fresh deploy at a database they control and then create the administrator
+  on it; the same page discloses the current database host, name and user
+  (configfile.php:76-80 -- the password field alone is not prefilled). And
+  `install/upgrade.php` runs schema migrations with no authentication for the
+  whole life of the installation, not only before it is installed:
+  `install/index.php` walks test.php -> configfile.php -> install.php, and
+  install.php redirects to upgrade.php as soon as the database is non-empty
+  (install.php:52-55). files/www/.htaccess denies the directory outright, and
+  the install and the upgrade both run from files/www/panelalpha-install.php in
+  a CLI process before Apache binds. The password is generated per account by
+  hooks/prepare.sh into `~/.panelalpha/groupoffice-admin-password` (0600 inside
+  a 0700 directory, because account homes are root-owned 0755) and is never a
+  default -- upstream's `Installer::installAdminUser()` ships `admin`/`admin`
+  (go/core/Installer.php:289-300).
+
+  **One file has to be created for the community edition to install at all.**
+  `Environment::sourceIsEncoded()` (go/core/Environment.php:175-186) decides
+  whether the source is ionCube-encoded by reading the first 200 bytes of
+  `go/modules/business/license/model/License.php`. That file is part of the
+  paid edition and `.gitignore` excludes `/www/go/modules/*` except
+  `community`, so in a git checkout it does not exist -- `file_get_contents`
+  raises E_WARNING, Group Office's own error handler turns that into an
+  ErrorException, and `Installer::install()` dies inside
+  `registerCoreEntities()`. Measured, with the full stack. So
+  files/www/go/modules/business/license/model/License.php is written as an
+  empty commented file: `ClassFinder::fileIsEncoded()` reads it, finds no
+  `sg_load`, and `hasIoncube()` correctly answers "this source is not
+  encoded". It defines no class, so `class_exists()` is false and ClassFinder
+  skips it exactly as it would have. This is a bug in hosting Group Office from
+  its own repository rather than from a release tarball, and it is upstream's.
+
+  **Where the data lives, and what a redeploy does to it.** Better than most:
+  Group Office keeps nothing user-generated inside the checkout. Every uploaded
+  file, mail attachment, photo and blob is under `file_storage_path`
+  (`Blob::buildPath()`, go/core/fs/Blob.php:380-384), which is a plain config
+  value. This recipe points it at `/data/files`, which the compose override
+  bind-mounts from `~/.panelalpha/groupoffice` -- so the clone that wipes
+  `~/project` on every deploy (#173) cannot touch a single user file. The
+  database is the account's own MySQL from `database: mysql` and survives a
+  redeploy the same way. The one thing that has to be *dropped* on a redeploy
+  is the compiled client bundle Extjs3 caches at
+  `<file_storage_path>/cache/clientscripts/all.js` (Extjs3.php:297): it lives
+  with the data, so after a version bump it would serve the previous release's
+  JavaScript. panelalpha-install.php removes it on both stages.
+
+  **Licensing: hosting for third parties is permitted, and this deployment is
+  under AGPL-3.0.** Group Office is dual-licensed -- a community edition and
+  paid Professional/Enterprise editions -- and what this repository contains is
+  the community edition: `LICENSE` is the verbatim GNU Affero General Public
+  License v3, `www/composer.json` declares `"license": "AGPL"`, and
+  `publiccode.yml` records the same. AGPL-3.0 places no limit on running the
+  software for third parties; its one network clause, section 13, requires that
+  users interacting with it over a network be offered the Corresponding Source,
+  which for an unmodified deployment is satisfied by pointing at
+  https://github.com/Intermesh/groupoffice. The paid editions are a separate
+  matter: they are the ionCube-encoded `go/modules/business/*` and `promodules/`
+  trees, which are **not in this repository** and are not deployed here, and
+  the recipe disables the update check rather than the licence check. See
+  README.md beside this file for the detail and the two caveats.
+
+  Two upstream weaknesses worth knowing and not this recipe's to fix.
+  `install/configfile.php` writes the database password into `www/config.php`
+  in clear with `var_export()` -- which is why this recipe writes that file
+  itself, as a list of `getenv()` calls, and denies the page that would replace
+  it. And the base image loads no php.ini at all (#185), so `display_errors` is
+  on, `expose_php` is on and `post_max_size` is the compiled-in 8M -- which for
+  groupware means a 2 MB ceiling on every attachment. files/www/.panelalpha/php
+  fixes all three through PHP_INI_SCAN_DIR.
+extends: php
+# The application is www/. Everything above -- the docroot, composer, the PHP
+# version, and what is inside the container at all -- follows from this one key.
+app_root: www
+# No `docroot:`. With app_root pointing at www/, PhpDocroot's own probe finds
+# www/index.php and answers PA_DOCROOT=/app, which is right. Saying `docroot: .`
+# here would be worse than saying nothing: readDocroot() folds it to '' (#172).
+#
+# MySQL or nothing. www/composer.json requires ext-pdo_mysql, go/core/db speaks
+# MySQL dialect throughout, go/core/install/install.sql is MySQL DDL and there
+# is no other driver in the tree. The checkout ships no .env and no compose file
+# to point itself at a server, so without this the engine has nothing to hand it
+# and www/config.php.example's `groupoffice:secret@localhost` placeholder is all
+# there is. Declaring it also keeps PhpStrategy from mining the checkout for
+# sidecars (#166) -- not that there is a compose file here to mine.
+database: mysql
+commands:
+  - id: groupoffice-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Writes www/config.php from the database the engine provisioned, then runs
+      Group Office's own installer in a CLI process on the first deploy, or its
+      own upgrade path when the checkout is newer than the schema. Idempotent:
+      the upgrade stage replays it on every redeploy.
+    run: 'sh panelalpha-setup.sh'

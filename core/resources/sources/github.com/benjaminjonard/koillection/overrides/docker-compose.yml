@@ -1,0 +1,186 @@
+# The stack for the repository, which ships none Docker would load: its only
+# compose file is docker-compose.dist.yml, a name compose never auto-loads,
+# commented "provided for dev purposes", building Dockerfile.dev and
+# bind-mounting the source tree.
+#
+# A full replacement rather than an override, and the filename is load-bearing
+# in both directions. An app config is applied *before* detection, so writing
+# docker-compose.yml here is what makes this a compose project at all: the
+# compose platform is priority 980 against php's 930, so this file wins the
+# walk and UserComposeStrategy runs it as written. An
+# overrides/docker-compose.override.yml would have layered onto nothing --
+# there is no upstream docker-compose.yml to layer onto -- and left the php
+# strategy in charge of a checkout it cannot build a frontend for.
+#
+# Koillection runs from its published image rather than from this checkout for
+# two reasons the php strategy cannot work around: the Vite bundle's
+# package.json is in assets/ where HostCompile::runForPhp does not look, and
+# that build needs assets/js/translations, which only exists after
+# `bin/console app:translations:dump` has run inside a working install. The
+# image is what .github/workflows/docker-release.yml publishes from the root
+# Dockerfile, so it is the same software, already built.
+services:
+  # Koillection has no SQLite migration set -- migrations/ holds Postgresql/
+  # and Mysql/ and DB_DRIVER picks between them -- so a database server is
+  # required, not preferred. Postgres because the dist file's own app service
+  # points at it.
+  #
+  # The mount is /var/lib/postgresql, not /var/lib/postgresql/data, and that
+  # single path is what broke the first deploy. Postgres 18 moved PGDATA to
+  # /var/lib/postgresql/18/docker, declares VOLUME /var/lib/postgresql, and its
+  # entrypoint hard-errors when the old path is a mount point
+  # (docker-library/postgres#1259). The dist file still mounts the old path, the
+  # php strategy copied that service verbatim as a runtime sidecar, and postgres
+  # exited 1 on every start.
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    # A default postgres sizes itself for a dedicated host. This one shares a
+    # 2500 MB account with a PHP worker that wants the rest.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=96MB
+      - -c
+      - max_connections=40
+    environment:
+      POSTGRES_DB: koillection
+      POSTGRES_USER: koillection
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - koillection_db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U koillection -d koillection"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
+    mem_limit: 512m
+
+  koillection:
+    # Tag written by hooks/prepare.sh from the checkout's own composer.json
+    # "version", so a clone of the 1.8 branch gets a 1.8 image rather than
+    # whatever :latest has become.
+    image: ${KOILLECTION_IMAGE:-koillection/koillection:latest}
+    restart: unless-stopped
+    # Host 8000 because ComposePortScan reads the *host* side of the mapping and
+    # ranks 80 first -- and 80 in an account is the proxy's own port. 8000 is
+    # the next preferred entry and is the port the failed php deploy published
+    # too, so the account's plumbing already expects it.
+    ports:
+      - "8000:80"
+    environment:
+      APP_ENV: prod
+      APP_DEBUG: "0"
+      # Pinned by hooks/prepare.sh. docker/entrypoint.sh writes .env.local on
+      # every boot with `${APP_SECRET:-$(openssl rand -base64 21)}`, so an unset
+      # value rotates on each restart -- logging out every session, and
+      # invalidating remember-me cookies, which security.yaml signs with this
+      # same secret.
+      APP_SECRET: ${APP_SECRET}
+      # Same defaulting, but here it corrupts rather than resets: the entrypoint
+      # runs `lexik:jwt:generate-keypair --skip-if-exists`, which keeps the
+      # keypair it already wrote, while an unset JWT_PASSPHRASE is regenerated
+      # beside it. After the first `docker restart` the passphrase no longer
+      # opens the private key and /api/authentication_token stops working.
+      JWT_PASSPHRASE: ${JWT_PASSPHRASE}
+      DB_DRIVER: pdo_pgsql
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: koillection
+      DB_USER: koillection
+      DB_PASSWORD: ${DB_PASSWORD}
+      # Doctrine's server_version: it only tells DBAL which SQL to emit, but a
+      # wrong one makes it connect just to ask, on every boot.
+      DB_VERSION: "18"
+      PHP_TZ: UTC
+      # Read by the entrypoint into php.ini's session.cookie_secure. Symfony's
+      # own `session.cookie_secure: auto` (framework.yaml) overrides it at
+      # runtime, so this matters only to code that reads the ini directly.
+      HTTPS_ENABLED: "1"
+      # framework.trusted_proxies defaults to
+      # `%env(default::SYMFONY_TRUSTED_PROXIES)%` (config/reference.php), i.e.
+      # nothing. The engine's proxy sets Host, X-Forwarded-For, -Proto, -Host
+      # and -Port (templates/dind/virtualHost-nginx-proxy.blade.php), and the
+      # only thing that can reach this container is that proxy, so the private
+      # ranges docker hands out are safe to trust. This is what makes
+      # `cookie_secure: auto` resolve to true and absolute URLs come out https.
+      SYMFONY_TRUSTED_PROXIES: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1
+      # CORS_ALLOW_ORIGIN is deliberately not set. The entrypoint defaults it to
+      # the repository's localhost-only regex, which guards /api and nothing
+      # else; the web interface is same-origin and unaffected. Widening it to
+      # the account's domain is a decision for whoever writes an API client,
+      # not something to open by default.
+      #
+      # docker/Caddyfile: one worker, two threads. The defaults already, said
+      # out loud because the account's ceiling is what sizes them.
+      FRANKENPHP_WORKERS_NUMBER: "1"
+      FRANKENPHP_THREADS_NUMBER: "2"
+      PHP_MEMORY_LIMIT: 256M
+    volumes:
+      # The image's only VOLUME. Item photos and avatars live here; the
+      # entrypoint replaces public/public/uploads with a symlink to it.
+      - koillection_uploads:/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Replaces the image's own `curl --fail http://localhost:80/`, which is
+    # satisfied by the 302 that / answers -- true before anything else is.
+    #
+    #   /                    SecurityController::login, and the reason this is
+    #                        not a bare liveness probe: it runs
+    #                        `userRepository->count([])`, so a 3xx from here is
+    #                        a completed round trip to a migrated database. A
+    #                        broken schema is a 500 and -f rejects it.
+    #   /first-connection    renders the create-the-admin form from that same
+    #                        schema, 200. Once an account exists it 302s to the
+    #                        homepage instead, which -f also accepts, so the
+    #                        check stays true for the life of the install.
+    #
+    # curl is in the image: the Dockerfile installs it and purges git,
+    # ca-certificates, gnupg2 and unzip, not curl. No -L: the redirect target is
+    # built from the request and there is nothing to gain by following it.
+    #
+    # start_period covers the entrypoint, which is the whole install -- it runs
+    # doctrine:migration:migrate, app:refresh-cached-values and
+    # lexik:jwt:generate-keypair (RSA, slow on a shared core) before frankenphp
+    # binds anything.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null --max-time 15 http://127.0.0.1:80/ &&
+          curl -fsS -o /dev/null --max-time 15 http://127.0.0.1:80/first-connection
+      interval: 10s
+      timeout: 20s
+      retries: 40
+      start_period: 300s
+    # The hardener's own figure for an unlisted service is 512m, which a
+    # FrankenPHP worker plus opcache and the Symfony prod container does not
+    # comfortably fit in. 1280m + 512m + 64m inside a 2500m account.
+    mem_limit: 1280m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be finished
+  # when that returns -- at which point Koillection has been *started*, not yet
+  # *answered*: its entrypoint migrates an empty database and generates an RSA
+  # keypair before frankenphp binds port 80, which is the `Recv failure:
+  # Connection reset by peer` half of this recipe. Compose does block on a
+  # depends_on health condition, so a service gated on the app's healthcheck is
+  # what makes `up -d` return only once the site answers. A clean exit 0 is
+  # explicitly not a crash loop as far as AppHealth is concerned.
+  #
+  # postgres:18 rather than a fourth image: it is already being pulled for this
+  # stack, and /bin/sh is in it.
+  ready:
+    image: postgres:18
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      koillection:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  koillection_db: {}
+  koillection_uploads: {}

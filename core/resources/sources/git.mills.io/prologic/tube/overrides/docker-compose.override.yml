@@ -1,0 +1,24 @@
+# Layers over the compose the dockerfile strategy generates for the `app`
+# service (image built from the FROM-only Dockerfile = prologic/tube). The
+# override reaches Docker as written, so ${...} interpolates from ~/project/.env
+# (written by hooks/prepare.sh) at `docker compose up`.
+services:
+  app:
+    # No `user:` override: the image's /init entrypoint must run as root to
+    # remap its `tube` user (usermod/groupmod) and su-exec down. The prepare
+    # hook records the account uid/gid and passes them as PUID/PGID so tube runs
+    # as — and /data stays owned by — the account that wrote the bind mount.
+    environment:
+      PUID: "${CONTAINER_UID}"
+      PGID: "${CONTAINER_GID}"
+    # ~/.panelalpha/tube (relative to the compose dir ~/project) -> /data. Holds
+    # every uploaded/transcoded video, thumbnails, the tube.db index, the upload
+    # password and the rendered config.json — all of tube's state, surviving the
+    # per-deploy ~/project wipe (engine#173).
+    volumes:
+      - "../.panelalpha/tube:/data"
+    # Reuse the persistent upload password and render config.json before tube
+    # takes over.
+    command: ["/usr/local/bin/pa-run.sh"]
+    # Transcoding is CPU/RAM heavy; give it room on this heavy host.
+    mem_limit: 3g

@@ -5,11 +5,14 @@ namespace App\System\Project\Dind;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Source\GitRepository;
 use App\System\Project\Git\Exception as GitException;
+use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Detect\DeployabilityCheck;
 use App\Lib\Deploy\Detect\PlaceholderPage;
+use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Platform\DeployPlanContext;
+use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\Platform\HostScript;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
@@ -123,6 +126,21 @@ class PrepareFromSource
         $logger?->info("Detected project type: {$decision['label']}");
         $logger?->info("Using strategy: {$decision['strategy']}");
 
+        // A compose file the repo ships but ComposeUsableProbe skipped as a
+        // workstation dev compose is otherwise invisible: name the mount that
+        // demoted it so a wrong strategy is one log line, not a silent hunt.
+        if ($decision['strategy'] !== Strategies::COMPOSE
+            && ($composePath = ComposeFileInspector::firstIn($projectDir)) !== null
+            && ($reason = ComposeFileInspector::localDevComposeReason($composePath)) !== null
+        ) {
+            $logger?->info(sprintf(
+                'Compose file %s looks like a workstation dev compose (%s); using strategy %s instead',
+                basename($composePath),
+                $reason,
+                $decision['strategy']
+            ));
+        }
+
         // Detection reaching past the manifests is not a failure — Railpack
         // usually builds the project, and where even it has nothing to go on
         // the fallback compose still serves something. Either way nobody has
@@ -187,8 +205,20 @@ class PrepareFromSource
         $path = $this->dind->homeDirPath() . '/' . AppConfig::PRE_CHECK_SCRIPT;
         $chown = $this->dind->userModel()->getChownString();
         $this->dind->system()->filesystem()->filePutContents($path, $script, $chown, '644');
-        $this->dind->shell()->execAsUser(['bash', $path]);
-        $this->dind->shell()->exec(['rm', $path]);
+        try {
+            // Hooks explain a refusal on stdout; the failure message is built
+            // from stderr, so without this it only names the script.
+            $this->dind->shell()->execAsUser(['bash', '-c', 'exec bash "$0" 1>&2', $path]);
+        } catch (DeployCancelledException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            // A precheck refusing the host is not a deploy that broke, so
+            // telemetry must not report it as one.
+            $this->dind->shell()->logger()?->markPreCheckRejected();
+            throw $e;
+        } finally {
+            $this->dind->shell()->exec(['rm', '-f', $path]);
+        }
     }
 
     private function assertGitHeadReadable(string $projectDir): void

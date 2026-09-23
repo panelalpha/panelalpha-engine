@@ -1,0 +1,122 @@
+# The stack for GoToSocial. The repository ships no compose file Docker would
+# load (only example/docker-compose/docker-compose.yaml, which the compose probe
+# does not adopt), and its root Dockerfile is a packaging Dockerfile that expects
+# a pre-built binary in the build context. So this file takes over:
+# AppConfigBootstrap writes it as the project's docker-compose.yml before
+# detection, and the compose-usable probe (priority 980) then wins over the root
+# Dockerfile (970).
+#
+# GoToSocial runs from the image upstream publishes rather than from this
+# checkout. hooks/prepare.sh reads one thing from the checkout -- its git ref --
+# to choose the image tag, and generates docker-compose.override.yml with the
+# account's uid/gid and the resolved image (neither is knowable when this file is
+# written).
+#
+# Files that reach the containers from outside this file:
+#   * ~/.panelalpha/gotosocial/gotosocial.env -- the generated administrator
+#     credentials, read only by the one-shot init service.
+#   * ~/.panelalpha/gotosocial/storage/ -- the SQLite database, the media store
+#     and the instance keypair (inside the DB), bind-mounted over the image's
+#     VOLUME /gotosocial/storage.
+#   * docker-compose.override.yml -- uid/gid and the resolved image.
+services:
+  # One-shot. Runs the migrations (implicitly, when the admin command opens the
+  # DB) and creates this account's administrator, then exits 0. `app` will not
+  # start until it has (engine#200): GoToSocial's first admin is a CLI action,
+  # not a web installer, so creating it here -- before anything is listening on
+  # the public domain -- means the moderation surface is never exposed adminless
+  # and no stranger can seed the instance.
+  init:
+    image: ${GTS_IMAGE:-docker.io/superseriousbusiness/gotosocial:latest}
+    restart: "no"
+    working_dir: /gotosocial
+    env_file:
+      # PA_ADMIN_USER / _PASSWORD / _EMAIL, written once by prepare.sh and never
+      # regenerated. Only init reads them; the running server does not.
+      - ../.panelalpha/gotosocial/gotosocial.env
+    environment:
+      GTS_DB_TYPE: sqlite
+      GTS_DB_ADDRESS: /gotosocial/storage/sqlite.db
+      GTS_STORAGE_LOCAL_BASE_PATH: /gotosocial/storage
+      GTS_WAZERO_COMPILATION_CACHE: /gotosocial/storage/.cache
+      # The init script starts an internal server to bootstrap the instance
+      # application before creating the admin, so it needs the same server env
+      # as `app`. This container publishes no ports, so that server is not
+      # reachable from outside.
+      GTS_BIND_ADDRESS: 0.0.0.0
+      GTS_PORT: "8080"
+      GTS_PROTOCOL: https
+      GTS_LETSENCRYPT_ENABLED: "false"
+      GTS_TRUSTED_PROXIES: "127.0.0.1/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+      GTS_ACCOUNTS_REGISTRATION_OPEN: "false"
+      # Rewritten to the account's public https URL before the stack starts,
+      # because the key ends in _URL (ComposePlaceholders). The init script
+      # strips it down to a bare host for GTS_HOST so the administrator account's
+      # URIs are minted against the real public domain.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      # The account's persistent data directory, replacing the image's
+      # VOLUME /gotosocial/storage by-target.
+      - ../.panelalpha/gotosocial/storage:/gotosocial/storage
+      # The init + entrypoint scripts, read-only.
+      - ./panelalpha/gotosocial:/pa:ro
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    mem_limit: 512m
+
+  app:
+    image: ${GTS_IMAGE:-docker.io/superseriousbusiness/gotosocial:latest}
+    restart: unless-stopped
+    working_dir: /gotosocial
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    environment:
+      GTS_DB_TYPE: sqlite
+      GTS_DB_ADDRESS: /gotosocial/storage/sqlite.db
+      GTS_STORAGE_LOCAL_BASE_PATH: /gotosocial/storage
+      GTS_WAZERO_COMPILATION_CACHE: /gotosocial/storage/.cache
+      GTS_BIND_ADDRESS: 0.0.0.0
+      GTS_PORT: "8080"
+      # The engine terminates TLS at its proxy and forwards plain HTTP to 8080.
+      # GoToSocial must not try to run its own ACME, and must mint https:// URIs.
+      GTS_PROTOCOL: https
+      GTS_LETSENCRYPT_ENABLED: "false"
+      # The app is reachable only through the engine's proxy; trusting the
+      # private ranges the proxy connects from lets GoToSocial read the real
+      # client IP for rate limiting instead of logging a warning per request.
+      GTS_TRUSTED_PROXIES: "127.0.0.1/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+      # Invite-only. No anonymous self-signup form (this is also the default).
+      GTS_ACCOUNTS_REGISTRATION_OPEN: "false"
+      # Rewritten to the account's public https URL (key ends in _URL); the
+      # entrypoint wrapper derives GTS_HOST from it before starting the server.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      - ../.panelalpha/gotosocial/storage:/gotosocial/storage
+      - ./panelalpha/gotosocial:/pa:ro
+    # /readyz is GoToSocial's own unauthenticated readiness endpoint. The alpine
+    # base image ships busybox wget (no curl); -q -O - is enough to gate on a
+    # 200. Fails until the server is actually listening.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 40s
+    entrypoint: ["/bin/sh", "/pa/entrypoint.sh"]
+    mem_limit: 1024m
+
+  # Does nothing and exits 0. `docker compose up -d` runs without --wait
+  # (engine#204), so the deploy is finished when containers have been started
+  # rather than when GoToSocial answers. Compose does block on a depends_on
+  # health condition, so a leaf that waits on app's healthcheck makes `up -d`
+  # return only once /readyz is green. alpine, so nothing large is pulled.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Env;
 
 use App\Lib\Deploy\Env\ComposeEnvFiles;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Yaml;
 
 /**
  * Which env files a compose stack expects to find beside it.
@@ -196,5 +197,122 @@ class ComposeEnvFilesTest extends TestCase
             env_file:
               - ${ENV_FILE:-../outside.env}
         YAML));
+    }
+
+    /**
+     * ADR-0001 D3: a tracked `.env` stays the client's, so account overrides
+     * are attached as `.env.panelalpha` -- but only to the services that
+     * would actually read `.env`, not a database sidecar that never did.
+     */
+    public function test_attach_appends_the_overrides_file_only_to_services_loading_env(): void
+    {
+        $compose = Yaml::parse(<<<'YAML'
+        services:
+          app:
+            image: acme/app
+            env_file: .env
+          worker:
+            image: acme/app
+            env_file:
+              - .env
+              - .env.production
+          db:
+            image: mariadb
+            env_file: .env.db
+          cache:
+            image: redis
+        YAML);
+
+        [$updated, $changed] = ComposeEnvFiles::attach($compose, '.env.panelalpha');
+
+        $this->assertSame(['app', 'worker'], $changed);
+        $this->assertSame(['.env', '.env.panelalpha'], $updated['services']['app']['env_file']);
+        $this->assertSame(
+            ['.env', '.env.production', '.env.panelalpha'],
+            $updated['services']['worker']['env_file']
+        );
+        $this->assertSame('.env.db', $updated['services']['db']['env_file']);
+        $this->assertArrayNotHasKey('env_file', $updated['services']['cache']);
+    }
+
+    public function test_attach_is_idempotent_and_moves_an_existing_entry_to_the_end(): void
+    {
+        $compose = Yaml::parse(<<<'YAML'
+        services:
+          app:
+            image: acme/app
+            env_file:
+              - .env
+              - .env.panelalpha
+              - .env.production
+        YAML);
+
+        [$updated, $changed] = ComposeEnvFiles::attach($compose, '.env.panelalpha');
+
+        $this->assertSame(['app'], $changed);
+        $this->assertSame(
+            ['.env', '.env.production', '.env.panelalpha'],
+            $updated['services']['app']['env_file']
+        );
+    }
+
+    public function test_attach_reads_the_long_env_file_form_to_decide_but_appends_a_plain_string(): void
+    {
+        $compose = Yaml::parse(<<<'YAML'
+        services:
+          app:
+            image: acme/app
+            env_file:
+              - path: .env
+                required: false
+        YAML);
+
+        [$updated, $changed] = ComposeEnvFiles::attach($compose, '.env.panelalpha');
+
+        $this->assertSame(['app'], $changed);
+        $this->assertSame(
+            [['path' => '.env', 'required' => false], '.env.panelalpha'],
+            $updated['services']['app']['env_file']
+        );
+    }
+
+    public function test_detach_removes_the_overrides_file_and_unsets_env_file_when_it_was_the_only_entry(): void
+    {
+        $compose = Yaml::parse(<<<'YAML'
+        services:
+          app:
+            image: acme/app
+            env_file:
+              - .env
+              - .env.panelalpha
+          worker:
+            image: acme/app
+            env_file: .env.panelalpha
+          db:
+            image: mariadb
+            env_file: .env.db
+        YAML);
+
+        [$updated, $removed] = ComposeEnvFiles::detach($compose, '.env.panelalpha');
+
+        $this->assertTrue($removed);
+        $this->assertSame(['.env'], $updated['services']['app']['env_file']);
+        $this->assertArrayNotHasKey('env_file', $updated['services']['worker']);
+        $this->assertSame('.env.db', $updated['services']['db']['env_file']);
+    }
+
+    public function test_detach_reports_nothing_removed_when_the_overrides_file_is_not_there(): void
+    {
+        $compose = Yaml::parse(<<<'YAML'
+        services:
+          app:
+            image: acme/app
+            env_file: .env
+        YAML);
+
+        [$updated, $removed] = ComposeEnvFiles::detach($compose, '.env.panelalpha');
+
+        $this->assertFalse($removed);
+        $this->assertSame('.env', $updated['services']['app']['env_file']);
     }
 }

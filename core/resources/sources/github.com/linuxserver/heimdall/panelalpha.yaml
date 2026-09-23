@@ -1,0 +1,94 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Heimdall is an application dashboard: a Laravel app over SQLite, no database
+  server, no queue, no cache, and no build step -- the repository commits both
+  `vendor/` (15 210 files) and the compiled `public/css`, `public/js` and
+  `public/mix-manifest.json`, so a clone is already a runnable Heimdall.
+  Detection reads it correctly as `laravel`, and everything the strategy does
+  is right: PHP 8.4 against `"php": "^8.4"`, `public/` as the document root,
+  Composer on the host dropping 33 dev packages from the committed tree, the
+  account's public https URL in APP_URL. The container still restart-looped on
+  exit 1, which is the `serving-unknown` verdict this recipe exists to fix.
+
+  One value was wrong, and the engine is what got it wrong.
+  `PhpEnvironment::sqlitePath()` exists to notice exactly this application --
+  its comment says "Heimdall wraps the variable in database_path(), so an
+  absolute path doubles" -- and hands a config shaped that way a bare filename
+  instead. Heimdall has since put a ternary in front of it, for the in-memory
+  test database:
+
+      'database' => env('DB_DATABASE', 'app.sqlite') === ':memory:'
+          ? ':memory:'
+          : database_path(env('DB_DATABASE', 'app.sqlite')),
+
+  and the method's regex wants `database_path(env('DB_DATABASE'` immediately
+  after the `=>`. It no longer matches, so the fallback wins and the compose
+  file carries `DB_DATABASE: /app/database/database.sqlite` -- which Heimdall
+  then wraps in `database_path()` anyway. `AppServiceProvider::setupDatabase()`
+  is the first thing to touch it, on the first artisan call the entrypoint
+  makes:
+
+      touch(): Unable to create file /app/database/app/database/database.sqlite
+
+  `set -e` in the generated entrypoint turned that into exit 1 on every boot.
+  The `env:` below restates DB_DATABASE as the bare filename Heimdall's own
+  `.env.example` uses, which `ComposeEnvironment::layer()` lets an app config
+  put over a strategy's default. Repairing the regex upstream would retire it.
+
+  With that one line the application serves. What is left is the two things a
+  Laravel checkout has no way to say.
+
+  The first is when it is ready. The install stage does everything before
+  Apache binds -- `key:generate`, `storage:link`, `migrate`, and inside the
+  first of those Heimdall's own setupDatabase(), which creates the SQLite file,
+  runs `migrate --seed` over it and fetches the 320 KB supported-apps list over
+  the network. `docker compose up -d` runs without --wait and the probe follows
+  it immediately, so overrides/docker-compose.override.yml adds a healthcheck
+  and a no-op `ready` service gated on it. The check asks twice: `/`, and then
+  `/login`, which renders from the seeded schema and so is the request that
+  proves the migration and the seeders finished rather than a redirect that
+  proves nothing.
+
+  The second is the admin account, and it is a security fix rather than a
+  convenience. database/seeders/UsersSeeder.php creates user 1 as `admin` with
+  `password = null`, and App\Http\Middleware\CheckAllowed reads that literally
+  -- `if (empty($current_user->password)) { return $next($request); }` -- so a
+  freshly seeded Heimdall serves /settings, /users and /items/create to anyone
+  who has the address. Measured on a deploy of this repository: HTTP 200, no
+  credentials, full administration. That is the right default for the LAN
+  dashboard Heimdall was written to be and the wrong one for an account that
+  has just been given a public HTTPS name, so
+  files/panelalpha/set-admin-password.php generates one, writes it to
+  ~/project/.panelalpha-admin-password (0600) and sets it -- only while the
+  password is still null, so a password an operator later chooses in the web
+  interface is never reset under them by a redeploy. The dashboard is then
+  behind a login; the *Public front* switch in Settings is how to open it again.
+
+  Not fixed, and upstream's to fix: `php artisan optimize` fails on
+  `route:cache` with "Unable to prepare route [tag/{slug}] for serialization.
+  Another route has already been assigned name [tags.show]" -- routes/web.php
+  registers `tags.show` twice, once through `Route::resource('tags')` and once
+  by hand. The platform marks that command optional, so the config cache is
+  written, the route cache is not, and the deploy continues; the cost is a
+  stack trace in the container log on every start.
+extends: laravel
+env:
+  # The bare filename Heimdall's own .env.example uses. config/database.php
+  # feeds it to database_path() unconditionally, so anything absolute here is
+  # appended to /app/database/ rather than used. See the description.
+  DB_DATABASE: app.sqlite
+commands:
+  - id: heimdall-admin-password
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Gives the seeded `admin` account a password while it still has none.
+      UsersSeeder creates it with `password = null`, and CheckAllowed serves
+      every route to anyone when that is so. The script writes the password it
+      generates to ~/project/.panelalpha-admin-password before it sets it, and
+      does nothing at all once the account has one.
+    run: 'php panelalpha/set-admin-password.php'
+    # A site that would otherwise serve is never held back by this step; the
+    # script already exits 0 on every unexpected state, and this is the belt.
+    optional: true

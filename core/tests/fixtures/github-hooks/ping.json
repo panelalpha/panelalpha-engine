@@ -1,0 +1,22 @@
+{
+  "zen": "Keep it logically awesome.",
+  "hook_id": 987654321,
+  "hook": {
+    "type": "Repository",
+    "id": 987654321,
+    "name": "web",
+    "active": true,
+    "events": ["push"],
+    "config": {"content_type": "json", "insecure_ssl": "0", "url": "https://203.0.113.10/hooks/abc"}
+  },
+  "repository": {
+    "id": 186853002,
+    "name": "Hello-World",
+    "full_name": "octocat/Hello-World",
+    "private": false,
+    "html_url": "https://github.com/octocat/Hello-World",
+    "clone_url": "https://github.com/octocat/Hello-World.git",
+    "default_branch": "main"
+  },
+  "sender": {"login": "octocat", "id": 583231, "type": "User"}
+}

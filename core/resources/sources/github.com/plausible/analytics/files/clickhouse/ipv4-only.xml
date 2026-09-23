@@ -1,0 +1,9 @@
+<!--
+  Upstream's clickhouse/ipv4-only.xml, verbatim. Docker does not enable IPv6 on
+  a bridge network, so the default `::` listener fails with
+  "Listen [::]:9000 failed: Address family for hostname not supported" and the
+  server spends its startup retrying it.
+-->
+<clickhouse>
+    <listen_host>0.0.0.0</listen_host>
+</clickhouse>

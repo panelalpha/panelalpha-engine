@@ -48,19 +48,19 @@ class TelemetryEndpointTest extends TestCase
     }
 
     /**
-     * Telemetry hangs off monitoring, never off the hub.
+     * Telemetry hangs off monitoring, never off Connect.
      *
-     * These are two services deployed apart: the hub is an integration the
+     * These are two services deployed apart: Connect is an integration the
      * engine calls (WithoutDNS, licensing), monitoring is where it reports.
-     * They were one variable for a release, and every report went to the hub,
+     * They were one variable for a release, and every report went to Connect,
      * which does not serve the ingest and answers 405 — so the thing worth
-     * asserting is that moving the hub moves nothing here.
+     * asserting is that moving Connect moves nothing here.
      */
-    public function test_the_route_follows_monitoring_and_not_the_hub(): void
+    public function test_the_route_follows_monitoring_and_not_connect(): void
     {
         config([
             'monitoring.url' => 'http://monitoring.example.test',
-            'hub.url' => 'https://hub.example.test',
+            'connect.url' => 'https://connect.example.test',
         ]);
 
         $this->assertSame('http://monitoring.example.test/api/v1/events', Telemetry::endpoint());

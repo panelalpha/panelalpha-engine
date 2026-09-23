@@ -1,0 +1,24 @@
+<!--
+  Upstream's clickhouse/logs.xml (plausible/community-edition), with query_log
+  removed as well. A default ClickHouse writes eight system log tables, each
+  with its own in-memory flush buffer and MergeTree parts on disk; upstream
+  already drops seven of them and keeps a 30-day query_log, which is a
+  debugging convenience worth several tens of megabytes of RSS and a steady
+  trickle of background merges. One hosting account does not need it.
+-->
+<clickhouse>
+    <logger>
+        <level>warning</level>
+        <console>true</console>
+    </logger>
+
+    <!-- Stops unnecessary logging -->
+    <query_log remove="remove" />
+    <metric_log remove="remove" />
+    <asynchronous_metric_log remove="remove" />
+    <query_thread_log remove="remove" />
+    <text_log remove="remove" />
+    <trace_log remove="remove" />
+    <session_log remove="remove" />
+    <part_log remove="remove" />
+</clickhouse>

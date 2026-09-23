@@ -1,0 +1,135 @@
+# Replaces the repo's build-from-source compose with the official Docker Hub
+# image razvanilin/chartbrew (pinned to the current release 5.3.2), a mysql:8.4
+# and a redis:7-alpine sidecar on named volumes, and an nginx that folds the
+# app's two ports (SPA :4018 + API :4019) onto one published origin. Seeding a
+# Hub image sidesteps engine#229 (the GHCR/quay docker-save seed stub); Docker
+# Hub is pulled normally. Only nginx publishes a host port, so the engine's port
+# scan takes it as the primary app (engine#231/#234); no other service declares
+# ports or expose. Secrets come from env_files hooks/prepare.sh writes into
+# ~/.panelalpha/chartbrew (../.panelalpha resolves from ~/project).
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    # MYSQL_PASSWORD is baked into the data volume on first init; never rotated.
+    env_file:
+      - ../.panelalpha/chartbrew/db.env
+    volumes:
+      - chartbrew-db:/var/lib/mysql
+    healthcheck:
+      # Real query as the app user: healthy only once the DB + user actually
+      # exist, so chartbrew's one-shot db.migrate() never races a half-up server.
+      test: ["CMD-SHELL", "mysql -h127.0.0.1 -uchartbrew -p\"$$MYSQL_PASSWORD\" -e 'SELECT 1' chartbrew >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1g
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/chartbrew/redis.env
+    # requirepass from the env_file; $$ so the shell (not compose) expands it.
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes"]
+    volumes:
+      - chartbrew-redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 320m
+
+  chartbrew:
+    image: razvanilin/chartbrew:5.3.2
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Secrets (DB/Redis passwords, CB_ENCRYPTION_KEY, CB_SECRET, BullMQ creds).
+    env_file:
+      - ../.panelalpha/chartbrew/app.env
+    environment:
+      # Bind the API on all interfaces so nginx can reach it by service name.
+      CB_API_HOST: "0.0.0.0"
+      CB_API_PORT: "4019"
+      VITE_APP_CLIENT_PORT: "4018"
+      # Single-owner instance: public signup refused once the owner exists.
+      CB_RESTRICT_SIGNUP: "1"
+      # Rewritten to the real https origin at deploy (key ends in _URL, value is
+      # a localhost placeholder -> ComposePlaceholders fills it). The entrypoint
+      # derives VITE_APP_API_HOST=<origin>/api and VITE_APP_CLIENT_HOST=<origin>
+      # from it, because those _HOST keys are NOT auto-rewritten.
+      PA_PUBLIC_URL: "http://localhost:4018"
+    volumes:
+      # Our entrypoint: derive the public origin, build the SPA synchronously.
+      - ./panelalpha/chartbrew/entrypoint.sh:/pa/entrypoint.sh:ro
+      # Persist user-uploaded assets (report/snapshot images) across redeploys.
+      - chartbrew-uploads:/code/server/uploads
+    entrypoint: ["/bin/bash", "/pa/entrypoint.sh"]
+    healthcheck:
+      # No curl/wget in node:22-slim; use node's http. Healthy only when BOTH the
+      # API (:4019) and the freshly built SPA (:4018) answer <500.
+      test: ["CMD-SHELL", "node -e \"const h=require('http');const g=u=>new Promise((r,j)=>h.get(u,x=>{x.statusCode<500?r():j(1)}).on('error',()=>j(1)));Promise.all([g('http://127.0.0.1:4019/'),g('http://127.0.0.1:4018/')]).then(()=>process.exit(0)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 15s
+      retries: 40
+      start_period: 300s   # runtime SPA rebuild takes a couple of minutes
+    mem_limit: 3g
+
+  # One-shot: claim the owner seat before the site is reachable (see init.sh).
+  init:
+    image: docker.io/curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      chartbrew:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/chartbrew/owner.env
+    volumes:
+      - ./panelalpha/chartbrew/init.sh:/pa/init.sh:ro
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    mem_limit: 64m
+
+  # Primary published service: SPA at /, /api/ + /socket.io/ to the API.
+  nginx:
+    image: docker.io/library/nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      chartbrew:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    volumes:
+      - ./panelalpha/chartbrew/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+    mem_limit: 128m
+
+  # Starts nothing, exits 0, gates the deploy on nginx being healthy AND the
+  # owner being seeded. The engine runs `docker compose up -d` without --wait
+  # (engine#204), so without this the deploy is "done" before the site answers.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      nginx:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  chartbrew-db: {}
+  chartbrew-redis: {}
+  chartbrew-uploads: {}

@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Baby Buddy is a self-hosted Django app for tracking a baby's feedings, sleep,
+  diaper changes, tummy time and growth. Every page is behind a login
+  (LoginRequiredMiddleware); an anonymous request 302s to /login/, so this is
+  the access-controlled case, not public data. There is no open self-
+  registration -- new caregivers are created by an admin from inside the app --
+  so the login gate is the whole boundary.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. The maintainer-endorsed distribution of
+  Baby Buddy is the LinuxServer.io image, published on Docker Hub as
+  linuxserver/babybuddy and tagged per release; this recipe pins the current
+  release v2.11.0 (v2.11.0-ls251). The repository also ships its own Dockerfile,
+  but the LSIO image is the standard deploy and seeding a Docker Hub image also
+  sidesteps engine#229 (image-seed NotFound). The image is a single container:
+  s6 runs the app's overridden `migrate` (which also seeds the first superuser),
+  then nginx in front of gunicorn on :8000. SQLite is Baby Buddy's default and
+  the whole datastore -- users, children and every entry -- lives under /config,
+  kept on a named volume so it survives a redeploy.
+
+  WHY COMPOSE-REPLACE. Baby Buddy has no compose file of its own the platform
+  could run unedited; the LSIO image is meant to be launched by hand with the
+  operator filling in PUID/PGID, TZ, a data mount and CSRF_TRUSTED_ORIGINS.
+  Nobody edits anything here, so this override supplies the full stack: the
+  pinned official image on SQLite at /config (named volume), PUID/PGID set to
+  the account's own ids so the container's files stay account-owned, the
+  Django SECRET_KEY and the admin password seeded once from ~/.panelalpha, and
+  only the app publishing a port (engine#234).
+
+  DOMAIN + HTTPS + CSRF. Django 4+ checks the browser Origin header on every
+  POST -- the login form included -- against CSRF_TRUSTED_ORIGINS, and rejects
+  it with 403 when the public https origin is absent. Baby Buddy reads that list
+  from the environment, but its key (CSRF_TRUSTED_ORIGINS, plural, a comma list)
+  is not one ComposePlaceholders can rewrite. So the compose file carries
+  PA_PUBLIC_URL=http://localhost:8000, which the engine rewrites to the account's
+  public https address before the stack starts (the key ends in _URL), and a
+  thin entrypoint wrapper in front of the image's own /init turns it into
+  CSRF_TRUSTED_ORIGINS -- exported into the s6 container environment so gunicorn
+  sees it. SECURE_PROXY_SSL_HEADER, secure session and CSRF cookies are on, and
+  DEBUG is forced False, so no stack traces reach the browser. ALLOWED_HOSTS is
+  left at the image default of "*" (single-tenant behind the engine's reverse
+  proxy; the origin check is the real CSRF control).
+
+  SECRETS + ADMIN. Baby Buddy's overridden `migrate` command creates a default
+  superuser admin/admin whenever the database has no superuser (see
+  babybuddy/management/commands/migrate.py); that default must never reach the
+  public internet. Because /config is a named volume nothing can pre-seed a DB
+  into, the rotation happens after boot: a one-shot `rotate-admin` service runs
+  once the app is healthy (migrations done, admin created) and sets admin's
+  password to a per-account secret generated once into ~/.panelalpha/babybuddy
+  (0600 in 0700). It is idempotent -- on a redeploy the admin already has that
+  password and it is left untouched, so sessions are not invalidated. The
+  Django SECRET_KEY is seeded the same way and reused on every rebuild (rotating
+  it would log everyone out). The `ready` gate blocks the deploy from turning
+  green until the site answers AND the admin has been rotated (engine#204/#90),
+  so the deploy never finishes with admin/admin live. Onboarding notes,
+  including the generated admin login, are written to credentials.txt.

@@ -26,11 +26,30 @@ use Illuminate\Validation\ValidationException;
  * wherever the literal would have gone (`User.details.git_token`, encrypted
  * by the existing accessor). The queue and the deploy pipeline never see the
  * vault, and an entry expiring later cannot affect a project already created.
+ *
+ * The engine's own secrets ({@see GlobalVault}) are reached two ways, never
+ * by surprise: `vault:global` in a field asks for one by name, and
+ * {@see getOrGlobal()} lets a *transient* read fall back to one when the
+ * field was left out. A stored credential does neither -- it stays absent and
+ * inherits at read time, so rotating the engine's token reaches every project
+ * that never had one of its own.
  */
 class RequestVault
 {
     /** What marks a value as a reference rather than a literal secret. */
     public const PREFIX = 'vault:';
+
+    /**
+     * `vault:global` -- the engine's own secret for this field's type, asked
+     * for by name. No ref, because a global entry is addressed by what it is
+     * rather than by a link somebody was handed: the field says the type, so
+     * this cannot be aimed at the wrong secret.
+     *
+     * It is honoured even when {@see GlobalVault::projectScoped()} is on: that
+     * setting governs what the engine reaches for on a caller's behalf, not
+     * what a caller may ask for outright.
+     */
+    public const GLOBAL_REF = 'global';
 
     /**
      * The value of `$field` from the current request, with a vault reference
@@ -63,6 +82,32 @@ class RequestVault
     public static function get(string $field, ?string $type = null): ?string
     {
         return self::resolve(request()->input($field), $type ?? $field);
+    }
+
+    /**
+     * As {@see get()}, but a field the caller left out falls back to the
+     * engine's own secret of that type ({@see GlobalVault}).
+     *
+     * Only for a value that is *used* and then dropped -- a transient clone,
+     * say. Not for one that is stored: a project that inherits the engine's
+     * token should keep inheriting it, so that rotating the global reaches
+     * every project and `project_setting_get` can say the value is inherited.
+     * Copying it in at create time would freeze a snapshot and quietly make
+     * the project look like it had been given a token of its own.
+     *
+     * Persisted fields therefore keep {@see get()}, and inherit at read time
+     * instead -- {@see \App\Models\User::getGitToken()}.
+     *
+     * An empty string is not an absent field: it is how a caller clears a
+     * credential, and it keeps meaning that.
+     */
+    public static function getOrGlobal(string $field, ?string $type = null): ?string
+    {
+        $type ??= $field;
+        /** @var mixed $value */
+        $value = request()->input($field);
+
+        return $value === null ? GlobalVault::secret($type) : self::resolve($value, $type);
     }
 
     /**
@@ -104,6 +149,10 @@ class RequestVault
 
         $ref = substr($value, strlen(self::PREFIX));
 
+        if ($ref === self::GLOBAL_REF) {
+            return self::resolveGlobal($type);
+        }
+
         $entry = SecretVaultEntry::query()
             ->where('ref_hash', SecretVaultEntry::hashRef($ref))
             ->where('type', $type)
@@ -126,6 +175,31 @@ class RequestVault
 
         // Reusable until TTL: reads are counted, not consumed.
         $entry->forceFill(['use_count' => $entry->use_count + 1, 'last_used_at' => now()])->save();
+
+        return $secret;
+    }
+
+    /**
+     * `vault:global` -- asked for outright, so an absent or unpasted global
+     * is a 422 rather than the silence the implicit fallback answers with.
+     * The caller named a secret they believe exists; saying nothing would
+     * surface later as an auth failure with no trace back to here.
+     */
+    private static function resolveGlobal(string $type): string
+    {
+        $entry = SecretVaultEntry::globalFor($type);
+
+        if ($entry === null) {
+            self::fail($type, "No global vault entry for '{$type}'. Create one with vault_secret_create (scope: global).");
+        } elseif ($entry->filled_at === null) {
+            self::fail($type, "The global vault entry for '{$type}' has no secret pasted yet. Open the URL vault_secret_create returned.");
+        }
+
+        $secret = GlobalVault::secret($type, force: true);
+
+        if ($secret === null) {
+            self::fail($type, "The global vault entry for '{$type}' could not be decrypted (APP_KEY rotated?). Create a new one.");
+        }
 
         return $secret;
     }

@@ -20,10 +20,37 @@ export const inspectSourceSchema = z
   })
   .passthrough();
 
+/** One compose port the engine will not proxy on its own. See PortsReport. */
+export const inspectPortNoteSchema = z
+  .object({
+    port: z.number(),
+    reason: z.string(),
+    routable: z.boolean(),
+  })
+  .passthrough();
+
+/**
+ * `ports` on POST /source/inspect. An object, not a list: `routed` is the one
+ * port the edge proxies, `unrouted` needs a proxy rule, `refused` must never
+ * get one (a database published by compose).
+ */
+export const inspectPortsSchema = z
+  .object({
+    primary: z.number().nullable(),
+    source: z.string().nullable(),
+    routed: z.array(z.number()),
+    unrouted: z.array(inspectPortNoteSchema),
+    refused: z.array(inspectPortNoteSchema),
+    compose: z.array(z.number()),
+    dockerfile_expose: z.number().nullable(),
+  })
+  .passthrough();
+
 export const inspectReportSchema = z
   .object({
     source: inspectSourceSchema,
     application: inspectApplicationSchema,
+    ports: inspectPortsSchema,
   })
   .passthrough();
 

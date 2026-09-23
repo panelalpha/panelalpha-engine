@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Foodsoft is a Ruby on Rails (7.2) / Puma app for running a non-profit food
+  coop: suppliers and an article catalog, group orders, member accounting and a
+  job scheduler. Everything past the login page is behind authentication -- the
+  member area, the admin/foodcoop management screens and the accounting -- and
+  there is no anonymous data: the root path redirects straight to a foodcoop
+  login. Registration is invitation-only (an admin invites members, or shares an
+  invite link per ordergroup); there is no open self sign-up that would expose
+  coop data, so nothing needs to be disabled to secure it.
+
+  BUILD THE REPO'S OWN DOCKERFILE, DO NOT SEED AN IMAGE. Upstream publishes no
+  prebuilt image that a plain clone matches, but the repository's Dockerfile is
+  a clean multi-stage build (bundle install with 'test development' excluded,
+  swagger docs, then `rake assets:precompile` against a nulldb adapter, all at
+  build time) that yields a Puma server on :3000 serving its own precompiled
+  assets (RAILS_SERVE_STATIC_FILES=true). This recipe builds that Dockerfile
+  locally in DinD, which also sidesteps engine#229 (image-seeding NotFound): the
+  app image carries `build:` plus a local tag, and imageRefs recognises a
+  same-file-built tag and never asks a registry for it.
+
+  WHY COMPOSE-REPLACE, NOT `dockerfile`. Foodsoft needs three processes and two
+  datastores: the Puma web server, a Resque worker and a supercronic cron
+  (Procfile), against MySQL (config/database.yml, the mysql2 gem -- there is no
+  Postgres or usable SQLite production path) and Redis (Resque; without
+  REDIS_URL it silently degrades to inline jobs). The schema's `database:` is a
+  single MySQL create with no Redis and no second/third process, so the whole
+  stack has to be expressed as compose. The repo's own compose files are dev/CI
+  only (bind-mounted source, a mailcatcher, no persisted data), so this override
+  supplies the real stack: mariadb:11 and redis:7 on named volumes, a one-shot
+  `init` that loads the schema and seeds the admin before the app is allowed to
+  answer, web/worker/cron on the built image, and a `ready` gate (engine#204) so
+  the deploy turns green only once the site actually answers.
+
+  CONFIG. The built image already contains a working config/app_config.yml (from
+  the SAMPLE: single-coop, default_scope 'f'), config/database.yml (production
+  reads FOODSOFT_DB_* from the environment) and config/storage.yml (local disk
+  under storage/). So the recipe injects only environment: SECRET_KEY_BASE
+  (required in production -- the app raises without it), the FOODSOFT_DB_*
+  coordinates, REDIS_URL and RAILS_ENV=production. TLS is terminated at the
+  engine proxy, which forwards X-Forwarded-Proto=https, so Rails' default
+  force_ssl is kept on (HSTS + secure cookies for real traffic) and only the
+  in-container healthcheck spoofs the header so it is not bounced to https.
+
+  SECRETS AND ADMIN. SECRET_KEY_BASE (a rotation logs everyone out and voids
+  every signed cookie), the database password (baked into the mariadb volume)
+  and a generated admin password are written once into ~/.panelalpha/foodsoft/
+  (0600 in 0700) -- the only writable place a deploy does not delete -- and
+  reused across redeploys, so a rebuild neither logs the coop out nor locks the
+  app out of its data. Foodsoft's stock seed (db/seeds.rb -> small.en) creates a
+  demo coop full of users whose password is literally "secret"; this recipe does
+  NOT run it. `init` loads only the schema and seeds a single Administrators
+  workgroup + one admin user with the generated password (never the default
+  admin/secret), plus the minimum lookup rows the UI needs, and only when the
+  database is empty. Onboarding notes go in credentials.txt.

@@ -9,7 +9,7 @@ use App\Lib\Apis\PanelAlpha;
  *
  * Metrics and telemetry — deploy reports, recovered signals, bug reports —
  * all of which are observations about this installation. Separate from the
- * hub ({@see \App\Integrations\Tunnels\PanelAlphaHub}): the hub is an
+ * Connect ({@see \App\Integrations\Tunnels\PanelAlphaConnect}): Connect is an
  * *integration* the engine calls to get something done (a WithoutDNS name
  * created, a licence resolved), and this is a sink the engine talks at. They
  * are two services, deployed apart, reachable apart, and an install may
@@ -17,7 +17,7 @@ use App\Lib\Apis\PanelAlpha;
  *
  * They used to be one variable, on the theory that "everything an engine
  * sends goes to the same host". That was wrong about the deployment and it
- * cost the telemetry a release: reports were addressed to the hub, which does
+ * cost the telemetry a release: reports were addressed to Connect, which does
  * not serve the ingest and answers 405.
  *
  * Emptying the variable is a supported answer, not a misconfiguration: it

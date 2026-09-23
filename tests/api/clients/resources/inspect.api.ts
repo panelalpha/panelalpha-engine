@@ -9,9 +9,13 @@ export class InspectApi extends EngineApiBase {
   }
 
   async inspectSourceRaw(
-    data: Partial<InspectSourceRequest>
+    data: Partial<InspectSourceRequest>,
+    options: { timeout?: number } = {}
   ): Promise<{ status: number; body: unknown }> {
-    const response = await this.api.post('source/inspect', { data });
+    const response = await this.api.post('source/inspect', {
+      data,
+      ...(options.timeout !== undefined ? { timeout: options.timeout } : {}),
+    });
     return this.rawCall(response);
   }
 

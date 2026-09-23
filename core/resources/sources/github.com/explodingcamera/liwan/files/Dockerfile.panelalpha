@@ -1,0 +1,23 @@
+# Configuration wrapper around the published image. No Rust is compiled and no
+# upstream source is patched: the prebuilt static binary is copied out of
+# ghcr.io/explodingcamera/liwan (distroless, /liwan only) into an alpine that
+# has a shell and busybox wget, so the entrypoint can seed the admin
+# idempotently, answer a healthcheck, and map the public URL. Building this
+# locally keeps the image off the engine's host docker-save seeding path, so
+# engine#229 does not apply.
+FROM ghcr.io/explodingcamera/liwan:latest AS upstream
+
+FROM alpine:3
+# The static musl binary runs unchanged under alpine (verified). busybox
+# already provides the shell and wget the entrypoint and healthcheck use.
+COPY --from=upstream /liwan /liwan
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod 0755 /entrypoint.sh
+
+ENV LIWAN_DATA_DIR=/data
+# The entrypoint binds LIWAN_PORT=8080 (the port the engine forwards to by
+# default); Liwan's own default 9042 is a non-standard port the deploy's port
+# detection does not recognise.
+EXPOSE 8080
+STOPSIGNAL SIGINT
+ENTRYPOINT ["/entrypoint.sh"]

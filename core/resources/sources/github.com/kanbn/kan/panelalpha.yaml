@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kan is a Next.js kanban board (a Trello alternative): workspaces hold boards,
+  boards hold lists and cards. Every board is private to its workspace's members
+  and the whole app sits behind a login (the / route redirects to /login unless
+  the visitor has a session), so this is the access-controlled case, not public
+  data. Auth is Better Auth over a Postgres backend.
+
+  PULL THE GHCR IMAGE, DO NOT BUILD. Kan publishes ghcr.io/kanbn/kan and
+  ghcr.io/kanbn/kan-migrate. engine#229 corrupts only images whose `docker save`
+  exports a manifest-only stub on the containerd image store; measured on the
+  target host both Kan images save at full size (~80 MB / ~64 MB) with real
+  layer blobs, so they seed into the account's nested Docker cleanly and are
+  pulled as-is. No local rebuild is needed, which also means the Next.js
+  NEXT_PUBLIC_* build-time trap does not apply here: the image ships
+  apps/web/bootstrap.cjs (next-runtime-env), which on boot rewrites
+  public/__ENV.js from the live NEXT_PUBLIC_* environment, and every read goes
+  through env() at run time -- so NEXT_PUBLIC_BASE_URL and the auth toggles are
+  taken from the container's environment, not baked at build.
+
+  WHY COMPOSE-REPLACE. The stack is Postgres + a one-shot drizzle migration
+  container + the web app, which is a compose concern, and the repo's own
+  compose file publishes the database port, leaves secrets to a hand-edited .env
+  and has no ready gate. This override supplies the real stack: postgres:15 on a
+  named volume, `migrate` run to completion before the app serves, a `seed`
+  one-shot that creates the workspace owner, the app on 3000 (the only published
+  port, so the engine's scan takes it as primary -- engine#231/#234), and a
+  `ready` gate (engine#204) so the deploy turns green only once the site answers.
+
+  AUTH AND EMAIL. NEXT_PUBLIC_ALLOW_CREDENTIALS=true turns on email+password
+  (Better Auth's emailAndPassword is gated on exactly this). NEXT_PUBLIC_DISABLE_EMAIL=true
+  switches every mail path off so sign-in needs no SMTP (upstream sets no
+  requireEmailVerification, so password login still works). NEXT_PUBLIC_BASE_URL
+  is left http://localhost and rewritten to the account's public https address
+  by ComposePlaceholders (the key ends in _URL); Better Auth uses it as its
+  baseURL and trusted origin, so login and CSRF match the real host over HTTPS.
+
+  OWNER AND REGISTRATION. Kan has no admin CLI and no "first user is admin"
+  concept -- each user owns the workspaces they create -- so hooks/prepare.sh
+  generates an owner password once and pa/seed.cjs writes the owner straight
+  into the user/account tables exactly as Better Auth's email sign-up would
+  (credential account, scrypt salt:hash), idempotently. Public sign-up is then
+  closed with NEXT_PUBLIC_DISABLE_SIGN_UP=true (the user.create.before hook
+  rejects anyone without a pending invitation), so only the owner, and people
+  the owner invites, can register.
+
+  SECRETS. BETTER_AUTH_SECRET, the database password and the owner password are
+  written once into ~/.panelalpha/kan/ (0600 in 0700) -- the only writable place
+  a deploy does not delete -- and reused across redeploys, so a rebuild does not
+  log everyone out, lock the app out of the pgdata volume, or reset the owner.
+  Onboarding notes go in credentials.txt.

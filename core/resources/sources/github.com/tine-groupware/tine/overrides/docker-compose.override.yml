@@ -1,0 +1,139 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the application -- the shared PHP 8.2 base image (resolved from
+# tine20/composer.json's `config.platform.php`, because `app_root: tine20` is
+# what tells PhpStrategy::build() where the manifest is), ~/project/tine20
+# bind-mounted at /app, the account's own uid, Apache on 8000, PA_DOCROOT=/app
+# from the probe finding tine20/index.php, APP_URL from the account's main
+# domain and DB_* from the database the engine provisioned -- and says nothing
+# about where groupware keeps its attachments, where its secrets come from, or
+# when tine is ready, because nothing in a PHP checkout can.
+#
+# An override rather than a replacement compose file, and here that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# *before* detection runs, so a compose file in the project root would make
+# tine look like a compose project and take the php strategy -- and with it the
+# bind mount, the app_root, the Composer pass, the host frontend build and the
+# staged entrypoint -- off the table entirely.
+#
+# There is no database service here on purpose. `database: mysql` in
+# panelalpha.yaml gets one on the account's own MySQL server: visible in the
+# panel, openable in phpMyAdmin, inside the account's backup, and costing this
+# host neither a container nor a volume.
+services:
+  app:
+    volumes:
+      # ~/.panelalpha/tine/data. Everything this account accumulates, and none
+      # of it in the checkout:
+      #
+      #   /data/files      filesdir -- every upload, every Filemanager node's
+      #                    content, every mail attachment tine keeps.
+      #   /data/tmp        tmpdir -- upload staging and export scratch.
+      #   /data/caching    the File cache backend.
+      #   /data/sessions   the File session backend, so a redeploy does not log
+      #                    everyone out.
+      #
+      # A redeploy clears and re-clones ~/project (engine#173), so a groupware
+      # site that kept attachments under the document root would lose every one
+      # of them while the database rows pointing at them survived. tine reads
+      # all four as plain config values (etc/tine20/config.inc.php.mpl names
+      # them), so unlike an application that hard-codes a path inside its own
+      # tree there is nothing to symlink and nothing to mount over a served
+      # directory.
+      #
+      # ~ itself is root-owned 0755 and nothing can be created in it;
+      # ~/.panelalpha is created by hooks/prepare.sh, which also creates these
+      # four subdirectories before this mount is made, so Docker never gets to
+      # create them as root.
+      - ../.panelalpha/tine/data:/data
+
+    # Both files, spelled out, because compose's merge rule for `env_file`
+    # between a base file and an override is not something to bet a deploy on:
+    # listed here in full, the result is the same whether compose replaces the
+    # base list or appends to it.
+    #
+    # .env is the engine's, and carries DB_*. app.env is this account's three
+    # generated secrets -- the tine administrator's password, the setup user's
+    # password and credentialCacheSharedKey -- written once by
+    # hooks/prepare.sh, 0600 in a 0700 directory, outside ~/project because a
+    # redeploy wipes that (engine#173) and because engine#173 also leaves
+    # .env.default there 0644.
+    #
+    # It has to exist before the container is *created*: env_file is read then,
+    # and a value written afterwards never reaches getenv() however right the
+    # file looks. hooks/prepare.sh runs before `docker compose up`, which is
+    # the only reason this works.
+    env_file:
+      - .env
+      - ../.panelalpha/tine/app.env
+
+    environment:
+      # The one way to give this container a php.ini. The base image loads none
+      # at all and scans /usr/local/etc/php/conf.d, a directory inside the image
+      # the account uid cannot write to (engine#185). PHP reads PHP_INI_SCAN_DIR
+      # from its own environment at startup whatever the SAPI, so naming a
+      # second directory here reaches the Apache module and the CLI both.
+      #
+      # The image's own directory is listed first and explicitly:
+      # PHP_INI_SCAN_DIR *replaces* the compiled-in path rather than adding to
+      # it, and dropping it would unload every docker-php-ext-*.ini -- intl,
+      # imagick, gd, soap, pdo_mysql, redis, the lot -- which is a container
+      # with no PHP extensions and no database driver.
+      #
+      # What the file says and why is in files/tine20/.panelalpha/php/zz-tine.ini.
+      PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/.panelalpha/php
+
+    # ServiceLimits caps an app-role service it did not write at 384m, and PHP
+    # with a 512M memory_limit does not fit in that. In an override file this
+    # reaches Docker as written -- the hardener never sees it -- which is the
+    # point. The peak is the install, which runs once; steady state is far
+    # below this (see README.md for the measurement).
+    mem_limit: 1024m
+
+    # The install stage does all of tine's setup before Apache binds: the
+    # schema for 29 applications, the initial administrator, the default
+    # groups, roles and containers. The engine runs `docker compose up -d`
+    # without --wait and probes as soon as it returns, which is while that is
+    # still going -- nothing is listening yet and the probe reads `Failed to
+    # connect to 127.0.0.1 port 8000`.
+    #
+    # The check asks for the thing only a working installation produces, and
+    # `curl -f` alone would not: it greps for `window.assetHash`, which
+    # Tinebase/views/partials/jsInclude.html.twig emits only after
+    # Tinebase_Frontend_Http_SinglePageApplication::getAssetHash() has read
+    # Tinebase/js/webpack-assets-FAT.json -- so it fails both when Apache is
+    # not up and when the frontend build did not produce a client, which is the
+    # failure that would otherwise reach a customer as a blank page.
+    #
+    # Host is 127.0.0.1:8000, as it is for AppHealth's own probe (#190). tine
+    # accepts it: config.inc.php declares tine20URL, so
+    # Tinebase_Core::getUrl() never consults the Host header.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS --max-time 25 http://127.0.0.1:8000/ | grep -q 'window.assetHash'
+      interval: 5s
+      timeout: 30s
+      retries: 60
+      # Generous: the first boot runs the whole installer. A check that fails
+      # inside this window neither counts against retries nor marks the
+      # container unhealthy.
+      start_period: 600s
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once tine has
+  # built its schema, created its administrator and rendered a page, and what
+  # the health probe then meets (engine#90).
+  #
+  # alpine:3 and not a datastore image: anything the sidecar miner recognises
+  # as a backing service here produces `dependency cycle detected: app -> ready
+  # -> app`. A clean exit 0 is not a crash loop as far as AppHealth is
+  # concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

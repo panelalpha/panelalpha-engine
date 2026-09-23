@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bytebase is a database DevOps and CI/CD tool for teams: a single Go binary
+  that serves its own bundled web console and API on one port (8080) and manages
+  schema migrations, change review, SQL access control and version control
+  across MySQL, PostgreSQL, TiDB, ClickHouse, Snowflake and more. Its own
+  metadata (workspace, users, RBAC roles, projects, database instances and the
+  migration history) lives in an embedded PostgreSQL that the binary starts and
+  manages under its --data directory, so a default deploy needs no external
+  datastore. Everything sits behind a login with role-based access control:
+  after the first-run setup the console and the whole /v1 API require a valid
+  session, so an anonymous request gets the setup/login page or 401, never data.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes the app as
+  bytebase/bytebase on Docker Hub and tags every release; this recipe runs that
+  official image with a compose-replace, pinned to the current stable release
+  3.23.0. Building from the clone would compile a Go backend plus a pnpm/Vite
+  frontend on the host for no gain -- the published image already bundles the
+  compiled frontend, the server and an embedded PostgreSQL 16. Seeding a Docker
+  Hub image also sidesteps engine#229 (image-seed NotFound on a from-registry
+  seed, which is the GHCR case, not Hub).
+
+  WHY COMPOSE-REPLACE. There is no datastore sidecar to add -- PostgreSQL is
+  embedded and managed by the binary under --data -- but a hosted deploy needs
+  two things bare detection cannot give: a data directory that outlives a
+  redeploy, and the public external URL wired in so links and redirects point at
+  the account's real origin. The image's default CMD is
+  `--port 8080 --data /var/opt/bytebase`; this override keeps those and mounts a
+  named volume at /var/opt/bytebase. Bytebase runs its own metadata migrations
+  and starts its embedded Postgres on boot, so no migrate stage is needed.
+
+  DOMAIN. Bytebase's --external-url is where users visit the instance; it is
+  optional at startup (the app runs without it and it can be set later from
+  Settings, but SSO/SCIM and some absolute links need it) and, unlike Weblate,
+  it is a full URL, not a bare host. It is a CLI flag with no env binding, so the
+  entrypoint is wrapped: it reads PA_PUBLIC_URL -- a `_URL` placeholder
+  ComposePlaceholders rewrites to the real https origin at deploy -- and, only
+  when it is a real origin (not the un-rewritten localhost fallback), appends
+  `--external-url <origin>` to the real `bytebase` command. Overriding the
+  entrypoint clears the image CMD, so the wrapper restates `--port 8080 --data
+  /var/opt/bytebase` itself.
+
+  ADMIN IS SEEDED, NOT FIRST-VISITOR-WINS. Bytebase's setup makes the FIRST
+  caller the workspace owner, and Community Edition has no env var or flag to
+  pre-seed it (the only server knobs are --data/--port/--external-url). Rather
+  than leave that window open, a `bootstrap` sidecar claims the owner over
+  Bytebase's own API (AuthService/Signup, allow-without-credential and
+  first-caller-wins) the instant the server is healthy -- on the internal
+  network, before the public proxy is even wired -- using a password
+  hooks/prepare.sh generates once into ~/.panelalpha/bytebase/admin.env (0600 in
+  0700) and records in credentials.txt (email admin@bytebase.local). It is
+  idempotent: on a redeploy the admin already exists in the persisted volume, so
+  it logs in with the stored password, confirms, and exits without touching
+  anything. The `ready` gate waits on the bootstrap, so the deploy reports
+  finished only after the admin is claimed.
+
+  KNOWN LIMITATION -- SIGNUP STAYS OPEN ON COMMUNITY EDITION. Disabling
+  self-service signup is a paid TEAM feature (the API answers PermissionDenied /
+  "please upgrade" on the free plan), so this recipe cannot turn it off. The
+  exposure is contained by RBAC, verified live: a self-registered (non-first)
+  user gets NO workspace role -- they cannot list, read or create any project,
+  database instance or migration, and cannot self-elevate; they can only see the
+  list of user emails. All schemas, connections and migration data stay behind
+  the owner's RBAC. credentials.txt tells the operator to upgrade and disable
+  signup in Settings if they want it fully closed.
+
+  PERSISTENCE. /var/opt/bytebase (the embedded Postgres cluster with the whole
+  workspace: admin user, RBAC, projects, database instances and migration
+  history) is a named volume, so it survives project_rebuild and storage
+  reclaim; ~/project is wiped every deploy (engine#173). The wrapper writes
+  nothing to ~/project.
+
+  PORT + READINESS. The binary listens on 8080 and only the app publishes a port
+  (8080:8080), so the engine's port scan takes it as the primary (engine#231/
+  #234). The alpine-based image ships curl, so an internal healthcheck polls
+  /healthz (unauthenticated) and a `ready` gate waits on it, so `docker compose
+  up` returns -- and the deploy reports finished -- only once Bytebase actually
+  answers, not the moment the container starts (engine#204).

@@ -1,0 +1,147 @@
+# Replaces the upstream github.com/onloc-app/onloc compose. Same four official
+# images, but hardened for shared hosting: generated secrets (from ~/project/.env,
+# written by hooks/prepare.sh out of ~/.panelalpha/onloc/onloc.env), named volumes
+# for the database and uploads so they survive a redeploy, and a one-shot admin
+# seeder that closes Onloc's open-registration window before caddy goes public.
+services:
+  # PostgreSQL — password generated per account; data on a named volume.
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: onloc
+      POSTGRES_USER: onloc
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - onloc-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onloc -d onloc"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    mem_limit: 384m
+
+  # Express/Bun API. Runs `prisma migrate deploy` then serves on :4000.
+  # DATABASE_URL carries the generated password; ACCESS/REFRESH token secrets
+  # are set so the API never falls back to its public hardcoded defaults.
+  api:
+    image: ghcr.io/onloc-app/onloc-api:latest
+    environment:
+      - PORT=4000
+      - DATABASE_URL=postgresql://onloc:${DB_PASSWORD}@db:5432/onloc?schema=public
+      - ACCESS_TOKEN_SECRET=${ACCESS_TOKEN_SECRET}
+      - REFRESH_TOKEN_SECRET=${REFRESH_TOKEN_SECRET}
+    volumes:
+      - onloc-uploads:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 512m
+
+  # One-shot: seed the first admin while the site is still private, then exit.
+  # Onloc makes the first registrant admin and then closes registration, so
+  # doing this before caddy starts means there is never a public window with an
+  # open registration and no admin. Idempotent: skips if an admin already exists
+  # (redeploys, where the database volume persisted).
+  init:
+    image: ghcr.io/onloc-app/onloc-api:latest
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      - ONLOC_ADMIN_USER=${ONLOC_ADMIN_USER}
+      - ONLOC_ADMIN_PASSWORD=${ONLOC_ADMIN_PASSWORD}
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        ok=0
+        for i in $$(seq 1 90); do
+          if wget -qO- http://api:4000/api/status > /tmp/status 2>/dev/null; then ok=1; break; fi
+          sleep 2
+        done
+        [ "$$ok" = 1 ] || { echo "onloc-init: API never became reachable"; exit 1; }
+        if grep -q '"is_setup":true' /tmp/status; then
+          echo "onloc-init: an admin already exists, nothing to seed"; exit 0
+        fi
+        echo "onloc-init: registering the first admin ($$ONLOC_ADMIN_USER)"
+        wget -qO- --header="Content-Type: application/json" \
+          --post-data="{\"username\":\"$$ONLOC_ADMIN_USER\",\"password\":\"$$ONLOC_ADMIN_PASSWORD\"}" \
+          http://api:4000/api/auth/register || true
+        for i in $$(seq 1 10); do
+          wget -qO- http://api:4000/api/status > /tmp/status 2>/dev/null || true
+          if grep -q '"is_setup":true' /tmp/status; then echo "onloc-init: admin seeded"; exit 0; fi
+          sleep 2
+        done
+        echo "onloc-init: admin was not created"; exit 1
+    restart: "no"
+    mem_limit: 256m
+
+  # React SPA on nginx :3000. No API URL is baked in — the browser derives it
+  # from window.location, so a single origin behind caddy just works.
+  ui:
+    image: ghcr.io/onloc-app/onloc-ui:latest
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      - api
+    restart: unless-stopped
+    mem_limit: 128m
+
+  # Single-origin front door. /api,/ws,/docs,/uploads -> API, else -> SPA.
+  # Published on 8080 so the engine's port detection picks it (a preferred web
+  # port) and routes the hosting domain here. Waits for the admin seeder so the
+  # site is never public before the first admin exists.
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "8080:80"
+    command:
+      - sh
+      - -c
+      - |
+        cat > /etc/caddy/Caddyfile <<'EOF'
+        :80 {
+          reverse_proxy /api* api:4000
+          reverse_proxy /ws* api:4000
+          reverse_proxy /docs* api:4000
+          reverse_proxy /uploads* api:4000
+          reverse_proxy ui:3000
+        }
+        EOF
+        caddy run --config /etc/caddy/Caddyfile
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      api:
+        condition: service_healthy
+      ui:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    mem_limit: 128m
+
+volumes:
+  onloc-db:
+  onloc-uploads:
+
+networks:
+  default:
+    name: onloc-network

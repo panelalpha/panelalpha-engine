@@ -1,0 +1,140 @@
+# Written by PanelAlpha. Group Office ships no .htaccess of its own.
+#
+# The document root is this directory -- `app_root: www` makes ~/project/www
+# the container's /app and PhpDocroot then answers PA_DOCROOT=/app -- and
+# upstream's layout puts rather more than the front controller in it. Every
+# rule below was checked against a real deploy: each of these answered an
+# unauthenticated request, and none is reachable through index.php, so denying
+# them costs the application nothing.
+#
+# The generated vhost already denies dotfiles and anything named `panelalpha-*`
+# or `docker-compose.ya?ml` (resources/deploy/templates/apache-vhost.stub), so
+# panelalpha-install.php, panelalpha-setup.sh, .panelalpha/ and
+# .panelalpha-admin-password need no rule here. This file covers what upstream
+# put here.
+#
+# RedirectMatch rather than <Directory>: <Directory> is a server-config
+# container and Apache refuses to start reading one from an .htaccess. A real
+# `Require all denied` for install/ is in files/www/install/.htaccess, which is
+# where a directory container can be expressed; these are the outer belt.
+
+# ---------------------------------------------------------------------------
+# install/ -- the whole tree.
+#
+# This is the important one. It is an unauthenticated wizard with three
+# separate holes, and unlike most web installers it does not stop being
+# reachable once the application is installed:
+#
+#   configfile.php  rewrites ../config.php from POST fields -- database host,
+#                   name, user, password and the data paths -- with no
+#                   authentication (configfile.php:103-112). A stranger can
+#                   point a fresh deploy at a database they control, and the
+#                   GET form discloses the current host, name and user
+#                   (configfile.php:76-80).
+#   install.php     creates the System Administrator from POST
+#                   (install.php:71-85). First visitor wins.
+#   upgrade.php     runs schema migrations. For the life of the installation,
+#                   not only before it is installed: index.php -> test.php ->
+#                   configfile.php -> install.php, and install.php redirects
+#                   straight to upgrade.php as soon as the database is
+#                   non-empty (install.php:52-55).
+#   gotest.php      a full system report, down to the loaded extensions.
+#   clearcache.php  rebuilds the cache on request. Only a denial of service,
+#                   but free to deny: this recipe clears the cache from the CLI.
+#
+# Everything this directory does is done by panelalpha-install.php on the
+# install and upgrade stages instead, before Apache binds. index.php's error
+# handler redirects here when it cannot boot, which on a working deploy does
+# not happen and on a broken one should be a 404 rather than an open wizard.
+RedirectMatch 404 ^/install(/|$)
+
+# ---------------------------------------------------------------------------
+# vendor/ -- Composer's tree.
+#
+# Nothing in Group Office links to an asset under vendor/ (checked: no URL
+# built in views/ or go/core/webclient/ resolves there), and it is thirty-odd
+# libraries' worth of examples, tests and tools -- including tcpdf's, whose own
+# tools/ directory ships an .htaccess saying exactly this.
+#
+# A rule here rather than a vendor/.htaccess because vendor/ does not exist
+# when this file is written: the recipe's files/ are copied in right after the
+# clone and `composer install` runs later, on the host.
+RedirectMatch 404 ^/vendor(/|$)
+
+# ---------------------------------------------------------------------------
+# Command-line entry points that happen to sit in the document root.
+#
+# cli.php, cron.php and groupofficecli.php are argv-driven scripts; `groupoffice`
+# is a shell wrapper Apache would serve as plain text. None is reachable
+# through index.php and none has any business answering a request. Group
+# Office's cron runs from the account's own scheduler, not over HTTP.
+<FilesMatch "^(?:cli|cron|groupofficecli)\.php$">
+    Require all denied
+</FilesMatch>
+<Files "groupoffice">
+    Require all denied
+</Files>
+
+# ---------------------------------------------------------------------------
+# config.php.
+#
+# It holds no literal secret -- this recipe writes it as a list of getenv()
+# calls -- and Apache executes .php rather than disclosing it. Denied anyway,
+# because the one thing making that true is a mod_php that is working, and the
+# file naming the account's database is not worth betting on that.
+<FilesMatch "^config\.php(?:\.example)?$">
+    Require all denied
+</FilesMatch>
+
+# ---------------------------------------------------------------------------
+# Dependency and build manifests. Information disclosure only -- the exact
+# version of every library in the tree, which is a shopping list for anyone
+# matching advisories against the site.
+<FilesMatch "^(?:composer|package|package-lock)\.(?:json|lock)$">
+    Require all denied
+</FilesMatch>
+<Files "composer.lock">
+    Require all denied
+</Files>
+
+# ---------------------------------------------------------------------------
+# display_errors and friends.
+#
+# Belt and braces for files/www/.panelalpha/php/zz-groupoffice.ini: the base
+# image loads no php.ini at all (#185), so display_errors is on and a single
+# notice is rendered into the page for every visitor -- with absolute paths in
+# it, as measured on this application before the ini existed. PHP_INI_SCAN_DIR
+# is the real fix and reaches the CLI too; this covers the Apache side if that
+# environment variable is ever lost. `php_flag` is mod_php's, and mod_php is
+# what the base image runs (panelalpha-serve.sh execs apache2-foreground).
+<IfModule php_module>
+php_flag display_errors Off
+php_flag log_errors On
+</IfModule>
+
+# ---------------------------------------------------------------------------
+# Z-Push's command-line tools, which ship inside the document root.
+#
+# The activesync module vendors Z-Push as a git submodule -- which the engine
+# fetches after the clone -- and Z-Push ships its administration and migration
+# scripts as ordinary .php files under src/ and tools/. Found by asking the
+# tree rather than by guessing: every .php under the document root whose first
+# line is a `#!` shebang is one of these, plus cli.php, cron.php and
+# groupofficecli.php, which are denied above.
+#
+# Measured on a real deploy: `GET /modules/z-push/z-push-admin.php` answered
+# 200 and wrote its shebang line into the response before failing on a constant
+# it only has under the CLI. Nothing here is reachable through the application
+# and none of it has any business answering a request.
+#
+# Z-Push/src/index.php is NOT denied: that one is the ActiveSync endpoint a
+# phone talks to, and it is the reason the submodule is here at all.
+<FilesMatch "^(?:z-push-admin|z-push-top|wbxml|checkshares|listfolders|gab-sync|gab2contacts|list-shared-folders|migrate-2\.0\.x-2\.1\.0|migrate-filestates-to-db)\.php$">
+    Require all denied
+</FilesMatch>
+
+# Z-Push's tools/ and config trees wholesale, for anything added upstream later
+# that this list does not name. config.php there holds an ActiveSync backend
+# configuration, not the account's database credentials, but it is still not a
+# page.
+RedirectMatch 404 ^/go/modules/community/activesync/Z-Push/(?:tools|config)(/|$)

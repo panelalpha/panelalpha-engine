@@ -41,6 +41,15 @@ return [
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
+            // WAL + a busy_timeout so concurrent queue workers wait instead of
+            // erroring; IMMEDIATE only takes effect on PHP >= 8.4 (SQLiteConnection
+            // falls back to PDO's DEFERRED begin below that). Measured in
+            // engine-core-db-sqlite-feasibility: 5s busy_timeout held under 16
+            // concurrent writers, IMMEDIATE cleared the job loss DEFERRED caused.
+            'journal_mode' => env('DB_JOURNAL_MODE', 'wal'),
+            'synchronous' => env('DB_SYNCHRONOUS', 'normal'),
+            'busy_timeout' => env('DB_BUSY_TIMEOUT', 5000),
+            'transaction_mode' => env('DB_TRANSACTION_MODE', 'IMMEDIATE'),
         ],
 
         'mysql' => [

@@ -1,0 +1,140 @@
+# Replaces the repository's own docker-compose.yml.
+#
+# That file is a four-line README away from working: it interpolates
+# POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB out of a `.env` the operator is
+# told to copy from TEMPLATE.env, and nobody copies it here, so postgres comes
+# up with an empty password, refuses to initialise, and everything behind it
+# 502s. It also bundles an nginx whose conf is hardcoded to `server_name
+# example.com`, in front of an app the engine's own proxy already fronts.
+#
+# So: the same two real services, credentials that exist, the image built from
+# the commit this repository is checked out at, and two gate services that make
+# `docker compose up -d` mean the site is answering.
+services:
+  db:
+    # Pinned major. Shynet cannot migrate a Postgres datadir backwards, and
+    # the repository's own compose says `image: postgres` -- floating latest,
+    # which breaks the volume the first time the major moves.
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, and nothing else: written once into
+    # ~/.panelalpha/shynet/ by hooks/prepare.sh. The app's copy of the same
+    # password lives in a second file, so the database container never sees
+    # the administrator password or the Django secret key.
+    env_file:
+      - ../.panelalpha/shynet/db.env
+    environment:
+      POSTGRES_DB: shynet
+      POSTGRES_USER: shynet
+      # postgres refuses to initialise into a non-empty directory and a named
+      # volume is not always empty (lost+found).
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shynet -d shynet -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 256m
+
+  # One-shot: migrate, create this account's administrator, point the Django
+  # Site at the account's domain, then exit 0.
+  #
+  # `app` waits on this with service_completed_successfully, so a database
+  # that never came up or an administrator that could not be created fails the
+  # deploy instead of publishing a half-set-up analytics dashboard. The
+  # image's own entrypoint.sh would migrate too, but it does it *after*
+  # gunicorn is already listening (startup_checks.sh runs, then webserver.sh),
+  # so on a first boot the site answers while the schema is still being built.
+  init:
+    image: ${SHYNET_IMAGE:-docker.io/milesmcc/shynet:edge}
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+      - ../.panelalpha/shynet/app.env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: shynet
+      DB_USER: shynet
+      # Rewritten to the account's public https address before the stack
+      # starts, because the key ends in _URL and the value is a bare
+      # http://localhost (ComposePlaceholders::PUBLIC_URL_KEY_PATTERN /
+      # LOCAL_URL_PATTERN). init.sh uses it for the Site row, which is what
+      # allauth builds password-reset links from.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      - ./panelalpha/shynet:/pa:ro
+    entrypoint: ["/bin/bash", "/pa/init.sh"]
+    mem_limit: 512m
+
+  app:
+    image: ${SHYNET_IMAGE:-docker.io/milesmcc/shynet:edge}
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - ../.panelalpha/shynet/app.env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: shynet
+      DB_USER: shynet
+      # webserver.sh binds 0.0.0.0:${PORT:-8080}; named outright so the
+      # published port and the healthcheck cannot drift from it.
+      PORT: "8080"
+      # /pa/entrypoint.sh turns this into ALLOWED_HOSTS and
+      # CSRF_TRUSTED_ORIGINS. Without them settings.py:43 leaves ALLOWED_HOSTS
+      # at localhost,127.0.0.1 and Django answers 400 DisallowedHost on every
+      # path -- which the engine's baseline check reports as healthy.
+      PA_PUBLIC_URL: http://localhost
+      # `init` has already migrated against this same database, and the
+      # image's checks re-run them on every boot in front of the web server.
+      PERFORM_CHECKS_AND_SETUP: "False"
+    volumes:
+      - ./panelalpha/shynet:/pa:ro
+    entrypoint: ["/bin/bash", "/pa/entrypoint.sh"]
+    healthcheck:
+      # django-health-check's own view: 200 only when Django booted, the
+      # database answers a write, and the cache answers. A plain page fetch
+      # would pass on a Django that cannot reach postgres and is rendering
+      # its own error page. 127.0.0.1 is in ALLOWED_HOSTS because
+      # entrypoint.sh puts it there; without that this 400s forever and the
+      # `ready` gate never returns. wget is busybox's -- the image is alpine
+      # and has no curl.
+      test: ["CMD-SHELL", "wget -q -O /dev/null 'http://127.0.0.1:8080/healthz/?format=json' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 768m
+
+  # Starts nothing and exits 0. The engine runs `docker compose up -d` with no
+  # --wait (AppLauncher.php:45), so without this the deploy is finished the
+  # moment containers have been *started* and the probe lands while gunicorn
+  # is still importing Django. Compose does block on a depends_on health
+  # condition, so a service that waits for app's healthcheck makes `up -d`
+  # return only once the site answers. alpine because nothing extra is pulled
+  # and nothing large starts; a clean exit 0 is not a crash loop to AppHealth.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}

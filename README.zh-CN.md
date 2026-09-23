@@ -38,7 +38,7 @@
 <p>
 <a href="#第-1-步在自己的-vps-上安装-engine"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="一行命令安装"></a>
 <a href="#第-1-步在自己的-vps-上安装-engine"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="支持的系统"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-182_tools-6f42c1" alt="182 个 MCP 工具"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-199_tools-6f42c1" alt="199 个 MCP 工具"></a>
 <a href="#许可证"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="加入 Discord"></a>
 </p>
@@ -158,7 +158,7 @@ pae connect
 | `给 n8n.mydomain.com 配一个 Cloudflare 隧道。` | DNS 和隧道都配好，这也是从 NAT 后面的服务器对外提供服务的办法。 |
 | `上周我们有多少流量？` | 该项目以及整台服务器的用量、日志和限额。 |
 
-更多现成的例子：[该怎么问](docs/04-connecting-your-ai/your-assistant.md#what-to-ask)。助手能够触达的完整清单：[182 个工具](docs/04-connecting-your-ai/your-assistant.md)。
+更多现成的例子：[该怎么问](docs/04-connecting-your-ai/your-assistant.md#what-to-ask)。助手能够触达的完整清单：[199 个工具](docs/04-connecting-your-ai/your-assistant.md)。
 
 ---
 
@@ -318,4 +318,4 @@ PanelAlpha Engine 是开源软件，采用 Apache 2.0 许可证。
 
 ## 一起来构建
 
-想参与？[`CONTRIBUTING.md`](CONTRIBUTING.md) 会带你起步。更深入的贡献者约定和测试流程，去看 [`AGENTS.md`](AGENTS.md)。
+想参与？[`CONTRIBUTING.md`](CONTRIBUTING.md) 会带你起步。给运维人员看的文档在 [`docs/`](docs/README.md)。

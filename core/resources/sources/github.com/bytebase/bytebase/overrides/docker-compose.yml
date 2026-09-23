@@ -1,0 +1,113 @@
+# Compose-replace: run the official bytebase/bytebase image (pulled, not built)
+# instead of compiling the Go backend + pnpm frontend from the clone. Pinned to
+# the current stable release 3.23.0. Bytebase is a single Go binary with the web
+# console embedded and its metadata in an embedded PostgreSQL managed under
+# --data, so there is no sidecar datastore -- the extra services here only wire
+# in the public URL, seed the admin and gate readiness.
+services:
+  app:
+    image: bytebase/bytebase:3.23.0
+    # --init so the embedded postgres child is reaped cleanly on stop/restart
+    # (the upstream docker run uses --init for the same reason).
+    init: true
+    restart: unless-stopped
+    environment:
+      # Rewritten to the real https origin at deploy (key ends in _URL, value is
+      # a localhost placeholder). The entrypoint turns it into --external-url;
+      # if it was NOT rewritten it stays localhost and the wrapper omits the flag
+      # (Bytebase runs fine without it, and the owner can set it in Settings).
+      PA_PUBLIC_URL: "http://localhost:8080"
+    # The image ENTRYPOINT is `bytebase` and its CMD is
+    # `--port 8080 --data /var/opt/bytebase`. --external-url is a CLI flag with
+    # no env binding, so wrap the entrypoint: derive the origin from PA_PUBLIC_URL
+    # and append --external-url only when it is a real origin. Overriding the
+    # entrypoint clears the image CMD, so restate --port/--data here. $$ escapes
+    # compose interpolation so the shell (busybox sh in the alpine image) expands
+    # these at runtime.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        EXTRA=""
+        case "$${PA_PUBLIC_URL}" in
+          ""|http://localhost*|https://localhost*|http://127.*|https://127.*|http://0.0.0.0*|http://host.docker.internal*)
+            : ;;
+          http://*|https://*)
+            EXTRA="--external-url $${PA_PUBLIC_URL}" ;;
+        esac
+        exec bytebase --port 8080 --data /var/opt/bytebase $$EXTRA
+    volumes:
+      # The embedded PostgreSQL cluster and all workspace metadata (admin user,
+      # RBAC, projects, database instances, migration history) live here. Named
+      # volume so it survives redeploy and storage reclaim. Bytebase manages a
+      # subdir for pgdata, so lost+found at the mount root is harmless.
+      - bytebase-data:/var/opt/bytebase
+    # Only the app publishes a port; the port scan takes 8080 as the primary
+    # (engine#231/#234).
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # /healthz is unauthenticated and returns 200 once the server is up. The
+      # image ships curl. Long start_period: first boot inits the embedded
+      # Postgres and runs the metadata migrations.
+      test: ["CMD-SHELL", "curl -fsS --max-time 10 http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 12s
+      retries: 40
+      start_period: 120s
+    mem_limit: 2g
+
+  # Claims the first-user workspace admin over Bytebase's own API the instant the
+  # server is healthy. Bytebase's setup makes the FIRST caller the workspace
+  # owner and Community Edition has no env/flag to pre-seed it, so this closes
+  # that window: it runs on the internal network before the public proxy is even
+  # wired, using the password hooks/prepare.sh generated. Idempotent -- on a
+  # redeploy the admin already exists in the persisted volume, a login with the
+  # stored password succeeds, and it exits without touching anything.
+  bootstrap:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/bytebase/admin.env
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -u
+        API="http://app:8080"
+        H1="Content-Type: application/json"; H2="Connect-Protocol-Version: 1"
+        # Already provisioned? (redeploy on the persisted volume). Login proves it.
+        code=$$(curl -s -o /dev/null -w '%{http_code}' -X POST "$$API/bytebase.v1.AuthService/Login" \
+          -H "$$H1" -H "$$H2" \
+          -d "{\"email\":\"$$BB_ADMIN_EMAIL\",\"password\":\"$$BB_ADMIN_PASSWORD\",\"web\":true}")
+        if [ "$$code" = "200" ]; then echo "[bootstrap] admin already provisioned"; exit 0; fi
+        # First run: claim the owner before any visitor can. The first signup on
+        # the self-host singleton workspace becomes the workspace admin/owner.
+        code=$$(curl -s -o /tmp/r -w '%{http_code}' -X POST "$$API/bytebase.v1.AuthService/Signup" \
+          -H "$$H1" -H "$$H2" \
+          -d "{\"email\":\"$$BB_ADMIN_EMAIL\",\"title\":\"Administrator\",\"password\":\"$$BB_ADMIN_PASSWORD\"}")
+        if [ "$$code" = "200" ]; then echo "[bootstrap] seeded workspace admin"; exit 0; fi
+        # Someone raced us and the email now exists with another password, or the
+        # API errored: do not clobber, and do not fail the deploy -- the app is up.
+        echo "[bootstrap] WARNING could not seed admin (HTTP $$code): $$(cat /tmp/r 2>/dev/null)"
+        exit 0
+    mem_limit: 64m
+
+  # Starts nothing, exits 0, waits on the admin having been seeded so
+  # `docker compose up -d` returns -- and the deploy reports finished -- only
+  # once Bytebase answers AND its admin is claimed, not the moment the container
+  # launches (engine#204).
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  bytebase-data: {}

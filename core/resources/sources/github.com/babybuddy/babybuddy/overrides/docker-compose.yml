@@ -1,0 +1,104 @@
+# Compose-replace: Baby Buddy ships no compose file the platform could run
+# unedited -- the LinuxServer image is meant to be launched by hand with the
+# operator supplying PUID/PGID, a data mount and CSRF_TRUSTED_ORIGINS. This
+# runs the same app made durable and self-configuring:
+#   - the official image linuxserver/babybuddy, pinned to release v2.11.0
+#   - SQLite (Baby Buddy's default) under /config on a named volume, so the
+#     whole datastore (users, children, entries) survives a redeploy
+#   - SECRET_KEY and the admin password seeded from ~/.panelalpha/babybuddy
+#     (../.panelalpha from ~/project), reused on every rebuild
+#   - CSRF_TRUSTED_ORIGINS derived from the account's public URL at boot
+#   - only the web service publishes a port
+# The image is a single container: s6 runs the app's overridden `migrate`
+# (which seeds the first superuser) then nginx in front of gunicorn on :8000.
+services:
+  web:
+    # Official LinuxServer release image on Docker Hub (multi-arch amd64/arm64).
+    image: linuxserver/babybuddy:v2.11.0-ls251
+    restart: unless-stopped
+    # In front of the image's own /init: the wrapper turns PA_PUBLIC_URL into
+    # CSRF_TRUSTED_ORIGINS (which ComposePlaceholders cannot rewrite by key),
+    # exports it into the s6 container environment, then execs /init unchanged.
+    entrypoint: ["/bin/bash", "/panelalpha/entrypoint.sh"]
+    env_file:
+      # Platform-merged account env first, then this account's seeded secrets
+      # (PUID/PGID, SECRET_KEY, BB_ADMIN_PASSWORD) so an empty default cannot
+      # clobber them.
+      - .env
+      - ../.panelalpha/babybuddy/app.env
+    environment:
+      TZ: "UTC"
+      # No Django stack traces reach the browser.
+      DEBUG: "False"
+      # Point Django straight at the SQLite file on the /config volume, so the
+      # web, migrate and rotate-admin steps all agree on one database.
+      DB_NAME: /config/data/db.sqlite3
+      # Behind the engine's TLS-terminating reverse proxy: trust
+      # X-Forwarded-Proto and mark the session/CSRF cookies secure so login
+      # works over the tunnel.
+      SECURE_PROXY_SSL_HEADER: "true"
+      SESSION_COOKIE_SECURE: "true"
+      CSRF_COOKIE_SECURE: "true"
+      # Rewritten to the account's public https address before the stack starts
+      # (ComposePlaceholders rewrites a local value whose key ends in _URL).
+      # entrypoint.sh turns it into CSRF_TRUSTED_ORIGINS. Left http://localhost
+      # on an account with no domain yet, where the wrapper leaves CSRF unset.
+      PA_PUBLIC_URL: "http://localhost:8000"
+    volumes:
+      # The PanelAlpha wrapper + rotation scripts (files/panelalpha -> ~/project
+      # /panelalpha), read-only.
+      - ./panelalpha:/panelalpha:ro
+      # SQLite DB, media uploads and the persisted secret key are all under
+      # /config; a named volume keeps them across a redeploy.
+      - config:/config
+    # nginx serves on :8000 inside the container; Baby Buddy is the only service
+    # that publishes a port (engine#234: publish explicitly).
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # /login/ is Baby Buddy's one unauthenticated page; a 200 proves nginx is
+      # up and gunicorn opened the SQLite database. busybox wget is always in the
+      # Alpine base. start_period is generous: this host is slow (mariusz2).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/login/ || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 120s
+    mem_limit: 768m
+
+  # One-shot: closes the shipped admin/admin default. Runs after the web service
+  # is healthy (so `migrate` has created the superuser) and sets admin's
+  # password to the per-account secret. Idempotent -- a no-op once rotated.
+  rotate-admin:
+    image: linuxserver/babybuddy:v2.11.0-ls251
+    restart: "no"
+    entrypoint: ["/bin/bash", "/panelalpha/rotate-admin.sh"]
+    env_file:
+      - .env
+      - ../.panelalpha/babybuddy/app.env
+    environment:
+      DB_NAME: /config/data/db.sqlite3
+    depends_on:
+      web:
+        condition: service_healthy
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      - config:/config
+    mem_limit: 256m
+
+  # No-op gate: `docker compose up` blocks on these depends_on conditions, so
+  # `up` returns only once the site answers AND the admin has been rotated
+  # (engine#204/#90) -- the deploy never turns green with admin/admin live.
+  ready:
+    image: linuxserver/babybuddy:v2.11.0-ls251
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      web:
+        condition: service_healthy
+      rotate-admin:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  config: {}

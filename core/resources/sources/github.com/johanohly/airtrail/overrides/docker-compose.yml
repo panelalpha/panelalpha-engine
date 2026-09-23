@@ -1,0 +1,89 @@
+# Compose-replace. Upstream's docker/production/compose.yml is a real two-service
+# deployment (published image + postgres:16-alpine on a named volume), so this
+# keeps that shape rather than building the from-source bun+node Dockerfile per
+# account. What changes: ORIGIN comes from the engine, secrets and the owner from
+# ~/.panelalpha, and a `ready` gate makes `up -d` block until the app answers.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # POSTGRES_USER/PASSWORD/DB from the 0600 env_file the prepare hook wrote;
+    # the password never touches this 0644 compose file.
+    env_file:
+      - ../.panelalpha/airtrail/db.env
+    volumes:
+      # The entire application state (users, sessions, flights) plus the Lucia
+      # session table lives here; a named volume survives a redeploy.
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airtrail -d airtrail"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 512m
+
+  airtrail:
+    image: johly/airtrail:latest
+    restart: unless-stopped
+    # DB_URL, BODY_SIZE_LIMIT, UPLOAD_LOCATION and the AIRTRAIL_OWNER_* values
+    # the seed step reads. All 0600, out of the compose file.
+    env_file:
+      - ../.panelalpha/airtrail/app.env
+    environment:
+      # Not a real address and not meant to survive. ComposePlaceholders rewrites
+      # an ORIGIN-shaped key with a bare-localhost value to the account's public
+      # https origin before the stack starts (PUBLIC_URL_KEY_PATTERN /
+      # isLocalPublicUrl). adapter-node rejects form POSTs whose Origin does not
+      # match this, and AirTrail sets the session cookie Secure flag from it, so
+      # it must be the real https URL.
+      ORIGIN: http://localhost
+    volumes:
+      # Uploaded airline icons (UPLOAD_LOCATION=/app/uploads); named volume so
+      # they survive a redeploy.
+      - uploads:/app/uploads
+      # Wrapped entrypoint: run the migration runner, seed the owner idempotently,
+      # then start the server -- so the setup window is closed before `node build`
+      # ever binds. Relative paths resolve against ~/project (the compose project
+      # directory), where files/ was copied. Both are read into /app so the seed
+      # script resolves `pg` and `@node-rs/argon2` from /app/node_modules.
+      - ./panelalpha/entrypoint.sh:/app/panelalpha-entrypoint.sh:ro
+      - ./panelalpha/seed-owner.mjs:/app/panelalpha-seed-owner.mjs:ro
+    entrypoint: ["sh", "/app/panelalpha-entrypoint.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    # /api/ping returns 200 "pong" without auth. The image is node:22-slim (no
+    # curl/wget), and the app's server init synchronously downloads airport and
+    # airline reference data before it serves, so this only passes once the app is
+    # genuinely up -- a generous window covers that first-boot sync.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/ping').then(r=>r.text()).then(t=>process.exit(t.trim()==='pong'?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    mem_limit: 2g
+
+  # No-op gate. `docker compose up -d` returns before the app is up (engine#90)
+  # but does block on a depends_on condition, so this makes `up -d` return only
+  # once AirTrail's healthcheck passes (engine#204). alpine:3, not the app image,
+  # to avoid a dependency cycle and any extra pull; a clean exit 0 is not a crash
+  # loop to AppHealth.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      airtrail:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  db_data:
+  uploads:

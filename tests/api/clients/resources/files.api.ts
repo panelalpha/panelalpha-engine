@@ -119,6 +119,49 @@ export class FilesApi extends SystemApi {
     await this.assertOk(response);
   }
 
+  async moveDirectoryContents(
+    username: string,
+    sourcePath: string,
+    destPath: string,
+    override = true
+  ): Promise<void> {
+    const response = await this.api.post(`projects/${username}/files/move-contents`, {
+      data: { source_path: sourcePath, dest_path: destPath, override },
+    });
+    await this.assertOk(response);
+  }
+
+  async moveDirectoryContentsRaw(
+    username: string,
+    data: { source_path?: string; dest_path?: string; override?: boolean }
+  ): Promise<{ status: number; body: unknown }> {
+    const response = await this.api.post(`projects/${username}/files/move-contents`, { data });
+    return this.rawCall(response);
+  }
+
+  async fetchFileRaw(
+    username: string,
+    data: { url?: string; path?: string; filename?: string }
+  ): Promise<{ status: number; body: unknown }> {
+    const response = await this.api.post(`projects/${username}/files/fetch`, { data });
+    return this.rawCall(response);
+  }
+
+  async chmodFile(username: string, filePath: string, mode: string): Promise<void> {
+    const response = await this.api.put(`projects/${username}/files/chmod`, {
+      data: { path: filePath, mode },
+    });
+    await this.assertOk(response);
+  }
+
+  async chmodFileRaw(
+    username: string,
+    data: { path?: string; mode?: string }
+  ): Promise<{ status: number; body: unknown }> {
+    const response = await this.api.put(`projects/${username}/files/chmod`, { data });
+    return this.rawCall(response);
+  }
+
   async healthCheck(): Promise<{ status: number }> {
     const response = await this.api.get('');
     return { status: response.status() };

@@ -1,0 +1,64 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  gobookmarks is a self-hosted personal landing / start page: a single Go
+  binary that renders your bookmarks from a plain-text file and serves its web
+  UI and editor on :8080. It supports four auth/storage providers — GitHub,
+  GitLab, local Git, and SQL — and this recipe runs it fully self-contained on
+  the SQL provider (SQLite), so it needs no external OAuth application and no
+  external account: users sign up and log in against the app's own database
+  (`/signup/sql`, `/login/sql`), passwords bcrypt-hashed in the `passwords`
+  table. When no GitHub/GitLab OAuth credentials are set the OAuth login
+  buttons are hidden (`ConfiguredProviderNames()`), so the login page offers
+  only the local providers. The local Git provider is also live by default
+  (the image ships `LOCAL_GIT_PATH=/var/lib/gobookmarks/localgit`), a second
+  self-contained option; SQL is chosen here because it is a single durable
+  file.
+
+  Why this ships a Dockerfile of its own. The repository's one `Dockerfile` is
+  the *release* image: `FROM debian` then `COPY gobookmarks /bin/gobookmarks`,
+  expecting a binary GoReleaser produces in CI that the checkout does not
+  contain. Built from source it fails at the COPY; built correctly it would
+  still need its `serve` subcommand. The project publishes a working image,
+  `ghcr.io/arran4/gobookmarks` (Debian, ENTRYPOINT `gobookmarks`, CMD `serve`,
+  EXPOSE 8080), so `files/Dockerfile` is a one-line `FROM` of that published
+  image — no build from source, and a public pullable base keeps it clear of
+  the image-seeding NotFound path (engine#229). `extra.dockerfile` /
+  `port_hint` state what the dockerfile probe would have found, because a
+  source recipe is applied before the probes run
+  (`PlatformSelector::fromSource()` describes with no probe data), and the
+  deployability check would otherwise refuse it.
+
+  Persistence. Everything the app owns — the SQLite database (accounts +
+  bookmarks + history), the auto-generated `session.key` cookie secret and the
+  local-git store — lives under `/var/lib/gobookmarks`, which
+  `overrides/docker-compose.override.yml` binds to the account's
+  `~/.panelalpha/gobookmarks`. `~/project` is wiped on every redeploy
+  (engine#173); `~/.panelalpha` is the one writable directory that survives a
+  redeploy and a failed-deploy rollback, so a login and a saved bookmark
+  persist across `project_rebuild`. `hooks/prepare.sh` creates that directory
+  0700 before the stack starts; `session.key` is written there 0600 by the app
+  on first boot and reused, so a redeploy does not invalidate sessions.
+
+  Public URL. gobookmarks reads `EXTERNAL_URL` only for OAuth redirects and
+  absolute links; with the local providers it is not load-bearing, and cookie
+  `Secure` is decided per request from `X-Forwarded-Proto`, so login works
+  over the proxy's HTTPS regardless. It is left at the image default.
+id: gobookmarks
+extends: dockerfile
+strategy: dockerfile
+runtime: dockerfile
+label: gobookmarks
+port: 8080
+extra:
+  # A source recipe is applied without probe data, so the dockerfile probe's
+  # dockerfile/port_hint would be null/80 even though files/Dockerfile ships a
+  # deployable Dockerfile — the deployability check then fails with "Dockerfile
+  # strategy selected but Dockerfile is missing." State what the probe finds.
+  dockerfile: Dockerfile
+  port_hint: 8080
+env:
+  # Self-contained auth + storage: SQLite, no external OAuth. The image sets
+  # LOCAL_GIT_PATH and FAVICON_CACHE_DIR already; these turn on the SQL
+  # provider and put its database on the durable mount.
+  DB_CONNECTION_PROVIDER: sqlite3
+  DB_CONNECTION_STRING: /var/lib/gobookmarks/bookmarks.db

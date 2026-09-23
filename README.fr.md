@@ -38,7 +38,7 @@ Open source. Self-hosted. Simple pour tout le monde, pas seulement pour les sysa
 <p>
 <a href="#étape-1--installez-engine-sur-votre-vps"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Installation en une commande"></a>
 <a href="#étape-1--installez-engine-sur-votre-vps"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Systèmes pris en charge"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-182_tools-6f42c1" alt="182 outils MCP"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-199_tools-6f42c1" alt="199 outils MCP"></a>
 <a href="#licence"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Rejoindre Discord"></a>
 </p>
@@ -158,7 +158,7 @@ Aucune commande à apprendre, et aucune formule magique non plus. Ces exemples m
 | `Monte un tunnel Cloudflare pour n8n.mydomain.com.` | DNS et tunnel configurés, ce qui est aussi la façon de servir depuis un serveur derrière du NAT. |
 | `Combien de trafic avons-nous eu la semaine dernière ?` | L'utilisation, les logs et les limites de ce projet, et ceux du serveur entier. |
 
-Plus d'exemples détaillés : [quoi demander](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). La liste complète de ce que votre assistant peut atteindre : [182 outils](docs/04-connecting-your-ai/your-assistant.md).
+Plus d'exemples détaillés : [quoi demander](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). La liste complète de ce que votre assistant peut atteindre : [199 outils](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 
@@ -318,4 +318,4 @@ PanelAlpha Engine est open source sous licence Apache 2.0.
 
 ## Venez construire avec nous
 
-Envie de participer ? [`CONTRIBUTING.md`](CONTRIBUTING.md) vous met en route. Pour les conventions plus poussées des contributeurs et le flux de tests, rendez-vous dans [`AGENTS.md`](AGENTS.md).
+Envie de participer ? [`CONTRIBUTING.md`](CONTRIBUTING.md) vous met en route. La documentation pour la personne qui exploite le serveur est dans [`docs/`](docs/README.md).

@@ -77,4 +77,41 @@ class DindEntrypointInitScriptsTest extends TestCase
         $this->assertStringContainsString('/etc/docker/daemon.json', $this->script());
         $this->assertStringContainsString('data-root', $this->script());
     }
+
+    /**
+     * A mirror endpoint is subject to the same TLS enforcement as any named
+     * registry: without it in insecure-registries too, the daemon would
+     * refuse the plain-HTTP proxy and every pull would fall straight through
+     * to Docker Hub unauthenticated, silently defeating the proxy.
+     */
+    public function test_registry_proxy_is_configured_and_marked_insecure(): void
+    {
+        $json = $this->daemonJson();
+
+        $this->assertSame(
+            ['http://panelalpha-registry-proxy:5000'],
+            $json['registry-mirrors'] ?? null
+        );
+        $this->assertContains('panelalpha-registry-proxy:5000', $json['insecure-registries'] ?? []);
+    }
+
+    public function test_the_existing_image_store_registry_is_untouched(): void
+    {
+        $this->assertContains('panelalpha-cache-registry:5000', $this->daemonJson()['insecure-registries'] ?? []);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function daemonJson(): array
+    {
+        $script = $this->script();
+        $this->assertMatchesRegularExpression('/cat > \/etc\/docker\/daemon\.json <<EOF\n(.+)\nEOF/', $script, 'daemon.json heredoc not found');
+        preg_match('/cat > \/etc\/docker\/daemon\.json <<EOF\n(.+)\nEOF/', $script, $m);
+
+        $json = json_decode($m[1], true);
+        $this->assertIsArray($json, 'daemon.json is not valid JSON: ' . $m[1]);
+
+        return $json;
+    }
 }

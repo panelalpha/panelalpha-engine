@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ShipShipShip is a self-hosted changelog / product-updates page: one Go (Gin)
+  binary that serves the public changelog and a built SvelteKit admin panel,
+  backed by a single SQLite file. The repository ships a `docker-compose.yml`
+  that builds the whole thing from source (Go + Node multi-stage) on every
+  deploy; the project also publishes a ready official image on Docker Hub
+  (`nelkinsky/shipshipship`), so this recipe REPLACES the build compose with a
+  one-service stack that pulls that image instead. Docker Hub images seed onto
+  the account without the wrapper build that engine#229 would otherwise force,
+  and building a CGO/SQLite Go stage plus a Node stage on a 2-core host is slow
+  and needless when the maintainer already ships the artifact.
+
+  Two things the upstream compose leaves to the operator and this recipe closes.
+  First, the admin is authenticated entirely from the environment — the Go
+  middleware compares the login against `ADMIN_USERNAME`/`ADMIN_PASSWORD` and
+  signs sessions with `JWT_SECRET`; there is no user row in the database. The
+  shipped defaults are `admin`/`admin` with a published `your-secret-key-...`
+  JWT secret, and — the dangerous part — if BOTH admin variables are ever
+  EMPTY the server switches into "demo mode", where `AuthMiddleware` waves
+  every request through as the `demo` user and anonymous visitors can create
+  and edit entries. So the credentials must be present AND non-default before
+  the page is public. The prepare hook generates a strong password and JWT
+  secret once into `~/.panelalpha/shipshipship/` (0600) and reuses them on
+  every redeploy; the compose reads them from the account's `.env`, and its
+  interpolation defaults are non-empty on purpose so a missing `.env` can never
+  drop the app into demo mode.
+
+  Second, state. The only state is the SQLite file at `/app/data/changelog.db`
+  (entries, settings, subscribers); `~/project` is wiped on every redeploy, so
+  the data directory is a named volume that survives. The admin identity lives
+  in the environment, not the DB, so the volume needs no seeding — the same
+  generated password re-supplied from `~/.panelalpha` logs into the persisted
+  database after a redeploy.
+
+  The image listens on 8080 (its own default), which is the port the engine's
+  proxy routes the domain to. The service publishes `8080:8080` so that inside
+  the account's nested Docker the port binds on the account container, where
+  the engine's proxy reaches it as `<account>:8080`; `expose: 8080` alone is
+  not enough — it stays on the inner compose network and the proxy 502s.
+  `BASE_URL` is set to a localhost value the engine rewrites to the real public
+  origin (it is used only for newsletter unsubscribe links).

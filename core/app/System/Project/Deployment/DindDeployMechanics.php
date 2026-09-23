@@ -8,7 +8,9 @@ use App\Models\User as ModelsUser;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppHealth;
+use App\System\Project\Dind\Source\EngineArtifactExclude;
 use App\System\Project\Dind\Source\GitRepository;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -85,6 +87,7 @@ final class DindDeployMechanics implements DeployMechanics
         } else {
             $this->dind->prepareFromSources();
         }
+        $this->excludeEngineArtifacts();
     }
 
     public function isApplicationEnvironmentRunning(): bool
@@ -112,6 +115,7 @@ final class DindDeployMechanics implements DeployMechanics
     public function syncHostingForSourceRebuild(?string $zipPath): void
     {
         $project = $this->aggregate();
+        $this->stopApplicationBeforeWipe();
         $project->prepareLinuxIsolation();
         if ($zipPath !== null && $zipPath !== '') {
             $project->importProjectArchive($zipPath);
@@ -119,19 +123,56 @@ final class DindDeployMechanics implements DeployMechanics
         $project->recreateOuterCompose();
     }
 
+    // prepareLinuxIsolation() clears ~/project and the re-clone lands on a new inode; any
+    // container bind-mounted under the old one (n8n's ./docker, and every recipe shipping
+    // overrides/) keeps reading the now-unlinked directory unless it's stopped first.
+    private function stopApplicationBeforeWipe(): void
+    {
+        $app = $this->dind->app();
+        if ($app === null) {
+            return;
+        }
+
+        $warn = $this->aggregate()->isRunning();
+
+        $result = $app->projectAction('down');
+        if ($result['exit_code'] === 0 || !$warn) {
+            return;
+        }
+
+        Log::warning(
+            "Could not stop the app before the wipe rebuild of {$this->user()->username}: "
+            . trim($result['stderr'] ?: $result['stdout']),
+        );
+    }
+
     public function ingestForWipeRebuild(?string $zipPath): void
     {
         if ($this->user()->hasGitProject() && ($zipPath === null || $zipPath === '')) {
             $this->dind->preCheckFromSources();
             (new GitRepository($this->dind))->cloneConfiguredRepository();
+            // Re-clone lands on the same ~/project the wipe just cleared; bootstrap it
+            // like ingestApplicationSource() does, or the app config's files never come back.
+            $this->dind->prepareFromSources();
+            // The fresh clone has a fresh .git/info/exclude, and nothing after
+            // this step writes the block -- without it every Engine Artifact
+            // shows up in `git status` (ADR-0001).
+            $this->excludeEngineArtifacts();
         } else {
             $this->dind->prepareFromSources();
         }
     }
 
+    public function ingestArchive(string $zipPath): void
+    {
+        $this->aggregate()->importProjectArchive($zipPath);
+        $this->dind->prepareFromSources();
+    }
+
     public function reprepareApplicationFromCheckout(): void
     {
         $this->dind->prepareFromSources();
+        $this->excludeEngineArtifacts();
     }
 
     public function publishDomain(DomainModel $domain): void
@@ -156,7 +197,11 @@ final class DindDeployMechanics implements DeployMechanics
 
     public function publicUrlWarnings(DomainModel $domain): array
     {
-        return PublicUrl::warnings($domain, $this->user()->getDetails());
+        // The name, not the model: `warnings()` takes a string, and a model
+        // coerced into one is its whole JSON -- which is how every partial
+        // deploy's log line came to carry the domain, the account details and
+        // the encrypted env_vars blob inside the sentence.
+        return PublicUrl::warnings((string) $domain->domain, $this->user()->getDetails());
     }
 
     public function customEnvFailureHint(): ?string
@@ -179,10 +224,19 @@ final class DindDeployMechanics implements DeployMechanics
 
     public function persistSuccess(): void
     {
-        $this->user()->setDetails([
-            'deployment_status' => 'success',
-        ]);
+        $this->user()->markDeploySucceeded();
         $this->user()->save();
+    }
+
+    /**
+     * List what the deploy just wrote in the checkout's local exclude file
+     * (ADR-0001), once the app is prepared and every Engine Artifact exists.
+     */
+    private function excludeEngineArtifacts(): void
+    {
+        if ($this->hasGitProject()) {
+            EngineArtifactExclude::forProject($this->dind)->write();
+        }
     }
 
     private function aggregate(): ProjectAggregate

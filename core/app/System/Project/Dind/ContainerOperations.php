@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Deploy\Platform\Strategies;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -66,9 +67,16 @@ final class ContainerOperations
 
     /**
      * Inner compose start (resume, no rebuild) after backup/restore.
+     *
+     * An account made from the template and never deployed has no inner compose
+     * project, so there is nothing to resume.
      */
     public function composeStart(): void
     {
+        if ($this->project->app() === null) {
+            return;
+        }
+
         $this->shell->execAsUser(
             $this->project->userAppComposeCommand(['start']),
             [],
@@ -87,6 +95,8 @@ final class ContainerOperations
         }
 
         try {
+            $this->refreshRunFileBefore($action);
+
             if ($action === 'pull') {
                 $pullOut = $this->shell->execAsUser($this->project->userAppComposeCommand(['pull']), [], 600);
                 $upOut = $this->shell->execAsUser(
@@ -106,6 +116,54 @@ final class ContainerOperations
         } catch (\Exception $e) {
             return ['stdout' => '', 'stderr' => $e->getMessage(), 'exit_code' => 1];
         }
+    }
+
+    /**
+     * Whether `$action` must regenerate the run file from the client's
+     * compose file before compose runs (ADR-0001 D7), so an edit the client
+     * made over SSH or the file tools takes effect, with the hosting
+     * hardening applied to it.
+     *
+     * Only where the run file is derived from the client's compose: the
+     * compose strategies, and a welcome account (no git, no strategy) whose
+     * client has created a compose file. A recipe's run file is generated,
+     * not derived, so `up` leaves it alone.
+     */
+    public static function regeneratesRunFile(
+        string $action,
+        ?string $strategy,
+        bool $hasGitRepo,
+        bool $hasClientCompose,
+    ): bool {
+        if ($action !== 'up' && $action !== 'pull') {
+            return false;
+        }
+        if ($strategy === Strategies::COMPOSE || $strategy === Strategies::PAEMD) {
+            return true;
+        }
+
+        return $strategy === null && !$hasGitRepo && $hasClientCompose;
+    }
+
+    /**
+     * Rewrites the run file only; no clone, no image build, no prepare.
+     */
+    private function refreshRunFileBefore(string $action): void
+    {
+        $user = $this->project->userModel();
+        if (!self::regeneratesRunFile(
+            $action,
+            $user->getDeployStrategy(),
+            $user->getGitRepo() !== null,
+            $this->project->userAppExistingComposeFilePath() !== null,
+        )) {
+            return;
+        }
+
+        $this->project->strategy()->refreshComposeRunFile(
+            $this->project->userAppDirPath(),
+            $user->getChownString(),
+        );
     }
 
     /**

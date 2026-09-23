@@ -1,0 +1,36 @@
+{
+  "ref": "refs/heads/main",
+  "before": "6113728f27ae82c7b1a177c8d03f9e96e0adf246",
+  "after": "a8c1f4d9e2b7305c6d4a1e8f9b0c2d3e4f5a6b7c",
+  "created": false,
+  "deleted": false,
+  "forced": false,
+  "compare": "https://github.com/octocat/Hello-World/compare/6113728f27ae...a8c1f4d9e2b7",
+  "commits": [
+    {
+      "id": "a8c1f4d9e2b7305c6d4a1e8f9b0c2d3e4f5a6b7c",
+      "message": "Update README.md",
+      "timestamp": "2026-09-20T10:15:30+02:00",
+      "author": {"name": "The Octocat", "email": "octocat@github.com", "username": "octocat"},
+      "added": [],
+      "removed": [],
+      "modified": ["README.md"]
+    }
+  ],
+  "head_commit": {
+    "id": "a8c1f4d9e2b7305c6d4a1e8f9b0c2d3e4f5a6b7c",
+    "message": "Update README.md",
+    "timestamp": "2026-09-20T10:15:30+02:00"
+  },
+  "repository": {
+    "id": 186853002,
+    "name": "Hello-World",
+    "full_name": "octocat/Hello-World",
+    "private": false,
+    "html_url": "https://github.com/octocat/Hello-World",
+    "clone_url": "https://github.com/octocat/Hello-World.git",
+    "default_branch": "main"
+  },
+  "pusher": {"name": "octocat", "email": "octocat@github.com"},
+  "sender": {"login": "octocat", "id": 583231, "type": "User"}
+}

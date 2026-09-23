@@ -2,11 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Lib\Vault\GlobalVault;
 use App\Lib\Vault\RequestVault;
+use App\Lib\Vault\SecretMinter;
 use App\Models\SecretVaultEntry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use OpenApi\Attributes as OA;
 
 /**
@@ -27,11 +28,16 @@ use OpenApi\Attributes as OA;
  * The secret itself is only ever stored encrypted and is never returned by
  * any of these endpoints; `show` reports whether one is present, which is
  * what an agent needs to know to wait for the paste.
+ *
+ * An entry minted with `scope: global` is the engine's own secret of that
+ * type instead: one per type, no expiry, and every project created without a
+ * secret of its own falls back to it ({@see \App\Lib\Vault\GlobalVault}), so
+ * a Git or Cloudflare token is asked for once rather than at each project.
+ * `config`/`updateConfig` below turn that sharing off for an engine that
+ * wants the old per-project isolation.
  */
 class SecretVaultController extends Controller
 {
-    private const REF_BYTES = 48;
-
     #[OA\Post(
         path: '/vault/secrets',
         summary: 'Create a vault slot for a secret that will be pasted in a browser',
@@ -40,7 +46,17 @@ class SecretVaultController extends Controller
             . "(the form the customer opens and pastes the secret into). The entry is reusable until it "
             . "expires (`expires_in` seconds), then gone; a paste can be repeated while it lives. "
             . "**The secret never passes through the API caller** -- that is this mechanism's whole purpose, "
-            . "for agents that must not relay a private-repository token through a conversation.",
+            . "for agents that must not relay a private-repository token through a conversation. "
+            . "Pass `scope: global` instead to store it as the engine's own secret of that type, which does "
+            . "not expire and which every project created without one of its own uses -- ask once, not at "
+            . "every project. Give `purpose` so the entry can be recognised later: the secret is never "
+            . "readable again, so the listing is all you have. **A pasted secret is final** -- it cannot be "
+            . "overwritten from the form or by minting over it; to replace one, delete it and create a new "
+            . "link. The form checks a `git_token` or `cloudflare_api_token` before saving it, with the "
+            . "same calls the engine makes when it uses one: a git token against `verify_with.repo_url` "
+            . "(required for the check), a Cloudflare token for its account and Tunnel access, plus the zone "
+            . "of `verify_with.hostname` when given. A refused token is not stored and the link stays open. "
+            . "`verification` on status then says whether it was checked.",
         security: [['bearerAuth' => []]],
         tags: ['Secret Vault'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -53,6 +69,43 @@ class SecretVaultController extends Controller
                         . 'Free-form snake_case -- the field the caller will send `vault:<ref>` in. '
                         . 'The paste form shows help from `resources/vault/<type>.md` when that file exists, else the default help.',
                     example: 'git_token'
+                ),
+                new OA\Property(
+                    property: 'scope',
+                    type: 'string',
+                    enum: ['request', 'global'],
+                    description: "`request` (the default) is one secret for the calls you are about to make; it "
+                        . "expires in an hour. `global` stores it as **the engine's** secret of that type: there is "
+                        . "one per type, it does not expire, and every project created without a secret of its own "
+                        . "uses it -- so ask the customer for a Git or Cloudflare token once rather than at each "
+                        . "project. Minting `global` for a type that already has one re-opens the paste form so the "
+                        . "secret can be replaced; the stored secret keeps working until it is. Pass `vault:global` "
+                        . "in a field to use it explicitly.",
+                    default: 'request',
+                ),
+                new OA\Property(
+                    property: 'purpose',
+                    type: 'string',
+                    description: 'What this secret is for, in your words -- "deploy key for the shop repo", '
+                        . '"Cloudflare token for the staging zone". Shown on the paste form, so the person '
+                        . 'handing over a credential can see why, and returned by `list`. Several entries '
+                        . 'share one `type`, and the secret can never be read back, so this is what tells '
+                        . 'them apart later when deciding which to delete.',
+                    maxLength: 255,
+                    example: 'Deploy key for the shop repo',
+                ),
+                new OA\Property(
+                    property: 'verify_with',
+                    type: 'object',
+                    description: 'What the pasted secret is checked against before it is saved. `git_token`: '
+                        . '`repo_url`, the HTTPS repository the token must be able to read. '
+                        . '`cloudflare_api_token`: `hostname` (optional), a domain whose zone the token must '
+                        . 'see. A refused token is not stored and the form asks again; an unreachable host '
+                        . 'saves it unchecked.',
+                    properties: [
+                        new OA\Property(property: 'repo_url', type: 'string', example: 'https://github.com/acme/shop'),
+                        new OA\Property(property: 'hostname', type: 'string', example: 'shop.example.com'),
+                    ],
                 ),
             ],
         )),
@@ -75,33 +128,43 @@ class SecretVaultController extends Controller
         // explains itself.
         $validated = $request->validate([
             'type' => ['required', 'string', 'max:64', 'regex:/^[a-z][a-z0-9_]*$/'],
+            'scope' => ['nullable', 'string', 'in:' . implode(',', SecretVaultEntry::SCOPES)],
+            'purpose' => ['nullable', 'string', 'max:255'],
+            'verify_with' => ['nullable', 'array'],
         ]);
 
-        // The ref doubles as the form URL token, so it needs browser-URL
-        // entropy. Raw is returned exactly once and never stored.
-        $ref = Str::random(self::REF_BYTES);
-
-        /** @var SecretVaultEntry */
-        $entry = SecretVaultEntry::create([
-            'ref_hash' => SecretVaultEntry::hashRef($ref),
-            'type' => $validated['type'],
-            'expires_at' => now()->addSeconds(SecretVaultEntry::TTL_SECONDS),
-        ]);
+        // One place decides what minting means, because the console mints too
+        // and the sealing rule must not differ between them.
+        [$entry, $ref] = SecretMinter::mint(
+            $validated['type'],
+            $validated['scope'] ?? SecretVaultEntry::SCOPE_REQUEST,
+            $validated['purpose'] ?? null,
+            $validated['verify_with'] ?? null,
+        );
 
         return new JsonResponse(['data' => [
-            'ref' => RequestVault::PREFIX . $ref,
+            'id' => $entry->id,
+            'ref' => $entry->isGlobal() ? RequestVault::PREFIX . RequestVault::GLOBAL_REF : RequestVault::PREFIX . $ref,
             'type' => $entry->type,
+            'scope' => $entry->scope,
+            'purpose' => $entry->purpose,
+            'verify_with' => $entry->verify_with,
             'url' => $this->formUrl($ref),
             'status' => $entry->status(),
-            'expires_in' => SecretVaultEntry::TTL_SECONDS,
+            // A global secret has no expiry; only the form does.
+            'expires_in' => $entry->isGlobal() ? null : SecretVaultEntry::TTL_SECONDS,
+            'url_expires_in' => SecretVaultEntry::TTL_SECONDS,
         ]], 201);
     }
 
     #[OA\Get(
         path: '/vault/secrets',
         summary: 'List vault entries',
-        description: 'Every live or recently expired entry, newest first. The secret is never included; '
-            . '`status` is pending (no paste yet), filled (usable) or expired.',
+        description: 'Every live or recently expired entry, newest first. **The secret is never included** '
+            . 'and cannot be read back by any endpoint -- this is the inventory, not the values. Each row '
+            . 'carries `id` (pass as `id:<n>` to status or delete), `type`, `purpose`, `scope`, `status` '
+            . '(pending, filled or expired) and the dates. `purpose` is what tells two entries of the same '
+            . 'type apart when deciding which to delete.',
         security: [['bearerAuth' => []]],
         tags: ['Secret Vault'],
         parameters: [
@@ -132,7 +195,8 @@ class SecretVaultController extends Controller
     #[OA\Get(
         path: '/vault/secrets/{ref}',
         summary: 'Get one vault entry by its reference',
-        description: 'The status of one entry. `ref` is the full `vault:<id>` value `create` returned.',
+        description: 'The status of one entry. `ref` is the full `vault:<id>` value `create` returned, '
+            . '`global:<type>` for an engine-wide secret, or `id:<n>` from `list`. The secret is never included.',
         security: [['bearerAuth' => []]],
         tags: ['Secret Vault'],
         parameters: [
@@ -161,7 +225,10 @@ class SecretVaultController extends Controller
     #[OA\Delete(
         path: '/vault/secrets/{ref}',
         summary: 'Delete a vault entry',
-        description: 'Removes the entry and its secret. References to it stop resolving.',
+        description: 'Removes the entry and its secret. References to it stop resolving. This is also how a '
+            . 'secret is *replaced*: a stored secret can never be overwritten, so delete it and create a new '
+            . 'one. `ref` accepts the `vault:<id>` create returned, `global:<type>` for an engine-wide '
+            . 'secret, or `id:<n>` from `list`.',
         security: [['bearerAuth' => []]],
         tags: ['Secret Vault'],
         parameters: [
@@ -185,6 +252,77 @@ class SecretVaultController extends Controller
         return new JsonResponse(['data' => ['ref' => $ref, 'deleted' => true]]);
     }
 
+    #[OA\Get(
+        path: '/vault/config',
+        summary: 'Whether projects share the engine-wide secrets',
+        description: 'Reports `project_scoped_tokens`. False (the default) means a project created without a '
+            . 'Git or Cloudflare token uses the engine-wide one, if a `global` vault entry holds it.',
+        security: [['bearerAuth' => []]],
+        tags: ['Secret Vault'],
+        responses: [
+            new OA\Response(response: 200, description: 'Vault configuration', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/VaultConfig')],
+            )),
+        ],
+    )]
+    public function config(): JsonResponse
+    {
+        return new JsonResponse(['data' => $this->configPayload()]);
+    }
+
+    #[OA\Put(
+        path: '/vault/config',
+        summary: 'Turn engine-wide secret sharing on or off',
+        description: "Set `project_scoped_tokens` true to keep every project on the credentials it was given: "
+            . "global entries stay stored but nothing reaches for them on a project's behalf, which is what a "
+            . "multi-customer engine wants. False (the default) shares them. Existing projects are not "
+            . "rewritten either way -- this only decides what a project *without* its own credential falls back "
+            . "to, so the switch can be flipped back.",
+        security: [['bearerAuth' => []]],
+        tags: ['Secret Vault'],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+            required: ['project_scoped_tokens'],
+            properties: [new OA\Property(property: 'project_scoped_tokens', type: 'boolean')],
+        )),
+        responses: [
+            new OA\Response(response: 200, description: 'Vault configuration', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/VaultConfig')],
+            )),
+        ],
+    )]
+    public function updateConfig(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'project_scoped_tokens' => ['required', 'boolean'],
+        ]);
+
+        GlobalVault::setProjectScoped((bool) $validated['project_scoped_tokens']);
+
+        return new JsonResponse(['data' => $this->configPayload()]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function configPayload(): array
+    {
+        $scoped = GlobalVault::projectScoped();
+
+        return [
+            'project_scoped_tokens' => $scoped,
+            'global_secrets_shared' => !$scoped,
+            // Which engine-wide secrets actually exist, so a caller can tell
+            // "sharing is on" from "sharing is on and there is something to
+            // share" without listing entries and filtering.
+            'global_types' => SecretVaultEntry::query()
+                ->where('scope', SecretVaultEntry::SCOPE_GLOBAL)
+                ->whereNotNull('filled_at')
+                ->orderBy('type')
+                ->pluck('type')
+                ->all(),
+        ];
+    }
+
     /**
      * The form URL on the engine's own host: the base clients already use
      * (`config('app.url')`, which the certificate scripts keep in sync with
@@ -206,6 +344,25 @@ class SecretVaultController extends Controller
             $ref = substr($ref, strlen(RequestVault::PREFIX));
         }
 
+        // A global entry outlives the link it was pasted through, and
+        // re-minting replaces that link, so a caller holding last week's ref
+        // has no way to name it. `global:<type>` is the name that keeps
+        // working -- it is what the entry *is*, not how it was filled. The
+        // colon cannot occur in a minted ref (Str::random is alphanumeric),
+        // so the two spellings can never collide.
+        if (str_starts_with($ref, RequestVault::GLOBAL_REF . ':')) {
+            return SecretVaultEntry::globalFor(substr($ref, strlen(RequestVault::GLOBAL_REF) + 1));
+        }
+
+        // `id:<n>`, the handle a listing hands out. Prefixed rather than bare
+        // digits so it can never be mistaken for a minted ref, and the only
+        // way to address a request entry after the one time its ref was shown.
+        if (str_starts_with($ref, 'id:')) {
+            $id = substr($ref, 3);
+
+            return ctype_digit($id) ? SecretVaultEntry::query()->find((int) $id) : null;
+        }
+
         return SecretVaultEntry::query()
             ->where('ref_hash', SecretVaultEntry::hashRef($ref))
             ->first();
@@ -217,13 +374,28 @@ class SecretVaultController extends Controller
     private function format(SecretVaultEntry $entry): array
     {
         return [
-            'ref' => null,             // unknowable: only its hash is stored
+            // The handle a listing can act on. A request entry's ref is
+            // unknowable (only its hash is stored) and a re-mint rotates a
+            // global's, so without this a listed entry could be read about
+            // and never deleted.
+            'id' => $entry->id,
+            // A global's ref is not a secret at all: it is the type.
+            'ref' => $entry->isGlobal() ? RequestVault::GLOBAL_REF . ':' . $entry->type : null,
             'type' => $entry->type,
+            'scope' => $entry->scope,
+            // Why it was asked for. The one field that tells two entries of
+            // the same type apart, since the secret is never readable.
+            'purpose' => $entry->purpose,
+            'verify_with' => $entry->verify_with,
+            'verification' => $entry->verification,
             'status' => $entry->status(),
             'used_count' => $entry->use_count,
             'last_used_at' => $entry->last_used_at?->toIso8601String(),
             'created_at' => $entry->created_at?->toIso8601String(),
-            'expires_at' => $entry->expires_at->toIso8601String(),
+            'expires_at' => $entry->expires_at?->toIso8601String(),
+            // When the paste form closes, which for a global is the only
+            // clock there is.
+            'url_expires_at' => $entry->link_expires_at?->toIso8601String(),
         ];
     }
 }

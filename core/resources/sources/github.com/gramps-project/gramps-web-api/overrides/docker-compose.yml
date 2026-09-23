@@ -1,0 +1,155 @@
+# The stack for Gramps Web, rewritten from the project's own docs compose for a
+# single hosting account. Everything runs from the published all-in-one image
+# ghcr.io/gramps-project/grampsweb (API + compiled frontend + Gramps runtime),
+# not from this checkout: this repository's Dockerfile builds only the API half
+# on top of gramps-web-base and leaves /app/static as an empty index.html, so a
+# build here would serve JSON with no web UI. The image's own entrypoint runs
+# the user-DB migration before gunicorn; the base image already points every
+# data path at /app (users, media, indexdir, secret) and the tree DB at
+# /root/.gramps/grampsdb, so the volumes below are simply those paths.
+services:
+  grampsweb_redis:
+    # Celery's broker and result backend. src/gramps_webapi wires the queue off
+    # CELERY_CONFIG, and without a reachable broker the worker cannot run the
+    # background tasks (search reindex, media, exports). Pure broker: no volume,
+    # append-only off -- the tree, not the queue, is the state that must survive.
+    image: docker.io/library/redis:7.2-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    mem_limit: 128m
+
+  # One-shot: create the owner account before anything serves, only when the
+  # user DB is empty, then exit 0. Gramps Web has no owner until one is made and
+  # registration is disabled below, so this is the only account the site starts
+  # with. init.sh is idempotent, so a redeploy re-runs it and leaves the
+  # existing owner (and any users it created) untouched. Something waits on it
+  # to *complete* and nothing waits on it to *run*, so the engine's
+  # OneShotServices treats it as a job, not a crash loop.
+  grampsweb_init:
+    image: ${GRAMPSWEB_IMAGE:-ghcr.io/gramps-project/grampsweb:latest}
+    restart: "no"
+    env_file:
+      - ../.panelalpha/gramps/gramps.env
+    environment:
+      GRAMPSWEB_TREE: ${GRAMPSWEB_TREE:-Gramps Web}
+      GRAMPSWEB_REGISTRATION_DISABLED: "true"
+    volumes:
+      - gramps_users:/app/users
+      - gramps_db:/root/.gramps/grampsdb
+      - gramps_media:/app/media
+      - gramps_index:/app/indexdir
+      - gramps_secret:/app/secret
+      - ./panelalpha/gramps/init.sh:/init.sh:ro
+    entrypoint: ["/bin/sh", "/init.sh"]
+    depends_on:
+      grampsweb_redis:
+        condition: service_healthy
+    mem_limit: 1024m
+
+  grampsweb:
+    image: ${GRAMPSWEB_IMAGE:-ghcr.io/gramps-project/grampsweb:latest}
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      # GRAMPSWEB_SECRET_KEY + the owner credentials, written once by
+      # hooks/prepare.sh into ~/.panelalpha/gramps/ (../ from ~/project) and
+      # never regenerated.
+      - ../.panelalpha/gramps/gramps.env
+    environment:
+      GRAMPSWEB_TREE: ${GRAMPSWEB_TREE:-Gramps Web}
+      # Bare http://localhost/ under a *_URL key: ComposePlaceholders rewrites
+      # it to this account's public https URL before the stack starts. Gramps
+      # Web needs it for the absolute links the frontend builds.
+      GRAMPSWEB_BASE_URL: http://localhost/
+      # No open sign-up: the owner is seeded by grampsweb_init and everyone else
+      # is invited by the owner. Left on (the app default), anyone could create
+      # an account against a private family tree.
+      GRAMPSWEB_REGISTRATION_DISABLED: "true"
+      GRAMPSWEB_CELERY_CONFIG__broker_url: redis://grampsweb_redis:6379/0
+      GRAMPSWEB_CELERY_CONFIG__result_backend: redis://grampsweb_redis:6379/0
+      # The image default is 8 gunicorn workers, sized for a dedicated host; two
+      # is right for one account's slice.
+      GUNICORN_NUM_WORKERS: "2"
+    volumes:
+      - gramps_users:/app/users
+      - gramps_db:/root/.gramps/grampsdb
+      - gramps_media:/app/media
+      - gramps_index:/app/indexdir
+      - gramps_secret:/app/secret
+      - gramps_thumb_cache:/app/thumbnail_cache
+      - gramps_cache:/app/cache
+      - gramps_tmp:/tmp
+    depends_on:
+      grampsweb_redis:
+        condition: service_healthy
+      grampsweb_init:
+        condition: service_completed_successfully
+    healthcheck:
+      # wget is in the base image; curl is not. `/` is the frontend index and
+      # answers 200 without auth once gunicorn is up.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:5000/"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    mem_limit: 2048m
+
+  # The Celery worker: same image, same volumes (it reads and writes the tree,
+  # media and index), the worker command instead of gunicorn.
+  grampsweb_celery:
+    image: ${GRAMPSWEB_IMAGE:-ghcr.io/gramps-project/grampsweb:latest}
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/gramps/gramps.env
+    environment:
+      GRAMPSWEB_TREE: ${GRAMPSWEB_TREE:-Gramps Web}
+      GRAMPSWEB_REGISTRATION_DISABLED: "true"
+      GRAMPSWEB_CELERY_CONFIG__broker_url: redis://grampsweb_redis:6379/0
+      GRAMPSWEB_CELERY_CONFIG__result_backend: redis://grampsweb_redis:6379/0
+    volumes:
+      - gramps_users:/app/users
+      - gramps_db:/root/.gramps/grampsdb
+      - gramps_media:/app/media
+      - gramps_index:/app/indexdir
+      - gramps_secret:/app/secret
+      - gramps_thumb_cache:/app/thumbnail_cache
+      - gramps_cache:/app/cache
+      - gramps_tmp:/tmp
+    command: ["celery", "-A", "gramps_webapi.celery", "worker", "--loglevel", "INFO", "--concurrency", "1"]
+    depends_on:
+      grampsweb_redis:
+        condition: service_healthy
+      grampsweb_init:
+        condition: service_completed_successfully
+    mem_limit: 1024m
+
+  # Does nothing and exits 0. `docker compose up -d` returns once containers are
+  # started, not once Gramps answers -- and first boot migrates the user DB,
+  # creates the tree and warms caches. A service that waits on the web
+  # healthcheck makes `up -d` block until the site is really serving. Uses the
+  # redis image so nothing extra is pulled.
+  ready:
+    image: docker.io/library/redis:7.2-alpine
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      grampsweb:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  gramps_users: {}
+  gramps_db: {}
+  gramps_media: {}
+  gramps_index: {}
+  gramps_secret: {}
+  gramps_thumb_cache: {}
+  gramps_cache: {}
+  gramps_tmp: {}

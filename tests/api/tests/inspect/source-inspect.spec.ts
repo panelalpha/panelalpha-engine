@@ -1,11 +1,13 @@
 import { expect, test } from '@/fixtures/test-options';
 import { inspectReportResponseSchema } from '@/schemas';
-import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
-import { configuredGitRepo } from '@/helpers/deploy-helpers';
+import { Timeouts } from '@/config/timeouts';
+import { configuredGitRepo, DEFAULT_DEPLOY_GIT_REPO } from '@/helpers/deploy-helpers';
+import { getDomainBasePath } from '@/helpers/file-path-helpers';
+import { inspectPlatform, inspectStrategy } from '@/helpers/inspect-helpers';
 import { uniqueId } from '@/helpers/random';
 import { skipUnless } from '@/helpers/test-helpers';
-import { getDomainBasePath } from '@/helpers/file-path-helpers';
-import { Timeouts } from '@/config/timeouts';
+import { validateParsedApiResponse } from '@/helpers/validate-parsed-response';
+import { wpCliUnavailableReason, wpPath } from '@/helpers/wpcli-helpers';
 
 test.describe('source inspect', () => {
   test('inspecting without a token is refused', async ({ anonymousRequest }) => {
@@ -117,5 +119,53 @@ test.describe('source inspect', () => {
     if (Array.isArray(names)) {
       expect(names).toContain('PA_TEST_SECRET');
     }
+  });
+});
+
+test.describe('source inspect of known instance kinds', () => {
+  test('the default public git fixture inspects as static', async ({ api }) => {
+    test.setTimeout(Timeouts.deploy);
+    test.skip(
+      configuredGitRepo() !== DEFAULT_DEPLOY_GIT_REPO,
+      'GIT_REPO is overridden; this assertion is for Spoon-Knife.'
+    );
+    const report = await api.inspectSource({ source: DEFAULT_DEPLOY_GIT_REPO, type: 'git' });
+    expect(inspectPlatform(report)).toBe('static');
+    expect(inspectStrategy(report)).toBe('static');
+  });
+
+  test('the shared classic WordPress account inspects as wordpress', async ({ api, setupUser }) => {
+    const reason = await wpCliUnavailableReason(api, setupUser);
+    test.skip(Boolean(reason), reason ?? '');
+
+    const relative = setupUser.wpPath.replace(new RegExp(`^/home/${setupUser.username}/`), '');
+    skipUnless(
+      relative && relative !== setupUser.wpPath,
+      'WordPress path is not under the account home.'
+    );
+
+    const inspected = await api.inspectSourceRaw({
+      source: setupUser.username,
+      type: 'project',
+      subdirectory: relative,
+    });
+    expect(inspected.status).toBe(200);
+    expect(inspectPlatform(inspected.body)).toBe('wordpress');
+    expect(inspectStrategy(inspected.body)).toBe('php');
+  });
+
+  test('WP-CLI reports the shared account as an installed WordPress', async ({
+    api,
+    setupUser,
+  }) => {
+    const reason = await wpCliUnavailableReason(api, setupUser);
+    test.skip(Boolean(reason), reason ?? '');
+
+    const installed = await api.executeWpCliCommand(setupUser.username, [
+      'core',
+      'is-installed',
+      wpPath(setupUser),
+    ]);
+    expect(installed.exit_code).toBe(0);
   });
 });

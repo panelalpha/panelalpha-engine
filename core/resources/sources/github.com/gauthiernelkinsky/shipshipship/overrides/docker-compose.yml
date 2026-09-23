@@ -1,0 +1,29 @@
+# Replaces the repo's build-from-source compose with the official Docker Hub
+# image. Secrets come from ~/project/.env (written by hooks/prepare.sh from the
+# persisted ~/.panelalpha/shipshipship/secrets.env). The :- defaults are
+# non-empty so a missing .env can never leave the admin creds blank, which is
+# what would put the app into anonymous-write "demo mode".
+services:
+  shipshipship:
+    image: nelkinsky/shipshipship:latest
+    restart: unless-stopped
+    environment:
+      GIN_MODE: release
+      PORT: "8080"
+      DB_PATH: /app/data/changelog.db
+      ADMIN_USERNAME: ${SSS_ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${SSS_ADMIN_PASSWORD:-shipshipship-locked}
+      JWT_SECRET: ${SSS_JWT_SECRET:-shipshipship-locked}
+      # Rewritten to the real public origin by the engine; used only for
+      # newsletter unsubscribe links.
+      BASE_URL: http://localhost:8080
+    # Publishes 8080 onto the account container so the engine's proxy, which
+    # routes the domain to <account>:8080, can reach it. Inside the account's
+    # nested Docker this binds the account container's netns, not the real host.
+    ports:
+      - "8080:8080"
+    volumes:
+      - shipshipship_data:/app/data
+
+volumes:
+  shipshipship_data:

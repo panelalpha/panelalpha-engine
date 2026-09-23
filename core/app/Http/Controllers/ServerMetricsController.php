@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Carbon\CarbonPeriod;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -10,6 +11,14 @@ use OpenApi\Attributes as OA;
 
 class ServerMetricsController extends Controller
 {
+    /** @var list<string> */
+    private const BUCKET_METRICS = [
+        'cpu_percent', 'cpu_load_avg_1', 'cpu_load_avg_5', 'cpu_load_avg_15',
+        'ram_percent', 'swap_percent', 'disk_read_bps', 'disk_write_bps',
+        'disk_read_iops', 'disk_write_iops', 'net_in_bps', 'net_out_bps',
+        'net_in_pps', 'net_out_pps',
+    ];
+
     #[OA\Get(
         path: '/metrics/current',
         summary: 'Get current server metrics',
@@ -81,25 +90,25 @@ class ServerMetricsController extends Controller
     )]
     public function lastHourAverages(): JsonResponse
     {
-        $query = <<<SQL
-SELECT
-  AVG(cpu_percent) AS avg_cpu_percent,
-  AVG(ram_percent) AS avg_ram_percent
-FROM server_metrics
-WHERE timestamp >= NOW() - INTERVAL 1 HOUR;
-SQL;
-        /** 
-         * @var non-empty-array<object{
-         *   avg_cpu_percent: float,
-         *   avg_ram_percent: float,
-         * }>
-         */
-        $results = DB::select($query);
+        /** @var object{avg_cpu_percent: ?float, avg_ram_percent: ?float} $result */
+        $result = $this->lastHourAveragesQuery()->first();
 
         return new JsonResponse(['data' => [
-            'avg_cpu_percent' => $results[0]->avg_cpu_percent,
-            'avg_ram_percent' => $results[0]->avg_ram_percent,
+            'avg_cpu_percent' => $result->avg_cpu_percent,
+            'avg_ram_percent' => $result->avg_ram_percent,
         ]]);
+    }
+
+    // split out from lastHourAverages() so tests can inspect the built SQL
+    // (via ->toSql()) without running it against a live driver
+    private function lastHourAveragesQuery(): Builder
+    {
+        // bind the cutoff instead of NOW() - INTERVAL so this works on sqlite too
+        $since = Carbon::now('UTC')->subHour()->format('Y-m-d H:i:s');
+
+        return DB::table('server_metrics')
+            ->where('timestamp', '>=', $since)
+            ->selectRaw('AVG(cpu_percent) AS avg_cpu_percent, AVG(ram_percent) AS avg_ram_percent');
     }
 
     #[OA\Get(
@@ -168,58 +177,27 @@ SQL;
 
     private function buildMetricsResponse(Carbon $start, Carbon $end, int $bucketSeconds): JsonResponse
     {
-        $query = <<<SQL
-SELECT 
-  FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(`timestamp`) / ?) * ?) AS bucket_time,
-  ROUND(AVG(cpu_percent), 2) AS cpu_percent,
-  ROUND(AVG(cpu_load_avg_1), 2) AS cpu_load_avg_1,
-  ROUND(AVG(cpu_load_avg_5), 2) AS cpu_load_avg_5,
-  ROUND(AVG(cpu_load_avg_15), 2) AS cpu_load_avg_15,
-  ROUND(AVG(ram_percent), 2) AS ram_percent,
-  ROUND(AVG(swap_percent), 2) AS swap_percent,
-  ROUND(AVG(disk_read_bps), 2) AS disk_read_bps,
-  ROUND(AVG(disk_write_bps), 2) AS disk_write_bps,
-  ROUND(AVG(disk_read_iops), 2) AS disk_read_iops,
-  ROUND(AVG(disk_write_iops), 2) AS disk_write_iops,
-  ROUND(AVG(net_in_bps), 2) AS net_in_bps,
-  ROUND(AVG(net_out_bps), 2) AS net_out_bps,
-  ROUND(AVG(net_in_pps), 2) AS net_in_pps,
-  ROUND(AVG(net_out_pps), 2) AS net_out_pps
-FROM server_metrics
-WHERE `timestamp` >= ?
-GROUP BY bucket_time
-SQL;
+        // plain select + PHP-side bucketing instead of FROM_UNIXTIME/UNIX_TIMESTAMP
+        // (MySQL-only): portable across drivers, and the WHERE already bounds the
+        // row count to this window, so grouping in PHP is cheap.
+        $rows = $this->rawMetricsQuery($start)->get();
 
-        /** 
-         * @var array<object{
-         *   bucket_time: string,
-         *   ...
-         * }>
-         */
-        $results = DB::select($query, [
-            $bucketSeconds,
-            $bucketSeconds,
-            $start->format('Y-m-d H:i:s'),
-        ]);
+        $sums = [];
+        $counts = [];
+        foreach ($rows as $row) {
+            $bucketTimestamp = (int)floor(Carbon::parse($row->timestamp, 'UTC')->timestamp / $bucketSeconds) * $bucketSeconds;
+            $bucketKey = Carbon::createFromTimestampUTC($bucketTimestamp)->format('Y-m-d H:i:s');
+            $counts[$bucketKey] = ($counts[$bucketKey] ?? 0) + 1;
+            foreach (self::BUCKET_METRICS as $metric) {
+                $sums[$bucketKey][$metric] = ($sums[$bucketKey][$metric] ?? 0) + (float)$row->$metric;
+            }
+        }
 
         $dataByPeriod = [];
-        foreach ($results as $row) {
-            $dataByPeriod[$row->bucket_time] = [
-                "cpu_percent" => (float)$row->cpu_percent,
-                "cpu_load_avg_1" => (float)$row->cpu_load_avg_1,
-                "cpu_load_avg_5" => (float)$row->cpu_load_avg_5,
-                "cpu_load_avg_15" => (float)$row->cpu_load_avg_15,
-                "ram_percent" => (float)$row->ram_percent,
-                "swap_percent" => (float)$row->swap_percent,
-                "disk_read_bps" => (float)$row->disk_read_bps,
-                "disk_write_bps" => (float)$row->disk_write_bps,
-                "disk_read_iops" => (float)$row->disk_read_iops,
-                "disk_write_iops" => (float)$row->disk_write_iops,
-                "net_in_bps" => (float)$row->net_in_bps,
-                "net_out_bps" => (float)$row->net_out_bps,
-                "net_in_pps" => (float)$row->net_in_pps,
-                "net_out_pps" => (float)$row->net_out_pps,
-            ];
+        foreach ($sums as $bucketKey => $metricSums) {
+            foreach (self::BUCKET_METRICS as $metric) {
+                $dataByPeriod[$bucketKey][$metric] = round($metricSums[$metric] / $counts[$bucketKey], 2);
+            }
         }
 
         $format = 'Y-m-d H:i:s';
@@ -239,5 +217,14 @@ SQL;
         }
 
         return new JsonResponse(['data' => $data]);
+    }
+
+    // split out from buildMetricsResponse() so tests can inspect the built SQL
+    // (via ->toSql()) without running it against a live driver
+    private function rawMetricsQuery(Carbon $start): Builder
+    {
+        return DB::table('server_metrics')
+            ->select(array_merge(['timestamp'], self::BUCKET_METRICS))
+            ->where('timestamp', '>=', $start->format('Y-m-d H:i:s'));
     }
 }

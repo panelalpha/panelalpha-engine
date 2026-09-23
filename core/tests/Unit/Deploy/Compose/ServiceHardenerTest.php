@@ -163,7 +163,7 @@ class ServiceHardenerTest extends TestCase
         $this->assertSame('512M', $service['mem_limit']);
         $this->assertSame('256M', $service['mem_reservation']);
         $this->assertSame('0.5', $service['cpus']);
-        $this->assertSame(256, $service['pids_limit']);
+        $this->assertSame(1024, $service['pids_limit']);
     }
 
     public function test_a_deploy_block_with_nothing_left_in_it_is_removed(): void
@@ -179,14 +179,17 @@ class ServiceHardenerTest extends TestCase
     public function test_every_service_gets_a_process_limit(): void
     {
         // The fork-bomb cap. Nothing else in the account bounds process count.
-        $this->assertSame(256, ServiceHardener::harden('app', ['image' => 'acme/app'])['pids_limit']);
+        // 1024, not 256: the lower cap starved multi-daemon images (engine#220).
+        $this->assertSame(1024, ServiceHardener::harden('app', ['image' => 'acme/app'])['pids_limit']);
     }
 
     public function test_a_process_limit_the_project_set_is_respected(): void
     {
-        $service = ServiceHardener::harden('app', ['image' => 'acme/app', 'pids_limit' => 1024]);
+        // A value distinct from the default, so this proves preservation, not
+        // that both happen to be 1024.
+        $service = ServiceHardener::harden('app', ['image' => 'acme/app', 'pids_limit' => 4096]);
 
-        $this->assertSame(1024, $service['pids_limit']);
+        $this->assertSame(4096, $service['pids_limit']);
     }
 
     public function test_cpu_shares_are_capped_lower_for_a_database(): void

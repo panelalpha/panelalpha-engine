@@ -123,6 +123,10 @@ return [
 
     'key' => env('APP_KEY'),
 
+    // This install's identity to Connect and monitoring, sent as
+    // X-Engine-App-UID. Written once by the installer; see .env-core.example.
+    'uid' => env('APP_UID'),
+
     'cipher' => 'AES-256-CBC',
 
     /*
@@ -193,7 +197,6 @@ return [
         App\Providers\AuthServiceProvider::class,
         // App\Providers\BroadcastServiceProvider::class,
         App\Providers\EventServiceProvider::class,
-        App\Providers\HorizonServiceProvider::class,
         App\Providers\RouteServiceProvider::class,
 
         /**

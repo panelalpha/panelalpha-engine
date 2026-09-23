@@ -29,7 +29,9 @@ class DeployFailureExplainer
 
         foreach (self::rules() as $rule => [$pattern, $build]) {
             if (preg_match($pattern, $output, $m) === 1) {
-                $sentence = $build($m);
+                // The whole output is passed too, so a rule that needs context
+                // beyond its own match (base-image-unavailable) can see it.
+                $sentence = $build($m, $output);
                 if ($sentence !== null) {
                     return ['rule' => $rule, 'message' => $sentence];
                 }
@@ -55,7 +57,28 @@ class DeployFailureExplainer
     }
 
     /**
-     * @return array<string, array{0: string, 1: callable(array<int|string, string>): ?string}>
+     * Whether $output shows the compose building the image $ref locally. Docker
+     * compose pulls an image a sibling service builds before building it (the
+     * local-tag pattern that sidesteps engine#229), and that pull's `failed to
+     * resolve reference ... not found` is benign, not a missing base image.
+     * BuildKit tags what it builds with `naming to <ref>`, so that line for the
+     * same repository is the signal the tag was produced here, not fetched.
+     */
+    private static function tagBuiltLocally(string $output, string $ref): bool
+    {
+        $ref = trim($ref, "\"' ");
+        // Bare repository name: drop any registry/namespace and the tag/digest.
+        $repo = (string) preg_replace('#^(?:[^/\s]+/)*#', '', $ref);
+        $repo = preg_split('/[:@\s]/', $repo)[0] ?? '';
+        if ($repo === '') {
+            return false;
+        }
+
+        return preg_match('/naming to \S*' . preg_quote($repo, '/') . '\b/i', $output) === 1;
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: callable(array<int|string, string>, string): ?string}>
      */
     private static function rules(): array
     {
@@ -256,15 +279,63 @@ class DeployFailureExplainer
                     'Docker Hub temporarily refused further downloads because of its rate limit. Try again in a few minutes.',
             ],
 
+            // The image exists but a layer arrived corrupted (seen when the host's registry
+            // mirror filled its disk and served a truncated blob). Above base-image-unavailable.
+            'layer-digest-mismatch' => [
+                '/unexpected commit digest/i',
+                static fn (): string =>
+                    'A downloaded image layer arrived corrupted — the host or its registry mirror '
+                        . 'delivered a damaged copy. This is a problem on the host, not in the project; '
+                        . 'retrying the deploy usually works.',
+            ],
+
+            // `docker compose up` failures, ranked above base-image-unavailable: when a
+            // compose builds the app image locally and a sibling references that tag, compose
+            // first tries to PULL it, prints a benign `failed to resolve reference ... not
+            // found`, then builds it. A real failure that follows (an entrypoint that is not
+            // there, a one-shot exiting non-zero) is the true cause and must win over that
+            // noise. Confirmed on Bitpoll (init exit 1) and Limbas (missing entrypoint).
+            'container-entrypoint-missing' => [
+                '/exec:\s*"?([^"\n:]+)"?:\s*executable file not found/i',
+                static fn (array $m): string =>
+                    "The application's container could not start: its entrypoint ({$m[1]}) was not "
+                        . 'found in the image. The full output is in the deploy log.',
+            ],
+            'container-start-failed' => [
+                '/(?:dependency failed to start:[^\n]*?exited \((\d+)\)'
+                    . '|service "[^"]+" didn.?t complete successfully:? (?:exit|exit code) (\d+)'
+                    . '|\bcontainer \S+ exited \((\d+)\))/i',
+                static function (array $m): ?string {
+                    $code = ($m[1] ?? '') ?: (($m[2] ?? '') ?: ($m[3] ?? ''));
+                    // Exit 0 is a one-shot that finished; 137 is a kill the out-of-memory
+                    // rule above already owns. Neither is this rule's failure.
+                    if ($code === '' || $code === '0' || $code === '137') {
+                        return null;
+                    }
+
+                    return "A container this project runs exited with code {$code} before the "
+                        . 'application came up. The full output is in the deploy log.';
+                },
+            ],
+
             // BuildKit's wording when it cannot reach the registry at all: a pruned patch tag
             // answers `not found` on its own, and a Dockerfile built for someone else's CI
-            // names a registry that is not there.
+            // names a registry that is not there. The `failed to resolve reference` branch is
+            // the ambiguous one: it is also the benign compose pull of a locally-built tag, so
+            // a ref this same log then builds (see tagBuiltLocally) is not a missing base image.
             'base-image-unavailable' => [
-                '/(manifest unknown|manifest for \S+ not found|pull access denied'
-                    . '|failed to resolve source metadata|failed to resolve reference|failed to do request)/i',
-                static fn (array $m): string =>
-                    'A base image this project asks for could not be downloaded — it may not exist, '
-                        . 'may be private, or its registry may be unreachable from here.',
+                '/(?:manifest unknown|manifest for \S+ not found|pull access denied'
+                    . '|failed to resolve source metadata|failed to do request'
+                    . '|failed to resolve reference (?:"([^"\n]+)"|(\S+)))/i',
+                static function (array $m, string $output = ''): ?string {
+                    $ref = ($m[1] ?? '') !== '' ? $m[1] : ($m[2] ?? '');
+                    if ($ref !== '' && self::tagBuiltLocally($output, $ref)) {
+                        return null;
+                    }
+
+                    return 'A base image this project asks for could not be downloaded — it may not exist, '
+                        . 'may be private, or its registry may be unreachable from here.';
+                },
             ],
 
             // node-gyp needs a Python interpreter and a C toolchain the slim Node images do
@@ -327,11 +398,21 @@ class DeployFailureExplainer
                     'The project\'s dependencies conflict with each other and could not be installed.',
             ],
 
+            // npm's own wording is the one that reads least like the truth:
+            // `npm error syscall spawn git` names a dependency problem, not a missing
+            // binary, and says nothing about the image the build runs in. The host-compile
+            // path picks that image from what the project declares -- see
+            // NodeRuntime::needsGitBinary() -- so when the declaration misses, this is the
+            // only place the reader can be told what actually happened.
             'git-binary-missing' => [
-                '/Executable not found in \$PATH:\s*["\']git["\']/i',
+                '/(Executable not found in \$PATH:\s*["\']git["\']|syscall spawn git'
+                    . '|git dep preparation failed|git: (command )?not found)/i',
                 static fn (): string =>
-                    'The build needs the git binary (often content-collections or similar calling `git log`). '
-                        . 'Hosting images now install git during the framework build — try deploying again.',
+                    'This build needs the git binary and the image it ran in has none. '
+                        . 'The build image is chosen from what the project declares — a git call written '
+                        . 'as `git <subcommand>`, or a dependency that resolves to a git URL — so try '
+                        . 'again after an engine update, or name an image that carries git in a '
+                        . 'panelalpha.yaml.',
             ],
 
             'prepare-script-failed' => [

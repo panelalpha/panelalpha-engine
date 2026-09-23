@@ -42,4 +42,32 @@ export class PhpApi extends DomainsApi {
     });
     await this.assertStatus(response, 204);
   }
+
+  async getDomainPhpDirectives(domain: string): Promise<ApiResponse<Record<string, string>>> {
+    const response = await this.api.get(`domains/${encodeURIComponent(domain)}/php-directives`);
+    await this.assertStatus(response, 200);
+    return response.json();
+  }
+
+  async getDomainPhpDirectivesRaw(domain: string): Promise<{ status: number; body: unknown }> {
+    const response = await this.api.get(`domains/${encodeURIComponent(domain)}/php-directives`);
+    return this.rawCall(response);
+  }
+
+  async setDomainPhpDirectives(domain: string, settings: Record<string, string>): Promise<void> {
+    const response = await this.api.put(`domains/${encodeURIComponent(domain)}/php-directives`, {
+      data: { settings },
+    });
+    await this.assertStatus(response, 204);
+  }
+
+  async setDomainPhpDirectivesRaw(
+    domain: string,
+    settings: Record<string, string> | Record<string, unknown>
+  ): Promise<{ status: number; body: unknown }> {
+    const response = await this.api.put(`domains/${encodeURIComponent(domain)}/php-directives`, {
+      data: { settings },
+    });
+    return this.rawCall(response);
+  }
 }

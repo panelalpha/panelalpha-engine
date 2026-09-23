@@ -5,6 +5,8 @@ namespace App\System;
 use App\Lib\Deploy\DetectAppPort;
 use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
+use App\System\Project\Dind;
+use App\System\Project\Dind\Paths;
 
 class Projects
 {
@@ -115,7 +117,7 @@ class Projects
 
             $toProject->fixPermissions();
 
-            if ($to->hasGitProject() || $to->getTemplate() === 'dind') {
+            if (($to->hasGitProject() || $to->getTemplate() === 'dind') && $toProject->hasUserApp()) {
                 $start = $toProject->startUserApp();
                 if (($start['exit_code'] ?? 1) !== 0) {
                     $output = trim(($start['stderr'] ?? '') . ' ' . ($start['stdout'] ?? ''));
@@ -230,7 +232,7 @@ class Projects
             $destProject->syncGeneratedProxyRules();
             $this->system->project($dest)->domain($domainModel)->create();
 
-            if ($dest->hasGitProject() || $dest->getTemplate() === 'dind') {
+            if (($dest->hasGitProject() || $dest->getTemplate() === 'dind') && $destProject->hasUserApp()) {
                 $result = $destProject->startUserApp();
                 if (($result['exit_code'] ?? 1) !== 0) {
                     $output = trim(($result['stderr'] ?? '') . ' ' . ($result['stdout'] ?? ''));
@@ -240,10 +242,8 @@ class Projects
                 }
             }
 
-            $dest->setDetails([
-                'error'             => null,
-                'deployment_status' => 'success',
-            ]);
+            $dest->markDeploySucceeded();
+            $dest->setDetails(['error' => null]);
             if ($asStaging) {
                 $dest->status = 'active';
                 $dest->mergeAsyncStatus(['staging' => 'completed']);
@@ -448,21 +448,22 @@ class Projects
 
     private function detectAppPort(Project $project): ?int
     {
-        $projectDir = rtrim($project->homeDirPath(), '/') . '/project';
-        foreach (['compose.yaml', 'compose.yml', 'docker-compose.yml', 'docker-compose.yaml'] as $candidate) {
-            $path = $projectDir . '/' . $candidate;
-            if (!is_file($path)) {
-                continue;
-            }
-            $ports = DetectAppPort::detectAllPorts($path);
-            if (!empty($ports['primary'])) {
-                return (int) $ports['primary'];
-            }
-
-            return DetectAppPort::detectPrimaryPort($path);
+        $runtime = $project->runtime();
+        if (!$runtime instanceof Dind) {
+            return null;
         }
 
-        return null;
+        $path = (new Paths($runtime))->composeFileForPorts();
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $ports = DetectAppPort::detectAllPorts($path);
+        if (!empty($ports['primary'])) {
+            return (int) $ports['primary'];
+        }
+
+        return DetectAppPort::detectPrimaryPort($path);
     }
 
     private function resumeBoth(Project $fromProject, Project $toProject): void

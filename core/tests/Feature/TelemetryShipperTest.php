@@ -6,6 +6,7 @@ use App\Lib\Deploy\Telemetry\DeployReport;
 use App\Lib\Deploy\Telemetry\Spool;
 use App\Lib\Deploy\Telemetry\Telemetry;
 use App\Lib\Deploy\Telemetry\TelemetryShipper;
+use App\Models\Setting;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -84,7 +85,7 @@ class TelemetryShipperTest extends TestCase
         $this->assertSame(1, $this->pendingCount(), 'a disabled shipper must not drain the spool');
     }
 
-    public function test_it_refuses_to_ship_without_a_hub(): void
+    public function test_it_refuses_to_ship_without_a_monitoring_host(): void
     {
         config(['monitoring.url' => '']);
         $this->queue();
@@ -95,7 +96,7 @@ class TelemetryShipperTest extends TestCase
         $this->assertSame(1, $this->pendingCount());
     }
 
-    public function test_the_batch_goes_to_the_hub_plus_the_configured_route(): void
+    public function test_the_batch_goes_to_monitoring_plus_the_configured_route(): void
     {
         $this->queue();
         Http::fake(['*' => Http::response(['accepted' => 1], 200)]);
@@ -105,9 +106,23 @@ class TelemetryShipperTest extends TestCase
         Http::assertSent(fn ($request): bool => $request->url() === 'https://monitoring.test/api/v1/events');
     }
 
-    public function test_a_hub_with_a_trailing_slash_does_not_double_it(): void
+    public function test_the_batch_carries_the_app_uid_header(): void
     {
-        config(['hub.url' => 'https://hub.test/']);
+        config(['app.uid' => 'install-42']);
+        // runtime settings keep this one off the database
+        Setting::setRuntimeSettings(['telemetry_enabled' => null, 'license_key' => '']);
+        $this->queue();
+        Http::fake(['*' => Http::response(['accepted' => 1], 200)]);
+
+        (new TelemetryShipper())->ship();
+
+        Http::assertSent(fn ($request): bool => $request->header('X-Engine-App-UID') === ['install-42']);
+        Setting::clearRuntimeSettings();
+    }
+
+    public function test_a_connect_url_with_a_trailing_slash_does_not_move_reports(): void
+    {
+        config(['connect.url' => 'https://connect.test/']);
         $this->queue();
         Http::fake(['*' => Http::response(['accepted' => 1], 200)]);
 
@@ -278,10 +293,10 @@ class TelemetryShipperTest extends TestCase
     }
 
     /**
-     * The case the hub creates today: every other route is live, the reports
+     * The case monitoring creates today: every other route is live, the reports
      * one is not built yet, so it answers 405. That is not a verdict on the
      * payload, and treating it as one would empty every spool in the fleet on
-     * the first cron run after the hub became reachable.
+     * the first cron run after monitoring became reachable.
      */
     public function test_a_missing_ingest_route_is_kept_not_dropped(): void
     {
@@ -299,12 +314,12 @@ class TelemetryShipperTest extends TestCase
     }
 
     /**
-     * The case the default hub creates until it serves: nothing answers, ever.
+     * The case the default monitoring host creates until it serves: nothing answers, ever.
      *
      * A counted failure would empty the spool after Spool::MAX_ATTEMPTS, so an
-     * engine pointed at a hub that does not resolve yet would destroy every
+     * engine pointed at a monitoring host that does not resolve yet would destroy every
      * report it took. A deferral backs off instead, and the reports survive to
-     * be sent the day the hub answers.
+     * be sent the day monitoring answers.
      */
     public function test_an_ingest_that_never_answers_never_drops_a_report(): void
     {
@@ -323,7 +338,7 @@ class TelemetryShipperTest extends TestCase
             $this->assertSame(0, $result['dropped']);
         }
 
-        $this->assertSame(1, $this->pendingCount(), 'a hub that never answers must not cost a report');
+        $this->assertSame(1, $this->pendingCount(), 'a monitoring host that never answers must not cost a report');
     }
 
     /** Pretend the backoff for every queued report has elapsed. */

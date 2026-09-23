@@ -1,0 +1,101 @@
+# Compose-replace on the official Docker Hub image orhunp/rustypaste, pinned to
+# the current stable release. Upstream's own docker-compose.yml is the bare
+# `image + build + two bind-mounts` example; this override is that same single
+# container plus what a hosted, secured deploy needs: the upload auth token fed
+# in from a redeploy-surviving store, a real config file (the FROM-scratch image
+# ships none and the binary panics without one), the public origin filled in at
+# deploy time, and the upload dir on a named volume so pastes survive a rebuild.
+# Pulling a Docker Hub image (not building) keeps detection on `compose` and
+# sidesteps engine#229 (image-seed NotFound is the GHCR case, not Hub).
+#
+# SECURITY: the upload endpoint (POST /) is world-writable unless a token is set
+# (config.rs). AUTH_TOKEN (generated once by hooks/prepare.sh, kept in
+# ~/.panelalpha) is merged into the server token set, so only the owner can
+# upload and no stranger can fill the account's disk. Reading a paste by its URL
+# stays public -- that is the point of a pastebin. expose_version/expose_list are
+# off in config.toml so neither the version nor the file list leaks.
+services:
+  # The image is FROM scratch and runs as uid 1000; a fresh named volume is
+  # root-owned, so uid 1000 could not create files under /app/upload. This
+  # one-shot fixes the volume's ownership before the app starts, keeping the app
+  # itself as the non-root uid the image ships. Harmless if already owned.
+  upload-init:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "mkdir -p /upload && chown -R 1000:1000 /upload"]
+    volumes:
+      - rustypaste_upload:/upload
+    mem_limit: 64m
+
+  server:
+    # Latest published stable release, pinned (not :latest) so a redeploy is
+    # reproducible. Official Docker Hub image, pulled not built.
+    image: docker.io/orhunp/rustypaste:0.18.1
+    restart: unless-stopped
+    depends_on:
+      upload-init:
+        condition: service_completed_successfully
+    env_file:
+      # Account env_vars merged in by the platform (touched by prepare.sh so
+      # `up` never aborts on a missing file), then the generated tokens.
+      # AUTH_TOKEN / DELETE_TOKEN come from here, NOT from `environment:`, so they
+      # never appear in the recipe and are never rewritten across redeploys.
+      - .env
+      - ../.panelalpha/rustypaste/app.env
+    environment:
+      # Bind on all interfaces inside the container (config::Environment
+      # separator "__" -> server.address). Only this service publishes a port.
+      SERVER__ADDRESS: "0.0.0.0:8000"
+      # Base the app stamps onto returned paste URLs (server.url). Unknown at
+      # deploy time; left as the localhost placeholder, which the engine rewrites
+      # to the account's public https origin (key ends in _URL). On an account
+      # with no domain yet it stays localhost.
+      SERVER__URL: "http://localhost"
+    volumes:
+      # Real config file (no secret in it); the scratch image has none and the
+      # binary refuses to start without it.
+      - ./panelalpha/rustypaste/config.toml:/app/config.toml:ro
+      # Uploaded pastes. Storing files is the whole point of the app, so this
+      # MUST survive a redeploy.
+      - rustypaste_upload:/app/upload
+    # The app (landing page + upload + retrieval) listens on 8000; publish it so
+    # the engine's port scan takes it as the primary (engine#234).
+    ports:
+      - "8000:8000"
+    mem_limit: 256m
+
+  # Polls the public landing page on :8000 until it answers, then exits 0.
+  # rustypaste is FROM scratch (no shell/curl), so an external curl image probes
+  # it. GET / is public (no token needed).
+  healthgate:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      server:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 60); do
+          curl -fsS -o /dev/null "http://server:8000/" && exit 0
+          sleep 2
+        done
+        echo "rustypaste did not become ready in time" >&2
+        exit 1
+    mem_limit: 64m
+
+  # Starts nothing, exits 0, waits on the health probe. `docker compose up -d`
+  # blocks on a depends_on completion condition, so the engine reports the deploy
+  # finished only after rustypaste actually answers (engine#204).
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      healthgate:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  rustypaste_upload: {}

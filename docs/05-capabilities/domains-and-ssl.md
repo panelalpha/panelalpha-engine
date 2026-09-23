@@ -50,6 +50,20 @@ Repository deploys pick their PHP version from your `composer.json`, so this doe
 List the available PHP versions, then set shop.example.com to PHP 8.2.
 ```
 
+## PHP settings, on traditional PHP hosting
+
+The same limit applies: repository deploys do not use these. On traditional PHP hosting, each domain can have its own PHP settings, such as `memory_limit`.
+
+```text
+Show the PHP settings for shop.example.com.
+Set memory_limit to 256M on shop.example.com, and keep the other PHP settings
+that are already there.
+```
+
+Saving replaces the whole set for that domain. If you name only `memory_limit`, the other settings on that domain are removed. Asking to clear them removes the set.
+
+This is not the project's own PHP memory setting. That one belongs to the project, and WordPress in its own container uses it: [Change the PHP version](wordpress-and-apps.md#change-the-php-version).
+
 ## Extra routes
 
 The engine already sends HTTP and HTTPS for your project hostnames to the right site. A **proxy rule** is extra routing on that public webserver: send a hostname or a port to a specific destination. Most sites never need one.

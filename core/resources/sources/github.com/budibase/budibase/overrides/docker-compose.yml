@@ -1,0 +1,304 @@
+# The stack for the repository, which ships none Docker would load: every
+# compose file it has lives under hosting/ (docker-compose.yaml plus .build,
+# .dev and .redis-tls companions) or under packages/server/scripts/integrations/
+# (fixture databases for the SQL connectors). None of those is at a name compose
+# auto-loads from the project root, which is also why the engine's own sidecar
+# mining never sees them: RuntimeSidecars globs the project root only.
+#
+# Budibase runs from published images because the checkout cannot be built.
+# There are three Dockerfiles that matter -- hosting/single/Dockerfile,
+# packages/server/Dockerfile and packages/worker/Dockerfile -- and all three
+# start from artifacts that are not in the tree: `COPY packages/server/dist`,
+# `COPY packages/server/builder`, `COPY packages/server/client`,
+# `COPY packages/worker/dist`. `dist` is gitignored (packages/server/.gitignore),
+# and `builder/` and `client/` simply do not exist in a clone. Each of them also
+# ends with `RUN test -n "$BUDIBASE_VERSION"`, a build-arg nothing in a deploy
+# supplies. They are packaging steps run after a full `lerna run build` of a
+# 13-package yarn-1 workspace, not builds of the checkout.
+#
+# This is the shape of upstream's own hosting/docker-compose.yaml, minus
+# LiteLLM. See README.md for why the all-in-one budibase/budibase image is not
+# used, and for what dropping LiteLLM costs.
+services:
+  # CouchDB is Budibase's database: apps, workspaces, users, everything. The
+  # image is not stock CouchDB -- it bundles Clouseau (the JVM Lucene service
+  # that powers every search endpoint, including the grids in the builder) and
+  # SQS. values.yaml says it in as many words: "we don't support using any
+  # other CouchDB image".
+  couchdb-service:
+    # Tag written by hooks/prepare.sh from hosting/couchdb/VERSION, which is
+    # the one version string in this checkout that is real -- see prepare.sh.
+    image: ${BB_COUCHDB_IMAGE:-budibase/database:2.1.0}
+    restart: unless-stopped
+    environment:
+      COUCHDB_USER: ${COUCH_DB_USER}
+      COUCHDB_PASSWORD: ${COUCH_DB_PASSWORD}
+      # hosting/couchdb/runner.sh branches on this: "docker-compose" is the
+      # branch that points Clouseau and CouchDB at ${DATA_DIR} rather than at
+      # the single-image /data or a Kubernetes layout.
+      TARGETBUILD: docker-compose
+      DATA_DIR: /data
+    volumes:
+      - couchdb_data:/data
+    # runner.sh creates _users and _replicator after CouchDB answers, and
+    # Clouseau has to have registered with epmd before CouchDB is even started,
+    # so this is a genuinely slow first boot -- a JVM, an Erlang VM and SQS in
+    # one container. curl is in the image (its own runner.sh uses it).
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5984/_up >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    # Clouseau is started as `java -server -Xmx2G` from a script baked into the
+    # image with no env override, so the ceiling has to come from the cgroup.
+    # An empty Budibase indexes almost nothing, so the heap stays far below
+    # this; the figure is for the JVM, the Erlang VM and SQS together.
+    mem_limit: 640m
+    # 256 (the hardener's default) is not enough for a JVM plus an Erlang VM
+    # plus SQS plus pm2 in one container: pids_limit counts threads, and the
+    # Erlang scheduler count follows the host's CPU count, not `cpus:`.
+    pids_limit: 512
+
+  redis-service:
+    # Upstream's compose says bare `redis`; pinned to a tag here so a redeploy
+    # six months from now is the same Redis. Only used as a cache and a job
+    # queue -- nothing in it needs to survive.
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --requirepass "${REDIS_PASSWORD}" --save "" --appendonly no
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    mem_limit: 96m
+
+  # Object storage for app bundles, attachments and the client library. Budibase
+  # has no filesystem fallback for these: with MinIO down the builder loads but
+  # saving an app fails.
+  minio-service:
+    # The release upstream pins in both hosting/docker-compose.yaml and
+    # hosting/single/Dockerfile.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      # MINIO_ACCESS_KEY/MINIO_SECRET_KEY are what Budibase's own compose sets
+      # and what the server reads; MINIO_ROOT_USER/PASSWORD are the names MinIO
+      # itself has preferred since 2021. Both are set to the same values so the
+      # pair cannot drift.
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+      MINIO_BROWSER: "off"
+    volumes:
+      - minio_data:/data
+    # Upstream's own probe: the image has no curl and no wget, but its shell is
+    # bash, so /dev/tcp is the check available inside it.
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5s bash -c ':> /dev/tcp/127.0.0.1/9000' || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+    mem_limit: 192m
+
+  # The Budibase server: the builder, the client runtime, automations and every
+  # /api/ route that is not a global one.
+  app-service:
+    image: ${BB_APPS_IMAGE:-budibase/apps:stable}
+    restart: unless-stopped
+    environment:
+      SELF_HOSTED: 1
+      BUDIBASE_ENVIRONMENT: PRODUCTION
+      PORT: 4002
+      LOG_LEVEL: info
+      ENABLE_ANALYTICS: "false"
+      # Not a real address, and not meant to survive: ComposePlaceholders
+      # rewrites a bare http://localhost under a *_URL-shaped key to the
+      # account's public https URL before the stack starts. PLATFORM_URL is the
+      # one address Budibase cannot work out for itself -- getPlatformUrl() in
+      # backend-core/src/configs/configs.ts falls back to
+      # http://localhost:10000, and that value ends up in password-reset links,
+      # invitation emails and OAuth callback URLs.
+      PLATFORM_URL: http://localhost
+      # Service addresses. None of these matches the localhost pattern, so the
+      # *_URL rewrite above leaves them alone even though they end in _URL.
+      COUCH_DB_URL: http://${COUCH_DB_USER}:${COUCH_DB_PASSWORD}@couchdb-service:5984
+      COUCH_DB_USERNAME: ${COUCH_DB_USER}
+      COUCH_DB_PASSWORD: ${COUCH_DB_PASSWORD}
+      WORKER_URL: http://worker-service:4003
+      MINIO_URL: http://minio-service:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      REDIS_URL: redis-service:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # Shared between app and worker; the two services authenticate to each
+      # other with it.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      API_ENCRYPTION_KEY: ${API_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      # server/src/startup/index.ts creates this admin once, if no global user
+      # exists yet. Without it /api/global/users/init stays open to whoever
+      # reaches the account's public name first. See hooks/prepare.sh.
+      BB_ADMIN_USER_EMAIL: ${BB_ADMIN_USER_EMAIL}
+      BB_ADMIN_USER_PASSWORD: ${BB_ADMIN_USER_PASSWORD}
+      # Two reasons this is written out rather than left to the hardener.
+      # --no-node-snapshot is baked into the image as ENV NODE_OPTIONS and is
+      # required for isolated-vm on Node 20+ (it is what runs every JS binding
+      # in an app); ServiceHardener only skips a service that already declares
+      # NODE_OPTIONS in compose, so leaving it out would replace the image's
+      # value with a bare --max-old-space-size and break the JS runner. The
+      # heap figure is then ~70% of mem_limit, the same share the hardener uses.
+      NODE_OPTIONS: --no-node-snapshot --max-old-space-size=384
+      # The single most important line in this file for fitting the account.
+      # The server does not run as one process: threads/index.ts starts a
+      # worker-farm for queries and another for automations, each of which
+      # *forks a full Node process* loading the whole server bundle. Three
+      # copies, and docker_run.sh adds --enable-source-maps to all of them --
+      # "~150MB of retained source map per process" in its own comment. With
+      # source maps on, the three together do not fit in any limit this account
+      # can afford; measured at 640m the container was OOM-killed mid-boot,
+      # which compose reports as `dependency failed to start` and takes the
+      # deploy with it. DISABLE_SOURCE_MAPS is the switch docker_run.sh checks.
+      # The cost is that a stack trace in the logs points at dist/, not at src/.
+      DISABLE_SOURCE_MAPS: "1"
+      # Deliberately no LITELLM_URL and no LITELLM_MASTER_KEY.
+      # waitForLiteLLMReadiness() in server/src/startup/index.ts returns
+      # immediately when LITELLM_MASTER_KEY is unset; set it, and every boot
+      # spends 30s polling a proxy that is not there before the server reports
+      # ready. See README.md for what is lost.
+    depends_on:
+      couchdb-service:
+        condition: service_healthy
+      redis-service:
+        condition: service_healthy
+      minio-service:
+        condition: service_healthy
+    # /health is served by the app itself on its own PORT. The image is
+    # node:slim-based and has curl.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4002/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    # Three Node processes, not one -- see DISABLE_SOURCE_MAPS above.
+    mem_limit: 896m
+    # 256 (the hardener's default) counts threads, and this container runs the
+    # main server plus two forked worker-farm children, each with its own libuv
+    # pool and isolated-vm isolates.
+    pids_limit: 512
+
+  # Global concerns: users, tenants, auth, SSO, licensing, email.
+  worker-service:
+    image: ${BB_WORKER_IMAGE:-budibase/worker:stable}
+    restart: unless-stopped
+    environment:
+      SELF_HOSTED: 1
+      PORT: 4003
+      # The port the platform is reached on, used when the worker builds
+      # absolute links against PLATFORM_URL.
+      CLUSTER_PORT: 10000
+      LOG_LEVEL: info
+      PLATFORM_URL: http://localhost
+      COUCH_DB_URL: http://${COUCH_DB_USER}:${COUCH_DB_PASSWORD}@couchdb-service:5984
+      COUCH_DB_USERNAME: ${COUCH_DB_USER}
+      COUCH_DB_PASSWORD: ${COUCH_DB_PASSWORD}
+      APPS_URL: http://app-service:4002
+      MINIO_URL: http://minio-service:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      REDIS_URL: redis-service:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      API_ENCRYPTION_KEY: ${API_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      NODE_OPTIONS: --no-node-snapshot --max-old-space-size=268
+      # Same reason as on app-service, for the same ~150 MB. The worker's
+      # docker_run.sh does not read this flag -- it always runs
+      # `yarn run:docker`, which is `node --enable-source-maps dist/index.js` --
+      # so this is set for the day it does, and costs nothing meanwhile.
+      DISABLE_SOURCE_MAPS: "1"
+    depends_on:
+      couchdb-service:
+        condition: service_healthy
+      redis-service:
+        condition: service_healthy
+      minio-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4003/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 90s
+    mem_limit: 384m
+    pids_limit: 512
+
+  # The only service published to the account. It is not a generic reverse
+  # proxy the engine's own routing makes redundant: nginx.prod.conf is Budibase's
+  # URL map, splitting /api/global and /api/system to the worker, /db/ to
+  # CouchDB, signed file URLs to MinIO and everything else to the app. Nothing
+  # answers correctly without it.
+  #
+  # HostIngress::strip() matches on image (traefik, caddy-docker-proxy,
+  # jwilder/nginxproxy nginx-proxy), not on service name, so budibase/proxy is
+  # left alone and port detection finds 10000 here.
+  proxy-service:
+    image: ${BB_PROXY_IMAGE:-budibase/proxy:stable}
+    restart: unless-stopped
+    ports:
+      - "10000:10000"
+    environment:
+      APPS_UPSTREAM_URL: http://app-service:4002
+      WORKER_UPSTREAM_URL: http://worker-service:4003
+      MINIO_UPSTREAM_URL: http://minio-service:9000
+      COUCHDB_UPSTREAM_URL: http://couchdb-service:5984
+      # Docker's embedded DNS. nginx.prod.conf resolves the upstreams at
+      # request time through `resolver ${RESOLVER}`, which is what lets the
+      # proxy start before them.
+      RESOLVER: 127.0.0.11
+      PROXY_RATE_LIMIT_API_PER_SECOND: 50
+      PROXY_RATE_LIMIT_WEBHOOKS_PER_SECOND: 10
+    depends_on:
+      app-service:
+        condition: service_healthy
+      worker-service:
+        condition: service_healthy
+    # nginx.prod.conf answers /health with a literal 200 -- it says the map is
+    # loaded, not that the upstreams are up, which is what depends_on is for.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:10000/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 64m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be finished
+  # when that returns -- which is when every container has been *started*, not
+  # when any of them answers. Here that gap is large: CouchDB has to bring up a
+  # JVM and an Erlang VM and create _users/_replicator, then the server runs its
+  # workspace migrations and creates the admin user, and only then does the
+  # proxy have anything to proxy to. Compose does block on depends_on
+  # conditions, so this makes `up -d` return only once the site really answers.
+  # A clean exit 0 is explicitly not a crash loop to AppHealth::isCrashing().
+  ready:
+    image: ${BB_PROXY_IMAGE:-budibase/proxy:stable}
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      proxy-service:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  couchdb_data: {}
+  minio_data: {}

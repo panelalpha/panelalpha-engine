@@ -69,6 +69,65 @@ class ArchiveSafetyTest extends TestCase
         ArchiveSafety::assertRegularMembersOnly($listing);
     }
 
+    public function test_sums_uncompressed_sizes_from_a_zip_listing(): void
+    {
+        // `unzip -Z` writes version and os between the mode and the size, so a
+        // parser that counts columns off the mode reads `3.0` as the size.
+        $listing = <<<'LISTING'
+        Archive:  upload.zip
+        Zip file size: 720 bytes, number of entries: 2
+        -rw-rw-r--  3.0 unx   100000 bx defN 26-Sep-22 13:46 big.bin
+        -rw-rw-r--  3.0 unx        2 tx stor 26-Sep-22 13:46 small.txt
+        2 files, 100002 bytes uncompressed, 128 bytes compressed:  99.9%
+        LISTING;
+
+        ArchiveSafety::assertUncompressedSizeWithin($listing, 100002);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/unpacks to more than/');
+
+        ArchiveSafety::assertUncompressedSizeWithin($listing, 100001);
+    }
+
+    public function test_sums_uncompressed_sizes_from_a_tar_listing(): void
+    {
+        // `tar -tvzf` writes owner/group there instead, and the directory row
+        // carries a 0 that must not be mistaken for the whole archive.
+        $listing = <<<'LISTING'
+        -rw-rw-r-- miodek/miodek 100000 2026-09-22 13:46 big.bin
+        drwxrwxr-x miodek/miodek      0 2026-09-22 13:46 sub/
+        -rw-rw-r-- miodek/miodek      1 2026-09-22 13:46 sub/x.txt
+        LISTING;
+
+        ArchiveSafety::assertUncompressedSizeWithin($listing, 100001);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        ArchiveSafety::assertUncompressedSizeWithin($listing, 100000);
+    }
+
+    public function test_a_small_archive_of_enormous_members_is_refused(): void
+    {
+        // The zip-bomb shape the entry count never caught: four members.
+        $listing = '';
+        for ($i = 0; $i < 4; $i++) {
+            $listing .= "-rw-r--r--  3.0 unx 2000000000 bx defN 26-Sep-22 13:46 zeros{$i}.bin\n";
+        }
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        ArchiveSafety::assertUncompressedSizeWithin($listing);
+    }
+
+    public function test_a_real_sized_upload_passes_the_default_limit(): void
+    {
+        $listing = "-rw-r--r-- root/root 524288000 2026-09-22 13:46 project/vendor.tar\n";
+
+        ArchiveSafety::assertUncompressedSizeWithin($listing);
+
+        $this->addToAssertionCount(1);
+    }
+
     /**
      * @return array<string, array{string}>
      */

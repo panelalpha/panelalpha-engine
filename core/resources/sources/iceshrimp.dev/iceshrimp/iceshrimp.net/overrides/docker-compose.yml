@@ -1,0 +1,170 @@
+# The stack for a repository that ships no compose file. Iceshrimp.NET is the
+# .NET source tree plus a root Dockerfile; building it per account is a
+# multi-stage SDK compile of five C# projects and a Blazor WASM frontend, for an
+# image the project publishes on every release. This file runs that published
+# image instead, with a single-account Postgres.
+#
+# Only prebuilt images, no `build:` — which is what makes detection prefer this
+# file (compose priority 980) to the root Dockerfile (970), and what keeps it
+# out of the local-dev-compose heuristic (that only fires on a `build:` service
+# that also bind-mounts the project root).
+services:
+  iceshrimp-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: iceshrimp
+      POSTGRES_DB: iceshrimp
+      POSTGRES_PASSWORD: ${ICESHRIMP_DB_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Sized for one hosting account, not a dedicated host.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=96MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - max_connections=50
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iceshrimp -d iceshrimp"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    shm_size: 64mb
+    mem_limit: 320m
+
+  # One-shot: apply migrations, then seed the first admin. The image self-
+  # migrates on start too (--migrate-and-start), but the admin has to be created
+  # against an already-migrated database. Idempotency is driven by the database,
+  # not a marker file: --create-admin-user throws "User already exists" on a
+  # redeploy, which is caught and treated as success, while any other failure
+  # still stops the deploy. This is deliberately DB-driven so a fresh volume
+  # (a failed-deploy rollback wipes named volumes) reseeds the admin with the
+  # same stable password rather than skipping it because a marker said "done".
+  # An operator who later changes the admin password keeps it — the seed never
+  # resets an existing user. Runs as root only to make the fresh media volume
+  # writable by the non-root app user; migration and seed do not need it.
+  iceshrimp-init:
+    image: ${ICESHRIMP_IMAGE:-iceshrimp.dev/iceshrimp/iceshrimp.net:latest}
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      # Iceshrimp's user-management CLI reads the username positionally as the
+      # SECOND arg and matches `--create-admin-user <u> --password <p>` as an
+      # EXACTLY-four-element list pattern: any other leading arg (e.g.
+      # --environment Production) shifts the username and drops the password,
+      # silently creating the wrong user with a random one. So the environment
+      # is set through ASPNETCORE_ENVIRONMENT and the command is passed exactly
+      # as the parser expects. --migrate is position-independent (matched with
+      # Contains) and runs on its own first.
+      - |
+        set -e
+        mkdir -p /media && chmod 0777 /media
+        ./Iceshrimp.Backend --migrate
+        echo "Iceshrimp: ensuring admin user '$$ADMIN_USERNAME' exists"
+        set +e
+        OUT=$$(./Iceshrimp.Backend --create-admin-user "$$ADMIN_USERNAME" --password "$$ADMIN_PASSWORD" 2>&1); RC=$$?
+        echo "$$OUT"
+        set -e
+        if [ $$RC -ne 0 ]; then
+          echo "$$OUT" | grep -q "already exists" || { echo "Iceshrimp: admin seed failed"; exit 1; }
+          echo "Iceshrimp: admin already exists, leaving it unchanged"
+        fi
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Database__Host: iceshrimp-db
+      Database__Port: "5432"
+      Database__Database: iceshrimp
+      Database__Username: iceshrimp
+      Database__Password: ${ICESHRIMP_DB_PASSWORD}
+      Storage__Local__Path: /media
+      ADMIN_USERNAME: ${ICESHRIMP_ADMIN_USER}
+      ADMIN_PASSWORD: ${ICESHRIMP_ADMIN_PASSWORD}
+    volumes:
+      - media-data:/media
+    depends_on:
+      iceshrimp-db:
+        condition: service_healthy
+    mem_limit: 640m
+
+  iceshrimp:
+    image: ${ICESHRIMP_IMAGE:-iceshrimp.dev/iceshrimp/iceshrimp.net:latest}
+    restart: unless-stopped
+    # PA_PUBLIC_URL ships as http://localhost and is rewritten to the account's
+    # https URL by ComposePlaceholders before the stack starts (a *_URL key with
+    # a localhost value — the engine#221 path, no platform block required). The
+    # entrypoint turns it into the bare host Iceshrimp wants for WebDomain /
+    # AccountDomain, which is what its federation actor URIs and web UI are built
+    # against. These two must never change after first boot, and they will not:
+    # the account's domain is stable across redeploys.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        WD=$$(printf '%s' "$$PA_PUBLIC_URL" | sed -e 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##' -e 's#/.*##' -e 's#:.*##')
+        export Instance__WebDomain="$$WD"
+        export Instance__AccountDomain="$$WD"
+        echo "Iceshrimp: serving as web/account domain $$WD"
+        exec ./Iceshrimp.Backend --environment Production --migrate-and-start
+    environment:
+      PA_PUBLIC_URL: http://localhost
+      Instance__ListenHost: 0.0.0.0
+      Instance__ListenPort: "3000"
+      # RequestVerificationMiddleware rejects any request whose Host header is
+      # not the WebDomain (421 Misdirected) — including the container-local
+      # healthcheck below, which reaches the app as Host: 127.0.0.1. Allowing
+      # the loopback address lets the probe get a real 200 from /api/v1/instance
+      # (which also proves the database is reachable). It widens nothing an
+      # external client can exploit: the engine's proxy forwards the account's
+      # real Host, and a request arriving with Host: 127.0.0.1 never matches the
+      # account's vhost.
+      Instance__AdditionalDomains: 127.0.0.1
+      Database__Host: iceshrimp-db
+      Database__Port: "5432"
+      Database__Database: iceshrimp
+      Database__Username: iceshrimp
+      Database__Password: ${ICESHRIMP_DB_PASSWORD}
+      Storage__Provider: Local
+      Storage__Local__Path: /media
+    ports:
+      - "3000:3000"
+    volumes:
+      - media-data:/media
+    depends_on:
+      iceshrimp-db:
+        condition: service_healthy
+      iceshrimp-init:
+        condition: service_completed_successfully
+    # /api/v1/instance is the public Mastodon-API instance endpoint: it answers
+    # 200 only once the app is up and the database is reachable. busybox wget is
+    # present in the alpine-composite runtime image.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/v1/instance || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 120s
+    mem_limit: 1024m
+
+  # Does nothing and exits 0. `docker compose up -d` returns — and the engine
+  # calls the deploy finished — as soon as containers are started, not when the
+  # app answers (engine#90). Gating a service on iceshrimp's healthcheck makes
+  # `up -d` block until the site is genuinely serving. Reuses the Postgres image
+  # so nothing extra is pulled.
+  ready:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      iceshrimp:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}
+  media-data: {}

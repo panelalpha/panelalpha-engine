@@ -1,0 +1,85 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Galette, a membership-management web app for non-profit associations (members,
+  contributions, mailings), GPL-3.0. supported-apps#1185. PHP, backed by the
+  account's own MySQL. No official image, so this is a php-strategy source
+  recipe. Verified against stable tag 1.2.1 (composer.json requires php >=8.2,
+  so the engine resolves PHP 8.3, in range 8.1-8.5; the panelalpha/php:8.3 image
+  already carries every extension Galette declares -- gd, intl, gettext, curl,
+  simplexml, pdo_mysql, fileinfo, mbstring). Deploy this tag, not master.
+
+  The repository is not its own application root: composer.json + the app tree
+  live under galette/ and only the build tooling (package.json, gulpfile.js, ui/)
+  is at the top. So app_root: galette makes galette/ the /app mount -- composer
+  then resolves galette/composer.json and installs galette/vendor, and the
+  document root is galette/webroot (relative to app_root: webroot), whose
+  index.php front controller keeps galette/config/ and galette/data/ above the
+  served directory. The stock php composer-install works unchanged: Galette's
+  only composer script is a post-install-cmd applying its own php8.1/php8.5
+  compat patches, irrelevant on 8.3 and skipped by --no-scripts; --no-plugins is
+  safe (its one allow-plugins entry is a dev-only phpcs installer); all platform
+  extensions are present.
+
+  What a bare deploy gets wrong, none of it a change to upstream source:
+
+  1. **The asset build never completes.** Galette ships no built CSS/JS in git;
+     the theme is compiled by Fomantic-UI + gulp. The engine's php frontend build
+     runs `npm ci && npm run build`, but Galette's `build` script is only
+     `npx gulp`, and gulpfile.js require()s ./semantic/tasks/build, which exists
+     only after the separate `fomantic-install` step. So the stock build dies
+     with MODULE_NOT_FOUND and aborts the whole deploy (verified in node:20). The
+     recipe overlays package.json with a one-line build shim -- `build` now runs
+     Galette's OWN `fomantic-install` then gulp (the same two steps its
+     `first-build` script chains). No dependency is touched, so `npm ci` still
+     matches the shipped package-lock.json. This is build configuration (the
+     ESMira precedent), not a source patch.
+
+  2. **config/ and data/ live in the checkout, wiped every redeploy** (engine#173,
+     ~/project is emptied). Galette keeps its DB connection (config/config.inc.php,
+     which holds the DB password) in config/ and all uploads/logs/exports/photos
+     in data/. galette-setup.sh seeds ~/.panelalpha/galette/{config,data} once
+     from the fresh checkout, then symlinks /app/config and /app/data onto it, so
+     both survive. Relational content is in the account MySQL (database: mysql),
+     which survives on its own.
+
+  3. **The installer is open to the first visitor.** Galette's webroot/installer.php
+     never checks whether Galette is already installed -- it always starts the
+     wizard fresh, so anyone hitting /installer.php could re-point the site at
+     their own database. galette-setup.sh drives Galette's OWN headless installer
+     (bin/console galette:install, via a launcher because bin/console assumes the
+     un-flattened repo layout) BEFORE Apache serves: it creates the schema from
+     the account MySQL env, writes config.inc.php, and creates a super-admin named
+     `superadmin` with a 24-char password generated once into
+     ~/.panelalpha/galette/secrets/admin.txt (0600, reused, never logged). Then it
+     removes installer.php and the unauthenticated compat_test.php /
+     post_contribution_test.php from the webroot. Idempotent: a persisted
+     config.inc.php means already-installed, so a redeploy skips install and only
+     re-links and re-locks.
+
+  engine#231 (port alignment) does not apply: this is a php/Apache app on the
+  engine's php image, serving on the standard port.
+
+  SOURCE: keyed to github.com/galette/galette (clones anonymously, verified
+  git ls-remote). supported-apps#1185.
+extends: php
+app_root: galette
+docroot: webroot
+database: mysql
+commands:
+  # Re-declared because a stated `commands` replaces the base list wholesale
+  # (top-level array_merge). This is php.yaml's composer-install verbatim: it
+  # works unchanged for Galette (all platform extensions present; the only
+  # composer script is an upstream compat patch that --no-scripts skips and 8.3
+  # does not need).
+  - id: composer-install
+    stage: build
+    role: dependencies
+    description: 'composer install for Galette (galette/composer.json, resolved via app_root). Runs on the host in the image the app is served from, so Composer checks the real PHP version and extension set. --no-plugins because a plugin is arbitrary PHP out of the customer repository.'
+    run: 'composer install --no-dev --no-interaction --no-scripts --no-plugins --optimize-autoloader'
+  - id: galette-setup
+    stage:
+      - start
+    before: true
+    timeout: 300
+    description: 'Persist config/ and data/ onto ~/.panelalpha (survives the redeploy that empties ~/project), drive Galette''s headless installer before Apache serves (schema + generated-password super-admin, idempotent), and lock the first-visitor-wins web installer.'
+    run: 'sh panelalpha/galette-setup.sh'

@@ -1,0 +1,110 @@
+# Upstream's own stack, with the three things a hosting account changes.
+#
+# The repository's docker-compose.yaml is a real deployment, not a workstation
+# file: one service, no build, the image upstream publishes at
+# ghcr.io/cmintey/wishlist, and it is the file the README's "Getting Started"
+# tells every operator to write. So this keeps its shape -- same image, same
+# port, same two volumes -- rather than replacing it with something else. The
+# engine sets the repository's copy aside (`docker-compose.yml` outranks
+# `docker-compose.yaml` in ComposeFileInspector::COMPOSE_FILE_CANDIDATES, and
+# AppConfigBootstrap::writeCompose stashes the shadowed one by name), so there
+# is exactly one stack here and it is this one.
+#
+# Building the checkout instead was considered and rejected. The Dockerfile is
+# real and production-shaped, but it is a three-stage build that compiles
+# sharp and better-sqlite3 from source under build-essential, runs a full
+# `vite build`, and downloads a Caddy release -- minutes and well over the
+# account's memory budget, per account, to arrive at the image that is already
+# published. The one cost is that the image is the last *release* while the
+# checkout is `main`: a migration merged after the release is in ~/project and
+# not in the database. Nothing reads the checkout at runtime, so that is a
+# version difference and not a broken deploy.
+services:
+  app:
+    # Unpinned, exactly as upstream's own compose file and README leave it.
+    # There is nothing in the checkout to pin to: package.json says
+    # "version": "0.0.1" (the releases are git tags, and the engine's clone
+    # fetches none), so a tag derived from the tree would be wrong rather than
+    # stale. `pnpm prisma migrate deploy` on boot is upstream's supported
+    # upgrade path, which is what makes :latest safe across a redeploy.
+    image: ghcr.io/cmintey/wishlist:latest
+    ports:
+      - "3280:3280"
+    environment:
+      # Not a real address, and not meant to survive. ComposePlaceholders
+      # rewrites a bare http://localhost under an ORIGIN/_URL-shaped key to the
+      # account's public https URL before the stack starts
+      # (isLocalPublicUrl(); the key matches PUBLIC_URL_KEY_PATTERN and port 80
+      # is on the allowlist), and the deploy log says so.
+      #
+      # This is the value the stock deploy could not supply and died without.
+      # @sveltejs/adapter-node validates ORIGIN and throws
+      # `Invalid ORIGIN: ''` on an empty one -- and empty is what
+      # .env.example ships and what ProjectEnvironment copies into .env. It has
+      # to be here rather than in .env for two reasons: only the engine knows
+      # the address, and a compose `environment:` value outranks `env_file:`,
+      # so this is also what stops a stale `ORIGIN=` in .env from reaching the
+      # server.
+      ORIGIN: http://localhost
+    # Everything else the operator may want to tune -- TOKEN_TIME,
+    # DEFAULT_CURRENCY, LOG_LEVEL, MAX_IMAGE_SIZE -- stays in .env, where
+    # hooks/prepare.sh writes it and the account's own env_vars are merged over
+    # it. Repeating those keys above would put them out of the operator's
+    # reach.
+    env_file:
+      - .env
+    volumes:
+      # ~/.panelalpha/wishlist, not ./data and ./uploads. Upstream mounts both
+      # inside the project directory, and a redeploy clears and re-clones
+      # ~/project (engine#173): every list, item, claim and uploaded image
+      # would be destroyed by the next deploy. Relative paths resolve against
+      # --project-directory, which is ~/project, so `..` is the account's home.
+      # hooks/prepare.sh creates all three before this mount is made, so Docker
+      # never gets to create them as root.
+      - ../.panelalpha/wishlist/data:/usr/src/app/data
+      - ../.panelalpha/wishlist/uploads:/usr/src/app/uploads
+      # The generated admin password, read once by the install step and never
+      # put in the environment: the compose file the engine writes is 0644 and
+      # readable by every other tenant (engine#173), and `docker inspect` on
+      # the account would show it too. 0600 on the host, root in the container.
+      - ../.panelalpha/wishlist/credentials:/usr/src/app/panelalpha-credentials:ro
+      # Upstream's entrypoint plus one line; see files/panelalpha/entrypoint.sh.
+      - ./panelalpha/entrypoint.sh:/usr/src/app/panelalpha-entrypoint.sh:ro
+      - ./panelalpha/install.mjs:/usr/src/app/panelalpha-install.mjs:ro
+    entrypoint: ["sh", "/usr/src/app/panelalpha-entrypoint.sh"]
+    # Caddy binds :3280 immediately and proxies to node on :3000, so the port
+    # answers -- with a 502 -- for the whole of the first boot: 45 Prisma
+    # migrations, the seed, three patches and the install step. Without
+    # something to wait on, `docker compose up -d` returns into that window and
+    # the engine probes a site that is not up yet. This is the gate for
+    # engine#90, and `ready` below is what makes `up -d` block on it.
+    # /login is unauthenticated (hooks.server.ts nonPrivateRoutes) and is
+    # served by SvelteKit rather than by Caddy's static handler, so it is only
+    # 200 once node is really serving. The image is node on debian-slim: no
+    # curl, no wget, and node itself is the only client it has.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3280/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  # Does nothing and exits 0. AppLauncher runs `docker compose up -d` without
+  # `--wait` and calls the deploy finished when that returns, but compose does
+  # block on a depends_on condition -- so this makes `up -d` return only once
+  # Wishlist really answers. alpine:3 rather than the app image: a datastore or
+  # app image here is how `dependency cycle detected` happens, and this way
+  # nothing large is pulled for a container that exits immediately. A clean
+  # exit 0 is explicitly not a crash loop to AppHealth::isCrashing().
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

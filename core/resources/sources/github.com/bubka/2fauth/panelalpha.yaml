@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  2FAuth is a self-hosted web app (PHP / Laravel 13) to manage Two-Factor
+  Authentication accounts and generate their TOTP/HOTP codes. Login is
+  mandatory and every stored 2FA secret is encrypted at rest with the Laravel
+  APP_KEY. The repository ships only a development-flavoured compose file (a
+  bind mount to ./2fauth, env_file settings.env, no admin bootstrap), so this
+  recipe is a full compose replacement that runs the official image the
+  maintainer publishes to Docker Hub, 2fauth/2fauth, exactly as the upstream
+  install docs do. Pinned to 8.0.2, the current release (repo tag v8.0.2,
+  Docker Hub "latest") -- a Hub-published tag the engine pulls normally, so the
+  from-source seed path (engine#229) never applies.
+
+  The image is a single Alpine container running nginx + php-fpm 8.4 under
+  supervisord, serving on internal port 8000 (docker/nginx.conf). Its own
+  entrypoint owns first-boot setup: on a fresh data dir it runs
+  `migrate:fresh --force` + `passport:install`, and it keeps everything that
+  must survive a redeploy under /2fauth -- the SQLite database
+  (/2fauth/database.sqlite, symlinked from /srv/database) and storage
+  (/2fauth/storage, symlinked from /srv/storage, which also holds the Passport
+  OAuth keys and the file cache). One named volume mounted at /2fauth therefore
+  persists the whole app state; ~/project is wiped every deploy (engine#173),
+  so nothing that matters lives there.
+
+  Two secrets are minted once by the prepare hook into ~/.panelalpha/2fauth/
+  (0600 in 0700, the only rebuild-surviving writable dir) and reused on every
+  later deploy: APP_KEY and the owner's admin password. APP_KEY MUST persist --
+  it is the AES key every stored TOTP secret is encrypted with, so rotating it
+  would make every saved 2FA account permanently unrecoverable. It is a real
+  base64:<32 bytes>, the only shape Laravel's cipher accepts. APP_URL ships as a
+  bare http://localhost under a *_URL-shaped key that ComposePlaceholders
+  rewrites to the account's public https origin before the stack starts;
+  TRUSTED_PROXIES=* makes Laravel trust the engine tunnel so HTTPS links,
+  secure cookies, CSRF and WebAuthn all work. APP_ENV=production and
+  APP_DEBUG=false are forced so a leaked stack trace can never carry a secret,
+  and IS_DEMO_APP=false keeps demo mode (hourly content reset, weakened auth)
+  off.
+
+  First-visitor-wins is the real risk this recipe closes. 2FAuth grants
+  administrator to the FIRST user that registers (RegisterController promotes
+  the account created while User::count()==1), and open registration is the
+  default (config/2fauth.php settings.disableRegistration=false, and there is
+  no env var for it -- it is only overridable through the DB-backed
+  SettingService). So a one-shot `init` service runs BEFORE the app ever serves
+  (the app depends_on it completing): it installs the schema and Passport keys
+  onto the volume, seeds the owner admin with the generated password directly
+  through 2FAuth's own User model (is_admin=1, no upstream patch), persists
+  disableRegistration=true, and writes the image's install marker so the app
+  entrypoint skips its own migrate:fresh and just serves. By the time the app
+  answers, the admin already exists and web registration already returns 403 --
+  the setup window is never open to anyone. The generated admin email/password
+  are recorded in ~/.panelalpha/2fauth/admin.txt (0600); the owner can change
+  the email and re-open registration from the in-app admin settings later.
+
+  A no-op `ready` service gated on the app healthcheck makes `docker compose up`
+  return only once 2FAuth actually answers (engine#204). Only the app publishes
+  a port (8000, engine#234).

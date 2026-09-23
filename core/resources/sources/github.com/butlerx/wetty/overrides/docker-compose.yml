@@ -1,0 +1,133 @@
+# Replaces the repository's docker-compose.yml, which is a demo of WeTTY rather
+# than a way to host it: it runs the app with NODE_ENV=development, puts an
+# nginx in front whose only server_name is `wetty.com` and whose document root
+# does not exist, and points SSHHOST at a container built from
+# containers/ssh/Dockerfile -- three lines that create the user `term` with the
+# password `term`. That password is in the public repository, so the demo stack
+# is a terminal anyone who has read the README can log into.
+#
+# Three services here, and the shape of them is the security argument:
+#
+#   auth   the only thing on the account's port 3000. Owns the two request
+#          inputs WeTTY trusts (the `remote-user` header and the Referer query
+#          string) and gates the socket that opens a session.
+#   app    WeTTY itself, publishing nothing.
+#   shell  an sshd that exists only to be the far end of WeTTY's `ssh`. It has
+#          one account, the customer's own, and it is on a network with no way
+#          out.
+#
+# hooks/prepare.sh writes docker-compose.override.yml beside this file with the
+# one thing that cannot be known when this is written: the account's uid.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: containers/wetty/Dockerfile
+    # Not the repository's `pnpm run docker-compose-entrypoint`: that runs
+    # ssh-keyscan against the demo ssh container before starting. The image's
+    # own ENTRYPOINT is this, and the configuration is entirely environment.
+    entrypoint: ['node', './build/main.js']
+    working_dir: /usr/src/app
+    # SSHUSER, written by hooks/prepare.sh. It is the account's own name and it
+    # cannot be written here. The proxy pins the same value in a header that
+    # outranks it (src/server/command/address.ts:13-29); this is what answers
+    # for a request that reached the app container without going through the
+    # proxy, which would otherwise get the username prompt at :28.
+    env_file:
+      - ../.panelalpha/wetty/identity.env
+    # Nothing published. `auth` is what the account's webserver talks to, and
+    # a port here would both take 3000 away from it and expose the app with
+    # its `remote-user` header unguarded.
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      BASE: /
+      TITLE: Terminal
+      # The far end of the ssh. A service name on the internal network below,
+      # never a host, never a port the customer can move: allowRemoteHosts is
+      # false by default (src/shared/defaults.ts:12) so the `host` and `port`
+      # URL parameters are ignored, and `auth` blanks the Referer they would
+      # have arrived in anyway.
+      SSHHOST: shell
+      SSHPORT: '22'
+      # Password only. Deliberately not `publickey,password`: there is no key
+      # for WeTTY to offer, and `none` would ask sshd to let it in unauthenticated.
+      SSHAUTH: password
+      # Connect through ssh even when running as root. This container does not
+      # run as root, so src/server/command.ts:63 would take the ssh path
+      # regardless -- but that line is `!forcessh && localhost(host)`, and the
+      # cost of being sure is one variable.
+      FORCESSH: 'true'
+      # SSHPASS and SSHKEY are *not* set, and must never be. Either one makes
+      # the far end log in with no credentials: `sshpass -p <pass> ssh` at
+      # src/server/command/ssh.ts:21, or `ssh -i <key>` at :26. Upstream prints
+      # a six-line warning about the second (src/server.ts:54). With neither,
+      # the password prompt is sshd's own and nothing here can answer it.
+      HOME: /tmp
+    volumes:
+      # An /etc/passwd with one line for the account, written by
+      # hooks/prepare.sh. OpenSSH calls getpwuid() on its own uid before it
+      # does anything and refuses when there is no entry -- measured, with the
+      # container running as the account and the image's own passwd file, every
+      # session died at `No user exists for uid 1002` before a password was
+      # asked for.
+      - ../.panelalpha/wetty/passwd:/etc/passwd:ro
+    networks:
+      - default
+      - shell
+    depends_on:
+      - shell
+
+  shell:
+    build:
+      context: ./panelalpha
+      dockerfile: wetty-sshd.Dockerfile
+    # PA_ACCOUNT / PA_UID / PA_GID, written by hooks/prepare.sh. A file rather
+    # than literal values because the account's name and uid are not knowable
+    # when this file is written.
+    env_file:
+      - ../.panelalpha/wetty/identity.env
+    volumes:
+      # The account's home, which is the whole point: this is the customer's
+      # own files and nothing else. Relative paths resolve against
+      # --project-directory, which is ~/project, so `..` is the home.
+      - ../:/account
+    networks:
+      # Only this one, and it is `internal: true`. Measured from inside an
+      # account: a container on an ordinary network can open TCP to the host's
+      # sshd, to the engine's API on :2011, and to another account's
+      # application container by IP. None of that is created by this app -- any
+      # deployed container can do it -- but this one is a shell that a stranger
+      # is invited to log into, so it does not get to.
+      - shell
+    # A shell is processes. The engine's default is 256 (ServiceHardener.php:38)
+    # which is plenty for a person and not enough for a fork bomb to take the
+    # account down with it.
+    mem_limit: 256m
+
+  auth:
+    # The unprivileged build, run as the account (docker-compose.override.yml).
+    # Stock nginx drops its workers to uid 101, which cannot read a 0600
+    # htpasswd in a 0700 directory the account owns; this image is built to run
+    # as an arbitrary uid, so the password file never has to be loosened.
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    depends_on:
+      - app
+    ports:
+      # 8080 because a non-root process cannot bind a privileged port. 3000 is
+      # where the account's webserver looks.
+      - '3000:8080'
+    volumes:
+      - ./panelalpha/wetty-auth.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./panelalpha:/etc/nginx/wetty-static:ro
+      # The directory, not the files in it: a single-file bind mount is bound
+      # by inode, so an editor that writes a new file leaves the container
+      # looking at the old one forever.
+      - ../.panelalpha/wetty/auth:/etc/nginx/wetty-auth:ro
+    mem_limit: 48m
+
+networks:
+  shell:
+    # No gateway, no NAT, no route off the account. `app` reaches `shell` and
+    # nothing else does; `shell` reaches nothing at all.
+    internal: true

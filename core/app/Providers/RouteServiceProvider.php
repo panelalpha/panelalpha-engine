@@ -37,6 +37,10 @@ class RouteServiceProvider extends ServiceProvider
             Route::middleware('web')
                 ->group(base_path('routes/web.php'));
 
+            // Deliberately not in `web`: a git host's POST has no session and
+            // no CSRF token. See the file for what guards it instead.
+            Route::group([], base_path('routes/hooks.php'));
+
             if (file_exists(base_path('routes/tests.php'))) {
                 Route::middleware('web')
                     ->group(base_path('routes/tests.php'));

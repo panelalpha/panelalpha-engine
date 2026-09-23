@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Onloc is a self-hosted "find my device" location tracker. This is the org's
+  own deployment repository (github.com/onloc-app/onloc): it ships nothing but a
+  docker-compose.yml that pulls the project's official prebuilt images —
+  ghcr.io/onloc-app/onloc-api (an Express/Bun + Prisma backend) and
+  ghcr.io/onloc-app/onloc-ui (a React SPA served by nginx) — with a postgres:16
+  database and a caddy:2 reverse proxy that fronts both on ONE origin: /api,
+  /ws, /docs and /uploads go to the API, everything else to the SPA. The SPA
+  computes its API base from window.location at runtime, so a single hosting
+  domain needs no build-time URL. No source is built and no second source repo
+  is cloned — the two images are official, the Zero-TOTP / PassIt precedent.
+
+  There is no platform block, so the compose strategy runs the stack from the
+  repo's compose file — replaced here by overrides/docker-compose.yml because
+  the upstream file is unsafe as shipped: it hardcodes the database password
+  (onloc/onloc), never sets ACCESS_TOKEN_SECRET / REFRESH_TOKEN_SECRET (the API
+  then falls back to a PUBLIC hardcoded default "onloc-access-token-secret",
+  letting anyone forge a valid admin JWT for a location database), and keeps its
+  data and uploads in ./data and ./uploads bind mounts under ~/project, which
+  the engine wipes on every redeploy (engine#173). The replacement pulls the
+  same four official images but: generates the DB password and both token
+  secrets once into ~/.panelalpha/onloc/ (0600, reused across redeploys so the
+  database and existing sessions survive), moves the database and uploads onto
+  named volumes (survive redeploy; only account deletion / failed-deploy
+  rollback wipe them), and seeds the first admin non-interactively.
+
+  Security model: Onloc's first registrant becomes admin and registration then
+  closes automatically (isSetup() true once any admin exists, and the
+  "registration" setting defaults off). The public window that leaves — anyone
+  could register the admin account before the owner does — is closed by a
+  one-shot `init` service that registers the generated admin (username `admin`,
+  password in ~/.panelalpha/onloc/onloc.env) as soon as the API is healthy; the
+  caddy front waits for it to finish, so the site is never publicly reachable
+  with registration still open and no admin. Every API route past /api/status
+  and /api/health enforces a Bearer token (401 otherwise), so locations and
+  devices are never anonymously readable. Onloc has no email/SMTP anywhere —
+  accounts are username + password only — so there is no mail step to document.

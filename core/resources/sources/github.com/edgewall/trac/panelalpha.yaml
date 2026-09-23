@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=../../../platforms/_schema.json
+description: >-
+  Trac is a Python wiki + issue tracker. It has no web installer and no
+  first-visitor-wins page: a project environment is created on the command line
+  with `trac-admin <envdir> initenv <name> <db>`, which writes conf/trac.ini,
+  the sqlite database and the wiki/attachment tree before anything is served.
+  Trac's canonical source is Subversion (svn.edgewall.org), which the engine
+  cannot clone; this is the official read-only GitHub mirror. It ships no
+  Dockerfile and pip-installs cleanly, so this recipe carries its own:
+  files/Dockerfile does `pip install .` of the checkout plus `setuptools<81`
+  (Trac 1.6 imports pkg_resources, which setuptools 81+ removed — a runtime
+  environment library, like the interpreter itself, not an app dependency pin)
+  and Jinja2 (pulled automatically). panelalpha-entrypoint.sh creates the
+  environment non-interactively on first boot — sqlite backend, base_url taken
+  from the engine's public origin — then locks it down and serves the single
+  project at / with tracd (Trac's own WSGI server).
+  Lockdown: the classic environment lets anonymous read broadly and grants any
+  authenticated user TICKET_CREATE / WIKI_MODIFY. The entrypoint strips every
+  permission from anonymous and re-grants only read (TICKET_VIEW, WIKI_VIEW and
+  the view perms the UI needs), creates an `admin` account with TRAC_ADMIN, and
+  serves with `tracd --auth`, an HTTP Digest realm whose only account is admin —
+  so a fresh visitor can read (if allowed) but cannot create/modify tickets,
+  register, or reach /admin. The admin password is generated once with
+  secrets.token_urlsafe, written 0600 into the persistent data dir as the digest
+  file plus a plaintext copy, and reused on redeploy.
+  The environment dir IS the data (trac.ini with the session secret, the sqlite
+  db, wiki pages, attachments) and must outlive a redeploy, which wipes
+  ~/project. It lives on a bind mount to ~/.panelalpha/trac — the tree the wipe
+  leaves alone (Project::createHomeDirectory only mkdir -p's it) — recorded by
+  hooks/prepare.sh in .env as TRAC_DATA and mounted at /data by the override.
+  Trac only sends notification mail as a client and that path is disabled
+  (smtp_enabled=false), so the web path never depends on SMTP and no inbound
+  mail is configured.
+extends: dockerfile
+label: Trac
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe's dockerfile/port_hint would be null/80 even though this
+  # recipe ships files/Dockerfile — and the deployability check then fails with
+  # "Dockerfile strategy selected but Dockerfile is missing." State what the
+  # probe would have found. The image EXPOSEs 8000 (tracd's default bind).
+  dockerfile: Dockerfile
+  port_hint: 8000

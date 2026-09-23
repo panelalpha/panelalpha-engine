@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+#
+# Everything this recipe does is in overrides/docker-compose.yml,
+# hooks/prepare.sh and files/panelalpha/manticore/. The long-form reasoning is
+# in README.md, deliberately and not for style: `description` is folded to a
+# single line here because a multi-line one is written into a generated script
+# with a single leading `#` (CommandScript::descriptionLine() in
+# core/app/Lib/Deploy/Platform/Stage/CommandScript.php), which turns the second
+# line into bare shell. Keeping every description on one line is the habit that
+# makes that impossible rather than merely unlikely.
+description: >-
+  Manticore Search is a search server, not a web application: it has no admin
+  interface of its own, and what a domain serves here is its JSON API on port
+  9308 -- create a table, index documents, search, read results back. The
+  repository builds a C++/CMake daemon, so this runs the published
+  manticoresearch/manticore image instead. Authentication is the whole of why
+  this recipe exists: `auth = 1` is in the config from the first boot, so the
+  daemon answers 401 to every request, including `/`, before any user exists,
+  and an admin login generated per account is bootstrapped into it by
+  `searchd --auth-non-interactive` from inside the container. A `ready` gate
+  refuses the deploy unless an anonymous request is still refused and the
+  generated credential still works, so an instance that failed to lock itself
+  never reaches a customer's domain.

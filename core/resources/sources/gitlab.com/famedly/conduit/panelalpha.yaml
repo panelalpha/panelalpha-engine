@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Conduit is the original simple, fast Matrix homeserver written in Rust
+  (Continuwuity/conduwuit, already Supported in this campaign, are forks of it).
+  It is a single binary with an embedded database - RocksDB by default, no
+  Postgres, no Redis, no external services - and upstream publishes an official
+  release image, matrixconduit/matrix-conduit:latest. Building the Rust binary
+  from source is slow and heavy and is not needed here, so the recipe runs the
+  published image instead of the checkout.
+
+  That image is a nix-built scratch image: ~132 MB, one static binary at
+  /nix/store/*-conduit-static-*/bin/conduit, no EXPOSE, and no shell. It would
+  ship as a one-service compose file (runtime: compose), but a source recipe
+  cannot - PlatformSelector::fromSource() describes a recipe without probe data,
+  so a compose strategy's compose_path is never filled and DeployabilityCheck
+  fails with "Compose strategy selected but compose file is missing". The
+  dockerfile strategy has no such gap (extra.dockerfile is resolved against the
+  project dir), so the recipe ships a small Dockerfile that starts `FROM` the
+  published image - no Rust build runs - and layers the hosting shape it needs
+  through the compose override, the same way the Continuwuity recipe does.
+
+  The one thing the scratch image cannot do is translate the platform's injected
+  public host into the CONDUIT_* environment the server reads: it has no shell
+  to run an entrypoint. The Dockerfile therefore copies a static busybox in
+  (only to run the wrapper; the Matrix binary is upstream's, untouched) and the
+  wrapper pins server_name from the account's public host, then execs the
+  upstream conduit binary (found by glob so an image version bump moves the nix
+  store path without breaking us).
+
+  server_name is the Matrix server name - the public domain - and it is
+  PERMANENT: it is baked into every user id and room id and cannot change
+  without a database wipe. The wrapper derives it once from the SERVER_NAME /
+  PUBLIC_URL the dockerfile strategy injects (PublicUrlEnvironment) and freezes
+  it into the data volume, so a later redeploy that saw a different domain could
+  never rewrite it. Everything else - the RocksDB at CONDUIT_DATABASE_PATH, the
+  listen address/port (6167), well-known delegation to :443, federation - is
+  env, set in the override and the wrapper. Conduit also panics unless
+  CONDUIT_CONFIG is set, so it is set empty (no toml file, env only), exactly as
+  upstream's own docker-compose example does.
+
+  Security. An open-registration Matrix server is abused within hours, so
+  registration is token-gated: allow_registration is true but a
+  registration_token (generated once by the prepare hook into
+  ~/.panelalpha/conduit/, 0600, and reused across redeploys) is required for
+  every signup, and a signup without it is refused (Conduit's register route
+  demands the RegistrationToken UIAA stage whenever a token is configured).
+  Conduit refuses to start on an empty-string token (forbid_empty_registration_token),
+  so the token is always a real 32-char secret. The first account registered
+  becomes the server admin. Federation is left on (normal for Matrix).
+
+  Persistence. The RocksDB at /data is all the state - accounts, rooms,
+  messages, media - and ~/project is wiped every redeploy (engine#173), so it is
+  bind-mounted to ~/.panelalpha/conduit/data, which the wipe never touches. The
+  pinned server_name lives beside it. A redeploy rebuilds the image and reuses
+  the volume, so a registered user still logs in and their messages persist.
+extends: dockerfile
+port: 6167
+extra:
+  # A source recipe is applied without running the probes
+  # (PlatformSelector::fromSource() calls describe() with no probe data), so the
+  # dockerfile probe's dockerfile/port_hint would be null/80 even though the
+  # recipe ships a Dockerfile - and the deployability check would then fail with
+  # "Dockerfile strategy selected but Dockerfile is missing." State what the
+  # probe would have found: the Dockerfile this recipe ships (files/Dockerfile)
+  # and the port Conduit listens on (6167, its documented default).
+  dockerfile: Dockerfile
+  port_hint: 6167

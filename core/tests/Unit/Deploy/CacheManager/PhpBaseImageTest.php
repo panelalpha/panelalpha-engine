@@ -165,6 +165,9 @@ class PhpBaseImageTest extends TestCase
         $this->assertStringContainsString('FROM php:8.5-apache-bookworm', $dockerfile);
         $this->assertStringContainsString('install-php-extensions ' . implode(' ', PhpBaseImage::EXTENSIONS), $dockerfile);
         $this->assertStringContainsString('git unzip', $dockerfile);
+        // The DB clients Laravel's schema:dump replay shells out to.
+        $this->assertStringContainsString('default-mysql-client', $dockerfile);
+        $this->assertStringContainsString('postgresql-client', $dockerfile);
     }
 
     public function test_extras_get_their_own_variant_tag(): void

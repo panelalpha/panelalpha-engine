@@ -11,6 +11,7 @@ use App\Http\Requests\Git\GitPullRequest;
 use App\Http\Requests\Git\GitRevertRequest;
 use App\Http\Requests\Git\GitStatusRequest;
 use App\Http\Requests\Git\GitUpdateCredentialsRequest;
+use App\Lib\DeployHook\DeployHooks;
 use App\System\Project\Git;
 use App\System\Project\Git\CheckoutRedeploy;
 use App\System\Project\Git\Exception as GitException;
@@ -164,7 +165,8 @@ class GitController extends Controller
         path: '/projects/{username}/git/disconnect',
         description: 'Disconnect git from a directory. Optional `path` defaults to `project` on DinD and '
             . '`public_html` on FPM/LiteSpeed. Removes `origin` and site-git metadata; does not delete '
-            . 'working-tree files. Returns 422 when managed_by is `deploy`.',
+            . 'working-tree files. Also removes the checkout\'s Deploy Hook, if it has one -- a '
+            . 'disconnected checkout has nothing for a push to deploy. Returns 422 when managed_by is `deploy`.',
         summary: 'Disconnect git from a directory',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -180,11 +182,15 @@ class GitController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function disconnect(string $username, GitPathRequest $request): JsonResponse
+    public function disconnect(string $username, GitPathRequest $request, DeployHooks $hooks): JsonResponse
     {
         $params = $request->validated();
 
-        return $this->runGit($username, $params['path'] ?? null, fn (Git $git) => $git->disconnect());
+        return $this->runGit(
+            $username,
+            $params['path'] ?? null,
+            fn (Git $git, User $user) => $hooks->disconnectAndForget($user, $git),
+        );
     }
 
     #[OA\Put(
@@ -262,9 +268,14 @@ class GitController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/pull',
         description: 'Pull from the git remote. Optional `path` defaults to `project` on DinD and '
-            . '`public_html` on FPM/LiteSpeed. Body `strategy` is `ff` (default; 422 if dirty), `force` '
-            . '(`reset --hard` origin/<branch> plus clean -fd), or `push_first`. Returns 422 when '
-            . 'managed_by is deploy — use `project_rebuild`. Confirm with the operator before `force`.',
+            . '`public_html` on FPM/LiteSpeed. Body `strategy` is `ff` (default), `force` '
+            . '(`reset --hard` origin/<branch> plus clean -fd), or `push_first`. `ff` fetches and fast-forwards, '
+            . 'and git alone decides whether the checkout allows it: untracked files (uploads, caches) and edits to '
+            . 'files the incoming commits leave alone do not block it. It returns 422 naming the paths when a local '
+            . 'edit or untracked file sits where an incoming commit writes, or 422 when history has diverged '
+            . '(for example after a force-push); the checkout is left as it was. On a Deploy-managed checkout '
+            . '(`managed_by` is `deploy`) a successful pull rebuilds the app from the pulled files. '
+            . 'Confirm with the operator before `force`.',
         summary: 'Pull from the git remote',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -371,7 +382,7 @@ class GitController extends Controller
     }
 
     /**
-     * @param callable(Git): mixed $action
+     * @param callable(Git, User): mixed $action
      */
     private function runGit(string $username, ?string $path, callable $action, bool $redeployIfManaged = false): JsonResponse
     {
@@ -380,7 +391,7 @@ class GitController extends Controller
         try {
             $project = $user->project();
             $git = $project->git($path);
-            $data = $action($git);
+            $data = $action($git, $user);
             if ($redeployIfManaged) {
                 app(CheckoutRedeploy::class)->afterMutation($git, $project);
             }

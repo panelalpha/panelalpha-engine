@@ -1,0 +1,13 @@
+# Layers over the compose the dockerfile strategy generates. The generated app
+# service is correct about the build, the published port and env_file — it just
+# has nowhere durable to keep state. LazyLibrarian stores EVERYTHING (the SQLite
+# db, config.ini, logs, cache) in its --datadir, and ~/project is wiped on every
+# redeploy (engine#173). This bind-mounts the account's persistent ~/.panelalpha
+# (relative to the compose project dir ~/project) onto /pa-data, and the image's
+# CMD points --datadir at /pa-data/lazylibrarian — so config.ini (pre-seeded
+# with BASIC auth by the prepare hook), lazylibrarian.db and any created record
+# survive a rebuild.
+services:
+  app:
+    volumes:
+      - ../.panelalpha:/pa-data

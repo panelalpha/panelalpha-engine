@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  FitTrackee is a self-hosted outdoor-activity tracker: it imports GPX files and
+  builds per-sport statistics, with a Flask API and a built Vue frontend served
+  together by gunicorn on one port (:5000, single origin). Every workout has a
+  visibility (private by default); the API and the whole app are behind login,
+  so an anonymous request to a user's data is refused. This is the access-
+  controlled case, not public data.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. FitTrackee publishes an official image
+  on Docker Hub, fittrackee/fittrackee, tagged per release; this recipe pins the
+  current stable v1.3.5 (v1.4.0b1 is a beta and is not used). Seeding a Docker
+  Hub image also sidesteps engine#229 (image-seed NotFound). The container runs
+  the app's own docker-entrypoint.sh: it applies migrations (`ftcli db upgrade`)
+  then execs gunicorn on :5000.
+
+  WHY COMPOSE-REPLACE. FitTrackee's shipped docker-compose.yml is written for an
+  operator to edit: it bind-mounts host directories the operator must create,
+  puts the whole datastore under ./data, and leaves APP_SECRET_KEY, the DB
+  password, UI_URL and the mail/redis wiring blank in a .env the operator fills
+  in. Nobody edits anything here, so this override supplies the full stack made
+  durable and self-configuring:
+    - the pinned official image fittrackee/fittrackee:v1.3.5;
+    - PostGIS as the database sidecar (postgis/postgis:16-3.5-alpine) -- the app
+      requires the PostGIS extension, which the postgis image auto-creates in the
+      fittrackee database on first init; a plain postgres image fails migrations.
+      Choosing the DB image the app requires is provisioning, not a repair;
+    - Redis (redis:7-alpine), internal only, so flask-limiter's API rate limits
+      are active (brute-force protection on the login endpoint). Redis is
+      optional for FitTrackee -- it is only needed for rate limits, async data
+      export and email. Email is not configured (no SMTP), so no worker is run;
+    - APP_SECRET_KEY and the Postgres password seeded once from ~/.panelalpha and
+      reused on every redeploy, so a rebuild does not log everyone out or lock
+      the app out of its own database;
+    - Postgres data, GPX/avatar uploads, the staticmap cache and logs each on a
+      named volume, so users, workouts and uploaded files survive a redeploy;
+    - only the app service publishing a port (engine#231/#234).
+
+  DOMAIN + HTTPS. FitTrackee builds absolute links (share URLs, email links)
+  from UI_URL. The compose carries UI_URL=http://localhost:5000, which the engine
+  rewrites to the account's public https address before the stack starts, because
+  the key ends in _URL and the value is a bare localhost URL
+  (ComposePlaceholders). DATABASE_URL and REDIS_URL also end in _URL but point at
+  service names, not localhost, so they are left untouched.
+
+  ADMIN + REGISTRATION. FitTrackee's entrypoint creates no admin. The first user
+  would normally self-register and be promoted, so instead a one-shot `seed-admin`
+  service runs once the API is healthy (migrations done) and, if it does not yet
+  exist, creates the account `admin` with role `owner` and a per-account password
+  generated once into ~/.panelalpha/fittrackee (0600 in 0700), via
+  `ftcli users create ... --role owner` (the created account is active, so no
+  email verification is needed). It is idempotent: on a redeploy the account
+  already exists, so the password is left untouched and only the role is re-
+  asserted -- sessions are not invalidated. The `ready` gate blocks the deploy
+  from turning green until the site answers AND the admin has been seeded
+  (engine#204), so the deploy never finishes without an owner account.
+  Self-registration is left at the app default (enabled): new accounts see only
+  their own data plus workouts explicitly made public, so open sign-up does not
+  expose the owner's private data; the owner can disable it from Administration ->
+  Application if a closed instance is wanted. The generated admin login is
+  written to credentials.txt.

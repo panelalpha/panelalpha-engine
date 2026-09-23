@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Chartbrew is an open-source dashboard and chart builder: it connects to
+  databases and APIs and turns the data into charts and shareable dashboards,
+  with real accounts, teams and a JWT-protected REST API. This is the
+  access-controlled case (real login, team-scoped data), not a no-auth viewer.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes razvanilin/chartbrew
+  on Docker Hub and tags every release; this recipe pins the current 5.3.2.
+  Building from the clone would compile the React client and install both
+  workspaces on every deploy; the published image already contains the source
+  and node_modules and rebuilds only the client bundle at start. Pulling from
+  Docker Hub also sidesteps engine#229 (the GHCR/quay image-seed stub).
+
+  WHY COMPOSE-REPLACE. Chartbrew is a split front+API app -- the React SPA
+  (served by `serve` on :4018) and the Express API (:4019) are two processes on
+  two ports -- and it needs MySQL and Redis beside them. The schema's MySQL-only
+  `database:` cannot also give it Redis, and the repo's own compose builds from
+  source and host-publishes 4018/4019/6379. This override runs the Hub image
+  against a mysql:8.4 and a password-protected redis:7-alpine sidecar on named
+  volumes, and adds an nginx that folds the two ports onto one public origin.
+
+  ONE ORIGIN, RUNTIME-BUILT API URL. Chartbrew bakes the API/client URLs into
+  the Vite bundle (settings.js: API_HOST = VITE_APP_API_HOST), and the image
+  rebuilds the client at container start, so the URL can be set per deploy. But
+  the client's own routes collide with the API's at root (/user/profile vs GET
+  /user/:id, /chart/:id/embedded vs the embed data endpoint), so the API cannot
+  live at root: the client is built with VITE_APP_API_HOST=<origin>/api and
+  every REST call is same-origin under /api. nginx serves the SPA at / and
+  proxies /api/ to the API with the prefix stripped. VITE_APP_API_HOST and
+  VITE_APP_CLIENT_HOST end in _HOST, which ComposePlaceholders does NOT rewrite
+  (only _URL/_ORIGIN/_ENDPOINT/_DOMAIN), so a custom entrypoint derives both
+  from PA_PUBLIC_URL -- a _URL key the engine rewrites to the real https origin.
+  The one cost of the single origin: the AI-assistant Socket.IO client connects
+  to <origin>/api, negotiating an "/api" namespace the server does not register,
+  so the AI modal's live progress is degraded. No core dashboard/chart/team
+  feature depends on it, and fixing it would require patching upstream.
+
+  OWNER + SIGNUP. Chartbrew has no admin seed; the first user to register via
+  POST /user becomes an active teamOwner. CB_RESTRICT_SIGNUP=1 then refuses
+  every later signup once any user exists, so an init one-shot claims the owner
+  seat (a generated password) before the site is reachable, closing the
+  first-visitor-wins window. The owner login is written to credentials.txt.
+
+  SECRETS + PERSISTENCE. hooks/prepare.sh generates the secrets once and keeps
+  them in ~/.panelalpha/chartbrew/ (0600 in 0700), the only writable place a
+  redeploy does not delete, then writes the env_files the compose reads: the DB
+  password (baked into the mysql volume), the Redis password, CB_ENCRYPTION_KEY
+  (rotating it makes every stored datasource credential undecryptable), CB_SECRET
+  and the owner password. MySQL data, Redis data and uploaded assets live on
+  named volumes, so the owner, dashboards and encrypted connections survive a
+  redeploy. The server runs its migrations on start, so no migrate stage.

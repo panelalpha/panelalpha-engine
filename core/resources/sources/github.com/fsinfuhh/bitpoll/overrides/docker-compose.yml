@@ -1,0 +1,126 @@
+# Replaces the repo's compose.yaml (a build+bind-mount dev file that only adds
+# an nginx and leaves the app on sqlite) with the real stack Bitpoll needs. The
+# app image is built from the repository's own Dockerfile locally in DinD;
+# postgres and the ready gate are the only pulled images.
+#
+# Detection re-reads this file after it is written and must keep resolving to
+# `compose`, so no service both `build:`s and bind-mounts a `./` path (that is
+# the local-dev heuristic in ComposeFileInspector). The dedicated `build`
+# service builds the image with no mounts; the app and init reference the tag.
+services:
+  # Builds the app image from the repo Dockerfile and exits. No bind mount, so
+  # the file is not read as a workstation compose. imageRefs recognises a
+  # same-file-built tag, so init/app never trigger a Hub pull for it.
+  build:
+    image: bitpoll-local:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    mem_limit: 64m
+
+  db:
+    # Pinned major: Postgres cannot migrate a datadir backwards, so a floating
+    # latest would break the named volume the first time the major moves.
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    # POSTGRES_PASSWORD only, written once by hooks/prepare.sh and baked into
+    # the pgdata volume; never regenerated.
+    env_file:
+      - ../.panelalpha/bitpoll/db.env
+    environment:
+      POSTGRES_DB: bitpoll
+      POSTGRES_USER: bitpoll
+      # A named volume is not always empty (lost+found); postgres refuses to
+      # init into a non-empty dir, so give it a clean subdir.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bitpoll -d bitpoll -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  # One-shot: migrate to completion and seed the admin before the app serves.
+  # The image ENTRYPOINT (docker_files/run) also migrates but then execs uWSGI
+  # immediately; running migrations here and gating `app` on
+  # service_completed_successfully means a failed migration fails the deploy
+  # instead of publishing a 500 site, and the admin exists before any request.
+  init:
+    image: bitpoll-local:latest
+    restart: "no"
+    depends_on:
+      build:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+      - ../.panelalpha/bitpoll/app.env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      POSTGRES_DB: bitpoll
+      POSTGRES_USER: bitpoll
+    volumes:
+      - ./panelalpha/bitpoll/settings.py:/opt/config/settings.py:ro
+      - ./panelalpha/bitpoll:/pa:ro
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    mem_limit: 512m
+
+  app:
+    image: bitpoll-local:latest
+    restart: unless-stopped
+    # uWSGI's http-socket is :3009 (docker_files/uwsgi-bitpoll.ini); publish it
+    # on 8080 so the engine's port scan takes 8080 as the primary (engine#231).
+    ports:
+      - "8080:3009"
+    depends_on:
+      db:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - ../.panelalpha/bitpoll/app.env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      POSTGRES_DB: bitpoll
+      POSTGRES_USER: bitpoll
+      # Rewritten to the account's public https address before the stack starts
+      # (ComposePlaceholders rewrites a local value whose key ends in _URL);
+      # settings.py turns it into ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS and
+      # BASE_URL. Left http://localhost on an account with no domain yet.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      - ./panelalpha/bitpoll/settings.py:/opt/config/settings.py:ro
+    healthcheck:
+      # The venv python is first on PATH; the slim image has no curl/wget. `/`
+      # renders through the DB, so a 200 proves the app and its database.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:3009/',timeout=5).status==200 else 1)\""]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1024m
+
+  # Starts nothing, exits 0, waits on app's healthcheck. `docker compose up -d`
+  # blocks on a depends_on health condition, so this makes `up` return only once
+  # the site actually answers, rather than the moment containers start
+  # (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}

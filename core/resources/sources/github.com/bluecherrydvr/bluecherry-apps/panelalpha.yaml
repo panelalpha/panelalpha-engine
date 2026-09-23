@@ -1,0 +1,130 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bluecherry is a network video recorder: a C++ server (bc-server) that records
+  IP cameras over RTSP and ONVIF into files and a MySQL database, plus a PHP
+  administration UI. The repository is the upstream source tree -- server/ and
+  lib/ built by a hand-written Makefile over libavcodec, libconfig, pugixml and
+  ONVIF, with www/ holding the 449-file PHP interface. Detection found no
+  compose file Docker would auto-load, no Dockerfile at the root and a
+  composer.json under www/, and settled on strategy php. That produced a
+  serving-missing_entry 403 until `www` was added to PhpDocroot::LATE_CANDIDATES,
+  after which the same run reported deploy-ok with the PHP interface on screen.
+
+  That deploy-ok was the trap, not the result. What Apache was serving is the
+  administration UI on its own, with no bc-server behind it, no database, and
+  no /etc/bluecherry.conf for www/lib/db.php to read credentials from. It is
+  the console of a recorder that is not running. Recording, the ONVIF and RTSP
+  clients, the HLS live-view stream on :7003 and the JSON API on :7005 are all
+  bc-server, a compiled binary that the PHP strategy neither builds nor starts.
+
+  The repository does not look like a container candidate, and that impression
+  is what the recipe exists to correct. lib/v4l2_device_solo6x10.cpp,
+  lib/v4l2_device_tw5864.cpp and the libudev PCI enumerator in
+  server/bc-detect.cpp are all present, and all of them are for Bluecherry's own
+  optional capture cards. It was deployed to check: in an ordinary unprivileged
+  container with no /dev/video*, no --device and no kernel module, the
+  enumerator finds nothing and bc-server carries on with the IP-camera path,
+  which is how the product is sold today. Idle footprint measured 49.5 MiB for
+  the application container and 104.7 MiB for MariaDB.
+
+  So overrides/docker-compose.yml runs upstream's published image, which is
+  built from this same repository: actions/Dockerfile, actions/entrypoint.sh and
+  .github/workflows/docker-build.yml are in the tree and push
+  bluecherrydvr/bluecherry to Docker Hub. It is not a build of the checkout even
+  there -- actions/Dockerfile's payload is `curl $BLUECHERRY_DEB_URL`, a release
+  .deb built elsewhere -- so the image is the artifact and the tree is its
+  source. hooks/prepare.sh reads the version from debian/changelog and uses that
+  tag when Docker Hub has it; only two of the 36 tags are version tags, so the
+  usual answer is the fallback, :latest. The fallback is deliberately not
+  :stable, which sounds like the conservative choice and was last pushed in
+  April 2024, eighteen months behind :latest.
+
+  Three things the engine cannot infer, and one of them is a security fix.
+
+  The UI is HTTPS-only on a port nothing routes to. nginx-configs/bluecherry.conf
+  says `listen 7001 ssl;` with `#  listen 80;` commented out one line above it,
+  and the certificate is the snakeoil pair actions/Dockerfile copies out of
+  /etc/ssl. Port 80 in the published image is Debian's default "Welcome to
+  nginx!" site, which the .deb reinstates after the Dockerfile removed it -- so
+  proxying the account's domain to the container as it ships serves the nginx
+  welcome page. The engine's proxy can speak https upstream (NginxProxy.php:607)
+  but the app-deploy path hardcodes 'upstream_protocol' => 'http', so the answer
+  is a vhost rather than a proxy change: files/bluecherry-http.conf is mounted
+  over /etc/nginx/sites-enabled/default, which removes the Debian site and adds
+  a plain-HTTP server for /usr/share/bluecherry/www in the same mount, carrying
+  over bluecherry.conf's proxies for /hls and /api. TLS stays where it belongs,
+  on the account's own certificate at the engine's proxy.
+
+  The database bootstrap does not work unset, and that is an upstream bug rather
+  than a missing preference. actions/entrypoint.sh defaults DB_NAME, DB_USER and
+  DB_PASS and passes them positionally to /bin/bc-database-create, but
+  actions/bc-database-create.sh ignores its arguments and reads
+  $BLUECHERRY_DB_NAME, $BLUECHERRY_DB_USER, $BLUECHERRY_DB_PASSWORD and
+  $BLUECHERRY_USERHOST from the environment with no defaults of its own. Left to
+  themselves they are empty, the first boot runs `DROP DATABASE IF EXISTS ;
+  CREATE DATABASE ` and the container dies with "ERROR 1064 ... DB create
+  failed". The compose file sets all four explicitly, plus BLUECHERRY_DB_HOST
+  and the MYSQL_ADMIN_* pair bc_db_tool.sh creates the account with. One error
+  survives and is expected: the entrypoint follows its GRANT with
+  `ALTER USER ... IDENTIFIED WITH mysql_native_password BY ...`, which MariaDB 11
+  rejects with ERROR 1064; the block is wrapped in a warn-and-continue, the
+  privileges were granted by the statement before it, and the application
+  authenticates normally. A health check must not read that line as fatal.
+
+  And the administrator. Bluecherry has no installer and no first-run wizard:
+  misc/sql/initial_data_mysql.sql, which bc_db_tool.sh loads into every new
+  database, inserts Users('Admin', 'b22dec1d6cfa580962f3a3796a5dc6b3', '1234'),
+  and that hash is md5('bluecherry' . '1234'). www/lib/lib.php says as much --
+  user::getInfo() flags default_password when the stored hash equals
+  md5('bluecherry'.salt) -- and the only consequence in the UI is a dismissible
+  banner. On a public HTTPS name that is a working administrator login of
+  Admin / bluecherry for anyone who knows the product. files/panelalpha-setup.sh
+  replaces that row with a password generated per account, then signs in with it
+  and fetches an access_setup page to prove the replacement works. The UPDATE is
+  conditioned on the row still carrying that exact default -- the same test
+  lib.php makes -- so it is idempotent across redeploys and never overwrites a
+  password the customer has since chosen; when it matches nothing the script
+  says so and skips the sign-in check rather than logging a refusal.
+
+  Every credential lives in ~/.panelalpha/bluecherry.env (0600, in a 0700
+  directory) and nowhere else, and that file is also the stack's env_file --
+  compose reads it at ../.panelalpha/bluecherry.env, relative to the
+  --project-directory the engine passes. ~/project/.env holds one line, the
+  image tag. Two engine behaviours make that the right shape rather than a
+  preference. The engine wipes and re-clones ~/project on every deploy
+  (engine#173), so a guard on a file there never fires on a redeploy and the
+  database password would be regenerated while the volume still held the old
+  one. And .env is copied to .env.default at mode 644
+  (ProjectEnvironment::apply) inside a home that is root-owned 0755, which
+  makes anything written there readable by every other account's uid on the
+  host -- confirmed by reading one account's .env.default as another account's
+  user. ~/.panelalpha survives the clone and is readable only by its owner; the
+  home being root-owned 0755 is also why prepare.sh creates that directory
+  rather than assuming it.
+
+  One service is a no-op that exits 0, for the reason it is in most of these
+  recipes: the engine runs `docker compose up -d` without --wait (engine#90) and
+  calls the deploy finished when that returns, which is when containers have
+  been started. `ready` waits for `setup`, which waits for the application's
+  healthcheck, which greps the login page's own title out of http://127.0.0.1/
+  rather than trusting the image's `pgrep bc-server` -- so `up -d` returns only
+  once the UI answers, the shipped default credential is gone and the generated
+  one has signed in. A clean exit 0 is explicitly not a crash loop to
+  AppHealth::isCrashing().
+
+  Storage is the open operational question, not a deployment one. An NVR writes
+  continuously, and the Storage row seeded by initial_data_mysql.sql is
+  ('/var/lib/bluecherry/recordings', 95.00, 90.00) -- delete oldest above 95%
+  full, stop at 90%. Those are percentages of the filesystem the volume lands
+  on, which inside an account is its whole Docker data directory rather than a
+  quota of its own, so an unattended camera fills that filesystem to 95% and
+  keeps it there by design. See README.md.
+
+  Mail, cameras and licensing are left unconfigured. Event notifications need an
+  SMTP server the engine does not provide (Settings -> E-mail), and cameras are
+  added by the customer against their own RTSP or ONVIF endpoints. The UI has a
+  Licenses page that activates a key through /usr/lib/bluecherry/licensecmd
+  against Bluecherry's own service; nothing here activates one, and no camera
+  limit was found enforced anywhere in the tree -- though that was not tested
+  with cameras attached, which is the one part of this application no deploy
+  here exercises.

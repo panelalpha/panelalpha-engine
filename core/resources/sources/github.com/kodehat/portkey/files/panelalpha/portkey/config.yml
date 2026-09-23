@@ -1,0 +1,71 @@
+# portkey configuration for PanelAlpha hosting.
+#
+# This is the whole application: portkey reads this file once at startup and
+# serves the links below. To add or change links, edit this file (on the host
+# it lives at ~/.panelalpha/portkey/config.yml, which survives redeploys) and
+# redeploy the project. There is no web admin — that is by design.
+#
+# Only keys portkey knows may appear here: an unknown key makes it refuse to
+# start (config is unmarshalled with ErrorUnused). See the upstream README.
+server:
+  logLevel: INFO
+  logJson: false
+  # 0.0.0.0, not the image default "localhost": the engine's proxy reaches the
+  # container by its bridge IP, and a loopback bind would refuse it.
+  host: 0.0.0.0
+  port: 3000
+  contextPath: ""
+  devMode: false
+metrics:
+  # The Prometheus metrics server on :3030 is not published or needed here.
+  enabled: false
+ui:
+  title: portkey
+  showSearchBar: true
+  showTopIcon: true
+  showKeywordsAsTooltips: true
+  sortAlphabetically: false
+  layoutColumns: 3
+  # No headerAddition: the image's baked config injects a third-party analytics
+  # script (analytics.thisismy.cloud) pinned to demo.portkey.page. Left out.
+  footer: |-
+    <p>Powered by <a class="no-underline border-b-1 border-solid" target="_blank" rel="nofollow noopener" href="https://www.portkey.page/">portkey</a></p>
+search:
+  stringSimilarity: true
+  minimumSimilarity: 0.5
+favicon:
+  # "direct": portkey fetches favicons itself, so there is no runtime dependency
+  # on portkey.page's hosted favicon service. Cache disabled -> no disk writes,
+  # the container stays read-only.
+  mode: direct
+  cacheEnabled: false
+# Starter links. Replace these with your own.
+portals:
+- title: portkey docs
+  icon: 📘
+  link: https://github.com/kodehat/portkey
+  group: Getting started
+  keywords:
+  - help
+  - documentation
+- title: About this portal
+  icon: ❓
+  link: /about
+  group: Getting started
+  keywords:
+  - info
+pages:
+- heading: About this portal
+  subtitle: How to add your own links
+  path: /about
+  content: |-
+    This is a <em>portkey</em> start page: a list of links you control.</br>
+    </br>
+    To add or change links, edit <code>~/.panelalpha/portkey/config.yml</code>
+    on your account and redeploy the project. Each entry under
+    <code>portals:</code> needs a <code>title</code> and a <code>link</code>,
+    and may add an <code>icon</code> (emoji, image path or URL),
+    a <code>group</code> and search <code>keywords</code>.</br>
+    </br>
+    There is no web admin — the page is generated entirely from that file,
+    which is why nothing here can be changed by a visitor.

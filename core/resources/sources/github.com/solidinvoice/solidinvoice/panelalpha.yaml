@@ -1,0 +1,86 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SolidInvoice is a self-hosted invoicing application -- clients, quotes,
+  invoices, payments -- built on Symfony and shipped as a single static
+  FrankenPHP binary with the whole application gzipped inside it. The
+  repository's docker-compose.yml is upstream's own: solidinvoice/solidinvoice
+  on 8765:8765 beside mysql:8.0.
+
+  Detection was already right. The tracker run read that compose file, chose
+  the compose strategy and found port 8765; what it got was
+  `serving-unknown`, nothing listening on 8765 and the health report's
+  app-restart-looping check naming `app (Restarting (137))`. 137 is the
+  kernel, and the reason is the first thing the binary does: initializeApp()
+  untars its embedded copy of the application into $HOME/.SolidInvoice before
+  any subcommand runs. Measured on this host, that untar wants more than 1280
+  MB of cgroup -- the dirty pages are charged to it -- while ServiceLimits
+  hands an unlisted `app` service a share of the account. So the container was
+  killed mid-untar, and then the second failure landed on top of the first:
+  extractEmbeddedApp() decides it has already unpacked by os.Stat() on the
+  directory alone, so a half-unpacked tree is never completed. Every later
+  boot found a directory with no bin/console and no Caddyfile, Caddy refused
+  to load a config that was not there, and the container sat "Up" answering
+  nothing. This recipe unpacks once, in a one-shot container sized for it, into
+  a volume the app service shares, and removes a half-unpacked tree before
+  trying again.
+
+  The other half is the install. SolidInvoice seeds no user and ships no
+  default password: until it is installed, InstallBundle's RequestListener
+  redirects every route to /install, and /install is PUBLIC_ACCESS. A deploy
+  that stops at "the wizard renders" has published a form on which the first
+  stranger to arrive becomes the only administrator -- so the recipe runs
+  upstream's non-interactive installer from a one-shot service that must exit
+  0 before the web server is started at all, with a password generated per
+  account into ~/project/.panelalpha-admin-password (0600). After that,
+  /install answers 302 to / and /register answers 404.
+
+  Getting that installer to work against the published image took three
+  workarounds, all of them upstream bugs in 3.0.1 -- which is what :latest is,
+  while the default branch this clones is 3.1.x:
+
+    * `solidinvoice console <cmd>` always exits 0. The cobra subcommand calls
+      frankenphp.ExecuteScriptCLI and discards its return, under Run: rather
+      than RunE:. So neither the guard nor the verdict can use an exit status,
+      and both read solidinvoice.list.php, the index of SolidInvoice's own
+      secret vault, for SOLIDINVOICE_INSTALLED -- which InstallCommand writes
+      last, after the admin user. (Upstream's isAppInstalled() has the same
+      hole; it is why the messenger worker starts consuming against a database
+      that does not exist yet.)
+    * The installer's steps never run on 3.0.1. install() calls
+      $step->execute(...) on five steps whose execute() is a Generator and
+      iterates none of them, so "Creating database schema" prints its label and
+      does nothing. 3.1.x fixed it. The recipe does that work itself, the way
+      Migration does it: doctrine:schema:update from the entity metadata, then
+      mark every migration complete. Not doctrine:migrations:migrate --
+      migrations/ is an upgrade path, and replaying it on an empty MySQL 8 dies
+      at Version20305 on `1828 Cannot drop column 'company_id'`.
+    * 3.0.1's saveConfig() seals SOLIDINVOICE_DATABASE_DRIVER, _HOST, _PORT,
+      _NAME, _USER, _PASSWORD and _VERSION into the vault, while
+      config/packages/doctrine.php reads one key, SOLIDINVOICE_DATABASE_URL.
+      The only code that turns those parts into a URL runs solely when it finds
+      a legacy config/env.php, which a container never has, so a CLI install
+      silently falls back to the default SQLite path and dies on `unable to
+      open database file`. The recipe sets SOLIDINVOICE_DATABASE_URL as a real
+      environment variable on both services: it outranks the vault in Symfony,
+      so it is right on 3.0.1 and still right on 3.1.x.
+
+  MySQL rather than SQLite, which SolidInvoice does support and which would
+  save a container and about 400 MB: the image runs a Symfony Messenger
+  consumer beside the web server and the transport is
+  `doctrine://default?queue_name=async`, so SQLite would put two writers on one
+  file. MySQL is also what upstream's own compose file runs.
+
+  The public address is the one thing this file cannot know -- hooks are told
+  no domain -- so SOLIDINVOICE_APPLICATION_URL is written as a bare
+  http://localhost and ComposePlaceholders rewrites it to the account's https
+  address. The deploy log says so: "Pointed the application address at its
+  public URL: SOLIDINVOICE_APPLICATION_URL". It is what puts the account's own
+  domain in the login form's action and in e-mailed invoice links. The Host
+  header needs no special handling here, unusually: the image sets
+  SOLIDINVOICE_DOCKER=true, which makes the Caddy site address `http://:8765`
+  -- a port with no hostname, matching any Host -- so the engine's probe on
+  127.0.0.1:8765 is answered rather than 400ed (engine#165).
+
+  Not configured: mail (SOLIDINVOICE_MAILER_DSN stays null://null, so password
+  resets and invoice e-mails are accepted and discarded), Meilisearch, Sentry,
+  and the Google OAuth client. Registration is left closed.

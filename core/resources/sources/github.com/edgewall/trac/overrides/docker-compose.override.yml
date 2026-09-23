@@ -1,0 +1,10 @@
+# The project environment (conf/trac.ini with the session secret, the sqlite db,
+# wiki pages, uploaded attachments, plus the admin digest file) is the data and
+# must outlive a redeploy. Bind it to ~/.panelalpha/trac, the tree the wipe
+# leaves alone; hooks/prepare.sh writes the absolute host path to .env as
+# TRAC_DATA. The :- default is only a last resort if that write did not happen;
+# the real value comes from .env.
+services:
+  app:
+    volumes:
+      - ${TRAC_DATA:-/root/.panelalpha/trac}:/data

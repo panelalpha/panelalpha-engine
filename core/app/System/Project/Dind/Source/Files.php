@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind\Source;
 
 use App\Lib\Deploy\Source\ArchiveSafety;
+use App\Lib\Deploy\Source\ArchiveUnpackedSize;
 use App\Lib\Deploy\Source\ProjectArchive;
 use App\Lib\Deploy\Source\UploadedArchive;
 use App\System\Project\Dind as DindProject;
@@ -49,7 +50,14 @@ final class Files
             $system->exec(['sudo', 'chmod', '0444', $staged]);
 
             ArchiveSafety::assertSafeListing($system->exec($archive->listNamesArgv($staged), [], 120));
-            ArchiveSafety::assertRegularMembersOnly($system->exec($archive->listModesArgv($staged), [], 120));
+            // One listing, two checks: member types, and the size the archive
+            // claims -- which is worth rejecting on when it is already too big.
+            $modes = $system->exec($archive->listModesArgv($staged), [], 120);
+            ArchiveSafety::assertRegularMembersOnly($modes);
+            ArchiveSafety::assertUncompressedSizeWithin($modes);
+            // Then the size it really is. The staged copy is root-owned and
+            // 0444, so it can be read here and cannot change underneath us.
+            ArchiveUnpackedSize::assertWithin($staged, $archive->isZip);
 
             $system->exec(['sudo', 'mkdir', '-p', $tmp]);
             if ($chown) {

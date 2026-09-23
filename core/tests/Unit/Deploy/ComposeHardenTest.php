@@ -107,7 +107,7 @@ class ComposeHardenTest extends TestCase
         $this->assertSame(['database', 'vite'], $result['services']['app']['depends_on']);
         $this->assertSame('384m', $result['services']['app']['mem_limit']);
         $this->assertSame('512m', $result['services']['database']['mem_limit']);
-        $this->assertSame(256, $result['services']['app']['pids_limit']);
+        $this->assertSame(1024, $result['services']['app']['pids_limit']);
     }
 
     public function test_preserves_worker_configuration_and_caps_application_resources(): void
@@ -334,6 +334,105 @@ YAML
         $this->assertSame(['./data:/app/data'], $service['volumes']);
     }
 
+    public function test_removes_capability_and_confinement_options(): void
+    {
+        // Dropping `privileged` is not enough on its own: every capability it
+        // implies can be asked for one at a time, and the confinement that
+        // would otherwise catch the abuse can be switched off by name.
+        $compose = ['services' => ['app' => [
+            'image' => 'example/app',
+            'cap_add' => ['SYS_ADMIN', 'SYS_PTRACE', 'ALL'],
+            'security_opt' => ['apparmor:unconfined', 'seccomp:unconfined'],
+            'userns_mode' => 'host',
+            'cgroup_parent' => '/',
+            'group_add' => ['docker'],
+            'sysctls' => ['kernel.shm_rmid_forced' => 0],
+            'device_cgroup_rules' => ['c *:* rwm'],
+        ]]];
+
+        $service = ComposeHarden::apply($compose)['services']['app'];
+
+        foreach (
+            ['cap_add', 'security_opt', 'userns_mode', 'cgroup_parent', 'group_add', 'sysctls', 'device_cgroup_rules']
+            as $key
+        ) {
+            $this->assertArrayNotHasKey($key, $service, "{$key} survived hardening");
+        }
+    }
+
+    public function test_removes_docker_socket_mounted_through_its_parent_directory(): void
+    {
+        // Matching the socket path alone left the directory it lives in as a
+        // way to hand over the daemon without naming the socket.
+        $compose = ['services' => ['app' => [
+            'image' => 'example/app',
+            'volumes' => [
+                '/var/run:/var/run',
+                '/run:/hostrun',
+                '/run/docker.sock:/tmp/d.sock',
+                './data:/app/data',
+            ],
+        ]]];
+
+        $service = ComposeHarden::apply($compose)['services']['app'];
+
+        $this->assertSame(['./data:/app/data'], $service['volumes']);
+    }
+
+    public function test_removes_binds_of_the_host_filesystem(): void
+    {
+        $compose = ['services' => ['app' => [
+            'image' => 'example/app',
+            'volumes' => [
+                '/:/hostfs',
+                '/etc:/hostetc:ro',
+                '/var/lib/docker:/var/lib/docker',
+                '/proc:/hostproc',
+                'appdata:/var/lib/app',
+                './src:/app/src',
+            ],
+        ]]];
+
+        $service = ComposeHarden::apply($compose)['services']['app'];
+
+        // A named volume and a path inside the project are the legitimate cases
+        // and must survive.
+        $this->assertSame(['appdata:/var/lib/app', './src:/app/src'], $service['volumes']);
+    }
+
+    public function test_long_form_mounts_are_filtered_too(): void
+    {
+        $compose = ['services' => ['app' => [
+            'image' => 'example/app',
+            'volumes' => [
+                ['type' => 'bind', 'source' => '/', 'target' => '/hostfs'],
+                ['type' => 'bind', 'source' => '/var/run/docker.sock', 'target' => '/sock'],
+                ['type' => 'volume', 'source' => 'appdata', 'target' => '/data'],
+            ],
+        ]]];
+
+        $service = ComposeHarden::apply($compose)['services']['app'];
+
+        $this->assertSame(
+            [['type' => 'volume', 'source' => 'appdata', 'target' => '/data']],
+            $service['volumes']
+        );
+    }
+
+    public function test_a_path_that_only_starts_like_run_is_kept(): void
+    {
+        // `/var/running` is not `/var/run`, and the socket pattern must not
+        // widen into a prefix match.
+        $compose = ['services' => ['app' => [
+            'image' => 'example/app',
+            'volumes' => ['/var/running:/app/running', './run:/app/run'],
+        ]]];
+
+        $service = ComposeHarden::apply($compose)['services']['app'];
+
+        $this->assertSame(['/var/running:/app/running', './run:/app/run'], $service['volumes']);
+    }
+
     public function test_a_build_base_service_is_not_restarted(): void
     {
         // Chatwoot: `base` only builds the image rails and sidekiq run, exits
@@ -491,5 +590,58 @@ YAML
 
         $this->assertSame('no', $result['services']['base']['restart']);
         $this->assertNotSame('no', $result['services']['rails']['restart'] ?? null);
+    }
+
+    /**
+     * An expose-only app service gets its detected primary port published, so
+     * the account container binds the port the DinD proxy targets (engine#234).
+     */
+    public function test_publishes_the_detected_primary_port_for_an_expose_only_service(): void
+    {
+        $compose = ['services' => [
+            'app' => ['build' => '.', 'expose' => ['8080']],
+            'db' => ['image' => 'postgres:16'],
+        ]];
+
+        $result = ComposeHarden::withPublishedPrimaryPort($compose);
+
+        $this->assertSame(8080, $result['published']);
+        $this->assertSame(['8080:8080'], $result['compose']['services']['app']['ports']);
+        $this->assertArrayNotHasKey('ports', $result['compose']['services']['db']);
+    }
+
+    /** A service that already publishes the primary port is left untouched. */
+    public function test_leaves_a_service_that_already_publishes_the_port_unchanged(): void
+    {
+        $compose = ['services' => [
+            'app' => ['build' => '.', 'ports' => ['8080:80'], 'expose' => ['8080']],
+        ]];
+
+        $result = ComposeHarden::withPublishedPrimaryPort($compose);
+
+        $this->assertNull($result['published']);
+        $this->assertSame(['8080:80'], $result['compose']['services']['app']['ports']);
+    }
+
+    /**
+     * Traefik's routed port survives as `expose:` after HostIngress strips the
+     * proxy, then gets published — the recipes' explicit `<primary>:<primary>`
+     * is what this now makes unnecessary.
+     */
+    public function test_publishes_a_routed_port_left_as_expose_by_ingress_stripping(): void
+    {
+        $compose = ['services' => [
+            'app' => [
+                'build' => '.',
+                'labels' => ['traefik.http.services.app.loadbalancer.server.port' => '5000'],
+            ],
+            'traefik' => ['image' => 'traefik:v3.1'],
+        ]];
+
+        $stripped = ComposeHarden::withoutHostIngress($compose)['compose'];
+        $result = ComposeHarden::withPublishedPrimaryPort($stripped);
+
+        $this->assertSame(5000, $result['published']);
+        $this->assertContains('5000:5000', $result['compose']['services']['app']['ports']);
     }
 }

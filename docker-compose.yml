@@ -2,30 +2,41 @@ include:
   - docker-compose.yml-webserver
 services:
   core:
+    # Versioned, not date-tagged, because this image runs core/vendor and so is
+    # pinned to core/composer.json's PHP. A date tag kept resolving to a real,
+    # pullable 8.3 image after core moved to ^8.4, and core crash-looped on
+    # vendor/composer/platform_check.php. A version tag the registry does not
+    # carry yet is built from Dockerfile-core instead, which is always current.
+    # The rest of the stack stays on date tags -- it has no such coupling.
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-core
       target: php_nginx_prod
-    image: ghcr.io/panelalpha/engine-core:20260908
+    image: ghcr.io/panelalpha/engine-core:v2.0.1
     pull_policy: missing
     restart: always
-    depends_on:
-      - core-redis
     post_start:
       - command: php artisan system:database:test --retries=10
       - command: php artisan system:ip:sync --skip-errors
     hostname: core.shared-hosting.palocal
     privileged: true
     pid: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "2011:2011"
     volumes:
       - ./core:/var/www/html
       - ./.env-core:/var/www/html/.env
       - ./config/core/nginx.conf:/etc/nginx/nginx.conf
+      - ./crt:/root/crt
       - ./config/core/images.yaml:/var/www/config/core/images.yaml:ro
-      - ./config/core/php.ini:/etc/php/8.3/cli/conf.d/90-panelalpha.ini
-      - ./config/core/php.ini:/etc/php/8.3/fpm/conf.d/90-panelalpha.ini
-      - ./config/core/php-fpm-pool.conf:/etc/php/8.3/fpm/pool.d/zz-docker.conf
+      - ./config/core/php.ini:/etc/php/8.4/cli/conf.d/90-panelalpha.ini
+      - ./config/core/php.ini:/etc/php/8.4/fpm/conf.d/90-panelalpha.ini
+      - ./config/core/php-fpm-pool.conf:/etc/php/8.4/fpm/pool.d/zz-docker.conf
       - ./config/core/supervisord.conf:/etc/supervisor/conf.d/supervisord.conf
+      - ./config/logrotate:/etc/logrotate.d
+      - ./data/logrotate:/var/lib/logrotate
       - ./logs/core/nginx:/var/log/nginx
       - ./logs/core/supervisor:/var/log/supervisor
       - core-storage:/var/www/html/storage
@@ -40,18 +51,22 @@ services:
       - ./dockerfiles/entrypoint-core.sh:/entrypoint.sh
     command: bash /entrypoint.sh
     environment:
-      - "DB_HOST=database-core.shared-hosting.palocal"
-      - "DB_DATABASE=core"
-      - "DB_USERNAME=core"
-      - "DB_PASSWORD=${CORE_MYSQL_PASSWORD}"
+      # sqlite is the default for every install; int-updater.sh backfills the
+      # CORE_DB_* overrides below into .env only for a host it finds already
+      # running core-db, so it keeps its existing MySQL data instead of
+      # starting against an empty core.sqlite. See docs/internal/core-db.md.
+      - "DB_CONNECTION=${CORE_DB_CONNECTION:-sqlite}"
+      - "DB_DATABASE=${CORE_DB_DATABASE:-/var/www/html/storage/database/core.sqlite}"
+      - "DB_HOST=${CORE_DB_HOST:-}"
+      - "DB_USERNAME=${CORE_DB_USERNAME:-}"
+      - "DB_PASSWORD=${CORE_MYSQL_PASSWORD:-}"
       - "USERS_DB_HOST=database-users.shared-hosting.palocal"
       - "USERS_DB_USERNAME=root"
       - "USERS_DB_PASSWORD=${USERS_MYSQL_ROOT_PASSWORD}"
       - "METRICS_LIMIT_DAYS=${METRICS_LIMIT_DAYS:-90}"
       - "METRICS_LIMIT_ENTRIES=${METRICS_LIMIT_ENTRIES:-1000000}"
-      - "QUEUE_CONNECTION=redis"
-      - "REDIS_HOST=redis.shared-hosting.palocal"
-    mem_limit: ${MEM_LIMIT_CORE:-3G}
+      - "QUEUE_CONNECTION=database"
+    mem_limit: ${MEM_LIMIT_CORE:-6G}
     memswap_limit: ${MEMSWAP_LIMIT_CORE:-0}
   mail:
     profiles: ["mail", "full"]
@@ -101,85 +116,21 @@ services:
     volumes:
       - "./scripts/server_metrics.py:/scripts/server_metrics.py"
     environment:
-      - "DB_HOST=database-core.shared-hosting.palocal"
-      - "DB_DATABASE=core"
-      - "DB_USERNAME=core"
-      - "DB_PASSWORD=${CORE_MYSQL_PASSWORD}"
+      - "DB_CONNECTION=${CORE_DB_CONNECTION:-sqlite}"
+      - "DB_DATABASE=${CORE_DB_DATABASE:-/var/www/html/storage/database/core.sqlite}"
+      - "DB_HOST=${CORE_DB_HOST:-}"
+      - "DB_USERNAME=${CORE_DB_USERNAME:-}"
+      - "DB_PASSWORD=${CORE_MYSQL_PASSWORD:-}"
       - "METRICS_SNAPSHOT_INTERVAL=${METRICS_SNAPSHOT_INTERVAL:-5}"
     mem_limit: ${MEM_LIMIT_METRICS:-1G}
     memswap_limit: ${MEMSWAP_LIMIT_METRICS:-0}
-  core-cron:
-    build:
-      context: ./dockerfiles
-      dockerfile: Dockerfile-core
-      target: php_cron_prod
-    image: ghcr.io/panelalpha/engine-cron:20260908
-    pull_policy: missing
-    depends_on:
-      - core
-    restart: always
-    volumes_from:
-      - core
-    volumes:
-      - ./config/logrotate:/etc/logrotate.d
-      - ./data/logrotate:/var/lib/logrotate
-    environment:
-      - "APP_ENV=cron"
-      - "DB_HOST=database-core.shared-hosting.palocal"
-      - "DB_DATABASE=core"
-      - "DB_USERNAME=core"
-      - "DB_PASSWORD=${CORE_MYSQL_PASSWORD}"
-      - "USERS_DB_HOST=database-users.shared-hosting.palocal"
-      - "USERS_DB_USERNAME=root"
-      - "USERS_DB_PASSWORD=${USERS_MYSQL_ROOT_PASSWORD}"
-      - "QUEUE_CONNECTION=redis"
-      - "REDIS_HOST=redis.shared-hosting.palocal"
-    mem_limit: ${MEM_LIMIT_CORE_CRON:-${MEM_LIMIT_CRON:-3G}}
-    memswap_limit: ${MEMSWAP_LIMIT_CORE_CRON:-${MEMSWAP_LIMIT_CRON:-0}}
-  core-queue:
-    build:
-      context: ./dockerfiles
-      dockerfile: Dockerfile-core
-      target: php_prod
-    image: ghcr.io/panelalpha/engine-queue-worker:20260908
-    pull_policy: missing
-    hostname: queue-worker.shared-hosting.palocal
-    depends_on:
-      - core
-      - core-redis
-    privileged: true
-    pid: host
-    user: "www-data"
-    command: "php artisan horizon"
-    restart: always
-    volumes_from:
-      - core
-    working_dir: /var/www/html
-    environment:
-      - "DB_HOST=database-core.shared-hosting.palocal"
-      - "DB_DATABASE=core"
-      - "DB_USERNAME=core"
-      - "DB_PASSWORD=${CORE_MYSQL_PASSWORD}"
-      - "USERS_DB_HOST=database-users.shared-hosting.palocal"
-      - "USERS_DB_USERNAME=root"
-      - "USERS_DB_PASSWORD=${USERS_MYSQL_ROOT_PASSWORD}"
-      - "QUEUE_CONNECTION=redis"
-      - "REDIS_HOST=redis.shared-hosting.palocal"
-    mem_limit: ${MEM_LIMIT_CORE_QUEUE:-${MEM_LIMIT_QUEUE_WORKER:-3G}}
-    memswap_limit: ${MEMSWAP_LIMIT_CORE_QUEUE:-${MEMSWAP_LIMIT_QUEUE_WORKER:-0}}
-  core-redis:
-    build:
-      context: ./dockerfiles
-      dockerfile: Dockerfile-redis
-    image: ghcr.io/panelalpha/engine-redis:20260908
-    pull_policy: missing
-    restart: always
-    hostname: redis.shared-hosting.palocal
-    volumes:
-      - ./data/redis:/data
-    mem_limit: ${MEM_LIMIT_CORE_REDIS:-${MEM_LIMIT_REDIS:-3G}}
-    memswap_limit: ${MEMSWAP_LIMIT_CORE_REDIS:-${MEMSWAP_LIMIT_REDIS:-0}}
   core-db:
+    # Only for a host int-updater.sh found already running this service --
+    # it backfills CORE_DB_CONNECTION=mysql and this profile into .env so an
+    # existing install keeps its data instead of starting against an empty
+    # core.sqlite. A fresh install never enables this profile and never had
+    # a core-db to detect. See docs/internal/core-db.md.
+    profiles: ["legacy-mysql-core"]
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-database
@@ -199,25 +150,6 @@ services:
       - "MARIADB_AUTO_UPGRADE=1"
     mem_limit: ${MEM_LIMIT_CORE_DB:-${MEM_LIMIT_DATABASE_CORE:-3G}}
     memswap_limit: ${MEMSWAP_LIMIT_CORE_DB:-${MEMSWAP_LIMIT_DATABASE_CORE:-0}}
-  core-http:
-    build:
-      context: ./dockerfiles
-      dockerfile: Dockerfile-nginx
-    image: ghcr.io/panelalpha/app-nginx:20260525
-    pull_policy: missing
-    depends_on:
-      - core
-    restart: always
-    hostname: nginx.shared-hosting.palocal
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    ports:
-      - "2011:2011"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./crt:/root/crt
-    mem_limit: ${MEM_LIMIT_CORE_HTTP:-${MEM_LIMIT_NGINX:-3G}}
-    memswap_limit: ${MEMSWAP_LIMIT_CORE_HTTP:-${MEMSWAP_LIMIT_NGINX:-0}}
   ftp:
     profiles: ["ftp", "full"]
     build:
@@ -251,8 +183,13 @@ services:
     volumes:
       - ./config/sftp/ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key
       - ./config/sftp/ssh_host_rsa_key:/etc/ssh/ssh_host_rsa_key
-      - ./config/sftp/logins.conf:/etc/sftp/logins.conf
-      - ./config/sftp/sync-logins.sh:/etc/sftp/sync-logins.sh
+      # The directory, not the two files inside it. A single-file bind binds an
+      # inode: once anything replaces logins.conf on the host -- and something in
+      # the install/update path does -- the container keeps reading the file it
+      # was started with, and no SFTP account ever reaches it again. Measured on
+      # a live host with the container on a 0-byte copy from days earlier. The
+      # image ships nothing under /etc/sftp, so nothing is shadowed.
+      - ./config/sftp:/etc/sftp
       - ./config/sftp/entrypoint.sh:/entrypoint.sh
       - /home:/home
     entrypoint: ["/bin/bash", "/entrypoint.sh"]
@@ -320,6 +257,47 @@ services:
       - cache-registry-data:/var/lib/registry
     mem_limit: ${MEM_LIMIT_CACHE_REGISTRY:-1G}
     memswap_limit: ${MEMSWAP_LIMIT_CACHE_REGISTRY:-0}
+  # A credentials-only pass-through to Docker Hub. A pull carrying a Hub login
+  # counts against that account's quota (200/6h) instead of this host IP's
+  # anonymous one (100/6h), and the login cannot go in a tenant's own daemon
+  # without handing the tenant the secret. Like cache-registry, the container
+  # name is load-bearing -- every account daemon names it in `registry-mirrors`.
+  #
+  # A broken mirror is an outage, not a slowdown. dockerd falls back to Hub
+  # only when the mirror errors; a mirror that answers 200 with a truncated
+  # blob fails the pull with `unexpected commit digest` (containerd image
+  # store), and the build dies. That is what a full 512m tmpfs did (#285).
+  #
+  # Nothing is kept for long. `proxy.ttl` expires an entry this long after it
+  # is fetched, and `storage.delete.enabled` is what makes that expiry free the
+  # bytes -- it defaults to false, and with it off the scheduler still runs and
+  # reclaims nothing. Manifest expiry drops only the tag link, so a few KB per
+  # repository survive; `system:registry-proxy:trim` clears them by hand.
+  #
+  # Storage is a named volume on disk: one uncached base image can be larger
+  # than any tmpfs worth reserving in RAM. The tag is pinned because 3.x moved
+  # the config path the stock entrypoint reads.
+  registry-proxy:
+    profiles: ["registry-proxy", "full"]
+    image: registry:3.1.1
+    pull_policy: missing
+    container_name: panelalpha-registry-proxy
+    restart: unless-stopped
+    environment:
+      REGISTRY_PROXY_REMOTEURL: https://registry-1.docker.io
+      REGISTRY_PROXY_USERNAME: ${REGISTRY_PROXY_USERNAME:-}
+      REGISTRY_PROXY_PASSWORD: ${REGISTRY_PROXY_PASSWORD:-}
+      REGISTRY_PROXY_TTL: ${REGISTRY_PROXY_TTL:-30m}
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      # The stock 3.x config logs at debug: a trace span every 10s from the
+      # storage health check, forever, on an idle host.
+      REGISTRY_LOG_LEVEL: ${REGISTRY_PROXY_LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:5001:5000"
+    volumes:
+      - registry-proxy-data:/var/lib/registry
+    mem_limit: ${MEM_LIMIT_REGISTRY_PROXY:-1G}
+    memswap_limit: ${MEMSWAP_LIMIT_REGISTRY_PROXY:-0}
   lighthouse:
     profiles: ["lighthouse", "full"]
     build:
@@ -339,6 +317,7 @@ volumes:
   core-storage: {}
   database-core-data: {}
   database-users-data: {}
+  registry-proxy-data: {}
 networks:
   default:
     name: pash-default-network

@@ -1,6 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
-import { modsecUnavailableReason } from '@/helpers/modsec-helpers';
+import { auditLogFiles, modsecUnavailableReason } from '@/helpers/modsec-helpers';
 
 test.describe('ModSecurity audit log', () => {
   test.beforeEach(async ({ api, anonymousRequest, setupUser }) => {
@@ -18,16 +18,22 @@ test.describe('ModSecurity audit log', () => {
     }
   });
 
-  test('a listed file can be downloaded', async ({ api }) => {
-    const { data } = await api.listModSecurityAuditLogFiles();
-    test.skip(data.length === 0, 'The engine has produced no audit logs yet.');
+  test('a listed file can be downloaded', async ({ api, anonymousRequest, setupUser }) => {
+    const data = await auditLogFiles(api, anonymousRequest, setupUser.url);
+    test.skip(
+      data.length === 0,
+      'The engine lists no audit log files even after a request the WAF should flag.'
+    );
 
     expect((await api.downloadModSecurityAuditLog(data[0].file)).status).toBe(200);
   });
 
-  test('a listed file can be tailed', async ({ api }) => {
-    const { data } = await api.listModSecurityAuditLogFiles();
-    test.skip(data.length === 0, 'The engine has produced no audit logs yet.');
+  test('a listed file can be tailed', async ({ api, anonymousRequest, setupUser }) => {
+    const data = await auditLogFiles(api, anonymousRequest, setupUser.url);
+    test.skip(
+      data.length === 0,
+      'The engine lists no audit log files even after a request the WAF should flag.'
+    );
 
     const tail = await api.tailModSecurityAuditLog(data[0].file);
     expect(tail.status).toBe(200);

@@ -1,0 +1,80 @@
+# Compose-replace: the repo ships a bare `image + bind-mount + admin env`
+# example; upstream publishes the same app as traggo/server on Docker Hub, so
+# this runs the official image directly (pulled, not built) rather than
+# compiling Go + the web UI on a small host. Pinned to the current stable
+# release 0.8.3 (Hub `latest` at time of writing). Single app service -- Traggo
+# is one Go binary with the UI embedded and SQLite in-process, no sidecar.
+#
+# The image is FROM scratch: no shell, curl or wget inside, so it carries no
+# internal healthcheck and cannot run a `/bin/sh -c` one-shot. Readiness is a
+# curl sidecar that polls the public UI, with a `ready` gate that makes
+# `docker compose up` block until the app answers (engine#204).
+services:
+  app:
+    image: traggo/server:0.8.3
+    restart: unless-stopped
+    # .env is the platform-merged account env (touched by the prepare hook so
+    # `up` never aborts on a missing file); traggo.env carries the admin
+    # password the hook generated once and keeps stable across redeploys. Paths
+    # are relative to ~/project, where the engine writes and runs this file.
+    env_file:
+      - .env
+      - ../.panelalpha/traggo/traggo.env
+    environment:
+      # Only dialect the binary ships; SQLite file on the named volume below.
+      TRAGGO_DATABASE_DIALECT: sqlite3
+      TRAGGO_DATABASE_CONNECTION: /opt/traggo/data/traggo.db
+      TRAGGO_PORT: "3030"
+      # First-admin bootstrap. TRAGGO_DEFAULT_USER_PASS comes from traggo.env
+      # (generated, never the shipped `admin`); the user is created only when no
+      # users exist yet, so this is a no-op on every deploy after the first.
+      TRAGGO_DEFAULT_USER_NAME: admin
+      TRAGGO_LOG_LEVEL: info
+      TZ: UTC
+    volumes:
+      # SQLite db (admin user + all time spans/tags/dashboards) on a named
+      # volume so it survives redeploy and storage reclaim. The scratch image
+      # runs as root, so the fresh volume is writable with no chown.
+      - traggo-data:/opt/traggo/data
+    # The binary EXPOSEs and listens on 3030; publish it so the port scan takes
+    # it as the primary (engine#234). No other service publishes a port.
+    ports:
+      - "3030:3030"
+    mem_limit: 512m
+
+  # Polls Traggo's public UI ("/" returns the login page, 200, no auth) until it
+  # answers, then exits 0. curlimages/curl is on Docker Hub (seeds fine) and has
+  # busybox /bin/sh. This is the readiness probe the scratch app cannot host.
+  healthgate:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 60); do
+          curl -fsS -o /dev/null "http://app:3030/" && exit 0
+          sleep 3
+        done
+        echo "traggo did not become ready in time" >&2
+        exit 1
+    mem_limit: 64m
+
+  # Starts nothing, exits 0, waits on the health probe. `docker compose up -d`
+  # blocks on a depends_on completion condition, so `up` returns -- and the
+  # engine reports the deploy finished -- only after Traggo actually answers
+  # (engine#204).
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      healthgate:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  traggo-data: {}

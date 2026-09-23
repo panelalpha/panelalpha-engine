@@ -51,6 +51,17 @@ class DeployReportTest extends TestCase
         ], $overrides);
     }
 
+    public function test_a_precheck_rejection_names_the_precheck_not_the_cloning_stage(): void
+    {
+        $report = DeployReport::build($this->input([
+            'latest' => ['id' => '20260923-083840-9d954b', 'stage' => 'cloning', 'precheck_rejected' => true],
+            'error' => 'Error: Less than 10GB of disk space available.',
+        ]));
+
+        $this->assertSame('precheck', $report['failure']['stage']);
+        $this->assertSame('running', DeployReport::build($this->input())['failure']['stage']);
+    }
+
     public function test_the_domain_block_says_which_rung_the_install_landed_on(): void
     {
         $report = DeployReport::build($this->input(['details' => [

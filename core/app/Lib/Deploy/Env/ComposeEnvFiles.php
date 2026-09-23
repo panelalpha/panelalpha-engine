@@ -53,6 +53,86 @@ final class ComposeEnvFiles
     }
 
     /**
+     * Add $overridesFile as the last `env_file` of every service whose
+     * `env_file` already loads `.env` (ADR-0001 D3), so account overrides
+     * reach exactly where `.env` reached — the app, not a database sidecar
+     * that never read `.env`. Idempotent: an entry already there is moved to
+     * the end rather than added twice.
+     *
+     * @param array<string, mixed> $compose a decoded compose file
+     * @return array{0: array<string, mixed>, 1: list<string>} the compose file, and the services changed
+     */
+    public static function attach(array $compose, string $overridesFile): array
+    {
+        [$compose, ] = self::detach($compose, $overridesFile);
+        if (!is_array($compose['services'] ?? null)) {
+            return [$compose, []];
+        }
+
+        $changed = [];
+        foreach ($compose['services'] as $name => &$service) {
+            if (!is_array($service)) {
+                continue;
+            }
+            $loadsEnv = false;
+            foreach (self::entriesOf($service['env_file'] ?? null) as $entry) {
+                if (self::projectRelative($entry) === '.env') {
+                    $loadsEnv = true;
+                    break;
+                }
+            }
+            if (!$loadsEnv) {
+                continue;
+            }
+            $entries = is_array($service['env_file']) ? array_values($service['env_file']) : [$service['env_file']];
+            $entries[] = $overridesFile;
+            $service['env_file'] = $entries;
+            $changed[] = (string) $name;
+        }
+        unset($service);
+
+        return [$compose, $changed];
+    }
+
+    /**
+     * Remove every `env_file` entry naming $overridesFile.
+     *
+     * @param array<string, mixed> $compose a decoded compose file
+     * @return array{0: array<string, mixed>, 1: bool} the compose file, and whether anything was removed
+     */
+    public static function detach(array $compose, string $overridesFile): array
+    {
+        if (!is_array($compose['services'] ?? null)) {
+            return [$compose, false];
+        }
+
+        $removed = false;
+        foreach ($compose['services'] as &$service) {
+            if (!is_array($service) || !isset($service['env_file'])) {
+                continue;
+            }
+            $entries = is_array($service['env_file']) ? array_values($service['env_file']) : [$service['env_file']];
+            $kept = array_values(array_filter($entries, static function ($entry) use ($overridesFile): bool {
+                $path = is_array($entry) ? ($entry['path'] ?? null) : $entry;
+
+                return !is_string($path) || self::projectRelative($path) !== $overridesFile;
+            }));
+            if (count($kept) === count($entries)) {
+                continue;
+            }
+            $removed = true;
+            if ($kept === []) {
+                unset($service['env_file']);
+            } else {
+                $service['env_file'] = $kept;
+            }
+        }
+        unset($service);
+
+        return [$compose, $removed];
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     private static function parse(string $raw): ?array

@@ -1,0 +1,281 @@
+# docker/docker-compose.yaml from this repository, rewritten for one hosting
+# account. The four services are upstream's -- piler, MariaDB, Manticore and
+# memcached -- and the image is upstream's too: docker/Dockerfile's payload is
+# `COPY ${PACKAGE}_${TARGETARCH}.deb /`, a release .deb built elsewhere and not
+# in the checkout, so the tree cannot build itself and sutoj/piler on Docker Hub
+# is the artifact. hooks/prepare.sh pins the tag from VERSION.
+#
+# What changed from upstream's file, and why:
+#
+#   `container_name:` dropped from all four services. Upstream pins them to
+#   `piler`, `mysql`, `manticore` and `memcached`, which are global names on a
+#   Docker daemon; `container_name: mysql` in particular is a name other stacks
+#   on the same account will want. Compose's own project-prefixed names are
+#   unique, and the DNS aliases the services address each other by are the
+#   *service* names, which are unchanged.
+#
+#   The `25:25` publish dropped. Piler still listens on 25 inside the stack, but
+#   a tenant application does not own inbound SMTP for the account's domain on
+#   shared hosting. Ingestion is the IMAP/POP3 pull path -- src/import_imap.c,
+#   src/import_pop3.c, util/imapfetch.py, driven from the web UI's Import page
+#   and run every five minutes by util/import.sh from the container's cron --
+#   plus pilerimport for bulk EML/mbox/Maildir. See README.md.
+#
+#   `MYSQL_PASSWORD=piler123` replaced. Upstream ships a literal in a public
+#   repository; hooks/prepare.sh generates one per account into
+#   ~/.panelalpha/piler.env and every service that needs it reads it from there.
+#
+#   A readiness gate, memory limits sized for a 2000 MB account, and a setup
+#   service that replaces Piler's two shipped logins. See each below.
+services:
+  # MariaDB, pinned as upstream pins it.
+  #
+  # Upstream mounts docker/piler.cnf here, which sets a 256M InnoDB buffer pool
+  # and a 64M log buffer -- sized for a dedicated archive host. The same
+  # settings are given as flags below at a size that fits an account sharing
+  # 2000 MB with three other containers. The character set is not tuning:
+  # util/db-mysql.sql's `subject` and `body` columns and Piler's own
+  # utf8mb4 handling depend on it.
+  db:
+    image: ${PILER_DB_IMAGE:-mariadb:12.0.2}
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-buffer-pool-size=96M
+      - --innodb-log-buffer-size=8M
+      - --innodb-file-per-table=1
+      - --performance-schema=0
+    # Every secret in this stack arrives from here and only from here.
+    # hooks/prepare.sh writes ~/.panelalpha/piler.env (0600, in a 0700
+    # directory); the path is relative to compose's --project-directory, which
+    # is ~/project. MYSQL_DATABASE, MYSQL_USER and MYSQL_PASSWORD are in it, and
+    # the mariadb image's entrypoint creates the database and the account from
+    # exactly those three names.
+    env_file:
+      - ../.panelalpha/piler.env
+    environment:
+      # Nothing in this stack connects as root: Piler's own account owns the
+      # `piler` database and the setup service uses it too. A random root
+      # password is upstream's choice and it is kept.
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+      # A redeploy onto an older data directory after the image moves on.
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      - db_data:/var/lib/mysql
+    # The image's own script. --innodb_initialized is what makes it mean "ready
+    # for DDL" rather than "the socket exists", which matters because the first
+    # thing Piler does is load a 40-table schema.
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    mem_limit: 384m
+
+  # The search index. Piler does not search MySQL: webui/model/search issues
+  # SphinxQL against 9306/9307 and src/ writes the index through the same
+  # protocol, so a message that is stored but not indexed cannot be found.
+  #
+  # searchd has no authentication of any kind, and the index holds every
+  # archived message's sender, recipients, subject and body. No host port is
+  # published: it is reachable on this account's compose network only.
+  manticore:
+    image: ${PILER_MANTICORE_IMAGE:-manticoresearch/manticore:25.0.0}
+    restart: unless-stopped
+    volumes:
+      # files/manticore.conf -- upstream's schema with the RAM chunk sizes
+      # brought down. Deliberately not `:ro`, which is what upstream's own
+      # compose file does and looked like an oversight: the image's entrypoint
+      # runs `chown manticore /etc/manticoresearch/manticore.conf` before
+      # searchd starts, and on a read-only bind that fails, the entrypoint
+      # exits, and the container restart-loops until `docker compose up -d`
+      # gives up with "dependency failed to start". Cost of writability: the
+      # file is in ~/project, which the next deploy overwrites from the recipe
+      # anyway, and it holds no secret.
+      - ./manticore.conf:/etc/manticoresearch/manticore.conf
+      - piler_manticore:/var/lib/manticore
+    # `show tables` rather than a port probe: searchd accepts connections on
+    # 9306 while it is still replaying the binlog, and a query is what proves
+    # the four RT indexes are open. The image carries a mysql client; it has no
+    # curl, which is why this is not an HTTP check.
+    healthcheck:
+      test: ["CMD-SHELL", "mysql -h 127.0.0.1 -P 9306 -e 'SHOW TABLES' >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 15s
+    # Upstream reserves and caps 512M with rt_mem_limit = 512M on the piler1
+    # index. files/manticore.conf lowers that to 128M, and the cap here is the
+    # RAM chunk plus searchd's own working set and the binlog it replays at
+    # startup. Measured idle with an empty index: see README.md.
+    mem_limit: 448m
+
+  # Session and preference cache for the web UI. webui/index.php constructs a
+  # Memcached client whenever MEMCACHED_ENABLED is 1, which the image's
+  # start.sh writes into config-site.php unconditionally, so this service is
+  # not optional in the shape upstream ships.
+  memcached:
+    image: ${PILER_MEMCACHED_IMAGE:-memcached:1.6-alpine}
+    restart: unless-stopped
+    # Upstream says -m 64. Halved: what goes in here is PHP session data and
+    # user preferences for one account's users, not a page cache.
+    command: ["-m", "32"]
+    mem_limit: 96m
+
+  piler:
+    # Tag written by hooks/prepare.sh from VERSION, confirmed on Docker Hub,
+    # falling back to :latest.
+    image: ${PILER_IMAGE:-sutoj/piler:latest}
+    restart: unless-stopped
+    # Upstream sets this, and it matters here for the same reason: the container
+    # runs nginx, php-fpm, rsyslogd, cron and three piler daemons under a shell
+    # that ends in `sleep infinity`, with nothing to reap what they orphan.
+    init: true
+    ports:
+      # Only the web UI. The container end is 80, where the vhost the .deb
+      # installs serves /var/piler/www through php-fpm; the host end is 8080
+      # because 80 inside an account is the one number something else is most
+      # likely to want. This is the stack's only published port, so it is what
+      # the account's domain proxies to.
+      #
+      # Port 25 is deliberately absent. piler-smtp is listening on it inside the
+      # container and an MTA on the compose network could deliver to it, but
+      # nothing outside the account can reach it.
+      - "8080:80"
+    environment:
+      MANTICORE_HOSTNAME: manticore
+      MEMCACHED_HOSTNAME: memcached
+      MYSQL_HOSTNAME: db
+      # RT=1 selects the realtime index path -- src/ pushes each message into
+      # Manticore as it is archived, instead of the `indexer` cron job rebuilding
+      # a batch index. It is what makes a message findable seconds after import
+      # rather than at the next half-hour, and files/manticore.conf declares the
+      # four `type = rt` indexes it needs. Upstream's compose file sets it too.
+      RT: "1"
+      # Not a real address, and not meant to survive. ComposePlaceholders
+      # rewrites a bare http://localhost under a key matching
+      # /(^|_)(URL|ORIGIN|ENDPOINT|DOMAIN)$/i to this account's public https URL
+      # before the stack starts, and port 80 is on isLocalPublicUrl()'s
+      # allowlist. PILER_HOSTNAME, which is what start.sh actually demands, does
+      # not match that pattern -- it is a bare hostname, not a URL -- so
+      # files/piler-entrypoint.sh splits it out of this, the way the Seafile
+      # recipe splits SEAFILE_SERVER_HOSTNAME.
+      PA_PUBLIC_URL: http://localhost
+    # MYSQL_DATABASE, MYSQL_USER and MYSQL_PASSWORD. Restated nowhere in
+    # `environment:` above on purpose: a bare ${VAR} there is rewritten to a
+    # literal by SidecarCredentials (engine#166), and these three have to stay
+    # equal to what the db service was created with.
+    env_file:
+      - ../.panelalpha/piler.env
+    volumes:
+      # Derives PILER_HOSTNAME from PA_PUBLIC_URL, then execs the image's own
+      # /start.sh. See files/piler-entrypoint.sh.
+      - ./piler-entrypoint.sh:/panelalpha-entrypoint.sh:ro
+      # /etc/piler is a VOLUME in the image and holds what the first boot
+      # generates and must not lose: piler.key, the 56 bytes every archived
+      # message's body is encrypted with, and piler.pem. Lose piler.key and the
+      # archive is unreadable -- there is no recovery path.
+      - piler_etc:/etc/piler
+      # The archive itself: the encrypted message store. db_data holds the
+      # metadata that points into it and piler_manticore holds the index over
+      # it; all three have to survive together for the archive to mean anything.
+      - piler_store:/var/piler/store
+    entrypoint: ["/bin/bash", "/panelalpha-entrypoint.sh"]
+    # Not upstream's `curl -s smtp://localhost/`, which probes the SMTP receiver
+    # this deployment does not publish and says nothing about the web UI. This
+    # asks nginx for the front page and greps for the login form's own body id,
+    # so a PHP fatal rendered with a 200 -- the shape engine#185's
+    # display_errors=1 tends to produce -- does not pass. The vhost the .deb
+    # installs is the only server block in the container (the Dockerfile removes
+    # Debian's default), so it answers a loopback Host header.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS -m 10 http://127.0.0.1/ | grep -q 'id="loginpage"' || exit 1
+      interval: 5s
+      timeout: 15s
+      retries: 60
+      start_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+      manticore:
+        condition: service_healthy
+      memcached:
+        condition: service_started
+    # nginx, php-fpm's pool, rsyslogd, cron, piler, piler-smtp and pilerpurge
+    # in one container. Measured idle: see README.md. The headroom above that is
+    # for php-fpm children rendering search results and for pilerimport, which
+    # runs in this container and holds a message in memory while it indexes it.
+    mem_limit: 640m
+    # The hardener's default 256 counts threads. php-fpm's pool plus nginx
+    # workers plus the piler daemons plus whatever cron starts every five
+    # minutes gets close enough to that to be worth raising.
+    pids_limit: 512
+
+  # Replaces Piler's two shipped logins and proves the replacement signs in.
+  # Runs the application's own image because it needs php, a mysql client and
+  # curl, and that image is already pulled. Always exits 0 --
+  # see files/panelalpha-setup.sh.
+  setup:
+    image: ${PILER_IMAGE:-sutoj/piler:latest}
+    restart: "no"
+    depends_on:
+      piler:
+        condition: service_healthy
+    # MYSQL_*, PILER_ADMIN_USERNAME and PILER_ADMIN_PASSWORD.
+    env_file:
+      - ../.panelalpha/piler.env
+    environment:
+      MYSQL_HOSTNAME: db
+      # The service name over the compose network, on the port the vhost serves.
+      # Not a public URL and not shaped like one, so ComposePlaceholders leaves
+      # it alone.
+      PILER_SETUP_URL: http://piler
+      # Rewritten to the account's https URL, the same as on the piler service
+      # above; the script writes it into config-site.php as SITE_URL, which is
+      # what every redirect Piler issues is built from.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      - ./panelalpha-setup.sh:/panelalpha-setup.sh:ro
+      # config-site.php lives here and is created by the first boot.
+      - piler_etc:/etc/piler
+    entrypoint: ["/bin/bash", "/panelalpha-setup.sh"]
+    # The image has no HEALTHCHECK of its own, but the engine's overlay may add
+    # one; a one-shot that exits is not a thing to health-check either way.
+    healthcheck:
+      disable: true
+    mem_limit: 128m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` (engine#90) and takes the deploy to
+  # be finished when that returns, which is when the containers have been
+  # *started*. Here that gap is the whole first boot: MariaDB initialises a data
+  # directory, Manticore opens four empty RT indexes, then Piler's start.sh
+  # generates piler.key, writes its configs, loads a 40-table schema and only
+  # then starts nginx. Compose does block on depends_on conditions, so waiting
+  # for `setup` to exit makes `up -d` return only once the login page answers,
+  # the two published credentials are gone and the generated one has signed in.
+  #
+  # alpine:3 rather than one of the images above: a datastore image here gives
+  # `dependency cycle detected`, and the piler image is 500 MB to start a
+  # process that immediately exits. A clean exit 0 is explicitly not a crash
+  # loop to AppHealth::isCrashing().
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    healthcheck:
+      disable: true
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  db_data: {}
+  piler_etc: {}
+  piler_manticore: {}
+  piler_store: {}

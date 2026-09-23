@@ -1,0 +1,16 @@
+# Craft's front-controller rewrite, as craftcms/craft ships it.
+#
+# config/general.php calls omitScriptNameInUrls(), so every URL Craft generates
+# -- including /admin and everything under it -- is a path with no index.php in
+# it, and only this rule makes such a path reach index.php. The engine's Apache
+# vhost sets `AllowOverride All` on the document root and enables mod_rewrite
+# (PhpApacheConfig::MODULES), so the file is read.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Send anything that is not a real file or directory to the front controller.
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} !^/(favicon\.ico|apple-touch-icon.*\.png)$ [NC]
+    RewriteRule (.+) index.php [L]
+</IfModule>

@@ -1,0 +1,128 @@
+# The stack for a repository that ships no compose file of any kind: Homarr is
+# a pnpm/turbo monorepo with one Dockerfile, and `docker compose` has nothing
+# to load. Without this file the engine generates one that builds that
+# Dockerfile -- 427s of a 486s deploy on the batch host, and on an 8-core
+# account capped at 7.5 GB the `pnpm turbo build` layer dies with
+# "ResourceExhausted: cannot allocate memory" instead of finishing.
+#
+# So this runs upstream's own published image, and the checkout is reduced to
+# one field: hooks/prepare.sh reads `version` out of package.json and pins
+# HOMARR_IMAGE to that tag in the generated docker-compose.override.yml. The
+# fallback below is what the recipe was written and verified against.
+#
+# The service order is Tandoor's, and it is the security control, not a
+# nicety: `init` closes Homarr's onboarding before `app` is allowed to start,
+# so there is never a moment when the public domain serves a /init page that
+# would hand the instance to whoever loads it first (engine#200).
+services:
+  # One-shot. Runs the database migrations, creates this account's
+  # administrator, and marks onboarding finished -- then exits 0. It runs as
+  # root (no PUID), which is what lets it create /appdata/db on a bind mount
+  # the account owns; `app`'s entrypoint chowns everything under /appdata back
+  # to the account on the very next start.
+  init:
+    image: ${HOMARR_IMAGE:-ghcr.io/homarr-labs/homarr:v1.77.2}
+    restart: "no"
+    # Replaces the image's own entrypoint, which would chown, expand _FILE
+    # variables and exec run.sh -- i.e. start the server. See
+    # ~/project/panelalpha/homarr/init.sh.
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    environment:
+      # Expanded by init.sh, not by the image's entrypoint (which is not being
+      # used here). The key is required, is validated at import time
+      # (packages/common/env.ts:13-25) and is the AES key for every integration
+      # secret in the database, so it is generated once into ~/.panelalpha and
+      # never regenerated.
+      SECRET_ENCRYPTION_KEY_FILE: /run/secrets/homarr/secret-encryption-key
+      # The administrator this account's owner signs in as. Created only when
+      # the database has no credentials admin at all, so a customer who
+      # renames or deletes it does not get it back on the next deploy.
+      PA_ADMIN_USER: ${HOMARR_ADMIN_USER:-owner}
+      PA_ADMIN_PASSWORD_FILE: /run/secrets/homarr/admin-password
+    volumes:
+      - ./panelalpha/homarr:/pa:ro
+      - ../.panelalpha/homarr/appdata:/appdata
+      # The directory, not the two files in it: a single-file bind mount is
+      # bound by inode, so rewriting a file would leave the container looking
+      # at the old one (engine's own .env-core lesson).
+      - ../.panelalpha/homarr/secrets:/run/secrets/homarr:ro
+    mem_limit: 768m
+
+  app:
+    image: ${HOMARR_IMAGE:-ghcr.io/homarr-labs/homarr:v1.77.2}
+    restart: unless-stopped
+    # nginx inside the image listens here and proxies /websockets to :3001 and
+    # everything else to the Next.js server on :3000 (nginx.conf). EXPOSE 7575.
+    ports:
+      - "7575:7575"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      # Read by the image's entrypoint.sh: it chowns /appdata, the nginx
+      # runtime directories and the Next.js cache to this uid/gid and then
+      # su-execs the server, so everything the customer's dashboard consists
+      # of belongs to the customer. hooks/prepare.sh overrides both with the
+      # account's real ids in docker-compose.override.yml; 0 here would run
+      # the whole thing as root and leave root-owned files in ~/.panelalpha.
+      PUID: "0"
+      PGID: "0"
+      # entrypoint.sh's `_FILE` loop exports SECRET_ENCRYPTION_KEY from this
+      # path before dropping privileges, so the key never appears in
+      # `docker inspect` or in a compose file.
+      SECRET_ENCRYPTION_KEY_FILE: /run/secrets/homarr/secret-encryption-key
+      # The image default, restated because it is load-bearing: it is what
+      # makes the username/password form exist at all, and what the CLI checks
+      # before it will touch a password. `oidc` and `ldap` are the other two
+      # (packages/definitions/src/auth.ts:1) and both need an IdP an account
+      # does not have.
+      AUTH_PROVIDERS: credentials
+      # Homarr's own redis, inside this container, started by run.sh. An
+      # external one would be a second container and another 100 MB for
+      # something nothing else talks to.
+      REDIS_IS_EXTERNAL: "false"
+    volumes:
+      # /appdata is `VOLUME` in upstream's Dockerfile, so without this line the
+      # engine gives it a named volume: it would survive a redeploy and the
+      # customer could never read a backup out of it. db.sqlite, the redis
+      # dump, uploaded media and trusted certificates are all under here.
+      # Relative paths resolve against --project-directory, which is ~/project.
+      - ../.panelalpha/homarr/appdata:/appdata
+      - ../.panelalpha/homarr/secrets:/run/secrets/homarr:ro
+    healthcheck:
+      # A real check, not a port probe: /api/health/live queries the database
+      # and does a redis handshake and answers 500 if either is down
+      # (apps/nextjs/src/app/api/health/live/route.ts). Going through nginx on
+      # 7575 also means a crash-looping Next.js shows up as the 502 it is,
+      # which is exactly the stock deploy's failure. wget is busybox's -- the
+      # runner stage installs redis, nginx, bash, gettext, su-exec and openssl,
+      # and no curl.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7575/api/health/live || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    # nginx + redis + node in one container. The Next.js server idles at about
+    # 200 MB and grows with the number of widgets polling; 1 GB leaves room
+    # without letting a runaway widget take the account down.
+    mem_limit: 1024m
+    # ServiceHardener puts 0.75 on anything it is not told about
+    # (ServiceHardener.php:36), which is enough to serve but slow to boot a
+    # Next.js server. Stated here so the cap is a decision and not a default.
+    cpus: 1.5
+
+  # Does nothing and exits 0. `docker compose up -d` runs without `--wait`
+  # (engine#204) and the deploy is declared finished the moment it returns
+  # (DeploymentWorkflow.php:73), so without this the deploy would end while the
+  # server was still starting. Compose does block on a depends_on health
+  # condition, so waiting on app's healthcheck makes `up -d` return only once
+  # the site answers. alpine, so nothing large is pulled or started; a clean
+  # exit 0 is explicitly not a crash loop to AppHealth::isCrashing().
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

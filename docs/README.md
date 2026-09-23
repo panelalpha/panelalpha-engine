@@ -58,7 +58,7 @@ pae connect
 
 Each assistant has a setup page with how to check it worked and what usually goes wrong: [Connecting your AI](04-connecting-your-ai/your-assistant.md).
 
-**Before you connect**, decide what the assistant may do. By default it can permanently delete an entire project: [Decide what the assistant may do](04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+**Before you connect**, decide what the assistant may do. By default it can permanently delete an entire project. `pae configure` on the VPS walks through that, and through the address, the queue, and telemetry: [Configure the engine](02-getting-started/configure-the-engine.md). The settings it writes are listed under [Decide what the assistant may do](04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 ### 3. Put your project online
 
@@ -97,6 +97,6 @@ The main way to run PanelAlpha Engine is to connect an AI assistant and describe
 
 - **[Connecting your AI](04-connecting-your-ai/your-assistant.md)**: Connect an assistant after install and drive deployments, maintenance and server management from chat.
 - **[CLI commands](06-commands/pae-cli.md)**: `pae` on your VPS over SSH, and the REST API for software you build on top of the engine.
-- **[Getting Started](02-getting-started/install.md)**: Install, update, uninstall, how a deploy works, looking after a project, telemetry, and failed deploys.
+- **[Getting Started](02-getting-started/install.md)**: Install, configure the engine, update, uninstall, how a deploy works, looking after a project, telemetry, and failed deploys.
 - **[Supported projects](07-supported-projects/project-types.md)**: Stacks the engine can run, what your repository needs, and how detection works.
-- **[Capabilities](05-capabilities/connecting-with-git.md)**: Git, projects, backups, domains, databases, files, WordPress, monitoring, security and Cloudflare.
+- **[Capabilities](05-capabilities/connecting-with-git.md)**: Git, projects, backups, domains, databases, files, WordPress, monitoring, visitor statistics, security and Cloudflare.

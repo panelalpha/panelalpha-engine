@@ -109,8 +109,8 @@ class Telemetry
     /**
      * The configured route, or this engine's own answer when nothing set one.
      *
-     * A blank override means "unset", not "post at the hub root": an empty path
-     * would send reports to whatever the hub serves at `/` — a web page.
+     * A blank override means "unset", not "post at the host root": an empty path
+     * would send reports to whatever that host serves at `/` — a web page.
      */
     public static function eventsPath(): string
     {
@@ -122,8 +122,8 @@ class Telemetry
     /**
      * Where a batch of reports is POSTed, or '' when nothing is configured.
      *
-     * {@see PanelAlphaMonitoring}, not the hub: the hub is an integration the
-     * engine calls to get something done. Addressing telemetry at the hub made
+     * {@see PanelAlphaMonitoring}, not Connect: Connect is an integration the
+     * engine calls to get something done. Addressing telemetry at Connect made
      * it 405.
      */
     public static function endpoint(): string
@@ -212,7 +212,7 @@ class Telemetry
             $fields = new TelemetryFields($username);
             $reportId = (string) Str::ulid();
             $input = self::deployInput($fields, $logger, $outcome, $error, $reportId);
-            $sendable = self::isSendable($fields, $outcome);
+            $sendable = self::isSendable($fields, $outcome, $input['latest']);
 
             if ($sendable) {
                 // Cut now, not at ship time: a failed account creation is rolled
@@ -277,11 +277,16 @@ class Telemetry
      * Everything that can stop a report being *sent* — none of it stops the
      * report being written down. An install with telemetry off, one that cannot
      * fingerprint its machine, or a template this pipeline does not report on
-     * still leaves the operator a record to hand over later.
+     * still leaves the operator a record to hand over later. Neither does a
+     * deploy a precheck refused: the host failed the app's requirements
+     * before anything was deployed, so it is not a deploy failure.
+     *
+     * @param array<string, mixed> $latest
      */
-    private static function isSendable(TelemetryFields $fields, string $outcome): bool
+    private static function isSendable(TelemetryFields $fields, string $outcome, array $latest): bool
     {
-        return self::enabled()
+        return !DeployReport::isPreCheckRejection($latest)
+            && self::enabled()
             && DeployReport::isReportable($outcome)
             && self::safely(fn (): string => self::installId(), '') !== ''
             && $fields->isDindAccount();
@@ -687,7 +692,7 @@ class Telemetry
      *
      * Refusals, each an error instead of a silent no-op: `disabled` (telemetry
      * or bug reports off, so nothing would ship it), `invalid` (no project,
-     * title or description), `no-project`, `not-ready` (no hub configured, or
+     * title or description), `no-project`, `not-ready` (no monitoring host configured, or
      * no fingerprint), `failed` (the spool could not be written).
      *
      * Only `queued` means it will be sent, by the next `telemetry:ship` run.

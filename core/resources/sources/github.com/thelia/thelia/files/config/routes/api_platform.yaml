@@ -1,0 +1,29 @@
+# Written by PanelAlpha. This is API Platform's own Symfony Flex recipe file,
+# and without it the shop has no REST API at all: `api_platform` is a routing
+# *type*, and nothing loads it unless something imports it. `debug:router`
+# listed 27 routes matching "api" and not one of them came from API Platform --
+# only the two JWT login endpoints and the legacy `/open_api/...` controllers
+# two modules register by hand.
+#
+# It matters for more than the API. Thelia's own front office reads its data
+# through it: HeaderHighlights' theme hook calls
+# `DataAccessService::resources('/api/header-highlights')`, base.html.twig
+# renders that hook at line 70, and the missing route turned into
+# `No routes found for "/api/header-highlights/"` -- an exception thrown while
+# rendering the layout, so **every** front-office page answered HTTP 500 with a
+# fully installed shop behind it and a working /admin/login next to it.
+#
+# Missing for the same reason as the rest: thelia/thelia's .gitignore lists
+# `/config/`, so only what someone added by hand is in the repository --
+# config/packages/api_platform.yaml is there, config/routes/ is not -- and with
+# `--no-plugins` symfony/flex never runs to write the other half.
+#
+# `resource: .` with `type: api_platform` is the recipe's own wording: the
+# loader ignores the resource and builds the routes from the resource classes
+# api_platform.mapping.paths points at, which Thelia fills in at build time
+# from core/lib/Thelia/Api/Resource plus every activated module's
+# Api/Resource directory.
+api_platform:
+    resource: .
+    type: api_platform
+    prefix: /api

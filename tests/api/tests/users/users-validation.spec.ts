@@ -110,10 +110,28 @@ test.describe('user creation validation', () => {
 
   const incompletePayloads = [
     ['a null username', (domain: string) => ({ username: null, domain })],
-    ['a missing username', (domain: string) => ({ username: undefined, domain })],
     ['a null domain', () => ({ username: '', domain: null })],
     ['a missing domain', () => ({ username: '', domain: undefined })],
   ] as const;
+
+  test('a missing username is generated from the domain', async ({ api, settings }) => {
+    // Username is optional. With only a domain, the engine names the project
+    // from that domain and answers 202. A null username is still a 422; that
+    // case stays in the rejection loop above.
+    const result = await api.createUserRaw({
+      domain: randomDomain(settings.requireDomain()),
+    } as never);
+    const body = rawResponseBody<{ data?: { username?: string } }>(result);
+    const username = body.data?.username;
+    try {
+      expect(result.status).toBe(202);
+      expect(username).toEqual(expect.any(String));
+    } finally {
+      if (username) {
+        await api.deleteUserSafe(username);
+      }
+    }
+  });
 
   for (const [label, buildPayload] of incompletePayloads) {
     test(`rejects ${label}`, async ({ api, settings }) => {

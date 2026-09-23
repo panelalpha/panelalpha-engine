@@ -296,6 +296,7 @@ show the user the `message`:
 | `node-engine-mismatch`, `go-toolchain-too-old` | `engines.node` / `go.mod` vs the resolved image | set `.nvmrc`/`engines.node` to something available, or `image:` in a manifest |
 | `disk-full`, `out-of-memory` | build too large for the account limits | raise `disk_space_limit`/`memory_limit` with `project_update`, rebuild |
 | `registry-rate-limited`, `base-image-unavailable` | registry side | wait and `project_rebuild`; check the image name in the Dockerfile |
+| `layer-digest-mismatch` | a layer arrived corrupted from the host's registry mirror | host-side; `project_rebuild` usually succeeds |
 | `env-validation-failed` | app-level env validation | read `environment` from `project_inspect`, pass real values in `env_vars`, rebuild |
 | `database-auth-failed` | credentials in `.env` differ from the database | `mysql_user_change_password` or fix `env_vars`; rebuild |
 | `missing-build-script`, `dependency-conflict`, `dependency-not-found`, `missing-package-at-runtime`, `bun-lockfile-*` | the project's own package files | fix the files (`file_write`) and rebuild; or replace the `build` stage via `stages` |

@@ -1,0 +1,135 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the app -- the shared PHP base image, ~/project bind-mounted at /app,
+# the account's own uid, Apache on 8000, APP_URL from the account's main domain,
+# DB_* from the database the engine provisioned, and PA_DOCROOT=/app/upload from
+# `docroot: upload` in panelalpha.yaml -- and says nothing about where a video
+# goes, what transcodes it or when ClipBucket is ready, because nothing in a
+# flat PHP checkout can.
+#
+# An override rather than a replacement compose file, and here that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# *before* detection runs, so a compose file in the project root would make
+# ClipBucket look like a compose project and take the php strategy -- and with
+# it the bind mount, the docroot and the staged entrypoint -- off the table.
+# (The repository already ships docker/docker-compose.yml, which is upstream's
+# own development stack for nginx + php-fpm + MariaDB. It is in a subdirectory,
+# so detection does not see it, and RuntimeSidecars is not asked to mine it
+# because the manifest declares `database: mysql` -- engine#166. Nothing here
+# moves compose files aside, so the trap in that issue, of globbing away the
+# engine's own docker-compose.override.yml and silently losing this
+# healthcheck, is not one this recipe can spring.)
+services:
+  app:
+    volumes:
+      # ~/.panelalpha/clipbucket. Everything this account accumulates lives
+      # here, because a redeploy clears and re-clones ~/project (engine#173):
+      #
+      #   /data/bin/              static ffmpeg, ffprobe and mediainfo. The
+      #                           shared PHP base image has none of them and no
+      #                           manifest key can add an apt package to it, so
+      #                           hooks/prepare.sh fetches them once per account
+      #                           and the install writes their paths into
+      #                           ClipBucket's own config rows.
+      #   /data/admin-credentials the generated administrator, 0600.
+      #   /data/files/            mounted again below, over the application's
+      #                           own upload/files.
+      - ../.panelalpha/clipbucket:/data
+
+      # Every byte a user uploads. DirPath::get() (includes/constants.php:33-47)
+      # puts videos, originals, thumbs, posters, photos, avatars, subtitles, the
+      # conversion queue and the per-video conversion logs under
+      # upload/files/<name>/ -- inside the checkout, which the next deploy
+      # deletes while the cb_video rows naming those files survive. A redeploy
+      # would leave a catalogue of videos that are no longer there.
+      #
+      # A mount over the directory rather than a symlink out of it (the shape
+      # xbackbone uses, where castopod uses the other one): the whole directory
+      # moves, ClipBucket serves thumbnails and the video files themselves as
+      # plain static URLs under `files/...`, and upload/.htaccess's own rules --
+      # the `files/temp/` deny, the `files/*.php` deny and the "missing file
+      # under files/ is a 404" rule -- are all written against that prefix.
+      # hooks/prepare.sh seeds it from the checkout before the container starts,
+      # so Docker never creates it as root and the repository's own
+      # no_video.mp4, processing.jpg and no-photo_*.png are on it.
+      - ../.panelalpha/clipbucket/files:/app/upload/files
+
+    environment:
+      # The one way to give this container a php.ini. The base image loads none
+      # at all and scans /usr/local/etc/php/conf.d, a directory inside the image
+      # that the account uid cannot write to (engine#185). PHP reads
+      # PHP_INI_SCAN_DIR from its own environment at startup whatever the SAPI,
+      # so naming a second directory here reaches the Apache module and the CLI
+      # both -- and both need it: the Apache module takes the upload, the CLI
+      # runs the conversion.
+      #
+      # The image's own directory is listed first and explicitly:
+      # PHP_INI_SCAN_DIR *replaces* the compiled-in path rather than adding to
+      # it, and dropping it would unload every docker-php-ext-*.ini -- mysqli,
+      # gd, exif, the lot -- which is a container with no database driver.
+      #
+      # What the file says and why is in files/panelalpha/php/zz-clipbucket.ini;
+      # the short version is that the product is uploading a video and the
+      # compiled-in post_max_size is 8M.
+      PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/panelalpha/php
+
+    # ServiceLimits caps an app-role service it did not write at 384m. The
+    # install stage does not fit in it -- configs.sql alone is 52 KB of inserts
+    # and the five language files are 1.7 MB of translation rows -- and neither
+    # does a conversion: ffmpeg is a separate process with its own memory, but
+    # the PHP driver holds the ffprobe JSON for the whole file and gd builds the
+    # thumbnails. In an override file this reaches Docker as written; the
+    # hardener never sees it.
+    mem_limit: 1g
+
+    # ClipBucket's schema, reference data and administrator are all created by
+    # the install stage before Apache binds. The engine runs
+    # `docker compose up -d` without --wait and probes as soon as it returns,
+    # which is while that is still going -- nothing is listening yet and the
+    # probe reads `Failed to connect to 127.0.0.1 port 8000`.
+    #
+    # Two requests, and both halves are load-bearing.
+    #
+    #   GET /        the home page. It is 200 only once the schema is there,
+    #                cb_config is readable, Smarty can compile the template and
+    #                the version row exists -- without that row every
+    #                Update::IsCurrentDBVersionIsHigherOrEqualTo() in the
+    #                application answers false and the page is a fatal.
+    #   GET /signin  the sign-in form, which is what the `content` grep below
+    #                is really checking. ClipBucket answers 200 with a rendered
+    #                error page for a good many failures, so a status code on
+    #                its own proves less here than usual.
+    #
+    # Host is 127.0.0.1:8000, as it is for AppHealth's own probe, and that is
+    # safe here where engine#190 would otherwise bite: ClipBucket builds every
+    # absolute URL from the base_url config row rather than from the Host
+    # header (Network::get_server_url(), network.class.php:303).
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null --max-time 20 http://127.0.0.1:8000/ &&
+          curl -fsS --max-time 20 http://127.0.0.1:8000/signin | grep -qi 'name="password"'
+      interval: 5s
+      timeout: 25s
+      retries: 40
+      # Generous: importing 2 MB of reference SQL on a shared host is minutes,
+      # not seconds. A check that fails inside this window neither counts
+      # against retries nor marks the container unhealthy.
+      start_period: 420s
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once ClipBucket has
+  # built its schema and answered, and what the health probe then meets
+  # (engine#90). alpine:3 and not a datastore image: this pulls in a few
+  # megabytes and exits, and anything the sidecar miner recognises as a backing
+  # service here would produce a dependency cycle. A clean exit 0 is not a crash
+  # loop as far as AppHealth is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

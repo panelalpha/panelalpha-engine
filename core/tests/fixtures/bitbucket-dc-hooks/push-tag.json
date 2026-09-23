@@ -1,0 +1,15 @@
+{
+  "eventKey": "repo:refs_changed",
+  "date": "2026-09-21T15:42:11+0200",
+  "actor": {"name": "alice", "displayName": "Alice Example", "slug": "alice", "type": "NORMAL"},
+  "repository": {"slug": "site", "id": 84, "name": "site", "scmId": "git", "project": {"key": "ACME", "id": 1, "name": "Acme"}},
+  "changes": [
+    {
+      "ref": {"id": "refs/tags/v1.4.0", "displayId": "v1.4.0", "type": "TAG"},
+      "refId": "refs/tags/v1.4.0",
+      "fromHash": "0000000000000000000000000000000000000000",
+      "toHash": "a8c1f4d9e2b7305c6d4a1e8f9b0c2d3e4f5a6b7c",
+      "type": "ADD"
+    }
+  ]
+}

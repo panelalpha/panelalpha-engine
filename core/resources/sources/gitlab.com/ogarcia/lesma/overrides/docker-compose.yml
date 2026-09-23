@@ -1,0 +1,50 @@
+# Replaces the repo (which ships only a CI-artifact Dockerfile, no compose) with
+# a working stack: the official prebuilt lesma image on a named volume, plus a
+# gate so the deploy finishes only once the site actually answers. Nothing is
+# built from the clone.
+services:
+  lesma:
+    image: ${LESMA_IMAGE:-docker.io/ogarcia/lesma:latest}
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Rewritten to the account's public https URL before the stack starts
+      # (ComposePlaceholders rewrites a localhost value whose key ends in _URL).
+      # /pa/entrypoint.sh turns it into LESMA_HTTPS + LESMA_DOMAINS, which lesma
+      # needs to emit correct https://<domain>/<id> paste links. The image already
+      # defaults ADDRESS=0.0.0.0, PORT=8000 and STORAGE=/var/lib/lesma.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      # Pastes are files; this named volume is the whole persistence surface and
+      # survives project_rebuild. The image owns /var/lib/lesma as uid/gid 100
+      # (the lesma user), so a fresh volume inits writable -- no chown needed.
+      - lesmadata:/var/lib/lesma
+      - ./panelalpha/lesma:/pa:ro
+    # Wrap the upstream entrypoint to derive the link config from the injected
+    # public URL, then exec the untouched /bin/lesma. The image runs as USER lesma.
+    entrypoint: ["/bin/sh", "/pa/entrypoint.sh"]
+    healthcheck:
+      # get_root at "/" is public and returns 200 (127.0.0.1:8000 is whitelisted
+      # by the entrypoint). The alpine image ships busybox wget; it has no curl.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/ || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 10s
+    mem_limit: 256m
+
+  # Starts nothing, exits 0, waits on lesma's healthcheck. The engine runs
+  # `docker compose up -d` with no --wait, so this gate makes `up` block until the
+  # site answers instead of the probe landing on a not-yet-listening port.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      lesma:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  lesmadata: {}

@@ -1,0 +1,142 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the app -- the shared PHP 8.5 base image, ~/project bind-mounted at
+# /app, the account's own uid, PA_DOCROOT=/app/public, Apache on 8000, APP_URL
+# set to the account's public https address, DB_* from the database the engine
+# provisioned, and an extra_hosts entry so that database resolves inside the
+# account's nested Docker -- and says nothing about where a podcast's audio
+# goes or when Castopod is ready, because nothing in a PHP checkout can.
+#
+# An override rather than a replacement compose file, and here that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# *before* detection runs, so a compose file in the project root would make
+# Castopod look like a compose project and take the php strategy -- and with it
+# the bind mount, the docroot, the Composer pass, the host frontend build and
+# the staged entrypoint -- off the table entirely.
+services:
+  app:
+    volumes:
+      # ~/.panelalpha/castopod. Everything this account accumulates lives here:
+      #
+      #   /data/media/            every uploaded audio file, cover and avatar.
+      #                           hooks/prepare.sh replaces public/media with a
+      #                           symlink to it, which is the only lever
+      #                           Modules\Media\Config\Media leaves: its
+      #                           $storage is `ROOTPATH . 'public'` and the URL
+      #                           a podcast client fetches has to keep pointing
+      #                           at the same place.
+      #   /data/analytics.salt    the salt listener IPs are hashed with. It has
+      #                           to be the same on the next deploy or every
+      #                           returning listener counts as a new one.
+      #   /data/admin-credentials the generated instance owner, 0600.
+      #
+      # A redeploy clears and re-clones ~/project (engine#173), so a podcast
+      # host that kept its episodes under the document root would lose every
+      # one of them on the next deploy -- and the database rows that point at
+      # them would survive, so the feed would keep advertising audio that is no
+      # longer there. ~ itself is root-owned 0755 and nothing can be created in
+      # it; ~/.panelalpha is created with the account and belongs to it, which
+      # is why the data directory is a child of that one. The prepare hook
+      # creates it before this mount is made, so Docker never gets to create it
+      # as root.
+      - ../.panelalpha/castopod:/data
+
+    environment:
+      # The one way to give this container a php.ini. The base image loads none
+      # at all and scans /usr/local/etc/php/conf.d, a directory inside the image
+      # that the account uid cannot write to (engine#185). PHP reads
+      # PHP_INI_SCAN_DIR from its own environment at startup whatever the SAPI,
+      # so naming a second directory here reaches the Apache module and the CLI
+      # both -- and both need it: the CLI runs the migrations, the Apache module
+      # takes the episode upload.
+      #
+      # The image's own directory is listed first and explicitly:
+      # PHP_INI_SCAN_DIR *replaces* the compiled-in path rather than adding to
+      # it, and dropping it would unload every docker-php-ext-*.ini -- intl,
+      # mysqli, gd, exif, the lot -- which is a container with no PHP
+      # extensions and no database driver.
+      #
+      # What the file says and why is in files/panelalpha/php/zz-castopod.ini;
+      # the short version is that an episode is an audio file and the
+      # compiled-in post_max_size is 8M.
+      PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/panelalpha/php
+
+    # ServiceLimits caps an app-role service it did not write at 384m, and the
+    # install stage does not fit in it: the migrations, then AppSeeder's ~1,900
+    # category and language rows, then three dataset generators that each hold a
+    # decoded JSON document and its var_export() in memory at once. In an
+    # override file this reaches Docker as written -- the hardener never sees
+    # it -- which is the point. It is also the ceiling for an episode upload:
+    # gd resizing a large cover into four variants is the peak.
+    mem_limit: 1g
+
+    # The install stage does all of Castopod's setup before Apache binds: the
+    # .env, the three generated dataset classes (two network round trips each),
+    # every migration, the category and language seeds, the instance owner and a
+    # cache clear. On a shared host that is minutes. The engine runs
+    # `docker compose up -d` without --wait and probes as soon as it returns,
+    # which is while all of that is still going: nothing is listening and the
+    # probe reads `Failed to connect to 127.0.0.1 port 8000`.
+    #
+    #   1. GET /health   Castopod's own health endpoint
+    #                 (App\Controllers\HomeController::health). It answers 200
+    #                 only when it can open the database, reach the cache
+    #                 handler and write through the file manager -- which is
+    #                 exactly the three things this recipe arranges, and 503
+    #                 with a JSON list of which one is wrong otherwise. `-f`
+    #                 fails on the 503.
+    #   2. GET /      the home page, and it is here because /health on its own
+    #                 is not enough: it renders no view, so it answered 200
+    #                 through the whole of a deploy whose every *page* was a
+    #                 500 on `Class "PHPIcons\Icons" not found`. A check that
+    #                 passes while the site is unusable is worse than none --
+    #                 it is what turns a broken deploy into a successful one.
+    #   3. GET /cp-auth/login   the sign-in form, which is the half a missing
+    #                 admin asset or a broken Vite manifest breaks while the
+    #                 public pages still render.
+    #
+    # The X-Forwarded-Proto header is not decoration. Config\App sets
+    # `forceGlobalSecureRequests = true` and CodeIgniter's ForceHTTPS filter
+    # runs before every route, so a plain http request from inside the container
+    # is answered with a 301 to the https baseURL -- which `curl -f` treats as
+    # success and which proves nothing. With the header, isSecure() is true and
+    # the request reaches the controller.
+    #
+    # Host is 127.0.0.1:8000, as it is for AppHealth's own probe. Castopod
+    # accepts it: CodeIgniter builds its URIs from app.baseURL rather than from
+    # the Host header, and no route here is host-dependent.
+    #
+    # Idempotent, so a retry replays it harmlessly. curl is in the base image.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null --max-time 30 -H 'X-Forwarded-Proto: https'
+          http://127.0.0.1:8000/health &&
+          curl -fsS -o /dev/null --max-time 30 -H 'X-Forwarded-Proto: https'
+          http://127.0.0.1:8000/ &&
+          curl -fsS -o /dev/null --max-time 30 -H 'X-Forwarded-Proto: https'
+          http://127.0.0.1:8000/cp-auth/login
+      interval: 10s
+      timeout: 40s
+      retries: 30
+      # The install stage on a shared host, including the dataset downloads. A
+      # failing check inside this window neither counts against retries nor
+      # marks the container unhealthy.
+      start_period: 600s
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once Castopod has
+  # migrated, seeded, created its owner and answered /health, and what the
+  # health probe then meets (engine#90). alpine:3 rather than a datastore image:
+  # anything the sidecar miner recognises as a backing service here produces
+  # `dependency cycle detected: app -> ready -> app`. A clean exit 0 is not a
+  # crash loop as far as AppHealth is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

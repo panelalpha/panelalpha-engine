@@ -131,8 +131,12 @@ final class DeploymentWorkflow
 
     /**
      * Redeploy from files already in ~/project (git pull/revert/change-branch on deploy-managed accounts).
+     *
+     * @param string  $source what the deploy log says started this: `git` for a manual porcelain call,
+     *                        `push` for a Deploy Hook delivery
+     * @param ?string $commit the commit the checkout is at, named in the log when the caller knows it
      */
-    public function rebuildFromCheckout(?DeployLogger $deployLogger = null): void
+    public function rebuildFromCheckout(?DeployLogger $deployLogger = null, string $source = 'git', ?string $commit = null): void
     {
         $mechanics = $this->resolveMechanics();
         $user = $mechanics->user();
@@ -140,7 +144,7 @@ final class DeploymentWorkflow
         if ($deployLogger === null) {
             $deployLogger = DeployLogger::resumeRunningOrStartSafely($user->username);
         }
-        $deployLogger->info('Deploy started (source: git)');
+        $deployLogger->info('Deploy started (source: ' . $source . ($commit !== null && $commit !== '' ? ', commit: ' . $commit : '') . ')');
 
         try {
             $reuseRunning = $user->getTemplate() === 'dind' && $mechanics->isApplicationEnvironmentRunning();
@@ -245,24 +249,7 @@ final class DeploymentWorkflow
             $deployLogger->stage(DeployLogger::STAGE_CLONING);
             $mechanics->ingestForWipeRebuild($zipPath);
 
-            $deployLogger->stage(DeployLogger::STAGE_RUNNING);
-            $result = $mechanics->startApplication();
-            if ($result['exit_code'] !== 0) {
-                $raw = $result['stderr'] ?: $result['stdout'];
-                $deployLogger->recordFailureOutput($raw);
-                $message = DeployFailureExplainer::explain($raw) ?? trim($raw);
-                $hint = $mechanics->customEnvFailureHint();
-                if ($hint !== null) {
-                    $deployLogger->info($hint);
-                }
-                $full = $hint !== null
-                    ? "Failed to start app: {$message} | {$hint}"
-                    : "Failed to start app: {$message}";
-                $deployLogger->finish(DeployLogger::STATUS_FAILED, $full);
-                throw new \Exception($full);
-            }
-
-            $this->finishSourceRebuildServing($deployLogger, $mechanics);
+            $this->startAndFinishSourceDeploy($deployLogger, $mechanics);
         } catch (DeployCancelledException $e) {
             $deployLogger->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
             throw $e;
@@ -276,7 +263,51 @@ final class DeploymentWorkflow
         }
     }
 
-    private function finishSourceRebuildServing(DeployLogger $logger, DeployMechanics $mechanics): void
+    /**
+     * Deploy an uploaded archive into the account as it stands.
+     *
+     * Unlike {@see rebuildFromSource()} this does not wipe ~/project first: the
+     * archive normally sits inside it. Same contract otherwise: the deploy log
+     * is finished here, deployment_status is not persisted, and failures are
+     * thrown as plain exceptions for the caller to map.
+     */
+    public function deployFromArchive(?DeployLogger $deployLogger, string $zipPath): void
+    {
+        $mechanics = $this->resolveMechanics();
+
+        $deployLogger?->stage(DeployLogger::STAGE_CLONING);
+        $mechanics->ingestArchive($zipPath);
+
+        $this->startAndFinishSourceDeploy($deployLogger, $mechanics);
+    }
+
+    /**
+     * Start what the source step prepared, then finish the deploy log with the
+     * serving verdict. Shared by the source rebuild and the archive deploy.
+     */
+    private function startAndFinishSourceDeploy(?DeployLogger $deployLogger, DeployMechanics $mechanics): void
+    {
+        $deployLogger?->stage(DeployLogger::STAGE_RUNNING);
+        $result = $mechanics->startApplication();
+        if ($result['exit_code'] !== 0) {
+            $raw = $result['stderr'] ?: $result['stdout'];
+            $deployLogger?->recordFailureOutput($raw);
+            $message = DeployFailureExplainer::explain($raw) ?? trim($raw);
+            $hint = $mechanics->customEnvFailureHint();
+            if ($hint !== null) {
+                $deployLogger?->info($hint);
+            }
+            $full = $hint !== null
+                ? "Failed to start app: {$message} | {$hint}"
+                : "Failed to start app: {$message}";
+            $deployLogger?->finish(DeployLogger::STATUS_FAILED, $full);
+            throw new \Exception($full);
+        }
+
+        $this->finishSourceRebuildServing($deployLogger, $mechanics);
+    }
+
+    private function finishSourceRebuildServing(?DeployLogger $logger, DeployMechanics $mechanics): void
     {
         $user = $mechanics->user();
         $warnings = array_merge(
@@ -285,8 +316,8 @@ final class DeploymentWorkflow
         );
 
         $warnings === []
-            ? $logger->finish(DeployLogger::STATUS_SUCCESS)
-            : $logger->finish(DeployLogger::STATUS_PARTIAL, implode(' | ', $warnings));
+            ? $logger?->finish(DeployLogger::STATUS_SUCCESS)
+            : $logger?->finish(DeployLogger::STATUS_PARTIAL, implode(' | ', $warnings));
     }
 
     private function resolveMechanics(): DeployMechanics

@@ -1,12 +1,10 @@
-# AGENTS.md — agent layer over `docs/`
+# AGENTS.md
 
-End-user documentation lives in [`docs/`](docs/README.md). It is written for the
-person who installs a host and deploys apps. This file is for agents changing
-the engine. Never duplicate a user procedure here. Link to the baseline page,
-then add only what an agent needs: how to verify, what numbers to report,
-traps, internals.
+Coding agents changing this repository start here. [`CONTRIBUTING.md`](CONTRIBUTING.md) sends you here on purpose.
 
-`docs/` never links here. A public wiki export of `docs/` stays clean.
+People opening a pull request follow [`CONTRIBUTING.md`](CONTRIBUTING.md). Operators who install a host and deploy apps follow [`docs/`](docs/README.md). Link that page, then add only what an agent needs to change the code: how to verify, what numbers to report, and the traps. Do not copy an operator procedure into this file.
+
+`docs/` does not link here.
 
 The rule throughout: every claim is a measurement, and every measurement names
 the stage it belongs to. "Deploy took 100s" is not a result. "npm ci 16.9s,
@@ -20,6 +18,7 @@ apt-get 11.9s, build 2.2s, inside a 53.1s critical path" is.
 | Deploy failures | [`docs/02-getting-started/what-happens.md`](docs/02-getting-started/what-happens.md) | Explainer rules vs DinD proof |
 | Telemetry | [`docs/02-getting-started/what-is-collected.md`](docs/02-getting-started/what-is-collected.md) | Field list when changing `DeployReport` |
 | Pipeline speed / caches | (none — operator does not measure this) | §1–§10 below |
+| REST + MCP behaviour | [`tests/api/README.md`](tests/api/README.md) | §1a: what it covers, what a green run does and does not prove |
 
 > **Adding support for a third-party application?** §11 in this file is the
 > playbook: detect without paying for a deploy, when an app needs a manifest,
@@ -51,6 +50,45 @@ away as "probably pre-existing".
 A recipe change must also keep detection stable. The fastest proof is
 differential: extract the pre-change classes into a parallel namespace, run both
 over the same fixtures, and diff every field of the returned decision.
+
+---
+
+## 1a. API tests (Playwright, `tests/api/`)
+
+The unit suite above covers the engine's logic in isolation. `tests/api/` drives
+a **live engine** over its REST API and its MCP endpoint: it creates real
+projects, domains, databases and deploys, and asserts on what comes back.
+How to run the suite, and which group does what, is in
+[`tests/api/README.md`](tests/api/README.md).
+
+```bash
+cd tests/api
+npm install
+npm test                  # unit, the API, and the supported-app deploys
+npm run test:unit         # pure logic, no engine
+npm run check             # typecheck + lint + format — run before pushing
+```
+
+Three things an agent gets wrong here:
+
+**A green run is not full coverage.** A lot of the suite skips for legitimate
+environmental reasons (CSF not installed, IP management absent, `pae-artisan`
+unreachable). Every run now prints what it skipped and why; read that summary
+before reporting a result, and quote the skip count alongside the pass count.
+`MAX_SKIPPED=<n>` turns the budget into a gate.
+
+**MCP is tested separately from REST, on purpose.** `tools/call` answers HTTP
+200 with `result.isError: true` when the tool itself fails, so REST specs
+passing says nothing about the MCP surface on top of them. `tests/mcp/` compares
+`tools/list` against `core/app/Mcp/tool-names.php` and calls every read-only
+tool. **Changing `tool-names.php` or anything under `core/app/Mcp/` means
+running `tests/mcp/`.**
+
+**Only the engine host runs the whole thing.** The `cli`,
+`webserver-change`, `update`, `engine-cert` and `network-mutation` projects
+reconfigure the host, and are excluded from `npm test`. Naming them in a
+result means having run them explicitly. The supported-app deploys are part
+of `npm test`.
 
 ---
 
@@ -164,7 +202,7 @@ silently *runs app N-1's image* and reports a meaningless HTTP 200 in ~5s. An
 earlier run of this battery had go-beszel "passing" while serving NestJS.
 
 ```bash
-docker exec $C docker compose -f $P/docker-compose.yml down --rmi local -v --remove-orphans
+docker exec $C docker compose -f $P/docker-compose.panelalpha.yml down --rmi local -v --remove-orphans
 docker exec $C docker rmi -f project-app:latest
 ```
 
@@ -1043,4 +1081,3 @@ Worked examples in the tree: `php.yaml` (DokuWiki), `matomo.yaml` (database +
 restore-config), `adminer.yaml` (build produces the entry point), `phpbb.yaml`
 (`app_root`), `opencart.yaml` (docroot below repo, outranks Dockerfile),
 `osticket.yaml` (PHP, no Composer).
-

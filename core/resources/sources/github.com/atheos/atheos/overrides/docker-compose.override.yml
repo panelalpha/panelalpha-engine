@@ -1,0 +1,35 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about everything it says -- the shared PHP base image, ~/project bind-mounted
+# at /app, the account's own uid, Apache on 8000, PA_DOCROOT=/app (Atheos is
+# served from its own root; the public/ directory it ships is a build artefact
+# cache with no index in it) -- and says nothing about where an IDE keeps the
+# code its user writes, because a checkout cannot say that.
+#
+# An override rather than a replacement compose file: an
+# overrides/docker-compose.yml is written into the checkout *before* detection,
+# and a docker-compose.yml in the project root would make Atheos look like a
+# compose project and take the php strategy -- with it the bind mount, the
+# document root and the staged entrypoint -- off the table entirely.
+services:
+  app:
+    volumes:
+      # ~/.panelalpha/atheos. Everything this account accumulates lives here
+      # and nowhere else:
+      #
+      #   /data/workspace/         every file the customer writes in the IDE
+      #   /data/data/              users.json.php (password hashes), the
+      #                            project list, per-user settings and drafts,
+      #                            the access and project logs
+      #   /data/admin-credentials  the generated administrator, 0600
+      #
+      # Upstream puts the first two inside the checkout -- WORKSPACE and DATA
+      # both default to BASE_PATH . "/..." -- and a redeploy re-clones
+      # ~/project after clearing it (engine#173). For a blog that loses a cache;
+      # for an IDE it deletes the customer's source code and their login. The
+      # generated config.php points both constants here instead.
+      #
+      # ~ itself is root-owned 0755 and nothing can be created in it;
+      # ~/.panelalpha is created with the account and belongs to it, which is
+      # why the data directory is a child of that one. hooks/prepare.sh creates
+      # it before this mount is made, so Docker never gets to create it as root.
+      - ../.panelalpha/atheos:/data

@@ -1,0 +1,43 @@
+{
+  "object_kind": "push",
+  "event_name": "push",
+  "before": "95790bf891e76fee5e1747ab589903a6a1f80f22",
+  "after": "c3d9e1f0a2b4c6d8e0f1a3b5c7d9e1f3a5b7c9d1",
+  "ref": "refs/heads/feature/login",
+  "ref_protected": false,
+  "checkout_sha": "c3d9e1f0a2b4c6d8e0f1a3b5c7d9e1f3a5b7c9d1",
+  "user_id": 4,
+  "user_name": "John Smith",
+  "user_username": "jsmith",
+  "project_id": 15,
+  "project": {
+    "id": 15,
+    "name": "Diaspora",
+    "web_url": "http://example.com/mike/diaspora",
+    "git_http_url": "http://example.com/mike/diaspora.git",
+    "path_with_namespace": "mike/diaspora",
+    "default_branch": "main"
+  },
+  "commits": [
+    {
+      "id": "c3d9e1f0a2b4c6d8e0f1a3b5c7d9e1f3a5b7c9d1",
+      "message": "add login form",
+      "title": "add login form",
+      "timestamp": "2012-01-03T23:36:29+02:00",
+      "url": "http://example.com/mike/diaspora/commit/c3d9e1f0a2b4c6d8e0f1a3b5c7d9e1f3a5b7c9d1",
+      "author": {
+        "name": "GitLab dev user",
+        "email": "gitlabdev@dv6700.(none)"
+      },
+      "added": [],
+      "modified": ["app/views/login.erb"],
+      "removed": []
+    }
+  ],
+  "total_commits_count": 1,
+  "push_options": {},
+  "repository": {
+    "name": "Diaspora",
+    "git_http_url": "http://example.com/mike/diaspora.git"
+  }
+}

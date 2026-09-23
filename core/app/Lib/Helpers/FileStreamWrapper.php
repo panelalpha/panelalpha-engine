@@ -4,7 +4,15 @@ namespace App\Lib\Helpers;
 
 class FileStreamWrapper
 {
-    /** 
+    /**
+     * Set by PHP on every wrapper instance; undeclared it is a dynamic
+     * property, deprecated since 8.2.
+     *
+     * @var resource|null
+     */
+    public $context;
+
+    /**
      * @var resource|false|null $proc
      */
     private $proc = null;

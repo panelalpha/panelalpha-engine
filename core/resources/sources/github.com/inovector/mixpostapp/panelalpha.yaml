@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mixpost Lite — a self-hosted social-media scheduler (Laravel) — run from its
+  official standalone image `inovector/mixpost` rather than built from this
+  source repository, which ships only the Laravel app and no compose file. The
+  full replacement compose stands up the app image (nginx + php-fpm + Horizon +
+  cron, all under supervisord in one container: it serves, runs the queue and
+  runs the scheduler itself), a MySQL 8 sidecar and a Redis sidecar, each on a
+  named volume so a redeploy — which wipes `~/project` — keeps the database, the
+  Redis append-only file and the uploaded media.
+
+  The prepare hook is the whole reason this is not a stock compose deploy. The
+  image's own entrypoint (`start.sh`) creates a default administrator
+  `admin@example.com` / `changeme` on first boot whenever that e-mail is absent
+  from the `users` table — a publicly known credential the moment the site is
+  exposed. The hook therefore generates every secret once into
+  `~/.panelalpha/mixpost/` (0600, the only writable dir that survives a rebuild)
+  and reuses it on every later deploy, and a one-shot `init` service migrates
+  the schema and seeds `admin@example.com` with a generated password *before*
+  the app container starts. By the time `start.sh` runs its check the e-mail
+  already exists, so the insecure default is never created; the strong password
+  is what an operator logs in with and is recorded in
+  `~/.panelalpha/mixpost/admin.txt`.
+
+  `APP_URL` is left as `http://localhost` in the compose environment on purpose:
+  the platform rewrites it to the project's public https URL before the stack
+  starts (engine#221 avoided), so Mixpost builds its links and Inertia redirects
+  against the address a visitor actually typed without the recipe having to know
+  it. Social-account providers (X/Twitter, Mastodon, Facebook, …) need operator
+  API keys and are configured from the running dashboard; they are left
+  unconfigured here and are an operator step, out of scope for the deploy.

@@ -1,0 +1,67 @@
+# Concrete CMS, served by PanelAlpha. Written by the recipe in
+# resources/sources/github.com/concretecms/concretecms/, not by Concrete --
+# this repository ships no .htaccess of its own, and the dashboard only offers
+# to write one once a human ticks "pretty URLs".
+#
+# Two jobs, and the second is the reason the file is installed before the first
+# request rather than after: this repository has no public/ directory, so the
+# document root is the repository root and `concrete/vendor/`, `composer.lock`
+# and `application/config/` are all inside it.
+#
+# What the engine's generated vhost already denies, and is not repeated here:
+# every dotfile and dot-directory except .well-known, `docker-compose.*` and
+# any basename starting `panelalpha-` or `panelalpha.`. Directory listings are
+# off (`Options -Indexes`) and `AllowOverride All` is what makes this file
+# read at all.
+
+# Fail closed. Everything below is mod_rewrite, and a server without it would
+# serve the repository rather than deny it.
+<IfModule !mod_rewrite.c>
+    Require all denied
+</IfModule>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Subtrees that are never web content.
+    #
+    #   concrete/vendor            Composer's install, including installed.json
+    #                              -- 452 KB naming the exact version of all
+    #                              158 packages, which is a vulnerability
+    #                              scanner's shopping list -- and every PHP
+    #                              file of every dependency.
+    #   application/config         database.php is the account's MySQL
+    #                              password. Apache would *execute* it rather
+    #                              than print it, so nothing leaks today; this
+    #                              is so that nothing has to.
+    #   application/bootstrap      app.php and autoload.php, included by the
+    #                              dispatcher, never requested.
+    #   tests, build               PHPUnit's suite and the release tooling.
+    #   packages/*/vendor          an add-on's own Composer install.
+    #   updates/*/concrete/vendor  the same, in a core update downloaded from
+    #                              the marketplace.
+    #   panelalpha                 this recipe's own setup script.
+    RewriteRule ^(?:concrete/vendor|application/config|application/bootstrap|tests|build|panelalpha|packages/[^/]+/vendor|updates/[^/]+/concrete/vendor)(?:/|$) - [F,L]
+
+    # Repository metadata at the top level. Anchored, so a .md a customer
+    # uploads into the file manager is still served.
+    RewriteRule ^(?:composer\.(?:json|lock)|phpunit\.xml|[^/]*\.md|LICENSE\.TXT|[^/]*\.ya?ml)$ - [F,L]
+
+    # index.php is the only entry point. Everything else that ends in a PHP
+    # extension is a template, a class or a config file that some path reaches
+    # by `require`, and none of them is meant to be requested directly.
+    # `!^/index\.php` rather than a filename test because Concrete's own links
+    # are `/index.php/dashboard/...` when pretty URLs are off.
+    RewriteCond %{REQUEST_URI} !^/index\.php
+    RewriteRule \.(?:php\d?|phtml|phar|inc)$ - [F,L]
+
+    # The front controller. Concrete has no public/ and no router of its own
+    # on disk: a request for /about-us is index.php with PATH_INFO. Real files
+    # -- /concrete/js/jquery.js, /application/files/1234/..., /robots.txt --
+    # are served as themselves.
+    RewriteRule ^index\.php$ - [L]
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule . index.php [L]
+</IfModule>

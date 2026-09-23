@@ -1,0 +1,121 @@
+# Compose-replace: the repository ships no runnable stack (no Dockerfile, no
+# production compose -- only docs and an s6-overlay tree baked into an image
+# built elsewhere), so this runs the official image the maintainer publishes to
+# Docker Hub, brufdev/many-notes, exactly as the upstream install docs do. An
+# `overrides/docker-compose.yml` is written into the checkout before detection
+# runs, so by the time ComposeUsableProbe reads it this is simply "the
+# repository's compose file" and the compose strategy claims the project.
+#
+# One container. The serversideup/php based image runs the whole runtime under
+# s6-overlay: nginx + php-fpm (internal 8080), the Typesense search server, the
+# Reverb websocket server and the queue worker. It auto-migrates on boot, so no
+# migrate step is needed here (the image's /75-upgrades entrypoint runs
+# `artisan upgrade:run`, which queries the upgrades table -- migrations must have
+# run before it).
+services:
+  app:
+    # Pinned to the current maintained release line (composer.json is 0.18.0).
+    # A Hub-published image, pulled normally -- the from-source seed path
+    # (engine#229) does not apply.
+    image: brufdev/many-notes:0.18
+    restart: unless-stopped
+    # .env is the platform-merged account env (touched by the prepare hook so
+    # `up` never aborts on a missing file); app.env carries the APP_KEY the hook
+    # generated once and keeps stable across redeploys. Paths are relative to
+    # ~/project, where the engine writes and runs this file.
+    env_file:
+      - .env
+      - ../.panelalpha/many-notes/app.env
+    environment:
+      APP_NAME: "Many Notes"
+      # Force production: .env.example ships APP_ENV=production/APP_DEBUG=false
+      # already, but stated here so a leaked stack trace can never carry a
+      # secret regardless of what the image bakes in. Compose environment
+      # outranks any baked .env.
+      APP_ENV: production
+      APP_DEBUG: "false"
+      # Not a real address and not meant to survive: ComposePlaceholders
+      # rewrites a bare http://localhost under a *_URL-shaped key to the
+      # account's public https URL before the stack starts. Laravel builds
+      # redirects, mail links and secure cookies from it; the app already
+      # trusts the proxy (bootstrap/app.php: trustProxies(at: '*')), so HTTPS
+      # and CSRF work over the tunnel with no extra setting.
+      APP_URL: http://localhost
+      # SQLite is the app default; the DB file lands in
+      # /var/www/html/database/sqlite/database.sqlite -- on the named volume.
+      DB_CONNECTION: sqlite
+      # These are the .env.example defaults, restated so a future image change
+      # cannot quietly move sessions/cache/queue off the database (which is what
+      # the SQLite volume persists).
+      SESSION_DRIVER: database
+      QUEUE_CONNECTION: database
+      CACHE_STORE: database
+      # Send framework logs to the container output so `container_service_logs`
+      # can read a boot failure instead of it disappearing into storage/logs.
+      LOG_CHANNEL: stderr
+      # APP_KEY comes from ../.panelalpha/many-notes/app.env (env_file above).
+    # Everything that must outlive a redeploy. Docker seeds each fresh named
+    # volume from the image's own directory (owned by the image's www-data), so
+    # ownership arrives correct without a bind-mount uid dance.
+    volumes:
+      # The SQLite database directory -- this is where the notes live.
+      - manynotes_database:/var/www/html/database/sqlite
+      # Uploaded attachments referenced from notes.
+      - manynotes_private:/var/www/html/storage/app/private
+      # The Typesense full-text index (rebuildable, but kept to avoid a reindex).
+      - manynotes_typesense:/var/www/html/typesense
+    # This image runs several processes under s6-overlay in one container --
+    # nginx, php-fpm, the queue worker, the Reverb websocket server and, above
+    # all, the Typesense search server, which is thread-hungry. The dind daemon
+    # caps a fresh container at pids.max=256, and Typesense fails every
+    # pthread_create past it ("Fail to start timer_thread, Resource temporarily
+    # unavailable") -- it crash-loops, and because note creation indexes into it
+    # synchronously (Laravel Scout), registering the first user 500s while the
+    # login page still answers 200. Raise the process/thread ceiling so the
+    # whole s6 tree fits. This is a runtime knob, not a patch to the app.
+    pids_limit: 4096
+    # 8080 inside (serversideup nginx), published so the port scan takes it as
+    # the primary (engine#231/#234). No other service publishes a port.
+    ports:
+      - "8000:8080"
+    # Two probes. /up is Laravel's framework health route (registered in
+    # bootstrap/app.php) -- a 200 proves the runtime booted. /login renders the
+    # Inertia login page, which needs the sessions table (SESSION_DRIVER=database)
+    # and a valid APP_KEY, so its 200 proves migrations ran and the key is good.
+    # curl if present, wget as fallback -- the base image ships one of them.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          { curl -fsS -o /dev/null http://127.0.0.1:8080/up ||
+            wget -q -O /dev/null http://127.0.0.1:8080/up; } &&
+          { curl -fsS -o /dev/null http://127.0.0.1:8080/login ||
+            wget -q -O /dev/null http://127.0.0.1:8080/login; }
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      # First boot migrates, boots Typesense and warms the queue/reverb services.
+      start_period: 120s
+    # Typesense holds its index in memory alongside php-fpm and nginx; give the
+    # single container comfortable headroom on the heavy host.
+    mem_limit: 1536m
+
+  # Does nothing and exits 0. `docker compose up -d` runs without --wait and
+  # takes the deploy to be finished when it returns -- which is when the
+  # container has started, not when it answers. Compose blocks on a depends_on
+  # health condition, so this makes `up` return only once Many Notes is serving,
+  # and a clean exit 0 is not a crash loop to AppHealth. Same image, no extra
+  # pull.
+  ready:
+    image: brufdev/many-notes:0.18
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  manynotes_database: {}
+  manynotes_private: {}
+  manynotes_typesense: {}

@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Receipt Wrangler is a self-hosted receipt manager: an Angular SPA and a Go
+  (chi) API, plus OCR/AI receipt scanning. The repository is a monorepo that
+  builds nothing the engine could run on its own — there is no root compose
+  file, only a source Dockerfile and a dev-only compose — but the project
+  publishes one official all-in-one image (Docker Hub noah231515/receipt-wrangler:
+  latest, the tag the repo's own release CI pushes) that bakes the built SPA and
+  the compiled API behind a single internal nginx: nginx serves the SPA and
+  reverse-proxies /api and /mcp to the API on :8081. The SPA calls its API on the
+  same origin with a relative /api base, so one hosting domain needs no build-time
+  URL and no *_URL rewrite. No source is built here and no second repository is
+  cloned — this is the single-product-multi-image case, the Zero-TOTP / Onloc
+  precedent, not source grafting.
+
+  There is no platform block, so the compose strategy runs the stack from a
+  compose file — supplied here as overrides/docker-compose.yml because the repo
+  ships none the engine may run. The stack is the official app image, the Redis
+  the API's embedded asynq task queue requires (the API exits fatally without
+  it), a one-shot init that secures the bootstrap admin, and a thin nginx front
+  that publishes the origin only after init has finished. The API is configured
+  entirely from environment: DB_ENGINE=sqlite keeps the whole database in the
+  app's own sqlite volume (no external DB server), and SECRET_KEY (JWT signing) +
+  ENCRYPTION_KEY (at-rest field encryption) are generated once into
+  ~/.panelalpha/receipt-wrangler/ (0600) and reused — regenerating either would
+  invalidate every session or make encrypted columns unreadable. OCR/AI receipt
+  processing stays off: it is opt-in through System Settings and no AI provider
+  is configured, so no external LLM is ever called.
+
+  Persistence and state: the SQLite database (rw-sqlite -> /app/receipt-wrangler-
+  api/sqlite) and the uploaded receipt images (rw-data -> .../data) live on named
+  volumes, so they survive the redeploy that wipes ~/project (engine#173); only
+  account deletion or a failed-deploy rollback clears them.
+
+  Security model: a fresh database auto-creates a bootstrap admin with the public
+  default credentials admin/admin, and local sign-up is disabled by default
+  (EnableLocalSignUp is false, so /api/signUp returns 404 — there is no public
+  registration to close). The one-shot init service logs in as admin/admin while
+  the site is still private and resets the admin password to a value generated
+  once into ~/.panelalpha/receipt-wrangler/receipt-wrangler.env (0600); the nginx
+  front waits for init to complete before it publishes the port, so the site is
+  never publicly reachable with the default password live. It is idempotent: on a
+  redeploy the admin/admin login fails (already rotated) and init exits clean.
+  Every API route past the unauthenticated /api/featureConfig and /api/login
+  enforces a JWT or API key, so receipts and groups are never anonymously
+  readable.

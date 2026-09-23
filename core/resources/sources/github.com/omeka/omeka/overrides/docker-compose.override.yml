@@ -1,0 +1,138 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the app -- the shared PHP 8.3 base image, ~/project bind-mounted at
+# /app, the account's own uid, PA_DOCROOT=/app, Apache on 8000, APP_URL set to
+# the account's public https address, and DB_* from the database the engine
+# provisioned -- and says nothing about where an uploaded file goes, what
+# php.ini is in force, or when Omeka is ready, because nothing in a PHP
+# checkout can.
+#
+# An override rather than a replacement compose file, and here that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# *before* detection runs, so a compose file in the project root would make
+# Omeka look like a compose project and take the php strategy -- and with it
+# the bind mount, the docroot, the Composer pass and the staged entrypoint --
+# off the table entirely.
+#
+# There is no database service here on purpose. `database: mysql` in
+# panelalpha.yaml gets one on the account's own MySQL server: visible in the
+# panel, openable in phpMyAdmin, inside the account's backup, and costing this
+# 3.7 GB host neither a container nor a volume.
+services:
+  app:
+    volumes:
+      # ~/.panelalpha/omeka. Everything this account accumulates lives here:
+      #
+      #   /data/files/            every uploaded original and the three
+      #                           derivatives Omeka makes of it, plus
+      #                           theme_uploads. hooks/prepare.sh replaces
+      #                           ~/project/files with a symlink to it,
+      #                           because bootstrap.php hard-codes both
+      #                           FILES_DIR (where they are written) and
+      #                           WEB_FILES (the URL a visitor fetches them
+      #                           from) to the same `files` under the document
+      #                           root.
+      #   /data/admin-credentials the generated super user, 0600.
+      #   /data/php/zz-omeka.ini  the php.ini the base image does not load.
+      #
+      # A redeploy empties and re-clones ~/project (engine#173), so a
+      # collections site that kept its uploads under the document root would
+      # lose every file on the next deploy -- and the `omeka_files` rows
+      # pointing at them would survive, so every item page would show a broken
+      # image. ~ itself is root-owned 0755 and nothing can be created in it;
+      # ~/.panelalpha is created with the account and belongs to it, which is
+      # why the data directory is a child of that one. The prepare hook creates
+      # it before this mount is made, so Docker never gets to create it as root.
+      - ../.panelalpha/omeka:/data
+
+    environment:
+      # The one way to give this container a php.ini. The base image loads none
+      # at all -- `php --ini` says "Loaded Configuration File: (none)" -- and
+      # scans /usr/local/etc/php/conf.d, a directory inside the image that the
+      # account uid cannot write to (engine#185). PHP reads PHP_INI_SCAN_DIR
+      # from its own environment at startup whatever the SAPI, so naming a
+      # second directory here reaches the Apache module and the CLI both --
+      # and both need it: the CLI runs the installer, the Apache module takes
+      # the file upload.
+      #
+      # The image's own directory is listed first and explicitly:
+      # PHP_INI_SCAN_DIR *replaces* the compiled-in path rather than adding to
+      # it, and dropping it would unload every docker-php-ext-*.ini -- imagick,
+      # mysqli, gd, exif, the lot -- as well as panelalpha-proxy.ini, which is
+      # the auto_prepend_file that tells the container the request arrived over
+      # https.
+      #
+      # The second directory is on the bind mount rather than in the checkout
+      # because Omeka serves from the repository root: a `panelalpha-php/`
+      # directory at the top would be inside the served tree, and the vhost's
+      # `^panelalpha[-.]` denial matches a file name, not a path component.
+      PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/data/php
+
+    # ServiceLimits caps an app-role service it wrote itself at 384m
+    # (Lib/Deploy/Compose/ServiceLimits.php:24), and Omeka does not fit in it:
+    # panelalpha-php.ini gives a request 256M so that ext/imagick can hold a
+    # scanned page while it makes three derivatives of it, and the installer
+    # runs under -d memory_limit=512M. In an override file this reaches Docker
+    # as written -- the hardener never sees it -- which is the point.
+    mem_limit: 768m
+
+    # The install stage does all of Omeka's setup before Apache binds: db.ini,
+    # the schema, the element sets, the default navigation and the super user.
+    # The engine runs `docker compose up -d` without --wait and probes as soon
+    # as it returns, which is while that is still going: nothing is listening
+    # and the probe reads `Failed to connect to 127.0.0.1 port 8000`.
+    #
+    #   1. GET /       the public site's home page, rendered through
+    #                  themes/default (a git submodule the engine fetches).
+    #                  200 only once the schema exists, Omeka can reach it,
+    #                  and no migration is pending -- while one is,
+    #                  Omeka_Controller_Plugin_Upgrade answers every public
+    #                  route with `die("Public site is unavailable until the
+    #                  upgrade completes.")`, which is a 200 with that
+    #                  sentence in it, so `-f` alone would not catch it. It
+    #                  would not be reached here anyway: panelalpha-install.php
+    #                  runs the migrations before Apache binds.
+    #   2. GET /admin/users/login   grepped, not trusted for its status code.
+    #                  An uninstalled Omeka answers /admin with a 500 and an
+    #                  error page, and a *half*-installed one can answer 200
+    #                  from a cached view; `type="password"` is on the login
+    #                  form and rendering it means the database, the session
+    #                  resource, the ACL and the admin theme all work. This is
+    #                  also the page a person is sent to, so a deploy that
+    #                  reports success has been asked the same question they
+    #                  will ask.
+    #
+    # Host is `127.0.0.1:8000` for both, as it is for AppHealth's own probe
+    # (engine#190). Omeka accepts it: bootstrap.php builds WEB_ROOT from
+    # whatever Host arrives and no route here is host-dependent.
+    #
+    # Idempotent, so a retry replays it harmlessly. curl is in the base image.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -o /dev/null --max-time 30 http://127.0.0.1:8000/ &&
+          curl -fsS --max-time 30 http://127.0.0.1:8000/admin/users/login |
+          grep -q 'type="password"'
+      interval: 10s
+      timeout: 40s
+      retries: 30
+      # The install stage on two slow cores. A failing check inside this window
+      # neither counts against retries nor marks the container unhealthy.
+      start_period: 300s
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once Omeka has
+  # built its schema, created its super user and answered, and what the health
+  # probe then meets (engine#90). alpine:3 rather than a datastore image:
+  # anything the sidecar miner recognises as a backing service here produces
+  # `dependency cycle detected: app -> ready -> app` (engine#166). A clean
+  # exit 0 is not a crash loop as far as AppHealth is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

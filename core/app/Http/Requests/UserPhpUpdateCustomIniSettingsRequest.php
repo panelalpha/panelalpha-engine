@@ -16,6 +16,7 @@ class UserPhpUpdateCustomIniSettingsRequest extends FormRequest
         return [
             'php_version' => 'string|required',
             'settings' => 'array|present',
+            'settings.*' => 'string',
         ];
     }
 }

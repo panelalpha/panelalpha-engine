@@ -61,19 +61,26 @@ final class EnvExampleCopies
      */
     public static function for(string $projectDir): array
     {
-        $projectDir = rtrim($projectDir, '/');
-        if ($projectDir === '' || !is_dir($projectDir)) {
-            return [];
+        return array_values(self::collect($projectDir, false));
+    }
+
+    /**
+     * Where every copy {@see for()} makes lands, including the ones already
+     * made -- the files a deploy leaves behind as Engine Artifacts when the
+     * repository does not track them.
+     *
+     * @return list<string> project-relative paths of files that exist
+     */
+    public static function made(string $projectDir): array
+    {
+        $made = [];
+        foreach (self::collect($projectDir, true) as $dest => $copy) {
+            if (is_file($dest)) {
+                $made[] = $copy['relative'];
+            }
         }
 
-        $copies = [];
-        self::collectExamples($projectDir, '', 0, $copies);
-        // First writer wins: a sibling example is a better source than the
-        // root one, and both beat creating the file empty.
-        $copies += self::composeDeclared($projectDir);
-        $copies += self::local($projectDir);
-
-        return array_values($copies);
+        return $made;
     }
 
     /**
@@ -81,9 +88,37 @@ final class EnvExampleCopies
      */
     public static function local(string $projectDir): array
     {
+        return self::localCopy($projectDir, false);
+    }
+
+    /**
+     * @return array<string, array{example: string, dest: string, relative: string}>
+     */
+    private static function collect(string $projectDir, bool $includeMade): array
+    {
+        $projectDir = rtrim($projectDir, '/');
+        if ($projectDir === '' || !is_dir($projectDir)) {
+            return [];
+        }
+
+        $copies = [];
+        self::collectExamples($projectDir, '', 0, $copies, $includeMade);
+        // First writer wins: a sibling example is a better source than the
+        // root one, and both beat creating the file empty.
+        $copies += self::composeDeclared($projectDir, $includeMade);
+        $copies += self::localCopy($projectDir, $includeMade);
+
+        return $copies;
+    }
+
+    /**
+     * @return array<string, array{example: string, dest: string, relative: string}>
+     */
+    private static function localCopy(string $projectDir, bool $includeMade): array
+    {
         $projectDir = rtrim($projectDir, '/');
         $dest = $projectDir . '/' . self::LOCAL;
-        if ($projectDir === '' || !is_dir($projectDir) || is_file($dest)) {
+        if ($projectDir === '' || !is_dir($projectDir) || (!$includeMade && is_file($dest))) {
             return [];
         }
 
@@ -135,20 +170,20 @@ final class EnvExampleCopies
     /**
      * @param array<string, array{example: string, dest: string, relative: string}> $copies
      */
-    private static function collectExamples(string $projectDir, string $rel, int $depth, array &$copies): void
+    private static function collectExamples(string $projectDir, string $rel, int $depth, array &$copies, bool $includeMade): void
     {
         $dir = $rel === '' ? $projectDir : $projectDir . '/' . $rel;
         foreach ([self::EXAMPLE => self::ENV, self::LOCAL_EXAMPLE => self::LOCAL] as $example => $target) {
             $source = $dir . '/' . $example;
             $dest = $dir . '/' . $target;
-            if (is_file($source) && !is_file($dest)) {
+            if (is_file($source) && ($includeMade || !is_file($dest))) {
                 $copies[$dest] = self::copy($source, $dest, $rel === '' ? $target : $rel . '/' . $target);
             }
         }
 
         if ($depth < self::MAX_DEPTH) {
             foreach (self::childDirectories($projectDir, $rel, $dir) as $childRel) {
-                self::collectExamples($projectDir, $childRel, $depth + 1, $copies);
+                self::collectExamples($projectDir, $childRel, $depth + 1, $copies, $includeMade);
             }
         }
     }
@@ -175,7 +210,7 @@ final class EnvExampleCopies
     /**
      * @return array<string, array{example: string, dest: string, relative: string}>
      */
-    private static function composeDeclared(string $projectDir): array
+    private static function composeDeclared(string $projectDir, bool $includeMade): array
     {
         $raw = self::composeContents($projectDir);
         if ($raw === null) {
@@ -185,7 +220,7 @@ final class EnvExampleCopies
         $copies = [];
         foreach (ComposeEnvFiles::declaredIn($raw) as $relative) {
             $dest = $projectDir . '/' . $relative;
-            if (!is_file($dest) && is_dir(dirname($dest))) {
+            if (($includeMade || !is_file($dest)) && is_dir(dirname($dest))) {
                 $copies[$dest] = self::copy(self::sourceFor($projectDir, $dest), $dest, $relative);
             }
         }

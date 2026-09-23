@@ -1,0 +1,140 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Readeck is a read-it-later and bookmark manager: one Go binary that serves
+  the whole UI and API, extracts and stores the readable version of every page
+  you save, and keeps all of it -- database, article store, images -- in a
+  single data directory with SQLite. AGPL-3.0, a real runnable application with
+  its own account system; nothing here is a scope question.
+
+  The repository is the Go source tree, and detection picks the `go` strategy
+  for it (go.mod at the root, priority 760). But a bare `go build` does not
+  compile it: assets/assets.go and docs/docs.go carry `//go:embed www` and
+  `//go:embed assets`, and those directories are produced by Readeck's frontend
+  asset pipeline (a Node/pnpm step its own build driver runs before `go
+  build`), so on a bare checkout they are empty and the compile fails with
+  `pattern www: cannot embed directory www: contains no embeddable files`.
+  Measured on the control deploy: the `go` strategy, failed at 42s, at exactly
+  that error. This is the Tandoor/Homarr shape -- the checkout is the source
+  but not a buildable one without the step upstream's CI runs separately.
+
+  So the recipe runs the image upstream publishes, codeberg.org/readeck/readeck
+  (102 MB, one ~30s pull), and after hooks/prepare.sh has read the checkout's
+  git ref to pick a tag, this checkout contributes nothing -- not the runtime,
+  not a compose file (there isn't one at the root), not a byte of the image.
+  The same choice the Seafile, Zabbix and Homarr recipes make. The application
+  itself runs correctly -- it is upstream's own published binary -- so this is
+  Supported, not a broken HEAD (scope rule 1); nothing here patches or pins the
+  source (scope rule 4). An operator who wants a source build must add the
+  frontend pipeline, which the engine's `go` strategy does not run, and which
+  would rebuild on every redeploy because the generated compose file sits in
+  the build context and changes each deploy (engine#208).
+
+  == What the checkout cannot state, and this recipe supplies ==
+
+  Four things, all measured on this host against readeck 0.23.4.
+
+  1. The account's public address. server.base_url defaults to null; Readeck
+     then builds absolute links and its login/CSRF origin from the request,
+     which behind the engine's https-terminating proxy is wrong. The compose
+     file sets READECK_SERVER_BASE_URL: http://localhost, which the engine
+     rewrites to the account's public https URL before the stack starts,
+     because the key ends in _URL (ComposePlaceholders::PUBLIC_URL_KEY_PATTERN,
+     value in the port allow-list). Measured: with it set, GET / on an empty
+     instance 303s to https://<domain>/onboarding; the redirect carries the
+     public host, not localhost. Readeck does not enforce allowed_hosts by
+     default (it is null), so there is no DisallowedHost class of failure to
+     close -- a request with any Host is answered.
+
+  2. A stable secret_key. main.secret_key has no fixed default: `readeck config`
+     returns a fresh random 64-char value on every invocation when none is set,
+     and on first serve the binary writes one into config.toml. It signs every
+     session cookie, so a value that changes on a redeploy logs everyone out.
+     hooks/prepare.sh generates one once into ~/.panelalpha/readeck/config.toml
+     and never again; the file is read back verbatim on every boot (measured:
+     the pinned value survived migrate, user creation and serve unchanged).
+     READECK_SERVER_BASE_URL is supplied by env because env is applied at
+     runtime; secret_key is pinned in config.toml because the env var does not
+     override it (measured: `READECK_MAIN_SECRET_KEY` set, config.toml's value
+     still won).
+
+  3. An administrator, created before the port opens. This is engine#200 in its
+     strongest form: on an instance with zero users, every path 303s to
+     /onboarding and /onboarding serves an unauthenticated form that makes its
+     submitter the first user -- the first visitor owns the instance. Readeck
+     ships no default credentials, so there is nothing to rotate; the exposure
+     is the open form itself. files/panelalpha/readeck/init.sh runs the
+     migrations and creates this account's administrator in a one-shot `init`
+     service, and `app` declares `init: service_completed_successfully`, so the
+     web container is never started until a user exists. Measured: the moment a
+     user exists, /onboarding 303s to /login and the form is gone. The password
+     is generated per account into ~/.panelalpha/readeck/, never upstream's
+     (there is no upstream default), and the user is created only when the
+     admin username is absent, so a redeploy neither resets it nor touches a
+     password the owner changed in the app.
+
+  4. Where the data lives. The image declares VOLUME /readeck and keeps
+     everything under it: config.toml, data/db.sqlite3 (the SQLite database in
+     WAL mode), the extracted article and image store, and content-scripts. A
+     stock deploy would get an anonymous named volume the customer can never
+     reach into and that the product's entire content lives in. It is replaced
+     by-target with a bind mount onto ~/.panelalpha/readeck, the only directory
+     that both survives a redeploy (~/project is emptied and re-cloned,
+     engine#173) and belongs to the account (~ is chown root:root on every
+     rebuild, Project.php:813). Both services run as the account's own uid/gid,
+     written into a generated docker-compose.override.yml by prepare.sh, so the
+     database and saved articles are account-owned and readable over SFTP
+     rather than root-owned inside the customer's own home.
+
+  == The shape of the stack ==
+
+  Three services, no database container and no cache tier -- Readeck is one
+  binary with SQLite and runs its extractor workers inline (worker.start_worker
+  defaults true, dsn memory://). `init` migrates and creates the administrator,
+  then exits 0. `app` runs `readeck serve`, depends on init with
+  service_completed_successfully, and its healthcheck is the binary's own
+  `readeck healthcheck`, which opens a TCP connection to the configured
+  host/port and exits non-zero when nothing answers -- a real readiness probe,
+  no curl or wget needed (the image ships neither). `ready` is an alpine no-op
+  that waits on app's healthcheck: `docker compose up -d` runs without --wait
+  (engine#204), so without it the deploy would finish while Readeck was still
+  starting; with it, `up -d` blocks until the site answers.
+
+  == What an anonymous visitor gets ==
+
+  A login page, and nothing else. Once the administrator exists (which is before
+  the port is ever open to the public), every path for an unauthenticated
+  request 303s to /login; /onboarding is closed. Bookmarks are private by
+  default -- a saved article is visible only to its owner unless the owner
+  explicitly creates a public share link -- so a stranger who knows the domain
+  can read neither the bookmark list nor any saved article.
+
+  Worker and extractor pools are tuned down from the machine-sized defaults
+  (worker.num_workers 7, extractor.workers 8) to a size that fits one account,
+  in config.toml. Mail is left unconfigured: Readeck uses it only for optional
+  password-reset and share emails and does not need it to run.
+
+  == Numbers ==
+
+  Measured on readeck 0.23.4, image codeberg.org/readeck/readeck:latest, a
+  fresh 2 GB account. Recipe: deploy-ok in 36s, all three containers as
+  expected (init exited 0, app healthy, ready exited 0), HTTP 200 over the
+  public https domain. Control (recipe parked, same repo, 3 GB account): the
+  `go` strategy, failed at 42s on the embed error above. Redeploy via POST
+  /projects/<user>/rebuild: success; config.toml and credentials.txt
+  byte-identical (md5 unchanged, so the secret_key and the administrator
+  password survived), the saved bookmark still present, and the browser session
+  still valid -- a stable secret_key means the redeploy did not log the owner
+  out. The app container used 57 MiB of its 1 GiB cap; the account 110 MiB.
+
+  Verified past the probe, in a browser, over the public https domain: logged
+  in as the generated admin, saved https://example.com as a bookmark, and read
+  the extracted article back ("This domain is for use in documentation
+  examples..."), which exercises the fetch/extract/store path, not just a 200
+  on /. /admin/users renders for the admin (the `admin` group is a real admin
+  role, not a free-form label). An anonymous request to /, to the saved
+  bookmark and to /admin/users all 303 to /login; /api/bookmarks is 401;
+  /onboarding 303s to /login once the admin exists. Fetching the SQLite
+  database, config.toml, readeck.env, credentials.txt and .git/config over the
+  public domain returns a 303 to /login with an empty body -- no file content
+  and no SQLite header -- because every path is served by the app container,
+  not from a document root.

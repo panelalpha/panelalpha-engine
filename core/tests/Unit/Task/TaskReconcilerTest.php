@@ -5,6 +5,7 @@ namespace Tests\Unit\Task;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Task\TaskReconciler;
 use App\Models\Task;
+use Illuminate\Support\Facades\DB;
 
 class TaskReconcilerTest extends SqliteTaskTestCase
 {
@@ -205,98 +206,77 @@ class TaskReconcilerTest extends SqliteTaskTestCase
 
     // ---- the real queue read ------------------------------------------
     //
-    // Every test above injects a queue verdict. These exercise the read that
-    // produces one, because the read had a bug no injected verdict could
-    // expose: it asked Redis for a member equal to the bare uuid, and Laravel
-    // stores the job's whole serialised payload as the member.
+    // Every test above injects a queue verdict. These read a real `jobs`
+    // table, because the uuid lives inside the payload and a lookup keyed by
+    // the bare uuid once retired nothing at all.
 
-    /**
-     * A queue member as Laravel writes it: the payload *is* the member, with
-     * the uuid as a field inside it.
-     */
-    private function member(string $uuid): string
+    private function createJobsTable(): void
     {
-        return json_encode([
-            'uuid' => $uuid,
-            'displayName' => 'App\\Jobs\\DeployProject',
-            'data' => ['uuid' => $uuid, 'commandName' => 'App\\Jobs\\DeployProject'],
-        ], JSON_THROW_ON_ERROR);
+        $migration = require base_path('database/migrations/2026_09_15_000000_create_jobs_table.php');
+        $migration->up();
     }
 
-    /**
-     * A Redis connection that answers from fixed lists instead of a server.
-     *
-     * @param array<int, string> $reserved raw ZSET members
-     * @param array<int, string> $pending  raw list members
-     */
-    private function redis(array $reserved = [], array $pending = [], bool $missingKey = false): object
+    /** Push a job the way the engine does, and return the uuid Laravel gave it. */
+    private function pushJob(string $queue = 'default'): string
     {
-        return new class($reserved, $pending, $missingKey)
-        {
-            /** @param array<int, string> $reserved */
-            public function __construct(
-                private array $reserved,
-                private array $pending,
-                private bool $missingKey,
-            ) {}
+        $manager = app('queue');
+        $manager->connection('database')->push(new \Illuminate\Queue\CallQueuedClosure(
+            new \Laravel\SerializableClosure\SerializableClosure(static fn () => null),
+        ), '', $queue);
 
-            /** @return array<int, string>|false */
-            public function zrange(string $key, int $start, int $end): array|false
-            {
-                return $this->missingKey ? false : $this->reserved;
-            }
+        $payload = json_decode((string) DB::table('jobs')->orderByDesc('id')->value('payload'), true);
 
-            /** @return array<int, string>|false */
-            public function lrange(string $key, int $start, int $end): array|false
-            {
-                return $this->missingKey ? false : $this->pending;
-            }
-        };
+        return (string) $payload['uuid'];
     }
 
-    public function test_a_running_job_reserved_by_a_worker_is_not_retired(): void
+    private function runningTaskFor(string $uuid): Task
     {
-        $task = $this->runningTask();
-        $uuid = (string) $task->job_id;
+        $task = Task::start(jobType: 'App\\Jobs\\DeployProject', queue: 'default', username: 'shop');
+        $task->markRunning($uuid);
 
-        // The member is the payload, not the uuid -- the shape that made the
-        // first version of this class retire nothing.
-        $check = TaskReconciler::queueCheck($this->redis(reserved: [$this->member($uuid)]));
+        return $task->refresh();
+    }
+
+    public function test_a_pending_job_is_not_retired(): void
+    {
+        $this->createJobsTable();
+        $task = $this->runningTaskFor($this->pushJob());
+
+        $check = TaskReconciler::queueCheck();
 
         $this->assertTrue($check($task));
         $this->assertNull(TaskReconciler::decide($task, null, $check));
     }
 
-    public function test_a_running_job_still_pending_is_not_retired(): void
+    public function test_a_job_reserved_by_a_worker_is_not_retired(): void
     {
-        $task = $this->runningTask();
-        $check = TaskReconciler::queueCheck($this->redis(pending: [$this->member((string) $task->job_id)]));
+        $this->createJobsTable();
+        $task = $this->runningTaskFor($this->pushJob());
+        DB::table('jobs')->update(['reserved_at' => time(), 'attempts' => 1]);
 
-        $this->assertTrue($check($task));
-        $this->assertNull(TaskReconciler::decide($task, null, $check));
+        $this->assertTrue(TaskReconciler::queueCheck()($task));
     }
 
-    public function test_a_job_absent_from_both_queues_is_gone(): void
+    public function test_a_job_gone_from_the_table_is_retired(): void
     {
-        // The case that must work, and did not: the deploy died with its
-        // worker, nothing finished it, and the row has to be retired.
+        // The case that must work: the deploy died with its worker, nothing
+        // finished it, and the row has to be retired.
+        $this->createJobsTable();
+        $this->pushJob();
         $task = $this->runningTask();
-        $check = TaskReconciler::queueCheck($this->redis(reserved: [$this->member('someone-elses-job')]));
+
+        $check = TaskReconciler::queueCheck();
 
         $this->assertFalse($check($task));
         $this->assertSame(Task::STATUS_CANCELLED, TaskReconciler::decide($task, null, $check));
     }
 
-    public function test_empty_queues_are_gone_not_unknown(): void
+    public function test_a_job_on_another_queue_is_not_this_one(): void
     {
-        // PhpRedis answers `false` rather than `[]` for a missing key. Read as
-        // "unknown" that would leave every orphan running; read as empty it is
-        // the plainest evidence there is that the job is over.
-        $task = $this->runningTask();
-        $check = TaskReconciler::queueCheck($this->redis(missingKey: true));
+        $this->createJobsTable();
+        $task = $this->runningTaskFor($this->pushJob('backups'));
 
-        $this->assertFalse($check($task));
-        $this->assertSame(Task::STATUS_CANCELLED, TaskReconciler::decide($task, null, $check));
+        $this->assertFalse(TaskReconciler::queueCheck()($task));
     }
 
     public function test_a_nested_uuid_is_still_the_same_job(): void
@@ -319,21 +299,10 @@ class TaskReconcilerTest extends SqliteTaskTestCase
 
     public function test_an_unreadable_queue_leaves_the_task_alone(): void
     {
+        // No `jobs` table: the read throws, and "cannot tell" is not death.
         $task = $this->runningTask();
 
-        $check = TaskReconciler::queueCheck(new class
-        {
-            public function zrange(string $key, int $start, int $end): array
-            {
-                throw new \RuntimeException('connection refused');
-            }
-
-            /** @return array<int, string> */
-            public function lrange(string $key, int $start, int $end): array
-            {
-                return [];
-            }
-        });
+        $check = TaskReconciler::queueCheck();
 
         $this->assertNull($check($task));
         $this->assertNull(TaskReconciler::decide($task, null, $check));

@@ -12,6 +12,7 @@ class ModsecRulesetCollection extends ResourceCollection
     {
         $labels = [
             'owasp-crs' => "OWASP Core Rule Set",
+            'panelalpha-wordpress' => "PanelAlpha WordPress hardening",
         ];
         $config = Setting::getModsecConfig();
 

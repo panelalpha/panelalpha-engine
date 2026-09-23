@@ -1,0 +1,122 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bolt 5/6 is a Symfony content management system: Doctrine ORM over SQLite by
+  default, Twig templates, an Encore-built Vue control panel at /bolt. The
+  repository is not the installable product -- SETUP.md says twice, in a
+  deliberately hard-to-miss `echo`, that a site should start from
+  `bolt/project` -- but it is the repository the tracker names, it holds all of
+  Bolt, and it does deploy. Detection read it correctly: composer.json and no
+  artisan, so the `php` strategy, PHP 8.2 against `"php": ">=8.2"`, the shared
+  Apache base image with ~/project bind-mounted, `composer install` on the
+  host, and `npm run build` after it because package.json declares a `build`
+  script. All of that worked on the first deploy, and the site still answered
+  HTTP 500 on every request, which is the `serving-error_page` verdict this
+  recipe exists to fix.
+
+  Six things were wrong, and four of them are the same shape: bolt/core
+  commits no composer.lock, so what `composer install --no-dev` produces on a
+  hosting account is not the tree any Bolt developer has ever run.
+
+  **The Composer plugins never ran.** The php manifest installs with
+  `--no-plugins` -- a plugin is arbitrary PHP out of a customer repository and
+  the install runs on the host daemon -- and `PhpHostBuild::mayRunPlugins()`
+  lifts that only when *composer.lock* pins nothing but installer plugins.
+  symfony/runtime is on that list by name. bolt/core has no lock, so
+  `lockedPlugins(null)` is empty, the exemption cannot fire, and
+  `vendor/autoload_runtime.php` is never written -- the file `public/index.php`
+  requires on its second line and `bin/console` on its first. Every request,
+  and every console command, died on `LogicException: Symfony Runtime is
+  missing`. The same event, POST_AUTOLOAD_DUMP, is what
+  composer/package-versions-deprecated and drupol/composer-packages need to
+  generate `PackageVersions\Versions` and `ComposerPackages\{Packages,Types}`,
+  both of which Bolt reads -- the second inside a container compiler pass. So
+  the install stage runs `composer dump-autoload` once, in the account's own
+  container, which re-fires that event and writes all three. A recipe cannot
+  fix this in the build: `AppConfig::readManifest()` keeps `commands` out of
+  the manifest and `PlatformValues` only walks the manifest's, so an app
+  config's `stage: build` command is read and never run.
+
+  **Four require-dev packages are bolt-extensions, and Bolt refuses to boot
+  without them.** `ExtensionRegistry::addComposerPackages()` asks
+  `ComposerPackages\Types::get('bolt-extension')` for every extension in the
+  project and throws when one cannot be loaded -- `The extension
+  "acmecorp/reference-extension" has its 'extra/entrypoint' set to
+  "AcmeCorp\ReferenceExtension\Extension", but that class does not exist`.
+  ComposerPackages is generated from composer.lock, which lists `packages-dev`
+  whether or not they were installed, so `--no-dev` guarantees the throw. It
+  happens in a compiler pass, so it is a container that never compiles.
+  hooks/prepare.sh takes the four out of require-dev before the deploy resolves
+  the lock: acmecorp's is a demo extension and the others are dashboard widgets
+  (news, weather, configuration notices), none of which belongs on a hosted
+  site.
+
+  **The extension wiring for those same four is committed.**
+  `config/routes/extension_reference-extension.yaml` and
+  `config/services_bolt.yaml` are files `bin/console extensions:configure`
+  generates, and this branch has them in git pointing at
+  `vendor/acmecorp/…`, `vendor/bolt/newswidget` and the rest.
+  `Kernel::configureContainer()` wraps the services_bolt.yaml load in a
+  try/catch for exactly this reason and `configureRoutes()` does not, so the
+  router throws `FileLocatorFileNotFoundException` while building its cache --
+  another 500 on everything. The prepare hook removes them as the build output
+  they are, and the install stage regenerates them from what is installed.
+
+  **APP_SECRET is `!ChangeMe!` and .env.local cannot change it.** The generated
+  compose file carries `env_file: - .env`, so every line of the repository's
+  committed .env becomes a real process environment variable -- and
+  `Dotenv::populate()` never overwrites one of those. A secret written to
+  .env.local, which is the file Symfony documents and .env's own header points
+  at, is read, found to be shadowed, and discarded: measured on a deploy that
+  had one, `printenv APP_SECRET` in the container still printed `!ChangeMe!`.
+  So hooks/prepare.sh replaces the placeholder in .env itself, matching only
+  the exact published value so an operator's own secret is never overwritten.
+
+  **Nothing reads TRUSTED_PROXIES.** The repository's .env sets it to the RFC
+  1918 ranges and config/packages/framework.yaml configures `trusted_hosts`
+  and no `trusted_proxies`, so Symfony trusts no X-Forwarded-* header and
+  builds every absolute URL from the Apache it is listening on:
+  `http://<domain>:8000/` in the canonical link of every page, inside an https
+  document. The engine's proxy does send what is needed -- Host,
+  X-Forwarded-For, X-Forwarded-Proto, X-Forwarded-Host and X-Forwarded-Port
+  are all set in `templates/dind/virtualHost-nginx-proxy.blade.php`, on both
+  server blocks -- so files/config/packages/panelalpha.yaml is one small
+  config file that turns the trust on, and framework.yaml stays as it shipped.
+
+  **And an empty Bolt is a 404, not a home page.** `homepage: homepage` in
+  config/bolt/config.yaml resolves to a record, and
+  `TwigAwareController::renderSingle()` throws NotFoundHttpException when there
+  is none. So the install stage loads Bolt's own fixtures, and immediately
+  replaces the password of every user they create: src/DataFixtures/
+  UserFixtures.php writes `admin%1`, `jane%1` and `john%1` in plain text in a
+  public repository, and upstream's way out -- `doctrine:fixtures:load
+  --append`, which switches those to random -- is broken on this branch, because
+  TaxonomyFixtures::load() returns early on `--append` and ContentFixtures then
+  dies on the references it did not register. The generated administrator
+  password is written to ~/project/.panelalpha-admin-password (0600) before
+  anything can serve a page. See the README.
+
+  The last thing the engine cannot infer is smaller and was making the health
+  report unreadable: the repository's compose.yml is a workstation stack, and
+  RuntimeSidecars reads a compose file it never runs for the backing services
+  it implies. It kept all four of them -- mariadb, an nginx, a phpMyAdmin and a
+  `node` running `encore dev --watch` against a directory it does not have --
+  so the account carried a second webserver and a crash-looping container, and
+  AppHealth reported *the application* as restarting. The prepare hook renames
+  the file; nothing else was needed.
+extends: php
+# What PhpDocroot would have worked out anyway -- it probes `public` first, and
+# public/index.php is Bolt's front controller -- said out loud because the
+# probe order is not something a recipe should rely on silently.
+docroot: public
+commands:
+  - id: bolt-setup
+    stage:
+      - install
+      - upgrade
+    description: >-
+      Regenerates what Composer's plugins would have written, rebuilds the
+      extension wiring for the installed tree, brings the schema up to the
+      entity mapping, and on a database with no users loads Bolt's demo content
+      and gives every account it creates a password that is not in the
+      repository. Idempotent; the upgrade stage replays it on every redeploy.
+    run: 'sh panelalpha/bolt-setup.sh'

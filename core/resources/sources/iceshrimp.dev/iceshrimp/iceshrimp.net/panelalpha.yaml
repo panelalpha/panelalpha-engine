@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Iceshrimp.NET is a federated (ActivityPub) microblogging server written in
+  C#/.NET 10, backed by PostgreSQL and nothing else — no Redis, no search
+  sidecar, no object storage unless you ask for it. The repository ships a root
+  Dockerfile and no compose file, so detection built the .NET app per account: a
+  multi-stage SDK compile of five projects plus a Blazor WASM frontend, minutes
+  of work and gigabytes of layers, to arrive at an image the project already
+  publishes on every release at iceshrimp.dev/iceshrimp/iceshrimp.net.
+
+  This recipe replaces that with the published image and a single-account
+  Postgres. overrides/docker-compose.yml is a REPLACE compose (no build), which
+  detection prefers to the root Dockerfile (compose priority 980 > dockerfile
+  970) because the file references only prebuilt images. No platform block is
+  declared, so the account's public address reaches the app the way engine#221
+  intends: ComposePlaceholders rewrites the app service's PA_PUBLIC_URL, shipped
+  as http://localhost, to the account's https URL before the stack starts, and
+  the app's entrypoint derives Instance:WebDomain / Instance:AccountDomain from
+  it. Everything else the app needs is set as a .NET environment override
+  (Section__Key), which AddEnvironmentVariables() applies last, over the
+  embedded configuration.ini defaults.
+
+  The app self-migrates (the image entrypoint is --migrate-and-start) and stores
+  its DataProtection signing keys in the database, not on disk, so sessions and
+  antiforgery survive a rebuild on the Postgres volume alone. A one-shot init
+  service runs --migrate, then seeds the first admin with
+  --create-admin-user, guarded by a marker in ~/.panelalpha so a redeploy does
+  not try to recreate a user that already exists (the command throws on a
+  duplicate). Registrations default to Closed, so there is no first-visitor
+  window to race: the admin is the only account until the operator opens signup.
+
+  Secrets (the Postgres password, the admin password) are generated once by
+  hooks/prepare.sh into ~/.panelalpha/iceshrimp/ (0600) and copied into
+  ~/project/.env each deploy for compose substitution — never regenerated,
+  because ~/project is wiped on every redeploy (engine#173) and a fresh DB
+  password would lock the app out of its own volume. Postgres data and uploaded
+  media live on named volumes, which survive rebuild and are wiped only on
+  account deletion or a failed-deploy rollback.
+
+  Mail is not configured: password reset and email confirmation need operator
+  SMTP, set through the account's env vars. Media processing defaults to the
+  managed ImageSharp path (no native libvips needed). A no-op ready service
+  gates the deploy on the app's own /api/v1/instance health so the engine does
+  not call the deploy finished while the first migration is still running
+  (engine#90, engine#204).

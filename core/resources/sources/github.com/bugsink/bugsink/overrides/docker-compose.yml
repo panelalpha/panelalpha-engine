@@ -1,0 +1,74 @@
+# Compose-replace: the repo ships docker-compose-sample.yaml as a template a
+# human edits (Postgres sidecar, a `django-insecure-` SECRET_KEY inline,
+# CREATE_SUPERUSER left as email:password, a bind volume). This runs the same
+# app made durable and self-configuring:
+#   - the official image bugsink/bugsink, pinned to release 2.6.0
+#   - SQLite (Bugsink's default) at /data/db.sqlite3 on a named volume, so the
+#     whole datastore (users, projects, issues, events) survives a redeploy
+#   - SECRET_KEY and the admin credential seeded from ~/.panelalpha/bugsink
+#     (../.panelalpha from ~/project), reused on every rebuild
+#   - only the web service publishes a port
+# The image is a single container: monofy runs `check --deploy` + migrate +
+# prestart (seeds the admin) then gunicorn on :8000, plus the snappea in-process
+# task workers (no Redis).
+services:
+  web:
+    # Official release image. amd64/arm64 multi-arch on Docker Hub.
+    image: bugsink/bugsink:2.6.0
+    restart: unless-stopped
+    env_file:
+      # Platform-merged account env first, then this account's seeded secrets so
+      # an empty default cannot clobber them.
+      - .env
+      - ../.panelalpha/bugsink/app.env
+    environment:
+      DEBUG: "false"
+      PORT: "8000"
+      # Rewritten to the account's public https address before the stack starts
+      # (ComposePlaceholders rewrites a local value whose key ends in _URL).
+      # Bugsink derives ALLOWED_HOSTS from this and builds its DSNs/self-links
+      # from it. Left http://localhost:8000 on an account with no domain yet.
+      BASE_URL: "http://localhost:8000"
+      # Trust the engine's TLS-terminating reverse proxy: enables
+      # SECURE_PROXY_SSL_HEADER (X-Forwarded-Proto) and secure cookies so CSRF
+      # and login work over the tunnel.
+      BEHIND_HTTPS_PROXY: "true"
+      # No open self-registration: only an admin can create further users.
+      USER_REGISTRATION: "CB_ADMINS"
+      TIME_ZONE: "UTC"
+    volumes:
+      # The SQLite DB is the entire state; keep it on a named volume so ingested
+      # events and the admin user survive a redeploy. The image creates /data
+      # owned by its own uid (14237), which a fresh named volume inherits, so the
+      # unprivileged container user can write.
+      - data:/data
+    # gunicorn binds 0.0.0.0:8000; Bugsink is the only service that publishes a
+    # port (engine#234: publish explicitly).
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # /health/ready is Bugsink's own readiness endpoint; `requests` is in the
+      # image (the image's own HEALTHCHECK uses it). A 200 proves gunicorn is up
+      # and the database opened and migrated.
+      test: ["CMD-SHELL", "python -c 'import requests,sys; sys.exit(0 if requests.get(\"http://127.0.0.1:8000/health/ready\",timeout=5).ok else 1)'"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
+    mem_limit: 1536m
+
+  # No-op gate: `docker compose up -d` blocks on a depends_on health condition,
+  # so this makes `up` return only once the site actually answers rather than the
+  # moment the container starts (engine#204/#90). Reuses the already-pulled image
+  # so it needs no extra download.
+  ready:
+    image: bugsink/bugsink:2.6.0
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  data: {}

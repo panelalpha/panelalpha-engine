@@ -1,13 +1,12 @@
 set -e
 ROOT="/home/$(hostname)/docker"
-CTL=(supervisorctl -c /etc/supervisor/supervisord.conf)
-"${CTL[@]}" stop docker >/dev/null 2>&1 || true
+supervisorctl -c /etc/supervisor/supervisord.conf stop docker >/dev/null 2>&1 || true
 rm -rf "$ROOT/buildkit"
 rm -rf "$ROOT/containerd/daemon/io.containerd.snapshotter.v1.overlayfs"
 rm -rf "$ROOT/containerd/daemon/io.containerd.metadata.v1.bolt"
 rm -rf "$ROOT/containerd/daemon/tmpmounts"
 mkdir -p "$ROOT"
-"${CTL[@]}" start docker >/dev/null 2>&1 || true
+supervisorctl -c /etc/supervisor/supervisord.conf start docker >/dev/null 2>&1 || true
 for i in $(seq 1 60); do
   docker info >/dev/null 2>&1 && exit 0
   sleep 1

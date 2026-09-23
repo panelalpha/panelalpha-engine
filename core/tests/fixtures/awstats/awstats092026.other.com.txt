@@ -1,0 +1,5 @@
+# Fixture AWStats monthly database for a second domain on the same project.
+BEGIN_DAY 2
+20260901 1 2 500 1
+20260902 2 3 700 1
+END_DAY

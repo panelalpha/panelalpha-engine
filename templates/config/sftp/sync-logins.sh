@@ -77,10 +77,21 @@ Match User $user
 EOF
 done
 
-# Reload sshd to apply new users/keys, if running
-if pidof sshd >/dev/null 2>&1; then
+# Reload sshd to apply new users/keys, if running. Only the listener: every
+# open connection is an sshd too -- on a host with 2222 open to the internet
+# there always are some -- and `kill -HUP "$(pidof sshd)"` passed all of them as
+# one argument, failed, and left new keys unread until a restart (engine#243).
+listener=""
+for pid in $(pidof sshd 2>/dev/null); do
+    ppid=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null) || continue
+    if [ "$(cat "/proc/$ppid/comm" 2>/dev/null)" != "sshd" ]; then
+        listener=$pid
+        break
+    fi
+done
+if [ -n "$listener" ]; then
     echo "Reloading sshd..."
-    kill -HUP "$(pidof sshd)"
+    kill -HUP "$listener"
 else
     echo "sshd not running yet, skipping reload"
 fi

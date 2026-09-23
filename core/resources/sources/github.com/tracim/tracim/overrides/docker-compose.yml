@@ -1,0 +1,147 @@
+# The stack for the repository, which ships none Docker would load: its compose
+# files live in tools_docker/ and backend/ (docker-compose.yml,
+# docker-compose-minio.yml, docker-compose-optional.yml, ...) — one directory
+# down from the root, where neither Docker nor the engine's compose probe looks.
+#
+# Tracim runs from its published image rather than from this checkout because
+# the checkout is not the artifact and the repository's own Dockerfile says so:
+# tools_docker/Debian_Uwsgi/Dockerfile starts by `git clone`-ing tracim back out
+# of GitHub (ARG REPO/BRANCH/TAG) and then builds the 18-package yarn workspace
+# and the whole Python backend on top of Debian. Detection never got that far —
+# it read the root package.json, picked Railpack, built the Node half of an app
+# whose server is Python, and ended with "No start command detected" and the
+# PanelAlpha placeholder on :8080.
+services:
+  tracim:
+    # Tag pinned by hooks/prepare.sh. `latest` deliberately — see the README:
+    # upstream's own README says "Docker images for the latest Tracim versions
+    # are only available to our paying customers", and Docker Hub confirms it:
+    # the newest public release tag is 2025-04.00, which is what `latest`
+    # points at. Nothing in this checkout names a tag that exists publicly.
+    image: ${TRACIM_IMAGE:-algoo/tracim:latest}
+    restart: unless-stopped
+    # Apache inside the image listens on 80 and reverse-proxies uwsgi (:8081),
+    # pushpin (:7999) and the static frontend. 8080 on the account side because
+    # that is a port the engine's port scan ranks as a web port and nothing
+    # else in the account wants.
+    ports:
+      - "8080:80"
+    environment:
+      # No database sidecar. Tracim supports SQLite as a first-class option
+      # (tools_docker/Debian_Uwsgi/common.sh writes
+      # sqlite:////var/tracim/data/tracim.sqlite for this value), one team's
+      # document store is not what a database server is for, and the ~300 MB a
+      # Postgres sidecar wants is memory the four uwsgi workers want more.
+      DATABASE_TYPE: sqlite
+      # Not a real address, and not meant to survive: ComposePlaceholders
+      # rewrites a bare http://localhost under a *_URL-shaped key to the
+      # account's public https URL before the stack starts, and this key ends
+      # in _URL so the pattern matches. Tracim reads TRACIM_<SECTION>__<KEY>
+      # ahead of the ini file (config.py get_raw_config: "Priority: 1:
+      # Environment variable"), and the entrypoint copies every TRACIM_* var
+      # into /var/tracim/data/tracim_env_variables, which is how uwsgi — a
+      # service, started without this environment — ever sees it.
+      #
+      # What it affects, checked against a running deploy rather than assumed:
+      # every link Tracim puts in an email (notification, password reset,
+      # share, upload permission) is built from it, and it is interpolated into
+      # the Content-Security-Policy script-src the frontend controller emits.
+      # It is *not* what makes the page render — every <script> in index.mak
+      # carries that response's CSP nonce and the frontend calls the API on
+      # relative paths — so a wrong value does not blank the SPA; it breaks
+      # mail links and the assets the rich-text editor injects at runtime,
+      # which have no nonce.
+      TRACIM_WEBSITE__BASE_URL: http://localhost
+      # Both off. Each is a second and third uwsgi application — a full copy of
+      # the Python backend per worker — for a WebDAV mount and a CalDAV/agenda
+      # endpoint that a first deploy does not need. START_CALDAV=0 also keeps
+      # the app list consistent: the entrypoint only appends `agenda` to
+      # DEFAULT_APP_LIST when caldav is on, which is upstream's own rule.
+      START_WEBDAV: "0"
+      START_CALDAV: "0"
+    volumes:
+      # The two paths the image declares as VOLUME, named so a redeploy does
+      # not strand two anonymous ones. /etc/tracim holds development.ini with
+      # the session secret and api key the entrypoint generates once;
+      # /var/tracim holds the SQLite file, uploads, previews and sessions.
+      - tracim_etc:/etc/tracim
+      - tracim_var:/var/tracim
+      # uwsgi's own config, mounted over the one common.sh would write on first
+      # boot — it only writes the file when it is absent, so this wins. Two web
+      # workers rather than four: see the header of the file. Docker applies
+      # the deeper mount last, so this file survives the volume above it.
+      - ./panelalpha-uwsgi-web.ini:/etc/tracim/tracim_web.ini:ro
+    # /api/system/config rather than `/`: it is the one endpoint with no
+    # @check_right on it (system_controller.config), it is served by uwsgi
+    # through the same Apache proxy a visitor uses, and it only answers once
+    # the backend has read its config and opened the database. `/` would go
+    # green on the Apache that starts seconds before uwsgi does. grepping the
+    # body rather than trusting the status code, because an Apache error page
+    # is also a perfectly valid HTTP response.
+    #
+    # start_period is generous: a first boot creates development.ini, runs
+    # `tracimcli db init` against an empty SQLite file, builds the search
+    # index and starts redis, pushpin, cron and supervisord before uwsgi.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "curl -fsS --max-time 10 http://127.0.0.1:80/api/system/config | grep -q instance_name"
+      interval: 10s
+      timeout: 15s
+      retries: 60
+      start_period: 120s
+    # Stated rather than left to ServiceHardener's defaults, which are sized
+    # for one process. This container runs Apache, uwsgi (2 workers x 4 threads
+    # of the Python backend — see panelalpha-uwsgi-web.ini), redis, pushpin's
+    # five processes, an rq worker, the mail notifier, a connection-state
+    # monitor, Xvfb, cron and supervisord. Measured: 1.16 GiB idle with the
+    # image's four workers, 0.93 GiB with two. pids_limit above the stock 256
+    # because 132 processes and threads at idle is close enough to it that a
+    # preview forking unoconv or ffmpeg could cross it.
+    mem_limit: 1408m
+    pids_limit: 512
+
+  # Replaces the admin password every Tracim ships with. This is not a
+  # convenience: InitializeDBCommand._populate_database() creates user 1 as
+  # "Global manager" / TheAdmin / admin@admin.admin with the password
+  # admin@admin.admin, hard-coded, on every first boot. On a public HTTPS name
+  # that is an open door with the key printed in the repository. See
+  # files/panelalpha-setup.sh.
+  setup:
+    image: ${CURL_IMAGE:-curlimages/curl:8.11.1}
+    restart: "no"
+    depends_on:
+      tracim:
+        condition: service_healthy
+    environment:
+      TRACIM_ADMIN_LOGIN: ${TRACIM_ADMIN_LOGIN:-admin@admin.admin}
+      TRACIM_ADMIN_PASSWORD: ${TRACIM_ADMIN_PASSWORD}
+      TRACIM_SHIPPED_PASSWORD: ${TRACIM_SHIPPED_PASSWORD:-admin@admin.admin}
+    volumes:
+      - ./panelalpha-setup.sh:/panelalpha-setup.sh:ro
+    entrypoint: ["/bin/sh", "/panelalpha-setup.sh"]
+    mem_limit: 128m
+
+  # Does nothing and exits 0. It exists because the engine runs
+  # `docker compose up -d` without `--wait` and takes the deploy to be finished
+  # when that returns — at which point every service has been *started*, which
+  # for `setup` is not the same as *finished*. Compose does block on a
+  # depends_on condition, so waiting for setup to complete makes `up -d` return
+  # only once Tracim has answered its own API and the admin password has been
+  # changed and verified by a real login. A clean exit 0 is explicitly not a
+  # crash loop as far as AppHealth::isCrashing() is concerned.
+  #
+  # The curl image rather than Tracim's own, so a ~1 GB image is not started a
+  # second time just to exit.
+  ready:
+    image: ${CURL_IMAGE:-curlimages/curl:8.11.1}
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  tracim_etc: {}
+  tracim_var: {}

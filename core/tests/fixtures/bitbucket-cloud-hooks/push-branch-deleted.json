@@ -1,0 +1,21 @@
+{
+  "push": {
+    "changes": [
+      {
+        "forced": false,
+        "old": {
+          "name": "main",
+          "type": "branch",
+          "target": {"type": "commit", "hash": "197a3e0d2f9a2b3ed1c4fe5923d5dd701bee9fdd"}
+        },
+        "created": false,
+        "commits": [],
+        "truncated": false,
+        "closed": true,
+        "new": null
+      }
+    ]
+  },
+  "actor": {"type": "user", "display_name": "Alice Example"},
+  "repository": {"type": "repository", "full_name": "acme/site", "scm": "git"}
+}

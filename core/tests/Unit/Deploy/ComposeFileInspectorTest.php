@@ -65,16 +65,6 @@ class ComposeFileInspectorTest extends TestCase
         rmdir($dir);
     }
 
-    public function test_compose_files_that_shadow_lists_v2_candidates_other_than_the_one_kept(): void
-    {
-        $this->writeFile('compose.yaml');
-        $this->writeFile('docker-compose.yml');
-
-        $shadowing = ComposeFileInspector::composeFilesThatShadow($this->tmpDir, 'docker-compose.yml');
-
-        $this->assertSame(['compose.yaml'], $shadowing);
-    }
-
     public function test_missing_compose_dockerfile_refs_resolves_context_relative_dockerfile(): void
     {
         $this->writeFile('docker-compose.yml', <<<'YAML'
@@ -181,6 +171,77 @@ YAML
 
         $this->assertTrue(ComposeFileInspector::isLocalDevCompose($path));
         $this->assertFalse(ComposeFileInspector::isLocalDevCompose($this->tmpDir . '/missing.yml'));
+    }
+
+    public function test_a_read_only_single_file_mount_into_a_build_service_is_not_a_dev_compose(): void
+    {
+        // The #219 regression: a recipe's build service injects one generated
+        // file read-only. That is not live reload, so the compose must not be
+        // demoted and skipped.
+        $compose = <<<'YAML'
+services:
+  app:
+    build: .
+    volumes:
+      - ./docker/entrypoint.sh:/entrypoint.sh:ro
+YAML;
+        $this->assertFalse(ComposeFileInspector::isLocalDevComposeYaml($compose));
+        $this->assertNull(ComposeFileInspector::localDevComposeReasonYaml($compose));
+
+        // Long syntax, read_only: true, of a single config file: also not demoted.
+        $longForm = <<<'YAML'
+services:
+  app:
+    build: .
+    volumes:
+      - type: bind
+        source: ./config/answers.json
+        target: /app/answers.json
+        read_only: true
+YAML;
+        $this->assertFalse(ComposeFileInspector::isLocalDevComposeYaml($longForm));
+
+        // A read-write subdirectory that is still a single file is injection,
+        // not a mounted source tree.
+        $writableFile = <<<'YAML'
+services:
+  app:
+    build: .
+    volumes:
+      - ./generated/config.php:/var/www/html/config.php
+YAML;
+        $this->assertFalse(ComposeFileInspector::isLocalDevComposeYaml($writableFile));
+    }
+
+    public function test_a_build_service_mounting_the_project_root_or_a_source_dir_is_still_a_dev_compose(): void
+    {
+        $root = <<<'YAML'
+services:
+  app:
+    build: .
+    volumes:
+      - .:/var/www/html
+YAML;
+        $this->assertTrue(ComposeFileInspector::isLocalDevComposeYaml($root));
+        $this->assertSame(
+            'service `app` mounts the project root',
+            ComposeFileInspector::localDevComposeReasonYaml($root)
+        );
+
+        // A whole source directory mounted read-write (OpenCart's `./upload`,
+        // a `./src`) is the genuine live-reload signal and still demotes.
+        $srcDir = <<<'YAML'
+services:
+  web:
+    build: .
+    volumes:
+      - ./src:/var/www/html
+YAML;
+        $this->assertTrue(ComposeFileInspector::isLocalDevComposeYaml($srcDir));
+        $this->assertSame(
+            'service `web` mounts `./src`',
+            ComposeFileInspector::localDevComposeReasonYaml($srcDir)
+        );
     }
 
     public function test_is_sidecars_only_compose_yaml_requires_every_service_to_be_a_known_datastore(): void
@@ -327,12 +388,15 @@ DOCKER
         $labelled = $this->writeFile('compose.labelled.yml', "# panelalpha.generated\nservices: {}\n");
         $this->assertTrue(ComposeFileInspector::isGeneratedBootstrapCompose($labelled));
 
+        // The unlabelled shape the engine wrote before the label existed.
         $welcome = $this->writeFile('compose.welcome.yml', <<<'YAML'
 services:
-  web:
+  app:
     image: nginx:alpine
+    ports:
+      - '8080:80'
     volumes:
-      - ./public:/usr/share/nginx/html
+      - './:/usr/share/nginx/html/:ro'
 YAML
         );
         $this->assertTrue(ComposeFileInspector::isGeneratedBootstrapCompose($welcome));
@@ -346,6 +410,31 @@ YAML
         $this->assertFalse(ComposeFileInspector::isGeneratedBootstrapCompose($userOwned));
 
         $this->assertFalse(ComposeFileInspector::isGeneratedBootstrapCompose($this->tmpDir . '/missing.yml'));
+    }
+
+    /**
+     * Found live (ticket 08): a client's own static site on the same image,
+     * serving a directory of its own rather than the project root, was taken
+     * for the engine's bootstrap and replaced by the placeholder page.
+     *
+     * @return array<string, array{0: string}>
+     */
+    public static function clientNginxStacks(): array
+    {
+        return [
+            'serves a subdirectory' => ["services:\n  web:\n    image: nginx:alpine\n    ports: ['8080:80']\n    volumes:\n      - ./html:/usr/share/nginx/html:ro\n"],
+            'serves ./public' => ["services:\n  web:\n    image: nginx:alpine\n    volumes:\n      - ./public:/usr/share/nginx/html\n"],
+            'root plus a second service' => ["services:\n  app:\n    image: nginx:alpine\n    volumes:\n      - ./:/usr/share/nginx/html/:ro\n  cache:\n    image: redis:7\n"],
+            'mentions the path only in a comment' => ["# serves /usr/share/nginx/html\nservices:\n  web:\n    image: nginx:alpine\n    ports: ['8080:80']\n"],
+        ];
+    }
+
+    #[DataProvider('clientNginxStacks')]
+    public function test_a_clients_own_nginx_stack_is_not_taken_for_the_bootstrap(string $contents): void
+    {
+        $path = $this->writeFile('client-nginx.yml', $contents);
+
+        $this->assertFalse(ComposeFileInspector::isGeneratedBootstrapCompose($path));
     }
 
     public function test_is_generated_bootstrap_compose_treats_unreadable_file_as_engine_written(): void

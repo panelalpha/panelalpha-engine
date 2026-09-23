@@ -9,6 +9,8 @@
 
         <p class="lede">To deploy a private repository, Engine needs a read-only token to clone it.</p>
 
+        @include('vault.partials.purpose', ['purpose' => $entry->purpose])
+
         @include('vault.partials.git-token')
     </main>
 @endsection

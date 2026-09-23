@@ -6,9 +6,11 @@ use App\Http\Requests\DeployPlanInput;
 use App\Http\Requests\RecipeChoiceInput;
 use App\Http\Requests\ProjectSourceInspectRequest;
 use App\Http\Requests\SourceInspectRequest;
+use App\Exceptions\ProblemException;
 use App\Lib\Deploy\Inspect\AppInspector;
 use App\Lib\Deploy\Inspect\DeploymentSnapshot;
 use App\Lib\Deploy\Inspect\InspectException;
+use App\Lib\Deploy\Inspect\RecipeFileOverlay;
 use App\Lib\Deploy\Inspect\ResolvedSource;
 use App\Lib\Deploy\Inspect\SourceResolver;
 use App\Lib\Deploy\Platform\DeployPlan;
@@ -127,9 +129,11 @@ class SourceInspectionController extends Controller
         $recipe = RecipeChoiceInput::parse($params['recipe'] ?? null);
         $type = $params['type'] ?? SourceResolver::classify($source);
         if ($type === null) {
-            return new JsonResponse([
-                'message' => 'Could not tell what this source is. Pass "type" as git, path or project.',
-            ], 422);
+            throw ProblemException::one(
+                'source',
+                'source_unrecognised',
+                'Could not tell what this source is. Pass `type` as git, path or project.'
+            );
         }
 
         if ($type === SourceResolver::TYPE_PROJECT) {
@@ -139,18 +143,22 @@ class SourceInspectionController extends Controller
         try {
             // git_token may be a `vault:<ref>` -- resolved here, so the
             // transient clone uses the pasted secret and nothing downstream
-            // (or in the log) ever sees it.
+            // (or in the log) ever sees it. No token at all falls back to the
+            // engine's own: this clone is thrown away, so nothing is copied or
+            // frozen by inheriting it, and inspecting a private repository
+            // stops needing a token the caller has already given the engine
+            // once.
             $resolved = $type === SourceResolver::TYPE_GIT
-                ? $this->resolver()->fromGit($source, $params['branch'] ?? null, RequestVault::get('git_token'))
+                ? $this->resolver()->fromGit($source, $params['branch'] ?? null, RequestVault::getOrGlobal('git_token'))
                 : $this->resolver()->fromDirectory(SourceResolver::TYPE_PATH, $source, $source);
         } catch (InspectException $e) {
-            return new JsonResponse(['message' => $e->getMessage()], 422);
+            throw ProblemException::of([$e->toProblem()]);
         }
 
         try {
             return $this->report($resolved, $params['subdirectory'] ?? null, null, $plan, $recipe);
         } catch (InspectException $e) {
-            return new JsonResponse(['message' => $e->getMessage()], 422);
+            throw ProblemException::of([$e->toProblem()]);
         } finally {
             // A git source is a real clone on disk. Nothing below this line
             // gets to decide whether to keep it.
@@ -230,7 +238,8 @@ class SourceInspectionController extends Controller
                 $recipe
             );
         } catch (InspectException $e) {
-            return new JsonResponse(['message' => $e->getMessage()], 422);
+            // `project`, not `source`: this endpoint is addressed by username.
+            throw ProblemException::of([$e->toProblem('project')]);
         }
     }
 
@@ -256,6 +265,13 @@ class SourceInspectionController extends Controller
         // the checkout on disk has lost its remote, and that URL is what
         // decides whether the engine's own app config for that repository applies.
         $repositoryUrl = $this->repositoryUrl($resolved) ?? $user?->getGitRepo();
+
+        // The deploy lays a recipe's files over the checkout before detection;
+        // a clone is ours to write to, and without them inspect judged a tree
+        // the deploy never sees.
+        if ($resolved->type === SourceResolver::TYPE_GIT) {
+            RecipeFileOverlay::apply($dir, $repositoryUrl);
+        }
 
         $report = AppInspector::inspect($dir, $repositoryUrl, $plan, $recipe);
 

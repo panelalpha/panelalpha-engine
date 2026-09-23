@@ -1,0 +1,54 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Paperless-ngx is a document management system: a Django application that
+  scans, OCRs, indexes and serves documents on :8000, with a Celery worker for
+  the OCR pipeline, Redis as the broker and either SQLite or PostgreSQL behind
+  it. The repository is the source tree, and detection read it as exactly what
+  it is -- `django`, on Python 3.11 -- which is the failure. The django
+  strategy resolved the project's uv lock into a plain python:3.11-slim: ~250
+  wheels including torch, the dev extras, pytest and ruff, and none of what
+  actually makes paperless run. The Angular frontend is never built, the OCR
+  toolchain (tesseract, ghostscript, unpaper, qpdf, jbig2enc, ImageMagick) is
+  not installed, and the s6 supervision tree that starts gunicorn beside the
+  celery worker, the scheduler and the consumer is part of the image rather
+  than the source. The container restart-looped on a Django management command
+  that a bare checkout does not have, nothing ever listened on 8000, and the
+  probe returned serving-unknown.
+
+  Its own Dockerfile is not a substitute either -- a multi-stage pnpm frontend
+  build plus the whole OCR toolchain, minutes of build and gigabytes of layers
+  per account, to arrive at an image the project already publishes. So the
+  recipe runs the published one: overrides/docker-compose.yml is
+  docker/compose/docker-compose.sqlite.yml rewritten for a single account.
+  Upstream's compose files live under docker/compose/ with names Docker never
+  auto-loads and their own headers tell the operator to copy one out, so the
+  compose probe never sees them.
+
+  SQLite rather than PostgreSQL: unset PAPERLESS_DBHOST already means SQLite,
+  the archive of one account does not need a database server, and the memory a
+  sidecar would take is memory the OCR worker wants. The broker is not
+  optional in the same way -- src/paperless/checks.py fails the Django startup
+  system check when Redis is unreachable -- so valkey:9-alpine runs beside it,
+  which is the image upstream's own file names. Tika and Gotenberg are left
+  out: they only add Office-document parsing, they are two more containers and
+  about a gigabyte, and a stack that serves the web UI is worth more than one
+  that tries to bring up everything and fails inside a 2.5 GB account.
+
+  hooks/prepare.sh writes the two secrets nothing else can supply --
+  PAPERLESS_SECRET_KEY, and an admin password, because paperless has no
+  sign-up page and would otherwise come up on a login form nobody holds an
+  account for -- and resolves the image tag from the checkout's own
+  src/paperless/version.py, using it only when ghcr.io actually has that tag.
+  The third value the recipe cannot generate is PAPERLESS_URL, which has to be
+  the account's public address: the compose file ships http://localhost, the
+  shape ComposePlaceholders rewrites to the account's https URL before the
+  stack starts. Without it ALLOWED_HOSTS still defaults to ["*"] so the site
+  answers, but CSRF_TRUSTED_ORIGINS is empty and every form POST -- including
+  the login -- is rejected.
+
+  One service in the compose file is a no-op that exits 0. `docker compose up
+  -d` runs without --wait, so the deploy is finished when the containers have
+  been started rather than when paperless answers, and its first boot runs
+  migrations against an empty SQLite file and builds the whoosh index. `ready`
+  waits on the webserver's healthcheck and nothing else, which makes `up -d`
+  block until the site is really up.

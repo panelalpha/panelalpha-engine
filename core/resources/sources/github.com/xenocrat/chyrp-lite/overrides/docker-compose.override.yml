@@ -1,0 +1,93 @@
+# Layers over the compose file the php strategy generates. That file is right
+# about the application -- the shared php:8.4-apache image, ~/project bind-
+# mounted at /app, the account's own uid, Apache on 8000, APP_URL from the
+# account's main domain and DB_* from the database the engine provisioned --
+# and says nothing about where a blog keeps its posts and pictures, because a
+# checkout cannot say that.
+#
+# An override rather than a replacement compose file, and here that is not a
+# preference: an `overrides/docker-compose.yml` is written into the checkout
+# *before* detection, and a compose file in the project root is exactly what
+# made the engine read this repository as a compose project in the first place.
+#
+# There is no database service here on purpose. `database: mysql` in
+# panelalpha.yaml gets one on the account's own MySQL server: visible in the
+# panel, openable in phpMyAdmin, inside the account's backup, and costing the
+# host neither a container nor a volume. It is also what keeps the checkout
+# from being mined for sidecars -- RuntimeSidecars globs every
+# `docker-compose.*` in the project and PhpStrategy skips that step entirely
+# when the manifest declares a database (PhpStrategy.php:67).
+services:
+  app:
+    volumes:
+      # ~/.panelalpha/chyrp-lite. A redeploy clears and re-clones ~/project
+      # (engine#173), so everything that has to outlive one is here:
+      #
+      #   /data/config.json.php     the site configuration, which holds the
+      #                             database password and every setting, and
+      #                             is what tells Chyrp it is installed.
+      #                             includes/common.php:101 reads the directory
+      #                             from $_SERVER['CHYRP_STORAGE_DIR'], which
+      #                             the .htaccess sets.
+      #   /data/admin-credentials   the generated administrator, 0600.
+      #
+      # ~ itself is root-owned 0755 and nothing can be created in it;
+      # ~/.panelalpha is created with the account. hooks/prepare.sh creates the
+      # subdirectory before this mount is made, so Docker never gets to create
+      # it as root.
+      - ../.panelalpha/chyrp-lite:/data
+
+      # The uploads directory, mounted *over* the one in the checkout rather
+      # than symlinked out of it. Chyrp hard-codes uploads_path relative to
+      # MAIN_DIR and Apache serves the files directly, and the generated
+      # vhost's `<Directory /> Require all denied` matches the resolved path --
+      # so a symlink pointing outside the document root answers 403 for every
+      # image on the blog. Mounting the account's directory onto the path
+      # Chyrp already expects keeps the files inside the document root and
+      # still out of the re-clone's way.
+      - ../.panelalpha/chyrp-lite/uploads:/app/uploads
+
+    environment:
+      # Said out loud, because a manifest cannot say it: `docroot: .` is folded
+      # to '' by PlatformManifest::readDocroot() (app/Lib/Deploy/Platform/
+      # PlatformManifest.php:305), which means "undeclared" and sends the
+      # engine back to the probe (engine#172). The probe reaches /app anyway --
+      # index.php is at the repository root and there is no public/ -- but the
+      # document root decides which files are web-reachable, and that is not
+      # something to leave to a probe order.
+      PA_DOCROOT: /app
+
+    # panelalpha-install.php runs Chyrp's own installer on the install stage,
+    # before Apache binds: ~20 CREATE TABLEs, the administrator, the config
+    # file. The engine runs `docker compose up -d` without --wait and probes as
+    # soon as it returns, which is while that is still going.
+    #
+    # GET / is the whole check and it is a real one. It answers 200 only once
+    # includes/upgrading.lock is gone, config.json.php exists and the database
+    # is reachable -- each of those is a 503 from includes/common.php on its
+    # own.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS -o /dev/null --max-time 20 http://127.0.0.1:8000/
+      interval: 5s
+      timeout: 25s
+      retries: 30
+      # Generous for two slow cores building a schema; a check that fails
+      # inside this window neither counts against retries nor marks the
+      # container unhealthy.
+      start_period: 120s
+
+  # Does nothing and exits 0. Compose does not wait for a healthcheck on its
+  # own, but it does block on a `depends_on` health condition -- so a service
+  # that waits for the app is what makes `up -d` return only once Chyrp has
+  # installed itself and answered, and what the health probe then meets. A
+  # clean exit 0 is not a crash loop as far as AppHealth is concerned.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m

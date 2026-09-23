@@ -14,7 +14,7 @@
     "test:unit": "playwright test --project=unit",
     "test:setup": "playwright test --project=setup",
     "test:cli": "tsx scripts/run-tests.ts --project=cli",
-    "test:deploy": "tsx scripts/run-tests.ts --project=setup-dind --project=deploy",
+    "test:supported-apps": "tsx scripts/run-tests.ts --project=supported-apps",
     "test:webserver-change": "playwright test --project=webserver-change",
     "test:update": "playwright test --project=update",
     "test:ui": "playwright test --ui",

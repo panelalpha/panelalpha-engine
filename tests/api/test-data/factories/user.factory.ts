@@ -24,19 +24,41 @@ export interface CreateUserOptions {
   tunnel?: 'none' | 'panelalpha';
   /** Caller-owned name. Omit so the engine allocates. */
   domain?: string;
+  /**
+   * When `autoCleanup` is on, a failed test keeps the user for inspection.
+   * Pass `false` for Online/hub names that must not linger after the run.
+   */
+  preserveOnFailure?: boolean;
+  /**
+   * How long to wait for the create task and, for a git deploy, the deploy log.
+   * Defaults to `DEPLOY_TIMEOUT` (10 minutes). Supported-app deploys pass a
+   * longer budget; a Java or Go build legitimately outlasts the default.
+   */
+  deployTimeout?: number;
 }
+
+/** Insist on `*.panelalpha.online` and always delete the project afterwards. */
+export const ONLINE_DEPLOY_USER = {
+  tunnel: 'panelalpha',
+  preserveOnFailure: false,
+} as const satisfies CreateUserOptions;
 
 export class UserFactory {
   private settings = getSettings();
 
   /** Users created here that nothing has deleted yet — drained by the fixture. */
-  private readonly pending = new Set<string>();
+  private readonly pending = new Map<string, { preserveOnFailure: boolean }>();
 
   constructor(private api: EngineApi) {}
 
   /** Usernames still awaiting cleanup, oldest first. */
   get pendingCleanup(): string[] {
-    return [...this.pending];
+    return [...this.pending.keys()];
+  }
+
+  /** True when a failed test should keep this user on the engine. */
+  shouldPreserveOnFailure(username: string): boolean {
+    return this.pending.get(username)?.preserveOnFailure !== false;
   }
 
   async createUser(options: CreateUserOptions = {}): Promise<UserCredentials> {
@@ -103,7 +125,9 @@ export class UserFactory {
     if (!(await this.finishCreatedProject(created, username, options))) {
       return null;
     }
-    await waitForDeploy(this.api, username, { timeout: this.settings.timing.deployTimeout });
+    await waitForDeploy(this.api, username, {
+      timeout: options.deployTimeout ?? this.settings.timing.deployTimeout,
+    });
     return { username, domain: await this.assignedDomain(username) };
   }
 
@@ -123,9 +147,12 @@ export class UserFactory {
   }
 
   private track(username: string, options: CreateUserOptions): void {
-    if (options.autoCleanup !== false) {
-      this.pending.add(username);
+    if (options.autoCleanup === false) {
+      return;
     }
+    this.pending.set(username, {
+      preserveOnFailure: options.preserveOnFailure !== false,
+    });
   }
 
   /**
@@ -149,7 +176,7 @@ export class UserFactory {
       throw new Error('POST /projects returned 202 without a task id');
     }
     const task = await waitForTask(this.api, taskId, {
-      timeout: this.settings.timing.deployTimeout,
+      timeout: options.deployTimeout ?? this.settings.timing.deployTimeout,
     });
     if (task.status !== 'completed') {
       throw new Error(`POST /projects task ${taskId} ended ${task.status}`);

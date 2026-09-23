@@ -15,7 +15,11 @@ class CreateSettingsTable extends Migration
     {
         Schema::create('settings', function (Blueprint $table) {
             $table->id();
-            $table->string('name');
+            $name = $table->string('name');
+            // MySQL's utf8mb4_unicode_ci makes name lookups case-insensitive; match that on sqlite.
+            if (Schema::getConnection()->getDriverName() === 'sqlite') {
+                $name->collation('NOCASE');
+            }
             $table->text('value');
             $table->timestamps();
         });

@@ -38,7 +38,7 @@ Open source. Self-hosted. Makkelijk voor iedereen, niet alleen voor sysadmins.
 <p>
 <a href="#stap-1-installeer-engine-op-je-vps"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Installatie met één commando"></a>
 <a href="#stap-1-installeer-engine-op-je-vps"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Ondersteunde systemen"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-182_tools-6f42c1" alt="182 MCP-tools"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-199_tools-6f42c1" alt="199 MCP-tools"></a>
 <a href="#licentie"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Kom op Discord"></a>
 </p>
@@ -158,7 +158,7 @@ Geen commando's om te leren, en ook geen toverformules. Dit zijn voorbeelden van
 | `Zet een Cloudflare-tunnel op voor n8n.mydomain.com.` | DNS en tunnel geregeld, en zo serveer je ook vanaf een server achter NAT. |
 | `Hoeveel verkeer kregen we vorige week?` | Verbruik, logs en limieten voor dat project, en voor de hele server. |
 
-Meer uitgewerkte voorbeelden: [waar je om kunt vragen](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). De volledige lijst van wat je assistent kan bereiken: [182 tools](docs/04-connecting-your-ai/your-assistant.md).
+Meer uitgewerkte voorbeelden: [waar je om kunt vragen](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). De volledige lijst van wat je assistent kan bereiken: [199 tools](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 
@@ -318,4 +318,4 @@ PanelAlpha Engine is open source onder de Apache 2.0-licentie.
 
 ## Bouw mee
 
-Wil je meedoen? [`CONTRIBUTING.md`](CONTRIBUTING.md) zet je op weg. Voor de diepere conventies voor bijdragers en de testworkflow ga je naar [`AGENTS.md`](AGENTS.md).
+Wil je meedoen? [`CONTRIBUTING.md`](CONTRIBUTING.md) zet je op weg. De documentatie voor wie de server beheert staat in [`docs/`](docs/README.md).

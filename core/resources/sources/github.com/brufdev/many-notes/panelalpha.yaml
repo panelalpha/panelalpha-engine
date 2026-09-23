@@ -1,0 +1,59 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Many Notes is a self-hosted markdown note-taking app: a Laravel 12 / Inertia
+  application that keeps notes as nodes inside "vaults", with per-user accounts,
+  vault collaboration, an embedded Typesense full-text search, a Reverb
+  websocket server and a queue worker. Detection had nothing to run: the
+  repository ships no Dockerfile and no production compose file (only
+  documentation snippets and an s6-overlay/entrypoint tree that is baked into an
+  image built elsewhere), so nothing in the checkout is a runnable app. What the
+  project *does* have is an official image the maintainer publishes to Docker
+  Hub, brufdev/many-notes, which the README and every install doc use directly.
+
+  So this recipe is a compose replacement that runs that published image rather
+  than anything built from source. The image is serversideup/php based (nginx +
+  php-fpm on internal port 8080) and carries the whole runtime under s6-overlay:
+  the web server, the Typesense search server, the Reverb websocket server and
+  the queue worker in one container. It auto-migrates on boot -- proven by the
+  image's own /75-upgrades entrypoint, which runs `artisan upgrade:run` and
+  queries the `upgrades` table, so migrations must already have run by then --
+  which is why a fresh `docker compose up -d` works in the upstream docs and why
+  this recipe does not add its own migrate step. Pinned to `0.18`, the current
+  maintained release line (composer.json is 0.18.0); a Hub-published tag, so the
+  engine pulls it normally and the from-source seed path (engine#229) never
+  applies.
+
+  Storage is SQLite on a named volume by design: it is the app's default, it
+  needs no datastore sidecar, and Many Notes keeps note bodies in the database
+  while attachments live under storage/app/private. Three named volumes hold
+  everything that must outlive a redeploy (~/project is wiped every deploy,
+  engine#173): the SQLite database directory, the private attachment store, and
+  the Typesense index. The database volume is where the notes actually live;
+  losing it would lose the notes.
+
+  Two values the compose cannot hardcode. APP_KEY is generated once by the
+  prepare hook into ~/.panelalpha/many-notes/ (0600 in 0700) -- the only
+  rebuild-surviving writable directory -- and fed back in as a container
+  environment variable on every deploy, so it is stable across redeploys;
+  rotating it would break every session and encrypted value. It is a real
+  base64:<32 bytes>, the only shape Laravel's AES cipher accepts. APP_URL is the
+  account's public origin, unknown at deploy time: the compose ships the bare
+  `http://localhost` under a *_URL-shaped key that ComposePlaceholders rewrites
+  to the account's https URL before the stack starts. The app already trusts the
+  proxy (bootstrap/app.php calls trustProxies(at: '*')), so HTTPS links, secure
+  cookies and CSRF work over the engine's tunnel without any extra setting, and
+  APP_ENV=production / APP_DEBUG=false are forced so a leaked stack trace can
+  never carry a secret.
+
+  Accounts: Many Notes has no seeded admin and no shipped credentials. The first
+  user to register becomes the SUPER_ADMIN (App\Actions\CreateUser promotes the
+  account created while User::count() is 0); everyone after is an ordinary user
+  with their own isolated vaults. So the owner simply registers first, then can
+  disable open registration from the in-app settings (the `registration` setting
+  defaults on, admin-toggleable). Nothing publicly known exists to rotate; there
+  is no credential to generate or print.
+
+  A no-op `ready` service gated on the app's healthcheck makes `docker compose
+  up -d` return only once Many Notes actually answers (engine#204): the app
+  healthcheck hits /up (framework liveness) and /login (which renders only once
+  migrations have created the sessions table and APP_KEY is valid).

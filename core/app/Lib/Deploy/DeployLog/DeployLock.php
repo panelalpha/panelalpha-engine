@@ -35,6 +35,32 @@ final class DeployLock
         $this->handle = $handle;
     }
 
+    /**
+     * Whether some process holds the lock right now, without taking it. A
+     * deploy that died without reaching finish() left its status `running`,
+     * but the kernel dropped its lock with it -- this is what tells the two
+     * apart.
+     */
+    public function isHeld(): bool
+    {
+        if (is_resource($this->handle)) {
+            return true;
+        }
+
+        $handle = @fopen($this->paths->lock(), 'c');
+        if ($handle === false) {
+            return false;
+        }
+
+        $free = flock($handle, LOCK_EX | LOCK_NB);
+        if ($free) {
+            flock($handle, LOCK_UN);
+        }
+        fclose($handle);
+
+        return !$free;
+    }
+
     public function release(): void
     {
         if (is_resource($this->handle)) {

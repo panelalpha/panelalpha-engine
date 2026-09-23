@@ -498,29 +498,28 @@ public function test_connect_when_origin_mismatches_throws_422(): void
         $this->assertNull($site['token']);
     }
 
-public function test_pull_ff_on_dirty_tree_throws_without_backup_or_restore(): void
+public function test_pull_ff_refused_by_git_never_runs_the_destructive_restore(): void
     {
         $model = $this->connectedUser();
         $runner = new FakeGitRunner();
         $runner->stdout = $this->connectedRepoStdout([
             'status --porcelain' => " M foo.txt\n",
         ]);
+        $runner->failIfContains = ['merge --ff-only'];
         $git = $this->testable($model, 'public_html', $runner);
 
         try {
             $git->pull();
             $this->fail('Expected GitException');
         } catch (GitException $e) {
-            $this->assertSame(422, $e->httpStatus);
-            $this->assertSame('Working tree is dirty.', $e->getMessage());
+            $this->assertStringContainsString('merge --ff-only', $e->getMessage());
         }
 
+        // A refused merge --ff-only changes nothing, so restoring the backup
+        // (reset --hard + clean -fd) could only destroy what git had spared.
         $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
-        $this->assertFalse($this->commandsContain($joined, 'fetch'));
-        $this->assertFalse($this->commandsContain($joined, 'update-ref refs/panelalpha/backup'));
         $this->assertFalse($this->commandsContain($joined, 'reset --hard'));
         $this->assertFalse($this->commandsContain($joined, 'clean -fd'));
-        $this->assertFalse($this->commandsContain($joined, 'merge --ff-only'));
     }
 
     public function test_pull_skips_backup_when_head_is_unborn(): void
