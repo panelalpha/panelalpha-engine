@@ -291,6 +291,9 @@ services:
       REGISTRY_PROXY_PASSWORD: ${REGISTRY_PROXY_PASSWORD:-}
       REGISTRY_PROXY_TTL: ${REGISTRY_PROXY_TTL:-30m}
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      # The stock 3.x config logs at debug: a trace span every 10s from the
+      # storage health check, forever, on an idle host.
+      REGISTRY_LOG_LEVEL: ${REGISTRY_PROXY_LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:5001:5000"
     tmpfs:
