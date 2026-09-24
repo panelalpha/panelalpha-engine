@@ -56,6 +56,17 @@ description: >-
   not a crash loop to AppHealth. Ghost reaches healthy about 25 seconds after
   its container starts.
 
-  Mail is left unconfigured: Ghost boots and the owner-setup flow at /ghost/
-  works without it, but staff invites and member emails need an SMTP service
+  Ghost's owner setup at /ghost/ is unauthenticated until it has been
+  submitted: whoever submits it first owns the site. A one-shot `init`
+  service closes it before `ghost` starts (ghost depends on it completing):
+  it boots the same Ghost image on loopback, in a container with no ports,
+  and completes the setup through Ghost's own setup endpoint with an owner
+  generated once into ~/.panelalpha/ghost/ (credentials.txt for the account
+  owner). A site that already has an owner costs one SELECT and is left
+  alone. The MySQL credentials live there too, because ~/project is emptied
+  on every deploy and the data volume is not.
+
+  Mail is left unconfigured, so Ghost's staff device verification (a code
+  mailed on every sign-in from a new browser) is off: with it on, the owner
+  could never sign in. Staff invites and member emails need an SMTP service
   the engine does not provide.

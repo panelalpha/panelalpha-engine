@@ -1,6 +1,15 @@
 # yaml-language-server: $schema=../../../_schema.json
 description: >-
-  listmonk on the compose stack its own repository ships — nothing here
-  overrides it. The only addition is the app-management script, which talks
-  to PostgreSQL directly because listmonk is a compiled binary with no
+  listmonk on the compose stack its own repository ships, with one change:
+  the Super Admin exists before listmonk listens. Upstream's compose leaves
+  LISTMONK_ADMIN_USER and LISTMONK_ADMIN_PASSWORD empty, so a fresh install
+  answers /admin/login with "Pick a username and password for the Super Admin
+  account" to whoever opens it first. The prepare hook generates the
+  credentials once into ~/.panelalpha/listmonk/ (credentials.txt for the
+  owner), and overrides/docker-compose.override.yml runs files/panelalpha/
+  listmonk/start.sh in place of upstream's command: listmonk's own install
+  with those credentials, its upgrade, a claim on a loopback address for a
+  database installed earlier without any user, and only then the server. A
+  database that already has a user is left alone. The app-management script
+  talks to PostgreSQL directly because listmonk is a compiled binary with no
   plugin system.

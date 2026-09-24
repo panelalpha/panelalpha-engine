@@ -139,41 +139,32 @@ case "${1:-}" in
       printf '{"error":"url, admin_user, admin_email and admin_password are required"}\n' >&2
       exit 1
     fi
-    # URL-encode a value for application/x-www-form-urlencoded submission.
-    # Runs in bash (the shebang of this script), so ${var:i:1} works.
-    urlencode() {
-      local i c
-      for i in $(seq 0 $((${#1} - 1))); do
-        c="${1:$i:1}"
-        case "$c" in
-          [a-zA-Z0-9.~_-]) printf '%s' "$c" ;;
-          *) printf '%%%02X' "'$c" ;;
-        esac
-      done
-    }
-    # Wait for listmonk's HTTP server to be ready.
-    for i in $(seq 1 30); do
-      docker compose exec -T app wget -q -O /dev/null http://localhost:9000/api/health 2>/dev/null && break
-      sleep 2
-    done
-    user_enc=$(urlencode "${admin_user}")
-    email_enc=$(urlencode "${admin_email}")
-    pass_enc=$(urlencode "${admin_pass}")
-    # Submit the setup wizard form.  On a fresh install with no users,
-    # POST /admin/login creates the first superadmin account.
-    docker compose exec -T app wget -q -O /dev/null \
-      --post-data="nonce=&next=%2Fadmin&email=${email_enc}&username=${user_enc}&password=${pass_enc}&password2=${pass_enc}" \
-      http://localhost:9000/admin/login 2>/dev/null || true
-    # Validate success by checking the DB — the wizard populates roles + creates the user.
+    # The recipe creates a Super Admin before listmonk is reachable (start.sh),
+    # so the first-time setup form is gone by the time this runs. Give the
+    # panel's account the Super Admin role instead: created if it does not
+    # exist, its email and password set if it does.
+    login=$(printf '%s' "${admin_user}" | sed "s/'/''/g")
+    email=$(printf '%s' "${admin_email}" | sed "s/'/''/g")
+    pass=$(printf '%s' "${admin_pass}" | sed "s/'/''/g")
     result=$(db_query "
-      SELECT json_build_object('id', u.id::text)
-      FROM   users u
-      JOIN   roles r ON r.id = u.user_role_id
-      WHERE  r.name = 'Super Admin'
-      LIMIT  1
+      WITH up AS (
+        INSERT INTO users
+              (username, password_login, password, email, name, type, user_role_id, status)
+        SELECT '${login}', true, crypt('${pass}', gen_salt('bf')), '${email}', '${login}',
+               'user', r.id, 'enabled'
+        FROM   roles r
+        WHERE  r.type = 'user' AND r.name = 'Super Admin'
+        LIMIT  1
+        ON CONFLICT (username) DO UPDATE
+           SET password = EXCLUDED.password, password_login = true,
+               email = EXCLUDED.email, user_role_id = EXCLUDED.user_role_id,
+               status = 'enabled', updated_at = NOW()
+        RETURNING id
+      )
+      SELECT json_build_object('id', id::text) FROM up
     ")
     if [ -z "${result}" ]; then
-      printf '{"error":"Install failed: admin user was not created"}\n' >&2
+      printf '{"error":"Install failed: the Super Admin role does not exist yet"}\n' >&2
       exit 1
     fi
     # Persist the public root URL and site name.
@@ -182,7 +173,7 @@ case "${1:-}" in
     db_query "
       UPDATE settings SET value = to_json('${url_sql}'::text)   WHERE key = 'app.root_url';
       UPDATE settings SET value = to_json('${title_sql}'::text) WHERE key = 'app.site_name';
-    "
+    " >/dev/null
     printf '%s\n' "${result}"
     ;;
 

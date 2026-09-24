@@ -6,6 +6,33 @@
 # the repository's Dockerfile.production cannot build a self-hosting image on
 # its own: the `full` target copies ghost/core/core/built/admin, which CI
 # injects from a separate admin build job and a fresh clone does not have.
+
+# Ghost's configuration, shared by `ghost` and the one-shot `init` that boots
+# the same Ghost once to complete its owner setup.
+x-ghost-environment: &ghost-environment
+  # Not a real address, and not meant to survive: ComposePlaceholders
+  # rewrites a bare http://localhost under a *_URL-shaped key to the
+  # account's public https URL before the stack starts. Ghost reads this
+  # key lowercase (nconf takes env keys verbatim), so the engine's own
+  # URL/APP_URL/SITE_URL aliases would not have reached it.
+  url: http://localhost
+  NODE_ENV: production
+  database__client: mysql
+  database__connection__host: mysql
+  database__connection__port: "3306"
+  database__connection__user: ghost
+  database__connection__password: ${MYSQL_PASSWORD}
+  database__connection__database: ghost
+  # Production defaults to file-only logging, which leaves `docker logs`
+  # empty and a failed boot invisible.
+  logging__transports: '["stdout"]'
+  NODE_OPTIONS: --max-old-space-size=768
+  # Staff device verification emails a code to every sign-in from a new
+  # browser, and mail is not configured here, so the owner could never
+  # sign in. Set GHOST_STAFF_DEVICE_VERIFICATION=true in the account's
+  # env vars once mail__* is configured.
+  security__staffDeviceVerification: ${GHOST_STAFF_DEVICE_VERIFICATION:-false}
+
 services:
   mysql:
     # Ghost has no sqlite fallback in production: env/config.production.json
@@ -34,35 +61,43 @@ services:
       start_period: 60s
     mem_limit: 768m
 
+  # One-shot, and `ghost` does not start until it has exited 0. Ghost's owner
+  # setup is an unauthenticated page at /ghost/: whoever submits it first owns
+  # the site. So the setup is completed here, with the credentials prepare.sh
+  # generated into ~/.panelalpha/ghost/, before anything publishes a port. It
+  # boots Ghost on loopback in this container (no ports), goes through Ghost's
+  # own setup endpoint and stops it. A site that already has an owner is left
+  # alone, and costs one SELECT.
+  init:
+    image: ${GHOST_IMAGE:-ghost:6-alpine}
+    restart: "no"
+    environment: *ghost-environment
+    env_file:
+      # PA_OWNER_NAME / _EMAIL / _PASSWORD. Only this service reads them.
+      - ../.panelalpha/ghost/owner.env
+    volumes:
+      - ghost_content:/var/lib/ghost/content
+      - ./panelalpha/ghost:/pa:ro
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    mem_limit: 1024m
+
   ghost:
     # Tag written by hooks/prepare.sh from the checkout's own major version.
     image: ${GHOST_IMAGE:-ghost:6-alpine}
     restart: unless-stopped
     ports:
       - "2368:2368"
-    environment:
-      # Not a real address, and not meant to survive: ComposePlaceholders
-      # rewrites a bare http://localhost under a *_URL-shaped key to the
-      # account's public https URL before the stack starts. Ghost reads this
-      # key lowercase (nconf takes env keys verbatim), so the engine's own
-      # URL/APP_URL/SITE_URL aliases would not have reached it.
-      url: http://localhost
-      NODE_ENV: production
-      database__client: mysql
-      database__connection__host: mysql
-      database__connection__port: "3306"
-      database__connection__user: ghost
-      database__connection__password: ${MYSQL_PASSWORD}
-      database__connection__database: ghost
-      # Production defaults to file-only logging, which leaves `docker logs`
-      # empty and a failed boot invisible.
-      logging__transports: '["stdout"]'
-      NODE_OPTIONS: --max-old-space-size=768
+    environment: *ghost-environment
     volumes:
       - ghost_content:/var/lib/ghost/content
     depends_on:
       mysql:
         condition: service_healthy
+      init:
+        condition: service_completed_successfully
     # Ghost's own dev healthcheck, verbatim: a manual-redirect fetch that
     # passes on anything under 500, so the 301 to the canonical https origin
     # counts as answering. Node 22 in the image has a global fetch; the image

@@ -2,6 +2,19 @@
 set -e
 cd ~/project
 
+# ~/project is emptied and re-cloned on every deploy; ~/.panelalpha is the one
+# directory that survives it and belongs to the account. Everything generated
+# here that must outlive a deploy lives there.
+DATA_HOME="${HOME}/.panelalpha/ghost"
+DB_ENV="${DATA_HOME}/database.env"
+OWNER_ENV="${DATA_HOME}/owner.env"
+NOTE="${DATA_HOME}/credentials.txt"
+
+say() { echo "[panelalpha] ghost: $*" >&2; }
+
+mkdir -p "${DATA_HOME}"
+chmod 700 "${DATA_HOME}"
+
 # The image tag comes from the checkout, not from a constant here: a clone of a
 # 6.x branch should get a 6.x Ghost. ghost/core/package.json is the server's own
 # manifest and its "version" is the second key in the file, so the first match
@@ -13,12 +26,71 @@ case "${GHOST_MAJOR}" in
     ''|*[!0-9]*) GHOST_MAJOR=6 ;;
 esac
 
-# Guarded: the MySQL data volume outlives the checkout, so regenerating the
-# password on a redeploy would lock Ghost out of its own database.
-if [ ! -f .env ]; then
-    cat > .env <<EOF
-GHOST_IMAGE=ghost:${GHOST_MAJOR}-alpine
+# The MySQL credentials, generated once. The data volume outlives the checkout,
+# so a password regenerated on a redeploy locks Ghost out of its own database.
+# Earlier versions of this recipe kept them only in ~/project/.env, which a
+# redeploy deletes; an account deployed that way still has them in its MySQL
+# container's environment, and they are adopted from there rather than replaced.
+if [ ! -f "${DB_ENV}" ]; then
+    OLD_DB=$(docker ps -aq --filter label=com.docker.compose.service=mysql 2>/dev/null | head -1)
+    OLD_ENV=""
+    if [ -n "${OLD_DB}" ]; then
+        OLD_ENV=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "${OLD_DB}" 2>/dev/null \
+            | grep -E '^MYSQL_(ROOT_)?PASSWORD=.' || true)
+    fi
+    (
+        umask 077
+        if [ "$(printf '%s\n' "${OLD_ENV}" | grep -c .)" = 2 ]; then
+            printf '%s\n' "${OLD_ENV}" > "${DB_ENV}"
+            say "kept the MySQL credentials of the existing database"
+        else
+            cat > "${DB_ENV}" <<EOF
 MYSQL_PASSWORD=$(openssl rand -hex 16)
 MYSQL_ROOT_PASSWORD=$(openssl rand -hex 16)
 EOF
+        fi
+    )
 fi
+
+# The owner account. Read only by the one-shot `init` service, and used only
+# when the site has no owner yet; a site already set up keeps its own.
+if [ ! -f "${OWNER_ENV}" ]; then
+    OWNER_EMAIL=owner@example.com
+    OWNER_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
+    (
+        umask 077
+        cat > "${OWNER_ENV}" <<EOF
+PA_OWNER_NAME=Owner
+PA_OWNER_EMAIL=${OWNER_EMAIL}
+PA_OWNER_PASSWORD=${OWNER_PASSWORD}
+EOF
+        cat > "${NOTE}" <<EOF
+Ghost owner for this account
+============================
+
+  sign in at  https://<your domain>/ghost/
+  email       ${OWNER_EMAIL}
+  password    ${OWNER_PASSWORD}
+
+PanelAlpha completed Ghost's owner setup with these credentials before the
+site was reachable, so nobody else could claim it. Change the email to your
+own and the password under Settings -> Staff. Nothing here is updated
+afterwards; the values in Ghost win.
+
+If this site already had an owner when this file was written, that owner was
+left alone and these credentials were never used.
+EOF
+    )
+    say "owner credentials written to ${NOTE}"
+fi
+chmod 600 "${DB_ENV}" "${OWNER_ENV}" "${NOTE}" 2>/dev/null || true
+
+# ~/project/.env is what compose interpolates the stack from. Only this
+# recipe's own keys are replaced, so anything else in it is left alone.
+touch .env
+chmod 600 .env
+sed -i '/^GHOST_IMAGE=/d; /^MYSQL_PASSWORD=/d; /^MYSQL_ROOT_PASSWORD=/d' .env
+{
+    echo "GHOST_IMAGE=ghost:${GHOST_MAJOR}-alpine"
+    cat "${DB_ENV}"
+} >> .env
