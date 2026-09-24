@@ -54,3 +54,6 @@ commands:
     stage: build
     run: '{{js.build:npx vite build}}'
     description: "The project's own build script wins over this default when package.json defines one."
+# vite.config's build.outDir (or the build script's --outDir), resolved
+# against `root`; `dist` when it is not written in literals.
+output_from: vite

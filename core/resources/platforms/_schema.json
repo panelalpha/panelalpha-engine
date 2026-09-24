@@ -120,9 +120,10 @@
       "enum": [
         "angular",
         "next-workspace",
+        "vite",
         "webpack"
       ],
-      "description": "Resolver for an output path the project declares itself (angular.json, webpack.config) or that depends on a workspace."
+      "description": "Resolver for an output path the project declares itself (angular.json, vite.config, webpack.config) or that depends on a workspace."
     },
     "commands_from": {
       "type": "object",

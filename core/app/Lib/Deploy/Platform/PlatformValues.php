@@ -7,6 +7,7 @@ use App\Lib\Deploy\Platform\Runtime\Requirement;
 use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
 use App\Lib\Deploy\Platform\Probes\AngularOutputProbe;
 use App\Lib\Deploy\Platform\Probes\BundlerSpaProbe;
+use App\Lib\Deploy\Platform\Probes\ViteOutputDir;
 use App\Lib\Deploy\Platform\Runtime\DotnetRuntime;
 use App\Lib\Deploy\Platform\Runtime\GoRuntime;
 use App\Lib\Deploy\Platform\Runtime\JavaRuntime;
@@ -239,6 +240,7 @@ final class PlatformValues
         return match ($manifest->outputFrom) {
             'angular' => AngularOutputProbe::outputDir($context->projectDir),
             'webpack' => BundlerSpaProbe::outputDir($context->projectDir, $manifest->outputDirectory ?? 'dist'),
+            'vite' => ViteOutputDir::outputDir($context->projectDir, $manifest->outputDirectory ?? 'dist'),
             // A Next app in a workspace builds into that workspace.
             'next-workspace' => self::prefixWorkspace(
                 (string) ($decision['workspace_relative'] ?? ''),
