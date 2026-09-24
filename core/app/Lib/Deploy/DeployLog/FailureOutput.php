@@ -62,6 +62,8 @@ final class FailureOutput
         '/^failed to pull /',                    // compose: an image it cannot fetch
         '/^unable to get image /',               // compose: an image reference it refuses
         '/^service "[^"]+" has neither /',       // compose: an invalid project
+        '/^dependency failed to start:/',         // compose: a depends_on that never came up
+        '/^service "[^"]+" didn\'t complete successfully/',
         '/^gyp: /',
         '/^\s*PHP Fatal error:/i',
         '/^Traceback \(most recent call last\)/',
@@ -107,6 +109,16 @@ final class FailureOutput
         // host compile wraps it in `|| true`. `ERROR:` on another subject is
         // still a finding.
         '/^ERROR: Unable to open log: Permission denied$/',
+        // `docker compose up`'s progress: an image, network, volume or
+        // container changing state, and the per-layer pull lines. On a stack
+        // pulling several images this is hundreds of lines and it was the
+        // whole reported "reason" for rero-ils (#112). A line saying `Error`
+        // matches neither and is kept.
+        '/^\s*(?:Image|Network|Volume|Container)\s+\S+\s+(?:Pulling|Pulled|Building|Built|Creating|Created'
+            . '|Starting|Started|Waiting|Healthy|Running|Recreate|Recreated|Stopping|Stopped|Removing|Removed'
+            . '|Skipped)(?:\s+[\d.]+s)?\s*$/',
+        '/^\s*[0-9a-f]{12}\s+(?:Pulling fs layer|Waiting|Downloading|Download complete|Verifying Checksum'
+            . '|Extracting|Pull complete|Already exists)\b/',
         '/^\s*$/',
     ];
 

@@ -326,4 +326,79 @@ class FailureOutputTest extends TestCase
         $this->assertSame('', FailureOutput::select(''));
         $this->assertSame('', FailureOutput::select("npm warn deprecated a@1\n\n   \n"));
     }
+
+    /**
+     * `docker compose up -d` on a stack whose datastore never turned healthy,
+     * captured from Compose on Docker 29.8.1 and trimmed. rero-ils (#112) was
+     * reported by the layer downloads above the one line that said why.
+     */
+    public const COMPOSE_UNHEALTHY_DEPENDENCY = <<<'OUT'
+         Image postgres:17-alpine Pulling 
+         Image curlimages/curl Pulling 
+         Image redis:alpine Pulling 
+         8c9c3a906635 Pulling fs layer 0B
+         618072543738 Pulling fs layer 0B
+         d0c1d894c237 Pulling fs layer 0B
+         2f1039339059 Pulling fs layer 0B
+         095940d4ebca Pulling fs layer 0B
+         d60026184d2e Pulling fs layer 0B
+         4f4fb700ef54 Pulling fs layer 0B
+         b18ba029a163 Pulling fs layer 0B
+         4ece9a32c307 Pulling fs layer 0B
+         a8a481ae6efc Pulling fs layer 0B
+         eb805f20f060 Pulling fs layer 0B
+         f3b07e8a357c Pulling fs layer 0B
+         7ccdb0dcae74 Pulling fs layer 0B
+         43f9814c9a3b Pulling fs layer 0B
+         93a3470d5852 Pulling fs layer 0B
+         3333950675b2 Pulling fs layer 0B
+         b0a0d9d2abf2 Pulling fs layer 0B
+         e2de96513ba9 Pulling fs layer 0B
+         4f4fb700ef54 Download complete 0B
+         8c9c3a906635 Downloading 1.049MB
+         2f1039339059 Download complete 0B
+         Image curlimages/curl Pulled 
+         Image redis:alpine Pulled 
+         Image postgres:17-alpine Pulled 
+         Network r_default Creating 
+         Network r_default Created 
+         Network r_default Created 
+         Container r-cache-1 Creating 
+         Container r-db-1 Creating 
+         Container r-cache-1 Created 
+         Container r-db-1 Created 
+         Container r-init-1 Creating 
+         Container r-init-1 Created 
+         Container r-cache-1 Starting 
+         Container r-db-1 Starting 
+         Container r-cache-1 Started 
+         Container r-db-1 Started 
+         Container r-db-1 Waiting 
+         Container r-db-1 Error dependency db failed to start
+        dependency failed to start: container r-db-1 is unhealthy
+        OUT;
+
+    public function test_compose_progress_is_not_the_reason(): void
+    {
+        $selected = FailureOutput::select(self::COMPOSE_UNHEALTHY_DEPENDENCY);
+
+        $this->assertStringStartsWith('dependency failed to start: container r-db-1 is unhealthy', $selected);
+        $this->assertStringNotContainsString('Downloading', $selected);
+        $this->assertStringNotContainsString('Pulling', $selected);
+    }
+
+    public function test_a_compose_line_that_says_error_is_kept(): void
+    {
+        $output = <<<'OUT'
+         Image HaschekSolutions/pictshare:3 Pulling 
+         Image HaschekSolutions/pictshare:3 Error failed to resolve reference "HaschekSolutions/pictshare:3": no such host
+         Container project-mongo-1 Error dependency mongo failed to start
+        OUT;
+
+        $selected = FailureOutput::select($output);
+
+        $this->assertStringContainsString('Image HaschekSolutions/pictshare:3 Error failed to resolve', $selected);
+        $this->assertStringContainsString('Container project-mongo-1 Error dependency', $selected);
+        $this->assertStringNotContainsString('Pulling', $selected);
+    }
 }

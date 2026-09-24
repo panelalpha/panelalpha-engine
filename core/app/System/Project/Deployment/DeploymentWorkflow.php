@@ -6,6 +6,7 @@ use App\Exceptions\DeployCancelledException;
 use App\Exceptions\ProblemException;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Domains\PublicUrl;
 use App\System\Project\Dind as DindRuntime;
 use Illuminate\Support\Facades\Log;
@@ -292,7 +293,7 @@ final class DeploymentWorkflow
         if ($result['exit_code'] !== 0) {
             $raw = $result['stderr'] ?: $result['stdout'];
             $deployLogger?->recordFailureOutput($raw);
-            $message = DeployFailureExplainer::explain($raw) ?? trim($raw);
+            $message = self::failureSentence($raw);
             $hint = $mechanics->customEnvFailureHint();
             if ($hint !== null) {
                 $deployLogger?->info($hint);
@@ -336,12 +337,23 @@ final class DeploymentWorkflow
     {
         $logger?->recordFailureOutput($output);
 
-        $explanation = DeployFailureExplainer::explain($output);
+        return 'Failed to start app: ' . self::failureSentence($output);
+    }
+
+    /**
+     * The explainer's sentence, else the failing region, as the first deploy
+     * reports it ({@see \App\Http\Controllers\UserController}). The whole
+     * output of a compose up is mostly pull progress.
+     */
+    private static function failureSentence(string $output): string
+    {
+        $region = trim(FailureOutput::select($output));
+        $explanation = DeployFailureExplainer::explain($region !== '' ? $region : $output);
         if ($explanation !== null) {
-            return 'Failed to start app: ' . $explanation;
+            return $explanation;
         }
 
-        return 'Failed to start app: ' . trim($output);
+        return $region !== '' ? $region : trim($output);
     }
 
     private function invokeBeforeRetention(?callable $beforeRetention, ?DeployLogger $logger, string $username): void

@@ -216,6 +216,24 @@ class DeployReportTest extends TestCase
     }
 
     /**
+     * The signature was the first 600 bytes of the raw output, which on a
+     * compose deploy is pull progress: rero-ils (#112) sent layer downloads
+     * cut off mid-word and never the line that named the unhealthy service.
+     */
+    public function test_the_signature_is_the_failing_region_not_the_head_of_the_output(): void
+    {
+        $report = DeployReport::build($this->input([
+            'error' => \Tests\Unit\Deploy\DeployLog\FailureOutputTest::COMPOSE_UNHEALTHY_DEPENDENCY,
+        ]));
+
+        $this->assertStringStartsWith(
+            'dependency failed to start: container r-db-1 is unhealthy',
+            $report['failure']['signature']
+        );
+        $this->assertStringNotContainsString('Pulling fs layer', $report['failure']['signature']);
+    }
+
+    /**
      * The single most important property of the whole feature.
      */
     public function test_no_report_contains_the_account_name(): void

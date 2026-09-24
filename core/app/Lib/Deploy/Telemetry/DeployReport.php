@@ -4,6 +4,7 @@ namespace App\Lib\Deploy\Telemetry;
 
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\Platform\Metadata\AppPackage;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\System\Project\Dind\AppHealth;
@@ -232,14 +233,20 @@ class DeployReport
             ];
         }
 
-        $match = DeployFailureExplainer::match($error);
+        // The failing region, as the customer's message is built from it
+        // ({@see FailureOutput}). The head of the raw output is progress on
+        // any compose deploy: rero-ils reported 600 bytes of layer downloads
+        // and cut off before the line that said why (#112).
+        $region = FailureOutput::select($error);
+        $focus = $region !== '' ? $region : $error;
+        $match = DeployFailureExplainer::match($focus) ?? DeployFailureExplainer::match($error);
 
         return [
             'stage' => $stage,
             'rule' => $match['rule'] ?? null,
             'explained' => $match !== null,
             'message' => $match['message'] ?? null,
-            'signature' => self::truncate(Redactor::text($error, $username), self::MAX_SIGNATURE_BYTES),
+            'signature' => self::truncate(Redactor::text($focus, $username), self::MAX_SIGNATURE_BYTES),
         ];
     }
 
