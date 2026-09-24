@@ -22,7 +22,7 @@ class DindImageStoreTest extends TestCase
     {
         $this->dir = sys_get_temp_dir() . '/dind-image-store-' . bin2hex(random_bytes(4));
         mkdir($this->dir . '/bin', 0700, true);
-        foreach (['host', 'account', 'cache'] as $store) {
+        foreach (['host', 'account', 'cache', 'hollow'] as $store) {
             mkdir($this->dir . '/state/' . $store, 0700, true);
         }
         file_put_contents($this->dir . '/bin/sudo', "#!/bin/sh\nexec \"\$@\"\n");
@@ -40,6 +40,8 @@ if [ "$1" = compose ]; then
   shift
   case "$1 $2" in
     "image inspect") [ -e "$STATE/account/$(key "$4")" ]; exit ;;
+    # A hollow tag (no config blob) answers inspect but not history.
+    "image history") [ -e "$STATE/account/$(key "$5")" ] && [ ! -e "$STATE/hollow/$(key "$5")" ]; exit ;;
     "image rm") exit 0 ;;
   esac
   if [ "$1" = pull ]; then
@@ -49,7 +51,7 @@ if [ "$1" = compose ]; then
         [ -e "$STATE/registry-running" ] || { echo "connection refused" >&2; exit 1; }
         [ -e "$STATE/cache/$(key "${ref#panelalpha-cache-registry:5000/}")" ] || { echo "manifest unknown" >&2; exit 1; } ;;
       *) [ -e "$STATE/remote-ok" ] || { echo "pull access denied for $ref" >&2; exit 1; }
-         touch "$STATE/account/$(key "$ref")" ;;
+         touch "$STATE/account/$(key "$ref")"; rm -f "$STATE/hollow/$(key "$ref")" ;;
     esac
     exit 0
   fi
@@ -136,6 +138,59 @@ SH);
         $this->assertSame(0, $code);
         $this->assertSame('', $out);
         $this->assertStringNotContainsString('pull', $this->calls());
+    }
+
+    public function test_a_hollow_tag_left_by_save_and_load_is_pulled_again(): void
+    {
+        // Present to `inspect`, missing its config: the account cannot run it.
+        $this->state('remote-ok');
+        $this->has('account', 'diygod/rsshub:latest');
+        $this->has('hollow', 'diygod/rsshub:latest');
+
+        [$code, $out] = $this->seed(false, 'diygod/rsshub:latest');
+
+        $this->assertSame(0, $code);
+        $this->assertSame('Pulled base image diygod/rsshub:latest', $out);
+        $this->assertFileDoesNotExist($this->dir . '/state/hollow/diygod_rsshub_latest', 'the pull repairs it');
+    }
+
+    public function test_presence_is_asked_with_history_not_inspect(): void
+    {
+        $this->assertSame(['docker', 'image', 'history', '-q', '--', 'redis:alpine'], (new DindImageStore())->imageIdArgv('redis:alpine'));
+    }
+
+    /**
+     * @return array{0: string, 1: array<string, mixed>}
+     */
+    private function mergeDaemonJson(string $json): array
+    {
+        $path = $this->dir . '/daemon.json';
+        file_put_contents($path, $json);
+        $argv = (new DindImageStore())->registryConfigArgv();
+        $script = str_replace('/etc/docker/daemon.json', $path, $argv[2]);
+        [, $out] = $this->sh('python3 -c ' . escapeshellarg($script));
+
+        return [$out, json_decode((string) file_get_contents($path), true)];
+    }
+
+    public function test_an_old_account_gets_both_registries_and_keeps_the_rest(): void
+    {
+        [$out, $config] = $this->mergeDaemonJson('{"data-root": "/home/demo/docker", "group": "demo"}');
+
+        $this->assertSame('changed', $out);
+        $this->assertSame('/home/demo/docker', $config['data-root']);
+        $this->assertSame(['panelalpha-cache-registry:5000', 'panelalpha-registry-proxy:5000'], $config['insecure-registries']);
+        $this->assertSame(['http://panelalpha-registry-proxy:5000'], $config['registry-mirrors']);
+    }
+
+    public function test_a_current_account_is_left_alone(): void
+    {
+        $current = '{"insecure-registries": ["panelalpha-cache-registry:5000", "panelalpha-registry-proxy:5000"],'
+            . ' "registry-mirrors": ["http://panelalpha-registry-proxy:5000"]}';
+
+        [$out] = $this->mergeDaemonJson($current);
+
+        $this->assertSame('ok', $out, 'no reload when nothing changed');
     }
 
     public function test_the_cache_registry_comes_first(): void

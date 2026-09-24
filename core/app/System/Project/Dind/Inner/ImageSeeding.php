@@ -25,6 +25,8 @@ class ImageSeeding
 
     private InnerDocker $inner;
 
+    private bool $registryConfigChecked = false;
+
     public function __construct(InnerDocker $inner)
     {
         $this->inner = $inner;
@@ -126,6 +128,7 @@ class ImageSeeding
      */
     private function seedInParallel(array $images, int $concurrency): void
     {
+        $this->ensureRegistryConfig();
         $host = $this->inner->host();
         $host->logDim("Seeding {$concurrency} base images at a time");
         try {
@@ -286,6 +289,7 @@ class ImageSeeding
     /** Run the seed ladder for one image and log the line saying where it came from. */
     private function seed(string $image, bool $ours): bool
     {
+        $this->ensureRegistryConfig();
         $host = $this->inner->host();
         // Opens the image_transfer span; the ladder's own line closes it.
         $host->logInfo("Fetching base image {$image}");
@@ -314,8 +318,38 @@ class ImageSeeding
         return $this->hasImage($image);
     }
 
+    /**
+     * Once per deploy, on the first image question: an account created before the
+     * cache registry or registry-proxy existed has a daemon that trusts neither,
+     * because its daemon.json is written only at creation. Add both and reload
+     * it in place, and rewrite the account's init script so a restart keeps them.
+     */
+    private function ensureRegistryConfig(): void
+    {
+        if ($this->registryConfigChecked) {
+            return;
+        }
+        $this->registryConfigChecked = true;
+
+        $shell = $this->inner->dind()->shell();
+        $store = $this->inner->imageStore();
+        try {
+            if (trim((string) $shell->execQuiet($store->registryConfigArgv(), [], 30)) !== 'changed') {
+                return;
+            }
+            $shell->execQuiet($store->reloadDaemonArgv(), [], 30);
+            $this->inner->dind()->setupEntrypointInitScripts();
+            $this->inner->host()->logInfo('Pointed this account\'s Docker at the engine\'s image registries');
+        } catch (\Exception $e) {
+            // Not fatal: public images still come straight from their registries.
+            $this->inner->host()->logDim('Could not update this account\'s registry settings: ' . trim($e->getMessage()));
+        }
+    }
+
     public function hasImage(string $image): bool
     {
+        // Every deploy asks this first, even when each image is already there.
+        $this->ensureRegistryConfig();
         try {
             $id = trim($this->inner->dind()->shell()->execQuiet(
                 $this->inner->imageStore()->imageIdArgv($image),

@@ -63,12 +63,27 @@ interface ImageStore
     public function listImagesArgv(): array;
 
     /**
-     * Inside the account: the id of $image, or empty output when the store
-     * does not have it.
+     * Inside the account: non-empty output when the store has $image and can
+     * read its config, empty output or a failure otherwise.
      *
      * @return list<string>
      */
     public function imageIdArgv(string $image): array;
+
+    /**
+     * Inside the account: point its daemon at the engine's registries, printing
+     * `changed` when that needed a reload.
+     *
+     * @return list<string>
+     */
+    public function registryConfigArgv(): array;
+
+    /**
+     * Inside the account: re-read the daemon's configuration without a restart.
+     *
+     * @return list<string>
+     */
+    public function reloadDaemonArgv(): array;
 
     /**
      * Inside the account: $image's declared ports as JSON, in the

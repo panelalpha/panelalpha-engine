@@ -130,6 +130,16 @@ final class FakeEngine implements ContainerEngine
                 return ['podman', 'images'];
             }
 
+            public function registryConfigArgv(): array
+            {
+                return ['true'];
+            }
+
+            public function reloadDaemonArgv(): array
+            {
+                return ['true'];
+            }
+
             public function imageIdArgv(string $image): array
             {
                 return ['podman', 'image', 'inspect', $image];

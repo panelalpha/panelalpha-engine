@@ -162,7 +162,7 @@ final class DindImageStore implements ImageStore
         $fromHost = "sudo docker image inspect -- {$img} >/dev/null 2>&1"
             . " && { {$this->loadFromHostCommand($account, $image)}; }";
 
-        $script = "if {$exec} docker image inspect -- {$img} >/dev/null 2>&1; then :;"
+        $script = "if {$exec} docker image history -q -- {$img} >/dev/null 2>&1; then :;"
             . " elif {$fromCache}; then printf 'Pulled base image %s from the cache registry\\n' {$img};";
         $script .= $ours
             ? " elif {$fromHost}; then printf 'Loaded base image %s from the host through the cache registry\\n' {$img};"
@@ -231,7 +231,63 @@ final class DindImageStore implements ImageStore
      */
     public function imageIdArgv(string $image): array
     {
-        return ['docker', 'images', '-q', $image];
+        // `history` reads the config, so a tag `save | load` left without one (a
+        // multi-platform image held incompletely) counts as missing and is pulled
+        // again; `images -q` and `inspect` both answer for it.
+        return ['docker', 'image', 'history', '-q', '--', $image];
+    }
+
+    /**
+     * Inside the account: make its daemon trust the cache registry and mirror
+     * Docker Hub through registry-proxy, keeping everything else in its
+     * daemon.json. Prints `changed` when it had to, so the caller reloads.
+     * Accounts created before either entry existed never got it: their
+     * daemon.json is written once, at creation.
+     *
+     * @return list<string>
+     */
+    public function registryConfigArgv(): array
+    {
+        $script = <<<'PY'
+import json, sys
+path = '/etc/docker/daemon.json'
+try:
+    config = json.load(open(path))
+except Exception:
+    sys.exit(3)
+trusted = config.get('insecure-registries', [])
+mirrors = config.get('registry-mirrors', [])
+changed = False
+for registry in (CACHE, PROXY):
+    if registry not in trusted:
+        trusted.append(registry)
+        changed = True
+if MIRROR not in mirrors:
+    mirrors.insert(0, MIRROR)
+    changed = True
+if changed:
+    config['insecure-registries'] = trusted
+    config['registry-mirrors'] = mirrors
+    with open(path, 'w') as f:
+        json.dump(config, f)
+print('changed' if changed else 'ok')
+PY;
+        $values = "CACHE = '" . self::CACHE_REGISTRY . "'\nPROXY = '" . self::PROXY_REGISTRY
+            . "'\nMIRROR = 'http://" . self::PROXY_REGISTRY . "'\n";
+
+        return ['python3', '-c', $values . $script];
+    }
+
+    /**
+     * Inside the account: have its dockerd re-read daemon.json. Registry
+     * mirrors and trusted registries apply on SIGHUP, so nothing restarts;
+     * through supervisord, so only the account's own dockerd gets it.
+     *
+     * @return list<string>
+     */
+    public function reloadDaemonArgv(): array
+    {
+        return ['supervisorctl', 'signal', 'HUP', 'docker'];
     }
 
     /**

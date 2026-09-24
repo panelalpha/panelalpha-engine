@@ -433,6 +433,11 @@ update_files() {
       echo_info "Docker DNS already set."
     fi
 
+    # From the files just copied: the install-sysbox.sh run at the start of the
+    # update is the previous release's, and predates this step on the update
+    # that introduces it. A reload, not a restart.
+    bash /opt/panelalpha/shared-hosting/scripts/install-sysbox.sh --registry-mirror || true
+
     bash /opt/panelalpha/shared-hosting/scripts/update-cloudflare-ips.sh || true
 
     prepare_config_files

@@ -341,6 +341,7 @@ show_usage() {
     echo "Usage:"
     echo "  bash install-sysbox.sh                # Install or upgrade Sysbox to ${SYSBOX_VERSION}"
     echo "  bash install-sysbox.sh --uninstall    # Uninstall Sysbox"
+    echo "  bash install-sysbox.sh --registry-mirror  # Only point Docker Hub pulls at registry-proxy"
     echo "  bash install-sysbox.sh --help         # Show this help"
     echo ""
     echo "This script installs or uninstalls Sysbox runtime for enhanced Docker-in-Docker security."
@@ -365,6 +366,9 @@ main() {
             ;;
         --uninstall)
             uninstall_sysbox
+            ;;
+        --registry-mirror)
+            ensure_registry_mirror
             ;;
         "")
             check_dependencies
