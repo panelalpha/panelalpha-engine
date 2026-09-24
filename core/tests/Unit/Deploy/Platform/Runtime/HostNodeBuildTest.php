@@ -188,7 +188,7 @@ class HostNodeBuildTest extends TestCase
         // corepack has to sit before the cache check, or `pnpm run build` on a
         // second deploy runs without pnpm ever being put on PATH.
         $script = HostNodeBuild::innerScript($install, 'pnpm run build');
-        $this->assertStringStartsWith('export PATH=/tmp/corepack-bin:$PATH', $script);
+        $this->assertStringStartsWith('export PATH=/tmp/corepack-bin:/tmp/corepack-npm/bin:$PATH', $script);
         $this->assertStringContainsString(
             'corepack enable --install-directory /tmp/corepack-bin && corepack prepare pnpm@10 --activate',
             $script
@@ -212,7 +212,7 @@ class HostNodeBuildTest extends TestCase
             $install = JsPackageManager::installCommand($pm, [$lockfile => true]);
             [$prepare, $rest] = HostNodeBuild::splitToolingPrefix($install);
 
-            $this->assertStringStartsWith('corepack enable', $prepare, $pm);
+            $this->assertStringStartsWith(JsPackageManager::ENSURE_COREPACK . ' && corepack enable', $prepare, $pm);
             $this->assertStringStartsWith('HUSKY=0 LEFTHOOK=0 CI=1 ' . $pm . ' install', $rest, $pm);
 
             $script = HostNodeBuild::innerScript($install, JsPackageManager::scriptCommand($pm, 'build'));
@@ -223,6 +223,32 @@ class HostNodeBuildTest extends TestCase
             );
             // The bare form is what needs root. It must not survive anywhere.
             $this->assertStringNotContainsString('corepack enable && ', $script, $pm);
+            $this->assertStringNotContainsString('npm install -g corepack', $script, $pm);
+            $this->assertStringContainsString('npm install -g --prefix /tmp/corepack-npm corepack', $script, $pm);
         }
+    }
+
+    /**
+     * engine#157: Node 25+ images ship no corepack. The guard installs it,
+     * and on the host it is found without writing npm's global prefix.
+     */
+    public function test_a_missing_corepack_is_installed_before_it_is_used(): void
+    {
+        $install = JsPackageManager::installCommand(
+            'pnpm',
+            ['pnpm-lock.yaml' => true],
+            ['packageManager' => 'pnpm@11.25.0']
+        );
+
+        $this->assertStringStartsWith(
+            "HUSKY=0 LEFTHOOK=0 CI=1 sh -c 'command -v corepack >/dev/null 2>&1 || npm install -g corepack'"
+                . ' && corepack enable && corepack prepare pnpm@11.25.0 --activate',
+            $install
+        );
+        $this->assertTrue(HostNodeBuild::usesJsPackageManager($install));
+
+        [$prepare, $rest] = HostNodeBuild::splitToolingPrefix($install);
+        $this->assertStringStartsWith("sh -c 'command -v corepack", $prepare);
+        $this->assertStringStartsWith('HUSKY=0 LEFTHOOK=0 CI=1 pnpm install', $rest);
     }
 }

@@ -19,7 +19,7 @@ class HostNodeBuild
     {
         $install = self::stripLeadingEnvAssignments(trim($install));
 
-        return preg_match('/^(npm |yarn |pnpm |corepack |bun )/', $install) === 1;
+        return preg_match('/^(npm |yarn |pnpm |corepack |bun |sh -c \'command -v corepack )/', $install) === 1;
     }
 
     /**
@@ -179,7 +179,7 @@ class HostNodeBuild
         }
 
         $prepare = [];
-        while ($segments !== [] && preg_match('/^(?:corepack\s|npm\s+install\s+-g\s)/', $segments[0]) === 1) {
+        while ($segments !== [] && preg_match('/^(?:corepack\s|sh -c \'command -v corepack\s|npm\s+install\s+-g\s)/', $segments[0]) === 1) {
             $prepare[] = array_shift($segments);
         }
 
@@ -209,11 +209,16 @@ class HostNodeBuild
         $build = trim($build);
         [$prepare, $install] = self::splitToolingPrefix($install);
         $prepare = str_replace(
-            'corepack enable',
-            'mkdir -p /tmp/corepack-bin && corepack enable --install-directory /tmp/corepack-bin',
+            ['npm install -g corepack', 'corepack enable'],
+            [
+                // The build runs as the account, which cannot write npm's
+                // global prefix; the missing corepack goes under /tmp instead.
+                'npm install -g --prefix /tmp/corepack-npm corepack',
+                'mkdir -p /tmp/corepack-bin && corepack enable --install-directory /tmp/corepack-bin',
+            ],
             $prepare
         );
-        $parts[] = 'export PATH=/tmp/corepack-bin:$PATH';
+        $parts[] = 'export PATH=/tmp/corepack-bin:/tmp/corepack-npm/bin:$PATH';
         if ($prepare !== '') {
             $parts[] = $prepare;
         }

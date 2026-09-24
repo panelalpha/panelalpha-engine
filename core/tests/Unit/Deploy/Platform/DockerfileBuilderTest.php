@@ -12,6 +12,7 @@ use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
+use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use PHPUnit\Framework\TestCase;
 
@@ -322,7 +323,8 @@ class DockerfileBuilderTest extends TestCase
         $recipe = DetectProjectStrategy::detect($this->tmpDir);
 
         $this->assertSame(
-            'HUSKY=0 LEFTHOOK=0 CI=1 corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm install --frozen-lockfile',
+            'HUSKY=0 LEFTHOOK=0 CI=1 ' . JsPackageManager::ENSURE_COREPACK
+                . ' && corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm install --frozen-lockfile',
             $recipe['install_command']
         );
         $this->assertStringNotContainsString('--dangerously-allow-all-builds', $recipe['install_command']);

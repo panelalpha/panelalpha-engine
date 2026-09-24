@@ -100,6 +100,14 @@ class JsPackageManager
     }
 
     /**
+     * Install corepack where the image lacks it: Node 25+ no longer bundles
+     * it (Misskey pins `.node-version` 26.4.0 and died on `corepack: not
+     * found`), while npm ships in every Node image. Its own `sh -c`, so the
+     * `||` cannot swallow a failure earlier in an `&&` chain.
+     */
+    public const ENSURE_COREPACK = "sh -c 'command -v corepack >/dev/null 2>&1 || npm install -g corepack'";
+
+    /**
      * The install line per manager: `bun install`; pnpm via corepack with
      * `--frozen-lockfile` when a lockfile exists; `corepack enable && yarn
      * install`; `npm ci` with a lockfile, `npm install` without.
@@ -129,7 +137,7 @@ class JsPackageManager
             $flags = trim($flags . ' ' . self::yarnEnginesFlag($files, $package, $projectDir));
 
             return self::withCiInstallEnv(
-                'corepack enable && yarn install' . ($flags === '' ? '' : ' ' . $flags)
+                self::ENSURE_COREPACK . ' && corepack enable && yarn install' . ($flags === '' ? '' : ' ' . $flags)
             );
         }
 
@@ -322,7 +330,7 @@ class JsPackageManager
             $install .= ' --dangerously-allow-all-builds';
         }
 
-        return 'corepack enable && corepack prepare ' . $spec . ' --activate && ' . $install;
+        return self::ENSURE_COREPACK . ' && corepack enable && corepack prepare ' . $spec . ' --activate && ' . $install;
     }
 
     /**
@@ -615,7 +623,8 @@ class JsPackageManager
                 continue;
             }
             $path = trim($workspace, " 	
-\0\x0B/");
+
+\0\x0B/");
             if ($path === '' || $path === '.' || preg_match('#(^|/)\.\.(/|$)#', $path) === 1) {
                 continue;
             }

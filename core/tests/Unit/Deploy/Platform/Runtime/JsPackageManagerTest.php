@@ -77,11 +77,11 @@ class JsPackageManagerTest extends TestCase
     public function test_install_command_yarn_frozen_lockfile_when_present(): void
     {
         $this->assertSame(
-            'HUSKY=0 LEFTHOOK=0 CI=1 corepack enable && yarn install --frozen-lockfile --ignore-engines',
+            'HUSKY=0 LEFTHOOK=0 CI=1 ' . JsPackageManager::ENSURE_COREPACK . ' && corepack enable && yarn install --frozen-lockfile --ignore-engines',
             JsPackageManager::installCommand('yarn', ['yarn.lock' => true])
         );
         $this->assertSame(
-            'HUSKY=0 LEFTHOOK=0 CI=1 corepack enable && yarn install --ignore-engines',
+            'HUSKY=0 LEFTHOOK=0 CI=1 ' . JsPackageManager::ENSURE_COREPACK . ' && corepack enable && yarn install --ignore-engines',
             JsPackageManager::installCommand('yarn', [])
         );
     }
@@ -137,7 +137,7 @@ class JsPackageManagerTest extends TestCase
     public function test_install_command_yarn_berry_uses_immutable(): void
     {
         $this->assertSame(
-            'HUSKY=0 LEFTHOOK=0 CI=1 corepack enable && yarn install --immutable',
+            'HUSKY=0 LEFTHOOK=0 CI=1 ' . JsPackageManager::ENSURE_COREPACK . ' && corepack enable && yarn install --immutable',
             JsPackageManager::installCommand(
                 'yarn',
                 ['yarn.lock' => true],
@@ -145,7 +145,7 @@ class JsPackageManagerTest extends TestCase
             )
         );
         $this->assertSame(
-            'HUSKY=0 LEFTHOOK=0 CI=1 corepack enable && yarn install --immutable',
+            'HUSKY=0 LEFTHOOK=0 CI=1 ' . JsPackageManager::ENSURE_COREPACK . ' && corepack enable && yarn install --immutable',
             JsPackageManager::installCommand(
                 'yarn',
                 ['yarn.lock' => true],
@@ -161,7 +161,7 @@ class JsPackageManagerTest extends TestCase
     public function test_install_command_yarn_classic_package_manager_field_wins(): void
     {
         $this->assertSame(
-            'HUSKY=0 LEFTHOOK=0 CI=1 corepack enable && yarn install --frozen-lockfile --ignore-engines',
+            'HUSKY=0 LEFTHOOK=0 CI=1 ' . JsPackageManager::ENSURE_COREPACK . ' && corepack enable && yarn install --frozen-lockfile --ignore-engines',
             JsPackageManager::installCommand('yarn', ['yarn.lock' => true], [
                 'packageManager' => 'yarn@1.22.22',
             ])
@@ -172,7 +172,7 @@ class JsPackageManagerTest extends TestCase
     public function test_install_command_yarn_berry_detected_from_yarnrc_yml(): void
     {
         $this->assertSame(
-            'HUSKY=0 LEFTHOOK=0 CI=1 corepack enable && yarn install --immutable',
+            'HUSKY=0 LEFTHOOK=0 CI=1 ' . JsPackageManager::ENSURE_COREPACK . ' && corepack enable && yarn install --immutable',
             JsPackageManager::installCommand('yarn', ['yarn.lock' => true, '.yarnrc.yml' => true])
         );
     }
@@ -191,11 +191,11 @@ class JsPackageManagerTest extends TestCase
 
         try {
             $this->assertSame(
-                'HUSKY=0 LEFTHOOK=0 CI=1 corepack enable && yarn install --immutable',
+                'HUSKY=0 LEFTHOOK=0 CI=1 ' . JsPackageManager::ENSURE_COREPACK . ' && corepack enable && yarn install --immutable',
                 JsPackageManager::installCommand('yarn', ['yarn.lock' => true], [], $berry)
             );
             $this->assertSame(
-                'HUSKY=0 LEFTHOOK=0 CI=1 corepack enable && yarn install --frozen-lockfile --ignore-engines',
+                'HUSKY=0 LEFTHOOK=0 CI=1 ' . JsPackageManager::ENSURE_COREPACK . ' && corepack enable && yarn install --frozen-lockfile --ignore-engines',
                 JsPackageManager::installCommand('yarn', ['yarn.lock' => true], [], $classic)
             );
         } finally {
@@ -214,7 +214,7 @@ class JsPackageManagerTest extends TestCase
     public function test_install_command_yarn_falls_back_to_frozen_without_a_version_signal(): void
     {
         $this->assertSame(
-            'HUSKY=0 LEFTHOOK=0 CI=1 corepack enable && yarn install --frozen-lockfile --ignore-engines',
+            'HUSKY=0 LEFTHOOK=0 CI=1 ' . JsPackageManager::ENSURE_COREPACK . ' && corepack enable && yarn install --frozen-lockfile --ignore-engines',
             JsPackageManager::installCommand('yarn', ['yarn.lock' => true], ['name' => 'app'])
         );
     }
