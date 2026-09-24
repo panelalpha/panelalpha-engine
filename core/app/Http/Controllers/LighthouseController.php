@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Lib\Lighthouse\LighthouseTarget;
 use App\System;
 use App\Models\Domain;
 use App\Models\Setting;
@@ -73,7 +74,14 @@ class LighthouseController extends Controller
         $desktop = !empty($params['desktop_preset']);
         $localResolve = empty($params['no_local_resolve']);
 
-        $system = new System();
+        // Chrome fetches from inside the engine's network: only this engine's
+        // own domains, and nothing private for whatever they lead to.
+        $target = LighthouseTarget::forThisEngine();
+        $host = $target->hostOf($url);
+        $engineIp = $this->engineIp();
+        $pin = $localResolve && $engineIp !== null && Domain::existsByName($host) ? $host : null;
+
+        $system = app(System::class);
         $filename = md5($url) . ($desktop ? "-desktop" : "-mobile") . ".json";
         $path = "/data/{$filename}";
         $realPath = $system->engineDirPath() . "/data/lighthouse/{$filename}";
@@ -86,10 +94,7 @@ class LighthouseController extends Controller
             '--ignore-certificate-errors',
         ];
 
-        if ($localResolve && $hostResolve = $this->getHostResolve($url)) {
-            $map = "MAP {$hostResolve['domain']} {$hostResolve['ip']}";
-            $chromeFlags[] = '--host-resolver-rules="' . $map . '"';
-        }
+        $chromeFlags[] = '--host-resolver-rules="' . LighthouseTarget::resolverRules($pin, $engineIp) . '"';
 
         $args = [
             "sudo",
@@ -145,6 +150,14 @@ class LighthouseController extends Controller
             ], 502);
         }
 
+        $strayed = $target->strayedTo($result);
+        if ($strayed !== null) {
+            return new JsonResponse([
+                'message' => "The page redirected to {$strayed}, which is not a domain hosted on this engine; "
+                    . 'the report is withheld.',
+            ], 422);
+        }
+
         if ($request->boolean('strip_screenshot')) {
             $this->stripScreenshotData($result);
         }
@@ -170,28 +183,10 @@ class LighthouseController extends Controller
         }
     }
 
-    /**
-     * @return ?array{
-     *   domain: string,
-     *   ip: string,
-     * }
-     */
-    private function getHostResolve(string $url): ?array
+    private function engineIp(): ?string
     {
-        $parsedUrl = parse_url($url);
-        if (
-            empty($parsedUrl['host'])
-            || !(Domain::existsByName($parsedUrl['host']))
-        ) {
-            return null;
-        }
         $ip = Setting::get('default_ipv4');
-        if (!is_string($ip) || !filter_var($ip, FILTER_VALIDATE_IP)) {
-            return null;
-        }
-        return [
-            'domain' => $parsedUrl['host'],
-            'ip' => $ip,
-        ];
+
+        return is_string($ip) && filter_var($ip, FILTER_VALIDATE_IP) ? $ip : null;
     }
 }

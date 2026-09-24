@@ -119,7 +119,7 @@ Covers storage, domains, subdomains, FTP and SFTP accounts, and databases. To ch
 
 ## 5. Lighthouse - "is it fast?"
 
-An optional performance and quality report against a site the engine hosts.
+An optional performance and quality report against a site the engine hosts. Only the engine's own domains, their aliases and tunnel hostnames are accepted. Any other address, including an IP address, is refused. If the site redirects somewhere that is not one of those domains, no report comes back.
 
 ```text
 Run a Lighthouse report on this site.
