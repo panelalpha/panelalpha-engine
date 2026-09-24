@@ -173,8 +173,13 @@ final class PythonRuntime implements Runtime
         if (isset($files['requirements.txt'])) {
             return $venv . $pip . '-r requirements.txt';
         }
+        // A committed Pipfile.lock is installed as-is, like `uv sync --frozen`:
+        // `install --deploy` aborts when the lock's hash lags the Pipfile
+        // (JARR), though the project's own image installs it with `pipenv sync`.
         if (isset($files['pipfile'])) {
-            return $venv . $pip . 'pipenv && ' . self::VENV . '/bin/pipenv install --deploy';
+            $pipenv = isset($files['pipfile.lock']) ? 'sync' : 'install --deploy';
+
+            return $venv . $pip . 'pipenv && ' . self::VENV . '/bin/pipenv ' . $pipenv;
         }
         // A Poetry application declaring `package-mode = false` is a
         // deployable program, not a distributable package: `pip install .`
