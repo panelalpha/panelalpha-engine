@@ -140,6 +140,16 @@ class PrepareFromSource
                 $decision['strategy']
             ));
         }
+        if ($decision['strategy'] !== Strategies::COMPOSE
+            && ($composePath = ComposeFileInspector::firstIn($projectDir)) !== null
+            && ComposeFileInspector::isLegacyV1Compose($composePath)
+        ) {
+            $logger?->info(sprintf(
+                'Compose file %s uses the v1 layout (no `services:`), which Docker Compose v2 refuses; using strategy %s instead',
+                basename($composePath),
+                $decision['strategy']
+            ));
+        }
 
         // Detection reaching past the manifests is not a failure — Railpack
         // usually builds the project, and where even it has nothing to go on

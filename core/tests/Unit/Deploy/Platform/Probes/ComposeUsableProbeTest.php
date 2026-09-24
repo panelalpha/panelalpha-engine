@@ -261,4 +261,37 @@ class ComposeUsableProbeTest extends ProbeTestCase
     {
         return DockerfileBuilder::FILENAME;
     }
+
+    /**
+     * rapidbay (#122) ships a Compose v1 file: the service at the top level,
+     * no `services:`. Compose v2 refuses it (`additional properties
+     * 'rapidbay' not allowed`), so claiming it only guaranteed a failed
+     * deploy while the root Dockerfile next to it builds.
+     */
+    public function test_a_v1_file_compose_v2_refuses_is_skipped(): void
+    {
+        $this->write('docker-compose.yml', <<<'YAML'
+        rapidbay:
+            ports:
+                - "5000:5000"
+            build: .
+            volumes:
+                - ./app:/app
+        YAML);
+
+        $this->assertFalse($this->probe()->evaluate($this->context()));
+    }
+
+    public function test_an_include_only_file_is_not_mistaken_for_v1(): void
+    {
+        $this->write('docker-compose.yml', <<<'YAML'
+        include:
+          - stack/compose.yaml
+        YAML);
+
+        $this->assertSame(
+            ['compose_path' => $this->dir . '/docker-compose.yml'],
+            $this->probe()->evaluate($this->context())
+        );
+    }
 }

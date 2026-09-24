@@ -9,7 +9,7 @@ use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
  * A compose file worth running as-is: not the engine's generated bootstrap, not
- * a workstation file, not sidecars-only. A missing Dockerfile reference is
+ * a workstation file, not sidecars-only, not a v1 file Compose v2 refuses. A missing Dockerfile reference is
  * accepted when the repo has a root Dockerfile. Yields `compose_path` or false.
  *
  * An app config's `replace`-mode compose (ADR-0001: written under its own
@@ -36,6 +36,7 @@ final class ComposeUsableProbe implements PlatformProbe
             if (ComposeFileInspector::isGeneratedBootstrapCompose($path)
                 || ComposeFileInspector::isLocalDevCompose($path)
                 || ComposeFileInspector::isSidecarsOnlyCompose($path)
+                || ComposeFileInspector::isLegacyV1Compose($path)
             ) {
                 continue;
             }

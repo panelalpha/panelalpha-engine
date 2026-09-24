@@ -331,6 +331,41 @@ class ComposeFileInspector
     }
 
     /**
+     * A Compose v1 file: services at the top level, no `services:` mapping.
+     * Compose v2 refuses the whole file (`additional properties 'rapidbay'
+     * not allowed`, #122), so running it can only fail.
+     */
+    public static function isLegacyV1Compose(string $composePath): bool
+    {
+        if (!is_file($composePath) || !is_readable($composePath)) {
+            return false;
+        }
+        $raw = @file_get_contents($composePath);
+
+        return is_string($raw) && self::isLegacyV1ComposeYaml($raw);
+    }
+
+    public static function isLegacyV1ComposeYaml(string $raw): bool
+    {
+        try {
+            $parsed = ComposeYaml::parse($raw);
+        } catch (\Throwable $e) {
+            return false;
+        }
+        // `include:` alone is a valid v2 file with no services of its own.
+        if (!is_array($parsed) || isset($parsed['services']) || isset($parsed['include'])) {
+            return false;
+        }
+        foreach ($parsed as $value) {
+            if (is_array($value) && (isset($value['image']) || isset($value['build']))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Compose file whose every service is a known datastore (postgres, redis, …).
      * Treat as sidecar inventory for framework/railpack deploys — not STRATEGY_COMPOSE.
      */
