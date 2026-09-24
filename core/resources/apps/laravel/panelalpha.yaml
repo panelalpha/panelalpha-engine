@@ -41,8 +41,8 @@ commands:
     optional: true
   - id: key-generate
     stage: install
-    description: 'Only on first deploy — regenerating APP_KEY later would invalidate every existing session and encrypted column.'
-    run: 'php artisan key:generate --force --no-interaction'
+    description: 'Only on first deploy — regenerating APP_KEY later would invalidate every existing session and encrypted column. Skipped when the container already has a key: the engine writes one into .env, the env_file, and key:generate would only rewrite that file under the running app, so the next restart would run on a different key (#178).'
+    run: 'case "${APP_KEY:-}" in base64:?*) echo "APP_KEY is already set; not generating one" ;; *) php artisan key:generate --force --no-interaction ;; esac'
   - id: storage-link
     stage: install
     run: 'php artisan storage:link'

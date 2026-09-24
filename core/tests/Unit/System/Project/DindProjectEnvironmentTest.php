@@ -3,6 +3,7 @@
 namespace Tests\Unit\System\Project;
 
 use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\EnvFile;
 use App\Models\User as ModelsUser;
 use App\System\Project as ProjectAggregate;
@@ -87,6 +88,82 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertSame('Custom', $env['APP_NAME']);
         $this->assertArrayNotHasKey('EMPTY', $env);
         $this->assertTrue($model->usedCustomEnvVars());
+    }
+
+    /**
+     * #178: every deploy re-clones ~/project, so the key written from
+     * .env.example has to be the same one each time or every session dies.
+     */
+    public function test_a_redeploy_from_env_example_keeps_the_same_app_key(): void
+    {
+        file_put_contents($this->projectDir . '/.env.example', "APP_NAME=Demo\nAPP_KEY=\n");
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+        $first = $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY'];
+
+        $this->reclone("APP_NAME=Demo\nAPP_KEY=\n");
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+        $second = $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY'];
+
+        $this->assertSame($first, $second);
+        $this->assertSame(32, strlen((string) base64_decode(substr($first, 7), true)));
+        // The value a compose project's APP_KEY placeholder already gets.
+        $seed = hash_hmac('sha256', 'compose-placeholders:alice', (string) config('app.key'));
+        $this->assertSame(ComposePlaceholders::publishedSecret('APP_KEY', $seed), $first);
+    }
+
+    public function test_two_accounts_from_the_same_template_get_different_keys(): void
+    {
+        file_put_contents($this->projectDir . '/.env.example', "APP_KEY=\n");
+        mkdir($this->homeRoot . '/bob/project', 0777, true);
+        mkdir($this->tmpRoot . '/users/bob', 0777, true);
+        file_put_contents($this->homeRoot . '/bob/project/.env.example', "APP_KEY=\n");
+
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+        $this->dind($this->dindModel([], 'bob'))->applyProjectEnvVars();
+
+        $this->assertNotSame(
+            $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY'],
+            $this->vars((string) file_get_contents($this->homeRoot . '/bob/project/.env'))['APP_KEY']
+        );
+    }
+
+    /** A key set in the panel is the account's answer and outranks the derived one. */
+    public function test_an_app_key_set_in_the_panel_still_wins(): void
+    {
+        file_put_contents($this->projectDir . '/.env.example', "APP_KEY=SomeRandomString\n");
+        $mine = 'base64:' . base64_encode(str_repeat('m', 32));
+
+        $this->dind($this->dindModel(['env_vars' => ['APP_KEY' => $mine]]))->applyProjectEnvVars();
+
+        $this->assertSame($mine, $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY']);
+    }
+
+    /** A .env already in the checkout (a prepare hook wrote it) keeps its key. */
+    public function test_an_env_written_before_apply_keeps_its_key(): void
+    {
+        file_put_contents($this->projectDir . '/.env.example', "APP_KEY=\n");
+        file_put_contents($this->projectDir . '/.env', "APP_KEY=base64:kept\n");
+
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+
+        $this->assertSame('base64:kept', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY']);
+    }
+
+    /**
+     * Plainpad (app_root: server) restores its own key into server/.env in the
+     * install stage. That only works while the root .env, the env_file, names
+     * no APP_KEY for the container to hold instead.
+     */
+    public function test_an_app_root_layout_puts_no_app_key_in_the_container_env(): void
+    {
+        mkdir($this->projectDir . '/server');
+        file_put_contents($this->projectDir . '/server/.env.example', "APP_NAME=Plainpad\nAPP_KEY={KEY}\n");
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE, "services:\n  app:\n    image: php:8-cli\n    env_file:\n      - .env\n");
+
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+
+        $this->assertSame('', file_get_contents($this->projectDir . '/.env'));
+        $this->assertFileExists($this->projectDir . '/server/.env');
     }
 
     public function test_apply_creates_the_env_file_a_generated_run_file_names(): void
@@ -267,7 +344,15 @@ YAML;
         };
     }
 
-    private function dindModel(array $details = []): ModelsUser
+    /** What a redeploy does to ~/project: cleared, then cloned again. */
+    private function reclone(string $example): void
+    {
+        $this->removeTree($this->projectDir);
+        mkdir($this->projectDir, 0777, true);
+        file_put_contents($this->projectDir . '/.env.example', $example);
+    }
+
+    private function dindModel(array $details = [], string $username = 'alice'): ModelsUser
     {
         $model = new class extends ModelsUser {
             public function save(array $options = []): bool
@@ -275,7 +360,7 @@ YAML;
                 return true;
             }
         };
-        $model->username = 'alice';
+        $model->username = $username;
         $model->setDetails(array_merge([
             'template' => 'dind',
             'UID' => 1000,

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Apis;
 
+use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\System\Project\Dind\ProjectEnvironment;
 use App\Lib\Deploy\EnvFile;
 use PHPUnit\Framework\TestCase;
@@ -23,12 +24,12 @@ use PHPUnit\Framework\TestCase;
  */
 class ProjectEnvironmentSecretsTest extends TestCase
 {
-    private function fill(string $contents): string
+    private function fill(string $contents, string $seed = 'seed-alice'): string
     {
         $method = new \ReflectionMethod(ProjectEnvironment::class, 'withGeneratedSecrets');
         $method->setAccessible(true);
 
-        return $method->invoke(null, $contents);
+        return $method->invoke(null, $contents, $seed);
     }
 
     /**
@@ -100,8 +101,8 @@ class ProjectEnvironmentSecretsTest extends TestCase
 
     public function test_two_accounts_do_not_share_a_key(): void
     {
-        $a = $this->vars($this->fill("APP_KEY=\n"))['APP_KEY'];
-        $b = $this->vars($this->fill("APP_KEY=\n"))['APP_KEY'];
+        $a = $this->vars($this->fill("APP_KEY=\n", 'seed-alice'))['APP_KEY'];
+        $b = $this->vars($this->fill("APP_KEY=\n", 'seed-bob'))['APP_KEY'];
 
         $this->assertNotSame($a, $b);
     }
@@ -177,13 +178,19 @@ class ProjectEnvironmentSecretsTest extends TestCase
         $this->assertNotSame($published, $filled['APP_KEY']);
     }
 
-    /** Two accounts must never be given the same key. */
-    public function test_every_deploy_gets_a_different_key(): void
+    /**
+     * #178: this used to assert that every deploy got a different key. Every
+     * deploy re-clones and lands here again, so that rotated the key -- and
+     * every session and encrypted column with it -- on each redeploy. The
+     * same account now gets the same key; other accounts still do not.
+     */
+    public function test_the_same_account_gets_the_same_key_on_every_deploy(): void
     {
         $a = $this->vars($this->fill("APP_KEY=SomeRandomString\n"))['APP_KEY'];
         $b = $this->vars($this->fill("APP_KEY=SomeRandomString\n"))['APP_KEY'];
 
-        $this->assertNotSame($a, $b);
+        $this->assertSame($a, $b);
+        $this->assertSame(ComposePlaceholders::publishedSecret('APP_KEY', 'seed-alice'), $a);
     }
 
     /** A project with no APP_KEY line at all is not given one. */

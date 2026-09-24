@@ -66,12 +66,9 @@ class ProjectEnvironment
             $baseContents = $fs->fileGetContents($envPath);
             $source = 'after-clone';
         } elseif ($fs->fileExists($examplePath)) {
-            $baseContents = self::withGeneratedSecrets((string) $fs->fileGetContents($examplePath));
-            [$baseContents, $replaced] = self::withoutPublishedSecrets(
-                $baseContents,
-                $this->dind->strategy()->secrets()->for('compose-placeholders'),
-                $overrides
-            );
+            $seed = $this->dind->strategy()->secrets()->for('compose-placeholders');
+            $baseContents = self::withGeneratedSecrets((string) $fs->fileGetContents($examplePath), $seed);
+            [$baseContents, $replaced] = self::withoutPublishedSecrets($baseContents, $seed, $overrides);
             foreach ($replaced as $key) {
                 $logger?->info("Replaced the published placeholder in {$key} from .env.example with a generated secret");
             }
@@ -338,13 +335,20 @@ class ProjectEnvironment
      *
      * A project that set its own key is untouched, because a project that set
      * its own key has a `.env`, and this is not reached.
+     *
+     * Derived from the account seed, not random (#178): every deploy re-clones
+     * ~/project and lands here again, so a random key rotated on each one and
+     * logged every session out. Same value as a compose APP_KEY placeholder.
+     * A null seed keeps the old random key, for a caller that has none.
      */
-    private static function withGeneratedSecrets(string $contents): string
+    private static function withGeneratedSecrets(string $contents, ?string $seed = null): string
     {
         foreach (EnvFile::parse($contents) as $row) {
             if (($row['type'] ?? '') === 'variable' && ($row['key'] ?? '') === 'APP_KEY') {
                 return EnvFile::merge($contents, [
-                    'APP_KEY' => 'base64:' . base64_encode(random_bytes(32)),
+                    'APP_KEY' => $seed === null
+                        ? 'base64:' . base64_encode(random_bytes(32))
+                        : ComposePlaceholders::publishedSecret('APP_KEY', $seed),
                 ]);
             }
         }
