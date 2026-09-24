@@ -1,0 +1,90 @@
+<?php
+
+namespace Tests\Unit\Deploy\Compose;
+
+use App\Lib\Deploy\Compose\ComposePlaceholders;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * How a compose stack the engine did not write learns the account's address
+ * (engine#192): under the engine's own names, by substitution, and in the
+ * keys the author left blank for whoever deploys it.
+ */
+class ComposePublicUrlTest extends TestCase
+{
+    private const URL = 'https://shop.example.com';
+
+    /**
+     * @param array<string, mixed> $services
+     * @return array<string, mixed>
+     */
+    private function fill(array $services, ?string $url = self::URL): array
+    {
+        return ComposePlaceholders::fill(['services' => $services], 'seed', $url);
+    }
+
+    public function test_every_service_but_a_datastore_is_told_the_address(): void
+    {
+        $result = $this->fill([
+            'app' => ['image' => 'ghcr.io/acme/shop', 'environment' => ['MODE' => 'public']],
+            'worker' => ['image' => 'ghcr.io/acme/shop', 'environment' => ['- ignored']],
+            'db' => ['image' => 'postgres:16'],
+        ]);
+        $services = $result['compose']['services'];
+
+        $this->assertSame(self::URL, $services['app']['environment']['PA_PUBLIC_URL']);
+        $this->assertSame('shop.example.com', $services['app']['environment']['PA_PUBLIC_HOST']);
+        $this->assertContains('PA_PUBLIC_URL=' . self::URL, $services['worker']['environment']);
+        $this->assertArrayNotHasKey('environment', $services['db']);
+    }
+
+    public function test_a_service_that_sets_the_names_itself_keeps_its_values(): void
+    {
+        $result = $this->fill([
+            'app' => ['image' => 'x', 'environment' => ['PA_PUBLIC_HOST=other.example.org']],
+        ]);
+
+        $environment = $result['compose']['services']['app']['environment'];
+        $this->assertContains('PA_PUBLIC_HOST=other.example.org', $environment);
+        $this->assertCount(1, preg_grep('/^PA_PUBLIC_HOST=/', $environment));
+    }
+
+    public function test_a_compose_file_can_hand_the_address_to_the_key_its_app_reads(): void
+    {
+        $result = $this->fill([
+            'app' => ['image' => 'x', 'environment' => [
+                'ORIGIN' => '${PA_PUBLIC_URL}',
+                'LESMA_DOMAINS' => '${PA_PUBLIC_HOST:-localhost}',
+                'CALLBACK' => '${PA_PUBLIC_URL}/auth/callback',
+            ]],
+        ]);
+
+        $environment = $result['compose']['services']['app']['environment'];
+        $this->assertSame(self::URL, $environment['ORIGIN']);
+        $this->assertSame('shop.example.com', $environment['LESMA_DOMAINS']);
+        $this->assertSame(self::URL . '/auth/callback', $environment['CALLBACK']);
+        $this->assertContains('ORIGIN', $result['urls']);
+    }
+
+    /** cmintey/wishlist's shape: `ORIGIN=` set and empty kills adapter-node. */
+    public function test_an_empty_public_url_key_is_filled(): void
+    {
+        $result = $this->fill([
+            'app' => ['image' => 'x', 'environment' => ['ORIGIN=', 'APP_URL=', 'WEBHOOK_URL=', 'DATABASE_URL=']],
+        ]);
+
+        $environment = $result['compose']['services']['app']['environment'];
+        $this->assertContains('ORIGIN=' . self::URL, $environment);
+        $this->assertContains('APP_URL=' . self::URL, $environment);
+        // Someone else's address, or a sidecar's: not ours to invent.
+        $this->assertContains('WEBHOOK_URL=', $environment);
+        $this->assertContains('DATABASE_URL=', $environment);
+    }
+
+    public function test_without_a_domain_nothing_changes(): void
+    {
+        $services = ['app' => ['image' => 'x', 'environment' => ['ORIGIN' => '']]];
+
+        $this->assertSame($services, $this->fill($services, null)['compose']['services']);
+    }
+}

@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\Sidecar\ServiceRole;
+
 /**
  * Fill in the blanks a project's own docker-compose.yml expects a human to
  * edit before the first `docker compose up`.
@@ -100,6 +102,23 @@ class ComposePlaceholders
     private const REQUIRED_VAR_PATTERN = '/^\$\{([A-Za-z_][A-Za-z0-9_]*):\?[^}]*\}$/';
 
     /**
+     * The account's address, given to every service that is not a datastore
+     * and substituted where a compose file writes `${PA_PUBLIC_URL}`, so a
+     * stack can hand it to whatever key its app reads (engine#192).
+     */
+    public const PUBLIC_URL_VARIABLE = 'PA_PUBLIC_URL';
+
+    public const PUBLIC_HOST_VARIABLE = 'PA_PUBLIC_HOST';
+
+    /**
+     * Keys that hold the whole public URL. Set but empty, the app gets `''`,
+     * which is worse than unset (SvelteKit: `Invalid ORIGIN: ''`), so an empty
+     * one is filled. The short list on purpose: an empty `WEBHOOK_URL` is a
+     * third party's address, not ours.
+     */
+    private const BLANK_URL_KEYS = ['URL', 'PUBLIC_URL', 'BASE_URL', 'APP_URL', 'ASSET_URL', 'SITE_URL', 'ORIGIN'];
+
+    /**
      * @param array<string, mixed> $compose
      * @param string $seed per-account secret the generated values derive from
      * @return array{
@@ -165,10 +184,21 @@ class ComposePlaceholders
 
                         return $publicUrl;
                     }
+                    if ($publicUrl !== null) {
+                        $withUrl = self::withPublicUrl($key, $value, $publicUrl);
+                        if ($withUrl !== $value) {
+                            $touchedUrls[$key] = true;
+
+                            return $withUrl;
+                        }
+                    }
 
                     return $value;
                 }
             );
+        }
+        if ($publicUrl !== null) {
+            $services = self::withPublicUrlVariables($services, $publicUrl);
         }
 
         $compose['services'] = $services;
@@ -431,6 +461,61 @@ class ComposePlaceholders
         // The whole value is replaced by the public origin, so the placeholder's
         // port is discarded either way -- any localhost port is fair game here.
         return true;
+    }
+
+    /**
+     * `${PA_PUBLIC_URL}` / `${PA_PUBLIC_HOST}` (with or without a default)
+     * resolved, and an empty whole-URL key filled.
+     */
+    private static function withPublicUrl(string $key, string $value, string $publicUrl): string
+    {
+        if (trim($value) === '' && in_array(strtoupper($key), self::BLANK_URL_KEYS, true)) {
+            return $publicUrl;
+        }
+        $host = (string) parse_url($publicUrl, PHP_URL_HOST);
+
+        return (string) preg_replace_callback(
+            '/\$\{(' . self::PUBLIC_URL_VARIABLE . '|' . self::PUBLIC_HOST_VARIABLE . ')(?::?-[^}]*)?\}/',
+            static fn (array $m): string => $m[1] === self::PUBLIC_URL_VARIABLE ? $publicUrl : $host,
+            $value
+        );
+    }
+
+    /**
+     * Every service that is not a datastore learns the address under the
+     * engine's own names; one that sets them itself keeps its values.
+     *
+     * @param array<array-key, mixed> $services
+     * @return array<array-key, mixed>
+     */
+    private static function withPublicUrlVariables(array $services, string $publicUrl): array
+    {
+        $values = [
+            self::PUBLIC_URL_VARIABLE => $publicUrl,
+            self::PUBLIC_HOST_VARIABLE => (string) parse_url($publicUrl, PHP_URL_HOST),
+        ];
+        foreach ($services as $name => $service) {
+            if (!is_array($service) || ServiceRole::isKnownDatastore((string) $name, $service)) {
+                continue;
+            }
+            $environment = $service['environment'] ?? [];
+            if (!is_array($environment)) {
+                continue;
+            }
+            $isList = $environment !== [] && array_is_list($environment);
+            foreach ($values as $key => $value) {
+                if ($isList) {
+                    if (preg_grep('/^' . $key . '(=|$)/', array_map('strval', $environment)) === []) {
+                        $environment[] = $key . '=' . $value;
+                    }
+                } elseif (!array_key_exists($key, $environment)) {
+                    $environment[$key] = $value;
+                }
+            }
+            $services[$name]['environment'] = $environment;
+        }
+
+        return $services;
     }
 
     private static function normalisedPublicUrl(?string $publicUrl): ?string
