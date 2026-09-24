@@ -159,6 +159,9 @@ class AppHealth
         $looping = $this->restartLoopCheck($results);
         if ($looping !== null) {
             $checks[] = $looping;
+        } elseif (($silent = (new SilentPortCheck($this->dind))->check($results)) !== null) {
+            // Up, not restarting, and still silent: say what it listens on.
+            $checks[] = $silent;
         }
 
         return [

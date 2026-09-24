@@ -264,7 +264,8 @@ final class AppLauncher
     {
         $details = $this->project->userModel()->getDetails();
         foreach ((array) ($details[AppHealth::DETAIL_CHECKS] ?? []) as $check) {
-            if (is_array($check) && ($check['id'] ?? null) === AppHealth::CHECK_RESTART_LOOPING) {
+            // A container that is up and silent printed why, too (engine#90).
+            if (is_array($check) && in_array($check['id'] ?? null, [AppHealth::CHECK_RESTART_LOOPING, SilentPortCheck::ID], true)) {
                 return true;
             }
         }
