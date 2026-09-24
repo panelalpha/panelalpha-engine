@@ -25,6 +25,12 @@ final class FailureOutput
     /** How much to keep when nothing announced itself. */
     private const FALLBACK = 6;
 
+    /** How much of a failed build step's own output to keep. */
+    private const STEP_LINES = 40;
+
+    /** BuildKit's `#<step> <seconds> ` in front of a step's output line. */
+    private const STEP_PREFIX = '/^#\d+ \d+(?:\.\d+)? /';
+
     /**
      * A line that says "this is where it died", anchored so that the same
      * words inside prose cannot match.
@@ -132,8 +138,10 @@ final class FailureOutput
 
         $window = array_slice($lines, -self::WINDOW);
         foreach ($window as $i => $line) {
+            // A build step's own output carries BuildKit's `#13 249.2 ` prefix.
+            $bare = (string) preg_replace(self::STEP_PREFIX, '', $line);
             foreach (self::CAUSE as $pattern) {
-                if (preg_match($pattern, $line) === 1) {
+                if (preg_match($pattern, $line) === 1 || preg_match($pattern, $bare) === 1) {
                     return trim(implode("\n", array_slice($window, $i, self::CONTEXT)));
                 }
             }
@@ -145,6 +153,37 @@ final class FailureOutput
         // so the whole window is returned -- it is already bounded to WINDOW
         // non-noise lines, and keeps whatever the explainer can recognise.
         return trim(implode("\n", $window));
+    }
+
+    /**
+     * What the failed BuildKit step printed, from `docker compose up --build`'s
+     * stdout: the `#N` lines of the first step that reported `#N ERROR:`.
+     *
+     * Compose writes the build progress to stdout and only the `failed to
+     * solve` summary to stderr, so the explainer saw "exit code: 101" and never
+     * the `error: could not compile` or `pattern ...: no matching files found`
+     * above it.
+     */
+    public static function failedBuildStep(string $stdout): string
+    {
+        $lines = preg_split('/\r?\n/', $stdout) ?: [];
+        $step = null;
+        foreach ($lines as $line) {
+            if (preg_match('/^#(\d+) ERROR:/', $line, $m) === 1) {
+                $step = $m[1];
+                break;
+            }
+        }
+        if ($step === null) {
+            return '';
+        }
+
+        $own = array_values(array_filter(
+            $lines,
+            static fn (string $l): bool => str_starts_with($l, '#' . $step . ' ')
+        ));
+
+        return trim(implode("\n", array_slice($own, -self::STEP_LINES)));
     }
 
     private static function isNoise(string $line): bool

@@ -5,6 +5,7 @@ namespace App\System\Project\Dind;
 use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Dind\DindBuildStorage;
+use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\Runtime\HostRunProject;
 use App\Lib\Deploy\Platform\Runtime\Images;
@@ -91,9 +92,25 @@ final class AppLauncher
 
         return [
             'stdout' => $process->getOutput(),
-            'stderr' => $process->getErrorOutput(),
+            'stderr' => self::failureOutput($process),
             'exit_code' => $process->getExitCode(),
         ];
+    }
+
+    /**
+     * stderr, led by what a failed build step printed. Compose keeps BuildKit's
+     * progress on stdout, so stderr alone reads `exit code: 101` and every
+     * caller explaining it ends at `build-step-failed`.
+     */
+    public static function failureOutput(Process $process): string
+    {
+        $stderr = $process->getErrorOutput();
+        if ($process->getExitCode() === 0) {
+            return $stderr;
+        }
+        $step = FailureOutput::failedBuildStep($process->getOutput());
+
+        return $step === '' ? $stderr : $step . "\n" . $stderr;
     }
 
     /**

@@ -381,6 +381,16 @@ class DeployFailureExplainer
                         . 'and that step is not part of the automatic recipe. It needs a PanelAlpha page to describe its build.',
             ],
 
+            // A package whose every file is behind a build tag -- in practice cgo, which the
+            // build has off: no C compiler in golang:*-alpine, or CGO_ENABLED=0 set outright.
+            'go-cgo-required' => [
+                '/(?:package|imports) ([\w.\/@-]+): build constraints exclude all Go files/',
+                static fn (array $m): string =>
+                    "The Go package `{$m[1]}` has no files this build can compile. That is almost always "
+                        . 'because it needs cgo (a C compiler and the C library it wraps), and this build '
+                        . 'compiles without it. The full output is in the deploy log.',
+            ],
+
             // Anchored to a BuildKit *output* line (#<step> <seconds>): the same words appear
             // in the RUN instruction BuildKit echoes when a build fails.
             'go-entrypoint-not-found' => [
@@ -515,6 +525,16 @@ class DeployFailureExplainer
                 '/(fatal: repository .* not found|ERROR: Repository not found)/i',
                 static fn (): string =>
                     'The repository was not found. Check the address and whether it is private.',
+            ],
+
+            // A COPY/ADD of a path the checkout does not have: a packaging Dockerfile that
+            // expects CI to have built `target/` or `dist/` into the context first.
+            'build-context-missing' => [
+                '/failed to (?:compute cache key|calculate checksum of ref)[^\n]*?"\/?([^"\n]+)": not found/i',
+                static fn (array $m): string =>
+                    "The repository's Dockerfile copies `{$m[1]}`, which is not in the repository. It is "
+                        . 'produced by a step that has to run before the image is built (usually CI), so the '
+                        . 'image cannot be built from a clean checkout.',
             ],
 
             // Generic build failure — last resort, still better than the dump.
