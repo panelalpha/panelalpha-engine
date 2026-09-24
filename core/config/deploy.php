@@ -2,6 +2,15 @@
 
 return [
     /*
+     * The Docker network host build containers run on (engine#246). The engine
+     * creates it and scripts/build-network-firewall.sh lets it reach the
+     * internet only -- not the engine API, the host, its private network or
+     * 169.254.169.254. Empty runs builds on Docker's default bridge as before,
+     * for a host whose registries or proxy sit on a private address.
+     */
+    'build_network' => env('DEPLOY_BUILD_NETWORK', 'panelalpha-build'),
+
+    /*
      * Memory a host build container may use, or empty to size it from the host.
      *
      * A build is a host resource, not an account one: it runs in a throwaway

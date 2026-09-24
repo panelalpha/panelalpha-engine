@@ -40,10 +40,11 @@ final class DindEngine implements ContainerEngine
         // The one place the ceiling is read from config; DindHostBuilder stays
         // Laravel-free. Empty means it is sized from this host's MemTotal, with
         // 2g as ServiceLimits::hostBuildMemoryMb()'s floor.
-        return $this->hostBuilder ??= new DindHostBuilder(self::resolveBuildMemory(
-            (string) config('deploy.build_memory', ''),
-            self::hostMeminfo()
-        ));
+        return $this->hostBuilder ??= new DindHostBuilder(
+            self::resolveBuildMemory((string) config('deploy.build_memory', ''), self::hostMeminfo()),
+            null,
+            (string) config('deploy.build_network', BuildNetwork::DEFAULT_NAME)
+        );
     }
 
     /**

@@ -23,8 +23,9 @@ use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
  *
  * A host-daemon container with the customer's repository mounted in, so the
  * hardening in every argv below is load-bearing: the account's uid:gid,
- * no-new-privileges, all capabilities dropped, memory and pid caps, and a
- * project directory that must match `~/project` exactly.
+ * no-new-privileges, all capabilities dropped, memory and pid caps, a network
+ * that reaches the internet and nothing of the host's ({@see BuildNetwork}),
+ * and a project directory that must match `~/project` exactly.
  *
  * What each command *is* comes from {@see HostNodeBuild}, which is
  * engine-neutral; this class only puts it in a container. Builds argv only.
@@ -61,6 +62,9 @@ final class DindHostBuilder implements HostBuilder
      */
     private string $caBundle;
 
+    /** The network build containers run on, or null for Docker's default bridge ({@see BuildNetwork}). */
+    private ?string $network;
+
     /** Bundle locations in the order worth trying: Debian/Ubuntu, RHEL/Fedora, SUSE, Alpine. */
     private const CA_BUNDLE_CANDIDATES = [
         '/etc/ssl/certs/ca-certificates.crt',
@@ -86,10 +90,16 @@ final class DindHostBuilder implements HostBuilder
      * A value Docker would reject, or one that parses below the floor, falls
      * back to the floor instead of failing every deploy on the host.
      */
-    public function __construct(?string $memoryLimit = null, ?string $caBundle = null)
+    public function __construct(?string $memoryLimit = null, ?string $caBundle = null, ?string $network = null)
     {
         $this->memoryLimit = self::saneMemoryLimit($memoryLimit);
         $this->caBundle = $caBundle === null ? self::probeCaBundle() : trim($caBundle);
+        $this->network = $network === null ? null : BuildNetwork::resolve($network);
+    }
+
+    public function network(): ?string
+    {
+        return $this->network;
     }
 
     /**
@@ -496,6 +506,9 @@ final class DindHostBuilder implements HostBuilder
             $this->memoryLimit(),
             '--pids-limit',
             '512',
+            // Internet only: not the engine API, the host, its LAN or the
+            // metadata address (engine#246).
+            ...($this->network !== null ? ['--network', $this->network] : []),
         ];
     }
 

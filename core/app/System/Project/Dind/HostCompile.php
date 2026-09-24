@@ -3,6 +3,8 @@
 namespace App\System\Project\Dind;
 
 use App\System\Project\Dind\Strategy\PythonBase;
+use App\Lib\Deploy\Dind\BuildNetwork;
+use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\HostRunProject;
 use App\Lib\Deploy\Platform\Strategies;
@@ -525,6 +527,55 @@ class HostCompile
     }
 
     /**
+     * Make sure the build network exists and its firewall is applied (engine#246).
+     *
+     * The network is required -- `docker run --network` fails without it -- so
+     * a network that cannot be created stops the build and says how to opt
+     * out. The firewall is best-effort: without it the build reaches what it
+     * did on the default bridge, which is logged rather than refused, so a
+     * host that cannot run the script (no nsenter, the DinD test harness)
+     * still deploys.
+     */
+    private function prepareBuildNetwork(): void
+    {
+        $builder = $this->hostBuilder();
+        $network = $builder instanceof DindHostBuilder ? $builder->network() : null;
+        if ($network === null) {
+            return;
+        }
+
+        $system = $this->project->system();
+        $logger = $this->project->shell()->logger();
+        try {
+            $system->exec(BuildNetwork::inspectArgv($network), [], 30);
+        } catch (\Exception) {
+            try {
+                $system->exec(BuildNetwork::createArgv($network), [], 60);
+            } catch (\Exception $e) {
+                // Another build may have created it in the meantime.
+                try {
+                    $system->exec(BuildNetwork::inspectArgv($network), [], 30);
+                } catch (\Exception) {
+                    throw new \Exception(
+                        "Could not create the host build network {$network}: " . $e->getMessage()
+                            . ' Set DEPLOY_BUILD_NETWORK= (empty) in .env-core to build on the default bridge.'
+                    );
+                }
+            }
+        }
+
+        try {
+            $system->exec(BuildNetwork::firewallArgv($network), [], 60);
+            $logger?->info("Host build network: {$network} (internet only)");
+        } catch (\Exception $e) {
+            $logger?->warn(
+                "Host build network {$network} has no firewall, so this build can reach private addresses: "
+                    . $e->getMessage()
+            );
+        }
+    }
+
+    /**
      * Create the account's host-side caches, and say whether it worked.
      *
      * Best-effort, because a cache is an optimisation and a host that will not
@@ -535,6 +586,10 @@ class HostCompile
      */
     private function prepareCache(): bool
     {
+        // Every host build path starts here, so this is also where the build
+        // network is made ready.
+        $this->prepareBuildNetwork();
+
         try {
             $this->project->system()->exec(
                 $this->hostBuilder()->prepareCacheArgv($this->project->engineAccount()),

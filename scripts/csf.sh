@@ -162,6 +162,18 @@ iptables -t nat -C POSTROUTING -s $subnet ! -o $bridge -j MASQUERADE 2>/dev/null
 EOF
         echo "csf: added docker build rules for $bridge ($subnet) to csfpost.sh"
     fi
+
+    # engine#246: host builds run on panelalpha-build, internet only. The
+    # engine applies that before every build; this covers a `csf -r` that
+    # lands while one is running and would otherwise cut its egress.
+    if ! grep -q "panelalpha-build-network" "$post" 2>/dev/null; then
+        cat >>"$post" <<'EOF'
+
+# panelalpha-build-network: host builds reach the internet only (engine#246).
+docker network inspect panelalpha-build >/dev/null 2>&1 && \
+  sh /opt/panelalpha/shared-hosting/scripts/build-network-firewall.sh panelalpha-build || true
+EOF
+    fi
     chmod 700 "$post"
 
     # Apply now as well, so an install does not have to wait for a restart.
