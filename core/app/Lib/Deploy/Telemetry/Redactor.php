@@ -88,9 +88,15 @@ class Redactor
      * line, and cutting it at 500 bytes would lose the half that says what
      * went wrong.
      */
-    public static function line(string $line, ?string $username = null, ?int $maxBytes = self::MAX_LINE_BYTES): string
-    {
+    public static function line(
+        string $line,
+        ?string $username = null,
+        ?int $maxBytes = self::MAX_LINE_BYTES,
+        ?PrivateRepoMask $repo = null
+    ): string {
         $line = self::stripAnsi($line);
+        // Before the account name, which is often part of the repository's.
+        $line = $repo?->apply($line) ?? $line;
 
         foreach (self::DROP_LINE_PATTERNS as $pattern) {
             if (preg_match($pattern, $line) === 1) {
@@ -138,11 +144,12 @@ class Redactor
     public static function prose(
         string $text,
         ?string $username = null,
-        int $maxBytes = self::MAX_PROSE_BYTES
+        int $maxBytes = self::MAX_PROSE_BYTES,
+        ?PrivateRepoMask $repo = null
     ): string {
         $lines = [];
         foreach (preg_split('/\R/', $text) ?: [] as $line) {
-            $redacted = self::line($line, $username, null);
+            $redacted = self::line($line, $username, null, $repo);
             // One blank line, never two: a dropped private key must not leave
             // a hole where the reader assumes something was said.
             if ($redacted === '' && ($lines === [] || end($lines) === '')) {
@@ -162,13 +169,13 @@ class Redactor
      * @param list<string> $lines
      * @return list<string>
      */
-    public static function tail(array $lines, ?string $username = null): array
+    public static function tail(array $lines, ?string $username = null, ?PrivateRepoMask $repo = null): array
     {
         $lines = array_slice($lines, -self::MAX_LINES);
 
         $kept = [];
         foreach ($lines as $line) {
-            $redacted = self::line($line, $username);
+            $redacted = self::line($line, $username, repo: $repo);
             if ($redacted !== '') {
                 $kept[] = $redacted;
             }
@@ -192,11 +199,11 @@ class Redactor
     /**
      * Redact a single free-text value (an error message, a signature).
      */
-    public static function text(string $text, ?string $username = null): string
+    public static function text(string $text, ?string $username = null, ?PrivateRepoMask $repo = null): string
     {
         $parts = [];
         foreach (preg_split('/\R/', $text) ?: [] as $line) {
-            $redacted = self::line($line, $username);
+            $redacted = self::line($line, $username, repo: $repo);
             if ($redacted !== '') {
                 $parts[] = $redacted;
             }

@@ -891,6 +891,7 @@ class Telemetry
             'contact' => self::stringOrNull($input['contact'] ?? null),
             'via' => self::stringOrNull($input['via'] ?? null),
             'details' => $fields->accountDetails(),
+            'repo_url' => $fields->repoUrl(),
             'repo_private' => $fields->repoIsPrivate(),
             // The address the reporter is looking at, so the report says where
             // the problem is. This path does not go through projectFacts(),

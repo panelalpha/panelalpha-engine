@@ -92,13 +92,22 @@ class DeployReport
         $runtime = self::stringOrNull($details['deploy_runtime'] ?? null);
         $error = is_string($input['error'] ?? null) ? $input['error'] : '';
         $private = (bool) ($input['repo_private'] ?? false);
+        // What the tree on disk says, as opposed to what the account record
+        // remembers.
+        $checkout = is_array($input['checkout'] ?? null) ? $input['checkout'] : [];
+        $repoMask = PrivateRepoMask::for(
+            $private,
+            [self::stringOrNull($input['repo_url'] ?? null), self::stringOrNull($checkout['remote'] ?? null)],
+            [self::stringOrNull($details['git_branch'] ?? null), self::stringOrNull($checkout['branch'] ?? null)]
+        );
 
         $failure = self::failure(
             (string) $input['outcome'],
             self::stringOrNull($input['signal'] ?? null),
             $error,
             $latest,
-            $username
+            $username,
+            $repoMask
         );
 
         $report = [
@@ -157,10 +166,6 @@ class DeployReport
             $report['app'] = $app;
         }
 
-        // What the tree on disk says, as opposed to what the account record
-        // remembers.
-        $checkout = is_array($input['checkout'] ?? null) ? $input['checkout'] : [];
-
         if ($tier >= self::TIER_REPO) {
             $report['repo'] = self::repo(
                 self::stringOrNull($input['repo_url'] ?? null),
@@ -174,7 +179,7 @@ class DeployReport
         }
 
         if ($tier >= self::TIER_LOG) {
-            $report['log_tail'] = Redactor::tail($input['log_tail'] ?? [], $username);
+            $report['log_tail'] = Redactor::tail($input['log_tail'] ?? [], $username, $repoMask);
         }
 
         // Not gated by tier: a source bundle is its own opt-in, off by default, and
@@ -213,7 +218,8 @@ class DeployReport
         ?string $signal,
         string $error,
         array $latest,
-        string $username
+        string $username,
+        ?PrivateRepoMask $repoMask
     ): array {
         // A precheck runs inside `cloning`, before the clone itself.
         $stage = self::isPreCheckRejection($latest)
@@ -228,7 +234,7 @@ class DeployReport
                 'stage' => $stage,
                 'rule' => $signal,
                 'explained' => true,
-                'message' => self::truncate(Redactor::text($error, $username), self::MAX_SIGNATURE_BYTES) ?: null,
+                'message' => self::truncate(Redactor::text($error, $username, $repoMask), self::MAX_SIGNATURE_BYTES) ?: null,
                 'signature' => $signal ?? 'recovered',
             ];
         }
@@ -246,7 +252,7 @@ class DeployReport
             'rule' => $match['rule'] ?? null,
             'explained' => $match !== null,
             'message' => $match['message'] ?? null,
-            'signature' => self::truncate(Redactor::text($focus, $username), self::MAX_SIGNATURE_BYTES),
+            'signature' => self::truncate(Redactor::text($focus, $username, $repoMask), self::MAX_SIGNATURE_BYTES),
         ];
     }
 

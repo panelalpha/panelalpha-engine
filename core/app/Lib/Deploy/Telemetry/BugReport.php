@@ -125,6 +125,7 @@ class BugReport
      *   via?: ?string,
      *   latest?: array<string, mixed>,
      *   details?: array<string, mixed>,
+     *   repo_url?: ?string,
      *   repo_private?: bool,
      *   domains?: list<array<string, mixed>>,
      *   inspect?: ?array<string, mixed>,
@@ -141,8 +142,19 @@ class BugReport
         $installId = (string) $input['install_id'];
         $area = self::normalizeArea($input['area'] ?? null);
 
-        $title = self::title((string) $input['title'], $username);
-        $description = Redactor::prose((string) $input['description'], $username ?: null);
+        $details = is_array($input['details'] ?? null) ? $input['details'] : [];
+        $repoMask = PrivateRepoMask::for(
+            (bool) ($input['repo_private'] ?? false),
+            [is_string($input['repo_url'] ?? null) ? $input['repo_url'] : null],
+            [is_string($details['git_branch'] ?? null) ? $details['git_branch'] : null]
+        );
+
+        $title = self::title((string) $input['title'], $username, $repoMask);
+        $description = Redactor::prose(
+            (string) $input['description'],
+            $username ?: null,
+            repo: $repoMask
+        );
 
         $report = [
             'id' => (string) $input['id'],
@@ -181,7 +193,7 @@ class BugReport
 
         // Build output is tier-2 material, as in a deploy report.
         if ($tier >= DeployReport::TIER_LOG) {
-            $tail = Redactor::tail($input['log_tail'] ?? [], $username ?: null);
+            $tail = Redactor::tail($input['log_tail'] ?? [], $username ?: null, $repoMask);
             if ($tail !== []) {
                 $report['log_tail'] = $tail;
             }
@@ -413,11 +425,11 @@ class BugReport
      * The headline, redacted and capped to one line: someone will eventually put a
      * token in a title, and newlines break every list view.
      */
-    private static function title(string $title, string $username): string
+    private static function title(string $title, string $username, ?PrivateRepoMask $repoMask): string
     {
         $title = (string) preg_replace('/\s+/', ' ', $title);
 
-        return Redactor::line(trim($title), $username ?: null, self::MAX_TITLE_BYTES);
+        return Redactor::line(trim($title), $username ?: null, self::MAX_TITLE_BYTES, $repoMask);
     }
 
     /**

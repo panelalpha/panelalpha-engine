@@ -350,6 +350,49 @@ class DeployReportTest extends TestCase
     }
 
     /**
+     * A rejected token on a private repository, from a real report: the `repo`
+     * block was hashed while the signature and the tail named the repository.
+     */
+    public function test_a_private_repository_is_not_named_by_the_signature_or_the_tail(): void
+    {
+        $url = 'https://github.com/skinkaidbwf/' . self::USERNAME . '-astro';
+        $report = DeployReport::build($this->input([
+            'latest' => ['stage' => 'cloning', 'stages' => []],
+            'details' => ['deploy_source' => 'git', 'git_branch' => 'main'],
+            'repo_url' => $url,
+            'repo_private' => true,
+            'error' => "Cloning into '/home/" . self::USERNAME . "/project'...\n"
+                . "remote: Invalid username or token. Password authentication is not supported for Git operations.\n"
+                . "fatal: Authentication failed for '{$url}/'",
+            'log_tail' => [
+                "Cloning repository {$url} (branch: main)",
+                "fatal: Authentication failed for '{$url}/'",
+            ],
+        ]));
+
+        $this->assertSame('repo-auth-failed', $report['failure']['rule']);
+        $this->assertStringContainsString(
+            "Authentication failed for 'https://github.com/<repo>/'",
+            $report['failure']['signature']
+        );
+        $this->assertSame('Cloning repository https://github.com/<repo> (branch: <branch>)', $report['log_tail'][0]);
+        $this->assertStringNotContainsString('skinkaidbwf', (string) json_encode($report));
+        $this->assertNotEmpty($report['repo']['path_hash']);
+    }
+
+    public function test_a_public_repository_is_still_named_in_the_tail(): void
+    {
+        $report = DeployReport::build($this->input([
+            'log_tail' => ['Cloning repository https://github.com/vercel/next.js (branch: canary)'],
+        ]));
+
+        $this->assertSame(
+            'Cloning repository https://github.com/vercel/next.js (branch: canary)',
+            $report['log_tail'][0]
+        );
+    }
+
+    /**
      * The case the account record could never answer: a site connected to a
      * remote after it was created, or an archive that turned out to carry a
      * .git. Both used to report `{"present": false}`.

@@ -403,6 +403,24 @@ class BugReportTest extends TestCase
         $this->assertSame('14.2.3', $inspect['metadata']['framework']['version']);
     }
 
+    public function test_a_private_project_is_not_named_by_the_log_tail_or_the_words(): void
+    {
+        $url = 'https://gitlab.example.com/acme/storefront.git';
+        $report = $this->build([
+            'repo_url' => $url,
+            'repo_private' => true,
+            'details' => ['git_branch' => 'release-7'],
+            'title' => 'Clone of acme/storefront fails',
+            'description' => "Every rebuild of {$url} stops at cloning.",
+            'log_tail' => ["Cloning repository {$url} (branch: release-7)"],
+        ]);
+
+        $json = (string) json_encode($report);
+        $this->assertStringNotContainsString('storefront', $json);
+        $this->assertStringNotContainsString('release-7', $json);
+        $this->assertSame('Clone of <repo> fails', $report['bug']['title']);
+    }
+
     public function test_a_private_project_still_groups_with_itself(): void
     {
         // Hashed rather than dropped: repeat reports about one project have to
