@@ -150,6 +150,29 @@ class DeployFailureExplainer
                     "This project needs the PHP extension {$m[1]}, which is not in the PHP image it runs on.",
             ],
 
+            // Above `composer-unresolvable`, which prints the same header: no package source
+            // has these at all, which is not a conflict. farmOS is a Drupal profile whose
+            // composer.json declares no packages.drupal.org, so all 28 drupal/* were unknown.
+            'composer-package-not-found' => [
+                '/requires ([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)[^,\n]*, it could not be found in any version/',
+                static function (array $m, string $output = ''): string {
+                    preg_match_all(
+                        '/requires ([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)[^,\n]*, it could not be found in any version/',
+                        $output !== '' ? $output : $m[0],
+                        $all
+                    );
+                    $names = array_values(array_unique($all[1] ?: [$m[1]]));
+                    $shown = implode(', ', array_slice($names, 0, 3))
+                        . (count($names) > 3 ? ' and ' . (count($names) - 3) . ' more' : '');
+
+                    return 'Composer could not find ' . (count($names) === 1 ? 'a package' : count($names) . ' packages')
+                        . " this project requires ({$shown}) in any repository it was given. Such packages "
+                        . 'usually come from a repository the composer.json does not declare, or the '
+                        . 'repository is a library meant to be required by another project rather than '
+                        . 'an application. The full resolver output is in the deploy log.';
+                },
+            ],
+
             // The project's own constraints cannot be satisfied together; nothing the
             // platform can do about it.
             'composer-unresolvable' => [

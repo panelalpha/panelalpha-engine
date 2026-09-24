@@ -631,6 +631,50 @@ OUT;
     }
 
     /**
+     * farmOS (#129): every drupal/* requirement is unknown because the repo is a
+     * Drupal profile with no packages.drupal.org. That is not a version conflict,
+     * and the old sentence said it was.
+     */
+    public function test_a_package_no_repository_has_is_not_called_a_conflict(): void
+    {
+        $output = "No composer.lock file present. Updating dependencies to latest instead of installing from lock file.\n"
+            . "Loading composer repositories with package information\nUpdating dependencies\n"
+            . "Your requirements could not be resolved to an installable set of packages.\n"
+            . "  Problem 1\n    - Root composer.json requires drupal/admin_toolbar, it could not be found in any version, there may be a typo in the package name.\n"
+            . "  Problem 2\n    - Root composer.json requires drupal/config_update, it could not be found in any version, there may be a typo in the package name.\n"
+            . "  Problem 3\n    - Root composer.json requires drupal/consumers ^1.22, it could not be found in any version, there may be a typo in the package name.\n"
+            . "  Problem 4\n    - Root composer.json requires drupal/token, it could not be found in any version, there may be a typo in the package name.\n"
+            . "  Problem 5\n    - Root composer.json requires drupal/token, it could not be found in any version, there may be a typo in the package name.\n";
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('composer-package-not-found', $match['rule'] ?? null);
+        $this->assertStringContainsString(
+            '4 packages this project requires (drupal/admin_toolbar, drupal/config_update, drupal/consumers and 1 more)',
+            $match['message'] ?? ''
+        );
+        $this->assertStringNotContainsString('installed together', $match['message'] ?? '');
+    }
+
+    public function test_a_real_conflict_is_still_composer_unresolvable(): void
+    {
+        $output = "Your requirements could not be resolved to an installable set of packages.\n"
+            . "  Problem 1\n    - Root composer.json requires acme/a ^2.0 -> satisfiable by acme/a[2.0.0].\n"
+            . "    - acme/a 2.0.0 requires acme/b ^1.0 -> found acme/b[2.0.0] but it does not match the constraint.\n";
+
+        $this->assertSame('composer-unresolvable', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    public function test_a_single_unknown_package_is_named(): void
+    {
+        $match = DeployFailureExplainer::match(
+            '- Root composer.json requires acme/privat3, it could not be found in any version, there may be a typo in the package name.'
+        );
+
+        $this->assertStringContainsString('could not find a package this project requires (acme/privat3)', $match['message'] ?? '');
+    }
+
+    /**
      * ActivityWatch #528. The project is a Poetry application, not a package,
      * so pip asking poetry-core to build a wheel of it can never work. The
      * engine now installs such a project with `poetry install --no-root`, but
