@@ -3,6 +3,8 @@
 namespace App\Lib\Deploy\Compose;
 
 use App\Lib\Deploy\Port\EnvVarDefault;
+use App\Lib\Deploy\Sidecar\ComposeService;
+use App\Lib\Deploy\Sidecar\SidecarDialects;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
 
 /**
@@ -83,6 +85,8 @@ final class ServiceHardener
     // caps a fork bomb. A per-service pids_limit overrides this default.
     private const PIDS_LIMIT = 1024;
 
+    private const LEGACY_POSTGRES_DATA = '/var/lib/postgresql/data';
+
     /** @var list<string> */
     private const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'];
 
@@ -98,8 +102,46 @@ final class ServiceHardener
         $service = self::withMemoryLimit($name, $service, $accountMemoryMb);
         $service = self::withNodeHeapCap($name, $service, $accountMemoryMb);
         $service = self::withReachablePublishedPorts($service);
+        $service = self::withLegacyPostgresDataDir($service);
 
         return self::withProcessLimits($name, $service);
+    }
+
+    /**
+     * postgres 18+ keeps its data under /var/lib/postgresql/18/docker and
+     * refuses to start when /var/lib/postgresql/data is a mount point
+     * (docker-library/postgres#1259). Files written for 17 and earlier mount
+     * exactly there, and an unpinned `postgres` tag now resolves to 18. Naming
+     * the mount as PGDATA skips that check and keeps the data where the volume
+     * is; on 17 and earlier it is the image's own default, so nothing changes.
+     *
+     * @param array<string, mixed> $service
+     * @return array<string, mixed>
+     */
+    private static function withLegacyPostgresDataDir(array $service): array
+    {
+        $family = ComposeService::familyOf((string) ($service['image'] ?? ''));
+        if (SidecarDialects::canonical($family) !== 'postgres'
+            || ServiceEnvironment::hasKey($service['environment'] ?? null, 'PGDATA')
+        ) {
+            return $service;
+        }
+
+        foreach ((array) ($service['volumes'] ?? []) as $volume) {
+            $target = is_array($volume)
+                ? (string) ($volume['target'] ?? '')
+                : (string) (self::splitFields(EnvVarDefault::resolve(trim((string) $volume)))[1] ?? '');
+            if (rtrim(trim($target), '/') === self::LEGACY_POSTGRES_DATA) {
+                $service['environment'] = ServiceEnvironment::withDefaults(
+                    $service['environment'] ?? [],
+                    ['PGDATA' => self::LEGACY_POSTGRES_DATA]
+                );
+
+                return $service;
+            }
+        }
+
+        return $service;
     }
 
     /**

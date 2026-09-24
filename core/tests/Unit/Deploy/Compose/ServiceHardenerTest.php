@@ -279,4 +279,49 @@ class ServiceHardenerTest extends TestCase
 
         $this->assertSame(['APP_ENV=production', 'NODE_OPTIONS=--max-old-space-size=268'], $service['environment']);
     }
+
+    /**
+     * limbas (#97): `image: postgres` resolves to 18, whose entrypoint refuses
+     * to start while /var/lib/postgresql/data is a mount point.
+     */
+    public function test_a_postgres_volume_at_the_legacy_path_is_named_as_pgdata(): void
+    {
+        $service = ServiceHardener::harden('limbas_pgsql', [
+            'image' => 'postgres',
+            'volumes' => ['postgres-data:/var/lib/postgresql/data'],
+            'environment' => ['POSTGRES_USER' => 'limbasuser'],
+        ]);
+
+        $this->assertSame('/var/lib/postgresql/data', $service['environment']['PGDATA']);
+        $this->assertSame('limbasuser', $service['environment']['POSTGRES_USER']);
+    }
+
+    public function test_the_legacy_postgres_path_is_matched_in_every_form(): void
+    {
+        $long = ServiceHardener::harden('db', [
+            'image' => 'docker.io/postgis/postgis:18-3.5',
+            'volumes' => [['type' => 'volume', 'source' => 'pg', 'target' => '/var/lib/postgresql/data/']],
+            'environment' => ['POSTGRES_PASSWORD=x'],
+        ]);
+        $this->assertSame(['POSTGRES_PASSWORD=x', 'PGDATA=/var/lib/postgresql/data'], $long['environment']);
+
+        $bind = ServiceHardener::harden('db', ['image' => 'postgres:18-alpine', 'volumes' => ['./pgdata:/var/lib/postgresql/data:rw']]);
+        $this->assertSame(['PGDATA' => '/var/lib/postgresql/data'], $bind['environment']);
+    }
+
+    public function test_pgdata_is_left_alone_when_set_or_when_nothing_mounts_the_legacy_path(): void
+    {
+        $own = ServiceHardener::harden('db', [
+            'image' => 'postgres:18',
+            'volumes' => ['pg:/var/lib/postgresql/data'],
+            'environment' => ['PGDATA' => '/var/lib/postgresql/data/pgdata'],
+        ]);
+        $this->assertSame(['PGDATA' => '/var/lib/postgresql/data/pgdata'], $own['environment']);
+
+        $modern = ServiceHardener::harden('db', ['image' => 'postgres:18', 'volumes' => ['pg:/var/lib/postgresql']]);
+        $this->assertArrayNotHasKey('environment', $modern);
+
+        $other = ServiceHardener::harden('db', ['image' => 'mysql:8', 'volumes' => ['d:/var/lib/postgresql/data']]);
+        $this->assertArrayNotHasKey('environment', $other);
+    }
 }
