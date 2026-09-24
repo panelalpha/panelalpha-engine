@@ -4,6 +4,9 @@ namespace App\Console\Commands\System;
 
 use App\System;
 use App\Lib\Deploy\CacheManager\BuiltImage;
+use App\Lib\Deploy\CacheManager\CacheRegistry;
+use App\Lib\Deploy\CacheManager\RegistryImageConfig;
+use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
@@ -11,7 +14,13 @@ use App\Lib\Deploy\Engine\EngineFactory;
 use Illuminate\Console\Command;
 
 /**
- * Warm the host image cache so no customer deploy pays a first-use penalty.
+ * Warm the host image cache so no customer deploy pays a first-use penalty,
+ * then publish it to panelalpha-cache-registry, where accounts pull from.
+ *
+ * `--refresh` (the weekly schedule) also rebuilds or re-pulls what is already
+ * here, one image at a time, so the registry never holds anything older than a
+ * week. The registry keeps only the catalogue: other tags are removed and
+ * garbage-collected, under a lock deploy-time pushes also take.
  *
  * What to warm and in what order comes from `config/core/images.yaml`. Disk
  * is the binding constraint on a VPS, so the plan is cut off by a budget and a
@@ -30,7 +39,8 @@ class PrewarmImages extends Command
         {--reserve= : Free space to leave untouched, e.g. 10G (default from images.yaml)}
         {--runtimes= : Comma-separated subset, e.g. php,node,static}
         {--keep-build-cache : Do not prune the buildx cache afterwards}
-        {--keep-unused : Never drop a current image, even when free space is under the reserve}';
+        {--keep-unused : Never drop a current image, even when free space is under the reserve}
+        {--refresh : Rebuild and re-pull catalogue images that are already present}';
 
     protected $description = 'Prebuild and pull the base images deploys need, within a disk budget';
 
@@ -87,24 +97,209 @@ class PrewarmImages extends Command
 
         $this->renderPlan($plan);
 
-        if ($plan['selected'] === []) {
-            $this->info('Nothing to warm.');
-
-            return 0;
-        }
         if ($this->option('dry-run')) {
             return 0;
         }
 
-        [$built, $failed] = $this->warmAll($system, $plan['selected'], $reserve, $budget);
+        [$built, $failed] = $plan['selected'] === []
+            ? [0, 0]
+            : $this->warmAll($system, $plan['selected'], $reserve, $budget);
+        if ($this->option('refresh')) {
+            $present = array_filter($plan['skipped'], static fn (array $i): bool => $i['reason'] === 'already present');
+            [$refreshed, $refreshFailed] = $this->refreshAll($system, array_values($present));
+            $built += $refreshed;
+            $failed += $refreshFailed;
+        }
 
         if (!$this->option('keep-build-cache')) {
             $this->pruneBuildCache($system);
         }
 
-        $this->info("Warmed {$built} image(s)" . ($failed > 0 ? ", {$failed} failed" : ''));
+        $this->info($built + $failed === 0
+            ? 'Nothing to warm.'
+            : "Warmed {$built} image(s)" . ($failed > 0 ? ", {$failed} failed" : ''));
+
+        $this->publish($system, $catalog);
+        // Trimming to a subset of the catalogue would delete everything else.
+        if ($runtimes === []) {
+            $this->trimRegistry($system, $catalog);
+        }
 
         return 0;
+    }
+
+    /**
+     * Rebuild or re-pull images the host already has, strictly one at a time,
+     * and drop the image each one replaced.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return array{int, int} refreshed and failed
+     */
+    private function refreshAll(System $system, array $items): array
+    {
+        $done = 0;
+        $failed = 0;
+        foreach ($items as $item) {
+            $ref = (string) $item['ref'];
+            $before = $this->imageId($system, $ref);
+            $this->line("↻ {$item['kind']} {$ref}");
+            $started = microtime(true);
+            if (!$this->warmOne($system, $item, true)) {
+                $failed++;
+                $this->warn('  refresh failed, keeping the current image');
+                continue;
+            }
+            $done++;
+            $after = $this->imageId($system, $ref);
+            $changed = $before !== null && $after !== null && $before !== $after;
+            if ($changed) {
+                try {
+                    $system->exec(['sudo', 'docker', 'rmi', $before], [], 120);
+                } catch (\Exception $e) {
+                    // Still in use by a container; the next prune gets it.
+                }
+            }
+            $this->info(sprintf(
+                '  %s in %ds',
+                $changed ? 'updated' : 'unchanged',
+                (int) round(microtime(true) - $started)
+            ));
+        }
+
+        return [$done, $failed];
+    }
+
+    private function imageId(System $system, string $ref): ?string
+    {
+        try {
+            $id = trim((string) $system->exec(['sudo', 'docker', 'image', 'inspect', '-f', '{{.Id}}', '--', $ref], [], 60));
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        return $id !== '' ? $id : null;
+    }
+
+    /**
+     * Push every catalogue image the host has to the cache registry, where
+     * accounts pull it from without asking the host.
+     *
+     * @param list<array<string, mixed>> $catalog
+     */
+    private function publish(System $system, array $catalog): void
+    {
+        if (!$this->registryRunning($system)) {
+            $this->warn('panelalpha-cache-registry is not running; nothing published.');
+
+            return;
+        }
+
+        $have = array_flip($this->presentImages($system));
+        $store = EngineFactory::default()->images();
+        $published = 0;
+        foreach ($catalog as $item) {
+            $ref = (string) $item['ref'];
+            if (!isset($have[$ref])) {
+                continue;
+            }
+            try {
+                $system->exec($store->hostPublishCommand($ref), [], 1800);
+                $published++;
+            } catch (\Exception $e) {
+                $this->warn("Could not publish {$ref}: " . trim($e->getMessage()));
+            }
+        }
+
+        $this->info("Published {$published} image(s) to the cache registry");
+    }
+
+    /**
+     * Remove every registry tag outside the catalogue, then garbage-collect,
+     * which also frees the layers a refresh left behind under a re-pushed tag.
+     *
+     * Holds the push lock exclusive: an upload's layers belong to no manifest
+     * until it finishes, and a GC in between deletes them.
+     *
+     * @param list<array<string, mixed>> $catalog
+     */
+    private function trimRegistry(System $system, array $catalog): void
+    {
+        if (!$this->registryRunning($system)) {
+            return;
+        }
+
+        $path = DindImageStore::PUSH_LOCK;
+        if (!file_exists($path)) {
+            @touch($path);
+        }
+        $lock = @fopen($path, 'r');
+        if ($lock === false || !flock($lock, LOCK_EX)) {
+            $this->warn("Could not lock {$path}; leaving the cache registry as it is.");
+
+            return;
+        }
+
+        try {
+            $registry = new CacheRegistry();
+            $refs = $registry->refs();
+            if ($refs === null) {
+                $this->warn('Could not list the cache registry; leaving it as it is.');
+
+                return;
+            }
+
+            $digests = [];
+            foreach ($refs as $ref) {
+                $digests[$ref] = $registry->digest($ref);
+            }
+            $keep = array_map(static fn (array $item): string => (string) $item['ref'], $catalog);
+            foreach (CacheRegistry::unwanted($digests, $keep) as $ref) {
+                $deleted = $registry->delete($ref, (string) $digests[$ref]);
+                $this->line(($deleted ? 'removed from the cache registry: ' : 'could not remove: ') . $ref);
+            }
+
+            $before = $this->registryBytes($system);
+            $system->exec(DindImageStore::garbageCollectArgv(), [], 1800);
+            $after = $this->registryBytes($system);
+            $this->info(sprintf(
+                'Cache registry garbage-collected: %s → %s',
+                HostPrewarmPlan::formatBytes($before),
+                HostPrewarmPlan::formatBytes($after)
+            ));
+        } catch (\Exception $e) {
+            $this->warn('Cache registry garbage-collect failed: ' . trim($e->getMessage()));
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+
+    private function registryRunning(System $system): bool
+    {
+        try {
+            return trim((string) $system->exec(
+                ['sudo', 'docker', 'inspect', '-f', '{{.State.Running}}', DindImageStore::CACHE_REGISTRY_CONTAINER],
+                [],
+                30
+            )) === 'true';
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    private function registryBytes(System $system): ?int
+    {
+        try {
+            $out = (string) $system->exec(
+                ['sudo', 'docker', 'exec', DindImageStore::CACHE_REGISTRY_CONTAINER, 'du', '-sk', '/var/lib/registry'],
+                [],
+                300
+            );
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        return is_numeric($kb = strtok($out, "\t ")) ? (int) $kb * 1024 : null;
     }
 
     /**
@@ -200,7 +395,8 @@ class PrewarmImages extends Command
     /**
      * What each image the plan might warm is expected to cost, keyed by ref.
      *
-     * Two measurements, never an estimate. A pull is asked of the registry.
+     * Two measurements, never an estimate. A pull is asked of our registries,
+     * then of its own.
      * A build has no manifest until it exists, so it is priced at whatever an
      * earlier image of the same repository actually took on this host -- a
      * previous PHP base under an older recipe date is the same image with a
@@ -217,6 +413,7 @@ class PrewarmImages extends Command
     {
         $have = array_flip($present);
         $onDisk = $this->presentImageSizes($system, $present);
+        $registries = new RegistryImageConfig();
         $sizes = [];
         foreach ($catalog as $item) {
             $ref = (string) $item['ref'];
@@ -230,22 +427,29 @@ class PrewarmImages extends Command
                 }
                 continue;
             }
-            try {
-                $out = $system->exec(
-                    ['sudo', 'docker', 'manifest', 'inspect', '--verbose', $ref],
-                    [],
-                    60
-                );
-            } catch (\Exception $e) {
-                continue;
-            }
-            $bytes = ImageTransfer::parseManifestSize(is_string($out) ? $out : '');
+            $bytes = $registries->downloadBytes($ref) ?? $this->inspectedSize($system, $ref);
             if ($bytes !== null) {
                 $sizes[$ref] = $bytes;
             }
         }
 
         return $sizes;
+    }
+
+    /**
+     * Asked of the image's own registry by the docker CLI in core, which the
+     * host daemon's mirror never sees: anonymous for Docker Hub. Only for what
+     * neither of our registries could answer, e.g. a ghcr.io image not yet cached.
+     */
+    private function inspectedSize(System $system, string $ref): ?int
+    {
+        try {
+            $out = $system->exec(['sudo', 'docker', 'manifest', 'inspect', '--verbose', $ref], [], 60);
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        return ImageTransfer::parseManifestSize(is_string($out) ? $out : '');
     }
 
     /**
@@ -274,7 +478,7 @@ class PrewarmImages extends Command
     /**
      * @param array<string, mixed> $item
      */
-    private function warmOne(System $system, array $item): bool
+    private function warmOne(System $system, array $item, bool $refresh = false): bool
     {
         $ref = (string) $item['ref'];
 
@@ -286,7 +490,7 @@ class PrewarmImages extends Command
                     return false;
                 }
                 $system->exec(
-                    EngineFactory::default()->images()->hostBuildCommand($ref, $dockerfile),
+                    EngineFactory::default()->images()->hostBuildCommand($ref, $dockerfile, $refresh),
                     [],
                     2400
                 );

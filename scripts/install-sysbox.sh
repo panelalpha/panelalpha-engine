@@ -91,6 +91,47 @@ ensure_time_namespaces_disabled() {
     fi
 }
 
+# Send the host daemon's Docker Hub pulls through registry-proxy, like every
+# account daemon's: prewarm, shared base builds and host compiles then pull under
+# the proxy's REGISTRY_PROXY_USERNAME login, not anonymously from the host IP.
+# dockerd reloads registry-mirrors on SIGHUP, so nothing restarts, and with the
+# proxy down it falls straight through to Docker Hub. Empty stops adding it but
+# does not remove one already set: a reload keeps the running value until the
+# file says "registry-mirrors": [] or dockerd restarts.
+PANELALPHA_REGISTRY_MIRROR="${PANELALPHA_REGISTRY_MIRROR-http://127.0.0.1:5001}"
+
+ensure_registry_mirror() {
+    local daemon_json="/etc/docker/daemon.json" tmp
+    [ -n "$PANELALPHA_REGISTRY_MIRROR" ] || { log_info "Registry mirror disabled (PANELALPHA_REGISTRY_MIRROR is empty)"; return 0; }
+    command -v jq >/dev/null 2>&1 || { log_warn "jq is missing; not setting the registry mirror"; return 0; }
+    [ -s "$daemon_json" ] || echo "{}" > "$daemon_json"
+    if ! jq empty "$daemon_json" 2>/dev/null; then
+        log_warn "$daemon_json is not valid JSON; not setting the registry mirror"
+        return 0
+    fi
+
+    tmp="$(mktemp)"
+    jq --arg m "$PANELALPHA_REGISTRY_MIRROR" \
+        '.["registry-mirrors"] = ((.["registry-mirrors"] // []) | if index($m) then . else [$m] + . end)' \
+        "$daemon_json" > "$tmp" || { rm -f "$tmp"; log_warn "Could not update $daemon_json"; return 0; }
+    if cmp -s "$tmp" "$daemon_json"; then
+        rm -f "$tmp"
+        log_info "Docker already mirrors Docker Hub through $PANELALPHA_REGISTRY_MIRROR"
+        return 0
+    fi
+    cp "$daemon_json" "${daemon_json}.bak.$(date +%s)" 2>/dev/null || true
+    cat "$tmp" > "$daemon_json" && rm -f "$tmp"
+
+    # Not pidof: on a sysbox host that also lists every account's inner dockerd.
+    systemctl reload docker 2>/dev/null || kill -HUP "$(cat /var/run/docker.pid 2>/dev/null)" 2>/dev/null || true
+    sleep 2
+    if docker info --format '{{json .RegistryConfig.Mirrors}}' 2>/dev/null | grep -qF "${PANELALPHA_REGISTRY_MIRROR%/}"; then
+        log_info "Docker Hub pulls on this host now go through $PANELALPHA_REGISTRY_MIRROR"
+    else
+        log_warn "Added $PANELALPHA_REGISTRY_MIRROR to $daemon_json, but dockerd has not picked it up yet; it will on its next restart"
+    fi
+}
+
 install_helper_script() {
     local name="$1"
     local dest="$2"
@@ -328,6 +369,7 @@ main() {
         "")
             check_dependencies
             install_sysbox
+            ensure_registry_mirror
             ;;
         *)
             echo "Unknown option: $1"

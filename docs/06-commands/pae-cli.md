@@ -18,11 +18,12 @@ Throughout this page, `{project}` means the project's name - the value shown as 
 
 | Command | What it does |
 |---|---|
-| `pae configure` | Opens the menu: address and certificate, assistant tokens, API tokens, the queue, telemetry. Pick one, do it, come back for the next. |
+| `pae configure` | Opens the menu: address and certificate, assistant tokens, API tokens, the queue, the Docker Hub login, telemetry. Pick one, do it, come back for the next. |
 | `pae configure address` | The address clients connect to, and the certificate on that name. |
 | `pae configure mcp-tokens` | Connect an assistant, or change what assistants may use. |
 | `pae configure api-tokens` | Mint a token for your own software, and limit it to part of the API. |
 | `pae configure queue` | How many deploys, backups, or staging jobs run at once. A number from 1 to 32. |
+| `pae configure docker-hub` | The Docker Hub account image downloads go out under. |
 | `pae configure telemetry` | Whether reports are sent, and how much they carry. |
 | `pae configure --dry-run` | Any of the above. Shows what it would write, and writes nothing. |
 
@@ -251,6 +252,19 @@ Context: [Security](../05-capabilities/security.md).
 | `pae settings:get {name}` / `pae settings:set {name} {value}` | Reads and writes an engine setting. |
 
 Context: [Telemetry](../02-getting-started/what-is-collected.md).
+
+## Docker Hub login
+
+Every image download on your server goes to Docker Hub under one login. Without one, your server shares Docker Hub's anonymous limit with everything else on its address.
+
+| Command | What it does |
+|---|---|
+| `pae docker-hub:login` | Asks for a Docker Hub username and access token, checks them with Docker Hub, and starts using them. |
+| `echo "$TOKEN" \| pae docker-hub:login --username={name} --token-stdin` | The same from a script. The token never appears on the command line. |
+| `pae docker-hub:status` | Which login is in use, and how many downloads it has left this hour. |
+| `pae docker-hub:logout` | Goes back to anonymous downloads. |
+
+Create the token on Docker Hub under **Account settings → Personal access tokens**, with the **Public Repo Read-only** scope. If the token can read private repositories, `docker-hub:login` lists them and stops: every project on your server could download them. `--allow-private` saves it anyway.
 
 ## Advanced and server maintenance
 

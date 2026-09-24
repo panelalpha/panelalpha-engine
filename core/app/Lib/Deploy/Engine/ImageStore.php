@@ -23,19 +23,26 @@ interface ImageStore
      * COPYed in, so the Dockerfile is all the input there is. Must be
      * idempotent: a deploy calls it on every run.
      */
-    public function hostBuildCommand(string $tag, string $dockerfile): string;
+    public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false): string;
 
     /**
-     * Host store → account store, pulling to the host first if it is not
-     * there yet. One Hub round-trip for the whole box, not one per account.
+     * Push a host image to where accounts pull shared images from, so an
+     * account can have it without the host being asked again.
      */
-    public function importFromHostCommand(EngineAccount $account, string $image): string;
+    public function hostPublishCommand(string $image): string;
 
     /**
-     * Host store → account store for an image only the host can produce
-     * ({@see hostBuildCommand()}), where a registry pull would only 404.
+     * Host store → account store for an image the host holds, such as one
+     * {@see hostBuildCommand()} produced, where a registry pull would only 404.
      */
     public function loadFromHostCommand(EngineAccount $account, string $image): string;
+
+    /**
+     * Get one image into the account by whatever route works, printing one
+     * line that says which. $ours: built on the host, so it comes from there;
+     * otherwise from its own registry.
+     */
+    public function seedCommand(EngineAccount $account, string $image, bool $ours): string;
 
     /**
      * Seed several images at once, never more than $concurrency in flight.
@@ -64,13 +71,6 @@ interface ImageStore
     public function imageIdArgv(string $image): array;
 
     /**
-     * Inside the account: pull $image from its registry.
-     *
-     * @return list<string>
-     */
-    public function pullArgv(string $image): array;
-
-    /**
      * Inside the account: $image's declared ports as JSON, in the
      * `{"5432/tcp":{}}` shape {@see \App\Lib\Deploy\CacheManager\ImageTransfer::parseExposedPorts()}
      * reads.
@@ -86,18 +86,6 @@ interface ImageStore
      * @return list<string>
      */
     public function hostImageInspectArgv(string $image): array;
-
-    /**
-     * On the host: fetch $image into the host store.
-     *
-     * The host is the only place with unNATted access to a registry; a pull of
-     * a few hundred megabytes through an account's nested bridge does not
-     * reliably finish. Fetched once here, handed to every account that wants
-     * it.
-     *
-     * @return list<string>
-     */
-    public function hostPullArgv(string $image): array;
 
     /**
      * On the host: the same port metadata as {@see imageExposedPortsArgv()},

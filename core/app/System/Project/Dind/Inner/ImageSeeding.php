@@ -4,26 +4,24 @@ namespace App\System\Project\Dind\Inner;
 
 use App\System\Project\Dind\InnerDocker;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
+use App\Lib\Deploy\CacheManager\RegistryImageConfig;
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\RailpackCache;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Platform\Runtime\Images;
 
 /**
- * Getting images into the inner daemon, preferring the host over the registry.
+ * Getting images into the inner daemon before a build or `compose up` asks.
  *
- * Another account on this host has usually pulled the same tag already, so a
- * `docker save | docker load` across the boundary beats a Hub round-trip
- * through the inner daemon's nested NAT — and it is one pull for the whole
- * server rather than one per account.
- *
- * Nothing here is required for correctness: every path falls back to pulling,
- * and the seed that runs at account start is fire-and-forget precisely
- * because {@see ensure()} will cover anything it missed.
+ * Every route is a registry pull; {@see DindImageStore::seedCommand()} has the
+ * order. Nothing here is required for correctness: `compose up` pulls whatever
+ * is still missing.
  */
 class ImageSeeding
 {
     private const PARALLEL_SEED_TIMEOUT_SECONDS = 900;
+
+    private const SEED_TIMEOUT_SECONDS = 600;
 
     private InnerDocker $inner;
 
@@ -32,10 +30,7 @@ class ImageSeeding
         $this->inner = $inner;
     }
 
-    /**
-     * Ensure recipe base images are in the inner daemon. Prefer loading from
-     * the host cache (one Hub pull for the whole server) over nested pull.
-     */
+    /** Ensure recipe base images are in the inner daemon. */
     public function preloadFramework(?string $strategy = null, ?string $runtime = null): void
     {
         $images = Images::preloadImagesFor(
@@ -69,11 +64,7 @@ class ImageSeeding
         }
     }
 
-    /**
-     * Sidecars (mysql, redis, …) are otherwise pulled by `compose up` through
-     * the inner daemon's nested NAT. Another account on this host has usually
-     * pulled the same tag already, so save|load beats a Hub round-trip.
-     */
+    /** Sidecars (mysql, redis, …), before `compose up` pulls them one at a time. */
     public function preloadCompose(string $composePath): void
     {
         $images = $this->composeImages($composePath);
@@ -81,10 +72,8 @@ class ImageSeeding
             return;
         }
 
-        // Seeding is save|load, so several at once finish far sooner than one
-        // after another - but only where the host can take it. On a 2-core VPS
-        // already running the panel this resolves to 1 and behaves exactly as
-        // it did before; on a big machine it uses the room it has.
+        // Several at once finish far sooner than one after another, but only
+        // where the host can take it: on a 2-core VPS this resolves to 1.
         $concurrency = $this->seedConcurrency(count($images));
         if ($concurrency <= 1) {
             foreach ($images as $image) {
@@ -207,8 +196,8 @@ class ImageSeeding
      *
      * This is what lets an unfamiliar vendor image be recognised for what it
      * is: we may never have heard of myorg/our-postgres, but it still says
-     * 5432. Best-effort by design — an image that is not on the host yet
-     * simply yields nothing and the caller falls back to weaker evidence.
+     * 5432. From the host store when it holds the image, otherwise from the
+     * registries. Best-effort: nothing found means weaker evidence, not an error.
      *
      * @return list<int>
      */
@@ -225,7 +214,7 @@ class ImageSeeding
                 30
             );
         } catch (\Exception $e) {
-            return [];
+            return (new RegistryImageConfig())->exposedPorts($image);
         }
 
         return ImageTransfer::parseExposedPorts(is_string($output) ? $output : '');
@@ -236,64 +225,34 @@ class ImageSeeding
         if ($this->hasImage($image)) {
             return;
         }
-        $host = $this->inner->host();
 
-        // Ours, and never on a registry. Which images those are comes from the
-        // catalogue rather than from one builder's prefix, which only ever
-        // recognised PHP: a `panelalpha/ruby:*` tag went to the pull ladder
-        // below, 404'd, and ended at the nested pull this method exists to
-        // avoid.
+        // Ours, and never on a public registry: the cache registry, the host,
+        // or a rebuild. Which images those are comes from the catalogue.
         if (BuiltImage::isOurs($image)) {
-            if ($this->provideBuiltImage($image)) {
-                return;
+            if (!$this->provideBuiltImage($image)) {
+                $this->inner->host()->logInfo(
+                    "Base image {$image} is one of ours and is not on this host; continuing without it"
+                );
             }
 
-            // Every route from here is a registry that never published this
-            // tag, so stopping is the fast answer; the caller's fallback is the
-            // real one.
-            $host->logInfo(
-                "Base image {$image} is one of ours and is not on this host; "
-                . 'continuing without it'
-            );
-
             return;
         }
 
-        if ($this->importFromHost($image)) {
-            $host->logInfo("Loaded base image {$image} from host cache");
-
-            return;
-        }
-
-        // Not on the host either. Fetch it there, where the network is not
-        // behind the account's nested bridge, and hand it over the same way.
-        //
-        // Without this the fall-through below is the only route left, and a
-        // pull through the nested NAT does not reliably finish: a Go project
-        // pinning a runtime version nobody prewarmed sat on
-        // `golang:1.27-alpine: Pulling from library/golang` for 25 minutes and
-        // failed the deploy. The prewarm catalogue is a fixed list and the
-        // version a project asks for comes from its own go.mod, pom.xml or
-        // composer.json, so the two disagree routinely -- this is the path
-        // that makes the disagreement cost one host pull instead of a hang.
-        if ($this->pullOnHost($image) && $this->importFromHost($image)) {
-            $host->logInfo("Pulled base image {$image} on the host and loaded it");
-
-            return;
-        }
-
-        $host->logInfo("Pulling base image {$image}");
-        try {
-            $this->inner->dind()->shell()->exec($this->inner->imageStore()->pullArgv($image), [], 300);
-        } catch (\Exception $e) {
-            $host->failDeployIfDiskFull($e->getMessage());
-            $host->logInfo("Could not pre-pull {$image}: " . $e->getMessage());
-        }
+        $this->seed($image, false);
     }
 
     /**
-     * Get one of our own images into the account: from the host if it is
-     * there, by rebuilding it if we can, otherwise not at all.
+     * From the cache registry, or from the host through it. What a shared base
+     * tries before anything is built.
+     */
+    public function provideFromStores(string $image): bool
+    {
+        return $this->seed($image, true);
+    }
+
+    /**
+     * Get one of our own images into the account: from the registry or the
+     * host if either has it, by rebuilding it if we can, otherwise not at all.
      *
      * A variant tag is the "not at all" case. Its `-x…` suffix hashes the set
      * baked in on top, and a hash does not go backwards, so rebuilding from the
@@ -303,9 +262,7 @@ class ImageSeeding
      */
     private function provideBuiltImage(string $image): bool
     {
-        if ($this->importFromHost($image)) {
-            $this->inner->host()->logInfo("Loaded base image {$image} from host cache");
-
+        if ($this->seed($image, true)) {
             return true;
         }
 
@@ -326,27 +283,35 @@ class ImageSeeding
         };
     }
 
-    /**
-     * Pull into the host store. False on any failure -- the caller still has
-     * the in-account pull to fall back on, and a deploy that ends up slow is
-     * better than one that ends up refused.
-     */
-    private function pullOnHost(string $image): bool
+    /** Run the seed ladder for one image and log the line saying where it came from. */
+    private function seed(string $image, bool $ours): bool
     {
-        if (!ImageTransfer::isSafeImageRef($image)) {
-            return false;
-        }
+        $host = $this->inner->host();
+        // Opens the image_transfer span; the ladder's own line closes it.
+        $host->logInfo("Fetching base image {$image}");
         try {
-            $this->inner->dind()->system()->execOnHost(
-                $this->inner->imageStore()->hostPullArgv($image)
+            $output = $this->inner->dind()->system()->exec(
+                $this->inner->imageStore()->seedCommand(
+                    $this->inner->dind()->engineAccount(),
+                    $image,
+                    $ours
+                ),
+                [],
+                self::SEED_TIMEOUT_SECONDS
             );
-
-            return true;
         } catch (\Exception $e) {
-            $this->inner->host()->logInfo("Could not pull {$image} on the host: " . $e->getMessage());
+            $host->failDeployIfDiskFull($e->getMessage());
+            $host->logInfo("Could not get {$image} into the account: " . trim($e->getMessage()));
 
             return false;
         }
+
+        $line = trim((string) $output);
+        if ($line !== '') {
+            $host->logInfo($line);
+        }
+
+        return $this->hasImage($image);
     }
 
     public function hasImage(string $image): bool
@@ -360,28 +325,6 @@ class ImageSeeding
 
             return $id !== '';
         } catch (\Exception $e) {
-            return false;
-        }
-    }
-
-    private function importFromHost(string $image): bool
-    {
-        $host = $this->inner->host();
-        try {
-            $this->inner->dind()->system()->exec(
-                $this->inner->imageStore()->importFromHostCommand(
-                    $this->inner->dind()->engineAccount(),
-                    $image
-                ),
-                [],
-                300
-            );
-
-            return $this->hasImage($image);
-        } catch (\Exception $e) {
-            $host->failDeployIfDiskFull($e->getMessage());
-            $host->logInfo("Host import of {$image} failed: " . $e->getMessage());
-
             return false;
         }
     }

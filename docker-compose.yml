@@ -232,25 +232,23 @@ services:
       - sites-db
     mem_limit: ${MEM_LIMIT_SITES_PHPMYADMIN:-${MEM_LIMIT_PHPMYADMIN_USERS:-3G}}
     memswap_limit: ${MEMSWAP_LIMIT_SITES_PHPMYADMIN:-${MEMSWAP_LIMIT_PHPMYADMIN_USERS:-0}}
-  # Optional. A local registry used to move base images into account daemons:
-  # the host pushes, the account pulls, and `pull` fetches only the layers the
-  # account is missing while `docker save` streams all of them. Measured on a
-  # 1.0GB base: no difference into an empty account (56s against 57s), 1s
-  # against 17s for an image sharing layers with one already there.
-  #
-  # Nothing requires it. Without this container every transfer falls back to
-  # `docker save | docker load`, which is slower only where layers overlap --
-  # a second PHP minor, a variant beside a plain base, a redeploy.
+  # Required. The only way images reach account daemons besides their own
+  # registries: the host pushes what it built or holds, the account pulls,
+  # fetching only the layers it is missing. There is no `docker save | load`
+  # fallback any more (#156), so this is not behind a profile.
   #
   # The container name is load-bearing: every account daemon is created with
   # `panelalpha-cache-registry:5000` in its `insecure-registries`, and that is
   # the name DindImageStore probes and pushes to.
   cache-registry:
-    profiles: ["cache-registry", "full"]
-    image: registry:2
+    # Same pin as registry-proxy. 3.x keeps the storage layout, so 2.x data carries over.
+    image: registry:3.1.1
     pull_policy: missing
     container_name: panelalpha-cache-registry
     restart: unless-stopped
+    environment:
+      # The stock 3.x config logs at debug.
+      REGISTRY_LOG_LEVEL: ${CACHE_REGISTRY_LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:5000:5000"
     volumes:

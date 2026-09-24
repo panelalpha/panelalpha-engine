@@ -1,20 +1,10 @@
 set -u
-COMPOSE={{ compose }}
 MAX={{ concurrency }}
-seed() {
-  img="$1"
-  if sudo docker compose -f "$COMPOSE" exec -T {{ service }} docker image inspect -- "$img" >/dev/null 2>&1; then
-    return 0
-  fi
-  sudo docker image inspect -- "$img" >/dev/null 2>&1 || sudo docker pull -- "$img" >/dev/null 2>&1 || return 0
-  if sudo docker save -- "$img" | sudo docker compose -f "$COMPOSE" exec -T {{ service }} docker load >/dev/null 2>&1; then
-    echo "Loaded base image $img from host cache"
-  fi
-}
-for img in {{ images }}; do
+# One DindImageStore::seedCommand() per image; each prints where its image came from.
+for cmd in {{ commands }}; do
   while [ "$(jobs -rp | wc -l)" -ge "$MAX" ]; do
     wait -n 2>/dev/null || break
   done
-  seed "$img" &
+  bash -c "$cmd" &
 done
 wait

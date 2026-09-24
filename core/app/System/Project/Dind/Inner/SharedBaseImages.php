@@ -4,6 +4,7 @@ namespace App\System\Project\Dind\Inner;
 
 use App\System\Project\Dind\InnerDocker;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
+use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\CacheManager\PythonBaseImage;
 use App\Lib\Deploy\CacheManager\RubyBaseImage;
@@ -15,8 +16,8 @@ use App\Lib\Deploy\Telemetry\Telemetry;
  *
  * A PHP image with the standard extension set already compiled, or a Ruby
  * image with the apt packages native gems need already installed. Building
- * one costs minutes; loading it into an account costs about two seconds, so
- * the whole design is about making sure nobody waits for the build.
+ * one costs minutes; pulling it from the cache registry costs seconds, so the
+ * whole design is about making sure nobody waits for the build.
  *
  * The degradation is deliberately one step at a time. A variant the host has
  * never built is queued for the background and *this* deploy falls back to
@@ -95,7 +96,7 @@ class SharedBaseImages
         if ($tag === null || !ImageTransfer::isSafeImageRef($tag)) {
             return null;
         }
-        if ($this->inner->seeding()->hasImage($tag)) {
+        if ($this->inner->seeding()->hasImage($tag) || $this->inner->seeding()->provideFromStores($tag)) {
             return $tag;
         }
 
@@ -143,7 +144,7 @@ class SharedBaseImages
         if ($tag === null || !ImageTransfer::isSafeImageRef($tag)) {
             return null;
         }
-        if ($this->inner->seeding()->hasImage($tag)) {
+        if ($this->inner->seeding()->hasImage($tag) || $this->inner->seeding()->provideFromStores($tag)) {
             return $tag;
         }
 
@@ -200,7 +201,7 @@ class SharedBaseImages
         if (!ImageTransfer::isSafeImageRef($tag)) {
             return false;
         }
-        if ($this->inner->seeding()->hasImage($tag)) {
+        if ($this->inner->seeding()->hasImage($tag) || $this->inner->seeding()->provideFromStores($tag)) {
             return true;
         }
 
@@ -238,6 +239,14 @@ class SharedBaseImages
         } catch (\Exception $e) {
             $host = $this->inner->host();
             $host->failDeployIfDiskFull($e->getMessage());
+            // The stock-image fallback below cannot serve a PHP app any more, and the
+            // registry is the only way in: fail with the cause, not a later side effect.
+            if (str_contains($e->getMessage(), DindImageStore::REGISTRY_DOWN)) {
+                throw new \RuntimeException(
+                    'The image cache (panelalpha-cache-registry) is not running, and a PHP deploy '
+                    . 'cannot get its base image without it. Start it with `docker compose up -d cache-registry`.'
+                );
+            }
             $host->logInfo(
                 'Shared PHP base image unavailable, compiling extensions in the account: ' . $e->getMessage()
             );
@@ -263,8 +272,8 @@ class SharedBaseImages
     }
 
     /**
-     * Build on the host, then load into the account — the path taken when the
-     * host already has the image, so both halves are usually near-instant.
+     * Build on the host, then push it through the cache registry into the
+     * account. Only reached once neither the registry nor the host had it.
      *
      * Throws rather than reporting, because the two callers answer a failure
      * differently: PHP has a stock image to fall back to and a disk-full to
@@ -283,10 +292,7 @@ class SharedBaseImages
         );
     }
 
-    /**
-     * Does the *host* already have this image, i.e. is providing it to the
-     * account a ~2s save|load rather than a multi-minute compile?
-     */
+    /** Does the *host* already have this image, i.e. is providing it a push rather than a compile? */
     private function hostHasImage(string $image): bool
     {
         if (!ImageTransfer::isSafeImageRef($image)) {

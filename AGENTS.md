@@ -745,12 +745,25 @@ read 95.9s and `start_to_answer` 22.1s, when the truth is 115.1s and 2.9s.
 Writing and unpacking a 1.36GB image is not bookkeeping. Any BuildKit step is
 counted now, bracketed or not; only `[internal]` ones are dropped.
 
-### Transferring base images: registry vs `save | load`, and what baking costs
+### Transferring base images: registries only, and what baking costs
 
-`DindImageStore::loadFromHostCommand()` pushes the image to the registry from
-the **host** and pulls it inside the **account**, falling back to
-`docker save | docker load` when the registry is unreachable **or** when any
-step of the registry path fails.
+There is no `docker save | docker load` any more: it copied incomplete
+containerd-store images without complaint (#156, #229). `DindImageStore::seedCommand()`
+is the whole ladder, used by `ensure()` and the parallel compose seed alike:
+account already has it → `panelalpha-cache-registry` → then, for **our** images
+only, the host that built it (push, then pull); for public images, the image's
+own registry (Docker Hub through `panelalpha-registry-proxy`). A public image is
+never taken from the host's copy, and the host no longer pulls anything on a
+deploy's behalf. So cache-registry holds the prewarmed catalogue, which prewarm
+keeps, plus our images built on demand by a deploy, which the weekly trim
+removes.
+
+**Check the registry through the daemon, never over the network.** Until
+2026-09 the probe was `curl 127.0.0.1:5000`, run by `System::exec()` inside
+the core container, where that is core's own loopback. It failed on every real
+install and nothing ever reached the registry; the numbers below came from the
+dind-test harness, which runs on the host and so never saw it. The probe is now
+`docker inspect` of the container.
 
 **The two ends address it differently and must.** The host pushes to
 `127.0.0.1:5000`; the account pulls `panelalpha-cache-registry:5000`.
@@ -762,8 +775,12 @@ and every transfer silently took `save | load` while the registry sat there
 looking installed. Loopback needs no daemon config — docker treats 127.0.0.0/8
 as insecure by default.
 
-It is a compose service now, `profiles: ["cache-registry", "full"]`, so an
-install running the full profile has it.
+It is a required compose service, behind no profile: a PHP base exists on no
+public registry, so without `cache-registry` it has no way into an account.
+
+Measured on 10.10.10.25 (2026-09-24, DokuWiki, 1.09GB PHP base, empty account),
+just before `save | load` was removed: `save | load` 21s, registry first push
+17s, already pushed 15s; `node:22` 11s against 10s.
 
 Measured on 178.104.84.45, 984MB and 989MB PHP bases, into a real account:
 
@@ -784,12 +801,30 @@ Two different PHP minors share only the Debian base; the PHP build and the
 extension layers are most of the gigabyte and are unique to each. The last row
 is the mechanism at its limit: total overlap, and `save` still streams 984MB.
 
-Nothing pre-populates the registry. `system:image:prewarm` builds and pulls onto
-the host and never pushes; the registry gains an image as a side effect of the
-first account that needs it, which is why the middle column exists. Pushing at
-prewarm time would make every account pay the right-hand column, at the cost of
-registry disk sooner -- the volume is ~479MB for two bases, so each base is
-stored twice on the host.
+`system:image:prewarm` fills the registry: after warming the host it pushes
+every catalogue image the host holds. The weekly schedule runs it with
+`--refresh`, which also rebuilds (`docker build --pull`) and re-pulls what is
+already there, strictly one image at a time, so nothing in the registry is more
+than a week old. Accounts that already hold an image keep it; only new pulls see
+the refresh. It then removes every registry tag outside the catalogue (never
+one sharing a digest with a kept tag) and runs `garbage-collect
+--delete-untagged`, which also frees the layers a refresh left under a
+re-pushed tag. Both hold `/tmp/panelalpha-cache-registry.lock` exclusive in the
+core container; every deploy-time push holds it shared, because a GC during an
+upload deletes that upload's layers. `--runtimes=` skips the trim, since a
+subset of the catalogue would delete the rest.
+
+Measured 2026-09-24 on registry 3.1.1: `garbage-collect --delete-untagged`
+keeps an OCI index's platform manifest and attestation, and the image still
+pulls and runs. The Docker Hub limit on these hosts is **100 per hour per
+egress IP** (`ratelimit-limit: 100;w=3600`), shared by every machine behind the
+office NAT, and registry-proxy has no credentials there. A morning of test
+deploys plus one `--dry-run` ran it to 0: the planner used to size each pull
+item with `docker manifest inspect`, which runs in core's CLI and goes to Hub
+anonymously, around the host daemon's mirror. It now asks cache-registry, then
+registry-proxy (`RegistryImageConfig::downloadBytes()`), and falls back to
+`docker manifest inspect` only for what neither answers, such as an uncached
+ghcr.io image. Sizes are byte-identical; the dry run went from >2 min to 17s.
 
 #### Baking extensions into the base is not free
 

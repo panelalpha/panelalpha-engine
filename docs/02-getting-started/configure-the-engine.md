@@ -1,6 +1,6 @@
 # Configure the engine
 
-`pae configure` on your VPS walks through the engine's own settings: the address assistants use, what those assistants are allowed to do, tokens for your own software, how many jobs run at once, and what the engine reports about itself. You pick one area, change it, and come back for the next.
+`pae configure` on your VPS walks through the engine's own settings: the address assistants use, what those assistants are allowed to do, tokens for your own software, how many jobs run at once, the Docker Hub login image downloads go out under, and what the engine reports about itself. You pick one area, change it, and come back for the next.
 
 ```bash
 pae configure
@@ -18,6 +18,7 @@ When you leave, the wizard prints what it wrote. If you changed nothing, it says
 - **MCP tokens.** Connect an assistant, decide which commands every assistant is offered, or give one assistant fewer of those. A token can only receive commands the engine is offering to everyone.
 - **API tokens.** A token for software you run yourself, not for an assistant. You can limit which parts of the engine that token may call, or revoke it.
 - **Queue.** How many deploys, backups, or staging copies run at the same time. They share one queue. The wizard asks for a number from 1 to 32 and applies it.
+- **Docker Hub.** The Docker Hub account every image download on this server goes out under. Without one, all projects share one anonymous limit for your server's address, and busy servers hit it: deploys then fail with "Docker Hub temporarily refused further downloads". Use a Docker Hub access token with the **Public Repo Read-only** scope. The wizard checks the token with Docker Hub, and warns you if it can read private repositories, because every project on this server could then download them.
 - **Telemetry.** Whether reports leave this server, how much a report carries, and whether bug reports are allowed. Recording a deploy on the server itself carries on either way: [Telemetry](what-is-collected.md).
 
 **Nothing more** closes the menu.
@@ -28,7 +29,7 @@ To open one area without the menu, name it:
 pae configure mcp-tokens
 ```
 
-The names are `address`, `mcp-tokens`, `api-tokens`, `queue`, and `telemetry`. Add `--dry-run` to see what would be written and write nothing.
+The names are `address`, `mcp-tokens`, `api-tokens`, `queue`, `docker-hub`, and `telemetry`. Add `--dry-run` to see what would be written and write nothing.
 
 The wizard needs the terminal you have over SSH. It will not run from a script.
 

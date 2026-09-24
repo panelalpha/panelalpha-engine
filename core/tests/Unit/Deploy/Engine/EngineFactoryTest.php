@@ -100,17 +100,22 @@ final class FakeEngine implements ContainerEngine
     public function images(): ImageStore
     {
         return new class implements ImageStore {
-            public function hostBuildCommand(string $tag, string $dockerfile): string
+            public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false): string
             {
                 return 'buildah bud';
             }
 
-            public function importFromHostCommand(EngineAccount $account, string $image): string
+            public function hostPublishCommand(string $image): string
             {
                 return 'skopeo copy';
             }
 
             public function loadFromHostCommand(EngineAccount $account, string $image): string
+            {
+                return 'skopeo copy';
+            }
+
+            public function seedCommand(EngineAccount $account, string $image, bool $ours): string
             {
                 return 'skopeo copy';
             }
@@ -130,19 +135,9 @@ final class FakeEngine implements ContainerEngine
                 return ['podman', 'image', 'inspect', $image];
             }
 
-            public function pullArgv(string $image): array
-            {
-                return ['podman', 'pull', $image];
-            }
-
             public function imageExposedPortsArgv(string $image): array
             {
                 return ['podman', 'image', 'inspect', $image];
-            }
-
-            public function hostPullArgv(string $image): array
-            {
-                return ['podman', 'pull', $image];
             }
 
             public function hostImageInspectArgv(string $image): array

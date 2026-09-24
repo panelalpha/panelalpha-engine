@@ -61,9 +61,10 @@ class Kernel extends ConsoleKernel
         $schedule->command('ssl:project-cert:renew')->dailyAt('03:10')->withoutOverlapping();
         // Base images get pruned by disk-pressure reclaim and by account
         // teardown. Rebuild them off-hours so the cost never lands on a
-        // customer deploy; the command is budget-capped and a no-op when the
-        // cache is already warm.
-        $schedule->command('system:image:prewarm')->weeklyOn(0, '03:30')->withoutOverlapping();
+        // customer deploy. --refresh also rebuilds and re-pulls what is there,
+        // one image at a time, and republishes it to the cache registry, so
+        // what accounts pull is never more than a week old.
+        $schedule->command('system:image:prewarm --refresh')->weeklyOn(0, '03:30')->withoutOverlapping();
         // Host build caches are worth nothing to a project that is not
         // deploying -- nothing mounts them into a running application -- and
         // until this ran, nothing ever reclaimed them from one that had

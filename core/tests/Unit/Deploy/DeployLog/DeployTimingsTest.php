@@ -176,6 +176,24 @@ class DeployTimingsTest extends TestCase
         );
     }
 
+    public function test_registry_pulls_are_image_transfer(): void
+    {
+        // The lines DindImageStore::seedCommand() prints since save|load went.
+        $phases = DeployTimings::summarize(
+            ['started_at' => 0, 'finished_at' => 60],
+            [
+                ['ts' => 0, 'msg' => 'Starting stage: running'],
+                ['ts' => 1, 'msg' => 'Fetching base image node:22-bookworm-slim'],
+                ['ts' => 2, 'msg' => 'Pulled base image node:22-bookworm-slim from the cache registry'],
+                ['ts' => 9, 'msg' => 'Loaded base image panelalpha/php:8.2-pa1 from the host through the cache registry'],
+                ['ts' => 14, 'msg' => 'Pulled base image redis:alpine'],
+                ['ts' => 20, 'msg' => 'Starting application (docker compose up -d)'],
+            ]
+        )['phases'];
+
+        $this->assertSame(13.0, array_column($phases, 'seconds', 'name')['image_transfer']);
+    }
+
     public function test_phases_absent_from_a_log_are_omitted_not_zeroed(): void
     {
         // A compose deploy pulls no base images and builds nothing. Reporting

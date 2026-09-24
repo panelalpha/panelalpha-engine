@@ -14,7 +14,7 @@ class ImageTransfer
     /** Absolute ceiling: past this the disk, not the CPU, is the bottleneck. */
     public const MAX_CONCURRENCY = 4;
 
-    /** Rough working set of one `docker save | docker load` stream. */
+    /** Rough working set of one image being pulled and unpacked into an account. */
     private const MB_PER_STREAM = 512;
 
     /** Stand-in load average when /proc is unreadable — forces sequential. */

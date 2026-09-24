@@ -3,6 +3,7 @@
 namespace App\Console\Wizard;
 
 use App\Console\Wizard\Sections\ApiTokensSection;
+use App\Console\Wizard\Sections\DockerHubSection;
 use App\Console\Wizard\Sections\EngineAddressSection;
 use App\Console\Wizard\Sections\McpTokensSection;
 use App\Console\Wizard\Sections\QueueSection;
@@ -22,6 +23,7 @@ class Wizard
         McpTokensSection::class,
         ApiTokensSection::class,
         QueueSection::class,
+        DockerHubSection::class,
         TelemetrySection::class,
     ];
 
