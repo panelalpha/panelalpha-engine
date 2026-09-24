@@ -60,7 +60,7 @@ These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit t
 
 | Value | What the assistant can do |
 |---|---|
-| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. |
+| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`csf_ui_credentials`, `system_exim_config_get`, `app_sso_login`) are not offered. |
 | `modify` | Create and change things, but not delete them. |
 | `full` | Everything, including deletion. **This is the default.** |
 

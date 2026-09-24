@@ -3,6 +3,9 @@
 namespace Tests\Unit\Mcp;
 
 use App\Mcp\ToolPolicy;
+use App\Mcp\Tools\Api\AppUsers\AppSsoLoginTool;
+use App\Mcp\Tools\Api\CSF\CsfUiCredentialsTool;
+use App\Mcp\Tools\Api\System\SystemEximConfigGetTool;
 use App\Mcp\Tools\Api\Deploy\SourceInspectTool;
 use App\Mcp\Tools\Api\Domains\DomainListTool;
 use App\Mcp\Tools\Api\Projects\ProjectDeleteTool;
@@ -261,6 +264,62 @@ class ToolPolicyTest extends TestCase
 
         foreach (['csf_rule_create', 'modsec_mode_set', 'ip_assign', 'tunnel_create'] as $on) {
             $this->assertContains($on, $names, "the default must expose {$on}");
+        }
+    }
+
+    private const CREDENTIAL_READS = [
+        CsfUiCredentialsTool::class,
+        SystemEximConfigGetTool::class,
+        AppSsoLoginTool::class,
+    ];
+
+    /**
+     * A GET that returns a password is a read by verb, but readonly means the
+     * assistant may look, not log in (#48 item 20).
+     */
+    public function test_readonly_withholds_the_reads_that_return_a_credential(): void
+    {
+        $policy = new ToolPolicy(['toolsets' => 'all', 'permission_mode' => 'readonly']);
+
+        foreach (self::CREDENTIAL_READS as $class) {
+            $this->assertSame('GET', $policy->verbOf($class));
+            $this->assertFalse($policy->permits($class), $class);
+            $this->assertSame([], $policy->filter([$class]), $class);
+            $this->assertSame('secret', $policy->accessOf($class));
+        }
+
+        // An ordinary read next to them is untouched.
+        $this->assertSame([DomainListTool::class], $policy->filter([DomainListTool::class]));
+    }
+
+    /** Naming one in MCP_TOOLS does not lift the ceiling either. */
+    public function test_naming_a_credential_read_does_not_get_it_past_readonly(): void
+    {
+        $policy = new ToolPolicy([
+            'toolsets' => 'engine',
+            'tools' => 'csf_ui_credentials,system_exim_config_get',
+            'permission_mode' => 'readonly',
+        ]);
+
+        $this->assertSame([], $policy->filter(self::CREDENTIAL_READS));
+    }
+
+    public function test_modify_and_full_keep_the_credential_reads(): void
+    {
+        foreach (['modify', 'full'] as $mode) {
+            $policy = new ToolPolicy(['toolsets' => 'all', 'permission_mode' => $mode]);
+
+            $this->assertSame(self::CREDENTIAL_READS, $policy->filter(self::CREDENTIAL_READS), $mode);
+        }
+    }
+
+    /** A renamed tool would otherwise drop off the list without a sound. */
+    public function test_every_listed_credential_tool_exists(): void
+    {
+        $names = array_map(fn (string $c): string => (new $c())->name(), $this->everyTool());
+
+        foreach (ToolPolicy::CREDENTIAL_TOOLS as $name) {
+            $this->assertContains($name, $names);
         }
     }
 

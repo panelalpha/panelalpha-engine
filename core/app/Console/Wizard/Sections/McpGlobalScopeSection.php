@@ -291,7 +291,7 @@ class McpGlobalScopeSection implements Section
             return $policy->accessOf($class)
                 // Worth saying on the row itself: ticking it here changes
                 // nothing until the ceiling is raised.
-                . ($policy->readsOnly($class) || $policy->filter([$class]) !== []
+                . ($policy->permits($class)
                     ? ''
                     : '  (above the ceiling)');
         }

@@ -33,6 +33,16 @@ class ToolPolicy
     ];
 
     /**
+     * Reads that hand out a live credential. They change nothing, but a
+     * readonly client may look, not log in, so these start at modify.
+     */
+    public const CREDENTIAL_TOOLS = [
+        'csf_ui_credentials',      // CSF_UI_PASSWORD
+        'system_exim_config_get',  // smarthost SMTP/SES/Mailchannels passwords, SendGrid token
+        'app_sso_login',           // redeems an SSO token into the app's admin session cookie
+    ];
+
+    /**
      * @param array<string, mixed> $config
      */
     public function __construct(private array $config = [])
@@ -167,7 +177,30 @@ class ToolPolicy
      */
     public function accessOf(string $class): string
     {
+        if ($this->revealsCredential($class)) {
+            return 'secret';
+        }
+
         return $this->readsOnly($class) ? 'read' : 'write';
+    }
+
+    /**
+     * @param class-string<Tool> $class
+     */
+    public function revealsCredential(string $class): bool
+    {
+        return in_array($this->nameOf($class), self::CREDENTIAL_TOOLS, true);
+    }
+
+    /**
+     * Whether this configuration's ceiling lets the tool through, whatever
+     * toolsets and denials then do with it.
+     *
+     * @param class-string<Tool> $class
+     */
+    public function permits(string $class): bool
+    {
+        return $this->permittedBy($this->mode(), $class);
     }
 
     /**
@@ -175,6 +208,10 @@ class ToolPolicy
      */
     private function permittedBy(string $mode, string $class): bool
     {
+        if ($this->revealsCredential($class)) {
+            return $mode !== self::MODE_READONLY;
+        }
+
         // A read is allowed in every mode, so a read-only POST is admitted by
         // readonly rather than being filtered out for the verb it had to use.
         return $this->readsOnly($class)

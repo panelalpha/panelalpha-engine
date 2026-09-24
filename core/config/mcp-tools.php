@@ -68,7 +68,10 @@ return [
     /*
     | The ceiling on what an enabled tool may do:
     |
-    |   readonly  only tools that read. Nothing can change server state.
+    |   readonly  only tools that read. Nothing can change server state, and
+    |             the reads that hand out a live credential (the CSF UI
+    |             password, the mail smarthost settings, app SSO) are held
+    |             back too -- ToolPolicy::CREDENTIAL_TOOLS.
     |   modify    reads, plus create and update. No deletes.
     |   full      everything, including deletes.
     |
