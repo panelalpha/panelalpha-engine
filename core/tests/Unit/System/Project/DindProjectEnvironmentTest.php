@@ -52,6 +52,27 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertFalse($model->usedCustomEnvVars());
     }
 
+    public function test_apply_comments_out_example_lines_compose_would_refuse(): void
+    {
+        // saltcorn: a .env.example meant to be `source`d (engine#135).
+        file_put_contents(
+            $this->projectDir . '/.env.example',
+            "unset DATABASE_URL SQLITE_FILEPATH\nexport SALTCORN_SESSION_SECRET='hrh64b45b3'\n"
+        );
+
+        $model = $this->dindModel(['env_vars' => ['EXTRA' => '1']]);
+        $this->dind($model)->applyProjectEnvVars();
+
+        foreach (['.env.default', '.env'] as $file) {
+            $contents = (string) file_get_contents($this->projectDir . '/' . $file);
+            $this->assertStringContainsString("# unset DATABASE_URL SQLITE_FILEPATH\n", $contents, $file);
+            $this->assertSame([], EnvFile::withoutComposeRejectedLines($contents)[1], $file);
+        }
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('hrh64b45b3', $env['SALTCORN_SESSION_SECRET']);
+        $this->assertSame('1', $env['EXTRA']);
+    }
+
     public function test_apply_merges_non_empty_overrides_onto_example_base(): void
     {
         file_put_contents($this->projectDir . '/.env.example', "APP_NAME=Demo\nAPP_KEY=\n");

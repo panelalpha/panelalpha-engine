@@ -7,6 +7,7 @@ use App\System\Project\Dind\Source\GitRepository;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\Compose\ComposeYaml;
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\Strategies;
@@ -82,6 +83,7 @@ class ProjectEnvironment
                     . implode(', ', $blanks)
                 );
             }
+            $baseContents = self::withoutComposeRejectedLines($baseContents, '.env.example', $logger);
             $source = '.env.example';
         }
 
@@ -422,6 +424,23 @@ class ProjectEnvironment
         return $blanks === [] ? [$contents, []] : [EnvFile::serialise($rows), $blanks];
     }
 
+    /**
+     * An example is copied into a file Compose parses strictly; a line meant
+     * for a shell (`unset A B`) would stop the stack, so it is commented out.
+     */
+    private static function withoutComposeRejectedLines(string $contents, string $name, ?DeployLogger $logger): string
+    {
+        [$contents, $lines] = EnvFile::withoutComposeRejectedLines($contents);
+        if ($lines !== []) {
+            $logger?->info(
+                "Commented out {$name} line(s) " . implode(', ', $lines)
+                . ': they are not KEY=VALUE, and Docker Compose refuses to read an env file that has them'
+            );
+        }
+
+        return $contents;
+    }
+
     private function materializeNestedEnvExamples(string $projectDir, ?string $chown): void
     {
         $system = $this->dind->system();
@@ -433,7 +452,11 @@ class ProjectEnvironment
             }
             $contents = $copy['example'] === ''
                 ? ''
-                : $fs->fileGetContents($copy['example']);
+                : self::withoutComposeRejectedLines(
+                    (string) $fs->fileGetContents($copy['example']),
+                    ltrim(substr($copy['example'], strlen($projectDir)), '/'),
+                    $logger
+                );
             $fs->filePutContents($copy['dest'], $contents, $chown, '644');
             $logger?->info(
                 $copy['example'] === ''

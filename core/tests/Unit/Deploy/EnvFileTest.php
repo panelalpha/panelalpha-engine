@@ -266,6 +266,39 @@ class EnvFileTest extends TestCase
         );
     }
 
+    public function test_shell_lines_compose_refuses_are_commented_out(): void
+    {
+        // saltcorn's .env.example, lines 20-22 and 26 (engine#135).
+        $example = "# stale values\n"
+            . "unset DATABASE_URL SQLITE_FILEPATH SALTCORN_DB_DRIVER SALTCORN_DEFAULT_SCHEMA\n"
+            . "unset PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE\n"
+            . "\n"
+            . "export SALTCORN_SESSION_SECRET='hrh64b45b3'\n"
+            . "A+B=1\n";
+
+        [$out, $lines] = EnvFile::withoutComposeRejectedLines($example);
+
+        $this->assertSame([2, 3, 6], $lines);
+        $this->assertSame(
+            "# stale values\n"
+            . "# unset DATABASE_URL SQLITE_FILEPATH SALTCORN_DB_DRIVER SALTCORN_DEFAULT_SCHEMA\n"
+            . "# unset PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE\n"
+            . "\n"
+            . "export SALTCORN_SESSION_SECRET='hrh64b45b3'\n"
+            . "# A+B=1\n",
+            $out
+        );
+    }
+
+    public function test_lines_compose_accepts_are_left_byte_for_byte(): void
+    {
+        // Every one of these was checked against `docker compose config`.
+        $valid = "foo.bar=1\nKEY: val\nBARE\nexport A=1\n  indented=1\nKEY = v\n1ABC=2\nA-B=1\nA[0]=1\n"
+            . "URL=http://x:1/y\nCERT=\"-----BEGIN\nnot a key line\n-----END\"\nAFTER=1\r\n";
+
+        $this->assertSame([$valid, []], EnvFile::withoutComposeRejectedLines($valid));
+    }
+
     private function removeDir(string $dir): void
     {
         if ($dir === '' || !is_dir($dir)) {

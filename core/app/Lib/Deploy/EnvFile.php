@@ -120,6 +120,49 @@ class EnvFile
         return self::serialise($rows);
     }
 
+    /**
+     * Comment out the lines Docker Compose's dotenv reader refuses. A
+     * `.env.example` written to be `source`d (saltcorn: `unset DATABASE_URL …`)
+     * otherwise stops `docker compose up` with "key cannot contain a space".
+     *
+     * @return array{0: string, 1: list<int>} contents, the 1-based lines commented out
+     */
+    public static function withoutComposeRejectedLines(string $contents): array
+    {
+        $lines = explode("\n", $contents);
+        $rejected = [];
+        $openQuote = null;
+        foreach ($lines as $i => $line) {
+            if ($openQuote !== null) {
+                // Inside a multi-line quoted value: Compose reads it as value, not keys.
+                if (preg_match('/(?<!\\\\)' . preg_quote($openQuote, '/') . '/', $line) === 1) {
+                    $openQuote = null;
+                }
+                continue;
+            }
+            $trimmed = trim($line);
+            if ($trimmed === '' || str_starts_with($trimmed, '#')) {
+                continue;
+            }
+            $statement = (string) preg_replace('/^export\s+/', '', $trimmed);
+            $parts = preg_split('/[=:]/', $statement, 2) ?: [$statement];
+            // Compose's own key alphabet: letters, digits, `_ . - [ ]`.
+            if (preg_match('/^[\p{L}\p{N}_.\-\[\]]+$/u', rtrim($parts[0])) !== 1) {
+                $lines[$i] = '# ' . $line;
+                $rejected[] = $i + 1;
+                continue;
+            }
+            $value = ltrim($parts[1] ?? '');
+            $quote = $value[0] ?? '';
+            if (($quote === '"' || $quote === "'")
+                && preg_match('/(?<!\\\\)' . preg_quote($quote, '/') . '/', substr($value, 1)) !== 1) {
+                $openQuote = $quote;
+            }
+        }
+
+        return $rejected === [] ? [$contents, []] : [implode("\n", $lines), $rejected];
+    }
+
     private static function unquote(string $raw): string
     {
         $value = $raw;
