@@ -22,8 +22,7 @@ class VaultSecretListCommand extends Command
 {
     protected $signature = 'vault:secret:list
                             {--type= : Only entries of this type}
-                            {--scope= : Only request or only global entries}
-                            {--all : Include expired entries (hidden by default)}';
+                            {--scope= : Only project or only global entries}';
 
     protected $description = 'List vault entries: id, type, purpose, scope, status and dates -- never the secret';
 
@@ -46,25 +45,22 @@ class VaultSecretListCommand extends Command
         /** @var list<SecretVaultEntry> $entries */
         $entries = $query->get()->all();
 
-        if (!$this->option('all')) {
-            $entries = array_values(array_filter($entries, fn (SecretVaultEntry $e) => !$e->expired()));
-        }
-
         if ($entries === []) {
-            $this->line($this->option('all') ? 'No vault entries.' : 'No live vault entries (--all includes expired ones).');
+            $this->line('No vault entries.');
 
             return self::SUCCESS;
         }
 
         $this->table(
-            ['id', 'type', 'purpose', 'scope', 'status', 'check', 'used', 'created', 'secret expires', 'link closes'],
+            ['ref', 'type', 'purpose', 'scope', 'project', 'status', 'check', 'used', 'created', 'expires', 'link closes'],
             array_map(fn (SecretVaultEntry $e) => [
-                $e->id,
+                $e->reference(),
                 $e->type,
                 // Truncated rather than wrapped: one row per entry keeps the
                 // table scannable, and the full text is in the API response.
                 $e->purpose === null ? '-' : Str::limit($e->purpose, 40),
                 $e->scope,
+                $e->project ?? '-',
                 $e->status(),
                 $e->verification['result'] ?? '-',
                 $e->use_count,

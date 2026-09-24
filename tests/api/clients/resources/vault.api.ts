@@ -7,12 +7,13 @@ import {
   type CreatedVaultSecret,
   type DeletedVaultSecret,
   type VaultSecretEntry,
+  type VaultSecretScope,
 } from '@/types';
 import { EngineApiBase } from '../engine-api-base';
 
 /**
  * Secret vault: a one-time browser handoff of a secret the API caller must not
- * relay. `create` mints a `vault:<ref>` plus the URL of the form the customer
+ * relay. `create` mints a `vault:<id>` plus the URL of the form the customer
  * pastes into; every other call reports status only, never the secret.
  */
 export class VaultApi extends EngineApiBase {
@@ -29,19 +30,29 @@ export class VaultApi extends EngineApiBase {
     return this.rawCall(response);
   }
 
-  async listVaultSecrets(type?: string): Promise<ApiListResponse<VaultSecretEntry>> {
-    const response = await this.api.get(
-      type ? `vault/secrets?type=${encodeURIComponent(type)}` : 'vault/secrets'
-    );
+  async listVaultSecrets(
+    type?: string,
+    scope?: VaultSecretScope
+  ): Promise<ApiListResponse<VaultSecretEntry>> {
+    const response = await this.api.get(VaultApi.listPath(type, scope));
     await this.assertStatus(response, 200);
     return response.json();
   }
 
-  async listVaultSecretsRaw(type?: string): Promise<{ status: number; body: any }> {
-    const response = await this.api.get(
-      type ? `vault/secrets?type=${encodeURIComponent(type)}` : 'vault/secrets'
-    );
+  async listVaultSecretsRaw(type?: string, scope?: string): Promise<{ status: number; body: any }> {
+    const response = await this.api.get(VaultApi.listPath(type, scope));
     return this.rawCall(response);
+  }
+
+  private static listPath(type?: string, scope?: string): string {
+    const query = new URLSearchParams();
+    if (type) {
+      query.set('type', type);
+    }
+    if (scope) {
+      query.set('scope', scope);
+    }
+    return query.size ? `vault/secrets?${query.toString()}` : 'vault/secrets';
   }
 
   /** `ref` is accepted both as `vault:<id>` and as the bare `<id>`. */

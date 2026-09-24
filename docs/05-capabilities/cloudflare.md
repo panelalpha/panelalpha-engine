@@ -36,7 +36,7 @@ You do three things:
 
    The assistant sends you a link on the engine. Open it, paste the token, select **Save secret**, then tell the assistant you are done. The token is never shown again, and the link lasts one hour. When that token is saved onto the project, Cloudflare is asked whether it works. A refusal means the token is wrong or missing a permission.
 
-   To keep one Cloudflare token for every new project, instead of pasting it again on each one: [One token for the whole engine](connecting-with-git.md#one-token-for-the-whole-engine).
+   To paste one Cloudflare token once and use it on several projects: [A token shared by several projects](connecting-with-git.md#a-token-shared-by-several-projects).
 
    <img src="../assets/connect-cloudflare.png" alt="Connect Cloudflare page: paste the API token and select Save secret" style="max-width: 100%; height: auto;">
 

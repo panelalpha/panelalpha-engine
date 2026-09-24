@@ -14,8 +14,8 @@ use Illuminate\Validation\ValidationException;
  * The rule has to hold at both doors. The form is the obvious one, but it is
  * a POST -- anyone holding the link can repeat it without ever loading the
  * page -- so refusing to *render* the form is not the same as refusing the
- * write. The other door is the mint: re-opening a paste link over a stored
- * secret would be an override by another name.
+ * write. Minting never touches a stored entry either: a new link is a new
+ * entry with its own `vault:<id>`.
  *
  * Why it matters beyond tidiness: the secret can never be read back, so an
  * overwrite is undetectable after the fact. `use_count` and `last_used_at`
@@ -57,6 +57,13 @@ class SecretIsFinalTest extends VaultTestCase
         $this->assertStringContainsString('cannot be changed from this page afterwards', $content);
     }
 
+    public function test_the_page_says_which_project_the_secret_is_for(): void
+    {
+        [, $ref] = $this->projectEntry(project: 'shop');
+
+        $this->get('/vault/' . $ref)->assertSee('Saved for project shop only.');
+    }
+
     public function test_a_pending_entry_still_accepts_its_first_paste(): void
     {
         [$entry, $ref] = $this->entry();
@@ -66,47 +73,28 @@ class SecretIsFinalTest extends VaultTestCase
         $this->assertSame('the-only-value', $entry->refresh()->revealSecret());
     }
 
-    public function test_minting_over_a_stored_global_is_refused(): void
+    public function test_minting_another_global_of_a_type_leaves_the_stored_one_alone(): void
     {
-        $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_engine');
+        [$stored] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_shop_org');
 
-        try {
-            $this->mint(['type' => 'git_token', 'scope' => 'global']);
-            $this->fail('A new paste link over a stored global is an override by another name.');
-        } catch (ValidationException $e) {
-            $this->assertStringContainsString('already set', $e->errors()['scope'][0]);
-            // The message has to say how to proceed, or the caller is stuck.
-            $this->assertStringContainsString("global:git_token", $e->errors()['scope'][0]);
-        }
+        $data = $this->mint(['type' => 'git_token', 'scope' => 'global', 'purpose' => 'Blog org']);
 
-        $this->assertSame(
-            'ghp_engine',
-            SecretVaultEntry::globalFor(SecretVaultEntry::TYPE_GIT_TOKEN)?->revealSecret()
-        );
-    }
-
-    public function test_re_minting_an_unpasted_global_is_still_allowed(): void
-    {
-        // Nothing to override: the first link was never used, and forcing a
-        // delete before a retry would be pure friction.
-        [$entry] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN);
-        $entry->forceFill(['link_expires_at' => now()->subHour()])->save();
-
-        $data = $this->mint(['type' => 'git_token', 'scope' => 'global']);
-
-        $this->assertSame('global', $data['scope']);
-        $this->assertSame(1, SecretVaultEntry::query()->where('scope', 'global')->count());
-    }
-
-    public function test_deleting_then_minting_is_how_a_global_is_replaced(): void
-    {
-        $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_old');
-
-        (new SecretVaultController())->destroy('global:git_token');
-        $data = $this->mint(['type' => 'git_token', 'scope' => 'global']);
-
+        // Several globals per type, told apart by purpose: a new one is a new entry.
+        $this->assertNotSame($stored->reference(), $data['ref']);
         $this->assertSame('pending', $data['status']);
-        $this->assertNull(SecretVaultEntry::globalFor(SecretVaultEntry::TYPE_GIT_TOKEN)?->revealSecret());
+        $this->assertSame('ghp_shop_org', $stored->refresh()->revealSecret());
+        $this->assertSame(2, SecretVaultEntry::query()->where('scope', 'global')->count());
+    }
+
+    public function test_deleting_then_minting_is_how_a_secret_is_replaced(): void
+    {
+        [$old] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_old');
+
+        (new SecretVaultController())->destroy($old->reference());
+        $data = $this->mint(['type' => 'git_token', 'scope' => 'global']);
+
+        $this->assertNull(SecretVaultEntry::query()->find($old->id));
+        $this->assertSame('pending', $data['status']);
     }
 
     /**

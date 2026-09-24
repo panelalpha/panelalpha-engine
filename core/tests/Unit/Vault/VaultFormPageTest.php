@@ -72,7 +72,7 @@ class VaultFormPageTest extends VaultTestCase
     {
         [, $ref] = $this->entry([
             'type' => SecretVaultEntry::TYPE_GIT_TOKEN,
-            'expires_at' => now()->addHour(),
+            'link_expires_at' => now()->addHour(),
         ]);
 
         $response = $this->page($ref);
@@ -86,7 +86,7 @@ class VaultFormPageTest extends VaultTestCase
 
     public function test_an_unknown_token_is_not_told_apart_from_an_expired_one(): void
     {
-        [, $expired] = $this->entry(['expires_at' => now()->subMinute()]);
+        [, $expired] = $this->entry(['link_expires_at' => now()->subMinute()]);
 
         $unknown = $this->page('a-token-that-was-never-minted');
         $late = $this->page($expired);
@@ -149,7 +149,7 @@ class VaultFormPageTest extends VaultTestCase
 
     public function test_a_paste_to_an_expired_entry_stores_nothing(): void
     {
-        [$entry, $ref] = $this->entry(['expires_at' => now()->subMinute()]);
+        [$entry, $ref] = $this->entry(['link_expires_at' => now()->subMinute()]);
 
         $response = $this->post('/vault/' . $ref, ['secret' => 'too_late']);
 

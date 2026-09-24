@@ -12,7 +12,7 @@ namespace App\Lib\Deploy\Source;
  * Nothing here ever puts the value in a message. Unlike a repository URL, a
  * token is a secret, and `errors` reaches logs, MCP and transcripts.
  *
- * A `vault:<ref>` is resolved by RequestVault in the controller, after
+ * A `vault:<id>` is resolved by RequestVault in the controller, after
  * validation -- so whether the real secret works is not knowable from here.
  */
 final class GitTokenInput
@@ -59,10 +59,10 @@ final class GitTokenInput
                 'A Git token must be at most ' . self::MAX_LENGTH . ' characters.');
         }
         if (self::isVaultReference($value)) {
-            return substr($value, strlen(self::VAULT_PREFIX)) === ''
-                ? self::problemOf($field, 'empty_vault_reference',
-                    'A `vault:` reference needs the ref that vault_secret_create returned.')
-                : null;
+            return ctype_digit(substr($value, strlen(self::VAULT_PREFIX)))
+                ? null
+                : self::problemOf($field, 'malformed_vault_reference',
+                    'A vault reference is `vault:<id>`, the id vault_secret_create returned.');
         }
         if (preg_match('/[\x00-\x1F\x7F]/', $value) === 1) {
             return self::problemOf($field, 'malformed',

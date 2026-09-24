@@ -8,143 +8,155 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 /**
- * The resolver: `RequestVault::get($field)` reads the current request and
- * swaps a `vault:<ref>` for the pasted secret, with one sentence per way a
- * reference can be unusable.
- *
- * The key is both the field it reads and the vault `type` it matches -- the
- * two are one name, by design, so this also covers that an entry created for
- * one field can never be spent as another.
+ * `RequestVault::get($field, $project)`: reads the request field; a literal
+ * passes through; the entry must be of the field's type; a global entry is
+ * returned to anyone; a project entry is assigned to the first project that
+ * reads it and refused to every other.
  */
 class RequestVaultTest extends VaultTestCase
 {
-    public function test_a_literal_passes_through_untouched(): void
+    public function test_a_literal_absent_or_empty_field_passes_through(): void
     {
         $this->requestWith(['git_token' => 'ghp_realtoken']);
+        $this->assertSame('ghp_realtoken', RequestVault::get('git_token', 'shop'));
 
-        $this->assertSame('ghp_realtoken', RequestVault::get('git_token'));
-    }
-
-    public function test_an_absent_field_is_null(): void
-    {
         $this->requestWith([]);
+        $this->assertNull(RequestVault::get('git_token', 'shop'));
 
-        $this->assertNull(RequestVault::get('git_token'));
-    }
-
-    public function test_an_empty_string_passes_through(): void
-    {
-        // '' is how a caller clears a stored credential; it must not become
-        // a lookup, let alone an error.
+        // '' is how a caller clears a stored credential.
         $this->requestWith(['git_token' => '']);
-
-        $this->assertSame('', RequestVault::get('git_token'));
+        $this->assertSame('', RequestVault::get('git_token', 'shop'));
     }
 
-    public function test_a_filled_reference_resolves_to_the_secret(): void
+    public function test_a_global_is_returned_to_any_project_and_outside_one(): void
     {
-        [$entry, $ref] = $this->entry(['secret' => 'ghp_pasted']);
-        $this->requestWith(['git_token' => RequestVault::PREFIX . $ref]);
+        [$entry] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_shared');
+        $this->requestWith(['git_token' => $entry->reference()]);
 
-        $this->assertSame('ghp_pasted', RequestVault::get('git_token'));
-        $this->assertSame(1, $entry->refresh()->use_count);
+        $this->assertSame('ghp_shared', RequestVault::get('git_token', 'shop'));
+        $this->assertSame('ghp_shared', RequestVault::get('git_token', 'blog'));
+        $this->assertSame('ghp_shared', RequestVault::get('git_token', null));
+        $this->assertNull($entry->refresh()->project);
+        $this->assertSame(3, $entry->use_count);
     }
 
-    public function test_a_reference_is_reusable_until_ttl(): void
+    public function test_a_project_entry_is_assigned_on_first_read_and_refused_to_others(): void
     {
-        [$entry, $ref] = $this->entry(['secret' => 'ghp_pasted']);
-        $this->requestWith(['git_token' => RequestVault::PREFIX . $ref]);
+        [$entry] = $this->projectEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_mine');
+        $this->requestWith(['git_token' => $entry->reference()]);
 
-        RequestVault::get('git_token');
-        RequestVault::get('git_token');
-        RequestVault::get('git_token');
+        $this->assertSame('ghp_mine', RequestVault::get('git_token', 'shop'));
+        $this->assertSame('shop', $entry->refresh()->project);
+        $this->assertSame('ghp_mine', RequestVault::get('git_token', 'shop'), 'Its own project keeps reading it.');
 
-        $this->assertSame(3, $entry->refresh()->use_count);
+        $this->assertRefused('git_token', "project 'shop'", fn () => RequestVault::get('git_token', 'blog'));
+        $this->assertSame('shop', $entry->refresh()->project);
     }
 
-    public function test_an_unknown_reference_is_a_422_naming_the_field(): void
+    public function test_outside_a_project_an_unowned_project_entry_is_used_without_assigning_it(): void
     {
-        $this->requestWith(['git_token' => RequestVault::PREFIX . 'never-created']);
+        [$entry] = $this->projectEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_mine');
+        $this->requestWith(['git_token' => $entry->reference()]);
 
+        $this->assertSame('ghp_mine', RequestVault::get('git_token', null));
+        $this->assertNull($entry->refresh()->project, 'A read with no project does not assign it.');
+
+        // The first read with a project assigns it, as always.
+        $this->assertSame('ghp_mine', RequestVault::get('git_token', 'shop'));
+        $this->assertSame('shop', $entry->refresh()->project);
+    }
+
+    public function test_a_secret_created_for_a_project_is_read_only_by_that_project(): void
+    {
+        [$entry] = $this->entry(['type' => SecretVaultEntry::TYPE_GIT_TOKEN, 'secret' => 'ghp_shop']);
+        $entry->forceFill(['project' => 'shop'])->save();
+        $this->requestWith(['git_token' => $entry->reference()]);
+
+        $this->assertRefused('git_token', "project 'shop'", fn () => RequestVault::get('git_token', 'blog'));
+        $this->assertRefused('git_token', "project 'shop'", fn () => RequestVault::get('git_token', null));
+        $this->assertSame('ghp_shop', RequestVault::get('git_token', 'shop'));
+    }
+
+    public function test_outside_a_project_an_owned_project_entry_is_refused(): void
+    {
+        [$entry] = $this->projectEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_mine', 'shop');
+        $this->requestWith(['git_token' => $entry->reference()]);
+
+        $this->assertRefused('git_token', "project 'shop'", fn () => RequestVault::get('git_token', null));
+        $this->assertSame(0, $entry->refresh()->use_count);
+    }
+
+    public function test_an_entry_of_another_type_is_refused_before_it_is_assigned(): void
+    {
+        [$entry] = $this->projectEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_mine');
+        [$global] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_shared');
+
+        foreach ([$entry, $global] as $e) {
+            // Field name is the type by default...
+            $this->requestWith(['env_vars' => ['TOKEN' => $e->reference()]]);
+            $this->assertRefused('env_vars', "holds a 'git_token', not a 'env_vars'", fn () => RequestVault::get('env_vars', 'shop'));
+
+            // ...or given, where one field carries several kinds (project_setting_set).
+            $this->requestWith(['value' => $e->reference()]);
+            $this->assertRefused(
+                'value',
+                "not a 'cloudflare_api_token'",
+                fn () => RequestVault::get('value', 'shop', SecretVaultEntry::TYPE_CLOUDFLARE_API_TOKEN)
+            );
+        }
+        $this->assertNull($entry->refresh()->project, 'A refused read must not assign the entry.');
+        $this->assertSame(0, $entry->use_count);
+        $this->assertSame(0, $global->refresh()->use_count);
+    }
+
+    public function test_an_expired_secret_is_refused_and_not_assigned(): void
+    {
+        [$entry] = $this->entry(['type' => SecretVaultEntry::TYPE_GIT_TOKEN, 'secret' => 'ghp_old', 'expires_at' => now()->subMinute()]);
+        [$global] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_shared');
+        $global->forceFill(['expires_at' => now()->subMinute()])->save();
+
+        foreach ([$entry, $global] as $e) {
+            $this->requestWith(['git_token' => $e->reference()]);
+            $this->assertRefused('git_token', 'expired', fn () => RequestVault::get('git_token', 'shop'));
+        }
+        $this->assertNull($entry->refresh()->project);
+    }
+
+    public function test_every_unusable_reference_is_a_422_naming_the_field(): void
+    {
+        [$unfilled] = $this->projectEntry();
+
+        foreach ([
+            'vault:999' => 'vault_secret_create',
+            'vault:abc' => 'vault_secret_create',
+            $unfilled->reference() => 'pasted',
+        ] as $value => $says) {
+            $this->requestWith(['git_token' => $value]);
+            $this->assertRefused('git_token', $says, fn () => RequestVault::get('git_token', 'shop'));
+        }
+        $this->assertNull($unfilled->refresh()->project, 'An unfilled entry is not assigned.');
+    }
+
+    public function test_an_array_field_has_each_value_read(): void
+    {
+        [$entry] = $this->projectEntry(SecretVaultEntry::TYPE_ENV_VARS, 'db-pass');
+        $this->requestWith(['env_vars' => ['APP_ENV' => 'production', 'DB_PASSWORD' => $entry->reference()]]);
+
+        $this->assertSame(['APP_ENV' => 'production', 'DB_PASSWORD' => 'db-pass'], RequestVault::get('env_vars', 'shop'));
+        $this->assertSame('shop', $entry->refresh()->project);
+    }
+
+    private function assertRefused(string $field, string $says, callable $call): void
+    {
         try {
-            RequestVault::get('git_token');
-            $this->fail('An unknown reference must not pass through as a literal.');
+            $call();
+            $this->fail('An unusable reference must be refused, not passed through.');
         } catch (ValidationException $e) {
-            $this->assertArrayHasKey('git_token', $e->errors());
-            $this->assertStringContainsString('vault_secret_create', $e->errors()['git_token'][0]);
+            $this->assertStringContainsString($says, $e->errors()[$field][0]);
         }
     }
 
-    public function test_a_wrong_type_reference_does_not_resolve(): void
-    {
-        // Created for git_token, asked for as env_vars: the type guard is
-        // what stops a ref minted for one field being spent as another.
-        [, $ref] = $this->entry(['secret' => 'ghp_pasted']);
-
-        $this->requestWith(['env_vars' => ['DB_PASSWORD' => RequestVault::PREFIX . $ref]]);
-
-        try {
-            RequestVault::envVars();
-            $this->fail('A ref of one type must not resolve as another.');
-        } catch (ValidationException $e) {
-            $this->assertArrayHasKey('env_vars', $e->errors());
-        }
-    }
-
-    public function test_an_unfilled_reference_is_a_422_saying_so(): void
-    {
-        [, $ref] = $this->entry(); // no secret
-        $this->requestWith(['git_token' => RequestVault::PREFIX . $ref]);
-
-        try {
-            RequestVault::get('git_token');
-            $this->fail('An unfilled reference must fail, not resolve to null.');
-        } catch (ValidationException $e) {
-            $this->assertStringContainsString('pasted', $e->errors()['git_token'][0]);
-        }
-    }
-
-    public function test_an_expired_reference_is_a_422_saying_so(): void
-    {
-        [, $ref] = $this->entry(['secret' => 'ghp_pasted', 'expires_at' => now()->subMinute()]);
-        $this->requestWith(['git_token' => RequestVault::PREFIX . $ref]);
-
-        try {
-            RequestVault::get('git_token');
-            $this->fail('An expired reference must fail.');
-        } catch (ValidationException $e) {
-            $this->assertStringContainsString('expired', $e->errors()['git_token'][0]);
-        }
-    }
-
-    public function test_env_vars_resolves_only_prefixed_values(): void
-    {
-        [$filled, $ref] = $this->entry(['secret' => 'db-pass', 'type' => SecretVaultEntry::TYPE_ENV_VARS]);
-        $this->requestWith(['env_vars' => [
-            'APP_ENV' => 'production',
-            'DB_PASSWORD' => RequestVault::PREFIX . $ref,
-        ]]);
-
-        $resolved = RequestVault::envVars();
-
-        $this->assertSame('production', $resolved['APP_ENV']);
-        $this->assertSame('db-pass', $resolved['DB_PASSWORD']);
-        $this->assertSame(1, $filled->refresh()->use_count);
-    }
-
-    public function test_env_vars_absent_is_null(): void
-    {
-        $this->requestWith([]);
-
-        $this->assertNull(RequestVault::envVars());
-    }
-
-    /**
-     * Swap the request the resolver reads. RequestVault reads the container's
-     * current request, exactly as it would inside a controller.
-     *
-     * @param array<string, mixed> $input
-     */
+    /** @param array<string, mixed> $input */
     private function requestWith(array $input): void
     {
         $this->app->instance('request', Request::create('/api/projects', 'POST', $input));

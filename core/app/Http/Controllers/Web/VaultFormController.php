@@ -105,16 +105,10 @@ class VaultFormController
         ]);
     }
 
-    /**
-     * Whether this page will still take a paste.
-     *
-     * Two clocks, because a global entry's secret has no expiry while the
-     * link that fills it does: the form closes on whichever ran out. For a
-     * request entry they are the same moment and this reads as it always did.
-     */
+    /** Whether this page will still take a paste. */
     private function closed(SecretVaultEntry $entry): bool
     {
-        return $entry->expired() || $entry->linkExpired();
+        return $entry->linkExpired();
     }
 
     /**
@@ -145,7 +139,7 @@ class VaultFormController
 
     private function expired(SecretVaultEntry $entry): View
     {
-        $at = $entry->link_expires_at ?? $entry->expires_at;
+        $at = $entry->link_expires_at;
 
         return $this->unavailable(
             'This link expired',
@@ -157,7 +151,7 @@ class VaultFormController
      * What the save means. A sealed entry never reaches here, so there is no
      * "this replaces what is there" case left to describe -- only how far
      * the save reaches, which a global entry has to say: it is not for one
-     * project, it is what every project without its own will use.
+     * project.
      */
     private function note(SecretVaultEntry $entry): string
     {
@@ -165,7 +159,9 @@ class VaultFormController
             . '(including your AI agent), and it cannot be changed from this page afterwards.';
 
         if ($entry->isGlobal()) {
-            $stored = 'Saved for this whole server: every project that has none of its own will use it. ' . $stored;
+            $stored = 'Saved for this whole server: any project may use it, but only where it is told to. ' . $stored;
+        } elseif ($entry->project !== null) {
+            $stored = "Saved for project {$entry->project} only. " . $stored;
         }
 
         return $stored;

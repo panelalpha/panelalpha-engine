@@ -49,14 +49,43 @@ class VaultSecretCommandsTest extends VaultTestCase
         $this->assertSame(0, SecretVaultEntry::query()->count());
     }
 
-    public function test_create_refuses_to_mint_over_a_stored_global(): void
+    public function test_create_prints_the_reference_and_who_may_use_it(): void
     {
-        $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_engine');
+        $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_shared');
 
-        $output = $this->runCommand('vault:secret:create', ['type' => 'git_token', '--scope' => 'global']);
+        $global = $this->runCommand('vault:secret:create', ['type' => 'git_token', '--scope' => 'global']);
+        $project = $this->runCommand('vault:secret:create', ['type' => 'git_token']);
 
-        $this->assertStringContainsString('already set', $output);
-        $this->assertSame('ghp_engine', SecretVaultEntry::globalFor('git_token')?->revealSecret());
+        $entries = SecretVaultEntry::query()->orderBy('id')->get();
+        $this->assertCount(3, $entries, 'Another global of the same type is a new entry.');
+        $this->assertStringContainsString('reference: ' . $entries[1]->reference(), $global);
+        $this->assertStringContainsString('Any project may use it', $global);
+        $this->assertStringContainsString('reference: ' . $entries[2]->reference(), $project);
+        $this->assertStringContainsString('claims it', $project);
+    }
+
+    public function test_create_can_name_the_project_that_owns_the_secret(): void
+    {
+        $output = $this->runCommand('vault:secret:create', ['type' => 'git_token', '--project' => 'shop']);
+
+        $entry = SecretVaultEntry::query()->firstOrFail();
+        $this->assertSame('shop', $entry->project);
+        $this->assertStringContainsString("Only project 'shop' can use " . $entry->reference(), $output);
+
+        $refused = $this->runCommand('vault:secret:create', ['type' => 'git_token', '--scope' => 'global', '--project' => 'shop']);
+        $this->assertStringContainsString('global', $refused);
+        $this->assertSame(1, SecretVaultEntry::query()->count());
+    }
+
+    public function test_create_can_give_the_secret_an_expiry(): void
+    {
+        $output = $this->runCommand('vault:secret:create', ['type' => 'git_token', '--expires-in' => '3600']);
+
+        $this->assertNotNull(SecretVaultEntry::query()->firstOrFail()->expires_at);
+        $this->assertStringContainsString('the secret expires at', $output);
+
+        $this->assertStringContainsString('seconds', $this->runCommand('vault:secret:create', ['type' => 'git_token', '--expires-in' => '7d']));
+        $this->assertSame(1, SecretVaultEntry::query()->count());
     }
 
     public function test_list_shows_the_inventory_and_never_the_secret(): void
@@ -71,12 +100,14 @@ class VaultSecretCommandsTest extends VaultTestCase
         $this->assertStringContainsString('filled', $output);
     }
 
-    public function test_list_hides_expired_entries_unless_asked(): void
+    public function test_list_shows_the_reference_and_the_owning_project(): void
     {
-        $this->entry(['secret' => 'gone', 'purpose' => 'Old one', 'expires_at' => now()->subDay()]);
+        [$entry] = $this->projectEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_mine', 'shop');
 
-        $this->assertStringNotContainsString('Old one', $this->runCommand('vault:secret:list'));
-        $this->assertStringContainsString('Old one', $this->runCommand('vault:secret:list', ['--all' => true]));
+        $output = $this->runCommand('vault:secret:list');
+
+        $this->assertStringContainsString($entry->reference(), $output);
+        $this->assertStringContainsString('shop', $output);
     }
 
     public function test_list_can_filter_by_type(): void
@@ -99,16 +130,15 @@ class VaultSecretCommandsTest extends VaultTestCase
         $this->assertNull(SecretVaultEntry::query()->find($entry->id));
     }
 
-    public function test_delete_takes_a_global_by_type(): void
+    public function test_delete_takes_a_reference_or_a_bare_id(): void
     {
-        $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_engine');
+        [$global] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_shared');
+        [$owned] = $this->projectEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_mine', 'shop');
 
-        $output = $this->runCommand('vault:secret:delete', ['ref' => 'global:git_token', '--force' => true]);
+        $this->runCommand('vault:secret:delete', ['ref' => $global->reference(), '--force' => true]);
+        $this->runCommand('vault:secret:delete', ['ref' => (string) $owned->id, '--force' => true]);
 
-        // The warning matters: this one is in use by every project that has
-        // no token of its own.
-        $this->assertStringContainsString('Every project without one of its own', $output);
-        $this->assertNull(SecretVaultEntry::globalFor('git_token'));
+        $this->assertSame(0, SecretVaultEntry::query()->count());
     }
 
     public function test_delete_of_an_unknown_ref_says_how_to_address_one(): void
@@ -118,14 +148,14 @@ class VaultSecretCommandsTest extends VaultTestCase
         $this->assertStringContainsString('vault:secret:list', $output);
     }
 
-    public function test_delete_then_create_is_the_way_to_replace_a_global(): void
+    public function test_config_lists_the_globals_any_project_may_use(): void
     {
-        $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_old');
+        [$global] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_shared');
+        $this->projectEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_mine', 'shop');
 
-        $this->runCommand('vault:secret:delete', ['ref' => 'global:git_token', '--force' => true]);
-        $output = $this->runCommand('vault:secret:create', ['type' => 'git_token', '--scope' => 'global']);
+        $output = $this->runCommand('vault:config');
 
-        $this->assertStringContainsString('/vault/', $output);
-        $this->assertNull(SecretVaultEntry::globalFor('git_token')?->revealSecret());
+        $this->assertStringContainsString($global->reference(), $output);
+        $this->assertStringNotContainsString('shop', $output);
     }
 }

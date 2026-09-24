@@ -29,14 +29,19 @@ class SecretVaultEntryTest extends VaultTestCase
         $this->assertSame('ghp_something', $entry->revealSecret());
     }
 
-    public function test_status_is_pending_then_filled_then_expired(): void
+    public function test_status_is_pending_filled_or_abandoned(): void
     {
         [$entry] = $this->entry();
         $this->assertSame('pending', $entry->status());
 
+        $entry->link_expires_at = now()->subSecond();
+        $this->assertSame('abandoned', $entry->status());
+
+        // A pasted secret does not expire with its link...
         $entry->setSecret('ghp_something');
         $this->assertSame('filled', $entry->status());
 
+        // ...only with an expiry it was created with.
         $entry->expires_at = now()->subSecond();
         $this->assertSame('expired', $entry->status());
     }
@@ -61,8 +66,15 @@ class SecretVaultEntryTest extends VaultTestCase
         // The contract the call sites rely on: only this exact prefix turns a
         // value into a lookup. Anything else -- including a secret that
         // happens to start with the word -- is a literal.
-        $this->assertSame('vault:', RequestVault::PREFIX);
-        $this->assertTrue(str_starts_with(RequestVault::PREFIX . 'abc', RequestVault::PREFIX));
-        $this->assertFalse(str_starts_with('Vault:abc', RequestVault::PREFIX));
+        $this->assertTrue(RequestVault::isReference('vault:12'));
+        $this->assertTrue(RequestVault::isReference('vault:abc'), 'Meant as a reference, so it must fail rather than pass as a literal.');
+        $this->assertFalse(RequestVault::isReference('Vault:12'));
+        $this->assertFalse(RequestVault::isReference('ghp_vault:12'));
+
+        [$entry] = $this->entry();
+        $this->assertSame('vault:' . $entry->id, $entry->reference());
+        $this->assertSame($entry->id, SecretVaultEntry::idFromReference($entry->reference()));
+        $this->assertSame($entry->id, SecretVaultEntry::idFromReference((string) $entry->id));
+        $this->assertNull(SecretVaultEntry::idFromReference('vault:abc'));
     }
 }

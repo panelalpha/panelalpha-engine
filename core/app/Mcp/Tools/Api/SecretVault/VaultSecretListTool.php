@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     List vault entries
 
-    Every live or recently expired entry, newest first. **The secret is never included** and cannot be read back by any endpoint -- this is the inventory, not the values. Each row carries `id` (pass as `id:<n>` to status or delete), `type`, `purpose`, `scope`, `status` (pending, filled or expired) and the dates. `purpose` is what tells two entries of the same type apart when deciding which to delete.
+    Entries, newest first. **The secret is never included** and cannot be read back by any endpoint -- this is the inventory, not the values. Each row carries `ref` (`vault:<id>`, what a request passes and what status or delete take), `type`, `scope`, `project` (the project a `project` entry belongs to, null until one claims it), `purpose`, `status` (pending, filled or abandoned) and the dates. `purpose` is what tells entries of the same type apart.
 
     Calls GET /api/vault/secrets.
     MARKDOWN)]
@@ -42,6 +42,7 @@ class VaultSecretListTool extends ApiTool
     {
         return [
             'type',
+            'scope',
         ];
     }
 
@@ -52,6 +53,7 @@ class VaultSecretListTool extends ApiTool
     {
         return [
             'type' => $schema->string()->description('Only entries of this type.'),
+            'scope' => $schema->string()->description('Only entries of this scope. One of: project, global.'),
         ];
     }
 }

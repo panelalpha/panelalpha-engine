@@ -29,11 +29,9 @@ use App\Lib\Domains\DomainAllocationException;
 use App\Lib\Domains\DomainAllocator;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Domains\PublicUrl;
-use App\Lib\Vault\GlobalVault;
 use App\Lib\Vault\RequestVault;
 use App\Models\Domain;
 use App\Models\ProxyRule;
-use App\Models\SecretVaultEntry;
 use App\Models\Setting;
 use App\Models\Task;
 use App\Models\Tunnel;
@@ -213,9 +211,10 @@ class UserController extends Controller
                     type: 'string',
                     nullable: true,
                     description: 'Optional HTTPS token injected at clone time. Never logged or returned in GET /users. '
-                        . 'A `vault:<ref>` from vault_secret_create is accepted here in place of the literal token -- '
-                        . 'the secret it stands for is substituted at read time, so the token itself never has to '
-                        . 'pass through the calling agent.'
+                        . 'A `vault:<id>` from vault_secret_create is accepted here in place of the literal token, '
+                        . 'so the token itself never passes through the calling agent. A `project` entry becomes '
+                        . 'this project\'s own and is refused to any other; a `global` one may be used by any '
+                        . 'project. Omitted, the repository is cloned anonymously.'
                 ),
                 new OA\Property(
                     property: 'env_vars',
@@ -383,9 +382,10 @@ class UserController extends Controller
                     type: 'string',
                     nullable: true,
                     description: 'Optional HTTPS token injected at clone time. Never logged or returned in GET /users. '
-                        . 'A `vault:<ref>` from vault_secret_create is accepted here in place of the literal token -- '
-                        . 'the secret it stands for is substituted at read time, so the token itself never has to '
-                        . 'pass through the calling agent.'
+                        . 'A `vault:<id>` from vault_secret_create is accepted here in place of the literal token, '
+                        . 'so the token itself never passes through the calling agent. A `project` entry becomes '
+                        . 'this project\'s own and is refused to any other; a `global` one may be used by any '
+                        . 'project. Omitted, the repository is cloned anonymously.'
                 ),
                 new OA\Property(
                     property: 'env_vars',
@@ -502,17 +502,6 @@ class UserController extends Controller
          */
         $params = $request->validated();
 
-        // Resolve vault references before anything is bought. A panelalpha
-        // label is spent by DomainAllocator below, and a name whose secret
-        // cannot be resolved must not leave a burnt label behind -- resolve
-        // first, fail 422 for free, spend later. `env_vars` may be a map with
-        // per-value references; null means the field was absent.
-        $params['git_token'] = RequestVault::get('git_token');
-        $envVars = RequestVault::envVars();
-        if ($envVars !== null) {
-            $params['env_vars'] = $envVars;
-        }
-
         if (
             !empty($params['domain'])
             && Str::startsWith($params['domain'], 'www.')
@@ -597,6 +586,15 @@ class UserController extends Controller
             throw ProblemException::of($problems);
         }
 
+        // Vault references are read once the name is known to be free, so a
+        // project entry is assigned to this project, and before the allocator
+        // spends a label on a create that would fail here. The project stores
+        // the secrets themselves; nothing reads the vault on its behalf later.
+        $params['git_token'] = RequestVault::get('git_token', $params['username']);
+        if (isset($params['env_vars']) && is_array($params['env_vars'])) {
+            $params['env_vars'] = RequestVault::get('env_vars', $params['username']);
+        }
+
         // After the local checks because it is the only one that leaves the
         // machine; before the allocator because everything past it spends a
         // panelalpha.online label, and those are never released.
@@ -604,13 +602,9 @@ class UserController extends Controller
             $probe = (new GitRemoteProbe())->problem(
                 'git_repo',
                 $params['git_repo'],
-                // The token the clone will actually use, which is not always
-                // the one being stored: a create that sends none inherits the
-                // engine's, and probing without it would refuse a private
-                // repository the deploy would then have read fine. Used here
-                // and dropped -- `git_token` above stays absent, so the
-                // project keeps inheriting and a rotation still reaches it.
-                GlobalVault::effective($params['git_token'] ?? null, SecretVaultEntry::TYPE_GIT_TOKEN)
+                // The token the clone will use. None sent means an anonymous
+                // probe, as the clone will be.
+                $params['git_token']
             );
             if ($probe !== null) {
                 throw ProblemException::of([$probe]);
@@ -682,9 +676,6 @@ class UserController extends Controller
                 'template' => $params['template'] ?? null,
                 'git_repo' => $params['git_repo'] ?? null,
                 'git_branch' => $params['git_branch'] ?? null,
-                // Resolved at the top of provision(): the plaintext, a
-                // literal, or null. Encrypted by the User model from here
-                // on; the vault is never consulted again for this project.
                 'git_token' => $params['git_token'],
                 'env_vars' => $this->mergedEnvVars($params['env_vars'] ?? [], []),
                 // Where the name came from and what it is worth: whether it
@@ -1296,7 +1287,10 @@ class UserController extends Controller
         RecipeChoiceInput::arm($request);
         if (array_key_exists('env_vars', $params)) {
             $user->setDetails([
-                'env_vars' => $this->mergedEnvVars(RequestVault::envVars() ?? null, $user->getEnvVars()),
+                'env_vars' => $this->mergedEnvVars(
+                    is_array($params['env_vars'] ?? null) ? RequestVault::get('env_vars', $user->username) : null,
+                    $user->getEnvVars()
+                ),
             ]);
             $user->save();
         }

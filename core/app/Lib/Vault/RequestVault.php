@@ -6,208 +6,99 @@ use App\Models\SecretVaultEntry;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Resolves a `vault:<ref>` riding in a request field into the pasted secret.
+ * The current request's fields, with `vault:<id>` read in place of a secret.
  *
- * The API's secret-bearing parameters stay exactly as they are: a caller may
- * send a literal token or a vault reference in the same field, and the call
- * sites cannot tell the difference after this class runs. That is the point --
- * no new parameters, no schema changes, and a transcript or activity log that
- * captures `git_token: vault:abc...` holds a reference, not a secret.
- *
- * Usage, at the HTTP boundary where the request lives:
- *
- *     'git_token' => RequestVault::get('git_token'),
- *
- * The key is both the request field to read and the vault `type` to match --
- * one name, by design, so `RequestVault::get('git_token')` can only ever
- * return an entry that was created for `git_token`.
- *
- * Copy-on-resolve: the plaintext is handed to the caller, which stores it
- * wherever the literal would have gone (`User.details.git_token`, encrypted
- * by the existing accessor). The queue and the deploy pipeline never see the
- * vault, and an entry expiring later cannot affect a project already created.
- *
- * The engine's own secrets ({@see GlobalVault}) are reached two ways, never
- * by surprise: `vault:global` in a field asks for one by name, and
- * {@see getOrGlobal()} lets a *transient* read fall back to one when the
- * field was left out. A stored credential does neither -- it stays absent and
- * inherits at read time, so rotating the engine's token reaches every project
- * that never had one of its own.
+ * The vault only proxies what a caller passes: a controller reads its request
+ * parameter here and stores the secret it gets back. Nothing else reads the
+ * vault -- no integration looks a secret up on a project's behalf.
  */
 class RequestVault
 {
-    /** What marks a value as a reference rather than a literal secret. */
-    public const PREFIX = 'vault:';
-
     /**
-     * `vault:global` -- the engine's own secret for this field's type, asked
-     * for by name. No ref, because a global entry is addressed by what it is
-     * rather than by a link somebody was handed: the field says the type, so
-     * this cannot be aimed at the wrong secret.
+     * Request field `$field` as `$project` may use it. A literal (or null, or
+     * '') passes through; `vault:<id>` becomes its secret; an array field
+     * (`env_vars`) has each value read the same way.
      *
-     * It is honoured even when {@see GlobalVault::projectScoped()} is on: that
-     * setting governs what the engine reaches for on a caller's behalf, not
-     * what a caller may ask for outright.
+     * - the entry must have been created for `$type`, the field name unless
+     *   given -- so a Git token cannot be spent as a Cloudflare token;
+     * - a `global` entry is returned to anyone;
+     * - a `project` entry with no project yet is assigned to `$project` and
+     *   returned; one already assigned to another project is refused.
+     *
+     * `$project` null is a read outside any project (source_inspect): a
+     * project entry no project owns yet may be used there, and stays
+     * unassigned until a project reads it; one a project owns is refused.
+     *
+     * @return mixed the field's value, with every reference read
+     * @throws ValidationException naming `$field` when a reference cannot be used
      */
-    public const GLOBAL_REF = 'global';
-
-    /**
-     * The value of `$field` from the current request, with a vault reference
-     * (if any) resolved to its secret.
-     *
-     * A value without the prefix passes through untouched -- including null
-     * and '' (an empty string is how a caller clears a stored credential, and
-     * that must keep working). A value with the prefix that has no usable
-     * entry is a 422, never a passthrough: storing a typo'd reference as a
-     * literal token would surface later as a clone-time auth failure nobody
-     * can trace, instead of the plain sentence this raises now.
-     *
-     * `$type` defaults to the field name, which is right wherever the field and
-     * the kind of secret are the same thing. A field that carries several kinds
-     * -- `project_setting_set`'s single `value` -- names the type itself; see
-     * the note below.
-     *
-     * {@see get()} uses one name for both by design -- it reads `git_token` and
-     * matches a `git_token` entry, so a reference cannot be aimed at the wrong
-     * secret by accident. That is right where the field and the kind of secret
-     * are the same thing, and wrong where one field carries several kinds of
-     * secret: `project_setting_set` has a single `value`, and the *setting key*
-     * is what says whether it is a Cloudflare token or something else.
-     *
-     * Without this the controller would have to ask for `get('value')` and
-     * match entries of type `value`, which no entry ever is.
-     *
-     * @return ?string the plaintext secret, the literal value, or null
-     */
-    public static function get(string $field, ?string $type = null): ?string
+    public static function get(string $field, ?string $project, ?string $type = null): mixed
     {
-        return self::resolve(request()->input($field), $type ?? $field);
-    }
-
-    /**
-     * As {@see get()}, but a field the caller left out falls back to the
-     * engine's own secret of that type ({@see GlobalVault}).
-     *
-     * Only for a value that is *used* and then dropped -- a transient clone,
-     * say. Not for one that is stored: a project that inherits the engine's
-     * token should keep inheriting it, so that rotating the global reaches
-     * every project and `project_setting_get` can say the value is inherited.
-     * Copying it in at create time would freeze a snapshot and quietly make
-     * the project look like it had been given a token of its own.
-     *
-     * Persisted fields therefore keep {@see get()}, and inherit at read time
-     * instead -- {@see \App\Models\User::getGitToken()}.
-     *
-     * An empty string is not an absent field: it is how a caller clears a
-     * credential, and it keeps meaning that.
-     */
-    public static function getOrGlobal(string $field, ?string $type = null): ?string
-    {
+        $value = request()->input($field);
         $type ??= $field;
-        /** @var mixed $value */
-        $value = request()->input($field);
 
-        return $value === null ? GlobalVault::secret($type) : self::resolve($value, $type);
+        return is_array($value)
+            ? array_map(fn (mixed $item) => self::read($item, $project, $type, $field), $value)
+            : self::read($value, $project, $type, $field);
     }
 
-    /**
-     * An `env_vars`-shaped map from the current request, with every value
-     * that carries the prefix resolved. Same rules as {@see get()}, one type
-     * for the whole map -- entries are per-secret, not per-variable, so two
-     * variables each need their own reference.
-     *
-     * @return array<string, string>|null
-     */
-    public static function envVars(string $field = 'env_vars'): ?array
+    private static function read(mixed $value, ?string $project, string $type, string $field): mixed
     {
-        $value = request()->input($field);
-
-        if (!is_array($value)) {
-            return is_string($value) ? self::resolve($value, $field) : $value;
-        }
-
-        $out = [];
-        foreach ($value as $key => $item) {
-            $out[$key] = is_string($item) ? self::resolve($item, $field) : $item;
-        }
-
-        return $out;
-    }
-
-    /**
-     * One raw value: prefix check, lookup, and the four ways a reference can
-     * be unusable -- each a different sentence, because they need different
-     * fixes from the caller.
-     *
-     * @return ?string the plaintext, the literal value, or null
-     */
-    private static function resolve(mixed $value, string $type): ?string
-    {
-        if (!is_string($value) || !str_starts_with($value, self::PREFIX)) {
+        if (!self::isReference($value)) {
             return $value;
         }
 
-        $ref = substr($value, strlen(self::PREFIX));
-
-        if ($ref === self::GLOBAL_REF) {
-            return self::resolveGlobal($type);
-        }
-
-        $entry = SecretVaultEntry::query()
-            ->where('ref_hash', SecretVaultEntry::hashRef($ref))
-            ->where('type', $type)
-            ->first();
+        $entry = self::entry($value);
+        $ref = trim((string) $value);
 
         if ($entry === null) {
-            self::fail($type, "No vault entry of type '{$type}' for this reference. Create one with vault_secret_create.");
-        } elseif ($entry->filled_at === null) {
-            self::fail($type, "Vault entry for '{$type}' has no secret pasted yet. Open the URL vault_secret_create returned.");
-        } elseif ($entry->expired()) {
-            self::fail($type, "Vault entry for '{$type}' expired. Create a new one with vault_secret_create.");
+            self::fail($field, "No vault entry for '{$ref}'. Use the `vault:<id>` vault_secret_create returned.");
+        }
+        if ($entry->type !== $type) {
+            self::fail($field, "Vault entry {$ref} holds a '{$entry->type}', not a '{$type}'.");
+        }
+        if ($entry->expired()) {
+            self::fail($field, "Vault entry {$ref} expired at {$entry->expires_at?->toIso8601String()}. Create a new one.");
+        }
+        if ($entry->filled_at === null) {
+            self::fail($field, "Vault entry {$ref} has no secret pasted yet. Open the URL vault_secret_create returned.");
+        }
+
+        if (!$entry->isGlobal()) {
+            if ($entry->project === null && $project !== null) {
+                // Conditional, so two projects racing for one entry cannot both win.
+                SecretVaultEntry::query()->whereKey($entry->id)->whereNull('project')->update(['project' => $project]);
+                $entry->refresh();
+            }
+            if ($entry->project !== null && $entry->project !== $project) {
+                self::fail($field, "Vault entry {$ref} belongs to project '{$entry->project}'.");
+            }
         }
 
         $secret = $entry->revealSecret();
-        if ($secret === null) {
-            // Unfilled entries were caught above; this is an undecryptable
-            // ciphertext, i.e. an APP_KEY rotation between paste and use.
-            self::fail($type, "Vault entry for '{$type}' could not be decrypted (APP_KEY rotated?). Create a new one.");
+        if ($secret === null || $secret === '') {
+            self::fail($field, "Vault entry {$ref} could not be decrypted (APP_KEY rotated?). Create a new one.");
         }
 
-        // Reusable until TTL: reads are counted, not consumed.
         $entry->forceFill(['use_count' => $entry->use_count + 1, 'last_used_at' => now()])->save();
 
         return $secret;
     }
 
-    /**
-     * `vault:global` -- asked for outright, so an absent or unpasted global
-     * is a 422 rather than the silence the implicit fallback answers with.
-     * The caller named a secret they believe exists; saying nothing would
-     * surface later as an auth failure with no trace back to here.
-     */
-    private static function resolveGlobal(string $type): string
+    /** Whether `$value` is meant as a vault reference -- usable or not. */
+    public static function isReference(mixed $value): bool
     {
-        $entry = SecretVaultEntry::globalFor($type);
-
-        if ($entry === null) {
-            self::fail($type, "No global vault entry for '{$type}'. Create one with vault_secret_create (scope: global).");
-        } elseif ($entry->filled_at === null) {
-            self::fail($type, "The global vault entry for '{$type}' has no secret pasted yet. Open the URL vault_secret_create returned.");
-        }
-
-        $secret = GlobalVault::secret($type, force: true);
-
-        if ($secret === null) {
-            self::fail($type, "The global vault entry for '{$type}' could not be decrypted (APP_KEY rotated?). Create a new one.");
-        }
-
-        return $secret;
+        return is_string($value) && str_starts_with(trim($value), SecretVaultEntry::PREFIX);
     }
 
-    /**
-     * A 422 naming the field, so the caller sees the mistake next to where
-     * they made it.
-     */
+    /** The entry a reference names, whatever its state; null for a literal or an unknown id. */
+    public static function entry(?string $value): ?SecretVaultEntry
+    {
+        $id = self::isReference($value) ? SecretVaultEntry::idFromReference(trim((string) $value)) : null;
+
+        return $id === null ? null : SecretVaultEntry::query()->find($id);
+    }
+
     private static function fail(string $field, string $message): never
     {
         throw ValidationException::withMessages([$field => $message]);

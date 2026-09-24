@@ -199,13 +199,12 @@ A paste link for a Git or Cloudflare token. The value is never printed back.
 
 | Command | What it does |
 |---|---|
-| `pae vault:secret:create {type} --purpose=` | Prints a paste link. `{type}` is `git_token` or `cloudflare_api_token`. `--scope=global` stores it for the whole engine. A request link expires in an hour, and so does that secret. A global secret does not expire. Creating a global one that is already filled is refused. |
-| `pae vault:secret:list` | Lists entries: id, type, purpose, and whether one is filled. Never the secret. `--scope=global` or `--type=` narrows the list. |
-| `pae vault:secret:delete {ref}` | Deletes one entry and its secret. `{ref}` is the id from the list, or `global:git_token`. Asks you to confirm. `--force` skips that. |
-| `pae vault:config` | Shows whether projects without their own token use the engine-wide ones, and which of those are stored. |
-| `pae vault:config --project-scoped=true` | Projects use only the token they were given. `--project-scoped=false` shares the engine-wide tokens again. Stored secrets are kept either way. |
+| `pae vault:secret:create {type} --purpose=` | Prints a paste link and the reference (`vault:<id>`). `{type}` is `git_token` or `cloudflare_api_token`. By default the secret belongs to the first project given it; `--project=NAME` makes it that project's from the start (the project need not exist yet); `--scope=global` lets any project use it. `--expires-in=SECONDS` makes the secret expire and be deleted automatically; without it the secret is kept until deleted. The link expires in an hour. |
+| `pae vault:secret:list` | Lists entries: reference, type, purpose, scope, the project that owns it, and whether it is filled. Never the secret. `--scope=` or `--type=` narrows the list. |
+| `pae vault:secret:delete {ref}` | Deletes one entry and its secret. `{ref}` is `vault:<id>` or the id from the list. Projects that already used it keep their copy. Asks you to confirm. `--force` skips that. |
+| `pae vault:config` | Lists the global secrets. A project uses one only when it is given that secret's `vault:<id>`. |
 
-Context: [One token for the whole engine](../05-capabilities/connecting-with-git.md#one-token-for-the-whole-engine) · [Cloudflare](../05-capabilities/cloudflare.md).
+Context: [A token shared by several projects](../05-capabilities/connecting-with-git.md#a-token-shared-by-several-projects) · [Cloudflare](../05-capabilities/cloudflare.md).
 
 ## Files
 

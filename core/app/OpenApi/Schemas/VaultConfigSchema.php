@@ -8,20 +8,14 @@ use OpenApi\Attributes as OA;
     schema: 'VaultConfig',
     properties: [
         new OA\Property(
-            property: 'project_scoped_tokens',
-            type: 'boolean',
-            description: 'True keeps every project on the credentials it was given — nothing falls back to the '
-                . "engine's global vault entries. False (the default) shares them, so a Git or Cloudflare token "
-                . 'is pasted once rather than at every project.',
-            example: false,
-        ),
-        new OA\Property(property: 'global_secrets_shared', type: 'boolean', description: 'The same answer the other way round, for readability.', example: true),
-        new OA\Property(
-            property: 'global_types',
+            property: 'globals',
             type: 'array',
-            items: new OA\Items(type: 'string'),
-            description: 'The types that actually have an engine-wide secret pasted.',
-            example: ['cloudflare_api_token', 'git_token'],
+            items: new OA\Items(properties: [
+                new OA\Property(property: 'ref', type: 'string', example: 'vault:7'),
+                new OA\Property(property: 'type', type: 'string', example: 'git_token'),
+                new OA\Property(property: 'purpose', type: 'string', nullable: true, example: 'GitHub org read token'),
+            ], type: 'object'),
+            description: 'Global entries with a secret pasted: usable by any project that passes the `ref`.',
         ),
     ],
     type: 'object',)]

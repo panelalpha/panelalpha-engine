@@ -15,9 +15,9 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('vault_config_get')]
 #[Description(<<<'MARKDOWN'
-    Whether projects share the engine-wide secrets
+    Which global secrets are stored
 
-    Reports `project_scoped_tokens`. False (the default) means a project created without a Git or Cloudflare token uses the engine-wide one, if a `global` vault entry holds it.
+    Lists the global entries that have a secret pasted, as `globals` (ref, type, purpose). Any project may use one by passing its `vault:<id>`; nothing uses one unasked.
 
     Calls GET /api/vault/config.
     MARKDOWN)]

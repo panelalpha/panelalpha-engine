@@ -222,24 +222,21 @@ return [
 
     // Secret Vault
     // A secret pasted into a browser form, then referenced from API calls as
-    // `vault:<ref>` in the field that would otherwise carry it (git_token,
+    // `vault:<id>` in the field that would otherwise carry it (git_token,
     // env_vars values). The whole point is that the secret never passes
-    // through the agent's conversation: `create` hands back a `vault:<ref>`
-    // plus a form URL, the customer pastes there, and the next call with the
-    // ref gets the plaintext. `status` is what an agent polls to wait for the
-    // paste; `delete` is cleanup. The secret itself is never returned by any
-    // of these.
+    // through the agent's conversation: `create` hands back a `vault:<id>`
+    // plus a form URL, the customer pastes there. `status` is what an agent
+    // polls to wait for the paste; `delete` is cleanup and revocation. The
+    // secret itself is never returned by any of these.
     //
-    // `create` with `scope: global` stores the engine's own secret of a type
-    // instead -- pasted once, used by every project that has none of its own,
-    // so an agent stops asking for the same Git token at every project. The
-    // `config` pair is the switch that governs whether projects inherit it.
+    // `scope: project` entries belong to the first project given them;
+    // `scope: global` ones to any project that names them. `config` lists
+    // the globals.
     'POST /vault/secrets' => 'vault_secret_create',
     'GET /vault/secrets' => 'vault_secret_list',
     'GET /vault/secrets/{ref}' => 'vault_secret_status',
     'DELETE /vault/secrets/{ref}' => 'vault_secret_delete',
     'GET /vault/config' => 'vault_config_get',
-    'PUT /vault/config' => 'vault_config_set',
 
     // System
     // Files a bug against the engine over the telemetry channel. `create`

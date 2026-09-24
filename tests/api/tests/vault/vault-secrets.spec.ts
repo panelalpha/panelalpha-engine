@@ -11,12 +11,12 @@ import {
 
 /**
  * The secret vault: a slot the customer pastes a secret into in their browser,
- * referenced from API calls as `vault:<ref>` so the secret never passes through
+ * referenced from API calls as `vault:<id>` so the secret never passes through
  * the caller.
  *
- * The properties under test are the ones the mechanism exists for. The
- * reference is returned exactly once, at creation; no read path hands it or the
- * secret back; and deleting an entry stops it resolving. A regression in any of
+ * The properties under test are the ones the mechanism exists for. The paste
+ * URL's token is returned exactly once, at creation; no read path hands it or
+ * the secret back; and deleting an entry stops it resolving. A regression in any of
  * those turns the vault into an ordinary — and worse — way of moving a token
  * around, while every endpoint still answers 200.
  *
@@ -39,12 +39,15 @@ test.describe('secret vault', () => {
       validateParsedApiResponse(created, createdVaultSecretResponseSchema);
       expect(created.data.type).toBe(type);
       expect(created.data.status).toBe('pending');
+      expect(created.data.ref).toBe(`vault:${created.data.id}`);
+      // Project scope by default, unclaimed until a project is given it.
+      expect(created.data.scope).toBe('project');
+      expect(created.data.project).toBeNull();
 
-      // The form URL and the `vault:` value carry the same raw ref, which is
-      // what keeps the page and the reference from ever disagreeing.
-      const raw = created.data.ref.slice('vault:'.length);
-      expect(raw.length).toBeGreaterThan(20);
-      expect(created.data.url.endsWith(`/vault/${raw}`)).toBe(true);
+      // The paste URL carries a long random token, not the guessable id.
+      const token = created.data.url.split('/vault/')[1];
+      expect(token.length).toBeGreaterThan(20);
+      expect(token).not.toBe(String(created.data.id));
     } finally {
       await api.deleteVaultSecretSafe(created.data.ref);
     }
@@ -68,29 +71,26 @@ test.describe('secret vault', () => {
     }
   });
 
-  test('no read path returns the reference or the secret', async ({ api }) => {
+  test('no read path returns the paste token or the secret', async ({ api }) => {
     const type = vaultType();
     const created = await api.createVaultSecret({ type });
-    const raw = created.data.ref.slice('vault:'.length);
+    const raw = created.data.url.split('/vault/')[1];
 
     try {
       const listing = await api.listVaultSecrets(type);
-      // The schema is strict and pins a request entry's `ref` to null, so an
-      // added field or a reference leaking back into the listing fails here.
+      // The schema is strict, so an added field fails here.
       validateParsedApiResponse(listing, vaultSecretListSchema);
 
       const single = await api.getVaultSecret(created.data.ref);
       validateParsedApiResponse(single, vaultSecretResponseSchema);
 
-      // Belt and braces against the raw reference reaching a read path under
+      // Belt and braces against the paste token reaching a read path under
       // some other key: only its sha-256 is stored, so this can never appear.
       for (const [label, body] of [
         ['listing', listing],
         ['single entry', single],
       ] as const) {
-        expect(JSON.stringify(body), `the raw reference appears in the ${label}`).not.toContain(
-          raw
-        );
+        expect(JSON.stringify(body), `the paste token appears in the ${label}`).not.toContain(raw);
       }
     } finally {
       await api.deleteVaultSecretSafe(created.data.ref);
@@ -117,23 +117,88 @@ test.describe('secret vault', () => {
     }
   });
 
-  test('a fresh entry has a future expiry and no uses', async ({ api }) => {
+  test('a fresh entry has an open paste form and no uses', async ({ api }) => {
     const created = await api.createVaultSecret({ type: vaultType() });
 
     try {
       const entry = (await api.getVaultSecret(created.data.ref)).data;
       expect(entry.used_count).toBe(0);
       expect(entry.last_used_at).toBeNull();
-      expect(new Date(entry.expires_at).getTime()).toBeGreaterThan(Date.now());
+      expect(entry.url_expires_at).not.toBeNull();
 
-      // `expires_in` from create and `expires_at` from the read have to agree,
-      // or an agent waiting for a paste is working from the wrong deadline.
-      const declared = created.data.expires_in * 1000;
-      const observed = new Date(entry.expires_at).getTime() - Date.now();
+      // `url_expires_in` from create and `url_expires_at` from the read have to
+      // agree, or an agent waiting for a paste is working from the wrong deadline.
+      const declared = created.data.url_expires_in * 1000;
+      const observed = new Date(entry.url_expires_at!).getTime() - Date.now();
       expect(Math.abs(observed - declared)).toBeLessThan(60_000);
     } finally {
       await api.deleteVaultSecretSafe(created.data.ref);
     }
+  });
+
+  test('a global entry is created on request and filtered by scope', async ({ api }) => {
+    const type = vaultType();
+    const project = await api.createVaultSecret({ type });
+    const global = await api.createVaultSecret({ type, scope: 'global' });
+
+    try {
+      validateParsedApiResponse(global, createdVaultSecretResponseSchema);
+      expect(global.data.scope).toBe('global');
+
+      const listing = await api.listVaultSecrets(type, 'global');
+      validateParsedApiResponse(listing, vaultSecretListSchema);
+      expect(listing.data.map((entry) => entry.ref)).toEqual([global.data.ref]);
+    } finally {
+      await api.deleteVaultSecretSafe(project.data.ref);
+      await api.deleteVaultSecretSafe(global.data.ref);
+    }
+  });
+
+  test('a project secret can be created for a named project', async ({ api }) => {
+    const created = await api.createVaultSecret({ type: vaultType(), project: 'pwvaultowner' });
+
+    try {
+      validateParsedApiResponse(created, createdVaultSecretResponseSchema);
+      expect(created.data.scope).toBe('project');
+      expect(created.data.project).toBe('pwvaultowner');
+    } finally {
+      await api.deleteVaultSecretSafe(created.data.ref);
+    }
+
+    expectOneOf(
+      (
+        await api.createVaultSecretRaw({
+          type: vaultType(),
+          scope: 'global',
+          project: 'pwvaultowner',
+        })
+      ).status,
+      [400, 422]
+    );
+  });
+
+  test('a secret can be given an expiry', async ({ api }) => {
+    const created = await api.createVaultSecret({ type: vaultType(), expires_in: 86_400 });
+    const plain = await api.createVaultSecret({ type: vaultType() });
+
+    try {
+      validateParsedApiResponse(created, createdVaultSecretResponseSchema);
+      const inOneDay = Date.now() + 86_400_000;
+      expect(Math.abs(new Date(created.data.expires_at!).getTime() - inOneDay)).toBeLessThan(
+        60_000
+      );
+      expect(plain.data.expires_at).toBeNull();
+    } finally {
+      await api.deleteVaultSecretSafe(created.data.ref);
+      await api.deleteVaultSecretSafe(plain.data.ref);
+    }
+  });
+
+  test('an old-style scope is refused', async ({ api }) => {
+    expectOneOf(
+      (await api.createVaultSecretRaw({ type: vaultType(), scope: 'request' })).status,
+      [400, 422]
+    );
   });
 
   test('a deleted entry stops resolving', async ({ api }) => {
@@ -155,7 +220,8 @@ test.describe('secret vault', () => {
   });
 
   test('an unknown reference is not found', async ({ api }) => {
-    expect((await api.getVaultSecretRaw('vault:nosuchreference999')).status).toBe(404);
+    expect((await api.getVaultSecretRaw('vault:999999999')).status).toBe(404);
+    expect((await api.getVaultSecretRaw('vault:notanid')).status).toBe(404);
   });
 
   test('a malformed type is refused', async ({ api }) => {

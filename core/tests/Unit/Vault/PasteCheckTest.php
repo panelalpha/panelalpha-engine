@@ -235,7 +235,7 @@ class PasteCheckTest extends VaultTestCase
         $body = json_decode((string) (new SecretVaultController())->store($request)->getContent(), true);
 
         $this->assertSame(['repo_url' => 'https://github.com/acme/shop'], $body['data']['verify_with']);
-        $show = json_decode((string) (new SecretVaultController())->show('id:' . $body['data']['id'])->getContent(), true);
+        $show = json_decode((string) (new SecretVaultController())->show($body['data']['ref'])->getContent(), true);
         $this->assertSame(['repo_url' => 'https://github.com/acme/shop'], $show['data']['verify_with']);
         $this->assertNull($show['data']['verification']);
     }

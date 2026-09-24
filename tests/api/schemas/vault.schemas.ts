@@ -1,28 +1,32 @@
 import { z } from 'zod';
 
-export const vaultSecretStatusSchema = z.enum(['pending', 'filled', 'expired']);
+export const vaultSecretStatusSchema = z.enum(['pending', 'filled', 'abandoned', 'expired']);
+
+export const vaultSecretScopeSchema = z.enum(['project', 'global']);
 
 /**
  * A listed or fetched entry.
  *
- * `ref` is null for a request entry (only its hash is stored) and
- * `global:<type>` for an engine-wide one. There is no passthrough: the secret
+ * `ref` is `vault:<id>`, the reference a request passes. The paste URL's
+ * token is not: only its hash is stored. There is no passthrough: the secret
  * must never appear on a read path, and a field the schema does not name
  * fails the test instead of slipping by.
  */
 export const vaultSecretEntrySchema = z.strictObject({
   id: z.number().int().positive(),
-  // A request entry's ref is shown once, at create, and is not stored. A
-  // global entry is addressed as `global:<type>`. Anything else on a read
-  // path would be the secret's reference leaking back.
-  ref: z.union([z.null(), z.string().regex(/^global:/)]),
+  ref: z.string().regex(/^vault:\d+$/),
   type: z.string(),
-  scope: z.enum(['request', 'global']),
+  scope: vaultSecretScopeSchema,
+  // The project a `project` entry belongs to; null until one claims it, and always for a global.
+  project: z.string().nullable(),
   purpose: z.string().nullable(),
+  verify_with: z.record(z.string(), z.string()).nullable(),
+  verification: z.record(z.string(), z.unknown()).nullable(),
   status: vaultSecretStatusSchema,
   used_count: z.number(),
   last_used_at: z.string().nullable(),
   created_at: z.string().nullable(),
+  // When the secret expires and is deleted; null when it never does.
   expires_at: z.string().nullable(),
   url_expires_at: z.string().nullable(),
 });
@@ -35,16 +39,9 @@ export const vaultSecretResponseSchema = z.object({
   data: vaultSecretEntrySchema,
 });
 
-/** The create response — the one shape that carries the reference in the clear. */
-export const createdVaultSecretSchema = z.strictObject({
-  id: z.number().int().positive(),
-  ref: z.string().startsWith('vault:'),
-  type: z.string(),
-  scope: z.enum(['request', 'global']),
-  purpose: z.string().nullable(),
+/** The create response: the entry plus the paste URL, the one place its token appears. */
+export const createdVaultSecretSchema = vaultSecretEntrySchema.extend({
   url: z.string().url(),
-  status: vaultSecretStatusSchema,
-  expires_in: z.number().positive().nullable(),
   url_expires_in: z.number().positive(),
 });
 

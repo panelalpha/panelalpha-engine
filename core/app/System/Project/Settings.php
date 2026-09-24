@@ -57,32 +57,26 @@ class Settings
     }
 
     /**
-     * @return array{key: string, value: ?string, set: bool, secret: bool, inherited: bool}
+     * @return array{key: string, value: ?string, set: bool, secret: bool}
      */
     public function get(string $key): array
     {
         $key = self::normalizeKey($key);
         self::assertKnownKey($key);
 
-        $own = $this->ownValue($key);
-        $raw = $own ?? $this->rawValue($key);
+        $value = $this->storedValue($key);
         $secret = self::isSecret($key);
 
         return [
             'key' => $key,
-            'value' => $raw === null ? null : ($secret ? self::redact($raw) : $raw),
-            'set' => $raw !== null && $raw !== '',
+            'value' => $value === null ? null : ($secret ? self::redact($value) : $value),
+            'set' => $value !== null && $value !== '',
             'secret' => $secret,
-            // The project has none of its own and is using the engine-wide
-            // secret ({@see \App\Lib\Vault\GlobalVault}). It works, but
-            // clearing it here will not clear it -- that is an engine-level
-            // change, not a project one.
-            'inherited' => $own === null && $raw !== null && $raw !== '',
         ];
     }
 
     /**
-     * @return list<array{key: string, value: ?string, set: bool, secret: bool, inherited: bool}>
+     * @return list<array{key: string, value: ?string, set: bool, secret: bool}>
      */
     public function list(): array
     {
@@ -148,21 +142,10 @@ class Settings
         throw new \InvalidArgumentException("No unsetter for '{$key}'.");
     }
 
-    /** The value in force, engine-wide fallback included. */
-    private function rawValue(string $key): ?string
+    private function storedValue(string $key): ?string
     {
         if ($key === self::KEY_CLOUDFLARE_API_TOKEN) {
             return $this->project->model()->getCloudflareApiToken();
-        }
-
-        return null;
-    }
-
-    /** Only what was set on this project, so `get()` can say which it is. */
-    private function ownValue(string $key): ?string
-    {
-        if ($key === self::KEY_CLOUDFLARE_API_TOKEN) {
-            return $this->project->model()->getOwnCloudflareApiToken();
         }
 
         return null;

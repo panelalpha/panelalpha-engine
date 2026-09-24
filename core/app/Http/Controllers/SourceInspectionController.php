@@ -77,8 +77,10 @@ class SourceInspectionController extends Controller
                     property: 'git_token',
                     type: 'string',
                     description: 'Access token for a private HTTPS repository. '
-                        . 'A `vault:<ref>` from vault_secret_create is accepted here in place of the '
-                        . 'literal token -- the secret it stands for is substituted at read time.'
+                        . 'A `vault:<id>` of a `global` vault entry is accepted here in place of the '
+                        . 'literal token. A `project` entry is accepted while no project owns it yet, and '
+                        . 'inspecting does not assign it; one a project owns is refused. Omitted, the clone '
+                        . 'is anonymous.'
                 ),
                 new OA\Property(
                     property: 'recipe',
@@ -141,15 +143,10 @@ class SourceInspectionController extends Controller
         }
 
         try {
-            // git_token may be a `vault:<ref>` -- resolved here, so the
-            // transient clone uses the pasted secret and nothing downstream
-            // (or in the log) ever sees it. No token at all falls back to the
-            // engine's own: this clone is thrown away, so nothing is copied or
-            // frozen by inheriting it, and inspecting a private repository
-            // stops needing a token the caller has already given the engine
-            // once.
+            // git_token may be a global `vault:<id>`: an inspection belongs
+            // to no project. No token clones anonymously.
             $resolved = $type === SourceResolver::TYPE_GIT
-                ? $this->resolver()->fromGit($source, $params['branch'] ?? null, RequestVault::getOrGlobal('git_token'))
+                ? $this->resolver()->fromGit($source, $params['branch'] ?? null, RequestVault::get('git_token', null))
                 : $this->resolver()->fromDirectory(SourceResolver::TYPE_PATH, $source, $source);
         } catch (InspectException $e) {
             throw ProblemException::of([$e->toProblem()]);

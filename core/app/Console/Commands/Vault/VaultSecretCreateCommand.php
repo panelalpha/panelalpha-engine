@@ -3,7 +3,6 @@
 namespace App\Console\Commands\Vault;
 
 use App\Lib\Vault\PasteCheck;
-use App\Lib\Vault\RequestVault;
 use App\Lib\Vault\SecretMinter;
 use App\Models\SecretVaultEntry;
 use Illuminate\Console\Command;
@@ -13,15 +12,16 @@ use Illuminate\Validation\ValidationException;
  * Mints a paste slot and prints the URL to hand to whoever holds the secret.
  *
  * The console half of `POST /api/vault/secrets`, through the same
- * {@see SecretMinter}, so the one-global-per-type and never-overwrite rules
- * cannot differ between a shell and an agent.
+ * {@see SecretMinter}, so a shell and an agent cannot mint differently.
  */
 class VaultSecretCreateCommand extends Command
 {
     protected $signature = 'vault:secret:create
                             {type : The request field the reference is for (git_token, cloudflare_api_token, env_vars, ...)}
-                            {--scope=request : request (one secret, expires in an hour) or global (the engine\'s own, no expiry)}
+                            {--scope=project : project (usable by the first project given it) or global (usable by any project)}
                             {--purpose= : What the secret is for, shown on the paste form and in vault:secret:list}
+                            {--project= : project scope only: the project that owns it from the start (need not exist yet)}
+                            {--expires-in= : Seconds until the secret expires and is deleted; omit to keep it}
                             {--repo-url= : git_token only: the repository a pasted token is tried against before it is saved}
                             {--hostname= : cloudflare_api_token only: a domain whose zone the pasted token must see}';
 
@@ -59,9 +59,23 @@ class VaultSecretCreateCommand extends Command
         ], static fn (mixed $v): bool => is_string($v) && $v !== '');
 
         try {
-            [$entry, $ref] = SecretMinter::mint($type, $scope, is_string($purpose) ? $purpose : null, $verifyWith);
+            $project = $this->option('project');
+            $expiresIn = $this->option('expires-in');
+            if (is_string($expiresIn) && !ctype_digit($expiresIn)) {
+                $this->error('--expires-in takes a number of seconds.');
+
+                return self::FAILURE;
+            }
+            [$entry, $ref] = SecretMinter::mint(
+                $type,
+                $scope,
+                is_string($purpose) ? $purpose : null,
+                $verifyWith,
+                is_string($project) ? $project : null,
+                is_string($expiresIn) ? (int) $expiresIn : null
+            );
         } catch (ValidationException $e) {
-            // A global of this type is already set, or --repo-url/--hostname is unusable.
+            // --repo-url/--hostname or --project is unusable.
             $this->error(collect($e->errors())->flatten()->implode(' '));
 
             return self::FAILURE;
@@ -80,14 +94,17 @@ class VaultSecretCreateCommand extends Command
         if (($target = PasteCheck::describe($entry)) !== null) {
             $this->line('  checked:   against ' . $target . ' before saving');
         }
-        $this->line('  reference: ' . ($entry->isGlobal()
-            ? RequestVault::PREFIX . RequestVault::GLOBAL_REF
-            : RequestVault::PREFIX . $ref));
+        $this->line('  reference: ' . $entry->reference());
         $this->newLine();
-        $this->line('The link stops accepting in ' . (SecretVaultEntry::TTL_SECONDS / 60) . ' minutes.');
-        $this->line($entry->isGlobal()
-            ? 'The secret itself will not expire, and every project without one of its own will use it.'
-            : 'The secret expires with the link.');
+        $this->line('The link stops accepting in ' . (SecretVaultEntry::TTL_SECONDS / 60) . ' minutes; '
+            . ($entry->expires_at === null
+                ? 'the secret itself does not expire.'
+                : 'the secret expires at ' . $entry->expires_at->format('Y-m-d H:i') . ' and is then deleted.'));
+        $this->line(match (true) {
+            $entry->isGlobal() => 'Any project may use it by passing ' . $entry->reference() . '.',
+            $entry->project !== null => "Only project '{$entry->project}' can use " . $entry->reference() . '.',
+            default => 'The first project given ' . $entry->reference() . ' claims it; any other project is refused.',
+        });
         // Said at create time, because it is the thing that most surprises
         // somebody later: there is no edit, only delete and re-create.
         $this->line('Once pasted it cannot be changed -- to replace it, delete the entry and create a new link.');

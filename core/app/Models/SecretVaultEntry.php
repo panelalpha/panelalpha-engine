@@ -10,22 +10,21 @@ use Illuminate\Support\Str;
 /**
  * One paste-slot for a secret the API caller does not want to send.
  *
- * An agent creates an entry (`vault_secret_create`), gets back a one-line URL
- * and a `vault:<ref>` reference, the customer pastes the secret into the form
- * at that URL, and the next API call that sends `vault:<ref>` in the
- * matching request field receives the plaintext in its place.
+ * An agent creates an entry (`vault_secret_create`), gets back a paste URL
+ * and the reference `vault:<id>`, the customer pastes the secret into the
+ * form, and an API call that sends `vault:<id>` in the matching request field
+ * uses the secret in its place.
  *
- * The raw ref is never stored: only `ref_hash` (sha-256) is. The form URL and
- * the reference are the same string, so one hashed column serves both, and a
- * database dump contains no live form links.
+ * The paste URL carries a random token of which only `ref_hash` (sha-256) is
+ * stored, so a database dump contains no live form links. The reference is
+ * the plain id: knowing it is not enough to read anything.
  *
- * `scope` says how long that answer is good for. A `request` entry is the
- * original thing: one secret for the call in front of it, gone an hour later.
- * A `global` entry is the engine's own credential of that type -- one per
- * type, pasted once, used by every project that does not carry one of its
- * own, so a solo developer is asked for their Git token once rather than at
- * every project. Its secret never expires; only the paste link does, which is
- * why the two clocks are separate columns.
+ * `scope` says where the secret may be used. A `project` entry belongs to the
+ * first project it is given to (`project`) and is refused everywhere else; a
+ * `global` entry may be used by any project that names it. There can be any
+ * number of either per type -- `purpose` tells them apart. The paste link
+ * closes after an hour; the secret expires only if it was created with an
+ * expiry (`expires_at`), and is then refused and purged.
  *
  * @property int       $id
  * @property string    $ref_hash
@@ -36,8 +35,9 @@ use Illuminate\Support\Str;
  * @property ?array<string, string> $verification the outcome of that check
  * @property ?string   $secret_encrypted
  * @property ?Carbon   $filled_at
+ * @property ?string   $project         the project a `project` entry is bound to
  * @property ?Carbon   $link_expires_at
- * @property ?Carbon   $expires_at
+ * @property ?Carbon   $expires_at      null: the secret never expires
  * @property int       $use_count
  * @property ?Carbon   $last_used_at
  * @property Carbon    $created_at
@@ -71,23 +71,19 @@ class SecretVaultEntry extends Model
         self::TYPE_CLOUDFLARE_API_TOKEN,
     ];
 
-    /** One secret for the call in front of it: expires with its paste link. */
-    public const SCOPE_REQUEST = 'request';
+    /** Usable by one project only: the first one it is given to. */
+    public const SCOPE_PROJECT = 'project';
 
-    /**
-     * The engine's own credential of this type -- one row per type, reused by
-     * every project that has none of its own, and it does not expire.
-     */
+    /** Usable by any project that names it. */
     public const SCOPE_GLOBAL = 'global';
 
     /** @var list<string> */
-    public const SCOPES = [self::SCOPE_REQUEST, self::SCOPE_GLOBAL];
+    public const SCOPES = [self::SCOPE_PROJECT, self::SCOPE_GLOBAL];
 
-    /**
-     * Seconds from the mint that the paste form stays open -- and, for a
-     * request entry, that its secret stays readable too. A global entry's
-     * secret has no such clock; only its form does.
-     */
+    /** What marks a request or stored value as a reference: `vault:<id>`. */
+    public const PREFIX = 'vault:';
+
+    /** Seconds from the mint that the paste form stays open. */
     public const TTL_SECONDS = 3600;
 
     protected $fillable = [
@@ -98,6 +94,7 @@ class SecretVaultEntry extends Model
         'verify_with',
         'secret_encrypted',
         'filled_at',
+        'project',
         'link_expires_at',
         'expires_at',
     ];
@@ -112,7 +109,7 @@ class SecretVaultEntry extends Model
     ];
 
     protected $attributes = [
-        'scope' => self::SCOPE_REQUEST,
+        'scope' => self::SCOPE_PROJECT,
     ];
 
     /**
@@ -172,6 +169,20 @@ class SecretVaultEntry extends Model
         return $this->scope === self::SCOPE_GLOBAL;
     }
 
+    /** `vault:<id>`, what a request or a project stores in place of the secret. */
+    public function reference(): string
+    {
+        return self::PREFIX . $this->id;
+    }
+
+    /** The id in `vault:<id>` (or a bare `<id>`), or null when it is not one. */
+    public static function idFromReference(string $value): ?int
+    {
+        $id = str_starts_with($value, self::PREFIX) ? substr($value, strlen(self::PREFIX)) : $value;
+
+        return ctype_digit($id) && $id !== '' ? (int) $id : null;
+    }
+
     /**
      * A secret has been pasted, and is therefore final.
      *
@@ -188,56 +199,34 @@ class SecretVaultEntry extends Model
     }
 
     /**
-     * The secret is past its life. A global entry has none, so this is only
-     * ever true of a request entry.
-     */
-    public function expired(): bool
-    {
-        return $this->expires_at !== null && $this->expires_at->isPast();
-    }
-
-    /**
-     * The paste form no longer accepts. Separate from {@see expired()}: a
-     * global entry's link dies after an hour while its secret stays usable,
-     * so a leaked URL cannot be pasted over months later.
+     * The paste form no longer accepts. The secret itself stays usable, so a
+     * leaked URL cannot be pasted into months later.
      */
     public function linkExpired(): bool
     {
         return $this->link_expires_at !== null && $this->link_expires_at->isPast();
     }
 
+    /** The secret is past the expiry it was created with. */
+    public function expired(): bool
+    {
+        return $this->expires_at !== null && $this->expires_at->isPast();
+    }
+
     /**
-     * `pending` (no paste yet), `filled` (usable), or `expired`.
-     *
-     * A global entry whose link has closed but whose secret is stored is
-     * `filled` -- the thing a caller wants to know is whether the credential
-     * is there, and it is.
+     * `expired` (past its expiry), `filled` (usable), `pending` (link open,
+     * nothing pasted) or `abandoned` (link closed unfilled).
      */
     public function status(): string
     {
         if ($this->expired()) {
             return 'expired';
         }
+        if ($this->filled_at !== null) {
+            return 'filled';
+        }
 
-        return $this->filled_at !== null ? 'filled' : 'pending';
-    }
-
-    /**
-     * The engine's global entry for `$type`, whatever state it is in.
-     *
-     * There is at most one: {@see \App\Http\Controllers\SecretVaultController}
-     * mints a global by updating the existing row rather than adding a second,
-     * so "the engine's Git token" names one secret and re-minting rotates the
-     * paste link instead of forking the answer. Newest first regardless, so a
-     * row that predates that rule cannot shadow the current one.
-     */
-    public static function globalFor(string $type): ?self
-    {
-        return self::query()
-            ->where('scope', self::SCOPE_GLOBAL)
-            ->where('type', $type)
-            ->orderByDesc('id')
-            ->first();
+        return $this->linkExpired() ? 'abandoned' : 'pending';
     }
 
     public function setSecret(string $secret): void

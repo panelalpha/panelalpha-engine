@@ -6,47 +6,47 @@ use App\Models\SecretVaultEntry;
 use Illuminate\Support\Facades\Artisan;
 
 /**
- * The sweeper: expired entries go, live ones stay, and the grace window
- * keeps a just-expired ref readable as `expired` instead of `unknown` for
- * an hour after its clock ran out.
+ * The sweeper: an entry whose paste link closed with nothing pasted goes; a
+ * filled one never does, and the grace window keeps a just-closed one
+ * readable as `abandoned` for an hour.
  */
 class VaultPurgeCommandTest extends VaultTestCase
 {
-    public function test_deletes_only_expired_entries(): void
+    public function test_a_filled_project_entry_is_never_swept(): void
     {
-        [, $liveRef] = $this->entry(['secret' => 'still-good']);
-        [, $expiredRef] = $this->entry(['secret' => 'gone', 'expires_at' => now()->subHours(2)]);
+        [$filled] = $this->projectEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_mine', 'shop');
+        $filled->forceFill(['link_expires_at' => now()->subYear()])->save();
 
-        $exit = Artisan::call('vault:purge');
+        $this->assertSame(0, Artisan::call('vault:purge', ['--grace' => 0]));
 
-        $this->assertSame(0, $exit);
-        $this->assertNotNull(
-            SecretVaultEntry::query()->where('ref_hash', SecretVaultEntry::hashRef($liveRef))->first(),
-            'A live entry must survive the sweep.'
-        );
-        $this->assertNull(
-            SecretVaultEntry::query()->where('ref_hash', SecretVaultEntry::hashRef($expiredRef))->first(),
-            'An expired entry must be deleted.'
-        );
+        $this->assertNotNull(SecretVaultEntry::query()->find($filled->id), 'The project uses it; it has no expiry.');
     }
 
-    public function test_grace_keeps_a_just_expired_entry(): void
+    public function test_a_secret_past_its_expiry_is_deleted_without_anyone_asking(): void
     {
-        [, $justExpiredRef] = $this->entry(['secret' => 'graceful', 'expires_at' => now()->subMinute()]);
+        [$expired] = $this->projectEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_old', 'shop');
+        $expired->forceFill(['expires_at' => now()->subMinute()])->save();
+        [$live] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_shared');
+        $live->forceFill(['expires_at' => now()->addDay()])->save();
 
         Artisan::call('vault:purge'); // default grace: 3600s
-
-        $this->assertNotNull(
-            SecretVaultEntry::query()->where('ref_hash', SecretVaultEntry::hashRef($justExpiredRef))->first(),
-            'A just-expired entry is kept for the grace window, so a status check still explains itself.'
-        );
+        $this->assertNotNull(SecretVaultEntry::query()->find($expired->id), 'Kept for the grace window.');
 
         Artisan::call('vault:purge', ['--grace' => 0]);
+        $this->assertNull(SecretVaultEntry::query()->find($expired->id));
+        $this->assertNotNull(SecretVaultEntry::query()->find($live->id), 'Not expired yet.');
+    }
 
-        $this->assertNull(
-            SecretVaultEntry::query()->where('ref_hash', SecretVaultEntry::hashRef($justExpiredRef))->first(),
-            'With no grace, even a just-expired entry is deleted.'
-        );
+    public function test_grace_keeps_a_just_abandoned_entry(): void
+    {
+        [$abandoned] = $this->projectEntry();
+        $abandoned->forceFill(['link_expires_at' => now()->subMinute()])->save();
+
+        Artisan::call('vault:purge'); // default grace: 3600s
+        $this->assertNotNull(SecretVaultEntry::query()->find($abandoned->id), 'Kept for the grace window.');
+
+        Artisan::call('vault:purge', ['--grace' => 0]);
+        $this->assertNull(SecretVaultEntry::query()->find($abandoned->id));
     }
 
     public function test_an_engine_wide_secret_is_never_swept(): void
@@ -59,14 +59,13 @@ class VaultPurgeCommandTest extends VaultTestCase
 
         $this->assertNotNull(
             SecretVaultEntry::query()->find($global->id),
-            'Deleting the engine-wide token on a cron would break every project that inherits it.'
+            'Deleting a global on a cron would break every project that names it.'
         );
     }
 
     public function test_an_abandoned_global_mint_is_swept(): void
     {
-        // Minted, form closed, nothing ever pasted. Left alone it would make
-        // vault_secret_list claim an engine-wide secret that does not exist.
+        // Minted, form closed, nothing ever pasted.
         [$abandoned] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN);
         $abandoned->forceFill(['link_expires_at' => now()->subDay()])->save();
 

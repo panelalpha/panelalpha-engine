@@ -736,39 +736,40 @@ Used when a private repository or a Cloudflare tunnel needs a token. You paste t
 | `vault_secret_delete` | Deletes a paste slot |
 | `vault_secret_list` | Lists paste slots. The secret itself is never included |
 | `vault_secret_status` | Whether a paste slot has a secret yet |
-| `vault_config_get` | Whether projects share the engine's secrets, and which ones are stored |
-| `vault_config_set` | Turn that sharing on or off |
+| `vault_config_get` | Which global secrets are stored |
 
 ### What you can see, and what you cannot
 
-A secret is never readable again. Not by your assistant, not by you, not by any command. What you can always see is the **inventory**: each entry's id, what kind of secret it is, what it is for, whether it has been filled in yet, and the dates.
+A secret is never readable again. Not by your assistant, not by you, not by any command. What you can always see is the **inventory**: each entry's reference (`vault:<id>`), what kind of secret it is, what it is for, which project owns it, whether it has been filled in yet, and the dates.
 
 Give a **purpose** when you ask for a link ("deploy key for the shop repo"). It is shown on the paste page, so whoever hands over a credential can see why it is wanted, and it appears in the listing afterwards. Since the value itself can never be read back, the purpose is usually the only thing that tells two entries of the same kind apart when you come to tidy up.
 
 ### A secret cannot be edited, only replaced
 
-Once a value has been pasted it is final. Opening the link again will not change it, and neither will asking for a new link for the same engine-wide secret. To replace one, delete the entry and create a fresh link. This is deliberate: an overwrite would be invisible afterwards, because nothing can read the value back to check.
+Once a value has been pasted it is final. Opening the link again will not change it. To replace one, delete the entry and create a fresh link. This is deliberate: an overwrite would be invisible afterwards, because nothing can read the value back to check.
 
-### Pasting a token once
+### Project secrets and global secrets
 
-By default a paste page is for the calls your assistant is about to make, and it expires in an hour. Ask for one for the whole engine instead:
+A secret belongs to one project by default. The first project it is given to owns it, and any other project that tries to use it is refused. You can also name the project when you ask for the link ("a Git token for the shop project"); then only that project can use it, even if it does not exist yet.
 
-```text
-Save my Git token once for this whole engine. New projects should use it
-when I do not give them one.
-```
-
-The engine keeps that secret as its own. Every project you create afterwards without a token of its own uses it, so you paste a Git or Cloudflare token once. A project that was given its own token keeps using that one. The shared token is not copied onto the project, so replacing it reaches every project that never had one of its own.
-
-There is one shared secret per kind. Once it has been pasted, a new link for that same kind is refused. Delete the entry, then ask for a fresh link. The page still expires in an hour. The shared secret does not expire with the page. If nothing has been pasted yet, asking again gives you a new link for the same empty slot.
-
-If you host projects for other people, each project can stay on its own credentials:
+Ask for a global secret when several projects should share one:
 
 ```text
-Stop projects from using the engine-wide tokens.
+Save a global Git token for the acme GitHub organisation.
 ```
 
-Stored engine-wide secrets stay stored. Ask to turn sharing back on and projects without their own token use them again. The same switch from the server: [Secrets](../06-commands/pae-cli.md#secrets).
+You can keep several global secrets of the same kind; the purpose tells them apart. A global secret is used only for a project you name it for:
+
+```text
+Create a project from https://github.com/acme/shop with the global
+acme Git token.
+```
+
+The assistant passes the secret's reference, such as `vault:7`, in place of the token. A project created without a token gets none, even when the engine holds global secrets. Inspecting a repository can use a global secret, or a project secret that no project owns yet. Inspecting does not make the secret belong to anything; the first project given it does.
+
+The paste page closes after an hour. A secret is kept until it is deleted, unless you give it an expiry when you ask for the link ("keep it for 7 days"); after that it is refused and the engine deletes it by itself. A project stores the secret it was given, so deleting the vault entry does not take it away from projects that already used it. The engine never looks a secret up in the vault on a project's behalf.
+
+When the engine was updated to this scheme, each project that was using the old shared token had that token stored on it, so it keeps working. From the server: [Secrets](../06-commands/pae-cli.md#secrets).
 
 ## From the server
 

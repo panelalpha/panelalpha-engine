@@ -2,24 +2,15 @@
 
 namespace Tests\Unit\Vault;
 
-use App\Lib\Vault\RequestVault;
+use App\Http\Controllers\User\ProjectSettingController;
 use App\Models\SecretVaultEntry;
 use App\System\Project\Settings;
 use Illuminate\Validation\ValidationException;
 
 /**
- * The Cloudflare token goes through the vault, like every other secret.
- *
- * `project_setting_set` is the one tool that takes a credential rather than a
- * preference, and it was the one secret-bearing field in the API that could not
- * take a `vault:<ref>` -- `RequestVault` was wired into `source_inspect` and
- * `project_create` and nowhere else. The documented advice for this tool is
- * "never ask for that token in chat", and that was unimplementable through the
- * tool itself: an assistant either relayed the secret or could not do the job.
- *
- * The resolution itself is `RequestVault`'s, and tested with it. What is tested
- * here is the decision this controller makes about *which* settings may take a
- * reference, which is the part that could go wrong quietly.
+ * `project_setting_set` takes a credential, so a secret setting accepts a
+ * `vault:<id>`: the controller reads it for this project and stores the
+ * secret, exactly as if the caller had sent it.
  */
 class ProjectSettingVaultTest extends VaultTestCase
 {
@@ -28,107 +19,40 @@ class ProjectSettingVaultTest extends VaultTestCase
         $this->assertTrue(Settings::isSecret('cloudflare-api-token'));
     }
 
-    /**
-     * The request field is `value`, so `RequestVault::get('value')` is what the
-     * controller must ask for. A reference in a differently named field would
-     * resolve to nothing and be stored as a literal `vault:...` string -- which
-     * is the failure this asserts against.
-     */
-    public function test_a_reference_in_the_value_field_resolves_to_the_pasted_secret(): void
+    public function test_a_reference_is_stored_as_its_secret_and_assigned_to_the_project(): void
     {
-        [, $ref] = $this->entry([
-            'type' => 'cloudflare_api_token',
-            'secret' => 'cf-real-token-value',
-        ]);
+        [$entry] = $this->projectEntry(SecretVaultEntry::TYPE_CLOUDFLARE_API_TOKEN, 'cf-real-token-value');
 
-        $request = \Illuminate\Http\Request::create(
-            '/',
-            'PUT',
-            ['value' => RequestVault::PREFIX . $ref]
-        );
-        $this->app->instance('request', $request);
-
-        $this->assertSame(
-            'cf-real-token-value',
-            RequestVault::get('value', 'cloudflare_api_token')
-        );
+        $this->assertSame('cf-real-token-value', $this->valueFor('shop', 'cloudflare-api-token', $entry->reference()));
+        $this->assertSame('shop', $entry->refresh()->project);
     }
 
-    /** A literal still passes through, so nothing changes for a caller with one. */
-    public function test_a_literal_value_passes_through_untouched(): void
+    public function test_a_literal_passes_through(): void
     {
-        $request = \Illuminate\Http\Request::create('/', 'PUT', ['value' => 'a-literal-token']);
-        $this->app->instance('request', $request);
-
-        $this->assertSame(
-            'a-literal-token',
-            RequestVault::get('value', 'cloudflare_api_token')
-        );
+        $this->assertSame('a-literal-token', $this->valueFor('shop', 'cloudflare-api-token', 'a-literal-token'));
     }
 
-    /**
-     * An unusable reference is a 422 rather than a passthrough.
-     *
-     * Storing the literal text `vault:xyz` as a token would surface later as a
-     * Cloudflare rejection nobody can trace; the exception names the field and
-     * says what to do.
-     */
-    public function test_an_unknown_reference_is_refused_not_stored(): void
+    public function test_a_git_token_entry_is_refused_as_a_cloudflare_token(): void
     {
-        $request = \Illuminate\Http\Request::create('/', 'PUT', ['value' => 'vault:nothing-here']);
-        $this->app->instance('request', $request);
+        [$entry] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_not_cloudflare');
 
         $this->expectException(ValidationException::class);
-        RequestVault::get('value', 'cloudflare_api_token');
+        $this->valueFor('shop', 'cloudflare-api-token', $entry->reference());
     }
 
-    /**
-     * A reference for one type does not resolve into another field.
-     *
-     * The type is the field name by design, so a `git_token` entry cannot be
-     * used as a Cloudflare token even if someone tries.
-     */
-    public function test_a_reference_of_the_wrong_type_does_not_resolve(): void
+    public function test_another_projects_entry_is_refused(): void
     {
-        [, $ref] = $this->entry([
-            'type' => SecretVaultEntry::TYPE_GIT_TOKEN,
-            'secret' => 'gh-token-not-a-cloudflare-one',
-        ]);
-
-        $request = \Illuminate\Http\Request::create(
-            '/',
-            'PUT',
-            ['value' => RequestVault::PREFIX . $ref]
-        );
-        $this->app->instance('request', $request);
+        [$entry] = $this->projectEntry(SecretVaultEntry::TYPE_CLOUDFLARE_API_TOKEN, 'cf-theirs', 'blog');
 
         $this->expectException(ValidationException::class);
-        RequestVault::get('value', 'cloudflare_api_token');
+        $this->valueFor('shop', 'cloudflare-api-token', $entry->reference());
     }
 
-    /**
-     * An entry minted but not yet pasted is its own sentence, because the fix
-     * is different: open the URL rather than create another entry.
-     */
-    public function test_an_unfilled_reference_says_to_open_the_url(): void
+    private function valueFor(string $username, string $key, string $value): string
     {
-        [, $ref] = $this->entry(['type' => 'cloudflare_api_token']);
+        $this->app->instance('request', \Illuminate\Http\Request::create('/', 'PUT', ['value' => $value]));
+        $method = new \ReflectionMethod(ProjectSettingController::class, 'valueFor');
 
-        $request = \Illuminate\Http\Request::create(
-            '/',
-            'PUT',
-            ['value' => RequestVault::PREFIX . $ref]
-        );
-        $this->app->instance('request', $request);
-
-        try {
-            RequestVault::get('value', 'cloudflare_api_token');
-            $this->fail('an unfilled reference must not resolve');
-        } catch (ValidationException $e) {
-            $this->assertStringContainsString(
-                'no secret pasted yet',
-                $e->getMessage()
-            );
-        }
+        return $method->invoke(null, $username, $key, $value);
     }
 }

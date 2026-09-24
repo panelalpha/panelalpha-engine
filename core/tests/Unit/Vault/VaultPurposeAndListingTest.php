@@ -62,8 +62,9 @@ class VaultPurposeAndListingTest extends VaultTestCase
         foreach ($rows as $row) {
             $this->assertIsInt($row['id']);
             $this->assertSame('git_token', $row['type']);
+            $this->assertSame('vault:' . $row['id'], $row['ref']);
             $this->assertArrayHasKey('created_at', $row);
-            $this->assertArrayHasKey('expires_at', $row);
+            $this->assertArrayHasKey('project', $row);
             // The whole point: an inventory, never the values.
             $this->assertArrayNotHasKey('secret', $row);
             $this->assertArrayNotHasKey('secret_encrypted', $row);
@@ -88,7 +89,7 @@ class VaultPurposeAndListingTest extends VaultTestCase
     {
         [$entry] = $this->entry(['secret' => 'ghp_pasted', 'purpose' => 'Shop repo']);
 
-        $response = (new SecretVaultController())->show('id:' . $entry->id);
+        $response = (new SecretVaultController())->show($entry->reference());
         $data = json_decode((string) $response->getContent(), true)['data'];
 
         $this->assertSame($entry->id, $data['id']);
@@ -98,38 +99,37 @@ class VaultPurposeAndListingTest extends VaultTestCase
 
     public function test_an_entry_can_be_deleted_by_that_id(): void
     {
-        // The reason `id` exists: a request entry's raw ref was shown once at
-        // create time and only its hash was kept, so this is the only handle
-        // left -- and deleting is the only way to replace a secret now.
+        // Deleting is the only way to replace a secret.
         [$entry] = $this->entry(['secret' => 'ghp_pasted']);
 
-        (new SecretVaultController())->destroy('id:' . $entry->id);
+        (new SecretVaultController())->destroy($entry->reference());
 
         $this->assertNull(SecretVaultEntry::query()->find($entry->id));
     }
 
     public function test_a_junk_id_is_a_404_not_a_crash(): void
     {
-        // `id:` followed by anything non-numeric resolves to no entry, which
-        // is the same 404 an unknown ref gets -- not a database error from
-        // casting "notanumber" to an integer key.
+        // A non-numeric id resolves to no entry: a 404, not a database error
+        // from casting "notanumber" to an integer key.
         try {
-            (new SecretVaultController())->show('id:notanumber');
+            (new SecretVaultController())->show('vault:notanumber');
             $this->fail('An unresolvable id must not be reported as a found entry.');
         } catch (HttpResponseException $e) {
             $this->assertSame(404, $e->getResponse()->getStatusCode());
         }
     }
 
-    public function test_a_global_reports_both_its_id_and_its_type_ref(): void
+    public function test_the_listing_filters_by_scope_and_shows_who_owns_what(): void
     {
-        $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_engine');
+        [$global] = $this->globalEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_shared');
+        $this->projectEntry(SecretVaultEntry::TYPE_GIT_TOKEN, 'ghp_mine', 'shop');
 
-        $row = $this->list()[0];
+        $rows = $this->list(['scope' => 'global']);
+        $this->assertSame([$global->reference()], array_column($rows, 'ref'));
+        $this->assertNull($rows[0]['project']);
 
-        $this->assertIsInt($row['id']);
-        $this->assertSame('global:git_token', $row['ref']);
-        $this->assertSame('global', $row['scope']);
+        $rows = $this->list(['scope' => 'project']);
+        $this->assertSame(['shop'], array_column($rows, 'project'));
     }
 
     /**
@@ -147,10 +147,13 @@ class VaultPurposeAndListingTest extends VaultTestCase
         return $body['data'];
     }
 
-    /** @return list<array<string, mixed>> */
-    private function list(): array
+    /**
+     * @param array<string, string> $query
+     * @return list<array<string, mixed>>
+     */
+    private function list(array $query = []): array
     {
-        $request = Request::create('/api/vault/secrets', 'GET');
+        $request = Request::create('/api/vault/secrets', 'GET', $query);
         $this->app->instance('request', $request);
 
         /** @var array{data: list<array<string, mixed>>} $body */

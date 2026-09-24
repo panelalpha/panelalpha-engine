@@ -116,6 +116,8 @@ class SettingsTest extends TestCase
         $user->username = 'alice';
         $user->method('hasGitProject')->willReturn(true);
         $user->method('getCloudflareApiToken')->willReturn($token);
+        // What Settings reports: the stored value, never a resolved global.
+        $user->method('getCloudflareApiToken')->willReturn($token);
 
         return $user;
     }

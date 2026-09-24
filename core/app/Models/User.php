@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Lib\Vault\GlobalVault;
 use App\System\Project as AppSystemProject;
 use App\System\Services\Webserver\AbstractWebserver;
 use Illuminate\Database\Eloquent\Collection;
@@ -1369,34 +1368,14 @@ class User extends Authenticatable
         return $branch !== '' ? $branch : null;
     }
 
-    /**
-     * This project's Git token, or the engine's own when it has none.
-     *
-     * The fallback is what makes a token pasted once work for every project
-     * afterwards ({@see GlobalVault}); a project that was given its own still
-     * uses that, so nothing set by hand is replaced from underneath, and an
-     * engine set to keep tokens per project never reaches for the global at
-     * all. {@see getOwnGitToken()} for the project's own, without inheriting.
-     */
+    /** The Git token this project clones with, or null for an anonymous clone. */
     public function getGitToken(): ?string
-    {
-        return $this->getOwnGitToken() ?? GlobalVault::secret(SecretVaultEntry::TYPE_GIT_TOKEN);
-    }
-
-    /** This project's own Git token -- null where it inherits the engine's. */
-    public function getOwnGitToken(): ?string
     {
         return self::trimmed($this->getDetails()['git_token'] ?? null);
     }
 
-    /** This project's Cloudflare API token, or the engine's own. {@see getGitToken()} */
+    /** This project's Cloudflare API token, or null. */
     public function getCloudflareApiToken(): ?string
-    {
-        return $this->getOwnCloudflareApiToken() ?? GlobalVault::secret(SecretVaultEntry::TYPE_CLOUDFLARE_API_TOKEN);
-    }
-
-    /** This project's own Cloudflare API token -- null where it inherits the engine's. */
-    public function getOwnCloudflareApiToken(): ?string
     {
         return self::trimmed($this->getDetails()['cloudflare_api_token'] ?? null);
     }

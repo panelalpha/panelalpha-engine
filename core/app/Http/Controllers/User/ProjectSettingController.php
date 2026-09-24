@@ -112,17 +112,9 @@ class ProjectSettingController extends Controller
         $settings = $this->settingsFor($username);
         $validated = $request->validate(['value' => ['required', 'string']]);
 
-        // Resolved before validation by value, not after: a `vault:<ref>` is a
-        // reference, so the rule above is satisfied by the reference itself and
-        // the secret only exists from here on. This is the one setting that is
-        // a credential rather than a preference -- a Cloudflare token scoped to
-        // edit tunnels and DNS -- and without this the tool that takes it is the
-        // one place an agent cannot use the vault, which is the opposite of what
-        // the vault is for. The key is the vault `type`, by design: only an
-        // entry created for `cloudflare-api-token` resolves into
-        // `cloudflare-api-token`.
+        // A secret setting may be given a `vault:<id>` in place of the secret.
         try {
-            $result = $settings->set($key, self::valueFor($key, (string) $validated['value']));
+            $result = $settings->set($key, self::valueFor($username, $key, (string) $validated['value']));
         } catch (\InvalidArgumentException | CloudflareException $e) {
             // An unknown key, or a token Cloudflare itself refused: the
             // caller's input either way.
@@ -133,47 +125,20 @@ class ProjectSettingController extends Controller
     }
 
     /**
-     * The value to store: the request's own, or the secret a `vault:<ref>`
-     * stands for.
+     * The value to store: as sent, or the secret a `vault:<id>` stands for.
      *
-     * Only a *secret* setting is allowed to take a reference. An allowlisted
-     * setting that is not a secret is a preference, and preferences may be read
-     * back -- `project_setting_get` returns a non-secret value verbatim -- so
-     * resolving one from the vault would take a secret the caller deliberately
-     * kept out of the transcript and write it somewhere it can be read out
-     * again. That would be worse than refusing it.
-     *
-     * A non-secret setting therefore keeps the literal path and a reference in
-     * one is stored as the literal string `vault:...`, which is what it always
-     * was. Nothing changes for the settings that exist today: the only
-     * allowlisted key is a secret.
+     * Only a *secret* setting may take a reference: a non-secret one can be
+     * read back verbatim, so resolving it from the vault would put a secret
+     * where the transcript can see it. There, `vault:...` is a literal.
      */
-    private static function valueFor(string $key, string $value): string
+    private static function valueFor(string $username, string $key, string $value): string
     {
         if (!Settings::isSecret($key)) {
             return $value;
         }
 
-        // The request field is `value`; the vault *type* is the setting key in
-        // snake_case. Both halves are forced rather than convenient.
-        //
-        // One field carries whatever secret the key names, so the type cannot
-        // be the field name -- `get('value')` would look for an entry of type
-        // `value`, which nothing creates. And it cannot be the key verbatim
-        // either: vault types are snake_case (`^[a-z][a-z0-9_]*$`, enforced by
-        // the mint endpoint), while setting keys are hyphenated, so
-        // `cloudflare-api-token` is not a type the vault will mint. The
-        // snake_case name is the same secret under both spellings, which is
-        // what `TYPES_WITH_HELP` already assumes.
-        //
-        // `get()` reads the request field by name, so a request that did not
-        // carry `value` at all would resolve to null rather than to the string
-        // just validated. Handing over the validated value keeps the two in
-        // step, and keeps the literal path identical to what it was.
-        $type = str_replace('-', '_', Settings::normalizeKey($key));
-        $resolved = RequestVault::get('value', $type);
-
-        return $resolved ?? $value;
+        // The field is `value`; the vault type is the setting key in snake_case.
+        return (string) RequestVault::get('value', $username, str_replace('-', '_', Settings::normalizeKey($key)));
     }
 
     #[OA\Delete(

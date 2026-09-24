@@ -120,37 +120,18 @@ class MigrationScopeTest extends TestCase
     {
         $this->migration->up();
 
-        SecretVaultEntry::create([
-            'ref_hash' => SecretVaultEntry::hashRef('ref-global'),
-            'type' => 'git_token',
-            'scope' => SecretVaultEntry::SCOPE_GLOBAL,
-            'link_expires_at' => now()->addHour(),
-            'expires_at' => null,
-        ]);
+        // Raw rows: this is the table as that migration left it, not today's model.
+        $this->insert('ref-global', 'global', null);
 
-        $entry = SecretVaultEntry::globalFor('git_token');
-        $this->assertNotNull($entry);
-        $this->assertNull($entry->expires_at);
-        $this->assertFalse($entry->expired());
+        $this->assertNull(DB::table('secret_vault_entries')->where('scope', 'global')->value('expires_at'));
     }
 
     public function test_rolling_back_drops_the_globals_and_restores_the_old_shape(): void
     {
         $this->migration->up();
 
-        SecretVaultEntry::create([
-            'ref_hash' => SecretVaultEntry::hashRef('ref-global'),
-            'type' => 'git_token',
-            'scope' => SecretVaultEntry::SCOPE_GLOBAL,
-            'link_expires_at' => now()->addHour(),
-            'expires_at' => null,
-        ]);
-        SecretVaultEntry::create([
-            'ref_hash' => SecretVaultEntry::hashRef('ref-request'),
-            'type' => 'git_token',
-            'link_expires_at' => now()->addHour(),
-            'expires_at' => now()->addHour(),
-        ]);
+        $this->insert('ref-global', 'global', null);
+        $this->insert('ref-request', 'request', now()->addHour());
 
         $this->migration->down();
 
@@ -159,5 +140,18 @@ class MigrationScopeTest extends TestCase
         // The global had no expiry and the column is NOT NULL again, so it
         // cannot survive the rollback -- it goes rather than blocking it.
         $this->assertSame(1, DB::table('secret_vault_entries')->count());
+    }
+
+    private function insert(string $ref, string $scope, ?\DateTimeInterface $expiresAt): void
+    {
+        DB::table('secret_vault_entries')->insert([
+            'ref_hash' => SecretVaultEntry::hashRef($ref),
+            'type' => 'git_token',
+            'scope' => $scope,
+            'link_expires_at' => now()->addHour(),
+            'expires_at' => $expiresAt,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
     }
 }

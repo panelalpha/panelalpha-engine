@@ -259,12 +259,12 @@ class UserStoreRequestSecurityTest extends TestCase
         $request = UserStoreRequest::create('/api/users', 'POST', [
             'email' => 'ops@example.com',
             'git_repo' => 'https://github.com/vvolv/market-radar.git',
-            'git_token' => 'vault:9f2c1d7b',
+            'git_token' => 'vault:12',
         ]);
         $request->setContainer($this->app);
         $request->validateResolved();
 
-        $this->assertSame('vault:9f2c1d7b', $request->validated()['git_token']);
+        $this->assertSame('vault:12', $request->validated()['git_token']);
     }
 
     /** No token, no token checks -- including the repository pairing. */

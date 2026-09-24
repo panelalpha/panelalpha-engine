@@ -23,28 +23,34 @@ Deploy https://github.com/org/private-app on this PanelAlpha Engine.
 The repository is private.
 ```
 
-The assistant sends you a link on this engine. Open it, paste a git access token that can clone that repository, select **Save secret**, then go back to the chat and say you are done. A token that cannot read that repository is refused on the page, before it is saved. The engine stores the token encrypted and uses it to clone. Later rebuilds reuse it. The assistant never sees the value. The link lasts one hour.
+The assistant sends you a link on this engine. Open it, paste a git access token that can clone that repository, select **Save secret**, then go back to the chat and say you are done. A token that cannot read that repository is refused on the page, before it is saved. The engine stores the token encrypted and uses it to clone. Later rebuilds reuse it. The assistant never sees the value. The link lasts one hour. The token is kept until it is deleted, unless you ask for it to expire ("keep it for 30 days"); then the engine deletes it from the vault by itself.
+
+That token belongs to the project it was pasted for. The first project given it keeps it, and no other project can use it.
 
 <img src="../assets/connect-repository.jpg" alt="Connect your repository page: paste a git token and select Save secret" style="max-width: 100%; height: auto; margin-top: 1.5em; margin-bottom: 1.5em;">
 
 If the stored token later stops working, ask the assistant to replace it. You get the same paste page. Do not put the new token in the chat.
 
-## One token for the whole engine
+## A token shared by several projects
 
-You can paste a Git token once, for every new project, instead of once per repository.
-
-```text
-Save my Git token once for this whole engine. New projects should use it
-when I do not give them one.
-```
-
-The assistant sends the same paste page. The secret does not expire. The link does, after one hour. A project that already has its own token keeps it. There is one shared Git token. To replace it, ask for that stored token to be deleted, then ask for a new link. Pasting again on the old link does not change it.
+To paste a Git token once and use it on several projects, ask for a global one:
 
 ```text
-Stop projects from using the engine-wide tokens.
+Save a global Git token for the acme GitHub organisation.
 ```
 
-Projects then use only the token they were given. Tokens already stored for the whole engine stay stored. Ask to turn sharing back on and new projects without their own token use them again.
+The assistant sends the same paste page. You can keep several global tokens, for example one per organisation; the purpose you give tells them apart. Like a project token, it is kept until deleted unless it was given an expiry, and the link closes after one hour.
+
+A global token is used only when you name it:
+
+```text
+Create a project from https://github.com/acme/shop with the global
+acme Git token.
+```
+
+The assistant passes the token's reference, such as `vault:7`, in place of the token. A project created without a token clones without one, even when the engine holds global tokens.
+
+A project stores the token it was given. Deleting a vault entry does not take it away from projects that already used it; to change a project's token, give it the new one. Pasting again on the old link does not change a stored secret.
 
 ## A zip of files, not a repository
 
