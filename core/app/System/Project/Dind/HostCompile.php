@@ -8,6 +8,7 @@ use App\Lib\Deploy\Platform\Runtime\HostRunProject;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Platform\Runtime\Ruby\SystemPackages;
 use App\Lib\Deploy\Platform\Runtime\RubyRuntime;
+use App\Lib\Deploy\Platform\Runtime\RustRuntime;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RubyApp;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
@@ -330,11 +331,19 @@ class HostCompile
      * slim image and running in the base would build extensions against
      * headers the compile did not have.
      *
+     * And Rust, which compiles in the full image and runs in slim: slim has no
+     * g++, make, pkg-config or OpenSSL headers, and the account cannot install
+     * them. Both are bookworm, so the binary still finds its libraries.
+     *
      * @param array<string, mixed> $decision
      */
     private function commandRuntimeImage(array $decision, string $projectDir): string
     {
         $declared = trim((string) ($decision['image'] ?? ''));
+
+        if (($decision['strategy'] ?? null) === Strategies::RUST) {
+            return RustRuntime::compileImage($declared);
+        }
 
         if (($decision['strategy'] ?? null) === Strategies::RUBY) {
             $app = RubyApp::at($projectDir, ProjectContext::listRootFiles($projectDir));

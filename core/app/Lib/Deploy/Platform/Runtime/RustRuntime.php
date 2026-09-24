@@ -91,14 +91,30 @@ final class RustRuntime implements Runtime
     }
 
     /**
+     * What a host compile runs in, given the image the recipe resolved: the
+     * runtime tag swaps to the build tag, an image pinned elsewhere is kept.
+     */
+    public static function compileImage(string $declared): string
+    {
+        $declared = trim($declared);
+        if ($declared === '' || $declared === self::imageTag(self::VERSION)) {
+            return self::buildImageTag(self::VERSION);
+        }
+
+        return $declared;
+    }
+
+    /**
      * `build-essential pkg-config libssl-dev` — what the common crates link
      * against. Best effort, because a host compile runs as the account and
      * cannot install anything: failing later in cargo, at the crate that wanted
-     * the header, beats failing first at all of them.
+     * the header, beats failing first at all of them. Skipped when the image
+     * already has the tools, so apt's permission error does not reach the log.
      */
     public static function systemPackages(): string
     {
-        return '{ apt-get update'
+        return '{ command -v c++ && command -v make && command -v pkg-config; } >/dev/null 2>&1'
+            . ' || { apt-get update'
             . ' && apt-get install -y --no-install-recommends build-essential pkg-config libssl-dev ca-certificates'
             . ' && rm -rf /var/lib/apt/lists/*; } || true';
     }

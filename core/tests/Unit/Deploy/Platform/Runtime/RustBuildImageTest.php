@@ -4,6 +4,8 @@ namespace Tests\Unit\Deploy\Platform\Runtime;
 
 use App\Lib\Deploy\Platform\Runtime\RustRuntime;
 use App\Lib\Deploy\Platform\Runtime\RuntimeImageCatalog;
+use App\System\Project\Dind;
+use App\System\Project\Dind\HostCompile;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -125,5 +127,76 @@ class RustBuildImageTest extends TestCase
         YAML);
 
         $this->assertSame('rust:1-bookworm', RustRuntime::buildImageTag('1'));
+    }
+
+    /**
+     * The host compile is where the build image has to arrive. It resolved
+     * `buildImageTag()` nowhere, so cargo ran in slim and died on the first
+     * crate wanting g++ (#104), make (#138) or pkg-config and OpenSSL (#92).
+     */
+    public function test_the_host_compile_runs_cargo_in_the_build_image(): void
+    {
+        RuntimeImageCatalog::useConfig(null);
+
+        $compile = new HostCompile($this->createStub(Dind::class));
+        $image = (new \ReflectionMethod($compile, 'commandRuntimeImage'))->invoke(
+            $compile,
+            ['strategy' => 'rust', 'image' => 'rust:1-slim-bookworm'],
+            '/nonexistent'
+        );
+
+        $this->assertSame('rust:1-bookworm', $image);
+    }
+
+    public function test_only_the_runtime_tag_is_swapped_for_the_build_tag(): void
+    {
+        RuntimeImageCatalog::useConfig(null);
+
+        $this->assertSame('rust:1-bookworm', RustRuntime::compileImage('rust:1-slim-bookworm'));
+        $this->assertSame('rust:1-bookworm', RustRuntime::compileImage(''));
+        // A manifest that pinned its own image chose what to compile in.
+        $this->assertSame('ghcr.io/acme/rust-musl:1', RustRuntime::compileImage('ghcr.io/acme/rust-musl:1'));
+    }
+
+    /**
+     * The apt best effort runs as the account and can only fail; in an image
+     * that already has the tools it must not run, or its permission error is
+     * the first line of every Rust failure report.
+     */
+    public function test_system_packages_do_not_run_apt_when_the_tools_are_there(): void
+    {
+        $this->assertSame(['apt-get'], $this->aptCallsWith([]));
+        $this->assertSame([], $this->aptCallsWith(['c++', 'make', 'pkg-config']));
+        $this->assertSame(['apt-get'], $this->aptCallsWith(['c++', 'make']));
+    }
+
+    /**
+     * Run systemPackages() with only the named tools on PATH, plus an apt-get
+     * that records being called and fails the way it does for the account.
+     *
+     * @param list<string> $tools
+     * @return list<string>
+     */
+    private function aptCallsWith(array $tools): array
+    {
+        $bin = sys_get_temp_dir() . '/rust-tools-' . bin2hex(random_bytes(4));
+        mkdir($bin);
+        $log = $bin . '/calls';
+        foreach ([...$tools, 'apt-get'] as $tool) {
+            $body = $tool === 'apt-get' ? "echo apt-get >> {$log}; exit 100" : 'exit 0';
+            file_put_contents("{$bin}/{$tool}", "#!/bin/sh\n{$body}\n");
+            chmod("{$bin}/{$tool}", 0755);
+        }
+        $sh = trim((string) shell_exec('command -v sh'));
+
+        exec('env -i PATH=' . escapeshellarg($bin) . ' ' . escapeshellarg($sh) . ' -c '
+            . escapeshellarg(RustRuntime::systemPackages()), $out, $code);
+        $calls = is_file($log) ? array_values(array_filter(explode("\n", (string) file_get_contents($log)))) : [];
+        array_map('unlink', glob($bin . '/*') ?: []);
+        rmdir($bin);
+
+        $this->assertSame(0, $code, 'the best effort must never fail the build chain');
+
+        return array_values(array_unique($calls));
     }
 }
