@@ -324,6 +324,52 @@ final class PhpHostBuild
     }
 
     /**
+     * Create the root `autoload.classmap` directories a fresh checkout lacks,
+     * or '' when there are none to create.
+     *
+     * Composer's autoload dump throws on a classmap path that does not exist,
+     * optimized or not. ILIAS lists `public/Customizing/global/plugins`, which
+     * is gitignored and made by its own `pre-install-cmd` -- a script
+     * `--no-scripts` skips. Only plain relative directory names are taken: a
+     * path with an extension is a file, and the vendor dir is Composer's own.
+     */
+    public static function classmapDirsStep(?string $composerJson): string
+    {
+        $decoded = json_decode((string) $composerJson, true);
+        $classmap = is_array($decoded) ? ($decoded['autoload']['classmap'] ?? null) : null;
+        if (!is_array($classmap)) {
+            return '';
+        }
+        $vendor = $decoded['config']['vendor-dir'] ?? 'vendor';
+        $vendor = is_string($vendor) ? trim((string) preg_replace('#^(\./)+#', '', $vendor), '/') : 'vendor';
+
+        $dirs = [];
+        foreach ($classmap as $path) {
+            if (!is_string($path)) {
+                continue;
+            }
+            $path = trim((string) preg_replace('#^(\./)+#', '', trim($path)), '/');
+            if ($path === ''
+                || preg_match('#^[A-Za-z0-9_][A-Za-z0-9_./-]*$#', $path) !== 1
+                || preg_match('#(^|/)\.\.?(/|$)#', $path) === 1
+                || str_contains(basename($path), '.')
+                || $path === $vendor
+                || str_starts_with($path, $vendor . '/')
+            ) {
+                continue;
+            }
+            $dirs[] = escapeshellarg($path);
+        }
+        if ($dirs === []) {
+            return '';
+        }
+
+        return 'for d in ' . implode(' ', array_unique($dirs)) . '; do [ -e "$d" ] || { '
+            . 'echo "[panelalpha] creating autoload classmap directory missing from the checkout: $d" >&2; '
+            . 'mkdir -p "$d"; }; done';
+    }
+
+    /**
      * The script the host container runs: the manifest's dependency-role build
      * commands, then its asset-role ones.
      *
@@ -346,6 +392,8 @@ final class PhpHostBuild
      *        Reported then ignored; see {@see self::lockContradictionNote()}.
      * @param ?string $composerLock the project's lock, read only to decide
      *        whether the plugins it pins may run; see {@see mayRunPlugins()}.
+     * @param ?string $composerJson the project's manifest, read only for the
+     *        classmap directories to create; see {@see classmapDirsStep()}.
      */
     public static function script(
         string $install,
@@ -353,7 +401,8 @@ final class PhpHostBuild
         bool $hasComposer = false,
         ?string $phpVersion = null,
         bool $lockPhpContradicted = false,
-        ?string $composerLock = null
+        ?string $composerLock = null,
+        ?string $composerJson = null
     ): string {
         $install = trim($install);
         if ($install === '' && $hasComposer) {
@@ -371,6 +420,9 @@ final class PhpHostBuild
             // must happen before Composer reads the platform. {@see platformPin()}
             if (($pin = self::platformPin($phpVersion)) !== '') {
                 $steps[] = $pin;
+            }
+            if (($dirs = self::classmapDirsStep($composerJson)) !== '') {
+                $steps[] = $dirs;
             }
             if ($lockPhpContradicted) {
                 $steps[] = self::lockContradictionNote();

@@ -402,6 +402,15 @@ class HostCompile
         return $this->project->projectTree()->readIn($projectDir, $prefix . 'composer.lock');
     }
 
+    /** The project's composer.json, from the same subtree as its lock. */
+    private function projectComposerJson(string $appRoot = ''): ?string
+    {
+        $projectDir = $this->project->engineAccount()->projectDir();
+        $prefix = trim($appRoot, '/') === '' ? '' : trim($appRoot, '/') . '/';
+
+        return $this->project->projectTree()->readIn($projectDir, $prefix . 'composer.json');
+    }
+
     /**
      * Whether the project's lock pins a PHP its own packages reject.
      *
@@ -462,7 +471,10 @@ class HostCompile
             // Read for one decision: whether the plugins this lock pins are
             // installers, which may run, or an application's build tooling,
             // which may not. {@see PhpHostBuild::mayRunPlugins()}
-            $this->projectComposerLock($appRoot)
+            $this->projectComposerLock($appRoot),
+            // For the classmap directories the checkout lacks, which the
+            // autoload dump would otherwise die on. {@see PhpHostBuild::classmapDirsStep()}
+            $this->projectComposerJson($appRoot)
         );
         if ($script === '') {
             return;

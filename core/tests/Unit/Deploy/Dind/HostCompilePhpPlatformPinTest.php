@@ -237,6 +237,22 @@ class HostCompilePhpPlatformPinTest extends TestCase
     }
 
     /**
+     * The classmap directories come from the app root's composer.json, the
+     * same file the install reads (#119, ILIAS).
+     */
+    public function test_missing_classmap_directories_are_read_from_the_app_root(): void
+    {
+        $script = $this->script($this->build([
+            'app/composer.json' => (string) json_encode([
+                'require' => ['php' => '^8.3'],
+                'autoload' => ['classmap' => ['./public/Customizing/global/plugins']],
+            ]),
+        ], $this->phpDecision(), 'app'));
+
+        $this->assertStringContainsString("for d in 'public/Customizing/global/plugins';", $script);
+    }
+
+    /**
      * osTicket vendors its dependencies and ships no composer.json. There is no
      * version to resolve for, so the install is left exactly as declared.
      */
