@@ -49,7 +49,7 @@ RUN ARCH="$(dpkg --print-architecture)" \
 # Create the log file to be able to run tail
 RUN mkdir -p /var/log/cron
 
-RUN apt-get install -y msmtp supervisor
+RUN apt-get install -y msmtp s6
 RUN ln -sf /usr/bin/msmtp /usr/sbin/sendmail
 
 # PHP + WP-CLI

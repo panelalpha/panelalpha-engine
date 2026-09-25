@@ -120,7 +120,7 @@ class DindAccountCleanupTest extends TestCase
             'mysql:8.4',
             Images::NGINX_IMAGE,
             'node:20-bookworm-slim',
-            'ghcr.io/panelalpha/engine-user-dind:20260907',
+            'ghcr.io/panelalpha/engine-user-dind:v2.0.2',
             'panelalpha/php:8.4-apache-bookworm-pab1ff14ca',
             'postgres:16',
         ];

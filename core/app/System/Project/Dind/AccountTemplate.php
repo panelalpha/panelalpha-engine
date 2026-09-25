@@ -8,6 +8,7 @@ use App\Lib\Deploy\Platform\ProjectContext;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project\Dind as DindProject;
+use App\System\Project\Dind\Services\SupervisordServiceManager;
 
 /**
  * Outer DinD account container from the dind project template.
@@ -35,7 +36,11 @@ final class AccountTemplate
             "sudo test -f {$projectDir}/entrypoint.sh && sudo chmod +x {$projectDir}/entrypoint.sh"
         );
         $this->project->system()->project($model)->cron()->ensureCrontabFile($model->getChownString());
-        Cloudflare::renderCloudflaredSupervisorConf($model, false);
+        // Rendered from the account's state, not off: a rebuild re-renders the
+        // template and used to leave a live tunnel with no connector.
+        Cloudflare::renderConnector($model, Cloudflare::connectorWanted($model));
+        // The template is s6's; a re-rendered account keeps nothing of supervisord.
+        SupervisordServiceManager::removeLayout($this->project);
 
         $composePath = $this->bootstrapWelcomeApp($model);
         $portDetection = DetectAppPort::detectAllPorts($composePath);

@@ -16,11 +16,14 @@ use Illuminate\Support\Facades\Log;
  * Cloudflare Tunnel orchestration for DinD projects.
  *
  * Token, remote cfd_tunnel, DNS CNAME, ingress from ProxyRules, and cloudflared
- * under supervisord. Public hostname rows live in `tunnels`; PanelAlpha Online
+ * as an account service. Public hostname rows live in `tunnels`; PanelAlpha Online
  * is {@see PanelAlphaConnect}, dispatched by {@see TunnelManager}.
  */
 class Cloudflare
 {
+    /** The account service that runs cloudflared. */
+    private const CONNECTOR = 'cloudflared';
+
     public static function tunnelName(string $username): string
     {
         return 'panelalpha-' . $username;
@@ -351,14 +354,6 @@ class Cloudflare
         return $user->project()->homeDirPath() . '/.panelalpha/cloudflared.env';
     }
 
-    /**
-     * @deprecated Prefer renderCloudflaredSupervisorConf with the tunnel token.
-     */
-    public static function writeConnectorToken(User $user, string $tunnelToken): void
-    {
-        self::renderCloudflaredSupervisorConf($user, true, $tunnelToken);
-    }
-
     public static function removeConnectorToken(User $user): void
     {
         try {
@@ -369,72 +364,49 @@ class Cloudflare
         }
     }
 
-    public static function cloudflaredSupervisorConfPath(User $user): string
-    {
-        return $user->project()->projectDirPath() . '/supervisord.conf.d/cloudflared.conf';
-    }
-
-    public static function cloudflaredSupervisorConfTemplatePath(): string
-    {
-        return (new System())->projectFilesTemplateDirPath('dind')
-            . '/supervisord.conf.d/cloudflared.conf.blade.php';
-    }
-
     /**
-     * Write supervisord program conf for cloudflared (autostart + optional TUNNEL_TOKEN).
+     * Configure the account's cloudflared: whether it runs, and its token.
+     * Takes effect when the account next starts, or now through
+     * {@see reloadConnector()}.
      */
-    public static function renderCloudflaredSupervisorConf(
-        User $user,
-        bool $autostart,
-        ?string $tunnelToken = null
-    ): void {
-        $project = $user->project();
-        $system = $project->system();
-        $dir = $project->projectDirPath() . '/supervisord.conf.d';
-        $system->runProcess(['sudo', 'mkdir', '-p', $dir]);
+    public static function renderConnector(User $user, bool $autostart, ?string $tunnelToken = null): void
+    {
+        $runtime = $user->project()->runtime();
+        if (!($runtime instanceof Dind)) {
+            return;
+        }
 
         $token = $autostart ? (is_string($tunnelToken) ? trim($tunnelToken) : '') : '';
         if ($autostart && $token === '') {
             $token = trim((string) ($user->getCloudflareTunnelToken() ?? ''));
         }
+        $enabled = $autostart && $token !== '';
 
-        $system->filesystem()->makeFileFromTemplate(
-            self::cloudflaredSupervisorConfPath($user),
-            self::cloudflaredSupervisorConfTemplatePath(),
-            [
-                'autostart' => $autostart && $token !== '',
-                'tunnelToken' => $token !== '' ? $token : null,
-            ],
-            null,
-            '600'
-        );
+        $runtime->services()->configure(self::CONNECTOR, $enabled, $enabled ? ['TUNNEL_TOKEN' => $token] : []);
+    }
+
+    /** Whether this account should be running its connector right now. */
+    public static function connectorWanted(User $user): bool
+    {
+        $token = $user->getCloudflareTunnelToken();
+
+        return $token !== null && trim($token) !== '' && Tunnel::projectHasCloudflareTunnels($user);
     }
 
     /**
-     * Apply cloudflared conf changes inside a running DinD account (best-effort).
+     * Apply the configured connector inside a running DinD account (best-effort).
      */
-    public static function reloadCloudflaredSupervisor(User $user): void
+    public static function reloadConnector(User $user): void
     {
         $runtime = $user->project()->runtime();
         if (!($runtime instanceof Dind)) {
             return;
         }
         try {
-            $runtime->shell()->runProcess(
-                ['supervisorctl', '-c', '/etc/supervisor/supervisord.conf', 'reread'],
-                [],
-                30
-            );
-            $runtime->shell()->runProcess(
-                ['supervisorctl', '-c', '/etc/supervisor/supervisord.conf', 'update', 'cloudflared'],
-                [],
-                60
-            );
+            $runtime->services()->apply(self::CONNECTOR);
         } catch (\Throwable $e) {
             // Container may be down during account create / teardown.
-            Log::info(
-                "supervisorctl update cloudflared skipped for {$user->username}: " . $e->getMessage()
-            );
+            Log::info("cloudflared reload skipped for {$user->username}: " . $e->getMessage());
         }
     }
 
@@ -449,22 +421,22 @@ class Cloudflare
             );
         }
 
-        self::renderCloudflaredSupervisorConf($user, true, $tunnelToken);
+        self::renderConnector($user, true, $tunnelToken);
         self::removeConnectorToken($user);
-        self::reloadCloudflaredSupervisor($user);
+        self::reloadConnector($user);
     }
 
     /**
-     * Stop cloudflared and clear token from supervisord conf (keep User.details tunnel ids).
+     * Stop cloudflared and clear its token from the account (keep User.details tunnel ids).
      */
     public static function disableConnector(User $user): void
     {
         if (!($user->project()->runtime() instanceof Dind)) {
             return;
         }
-        self::renderCloudflaredSupervisorConf($user, false);
+        self::renderConnector($user, false);
         self::removeConnectorToken($user);
-        self::reloadCloudflaredSupervisor($user);
+        self::reloadConnector($user);
     }
 
     public static function stopConnector(User $user): void

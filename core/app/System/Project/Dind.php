@@ -32,6 +32,9 @@ use App\System\Project\Dind\PrepareFromSource;
 use App\System\Project\Dind\ProjectEnvironment;
 use App\System\Project\Dind\ProjectFiles;
 use App\System\Project\Dind\ShellOperations;
+use App\System\Project\Dind\Services\S6ServiceManager;
+use App\System\Project\Dind\Services\ServiceManager;
+use App\System\Project\Dind\Services\SupervisordServiceManager;
 use App\System\Project\Dind\Source\Files as SourceFiles;
 use App\System\Project\Dind\Source\GitRepository;
 use Symfony\Component\Yaml\Yaml;
@@ -160,6 +163,15 @@ class Dind implements DeployableDindProject, Runtime
     public function shell(): ShellOperations
     {
         return $this->shell ??= new ShellOperations($this);
+    }
+
+    /**
+     * What keeps the account's processes up: s6, or supervisord on an account
+     * rendered before s6. Not cached: rendering the template changes it.
+     */
+    public function services(): ServiceManager
+    {
+        return S6ServiceManager::manages($this) ? new S6ServiceManager($this) : new SupervisordServiceManager($this);
     }
 
     /**

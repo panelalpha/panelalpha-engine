@@ -6,10 +6,10 @@ use App\System\Project\Dind\AccountTemplate;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The init scripts an account runs before supervisord starts dockerd.
+ * The init scripts an account runs before s6 starts dockerd.
  *
  * They run from `/entrypoint.sh` as `entrypoint.d/*.sh` one-shots ahead of
- * `exec supervisord` — so this is the hook for anything that must be true
+ * `exec s6-svscan` — so this is the hook for anything that must be true
  * before the nested Docker daemon comes up, without rebuilding the account image.
  *
  * Since `/run` became a tmpfs it starts empty on every boot, and the

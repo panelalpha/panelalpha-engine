@@ -135,11 +135,6 @@ final class FakeEngine implements ContainerEngine
                 return ['true'];
             }
 
-            public function reloadDaemonArgv(): array
-            {
-                return ['true'];
-            }
-
             public function imageIdArgv(string $image): array
             {
                 return ['podman', 'image', 'inspect', $image];
@@ -201,7 +196,6 @@ final class FakeEngine implements ContainerEngine
             }
         };
     }
-
 
     public function storage(): AccountStorage
     {

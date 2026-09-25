@@ -337,7 +337,8 @@ class ImageSeeding
             if (trim((string) $shell->execQuiet($store->registryConfigArgv(), [], 30)) !== 'changed') {
                 return;
             }
-            $shell->execQuiet($store->reloadDaemonArgv(), [], 30);
+            // Registry mirrors and trusted registries apply on SIGHUP, so nothing restarts.
+            $shell->execQuiet($this->inner->dind()->services()->signalArgv('docker', 'HUP'), [], 30);
             $this->inner->dind()->setupEntrypointInitScripts();
             $this->inner->host()->logInfo('Pointed this account\'s Docker at the engine\'s image registries');
         } catch (\Exception $e) {

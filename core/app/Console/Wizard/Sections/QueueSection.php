@@ -128,7 +128,7 @@ class QueueSection implements Section
 
         $running = QueueWorkers::running();
         note($running === null
-            ? 'Written, but supervisord could not be reached to confirm it live. It takes effect on its next read regardless.'
+            ? 'Written, but s6 is not running to confirm it live. It takes effect on its next start regardless.'
             : sprintf('Applied live -- %d workers running now.', $running));
         pause('Press enter to carry on...');
     }

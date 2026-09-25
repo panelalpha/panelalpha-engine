@@ -279,18 +279,6 @@ PY;
     }
 
     /**
-     * Inside the account: have its dockerd re-read daemon.json. Registry
-     * mirrors and trusted registries apply on SIGHUP, so nothing restarts;
-     * through supervisord, so only the account's own dockerd gets it.
-     *
-     * @return list<string>
-     */
-    public function reloadDaemonArgv(): array
-    {
-        return ['supervisorctl', 'signal', 'HUP', 'docker'];
-    }
-
-    /**
      * @return list<string>
      */
     public function imageExposedPortsArgv(string $image): array

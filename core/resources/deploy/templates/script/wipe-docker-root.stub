@@ -1,5 +1,5 @@
 set -e
+# dockerd is stopped before this runs; see StorageReclaim.
 ROOT="/home/$(hostname)/docker"
-supervisorctl -c /etc/supervisor/supervisord.conf stop docker >/dev/null 2>&1 || true
 rm -rf "$ROOT"
 mkdir -p "$ROOT"

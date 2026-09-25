@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
-    image: ghcr.io/panelalpha/engine-user-dind:20260907
+    image: ghcr.io/panelalpha/engine-user-dind:v2.0.2
     pull_policy: missing
     restart: always
     hostname: {{ $user }}
@@ -19,15 +19,17 @@ services:
     # and refuses to start the daemon. The account comes up with no Docker
     # and every app in it stays down, silently. Sized because tmpfs pages
     # count against the account's own memory limit; real usage is ~276K.
-    # Also holds supervisord.pid / supervisor.sock.
+    #
+    # s6's scan directory gets its own tmpfs: Docker mounts tmpfs noexec, and
+    # s6 has to exec each service's run script from there. /run stays noexec.
     tmpfs:
       - /run:mode=755,size=64m
+      - /run/service:mode=755,size=4m,exec
     volumes:
       - /home/{{ $user }}/:/home/{{ $user }}/
       - ./entrypoint.sh:/entrypoint.sh
       - ./entrypoint.d/:/entrypoint.d/
-      - ./supervisord.conf:/etc/supervisor/supervisord.conf:ro
-      - ./supervisord.conf.d/:/etc/supervisor/conf.d/
+      - ./services/:/etc/s6/account/:ro
     tty: true
     {{ !empty($cpu_limit) ? ("cpus: " . $cpu_limit) : "" }}
     {{ !empty($memory_limit) ? ("mem_limit: " . $memory_limit . "M") : "" }}

@@ -83,13 +83,18 @@ TXT;
         ));
     }
 
-    public function test_partial_reclaim_script_restarts_inner_docker(): void
+    /** Stopping and starting dockerd is StorageReclaim's, through the account's service manager. */
+    public function test_reclaim_scripts_only_touch_the_disk(): void
     {
-        $script = DindBuildStorage::partialReclaimScript();
+        $partial = DindBuildStorage::partialReclaimScript();
+        $full = DindBuildStorage::fullWipeScript();
 
-        $this->assertStringContainsString('rm -rf "$ROOT/buildkit"', $script);
-        $this->assertStringContainsString('supervisorctl', $script);
-        $this->assertStringContainsString('start docker', $script);
+        $this->assertStringContainsString('rm -rf "$ROOT/buildkit"', $partial);
+        $this->assertStringContainsString('rm -rf "$ROOT"', $full);
+        foreach ([$partial, $full] as $script) {
+            $this->assertStringNotContainsString('supervisorctl', $script);
+            $this->assertStringNotContainsString('s6-svc', $script);
+        }
     }
 
     /**

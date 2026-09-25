@@ -8,11 +8,15 @@ echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
 echo 'export GODEBUG=preferIPv4=1' > /etc/default/docker
 
 # One-shot bootstrap only (passwd, daemon.json, cgroup). Long-running processes
-# are supervised below.
+# are supervised by s6 below.
 for f in /entrypoint.d/*.sh; do
   [ -f "$f" ] || continue
   echo "[entrypoint] running $f"
   bash "$f"
 done
 
-exec supervisord -c /etc/supervisor/supervisord.conf
+# s6 supervises dockerd, cron and cloudflared: one directory per service,
+# copied into /run (a tmpfs) so every start begins with no stale state.
+mkdir -p /run/service
+cp -a /etc/s6/account/. /run/service/
+exec s6-svscan /run/service

@@ -17,6 +17,8 @@ use App\Lib\Deploy\Engine\AccountStorage;
  */
 class StorageReclaim
 {
+    private const DOCKER_READY_SECONDS = 60;
+
     private InnerDocker $inner;
 
     public function __construct(InnerDocker $inner)
@@ -69,21 +71,33 @@ class StorageReclaim
                 ? 'Clearing inner Docker cache after disk-full build failure'
                 : 'Clearing inner Docker cache before heavy build'
         );
+        $dind = $this->inner->dind();
+        $services = $dind->services();
 
-        $this->inner->dind()->shell()->exec(
-            ['sh', '-lc', $this->storage()->partialReclaimScript()],
-            [],
-            300
-        );
+        // Best-effort stop and start, as before: the wipe itself is what matters.
+        $dind->shell()->runProcess($services->stopArgv('docker'), [], 120);
+        $dind->shell()->exec(['sh', '-lc', $this->storage()->partialReclaimScript()], [], 300);
+        $dind->shell()->runProcess($services->startArgv('docker'), [], 60);
+        $this->waitForDocker();
     }
 
     public function wipeDataRoot(): void
     {
-        $this->inner->dind()->shell()->exec(
-            ['sh', '-lc', $this->storage()->fullWipeScript()],
-            [],
-            300
-        );
+        $dind = $this->inner->dind();
+        $dind->shell()->runProcess($dind->services()->stopArgv('docker'), [], 120);
+        $dind->shell()->exec(['sh', '-lc', $this->storage()->fullWipeScript()], [], 300);
+    }
+
+    private function waitForDocker(): void
+    {
+        for ($i = 0; $i < self::DOCKER_READY_SECONDS; $i++) {
+            if ($this->inner->dind()->shell()->runProcess(['docker', 'info'], [], 20)->isSuccessful()) {
+                return;
+            }
+            sleep(1);
+        }
+
+        throw new \RuntimeException('docker did not become ready after cache cleanup');
     }
 
     private function storage(): AccountStorage

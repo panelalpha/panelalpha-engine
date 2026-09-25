@@ -1,0 +1,5 @@
+#!/bin/sh
+# The engine writes env/ (TUNNEL_TOKEN, one file per variable) and a `down`
+# file while the connector should stay stopped. The token reaches cloudflared
+# through its environment, so it never shows up in the process list.
+exec s6-envdir ./env cloudflared --no-autoupdate tunnel run

@@ -79,13 +79,6 @@ interface ImageStore
     public function registryConfigArgv(): array;
 
     /**
-     * Inside the account: re-read the daemon's configuration without a restart.
-     *
-     * @return list<string>
-     */
-    public function reloadDaemonArgv(): array;
-
-    /**
      * Inside the account: $image's declared ports as JSON, in the
      * `{"5432/tcp":{}}` shape {@see \App\Lib\Deploy\CacheManager\ImageTransfer::parseExposedPorts()}
      * reads.
