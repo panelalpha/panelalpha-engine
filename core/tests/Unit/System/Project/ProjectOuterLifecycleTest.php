@@ -179,7 +179,7 @@ class ProjectOuterLifecycleTest extends TestCase
                 return true;
             }
 
-            public function project(): Project
+            public function project(?System $system = null): Project
             {
                 return new Project($this->boundSystem, $this);
             }

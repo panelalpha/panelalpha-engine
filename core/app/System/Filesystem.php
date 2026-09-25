@@ -53,6 +53,10 @@ class Filesystem
         $toCreate = [];
         $dir = $target;
         while (!$this->isDir($dir)) {
+            // dirname('/') is '/': stop there, or a failing `sudo test` spins forever.
+            if (dirname($dir) === $dir) {
+                throw new \RuntimeException("Cannot create {$target}: '{$dir}' does not read as a directory (is sudo working?)");
+            }
             $toCreate[] = $dir;
             $dir = dirname($dir);
         }

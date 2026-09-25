@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System;
@@ -14,6 +15,7 @@ use App\System\Project\Dind\Networking;
 use App\System\Project\Dind\ProjectFiles;
 use App\System\Project\Dind\ShellOperations;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Process\Process;
 
 class DindInnerRuntimeTest extends TestCase
 {
@@ -50,13 +52,17 @@ class DindInnerRuntimeTest extends TestCase
 
     public function test_compose_writer_writes_inner_compose_file(): void
     {
-        $project = $this->dind($this->dindModel(['deploy_strategy' => 'static']));
+        $model = $this->dindModel(['deploy_strategy' => 'static']);
+        $project = $this->dind($model);
         $yaml = "services:\n  app:\n    image: nginx:alpine\n";
 
         $project->composeWriter()->writeGeneratedCompose($project->userAppDirPath(), $yaml, null);
 
-        $this->assertFileExists($this->homeRoot . '/alice/project/docker-compose.yml');
-        $this->assertStringContainsString('nginx:alpine', file_get_contents($this->homeRoot . '/alice/project/docker-compose.yml'));
+        $composeFile = $this->homeRoot . '/alice/project/' . EngineArtifacts::RUN_COMPOSE;
+        $this->assertSame($composeFile, $project->userAppComposeFilePath());
+        $this->assertFileExists($composeFile);
+        $this->assertStringContainsString('nginx:alpine', file_get_contents($composeFile));
+        $this->assertSame('nginx:alpine', $model->getDetails()['deploy_image'] ?? null);
     }
 
     public function test_networking_public_app_url_uses_main_domain_ssl_flag(): void
@@ -95,7 +101,9 @@ class DindInnerRuntimeTest extends TestCase
 
     private function dindModel(array $details = []): ModelsUser
     {
-        $model = new ModelsUser();
+        // No database in unit tests: deploy snapshots stay on the model.
+        $model = self::getStubBuilder(ModelsUser::class)->onlyMethods(['save'])->getStub();
+        $model->method('save')->willReturn(true);
         $model->username = 'alice';
         $model->setDetails(array_merge([
             'template' => 'dind',
@@ -133,9 +141,35 @@ class DindInnerRuntimeTest extends TestCase
                 return $this->homeRoot . '/' . $username;
             }
 
+            // Filesystem probes answer from the temp tree, without sudo.
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $argv = $this->withoutSudo($cmd);
+                if (($argv[0] ?? null) !== 'test') {
+                    throw new \LogicException('Unexpected process in test: ' . implode(' ', $argv));
+                }
+                $process = new Process($argv);
+                $process->run();
+
+                return $process;
+            }
+
+            // File writes really happen so the test can assert on them; anything else is inert.
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
+                $argv = $this->withoutSudo($cmd);
+                if (in_array($argv[0] ?? null, ['mkdir', 'cp', 'chmod'], true)) {
+                    return (new Process($argv))->mustRun()->getOutput();
+                }
+
                 return '';
+            }
+
+            private function withoutSudo(string|array $cmd): array
+            {
+                $argv = is_array($cmd) ? array_values($cmd) : explode(' ', $cmd);
+
+                return ($argv[0] ?? null) === 'sudo' ? array_slice($argv, 1) : $argv;
             }
         };
     }
