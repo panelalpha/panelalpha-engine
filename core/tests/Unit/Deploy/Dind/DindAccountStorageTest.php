@@ -120,10 +120,26 @@ class DindAccountStorageTest extends TestCase
         }
     }
 
-    public function test_the_reclaim_scripts_are_shell_the_account_can_run(): void
+    public function test_the_wipe_script_is_shell_the_account_can_run(): void
     {
-        $this->assertNotSame('', trim($this->storage->partialReclaimScript()));
         $this->assertNotSame('', trim($this->storage->fullWipeScript()));
+    }
+
+    /**
+     * Through dockerd, which keeps running: deleting containerd's directories
+     * under it would need it stopped. Volumes are the account's data and stay.
+     */
+    public function test_the_reclaim_prunes_images_and_both_build_caches_but_no_volumes(): void
+    {
+        $argvs = $this->storage->reclaimArgvs();
+
+        $this->assertSame(['docker', 'system', 'prune', '-af'], $argvs[0]);
+        $this->assertContains(['docker', 'builder', 'prune', '-af'], $argvs);
+        $this->assertContains(['docker', 'buildx', 'prune', '-af'], $argvs);
+        foreach ($argvs as $argv) {
+            $this->assertNotContains('--volumes', $argv);
+            $this->assertNotContains('rm', $argv);
+        }
     }
 
     public function test_stopping_the_engine_uses_the_accounts_own_init(): void

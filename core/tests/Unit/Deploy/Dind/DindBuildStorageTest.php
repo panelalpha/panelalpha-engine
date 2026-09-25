@@ -83,28 +83,24 @@ TXT;
         ));
     }
 
-    /** Stopping and starting dockerd is StorageReclaim's, through the account's service manager. */
-    public function test_reclaim_scripts_only_touch_the_disk(): void
+    /** Stopping dockerd before the wipe is StorageReclaim's, through the account's service manager. */
+    public function test_the_wipe_script_only_touches_the_disk(): void
     {
-        $partial = DindBuildStorage::partialReclaimScript();
         $full = DindBuildStorage::fullWipeScript();
 
-        $this->assertStringContainsString('rm -rf "$ROOT/buildkit"', $partial);
         $this->assertStringContainsString('rm -rf "$ROOT"', $full);
-        foreach ([$partial, $full] as $script) {
-            $this->assertStringNotContainsString('supervisorctl', $script);
-            $this->assertStringNotContainsString('s6-svc', $script);
-        }
+        $this->assertStringNotContainsString('supervisorctl', $full);
+        $this->assertStringNotContainsString('s6-svc', $full);
     }
 
     /**
-     * StorageReclaim runs both scripts with `sh -lc`, which is dash in the
+     * StorageReclaim runs the wipe script with `sh -lc`, which is dash in the
      * account image: a bash array failed every heavy build with
      * `sh: 3: Syntax error: "(" unexpected`.
      */
-    public function test_reclaim_scripts_parse_under_posix_sh(): void
+    public function test_the_wipe_script_parses_under_posix_sh(): void
     {
-        foreach ([DindBuildStorage::partialReclaimScript(), DindBuildStorage::fullWipeScript()] as $script) {
+        foreach ([DindBuildStorage::fullWipeScript()] as $script) {
             $process = proc_open(['sh', '-n'], [0 => ['pipe', 'r'], 2 => ['pipe', 'w']], $pipes);
             fwrite($pipes[0], $script);
             fclose($pipes[0]);

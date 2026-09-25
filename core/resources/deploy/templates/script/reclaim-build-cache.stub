@@ -1,8 +1,0 @@
-set -e
-# dockerd is stopped before this runs and started after it; see StorageReclaim.
-ROOT="/home/$(hostname)/docker"
-rm -rf "$ROOT/buildkit"
-rm -rf "$ROOT/containerd/daemon/io.containerd.snapshotter.v1.overlayfs"
-rm -rf "$ROOT/containerd/daemon/io.containerd.metadata.v1.bolt"
-rm -rf "$ROOT/containerd/daemon/tmpmounts"
-mkdir -p "$ROOT"

@@ -31,8 +31,8 @@ final class AccountTeardown
         $storage = $this->project->engine()->storage();
         $this->project->abortRunningDeploy(false);
         $this->tryStep($storage->pruneAllArgv(), 300, true);
-        $this->tryStep($storage->stopEngineArgv(), 120, false);
 
+        // Stops dockerd through the account's init, then removes its store.
         try {
             $this->project->innerDocker()->wipeDataRoot();
         } catch (\Exception $e) {

@@ -68,14 +68,6 @@ class DindBuildStorage
     }
 
     /**
-     * Drop BuildKit/containerd caches, keep the inner daemon running (deploy).
-     */
-    public static function partialReclaimScript(): string
-    {
-        return self::script('reclaim-build-cache');
-    }
-
-    /**
      * Remove the entire inner Docker data-root (user delete / failed deploy).
      */
     public static function fullWipeScript(): string

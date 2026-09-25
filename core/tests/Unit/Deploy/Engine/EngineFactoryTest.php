@@ -230,9 +230,9 @@ final class FakeEngine implements ContainerEngine
                 return ['podman', 'ps', '-aq'];
             }
 
-            public function partialReclaimScript(): string
+            public function reclaimArgvs(): array
             {
-                return 'true';
+                return [['podman', 'system', 'prune', '-af']];
             }
 
             public function fullWipeScript(): string

@@ -55,10 +55,13 @@ interface AccountStorage
     public function containersProbeArgv(): array;
 
     /**
-     * Inside the account: drop build caches, leaving the engine usable so the
-     * deploy that asked for the space carries on.
+     * Inside the account: drop unused images and build caches through the
+     * engine itself, so it keeps running and the deploy that asked for the
+     * space carries on. Volumes stay. Only run with no containers left.
+     *
+     * @return list<list<string>>
      */
-    public function partialReclaimScript(): string;
+    public function reclaimArgvs(): array;
 
     /**
      * Inside the account: remove the store outright. Account deletion and

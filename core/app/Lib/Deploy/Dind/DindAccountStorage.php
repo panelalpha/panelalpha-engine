@@ -58,9 +58,15 @@ final class DindAccountStorage implements AccountStorage
         return ['sh', '-lc', 'docker ps -aq 2>/dev/null || true'];
     }
 
-    public function partialReclaimScript(): string
+    /**
+     * `system prune -a` takes the unused images; the builder prunes take
+     * BuildKit's cache under both the classic builder and buildx.
+     *
+     * @return list<list<string>>
+     */
+    public function reclaimArgvs(): array
     {
-        return DindBuildStorage::partialReclaimScript();
+        return [['docker', 'system', 'prune', '-af'], ...$this->pruneBuildCacheArgv()];
     }
 
     public function fullWipeScript(): string
