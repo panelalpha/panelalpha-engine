@@ -31,7 +31,6 @@ build/*
 # Runtime artifacts of an engine installed straight from a checkout — what
 # bootstrap-from-source.sh and scripts/engine-container.sh create in place.
 logs/
-core/supervisord.pid
 
 # API test suite (tests/api) — build artifacts
 tests/api/node_modules

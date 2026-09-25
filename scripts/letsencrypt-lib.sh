@@ -255,10 +255,10 @@ le_install_lineage() {
 
     # Reload nginx inside core, not the container: core also runs the queue
     # workers now, and restarting it would kill every deploy in flight.
-    # `supervisorctl restart nginx` only when the process itself is down.
+    # Restart nginx through s6 only when the process itself is down.
     if [ "$target" = "server" ]; then
         docker compose -f "$LE_COMPOSE_FILE" exec -T core nginx -s reload >/dev/null 2>&1 \
-            || docker compose -f "$LE_COMPOSE_FILE" exec -T core supervisorctl restart nginx >/dev/null 2>&1 \
+            || docker compose -f "$LE_COMPOSE_FILE" exec -T core s6-svc -r /run/service/nginx >/dev/null 2>&1 \
             || le_warn "Could not reload core's nginx; the new certificate is served after the next reload"
     fi
     return 0

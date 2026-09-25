@@ -15,11 +15,11 @@ use function Laravel\Prompts\text;
 use function Laravel\Prompts\warning;
 
 /**
- * How many `queue:work` processes core's own supervisord runs.
+ * How many `queue:work` processes core runs.
  *
  * One queue serves everything async on this engine -- deploys, backups,
  * staging -- so this is the only knob for how much of it runs at once.
- * Applies live via `supervisorctl`, no container recreate; see
+ * Applies live through s6, no container recreate; see
  * {@see QueueWorkers} for why that works here and did not through the
  * container's own environment.
  */
@@ -77,7 +77,7 @@ class QueueSection implements Section
     {
         $lines = [
             sprintf('Configured: %d', $configured),
-            sprintf('Running:    %s', $running === null ? '(supervisord not reachable)' : (string) $running),
+            sprintf('Running:    %s', $running === null ? '(s6 not running)' : (string) $running),
         ];
 
         if ($running !== null && $running !== $configured) {

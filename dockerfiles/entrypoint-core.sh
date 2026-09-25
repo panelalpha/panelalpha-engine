@@ -16,10 +16,12 @@ chown -R www-data:www-data /var/www/html/storage
 mkdir -p /var/tmp/panelalpha-backup
 chown www-data:www-data /var/tmp/panelalpha-backup
 chmod 1777 /var/tmp/panelalpha-backup
-# Writes /etc/supervisor/conf.d/queue.generated.conf with the worker count
-# baked in as a literal; supervisord.conf [include]s it. See
-# App\Support\QueueWorkers: a plain %(ENV_QUEUE_WORKERS)s could not be changed
-# live, since Docker freezes a running container's environment -- a generated
-# file supervisorctl reread/update can pick up without one.
+# s6 supervises core's processes: one directory per service under
+# /run/service, copied fresh on every start so no stale supervise/ state from a
+# previous run survives. The queue workers are generated into the same
+# directory from QUEUE_WORKERS; see App\Support\QueueWorkers.
+rm -rf /run/service
+mkdir -p /run/service
+cp -a /etc/s6/core/. /run/service/
 php /var/www/html/artisan system:queue-workers:sync
-exec supervisord -c /etc/supervisor/conf.d/supervisord.conf
+exec s6-svscan /run/service

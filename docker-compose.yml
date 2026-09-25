@@ -12,7 +12,7 @@ services:
       context: ./dockerfiles
       dockerfile: Dockerfile-core
       target: php_nginx_prod
-    image: ghcr.io/panelalpha/engine-core:v2.0.1
+    image: ghcr.io/panelalpha/engine-core:v2.0.2
     pull_policy: missing
     restart: always
     post_start:
@@ -34,11 +34,10 @@ services:
       - ./config/core/php.ini:/etc/php/8.4/cli/conf.d/90-panelalpha.ini
       - ./config/core/php.ini:/etc/php/8.4/fpm/conf.d/90-panelalpha.ini
       - ./config/core/php-fpm-pool.conf:/etc/php/8.4/fpm/pool.d/zz-docker.conf
-      - ./config/core/supervisord.conf:/etc/supervisor/conf.d/supervisord.conf
+      - ./config/core/services:/etc/s6/core:ro
       - ./config/logrotate:/etc/logrotate.d
       - ./data/logrotate:/var/lib/logrotate
       - ./logs/core/nginx:/var/log/nginx
-      - ./logs/core/supervisor:/var/log/supervisor
       - core-storage:/var/www/html/storage
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/lib/docker:/var/lib/docker

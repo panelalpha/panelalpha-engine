@@ -1,0 +1,5 @@
+#!/bin/sh
+# Laravel scheduler (was the core-cron container). Output went to /dev/null
+# under cron too; failures still reach storage/logs.
+cd /var/www/html || exit 1
+exec env HOME=/var/www USER=www-data s6-setuidgid www-data php artisan schedule:work >/dev/null 2>&1

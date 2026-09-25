@@ -22,7 +22,7 @@ Throughout this page, `{project}` means the project's name - the value shown as 
 | `pae configure address` | The address clients connect to, and the certificate on that name. |
 | `pae configure mcp-tokens` | Connect an assistant, or change what assistants may use. |
 | `pae configure api-tokens` | Mint a token for your own software, and limit it to part of the API. |
-| `pae configure queue` | How many deploys, backups, or staging jobs run at once. A number from 1 to 32. |
+| `pae configure queue` | How many deploys, backups, or staging jobs run at once. A number from 1 to 32. Left unset, it is 1 on a server with less than 4 GB of RAM and 2 otherwise. |
 | `pae configure docker-hub` | The Docker Hub account image downloads go out under. |
 | `pae configure telemetry` | Whether reports are sent, and how much they carry. |
 | `pae configure --dry-run` | Any of the above. Shows what it would write, and writes nothing. |

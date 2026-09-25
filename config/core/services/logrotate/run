@@ -1,0 +1,5 @@
+#!/bin/sh
+# Rotation state decides what is due, so an hourly pass is idempotent. s6
+# starts this again when the sleep ends.
+/usr/sbin/logrotate /etc/logrotate.conf
+exec sleep 3600
