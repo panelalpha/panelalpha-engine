@@ -1,4 +1,9 @@
 #!/bin/bash
 mkdir -p /opt/panelalpha/log
 ps aux --sort=-%mem > /opt/panelalpha/log/monit_psdump_$(date +"%Y-%m-%d_%H-%M-%S").log
-docker stats --no-stream --format "table {{.Container}}\t{{.Name}}\t{{.MemUsage}}" | sort -k3 -h -r | head -n 2 | awk '{print $1}' | xargs docker restart
+# Only tenant accounts (compose projects under users/), never the engine's own containers.
+for c in $(docker ps -q); do
+    case "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$c")" in
+    /opt/panelalpha/shared-hosting/users/*) echo "$c" ;;
+    esac
+done | xargs -r docker stats --no-stream --format "{{.Container}} {{.MemUsage}}" | sort -k2 -h -r | head -n 2 | awk '{print $1}' | xargs -r docker restart
