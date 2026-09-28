@@ -17,8 +17,11 @@ interface ContainerEngine
     /** Images between the host store and an account's store, plus the shared base images. */
     public function images(): ImageStore;
 
-    /** Throwaway build containers on the host daemon: the Node compile and Composer resolve. */
-    public function hostBuilder(): HostBuilder;
+    /**
+     * Throwaway build containers on the host daemon: the Node compile and Composer resolve.
+     * A project memory limit (MB) may raise their memory, never lower it.
+     */
+    public function hostBuilder(?int $projectMemoryMb = null): HostBuilder;
 
     /** An account's own image/layer store: probing, reclaiming, and removing it. */
     public function storage(): AccountStorage;

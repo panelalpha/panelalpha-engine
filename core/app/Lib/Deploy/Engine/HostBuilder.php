@@ -31,6 +31,8 @@ interface HostBuilder
      * @param bool $isolateNodeModules keep node_modules in the host cache
      *        instead of leaving it in the account's ~/project. False only for
      *        a standalone Node runtime, which has to serve the tree it built.
+     * @param string $appRoot application subtree the build runs in, '' for
+     *        the checkout root
      * @return list<string>
      */
     public function nodeBuildArgv(
@@ -40,7 +42,8 @@ interface HostBuilder
         string $build,
         array $env = [],
         bool $isolateNodeModules = true,
-        bool $isNode = true
+        bool $isNode = true,
+        string $appRoot = ''
     ): array;
 
     /**
@@ -81,7 +84,8 @@ interface HostBuilder
     public function composerInstallArgv(
         EngineAccount $account,
         ?string $phpVersion = null,
-        ?string $manifest = null
+        ?string $manifest = null,
+        string $appRoot = ''
     ): array;
 
     /**
@@ -91,4 +95,10 @@ interface HostBuilder
      * @return list<string>
      */
     public function prepareCacheArgv(EngineAccount $account): array;
+
+    /** The memory, in MB, every build container above is started with. */
+    public function memoryLimitMb(): int;
+
+    /** Where that figure came from, for the deploy log. */
+    public function memoryOrigin(): BuildMemory;
 }

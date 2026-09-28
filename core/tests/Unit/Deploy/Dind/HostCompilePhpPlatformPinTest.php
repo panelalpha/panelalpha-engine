@@ -272,7 +272,7 @@ class HostCompilePhpPlatformPinTest extends TestCase
      * and `composer config` writes wherever COMPOSER points. Left unset, that
      * is composer.json -- exactly the file ADR-0001 says the engine may never
      * write. So the pin redirects Composer to a runtime manifest here too,
-     * carrying composer.json byte for byte, with composer.lock copied beside
+     * carrying composer.json plus the engine's allow-plugins, with composer.lock copied beside
      * it under the matching engine name so `install` still reads what the
      * project committed rather than resolving the whole graph remotely.
      */
@@ -300,7 +300,10 @@ class HostCompilePhpPlatformPinTest extends TestCase
         $manifestPath = '/home/acme/project/' . PhpHostBuild::RUNTIME_MANIFEST_FILE;
         $lockPath = '/home/acme/project/' . PhpHostBuild::RUNTIME_LOCK_FILE;
         $this->assertArrayHasKey($manifestPath, $this->copiedTo, 'the runtime manifest was never written');
-        $this->assertSame($composerJson, $this->copiedTo[$manifestPath], 'composer.json must travel unchanged');
+        $written = json_decode($this->copiedTo[$manifestPath], true);
+        $this->assertSame(PhpHostBuild::allowPlugins(), $written['config']['allow-plugins']);
+        unset($written['config']);
+        $this->assertSame(json_decode($composerJson, true), $written, 'composer.json must travel unchanged but for allow-plugins');
         $this->assertArrayHasKey($lockPath, $this->copiedTo, 'the lock was never copied beside the runtime manifest');
         $this->assertSame($composerLock, $this->copiedTo[$lockPath]);
     }
@@ -368,6 +371,7 @@ class HostCompilePhpPlatformPinTest extends TestCase
             PhpHostBuild::MANIFEST_ENV . '=' . PhpHostBuild::RUNTIME_MANIFEST_FILE,
             implode(' ', $argv)
         );
+        $this->assertStringNotContainsString(' cp ', $this->script($argv), 'a require-dev-less lock is never composer.lock');
     }
 
     /**
@@ -501,5 +505,46 @@ class HostCompilePhpPlatformPinTest extends TestCase
         $this->assertStringNotContainsString('platform.php 7.2', $script);
         // ...and the php requirement the lock's own packages reject is let go.
         $this->assertStringContainsString('--ignore-platform-req=php', $script);
+    }
+
+    /**
+     * Engine #168. bolt/project, pimcore/skeleton and thelia/thelia commit no
+     * composer.lock, so the lock-keyed gate always built them --no-plugins
+     * and symfony/runtime never wrote vendor/autoload_runtime.php. Now the
+     * install runs with plugins, under the runtime manifest's allow-plugins,
+     * which replaces the project's own -- here one that trusts everything.
+     */
+    public function test_a_lockless_symfony_project_installs_with_only_the_installer_plugins(): void
+    {
+        $composerJson = (string) json_encode([
+            'require' => ['php' => '>=8.2', 'symfony/runtime' => '^6.4', 'symfony/flex' => '^2'],
+            'config' => ['allow-plugins' => ['symfony/flex' => true, 'symfony/runtime' => true, '*' => true]],
+        ]);
+        $argv = $this->build(['composer.json' => $composerJson], $this->phpDecision());
+
+        $this->assertNotNull($argv);
+        $this->assertStringContainsString(
+            PhpHostBuild::MANIFEST_ENV . '=' . PhpHostBuild::RUNTIME_MANIFEST_FILE,
+            implode(' ', $argv)
+        );
+        $script = $this->script($argv);
+        $install = '';
+        foreach (explode("\n", $script) as $line) {
+            if (str_contains($line, 'composer install')) {
+                $install = $line;
+            }
+        }
+        $this->assertStringNotContainsString('--no-plugins', $install);
+        $this->assertStringContainsString('--no-scripts', $install);
+        $this->assertStringContainsString('composer config --no-plugins platform.php', $script);
+        // No require-dev to drop, so the lock goes back to composer.lock as before.
+        $this->assertStringContainsString('|| cp ' . PhpHostBuild::RUNTIME_LOCK_FILE . ' composer.lock', $script);
+
+        $manifestPath = '/home/acme/project/' . PhpHostBuild::RUNTIME_MANIFEST_FILE;
+        $this->assertArrayHasKey($manifestPath, $this->copiedTo);
+        $allow = json_decode($this->copiedTo[$manifestPath], true)['config']['allow-plugins'];
+        $this->assertSame(PhpHostBuild::allowPlugins(), $allow);
+        $this->assertFalse($allow['symfony/flex'] ?? false);
+        $this->assertSame($composerJson, $this->files['/home/acme/project/composer.json']);
     }
 }

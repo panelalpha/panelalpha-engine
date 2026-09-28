@@ -5,6 +5,7 @@ namespace App\System\Project\Dind\Inner;
 use App\System\Project\Dind\InnerDocker;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\Dind\DindImageStore;
+use App\Lib\Deploy\CacheManager\NodeBuildImage;
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\CacheManager\PythonBaseImage;
 use App\Lib\Deploy\CacheManager\RubyBaseImage;
@@ -188,6 +189,40 @@ class SharedBaseImages
         }
 
         return $this->inner->seeding()->hasImage($tag) ? $tag : null;
+    }
+
+    /**
+     * $image with Node copied in, for a host build that runs a JS tool
+     * ({@see NodeBuildImage}). Built on the host only, since only a host
+     * build uses it; nothing is loaded into the account.
+     *
+     * Built now rather than in the background: without Node the build fails
+     * every time, and the image is COPY layers, seconds once both sources
+     * are on the host. Null means build in $image and let it fail as before.
+     */
+    public function ensureNodeBuild(string $image, string $nodeImage): ?string
+    {
+        $tag = NodeBuildImage::tag($image, $nodeImage);
+        $dockerfile = NodeBuildImage::dockerfile($image, $nodeImage);
+        if ($tag === null || $dockerfile === null) {
+            return null;
+        }
+        $host = $this->inner->host();
+        $host->logInfo("The build runs a JS tool; building in {$tag} ({$image} with Node from {$nodeImage})");
+        if ($this->hostHasImage($tag)) {
+            return $tag;
+        }
+
+        try {
+            $host->cancellable($this->inner->imageStore()->hostBuildCommand($tag, $dockerfile), self::BUILD_TIMEOUT_SECONDS);
+        } catch (\Exception $e) {
+            $host->failDeployIfDiskFull($e->getMessage());
+            $host->logInfo("Could not build {$tag}, building without Node: " . $e->getMessage());
+
+            return null;
+        }
+
+        return $tag;
     }
 
     /**

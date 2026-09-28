@@ -192,6 +192,9 @@ class HostCompileSharedManifestTest extends TestCase
             $copiedFromRunComposer[$lockPath],
             'runPhpBuild() and runComposer() disagreed on the copied lock content'
         );
-        $this->assertSame($composerJson, $copiedFromPhpBuild[$manifestPath], 'the manifest must carry composer.json byte for byte');
+        $written = json_decode($copiedFromPhpBuild[$manifestPath], true);
+        $this->assertSame(PhpHostBuild::allowPlugins(), $written['config']['allow-plugins']);
+        unset($written['config']);
+        $this->assertSame(json_decode($composerJson, true), $written, 'the manifest must carry composer.json, plus the allow-plugins');
     }
 }

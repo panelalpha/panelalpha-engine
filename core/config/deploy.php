@@ -24,14 +24,23 @@ return [
      *
      * Empty (the default, and what an install that never mentioned this key
      * gets) means "a third of this host's MemTotal, floored at 2g and capped
-     * at 8g" -- see {@see \App\Lib\Deploy\Compose\ServiceLimits::hostBuildMemoryMb()}.
-     * Setting it is an override: `2g` pins every build to 2g, `8g` gives every
-     * build 8g, and it is never sized below the floor.
+     * at 8g" -- see {@see \App\Lib\Deploy\Compose\ServiceLimits::hostBuildMemoryMb()} --
+     * raised to a project's larger memory limit, up to half of MemTotal.
+     * Setting it is an override: `2g` pins every build to 2g whatever the
+     * project's limit, `8g` gives every build 8g, and it is never sized below
+     * the floor.
      *
      * Accepts a Docker size string: 512m, 2g, 4096m. An unparseable value
      * falls back to the host-derived default rather than failing every deploy.
      */
     'build_memory' => env('DEPLOY_BUILD_MEMORY', ''),
+
+    /*
+     * Memory limit for an account whose plan sets none (engine#110). Empty is
+     * half of this host's RAM, floored at 2g; `0` leaves such accounts
+     * unlimited, as they were before. A plan's own memory_limit always wins.
+     */
+    'account_memory' => env('DEPLOY_ACCOUNT_MEMORY', ''),
 
     /*
      * Seconds a streamed deploy step may go without printing anything before

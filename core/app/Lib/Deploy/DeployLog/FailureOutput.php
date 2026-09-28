@@ -110,7 +110,9 @@ final class FailureOutput
         // runs; the engine compiles Java on the host as the account, and the
         // real failure is thousands of lines later. A `mkdir` naming anything
         // else is still a finding.
-        '/^mkdir: cannot create directory .\/root./',
+        // coreutils quotes it with ‘’, three bytes each, which a bare `.`
+        // never matched: the real line was never dropped (#86).
+        '/^mkdir: cannot create directory (?:\'|"|‘)\/root(?:\'|"|’):/',
         // `apk add` runs as the account, not root, so this is ignored -- a Go
         // host compile wraps it in `|| true`. `ERROR:` on another subject is
         // still a finding.
@@ -125,6 +127,9 @@ final class FailureOutput
             . '|Skipped)(?:\s+[\d.]+s)?\s*$/',
         '/^\s*[0-9a-f]{12}\s+(?:Pulling fs layer|Waiting|Downloading|Download complete|Verifying Checksum'
             . '|Extracting|Pull complete|Already exists)\b/',
+        // The same for `apt-get update`, best effort in the Rust host compile
+        // (`|| true`): the account cannot write the apt lists (#86).
+        '/^E: List directory \/var\/lib\/apt\/lists\/partial is missing\. - Acquire \(13: Permission denied\)$/',
         '/^\s*$/',
     ];
 
@@ -188,6 +193,25 @@ final class FailureOutput
         ));
 
         return trim(implode("\n", array_slice($own, -self::STEP_LINES)));
+    }
+
+    /**
+     * The text a failed build process is reported by: its stderr, unless that
+     * is nothing but noise. The maven image's `mkdir: cannot create directory
+     * '/root'` and the JVM's JAVA_TOOL_OPTIONS banner go to stderr while Maven
+     * prints `[ERROR] ... release version 25 not supported` to stdout, and the
+     * banner was reported as the reason (#86).
+     */
+    public static function fromStreams(string $stderr, string $stdout): string
+    {
+        if (self::select($stderr) === '') {
+            $region = self::select($stdout);
+            if ($region !== '') {
+                return $region;
+            }
+        }
+
+        return $stderr !== '' ? $stderr : $stdout;
     }
 
     private static function isNoise(string $line): bool

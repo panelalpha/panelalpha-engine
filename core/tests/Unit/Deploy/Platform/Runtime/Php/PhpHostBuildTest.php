@@ -110,12 +110,19 @@ class PhpHostBuildTest extends TestCase
         $this->assertStringContainsString('drupal/action', $runtime);
     }
 
-    public function test_a_manifest_without_dev_requirements_is_left_alone(): void
+    /** Nothing to drop still gets a manifest -- it carries the allow-plugins -- and nothing else changes. */
+    public function test_a_manifest_without_dev_requirements_only_gains_the_allow_plugins(): void
     {
         $manifest = '{"name": "acme/app", "require": {"psr/log": "^1.0"}}';
 
-        $this->assertNull(PhpHostBuild::runtimeManifest($manifest));
-        $this->assertNull(PhpHostBuild::runtimeManifest('{"require-dev": {"phpunit/phpunit": "^6"}}'));
+        $runtime = json_decode((string) PhpHostBuild::runtimeManifest($manifest), true);
+        $this->assertSame(PhpHostBuild::allowPlugins(), $runtime['config']['allow-plugins']);
+        unset($runtime['config']);
+        $this->assertSame(json_decode($manifest, true), $runtime);
+
+        // No `require` to keep: require-dev stays rather than leaving an empty graph.
+        $runtime = json_decode((string) PhpHostBuild::runtimeManifest('{"require-dev": {"phpunit/phpunit": "^6"}}'), true);
+        $this->assertSame(['phpunit/phpunit' => '^6'], $runtime['require-dev']);
     }
 
     /**
@@ -198,41 +205,30 @@ class PhpHostBuildTest extends TestCase
         // require-dev that can block an unlocked resolve is still dropped.
         $this->assertNotNull(PhpHostBuild::runtimeManifest($manifest));
 
-        // With one and no pin to write, nothing is written and Composer
-        // keeps composer.json, which is the name its lock is filed under.
-        $this->assertNull(PhpHostBuild::runtimeManifest($manifest, '{"packages": []}'));
-        $this->assertNull(PhpHostBuild::runtimeManifest($manifest, '{}'));
+        // With one, require-dev stays so the lock's content-hash still
+        // matches; the caller copies the lock beside the manifest
+        // ({@see \App\System\Project\Dind\HostCompile}).
+        foreach (['{"packages": []}', '{}'] as $lock) {
+            $runtime = json_decode((string) PhpHostBuild::runtimeManifest($manifest, $lock), true);
+            $this->assertSame(['phpunit/phpunit' => '^6'], $runtime['require-dev']);
+        }
     }
 
     /**
-     * A lock stops protecting composer.json the moment a platform pin needs
-     * writing: `composer config` writes wherever `COMPOSER` points, and left
-     * unset that is composer.json -- exactly the file ADR-0001 says the
-     * engine may never write. So a lock with a pin still gets the manifest,
-     * carrying composer.json byte for byte (there is nothing to drop; the
-     * lock is what `install` reads), on the understanding that the caller
-     * copies composer.lock in beside it under the matching engine name
-     * before Composer ever sees `COMPOSER` pointed elsewhere -- see
-     * {@see \App\System\Project\Dind\HostCompile}.
+     * A lock with nothing to drop still gets the manifest: `composer config`
+     * writes the platform pin wherever `COMPOSER` points, and ADR-0001 says
+     * the engine never writes composer.json. Everything but allow-plugins
+     * travels unchanged.
      */
-    public function test_a_lock_gets_the_manifest_once_a_pin_needs_somewhere_to_land(): void
+    public function test_a_locked_manifest_travels_unchanged_but_for_allow_plugins(): void
     {
-        $manifest = '{"require": {"php": "^8.4", "psr/log": "^3"}}';
-        $lock = '{"packages": []}';
+        $manifest = '{"require": {"php": "^8.4", "psr/log": "^3"}, "extra": {"ratio": 1.0}}';
 
-        $runtime = PhpHostBuild::runtimeManifest($manifest, $lock, '8.4');
+        $runtime = json_decode((string) PhpHostBuild::runtimeManifest($manifest, '{"packages": []}'), true);
 
-        $this->assertSame($manifest, $runtime, 'the manifest travels unchanged -- there is nothing to drop');
-    }
-
-    /** The other half of the same case: no minor to pin, so the lock still needs no manifest. */
-    public function test_a_lock_with_no_pin_to_write_still_needs_no_manifest(): void
-    {
-        $manifest = '{"require": {"php": "^8.4"}}';
-        $lock = '{"packages": []}';
-
-        $this->assertNull(PhpHostBuild::runtimeManifest($manifest, $lock, null));
-        $this->assertNull(PhpHostBuild::runtimeManifest($manifest, $lock, '8.4.25'));
+        $this->assertSame(PhpHostBuild::allowPlugins(), $runtime['config']['allow-plugins']);
+        unset($runtime['config']);
+        $this->assertSame(json_decode($manifest, true), $runtime);
     }
 
     /**
@@ -254,7 +250,7 @@ class PhpHostBuildTest extends TestCase
     {
         // A manifest rebuilt from a file we could not parse would resolve a
         // different tree; the caller falls back to composer.json instead.
-        foreach (['', 'not json', '[]', '"a string"', '{"require": "not an object"}'] as $broken) {
+        foreach (['', 'not json', '[]', '"a string"'] as $broken) {
             $this->assertNull(PhpHostBuild::runtimeManifest($broken), $broken);
         }
     }

@@ -246,6 +246,9 @@ harden_host() {
     bash /opt/panelalpha/shared-hosting/scripts/configure-monit.sh
     bash /opt/panelalpha/shared-hosting/scripts/csf.sh --install
     service docker restart
+    # engine#246: host builds run on panelalpha-build. Made here, while
+    # Docker's chains are fresh: after a CSF flush the engine cannot create it.
+    bash /opt/panelalpha/shared-hosting/scripts/build-network-firewall.sh --create panelalpha-build || true
 }
 
 set_default_ip() {

@@ -53,11 +53,29 @@ final class ServiceLimits
     /** Above this the operator has to say so with `DEPLOY_BUILD_MEMORY`. */
     private const MAX_BUILD_MEMORY_MB = 8192;
 
+    /**
+     * An account whose plan names no memory limit gets half the host, so one
+     * tenant's build is OOM-killed inside its own cgroup instead of taking the
+     * host and core with it (engine#110).
+     */
+    private const ACCOUNT_MEMORY_DIVISOR = 2;
+
+    private const MIN_ACCOUNT_MEMORY_MB = 2048;
+
+    /**
+     * A project's memory limit may raise its build up to half of MemTotal,
+     * never lower it (engine#184). Safe only because builds run one at a time.
+     */
+    private const PROJECT_BUILD_MEMORY_DIVISOR = 2;
+
     private const PROC_MEMTOTAL_PATTERN = '/^MemTotal:\s+(\d+)\s*kB/mi';
 
     private const HEAP_SHARE = 0.70;
 
     private const HEAP_HEADROOM_MB = 64;
+
+    /** What one cargo job may take: a C++ compiler on a large unity file peaks past 1.2 GB. */
+    private const CARGO_JOB_MEMORY_MB = 1536;
 
     private const BYTES_PER_MB = 1048576;
 
@@ -120,11 +138,8 @@ final class ServiceLimits
      */
     public static function hostBuildMemoryMb(string $procMeminfo): int
     {
-        if (preg_match(self::PROC_MEMTOTAL_PATTERN, $procMeminfo, $m) !== 1) {
-            return self::MIN_BUILD_MEMORY_MB;
-        }
-        $totalMb = (int) floor((int) $m[1] / 1024);
-        if ($totalMb <= 0) {
+        $totalMb = self::memTotalMb($procMeminfo);
+        if ($totalMb === null) {
             return self::MIN_BUILD_MEMORY_MB;
         }
 
@@ -132,6 +147,45 @@ final class ServiceLimits
         $share = intdiv($totalMb, self::BUILD_MEMORY_DIVISOR);
 
         return max(self::MIN_BUILD_MEMORY_MB, min(self::MAX_BUILD_MEMORY_MB, $share));
+    }
+
+    /**
+     * The account container's limit when neither the plan nor the operator set
+     * one: half of MemTotal, floored at 2g. Unreadable falls back to the floor.
+     */
+    public static function accountDefaultMemoryMb(string $procMeminfo): int
+    {
+        if (preg_match(self::PROC_MEMTOTAL_PATTERN, $procMeminfo, $m) !== 1) {
+            return self::MIN_ACCOUNT_MEMORY_MB;
+        }
+        $totalMb = (int) floor((int) $m[1] / 1024);
+
+        return max(self::MIN_ACCOUNT_MEMORY_MB, intdiv($totalMb, self::ACCOUNT_MEMORY_DIVISOR));
+    }
+
+    /**
+     * The most a project's memory limit may raise its host build to: half of
+     * MemTotal, and never below the server share. Null when the host cannot be
+     * read, so an unknown machine never gets a build sized by a plan.
+     */
+    public static function projectBuildMemoryCapMb(string $procMeminfo): ?int
+    {
+        $totalMb = self::memTotalMb($procMeminfo);
+        if ($totalMb === null) {
+            return null;
+        }
+
+        return max(self::hostBuildMemoryMb($procMeminfo), intdiv($totalMb, self::PROJECT_BUILD_MEMORY_DIVISOR));
+    }
+
+    private static function memTotalMb(string $procMeminfo): ?int
+    {
+        if (preg_match(self::PROC_MEMTOTAL_PATTERN, $procMeminfo, $m) !== 1) {
+            return null;
+        }
+        $totalMb = (int) floor((int) $m[1] / 1024);
+
+        return $totalMb > 0 ? $totalMb : null;
     }
 
     /**
@@ -162,6 +216,21 @@ final class ServiceLimits
     public static function javaHeapMbFor($memoryLimit): int
     {
         return self::nodeHeapMbFor($memoryLimit);
+    }
+
+    /**
+     * Parallel cargo jobs for a build container of this size. Cargo runs one
+     * job per CPU and a `-sys` crate's C++ gets one compiler per job: liwan's
+     * libduckdb-sys was OOM-killed at 8 jobs in 5202 MB (cc1plus ~1.2 GB each).
+     *
+     * @param mixed $memoryLimit
+     */
+    public static function cargoJobsFor($memoryLimit, ?int $cpus = null): int
+    {
+        $limitMb = self::toMegabytes($memoryLimit) ?? self::MIN_BUILD_MEMORY_MB;
+        $jobs = max(1, intdiv($limitMb, self::CARGO_JOB_MEMORY_MB));
+
+        return $cpus !== null && $cpus > 0 ? min($cpus, $jobs) : $jobs;
     }
 
     /**

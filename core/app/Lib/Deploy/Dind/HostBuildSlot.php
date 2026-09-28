@@ -48,9 +48,11 @@ final class HostBuildSlot
 
     /**
      * Run `$build` with the host's build slot held, releasing it either way.
+     * `$build` is told whether it holds the slot: a build that is not alone
+     * must not size itself as if it were.
      *
      * @template T
-     * @param callable(): T $build
+     * @param callable(bool): T $build
      * @param ?callable(): void $onWait called once when the slot is busy
      * @return T
      */
@@ -59,7 +61,7 @@ final class HostBuildSlot
         $handle = self::acquire($onWait);
 
         try {
-            return $build();
+            return $build($handle !== null);
         } finally {
             if (is_resource($handle)) {
                 flock($handle, LOCK_UN);
@@ -74,7 +76,11 @@ final class HostBuildSlot
      */
     private static function acquire(?callable $onWait)
     {
-        $handle = @fopen(storage_path(self::LOCK_FILE), 'c');
+        $path = self::lockPath();
+        if ($path === null) {
+            return null;
+        }
+        $handle = @fopen($path, 'c');
         if ($handle === false) {
             // Nowhere to put the lock is not a reason to refuse to build.
             Log::warning('Host build slot unavailable; building without it.');
@@ -101,5 +107,15 @@ final class HostBuildSlot
         }
 
         return $handle;
+    }
+
+    /** Null outside a booted application (plain unit tests), which builds unslotted. */
+    private static function lockPath(): ?string
+    {
+        try {
+            return storage_path(self::LOCK_FILE);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }

@@ -27,6 +27,19 @@ CONSOLE="${PHP} Thelia"
 COMPOSER_HOME="${COMPOSER_HOME:-/tmp/composer}"
 export COMPOSER_HOME
 
+# Where the host build left the thelia packages. Since engine #168 it runs
+# composer/installers, so flexy is at templates/frontOffice/flexy and the
+# modules under vendor/thelia/modules, and a `--no-plugins` dump would point the
+# map back at vendor/thelia/<package> and drop them. A build that still ran
+# `--no-plugins` leaves flexy at vendor/thelia/flexy, and the re-dumps below
+# are what keep that layout working. Read once, before bin/install copies
+# anything.
+if [ -d vendor/thelia/flexy ]; then
+    PLUGINS_SKIPPED_ON_HOST=1
+else
+    PLUGINS_SKIPPED_ON_HOST=
+fi
+
 if [ -z "${DB_HOST:-}" ] || [ -z "${DB_DATABASE:-}" ]; then
     echo "[thelia] no DB_* in the environment; is 'database: mysql' still in panelalpha.yaml?" >&2
     exit 1
@@ -93,7 +106,9 @@ ${PHP} panelalpha/thelia-place-modules.php
 # generates the JWT key pair through bin/console, which does not exist here,
 # and bin/install does both itself in the right order.
 composer dump-autoload --no-dev --optimize --no-interaction --no-scripts
-composer dump-autoload --no-dev --optimize --no-interaction --no-scripts --no-plugins
+if [ -n "${PLUGINS_SKIPPED_ON_HOST}" ]; then
+    composer dump-autoload --no-dev --optimize --no-interaction --no-scripts --no-plugins
+fi
 
 # ---------------------------------------------------------------------------
 # 3. The bundles Flex would have registered.
@@ -230,8 +245,12 @@ set -e
 # and lists all three template bundles -- so every request answered
 # `Class "BackOfficeDefaultBundle\BackOfficeDefaultBundle" not found`, with the
 # shop fully installed behind it. Measured: 154 psr-4 prefixes instead of 157,
-# the three missing ones all that package's.
-composer dump-autoload --no-dev --optimize --no-interaction --no-scripts --no-plugins
+# the three missing ones all that package's. Only for that layout: when the host
+# ran composer/installers the package is at templates/backOffice/default and
+# the map bin/install wrote is already right.
+if [ -n "${PLUGINS_SKIPPED_ON_HOST}" ]; then
+    composer dump-autoload --no-dev --optimize --no-interaction --no-scripts --no-plugins
+fi
 
 # bin/install writes the credentials into .env.local in the clear. It is
 # outside the document root (public/ is), and the generated vhost denies

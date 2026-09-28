@@ -121,7 +121,7 @@ class PhpStrategy
             $build->appRoot,
             $build->composerJson !== null
         );
-        $this->dind->hostCompile()->runForPhp($projectDir, $files);
+        $this->dind->hostCompile()->runForPhp($projectDir, $files, $build->appRoot);
         // No Dockerfile. The shared base image is the runtime -- Apache, the
         // extension set, composer and the entrypoint shim are all baked into
         // it -- and what makes it this project is the bind mount the compose

@@ -75,6 +75,37 @@ class DindHostBuilderTest extends TestCase
         );
     }
 
+    /** Group Office: the application is www/, the mount is still the whole checkout. */
+    public function test_an_app_root_is_the_working_directory_not_the_mount(): void
+    {
+        $argv = $this->builder()->nodeBuildArgv(
+            $this->account('groupoffice'),
+            Images::NODE_IMAGE,
+            'npm ci',
+            'npm run build',
+            [],
+            true,
+            true,
+            'www'
+        );
+        $script = (string) end($argv);
+
+        $this->assertContains('/home/groupoffice/project:/app', $argv);
+        $this->assertSame('/app/www', $argv[array_search('-w', $argv, true) + 1]);
+        $this->assertContains(ProjectCache::dirFor('groupoffice') . '/node_modules:/app/www/node_modules', $argv);
+        $this->assertStringContainsString('if [ -f /app/www/package.json ]', $script);
+        $this->assertStringContainsString('cmp -s /app/www/package-lock.json /app/www/node_modules/.pa-lock', $script);
+        $this->assertStringNotContainsString(' /app/package.json', $script);
+    }
+
+    public function test_the_composer_pass_runs_in_the_app_root(): void
+    {
+        $argv = $this->builder()->composerInstallArgv($this->account('groupoffice'), '8.3', null, 'www');
+
+        $this->assertContains('/home/groupoffice/project:/app', $argv);
+        $this->assertSame('/app/www', $argv[array_search('-w', $argv, true) + 1]);
+    }
+
     public function test_refuses_a_project_dir_outside_home_project(): void
     {
         $this->expectException(\InvalidArgumentException::class);

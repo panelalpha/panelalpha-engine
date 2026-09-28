@@ -144,8 +144,10 @@ final class RustRuntime implements Runtime
         $path = './' . self::binaryPath($projectDir);
 
         // Cargo's name first; failing that, the only executable in
-        // target/release runs instead.
-        return 'b=' . $path . ';'
+        // target/release runs instead. Libraries the runtime image lacks were
+        // bundled by the host compile. {@see RustRuntimeLibraries}
+        return RustRuntimeLibraries::startPrefix()
+            . ' b=' . $path . ';'
             . ' [ -x "$b" ] || { set -- $(find ./target/release -maxdepth 1 -type f -perm -u+x'
             . ' ! -name \'*.d\' ! -name \'*.so\' -printf \'%f \' 2>/dev/null);'
             . ' if [ $# -eq 1 ]; then b=./target/release/$1;'

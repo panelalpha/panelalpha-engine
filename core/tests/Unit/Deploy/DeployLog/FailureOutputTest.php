@@ -434,4 +434,59 @@ OUT;
         $this->assertStringContainsString('Container project-mongo-1 Error dependency', $selected);
         $this->assertStringNotContainsString('Pulling', $selected);
     }
+
+    /**
+     * tigase-server on develop, 2026-09-23: the host compile's stderr is only
+     * the maven image's mkdir and the JVM banner, and Maven's own failure is on
+     * stdout. The deploy said "Failed to start app: mkdir: cannot create
+     * directory '/root'" (#86).
+     */
+    private const TIGASE_STDERR = "mkdir: cannot create directory ‘/root’: Permission denied\nPicked up JAVA_TOOL_OPTIONS: -Xmx3641m\n";
+
+    private const TIGASE_STDOUT = <<<'OUT'
+        [INFO] Compiling 816 source files with javac [debug release 25] to target/classes
+        [INFO] ------------------------------------------------------------------------
+        [INFO] BUILD FAILURE
+        [INFO] ------------------------------------------------------------------------
+        [INFO] Total time:  36.629 s
+        [INFO] --             Maven Build Time Profiler Summary                      --
+        [INFO]         1189 ms : compile
+        [INFO] 99,363 ms  54,170,013 bytes. 0.52 MiB / s
+        [INFO] ForkTime: 0
+        [ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.15.0:compile (default-compile) on project tigase-server: Fatal error compiling: error: release version 25 not supported -> [Help 1]
+        [ERROR]
+        [ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+        [ERROR] Re-run Maven using the -X switch to enable full debug logging.
+        OUT;
+
+    public function test_the_maven_entrypoint_mkdir_is_noise_with_the_quotes_coreutils_prints(): void
+    {
+        $this->assertSame('', FailureOutput::select(self::TIGASE_STDERR));
+        $this->assertSame('', FailureOutput::select("mkdir: cannot create directory '/root': Permission denied"));
+    }
+
+    public function test_a_noise_only_stderr_hands_over_to_the_failure_on_stdout(): void
+    {
+        $text = FailureOutput::fromStreams(self::TIGASE_STDERR, self::TIGASE_STDOUT);
+
+        $this->assertStringStartsWith('[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin', $text);
+        $this->assertStringNotContainsString('mkdir', $text);
+        $this->assertStringContainsString('Java 25', (string) DeployFailureExplainer::explain($text));
+    }
+
+    public function test_a_stderr_that_says_something_is_kept(): void
+    {
+        $stderr = "npm error code ERESOLVE\nnpm error ERESOLVE unable to resolve dependency tree\n";
+
+        $this->assertSame($stderr, FailureOutput::fromStreams($stderr, "added 12 packages\n"));
+        $this->assertSame('only stdout', FailureOutput::fromStreams('', 'only stdout'));
+    }
+
+    /** Rust's best-effort `apt-get update` as the account, wrapped in `|| true`. */
+    public function test_apt_lists_permission_line_is_noise(): void
+    {
+        $this->assertSame('', FailureOutput::select(
+            'E: List directory /var/lib/apt/lists/partial is missing. - Acquire (13: Permission denied)'
+        ));
+    }
 }

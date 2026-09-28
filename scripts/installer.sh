@@ -957,6 +957,9 @@ harden_host() {
     # fourth fails with start-limit-hit although the daemon stopped cleanly.
     systemctl reset-failed docker.service 2>/dev/null || true
     service docker restart
+    # engine#246: host builds run on panelalpha-build. Made here, while
+    # Docker's chains are fresh: after a CSF flush the engine cannot create it.
+    bash /opt/panelalpha/shared-hosting/scripts/build-network-firewall.sh --create panelalpha-build || true
 }
 
 remove_renamed_containers() {

@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Exceptions\DeployCancelledException;
 use App\System\Project\Dind\Strategy\PythonBase;
 use App\Lib\Deploy\Dind\BuildNetwork;
 use App\Lib\Deploy\Dind\DindHostBuilder;
@@ -11,14 +12,18 @@ use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Platform\Runtime\Ruby\SystemPackages;
 use App\Lib\Deploy\Platform\Runtime\RubyRuntime;
 use App\Lib\Deploy\Platform\Runtime\RustRuntime;
+use App\Lib\Deploy\Platform\Runtime\RustRuntimeLibraries;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RubyApp;
 use App\Lib\Deploy\Platform\Runtime\Images;
+use App\Lib\Deploy\Platform\Runtime\JavaNodeTooling;
 use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 use App\Lib\Deploy\Platform\PlatformManifest;
 use App\System\Project\Dind as DindProject;
+use App\Lib\Deploy\Compose\AppRoot;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\DetectProjectStrategy;
+use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\Engine\HostBuilder;
@@ -26,6 +31,10 @@ use App\Lib\Deploy\Platform\Runtime\HostNodeBuild;
 use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
+use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\Dind\HostBuildSlot;
+use App\Lib\Deploy\Engine\BuildMemory;
+use Symfony\Component\Process\Process;
 
 
 /**
@@ -48,14 +57,21 @@ class HostCompile
 
     private DindProject $project;
 
+    /** The deploy and figure last announced, so each is said once per deploy. */
+    private ?string $memoryAnnouncedIn = null;
+
     public function __construct(DindProject $project)
     {
         $this->project = $project;
     }
 
-    private function hostBuilder(): HostBuilder
+    private function hostBuilder(?int $projectMemoryMb = null): HostBuilder
     {
-        return $this->project->engine()->hostBuilder();
+        $builder = $this->project->engine()->hostBuilder($projectMemoryMb);
+
+        return $this->buildNetworkUnavailable && $builder instanceof DindHostBuilder
+            ? $builder->withoutNetwork()
+            : $builder;
     }
 
     /**
@@ -154,6 +170,10 @@ class HostCompile
             );
         }
 
+        if (($decision['strategy'] ?? null) === Strategies::RUST) {
+            $this->bundleRustRuntimeLibraries($projectDir, $image, trim((string) ($decision['image'] ?? '')));
+        }
+
         $output = NodeRuntime::safeOutputDir(
             $decision['output_directory'] ?? null,
             $isNitro ? '.output' : 'dist'
@@ -186,21 +206,35 @@ class HostCompile
      * build command is the contract; output paths are intentionally not tied to
      * Laravel Vite, Mix, Symfony Encore, or another framework.
      *
+     * `$appRoot` is the manifest's application subtree: its composer.json and
+     * vendor/ are the application's, and so is its package.json when that
+     * has a build script -- the build then runs there. Otherwise the
+     * checkout root's package.json is used, as before: the Group Office
+     * recipe drives upstream's build from one there.
+     *
      * @param array<string, true> $files
      */
-    public function runForPhp(string $projectDir, array $files): bool
+    public function runForPhp(string $projectDir, array $files, string $appRoot = ''): bool
     {
-        $packageJson = $this->project->projectTree()->readIn($projectDir, 'package.json');
-        if ($packageJson === null) {
+        $appRoot = AppRoot::relative(['app_root' => $appRoot]);
+        $prefix = $appRoot === '' ? '' : $appRoot . '/';
+        $appDir = $appRoot === '' ? $projectDir : rtrim($projectDir, '/') . '/' . $appRoot;
+
+        $package = null;
+        $buildRoot = '';
+        foreach (array_unique([$appRoot, '']) as $candidate) {
+            $package = $this->packageWithBuild($projectDir, $candidate);
+            if ($package !== null) {
+                $buildRoot = $candidate;
+                break;
+            }
+        }
+        if ($package === null) {
             return false;
         }
-        $package = json_decode($packageJson, true);
-        if (!is_array($package)) {
-            return false;
-        }
-        $scripts = $package['scripts'] ?? null;
-        if (!is_array($scripts) || !isset($scripts['build']) || !is_string($scripts['build']) || $scripts['build'] === '') {
-            return false;
+        $buildDir = $buildRoot === '' ? $projectDir : $appDir;
+        if ($buildRoot !== '') {
+            $files = ProjectContext::listRootFiles($buildDir);
         }
 
         $logger = $this->project->shell()->logger();
@@ -223,16 +257,23 @@ class HostCompile
         // Composer dependencies has the manifest, and the manifest is the
         // only thing composer can work from; running it against nothing is
         // not a fallback.
-        if (!$this->project->system()->filesystem()->fileExists($projectDir . '/vendor/autoload.php')
-            && $this->project->projectTree()->readIn($projectDir, 'composer.json') !== null
+        //
+        // The autoloader is looked for where composer.json says it goes:
+        // grocy sets `vendor-dir: packages`, and probing vendor/ reran a
+        // second install that found "Nothing to install" on every deploy.
+        $composerJson = $this->project->projectTree()->readIn($projectDir, $prefix . 'composer.json');
+        if ($composerJson !== null
+            && !$this->project->system()->filesystem()->fileExists(
+                $appDir . '/' . self::vendorDir($composerJson) . '/autoload.php'
+            )
         ) {
-            $this->runComposer();
+            $this->runComposer($appRoot);
         }
 
         $pm = JsPackageManager::detectPackageManager($files, $package);
-        $install = JsPackageManager::installCommand($pm, $files, $package, $projectDir);
+        $install = JsPackageManager::installCommand($pm, $files, $package, $buildDir);
         $build = JsPackageManager::scriptCommand($pm, 'build');
-        $nodeImage = Images::nodeImage($projectDir, $package);
+        $nodeImage = Images::nodeImage($buildDir, $package);
         $image = HostNodeBuild::compilerImage($install, $nodeImage, $pm);
         $installCmd = $install;
         $buildCmd = $build;
@@ -243,7 +284,7 @@ class HostCompile
         $recipeEnv = ['NODE_ENV' => 'development'];
 
         try {
-            $this->runContainer($projectDir, $image, $installCmd, $buildCmd, $recipeEnv, $cached);
+            $this->runContainer($projectDir, $image, $installCmd, $buildCmd, $recipeEnv, $cached, true, $buildRoot);
         } catch (\Exception $e) {
             if ($image === $nodeImage) {
                 throw $e;
@@ -256,7 +297,9 @@ class HostCompile
                 HostNodeBuild::nodeInstallCommand($install),
                 HostNodeBuild::nodeBuildCommand($build),
                 $recipeEnv,
-                $cached
+                $cached,
+                true,
+                $buildRoot
             );
         }
 
@@ -335,7 +378,8 @@ class HostCompile
      *
      * And Rust, which compiles in the full image and runs in slim: slim has no
      * g++, make, pkg-config or OpenSSL headers, and the account cannot install
-     * them. Both are bookworm, so the binary still finds its libraries.
+     * them. A library the binary links that slim lacks is bundled afterwards
+     * by {@see bundleRustRuntimeLibraries()}.
      *
      * @param array<string, mixed> $decision
      */
@@ -357,6 +401,17 @@ class HostCompile
             return $base ?: $declared;
         }
 
+        // A Java build that runs npm (Tolgee's Gradle scripts) compiles in the
+        // same image with Node copied in; the container still runs $declared.
+        if (($decision['strategy'] ?? null) === Strategies::JAVA && $declared !== '') {
+            $node = JavaNodeTooling::nodeImageFor($projectDir);
+            if ($node !== null) {
+                return $this->project->innerDocker()->bases()->ensureNodeBuild($declared, $node) ?? $declared;
+            }
+
+            return $declared;
+        }
+
         // Python gets the same treatment through the same helper
         // FrameworkStrategy uses when it writes the compose file. It has to be
         // the same answer in both places: the venv is built here and run
@@ -366,6 +421,41 @@ class HostCompile
         // A no-op for Go, Rust and Java -- their images are not python tags,
         // so the swap declines and the declared image passes through.
         return PythonBase::imageFor($this->project, $projectDir, $declared);
+    }
+
+    /**
+     * Rust compiles in the build image and runs in the recipe's slim one, so
+     * a binary can link a library only the build image has: focus_flow_cloud's
+     * libpq. Checked in the runtime image; only a gap costs the other two
+     * containers. {@see RustRuntimeLibraries}
+     */
+    private function bundleRustRuntimeLibraries(string $projectDir, string $compileImage, string $runtimeImage): void
+    {
+        if ($runtimeImage === '' || $runtimeImage === $compileImage) {
+            return;
+        }
+
+        try {
+            $this->runContainer($projectDir, $runtimeImage, '', RustRuntimeLibraries::checkScript(), [], false, false);
+        } catch (DeployCancelledException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            // A runtime image that cannot even run the check starts as it did before.
+            $this->project->shell()->logger()?->info(
+                "Could not check the Rust binary against {$runtimeImage}: " . $e->getMessage()
+            );
+
+            return;
+        }
+        if (!$this->project->system()->filesystem()->fileExists($projectDir . '/' . RustRuntimeLibraries::MISSING_FILE)) {
+            return;
+        }
+
+        $this->project->shell()->logger()?->info(
+            "Bundling the libraries {$runtimeImage} lacks from {$compileImage} into " . RustRuntimeLibraries::DIR
+        );
+        $this->runContainer($projectDir, $compileImage, '', RustRuntimeLibraries::bundleScript(), [], false, false);
+        $this->runContainer($projectDir, $runtimeImage, '', RustRuntimeLibraries::verifyScript(), [], false, false);
     }
 
     /**
@@ -422,6 +512,15 @@ class HostCompile
         return $this->project->projectTree()->readIn($projectDir, $prefix . 'composer.json');
     }
 
+    /** {@see PhpHostBuild::mirrorsRuntimeLock()}, for the manifest's subtree. */
+    private function mirrorsRuntimeLock(string $appRoot = ''): bool
+    {
+        $composerJson = $this->projectComposerJson($appRoot);
+
+        return $composerJson !== null
+            && PhpHostBuild::mirrorsRuntimeLock($composerJson, $this->projectComposerLock($appRoot));
+    }
+
     /**
      * Whether the project's lock pins a PHP its own packages reject.
      *
@@ -464,9 +563,22 @@ class HostCompile
         string $appRoot = '',
         bool $hasComposer = false
     ): void {
+        $install = is_string($decision['install_command'] ?? null) ? $decision['install_command'] : '';
+        $build = is_string($decision['build_command'] ?? null) ? $decision['build_command'] : '';
+        if (PhpHostBuild::script($install, $build, $hasComposer) === '') {
+            return;
+        }
+
+        $account = $this->project->engineAccount();
+
+        // Before the script: plugins are allowed only when Composer will read
+        // this manifest, whose allow-plugins names the installers and refuses
+        // the rest. Null (no composer.json, or not writable) keeps --no-plugins.
+        $manifest = $this->runtimeComposerManifest($account->projectDir(), $appRoot);
+
         $script = PhpHostBuild::script(
-            is_string($decision['install_command'] ?? null) ? $decision['install_command'] : '',
-            is_string($decision['build_command'] ?? null) ? $decision['build_command'] : '',
+            $install,
+            $build,
             $hasComposer,
             // The engine's PHP minor, so this resolve answers the same
             // question the build image was chosen for. Without it a project
@@ -479,22 +591,14 @@ class HostCompile
             // engine stops enforcing the one requirement the lock contradicts
             // instead of failing a deploy that would have worked.
             $this->lockPhpContradicted($appRoot),
-            // Read for one decision: whether the plugins this lock pins are
-            // installers, which may run, or an application's build tooling,
-            // which may not. {@see PhpHostBuild::mayRunPlugins()}
-            $this->projectComposerLock($appRoot),
+            $manifest !== null,
+            $manifest !== null && $this->mirrorsRuntimeLock($appRoot),
             // For the classmap directories the checkout lacks, which the
             // autoload dump would otherwise die on. {@see PhpHostBuild::classmapDirsStep()}
             $this->projectComposerJson($appRoot)
         );
-        if ($script === '') {
-            return;
-        }
 
-        $account = $this->project->engineAccount();
-        $shell = $this->project->shell();
-        $logger = $shell->logger();
-        $system = $this->project->system();
+        $logger = $this->project->shell()->logger();
 
         // Best-effort. A cache is an optimisation, and a host that will not
         // let the engine create one is no reason to refuse the deploy -- but
@@ -504,22 +608,14 @@ class HostCompile
         $withCache = $this->prepareCache();
         $logger?->info('Resolving PHP dependencies on host');
 
-        // Written before the argv, so a Composer step that is dropped from
-        // the manifest (an app with no dependencies) does not leave a stale
-        // runtime manifest behind for the next deploy to read.
-        $manifest = $this->runtimeComposerManifest($account->projectDir(), $appRoot);
-
-        $argv = $this->hostBuilder()->phpBuildArgv($account, $image, $script, $appRoot, $withCache, $manifest);
-        if ($logger === null) {
-            $process = $system->runProcess($argv, [], self::PHP_BUILD_TIMEOUT_SECONDS);
-        } else {
-            $logger->throwIfCancelled();
-            $process = $shell->streamProcess($argv, [], self::PHP_BUILD_TIMEOUT_SECONDS, $logger);
-            $logger->throwIfCancelled();
-        }
+        $process = $this->runHostBuild(
+            static fn (HostBuilder $builder): array
+                => $builder->phpBuildArgv($account, $image, $script, $appRoot, $withCache, $manifest),
+            self::PHP_BUILD_TIMEOUT_SECONDS
+        );
 
         if (!$process->isSuccessful()) {
-            $message = $process->getErrorOutput() ?: $process->getOutput();
+            $message = FailureOutput::fromStreams($process->getErrorOutput(), $process->getOutput());
             throw new \Exception($message !== '' ? $message : 'Host PHP build failed');
         }
 
@@ -527,14 +623,20 @@ class HostCompile
     }
 
     /**
+     * Set when the build network could not be made; see prepareBuildNetwork().
+     * A flag, not a builder: the builder differs by the project's memory limit.
+     */
+    private bool $buildNetworkUnavailable = false;
+
+    /**
      * Make sure the build network exists and its firewall is applied (engine#246).
      *
-     * The network is required -- `docker run --network` fails without it -- so
-     * a network that cannot be created stops the build and says how to opt
-     * out. The firewall is best-effort: without it the build reaches what it
-     * did on the default bridge, which is logged rather than refused, so a
-     * host that cannot run the script (no nsenter, the DinD test harness)
-     * still deploys.
+     * Both fail open, to what a build had before this network existed: a
+     * network that cannot be made -- on a CSF host `docker network create`
+     * fails once CSF has flushed Docker's chains, which is why the installers
+     * make it right after restarting Docker -- sends this build to the default
+     * bridge, and a firewall that cannot be applied leaves the network
+     * unfiltered. Either is a warning in the deploy log, never a failed deploy.
      */
     private function prepareBuildNetwork(): void
     {
@@ -546,20 +648,19 @@ class HostCompile
 
         $system = $this->project->system();
         $logger = $this->project->shell()->logger();
-        try {
-            $system->exec(BuildNetwork::inspectArgv($network), [], 30);
-        } catch (\Exception) {
+        if (!$this->buildNetworkExists($network)) {
             try {
                 $system->exec(BuildNetwork::createArgv($network), [], 60);
             } catch (\Exception $e) {
-                // Another build may have created it in the meantime.
-                try {
-                    $system->exec(BuildNetwork::inspectArgv($network), [], 30);
-                } catch (\Exception) {
-                    throw new \Exception(
-                        "Could not create the host build network {$network}: " . $e->getMessage()
-                            . ' Set DEPLOY_BUILD_NETWORK= (empty) in .env-core to build on the default bridge.'
+                // Another build may have made it in the meantime.
+                if (!$this->buildNetworkExists($network)) {
+                    $this->buildNetworkUnavailable = true;
+                    $logger?->warn(
+                        "Host build network {$network} could not be created, so this build runs on Docker's "
+                            . 'default bridge and can reach the host and its private network: ' . trim($e->getMessage())
                     );
+
+                    return;
                 }
             }
         }
@@ -570,8 +671,19 @@ class HostCompile
         } catch (\Exception $e) {
             $logger?->warn(
                 "Host build network {$network} has no firewall, so this build can reach private addresses: "
-                    . $e->getMessage()
+                    . trim($e->getMessage())
             );
+        }
+    }
+
+    private function buildNetworkExists(string $network): bool
+    {
+        try {
+            $this->project->system()->exec(BuildNetwork::inspectArgv($network), [], 30);
+
+            return true;
+        } catch (\Exception) {
+            return false;
         }
     }
 
@@ -607,54 +719,71 @@ class HostCompile
         }
     }
 
-    private function runComposer(): void
+    /**
+     * The package.json in `$root` (relative to the checkout), decoded, when it
+     * has a non-empty build script; null otherwise.
+     *
+     * @return ?array<string, mixed>
+     */
+    private function packageWithBuild(string $projectDir, string $root): ?array
     {
-        $shell = $this->project->shell();
-        $logger = $shell->logger();
+        $raw = $this->project->projectTree()->readIn($projectDir, ($root === '' ? '' : $root . '/') . 'package.json');
+        $package = $raw === null ? null : json_decode($raw, true);
+        if (!is_array($package)) {
+            return null;
+        }
+        $build = is_array($package['scripts'] ?? null) ? ($package['scripts']['build'] ?? null) : null;
+
+        return is_string($build) && $build !== '' ? $package : null;
+    }
+
+    /** Composer's `config.vendor-dir`, or `vendor` for anything that could leave the project. */
+    private static function vendorDir(string $composerJson): string
+    {
+        $decoded = json_decode($composerJson, true);
+        $dir = is_array($decoded) && is_array($decoded['config'] ?? null) ? ($decoded['config']['vendor-dir'] ?? null) : null;
+        $dir = is_string($dir) ? rtrim($dir, '/') : '';
+
+        return AppRoot::relative(['app_root' => $dir]) ?: 'vendor';
+    }
+
+    private function runComposer(string $appRoot = ''): void
+    {
         $account = $this->project->engineAccount();
-        $argv = $this->hostBuilder()->composerInstallArgv(
-            $account,
-            $this->targetPhpMinor(),
-            // The same decision runPhpBuild() made, so the two Composer
-            // passes never resolve against different manifests for the same
-            // deploy.
-            $this->runtimeComposerManifest($account->projectDir())
+        $phpMinor = $this->targetPhpMinor($appRoot);
+        // The same decision runPhpBuild() made, so the two Composer passes
+        // never resolve against different manifests for the same deploy.
+        $manifest = $this->runtimeComposerManifest($account->projectDir(), $appRoot);
+
+        $process = $this->runHostBuild(
+            static fn (HostBuilder $builder): array
+                => $builder->composerInstallArgv($account, $phpMinor, $manifest, $appRoot),
+            1800
         );
 
-        if ($logger === null) {
-            $process = $this->project->system()->runProcess($argv, [], 1800);
-        } else {
-            $logger->throwIfCancelled();
-            $process = $shell->streamProcess($argv, [], 1800, $logger);
-            $logger->throwIfCancelled();
-        }
-
         if (!$process->isSuccessful()) {
-            $message = $process->getErrorOutput() ?: $process->getOutput();
+            $message = FailureOutput::fromStreams($process->getErrorOutput(), $process->getOutput());
             throw new \Exception($message !== '' ? $message : 'Host Composer install failed');
         }
     }
 
     /**
      * Write the manifest Composer should resolve from, and return its name,
-     * or null when the project's own composer.json is fine as-is.
+     * or null when there is no composer.json to derive it from.
      *
-     * Two cases write one: a project with no lock and a require-dev to drop
-     * (the manifest is the fix itself), and a locked project that also needs
-     * a platform pin (the manifest is an untouched copy of composer.json,
-     * only so the pin has somewhere to land other than the client's file).
-     * {@see PhpHostBuild::runtimeManifest()} decides which, if either.
+     * Written for every project with a composer.json: it carries the engine's
+     * allow-plugins, which is what lets the host build drop `--no-plugins`
+     * ({@see PhpHostBuild::runtimeManifest()}), plus the platform pin and,
+     * without a lock, the require-dev drop.
      *
-     * The lock is copied beside it under the matching engine name in the
-     * second case, refreshed on every call: Composer finds a lock by the name
-     * of the manifest it was handed, so without a copy filed under the
-     * runtime manifest's name it would see no lock at all and resolve the
-     * whole graph remotely instead of installing the one the project
-     * committed.
+     * The lock, when there is one, is copied beside it under the matching
+     * engine name, refreshed on every call: Composer finds a lock by the name
+     * of the manifest it was handed, so without the copy it would see no lock
+     * at all and resolve the whole graph remotely instead of installing the
+     * one the project committed.
      *
-     * Best-effort. A project whose manifest cannot be written -- or that
-     * needs none of this -- resolves from its own composer.json, exactly as
-     * before.
+     * Best-effort. A project whose manifest cannot be written resolves from
+     * its own composer.json with `--no-plugins`, exactly as before.
      */
     private function runtimeComposerManifest(string $projectDir, string $appRoot = ''): ?string
     {
@@ -671,7 +800,7 @@ class HostCompile
         }
 
         $composerLock = $files->readIn($appDir, 'composer.lock');
-        $runtime = PhpHostBuild::runtimeManifest($composerJson, $composerLock, $this->targetPhpMinor($appRoot));
+        $runtime = PhpHostBuild::runtimeManifest($composerJson, $composerLock);
         if ($runtime === null) {
             return null;
         }
@@ -715,35 +844,111 @@ class HostCompile
         string $build,
         array $env = [],
         bool $isolateNodeModules = true,
-        bool $isNode = true
+        bool $isNode = true,
+        string $appRoot = ''
     ): void {
-        $shell = $this->project->shell();
-        $logger = $shell->logger();
         $account = $this->project->engineAccount();
         if ($projectDir !== $account->projectDir()) {
             throw new \InvalidArgumentException('Refusing host build outside the account project directory');
         }
-        $argv = $this->hostBuilder()->nodeBuildArgv(
-            $account,
-            $image,
-            $install,
-            $build,
-            $env,
-            $isolateNodeModules,
-            $isNode
+        $process = $this->runHostBuild(
+            static fn (HostBuilder $builder): array => $builder->nodeBuildArgv(
+                $account,
+                $image,
+                $install,
+                $build,
+                $env,
+                $isolateNodeModules,
+                $isNode,
+                $appRoot
+            ),
+            3600
         );
 
-        if ($logger === null) {
-            $process = $this->project->system()->runProcess($argv, [], 3600);
-        } else {
-            $logger->throwIfCancelled();
-            $process = $shell->streamProcess($argv, [], 3600, $logger);
-            $logger->throwIfCancelled();
-        }
-
         if (!$process->isSuccessful()) {
-            $message = $process->getErrorOutput() ?: $process->getOutput();
+            $message = FailureOutput::fromStreams($process->getErrorOutput(), $process->getOutput());
             throw new \Exception($message !== '' ? $message : 'Host static asset compile failed');
         }
+    }
+
+    /**
+     * Run one host build container while holding the engine's build slot.
+     * Each is sized for the server (a third of its RAM by default, or the
+     * project's larger limit), so two at once can exhaust it; {@see HostBuildSlot}.
+     *
+     * @param callable(HostBuilder): list<string> $argvFor
+     */
+    private function runHostBuild(callable $argvFor, int $timeout): Process
+    {
+        $shell = $this->project->shell();
+        $logger = $shell->logger();
+
+        return HostBuildSlot::run(
+            function (bool $alone) use ($logger, $shell, $argvFor, $timeout): Process {
+                // The project's limit may raise the build only while it runs
+                // alone; a build that failed open sharing the host gets the server share.
+                $projectMemoryMb = $this->projectMemoryLimitMb();
+                $builder = $this->hostBuilder($alone ? $projectMemoryMb : null);
+                if (!$alone && $this->hostBuilder($projectMemoryMb)->memoryLimitMb() > $builder->memoryLimitMb()) {
+                    $logger?->warn('Building without the host build slot, so at the server default'
+                        . ' rather than the project\'s memory limit');
+                }
+                $this->announceBuildMemory($logger, $builder);
+                $argv = $argvFor($builder);
+
+                if ($logger === null) {
+                    return $this->project->system()->runProcess($argv, [], $timeout);
+                }
+                $logger->throwIfCancelled();
+                $process = $shell->streamProcess($argv, [], $timeout, $logger);
+                $logger->throwIfCancelled();
+
+                return $process;
+            },
+            static fn () => $logger?->info('Waiting for the host build slot: another deploy is building on this server')
+        );
+    }
+
+    /** The account's memory limit in MB, or null when it has none. */
+    private function projectMemoryLimitMb(): ?int
+    {
+        $limit = $this->project->userModel()->getMemoryLimit();
+
+        return $limit !== null && $limit > 0 ? $limit : null;
+    }
+
+    /**
+     * Say what the build container gets and who sets it, once per deploy and
+     * again only if the figure changes: the project's memory limit is the
+     * first thing anyone raises when a build OOMs.
+     */
+    private function announceBuildMemory(?DeployLogger $logger, HostBuilder $builder): void
+    {
+        if ($logger === null) {
+            return;
+        }
+        $key = $logger->getDeployId() . '|' . $builder->memoryLimitMb();
+        if ($key === $this->memoryAnnouncedIn) {
+            return;
+        }
+        $this->memoryAnnouncedIn = $key;
+        $logger->info(self::buildMemoryLine($builder->memoryLimitMb(), $builder->memoryOrigin()));
+    }
+
+    public static function buildMemoryLine(int $memoryMb, ?BuildMemory $origin = null): string
+    {
+        $line = 'Host build container memory: ' . $memoryMb . ' MB, ';
+
+        return $line . match ($origin?->source ?? BuildMemory::SETTING) {
+            BuildMemory::SERVER => 'the server default (a third of its RAM, 2048-8192 MB).'
+                . ' A project memory limit above it raises it, up to half the server\'s RAM;'
+                . ' DEPLOY_BUILD_MEMORY replaces both',
+            BuildMemory::PROJECT => 'raised to the project\'s memory limit from the server default of '
+                . $origin->serverShareMb . ' MB; DEPLOY_BUILD_MEMORY replaces both',
+            BuildMemory::PROJECT_CAPPED => 'the project\'s memory limit of ' . $origin->projectLimitMb
+                . ' MB held to half the server\'s RAM (server default ' . $origin->serverShareMb . ' MB);'
+                . ' DEPLOY_BUILD_MEMORY replaces both',
+            default => 'set for the server by DEPLOY_BUILD_MEMORY; the project\'s memory limit does not apply to it',
+        };
     }
 }

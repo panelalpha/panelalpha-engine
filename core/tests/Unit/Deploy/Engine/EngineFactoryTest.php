@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Engine;
 
 use App\Lib\Deploy\Dind\DindEngine;
 use App\Lib\Deploy\Engine\AccountStorage;
+use App\Lib\Deploy\Engine\BuildMemory;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Engine\EngineFactory;
@@ -157,7 +158,7 @@ final class FakeEngine implements ContainerEngine
         };
     }
 
-    public function hostBuilder(): HostBuilder
+    public function hostBuilder(?int $projectMemoryMb = null): HostBuilder
     {
         return new class implements HostBuilder {
             public function nodeBuildArgv(
@@ -166,7 +167,9 @@ final class FakeEngine implements ContainerEngine
                 string $install,
                 string $build,
                 array $env = [],
-                bool $isolateNodeModules = true
+                bool $isolateNodeModules = true,
+                bool $isNode = true,
+                string $appRoot = ''
             ): array {
                 return ['podman', 'run'];
             }
@@ -185,7 +188,8 @@ final class FakeEngine implements ContainerEngine
             public function composerInstallArgv(
                 EngineAccount $account,
                 ?string $phpVersion = null,
-                ?string $manifest = null
+                ?string $manifest = null,
+                string $appRoot = ''
             ): array {
                 return ['podman', 'run'];
             }
@@ -193,6 +197,16 @@ final class FakeEngine implements ContainerEngine
             public function prepareCacheArgv(EngineAccount $account): array
             {
                 return ['mkdir'];
+            }
+
+            public function memoryLimitMb(): int
+            {
+                return 2048;
+            }
+
+            public function memoryOrigin(): BuildMemory
+            {
+                return new BuildMemory('2g');
             }
         };
     }

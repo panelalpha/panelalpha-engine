@@ -200,7 +200,11 @@ class HostNodeBuild
         return implode(' && ', $parts);
     }
 
-    public static function innerScript(string $install, string $build): string
+    /**
+     * @param string $dir where the application sits in the build container:
+     *        /app, or /app/<app_root> for an application in a subtree
+     */
+    public static function innerScript(string $install, string $build, string $dir = '/app'): string
     {
         if (trim($install) === '' && trim($build) === '') {
             return '';
@@ -228,19 +232,21 @@ class HostNodeBuild
             $strip = str_contains($install, 'bun ')
                 ? JsPackageManager::dockerfileStripGitHookScriptsCommand('bun', sourcePresent: true)
                 : JsPackageManager::dockerfileStripGitHookScriptsCommand('npm', sourcePresent: true);
-            $parts[] = 'if [ -f /app/package.json ]; then ' . $strip . '; fi';
-            $parts[] = 'if [ -f /app/node_modules/.pa-lock ] && { '
-                . 'cmp -s /app/package-lock.json /app/node_modules/.pa-lock '
-                . '|| cmp -s /app/pnpm-lock.yaml /app/node_modules/.pa-lock '
-                . '|| cmp -s /app/yarn.lock /app/node_modules/.pa-lock '
-                . '|| cmp -s /app/bun.lock /app/node_modules/.pa-lock; '
+            $parts[] = 'if [ -f ' . $dir . '/package.json ]; then ' . $strip . '; fi';
+            $parts[] = 'if [ -f ' . $dir . '/node_modules/.pa-lock ] && { '
+                . 'cmp -s ' . $dir . '/package-lock.json ' . $dir . '/node_modules/.pa-lock '
+                . '|| cmp -s ' . $dir . '/pnpm-lock.yaml ' . $dir . '/node_modules/.pa-lock '
+                . '|| cmp -s ' . $dir . '/yarn.lock ' . $dir . '/node_modules/.pa-lock '
+                . '|| cmp -s ' . $dir . '/bun.lock ' . $dir . '/node_modules/.pa-lock; '
                 . '}; then echo "node_modules cache hit"; '
+                // Only a lockfile that exists is copied: a `cp` chain printed
+                // `cp: cannot stat '/app/package-lock.json'` on every pnpm
+                // build, and a failed build's last lines are what gets
+                // reported as its cause (dub, Teable).
                 . 'else ' . $install . ' && { '
-                . 'cp /app/package-lock.json /app/node_modules/.pa-lock '
-                . '|| cp /app/pnpm-lock.yaml /app/node_modules/.pa-lock '
-                . '|| cp /app/yarn.lock /app/node_modules/.pa-lock '
-                . '|| cp /app/bun.lock /app/node_modules/.pa-lock '
-                . '|| true; }; fi';
+                . 'for f in package-lock.json pnpm-lock.yaml yarn.lock bun.lock; do '
+                . 'if [ -f "' . $dir . '/$f" ]; then cp "' . $dir . '/$f" ' . $dir . '/node_modules/.pa-lock; break; fi; '
+                . 'done; true; }; fi';
         }
         if ($build !== '') {
             $parts[] = $build;

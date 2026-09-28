@@ -422,6 +422,8 @@ if [ "$HARDEN" = 1 ]; then
     bash scripts/configure-monit.sh || warn "monit configuration failed"
     bash scripts/csf.sh --install || warn "CSF install failed"
     service docker restart || warn "Could not restart Docker"
+    # engine#246, as in installer.sh: the build network, while Docker's chains are fresh.
+    bash scripts/build-network-firewall.sh --create panelalpha-build || warn "Could not create the build network"
 fi
 
 step "Starting the stack"

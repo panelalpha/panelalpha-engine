@@ -13,11 +13,22 @@
 #   - everything else leaves, masqueraded.
 # DNS is unaffected: Docker's embedded resolver forwards from the daemon.
 #
-# Usage: build-network-firewall.sh [network]   (default panelalpha-build)
+# Usage: build-network-firewall.sh [--create] [network]   (default panelalpha-build)
 # Idempotent. Run by the engine before every host build -- a reboot or CSF
-# restart drops these rules -- and from csfpost.sh.
+# restart drops these rules -- and from csfpost.sh. --create makes the network
+# first; the installers run that right after restarting Docker, because on a
+# CSF host `docker network create` fails once CSF has flushed Docker's chains
+# ("iptables ... -A DOCKER-FORWARD ...: No chain/target/match by that name").
 
+CREATE=0
+if [ "${1:-}" = "--create" ]; then CREATE=1; shift; fi
 NET="${1:-panelalpha-build}"
+
+if [ "$CREATE" = 1 ] && ! docker network inspect "$NET" >/dev/null 2>&1; then
+    docker network create --driver bridge \
+        --opt com.docker.network.bridge.name=br-pa-build \
+        --label com.panelalpha.role=build "$NET" >/dev/null || exit 1
+fi
 CHAIN=PA-BUILD-EGRESS
 REFUSED="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4"
 

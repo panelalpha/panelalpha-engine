@@ -110,6 +110,15 @@ class BuildNetworkTest extends TestCase
         $this->assertStringContainsString('for parent in DOCKER-USER FORWARD', $script);
         // Egress still works after CSF has removed Docker's own NAT.
         $this->assertStringContainsString('-j MASQUERADE', $script);
+        // The installers make the network while Docker's chains are fresh.
+        $this->assertStringContainsString('--create', $script);
+        foreach (['installer.sh', 'int-updater.sh'] as $installer) {
+            $this->assertStringContainsString(
+                'build-network-firewall.sh --create panelalpha-build',
+                (string) file_get_contents(dirname($path) . '/' . $installer),
+                $installer
+            );
+        }
 
         $csf = (string) file_get_contents(dirname($path) . '/csf.sh');
         $this->assertStringContainsString('panelalpha-build-network', $csf);

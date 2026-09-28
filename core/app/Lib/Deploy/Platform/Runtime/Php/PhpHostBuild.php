@@ -23,40 +23,39 @@ final class PhpHostBuild
 
 
     /**
-     * `--no-scripts` always; `--no-plugins` unless the lock pins only plugins
-     * the engine has decided are installers (see {@see INSTALLER_PLUGINS}).
+     * `--no-scripts` always. `--no-plugins` is the fail-safe default, dropped
+     * only once the build resolves from the engine's runtime manifest, whose
+     * `allow-plugins` names {@see INSTALLER_PLUGINS} and refuses the rest
+     * ({@see allowPlugins()}).
      *
      * Both execute arbitrary PHP out of the customer's repository, and this
-     * runs on the host daemon. The manifest's own `post-autoload-dump` step
-     * runs afterwards with plugins allowed, by which point the tree is
-     * resolved — a plugin like Magento's dies on a missing vendor_path.php
-     * before that.
-     *
-     * The exception exists because for a class of frameworks the plugin *is*
-     * the installer: `composer/installers` reads `installer-paths` and moves
-     * each package into the directory it names, so nothing but `vendor/` exists
-     * until it has run. With plugins disabled a Drupal install reported 46
-     * packages installed, produced no web root, and the deploy ended on "there
-     * is no index.php anywhere in ~/project".
+     * runs on the host daemon. The exception exists because for a class of
+     * frameworks the plugin *is* the installer: `composer/installers` reads
+     * `installer-paths` and moves each package into the directory it names,
+     * so nothing but `vendor/` exists until it has run. With plugins disabled
+     * a Drupal install reported 46 packages installed, produced no web root,
+     * and the deploy ended on "there is no index.php anywhere in ~/project".
      */
     public const SAFE_INSTALL_FLAGS = '--no-dev --no-interaction --no-scripts --no-plugins';
 
     /**
-     * Composer plugins that scaffold a project instead of building one, and may
-     * run during the install when the project's own lock pins them.
+     * Composer plugins that scaffold a project instead of building one, and
+     * the only ones the host install lets Composer run.
      *
-     * A plugin runs only if `composer.lock` lists it under `packages` with
-     * `"type": "composer-plugin"`, so a project cannot acquire one without
-     * committing it — which is why this list is checked against the lock rather
-     * than trusted from a manifest.
+     * The install only: the manifest's own `post-autoload-dump` step runs
+     * afterwards against the project's composer.json, so it loads whatever
+     * plugins the project's allow-plugins trusts, as it always has -- by which
+     * point the tree is resolved (a plugin like Magento's dies on a missing
+     * vendor_path.php before that).
      *
      * composer/installers, drupal/core-composer-scaffold,
-     * drupal/core-recipe-unpack, drupal/core-project-message and
-     * symfony/runtime all write files a project loads instead of running a
-     * build. symfony/runtime is here mainly because `drupal/recommended-project`
-     * pins all five, and the all-or-nothing rule below refuses a partial set. A
-     * plugin that runs an application's build, Magento's for instance, belongs
-     * to the manifest's `post-autoload-dump` step instead.
+     * drupal/core-recipe-unpack and drupal/core-project-message write files a
+     * project loads instead of running a build. symfony/runtime writes
+     * `vendor/autoload_runtime.php`, which every Symfony 5.3+ front controller
+     * requires on its first line. A plugin that runs an application's build,
+     * Magento's for instance, belongs to the manifest's own steps instead.
+     *
+     * Matched by package name, like everything in `allow-plugins`.
      *
      * @var list<string>
      */
@@ -69,74 +68,37 @@ final class PhpHostBuild
     ];
 
     /**
-     * The plugin packages a lock pins, or [] when it has no lock to read.
+     * The `config.allow-plugins` the runtime manifest carries: each installer
+     * allowed by name, then `"*": false` for everything else.
      *
-     * Read from `packages` only, never `packages-dev`: `--no-dev` means a
-     * dev-time plugin is not installed, so allowing one would be permission to
-     * run code the install then skips.
+     * Composer takes the first rule that matches, so the catch-all is last.
+     * `false` rather than absent: a plugin allow-plugins does not mention
+     * throws PluginBlockedException under --no-interaction, while an explicit
+     * false skips it silently. The project's own allow-plugins is replaced,
+     * not merged, so `"*": true` there cannot re-enable anything.
      *
-     * @return list<string> lowercased package names of type composer-plugin
+     * @return array<string, bool>
      */
-    public static function lockedPlugins(?string $composerLock): array
+    public static function allowPlugins(): array
     {
-        $decoded = json_decode((string) $composerLock, true);
-        if (!is_array($decoded) || !isset($decoded['packages']) || !is_array($decoded['packages'])) {
-            return [];
-        }
+        $rules = array_fill_keys(self::INSTALLER_PLUGINS, true);
+        $rules['*'] = false;
 
-        $plugins = [];
-        foreach ($decoded['packages'] as $package) {
-            if (!is_array($package)) {
-                continue;
-            }
-            if (($package['type'] ?? null) !== 'composer-plugin') {
-                continue;
-            }
-            $name = $package['name'] ?? null;
-            if (is_string($name) && $name !== '') {
-                $plugins[] = strtolower($name);
-            }
-        }
-
-        return $plugins;
-    }
-
-    /**
-     * Whether the install may run plugins: the lock pins at least one, and
-     * every one it pins is an installer, not an application's build.
-     *
-     * All-or-nothing: Composer cannot allow one plugin and refuse another, so a
-     * project pinning both `composer/installers` and a build plugin cannot be
-     * given the first alone. Refusing is the safe direction, and the failure
-     * names the plugin.
-     */
-    public static function mayRunPlugins(?string $composerLock): bool
-    {
-        $locked = self::lockedPlugins($composerLock);
-        if ($locked === []) {
-            return false;
-        }
-
-        foreach ($locked as $plugin) {
-            if (!in_array($plugin, self::INSTALLER_PLUGINS, true)) {
-                return false;
-            }
-        }
-
-        return true;
+        return $rules;
     }
 
     /**
      * The dependency install command, with `--no-plugins` dropped when the
-     * lock's plugins are all installers. {@see mayRunPlugins()}
+     * build resolves from the runtime manifest and so under
+     * {@see allowPlugins()}.
      *
      * A declared install passes through untouched except that one flag: a
      * manifest that spelled its own `composer install` still gets it, and only
      * the `--no-plugins` it carries is reconsidered.
      */
-    public static function installCommand(string $install, ?string $composerLock): string
+    public static function installCommand(string $install, bool $pluginsRestricted): string
     {
-        if ($install === '' || !self::mayRunPlugins($composerLock)) {
+        if ($install === '' || !$pluginsRestricted) {
             return $install;
         }
 
@@ -159,10 +121,11 @@ final class PhpHostBuild
     public const DEFAULT_INSTALL = 'composer install ' . self::SAFE_INSTALL_FLAGS . ' --optimize-autoloader';
 
     /**
-     * The copy of the manifest Composer resolves from: when require-dev is
-     * being dropped, or when a locked project's platform pin would otherwise
-     * land in composer.json. Beside composer.json and inside the mount, so it
-     * is the same file to the build container as to the account.
+     * The copy of the manifest Composer resolves from: the engine's
+     * allow-plugins, require-dev dropped when there is no lock, and the
+     * platform pin, none of which belongs in the customer's composer.json.
+     * Beside composer.json and inside the mount, so it is the same file to the
+     * build container as to the account.
      *
      * @see runtimeManifest()
      */
@@ -223,41 +186,33 @@ final class PhpHostBuild
     }
 
     /**
-     * The manifest Composer should resolve from, and null when the project's
-     * own composer.json will do.
+     * The manifest Composer should resolve from, or null when composer.json
+     * is not a JSON object, in which case the build keeps `--no-plugins`.
      *
-     * Composer still resolves require-dev under `--no-dev` — `--no-dev` says
-     * which packages are *installed*, not which the resolver may reject the
-     * graph over — and since Composer 2.7 versions with a security advisory are
-     * removed from the pool by default. So a dev-only pin can block a
-     * production install (Islandora's require-dev pins phpunit 6). Composer has
-     * no per-scope advisory policy, so the resolver is handed a manifest with
-     * `require-dev` removed and every runtime advisory left in place.
+     * Always the project's manifest with `config.allow-plugins` replaced by
+     * {@see allowPlugins()}: Composer 2.2+ enforces it per plugin, so the
+     * installers run and every other plugin is installed but never loaded,
+     * whatever the project's own allow-plugins says and with or without a
+     * lock. The old gate was keyed on composer.lock and all-or-nothing, so a
+     * lockless Symfony project (bolt/project, pimcore/skeleton, thelia) was
+     * built `--no-plugins` and never got `vendor/autoload_runtime.php`.
      *
-     * Null whenever the file is unreadable or has no require-dev to drop.
+     * Without a lock, `require-dev` is dropped too: Composer still resolves it
+     * under `--no-dev`, and since Composer 2.7 versions with a security
+     * advisory are removed from the pool, so a dev-only pin can block a
+     * production install (Islandora's require-dev pins phpunit 6).
      *
-     * A project shipping a composer.lock is different: `install` reads the
-     * lock and resolves nothing, so the advisory rule this manifest dodges
-     * cannot fire there, and ordinarily nothing needs to move. Composer finds
-     * a lock by the name of the manifest handed to it, though, so once
-     * something *does* need writing — {@see platformPin()} — pointing
-     * `COMPOSER` at a runtime manifest with no lock beside it would make
-     * Composer look for `.pa-runtime-composer.lock`, find none, and resolve
-     * the whole graph against the remote repositories instead of installing
-     * the committed one — reaching api.github.com and dying on the
-     * unauthenticated 60-requests-per-hour budget every deploy on the host's
-     * egress IP shares. So a lock with nothing to pin still returns null and
-     * installs straight from composer.json/.lock; a lock with a pin returns
-     * composer.json byte for byte, on the understanding that the caller
-     * copies composer.lock beside it under the matching engine name before
-     * Composer ever sees `COMPOSER` pointed elsewhere.
+     * With a lock, require-dev stays, so the lock's content-hash still
+     * matches (allow-plugins is not part of it). Composer finds a lock by the
+     * name of the manifest handed to it, so the caller copies composer.lock
+     * beside this file as {@see RUNTIME_LOCK_FILE} before Composer sees
+     * `COMPOSER`; otherwise it would resolve the whole graph remotely and meet
+     * the unauthenticated api.github.com budget every deploy on the host
+     * shares. {@see platformPin()} then writes into this file, never into
+     * composer.json.
      */
-    public static function runtimeManifest(string $composerJson, ?string $composerLock = null, ?string $phpVersion = null): ?string
+    public static function runtimeManifest(string $composerJson, ?string $composerLock = null): ?string
     {
-        if ($composerLock !== null && trim($composerLock) !== '') {
-            return self::platformPin($phpVersion) !== '' ? $composerJson : null;
-        }
-
         // Decoded as objects, not associative arrays, so what is written
         // back is the same *shape* Composer validated. As arrays an empty
         // `require` re-encodes as `[]`, and Composer's schema requires an
@@ -268,23 +223,50 @@ final class PhpHostBuild
         // Objects round-trip `{}` as `{}` and leave real lists (`classmap`,
         // `authors`) as lists, which JSON_FORCE_OBJECT would not.
         $decoded = json_decode($composerJson);
-        if (!is_object($decoded) || !isset($decoded->{'require-dev'})) {
-            return null;
-        }
-        if (!isset($decoded->require) || !is_object($decoded->require)) {
-            // Composer's own validator rejects a root with no `require`,
-            // and a manifest without one would resolve an empty graph.
+        if (!is_object($decoded)) {
             return null;
         }
 
-        unset($decoded->{'require-dev'});
-
-        $encoded = json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        if ($encoded === false || $encoded === $composerJson) {
-            return null;
+        $locked = $composerLock !== null && trim($composerLock) !== '';
+        // A root with no `require` object keeps its require-dev: dropping it
+        // would leave an empty graph.
+        if (!$locked && isset($decoded->{'require-dev'}) && isset($decoded->require) && is_object($decoded->require)) {
+            unset($decoded->{'require-dev'});
         }
 
-        return $encoded;
+        if (!isset($decoded->config) || !is_object($decoded->config)) {
+            $decoded->config = new \stdClass();
+        }
+        $decoded->config->{'allow-plugins'} = (object) self::allowPlugins();
+
+        $encoded = json_encode(
+            $decoded,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION
+        );
+
+        return $encoded === false ? null : $encoded;
+    }
+
+    /**
+     * Whether a lockless build should leave its lock as composer.lock too.
+     *
+     * Before #168 a lockless project with nothing to drop resolved from
+     * composer.json itself, so Composer wrote composer.lock, and container
+     * steps rely on it: contao's `composer install` installs from the lock the
+     * host wrote instead of resolving again. Now that such a project resolves
+     * from the runtime manifest, its lock lands under
+     * {@see RUNTIME_LOCK_FILE}; this says when to copy it back. Not when
+     * require-dev was dropped: that lock never was composer.lock.
+     */
+    public static function mirrorsRuntimeLock(string $composerJson, ?string $composerLock): bool
+    {
+        if ($composerLock !== null && trim($composerLock) !== '') {
+            return false;
+        }
+        $decoded = json_decode($composerJson);
+
+        return is_object($decoded)
+            && !(isset($decoded->{'require-dev'}) && isset($decoded->require) && is_object($decoded->require));
     }
 
     /**
@@ -390,8 +372,11 @@ final class PhpHostBuild
      * @param bool $lockPhpContradicted the lock pins a PHP its own packages
      *        cannot run on, so the deploy must not fail on that requirement.
      *        Reported then ignored; see {@see self::lockContradictionNote()}.
-     * @param ?string $composerLock the project's lock, read only to decide
-     *        whether the plugins it pins may run; see {@see mayRunPlugins()}.
+     * @param bool $pluginsRestricted Composer reads the runtime manifest, so
+     *        its allow-plugins holds and `--no-plugins` may go; see
+     *        {@see runtimeManifest()}. False keeps the flag.
+     * @param bool $mirrorLock copy the lock the install wrote to composer.lock
+     *        when there is none; see {@see mirrorsRuntimeLock()}.
      * @param ?string $composerJson the project's manifest, read only for the
      *        classmap directories to create; see {@see classmapDirsStep()}.
      */
@@ -401,7 +386,8 @@ final class PhpHostBuild
         bool $hasComposer = false,
         ?string $phpVersion = null,
         bool $lockPhpContradicted = false,
-        ?string $composerLock = null,
+        bool $pluginsRestricted = false,
+        bool $mirrorLock = false,
         ?string $composerJson = null
     ): string {
         $install = trim($install);
@@ -410,12 +396,16 @@ final class PhpHostBuild
         }
         // Dropped here, not left out of DEFAULT_INSTALL: a manifest that
         // declared its own `composer install` carries the flag too.
-        // {@see mayRunPlugins()}
-        $install = self::installCommand($install, $composerLock);
+        $install = self::installCommand($install, $pluginsRestricted);
 
         $steps = [];
         if ($install !== '') {
             $steps[] = 'echo "[panelalpha] build: dependencies" >&2';
+            if ($pluginsRestricted) {
+                // So a project missing a plugin's output can see why.
+                $steps[] = 'echo "[panelalpha] composer plugins allowed: '
+                    . implode(', ', self::INSTALLER_PLUGINS) . '; any other plugin is installed but not run" >&2';
+            }
             // Ahead of the install: the pin is a `composer config` write that
             // must happen before Composer reads the platform. {@see platformPin()}
             if (($pin = self::platformPin($phpVersion)) !== '') {
@@ -429,13 +419,46 @@ final class PhpHostBuild
                 $install .= " --ignore-platform-req=php";
             }
             $steps[] = $install;
+            if ($mirrorLock) {
+                $steps[] = '[ -e composer.lock ] || cp ' . self::RUNTIME_LOCK_FILE . ' composer.lock';
+            }
         }
         if (trim($build) !== '') {
             $steps[] = 'echo "[panelalpha] build: assets" >&2';
+            if ($pluginsRestricted) {
+                $steps[] = self::restoreProjectAllowPlugins();
+            }
             $steps[] = trim($build);
         }
 
         return implode("\n", $steps);
+    }
+
+    /**
+     * Put the project's own allow-plugins back into the runtime manifest for
+     * the asset half, which is how it read before #168.
+     *
+     * The allowlist is for the install. php.yaml's `run-script
+     * post-autoload-dump` loads whatever the project trusts, as it always
+     * has: bolt/project boots only because drupol/composer-packages generates
+     * its classes there. Restricting that step too is a separate decision.
+     * Rewritten in place rather than unsetting COMPOSER, because the lock the
+     * install wrote is filed under the runtime manifest's name and
+     * package-versions-deprecated refuses to run without one.
+     */
+    public static function restoreProjectAllowPlugins(): string
+    {
+        $code = '$m = getenv("' . self::MANIFEST_ENV . '");'
+            . ' $p = json_decode((string) file_get_contents("composer.json"));'
+            . ' $r = json_decode((string) file_get_contents($m));'
+            . ' if (!is_object($r)) { exit(0); }'
+            . ' if (!isset($r->config) || !is_object($r->config)) { $r->config = new stdClass(); }'
+            . ' if (is_object($p) && isset($p->config) && is_object($p->config) && property_exists($p->config, "allow-plugins")) {'
+            . ' $r->config->{"allow-plugins"} = $p->config->{"allow-plugins"}; }'
+            . ' else { unset($r->config->{"allow-plugins"}); }'
+            . ' file_put_contents($m, json_encode($r, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION));';
+
+        return 'php -r ' . escapeshellarg($code);
     }
 
     /**

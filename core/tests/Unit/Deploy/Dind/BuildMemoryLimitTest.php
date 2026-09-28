@@ -5,6 +5,7 @@ namespace Tests\Unit\Deploy\Dind;
 use App\Lib\Deploy\Compose\ServiceLimits;
 use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Dind\DindEngine;
+use App\Lib\Deploy\Engine\BuildMemory;
 use App\Lib\Deploy\Engine\EngineAccount;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -236,6 +237,29 @@ class BuildMemoryLimitTest extends TestCase
     }
 
     /**
+     * Cargo's default is one job per CPU, and each job of a C++ `-sys` crate is
+     * a compiler of its own. liwan's libduckdb-sys: 8 jobs, 5202m, cc1plus
+     * OOM-killed at ~1.2 GB each (engine#104 retest).
+     */
+    public function test_cargo_jobs_follow_the_configured_limit(): void
+    {
+        $this->assertSame('1', $this->envFrom($this->argv('2g'))['CARGO_BUILD_JOBS'] ?? null);
+        $jobs = (int) ($this->envFrom($this->argv('5202m'))['CARGO_BUILD_JOBS'] ?? 0);
+
+        $this->assertGreaterThanOrEqual(1, $jobs);
+        $this->assertLessThanOrEqual(3, $jobs);
+    }
+
+    public function test_cargo_jobs_never_exceed_the_cpus_or_drop_below_one(): void
+    {
+        $this->assertSame(3, ServiceLimits::cargoJobsFor('5202m', 8));
+        $this->assertSame(2, ServiceLimits::cargoJobsFor('8g', 2));
+        $this->assertSame(5, ServiceLimits::cargoJobsFor('8g'));
+        $this->assertSame(1, ServiceLimits::cargoJobsFor('1g', 8));
+        $this->assertSame(1, ServiceLimits::cargoJobsFor('lots', 8));
+    }
+
+    /**
      * A JS build inside a *generated Dockerfile* runs in the account's daemon,
      * not in the engine's 2g build container, so `deploy.build_memory` is the
      * wrong ceiling for it -- the account's own limit is what can kill it.
@@ -288,5 +312,74 @@ class BuildMemoryLimitTest extends TestCase
             'shell injection' => ['2g; rm -rf /'],
             'missing number' => ['g'],
         ];
+    }
+    /** engine#184: what the deploy log reports is what `--memory` gets. */
+    public function test_the_reported_limit_matches_the_container_flag(): void
+    {
+        foreach (['5202m' => 5202, '6g' => 6144, '4096' => 4096, '1g' => 2048, 'lots' => 2048] as $configured => $mb) {
+            $builder = new DindHostBuilder((string) $configured);
+            $this->assertSame($mb, $builder->memoryLimitMb(), $configured);
+            $this->assertSame($mb, ServiceLimits::toMegabytes($this->memoryFlag($this->argv((string) $configured))), $configured);
+        }
+    }
+
+    /**
+     * engine#184, option B: the project's memory limit raises the build and
+     * never lowers it, up to half the server; `DEPLOY_BUILD_MEMORY` wins.
+     */
+    #[DataProvider('projectLimits')]
+    public function test_a_project_limit_only_ever_raises_the_build(
+        string $configured,
+        string $meminfo,
+        ?int $projectMb,
+        string $limit,
+        string $source
+    ): void {
+        $memory = DindEngine::buildMemory($configured, $meminfo, $projectMb);
+
+        $this->assertSame([$limit, $source], [$memory->limit, $memory->source]);
+        $this->assertSame($limit, DindEngine::resolveBuildMemory($configured, $meminfo, $projectMb));
+        $this->assertSame(
+            ServiceLimits::toMegabytes($limit) < 2048 ? '2g' : ServiceLimits::toMegabytes($limit) . 'm',
+            $this->memoryFlag(DindEngine::builderFor($configured, $meminfo, $projectMb)->nodeBuildArgv(
+                new EngineAccount('demo', '/home/demo', '1001:1001'),
+                'node:24-bookworm-slim',
+                'npm ci',
+                'npm run build'
+            ))
+        );
+    }
+
+    public static function projectLimits(): array
+    {
+        $host16 = "MemTotal:       15983292 kB\n"; // share 5202, half 7804
+        $host6 = "MemTotal:        6291456 kB\n";  // share 2048 (floor), half 3072
+        $host4 = "MemTotal:        4194304 kB\n";  // share 2048, half 2048
+
+        return [
+            'no plan' => ['', $host16, null, '5202m', BuildMemory::SERVER],
+            'unlimited plan' => ['', $host16, 0, '5202m', BuildMemory::SERVER],
+            'plan below the share is not a cut' => ['', $host16, 2000, '5202m', BuildMemory::SERVER],
+            'plan equal to the share' => ['', $host16, 5202, '5202m', BuildMemory::SERVER],
+            'plan above the share raises it' => ['', $host16, 7000, '7000m', BuildMemory::PROJECT],
+            'plan above half the server is capped' => ['', $host16, 12000, '7804m', BuildMemory::PROJECT_CAPPED],
+            // Shopware's administration build needs 2800 MB.
+            '6 GB host, a 2800 MB plan builds Shopware admin' => ['', $host6, 2800, '2800m', BuildMemory::PROJECT],
+            '6 GB host, capped at 3072' => ['', $host6, 8000, '3072m', BuildMemory::PROJECT_CAPPED],
+            '4 GB host has no room above the floor' => ['', $host4, 8000, '2048m', BuildMemory::SERVER],
+            'unreadable host never sizes by plan' => ['', '', 8000, '2048m', BuildMemory::SERVER],
+            'operator setting wins over a larger plan' => ['3g', $host16, 7000, '3g', BuildMemory::SETTING],
+            'operator setting wins over a smaller plan' => ['12g', $host16, 1000, '12g', BuildMemory::SETTING],
+        ];
+    }
+
+    public function test_the_log_can_name_both_figures(): void
+    {
+        $memory = DindEngine::buildMemory('', "MemTotal:       15983292 kB\n", 12000);
+
+        $this->assertSame(5202, $memory->serverShareMb);
+        $this->assertSame(12000, $memory->projectLimitMb);
+        $this->assertSame(7804, ServiceLimits::projectBuildMemoryCapMb("MemTotal:       15983292 kB\n"));
+        $this->assertNull(ServiceLimits::projectBuildMemoryCapMb(''));
     }
 }

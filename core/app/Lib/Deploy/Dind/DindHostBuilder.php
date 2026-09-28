@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\Dind;
 use App\Lib\Deploy\Compose\ServiceLimits;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
+use App\Lib\Deploy\Engine\BuildMemory;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Engine\HostBuilder;
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
@@ -76,30 +77,46 @@ final class DindHostBuilder implements HostBuilder
     /** Where it is mounted, which is the path Debian images would use. */
     private const CONTAINER_CA_BUNDLE = '/etc/ssl/certs/ca-certificates.crt';
 
+    private BuildMemory $memoryOrigin;
+
     /**
      * A build is a host resource, so the ceiling is the operator's, not a
-     * hosting plan's — and not the account's `memory_limit` either: a 512 MB
-     * plan would then get a 512 MB build, and Chamilo 2.x's Encore build needs
-     * ~4.3 GB of heap.
+     * hosting plan's. The account's `memory_limit` may raise it but never
+     * lower it: a 512 MB plan would otherwise get a 512 MB build, and
+     * Chamilo 2.x's Encore build needs ~4.3 GB of heap.
      *
      * Passed in, not read from config here, because this class has no
      * Laravel dependencies. The one caller with a container reads
-     * `deploy.build_memory`, or derives it from the host, and hands the value
-     * over; see {@see \App\Lib\Deploy\Dind\DindEngine}.
+     * `deploy.build_memory`, or derives it from the host and the project, and
+     * hands the value over; see {@see \App\Lib\Deploy\Dind\DindEngine}.
      *
      * A value Docker would reject, or one that parses below the floor, falls
      * back to the floor instead of failing every deploy on the host.
      */
-    public function __construct(?string $memoryLimit = null, ?string $caBundle = null, ?string $network = null)
-    {
+    public function __construct(
+        ?string $memoryLimit = null,
+        ?string $caBundle = null,
+        ?string $network = null,
+        ?BuildMemory $memoryOrigin = null
+    ) {
         $this->memoryLimit = self::saneMemoryLimit($memoryLimit);
         $this->caBundle = $caBundle === null ? self::probeCaBundle() : trim($caBundle);
         $this->network = $network === null ? null : BuildNetwork::resolve($network);
+        $this->memoryOrigin = $memoryOrigin ?? new BuildMemory((string) $memoryLimit, BuildMemory::SETTING);
     }
 
     public function network(): ?string
     {
         return $this->network;
+    }
+
+    /** The same builder on Docker's default bridge, for a host that has no build network. */
+    public function withoutNetwork(): self
+    {
+        $clone = clone $this;
+        $clone->network = null;
+
+        return $clone;
     }
 
     /**
@@ -142,20 +159,25 @@ final class DindHostBuilder implements HostBuilder
         string $build,
         array $env = [],
         bool $isolateNodeModules = true,
-        bool $isNode = true
+        bool $isNode = true,
+        string $appRoot = ''
     ): array {
         $projectDir = $account->projectDir();
-        $script = $this->assertBuildable($projectDir, $image, $install, $build, $isNode);
+        // The whole checkout stays the mount and the subtree is only the
+        // working directory, so a symlinked app_root cannot point the bind
+        // mount anywhere on the host.
+        $workdir = PhpHostBuild::workingDir($appRoot);
+        $script = $this->assertBuildable($projectDir, $image, $install, $build, $isNode, $workdir);
         $cache = HostNodeBuild::cacheDirFor($account->username);
 
         return [
             ...$this->sandboxPrefix($account->identity),
             '-v', $projectDir . ':/app',
             '-v', $cache . ':/var/cache/pa-js',
-            '-w', '/app',
+            '-w', $workdir,
             ...$this->systemTrustStore(),
             ...$this->flatEnv($this->toolchainEnv()),
-            ...($isolateNodeModules ? ['-v', $cache . '/node_modules:/app/node_modules'] : []),
+            ...($isolateNodeModules ? ['-v', $cache . '/node_modules:' . $workdir . '/node_modules'] : []),
             ...$this->callerEnv($env),
             $image,
             'sh',
@@ -174,7 +196,8 @@ final class DindHostBuilder implements HostBuilder
         string $image,
         string $install,
         string $build,
-        bool $isNode = true
+        bool $isNode = true,
+        string $workdir = '/app'
     ): string {
         if (!HostNodeBuild::isSafeProjectDir($projectDir)) {
             throw new \InvalidArgumentException('Refusing host Node build outside ~/project');
@@ -184,7 +207,7 @@ final class DindHostBuilder implements HostBuilder
         }
 
         $script = $isNode
-            ? HostNodeBuild::innerScript($install, $build)
+            ? HostNodeBuild::innerScript($install, $build, $workdir)
             : HostNodeBuild::plainScript($install, $build);
         if ($script === '') {
             throw new \InvalidArgumentException('Host Node build has no install/build command');
@@ -228,6 +251,9 @@ final class DindHostBuilder implements HostBuilder
             'GOMODCACHE' => '/var/cache/pa-js/go/mod',
             'GOCACHE' => '/var/cache/pa-js/go/build',
             'CARGO_HOME' => '/var/cache/pa-js/cargo',
+            // Cargo defaults to one job per CPU whatever the cgroup allows, and
+            // cc-rs and `make` inside build scripts take the same count.
+            'CARGO_BUILD_JOBS' => (string) ServiceLimits::cargoJobsFor($this->memoryLimit(), self::hostCpus()),
             // Maven 3.9+ reads MAVEN_ARGS; older versions ignore it and keep
             // their default local repository, which is a slower build and not
             // a broken one.
@@ -277,6 +303,15 @@ final class DindHostBuilder implements HostBuilder
             '-v', $this->caBundle . ':' . self::CONTAINER_CA_BUNDLE . ':ro',
             '-e', 'SSL_CERT_FILE=' . self::CONTAINER_CA_BUNDLE,
         ];
+    }
+
+    /** The host's CPU count; /proc/cpuinfo is not namespaced. Null when unreadable. */
+    private static function hostCpus(): ?int
+    {
+        $raw = is_readable('/proc/cpuinfo') ? (string) @file_get_contents('/proc/cpuinfo') : '';
+        $cpus = preg_match_all('/^processor\s*:/m', $raw);
+
+        return $cpus > 0 ? $cpus : null;
     }
 
     /** The first candidate this host actually has, or '' if it has none. */
@@ -409,7 +444,8 @@ final class DindHostBuilder implements HostBuilder
     public function composerInstallArgv(
         EngineAccount $account,
         ?string $phpVersion = null,
-        ?string $manifest = null
+        ?string $manifest = null,
+        string $appRoot = ''
     ): array {
         $projectDir = $account->projectDir();
         if (!HostNodeBuild::isSafeProjectDir($projectDir)) {
@@ -423,7 +459,7 @@ final class DindHostBuilder implements HostBuilder
             '-v',
             $projectDir . ':/app',
             '-w',
-            '/app',
+            PhpHostBuild::workingDir($appRoot),
             ...$this->flatEnv([
                 'COMPOSER_ALLOW_SUPERUSER' => '1',
                 'COMPOSER_MAX_PARALLEL_HTTP' => '6',
@@ -510,6 +546,16 @@ final class DindHostBuilder implements HostBuilder
             // metadata address (engine#246).
             ...($this->network !== null ? ['--network', $this->network] : []),
         ];
+    }
+
+    public function memoryLimitMb(): int
+    {
+        return (int) ServiceLimits::toMegabytes($this->memoryLimit);
+    }
+
+    public function memoryOrigin(): BuildMemory
+    {
+        return $this->memoryOrigin;
     }
 
     /**

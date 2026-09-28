@@ -4,6 +4,7 @@ namespace App\System\Project\Dind;
 
 use App\Integrations\Tunnels\Cloudflare;
 use App\Lib\Deploy\DetectAppPort;
+use App\Lib\Deploy\Dind\DindEngine;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Models\User as ModelsUser;
 use App\System;
@@ -116,7 +117,7 @@ BASH;
             'uid' => $user->getUid() ?? 33,
             'gid' => $user->getGid() ?? 33,
             'cpu_limit' => (string) $user->getCpuLimit(),
-            'memory_limit' => (string) $user->getMemoryLimit(),
+            'memory_limit' => (string) DindEngine::accountMemoryMb($user->getMemoryLimit()),
             'device_read_bps' => $deviceReadBps,
             'device_write_bps' => $deviceWriteBps,
             'block_device' => $blockDevice,

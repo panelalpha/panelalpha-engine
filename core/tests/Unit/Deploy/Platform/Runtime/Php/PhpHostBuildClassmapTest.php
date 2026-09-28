@@ -32,7 +32,8 @@ class PhpHostBuildClassmapTest extends TestCase
             true,
             null,
             false,
-            null,
+            false,
+            false,
             (string) json_encode(self::ILIAS)
         );
 
@@ -87,7 +88,7 @@ class PhpHostBuildClassmapTest extends TestCase
     /** No install, nothing to dump: an asset-only script gets no step. */
     public function test_an_asset_only_script_gets_no_step(): void
     {
-        $script = PhpHostBuild::script('', 'php compile.php', false, null, false, null, (string) json_encode(self::ILIAS));
+        $script = PhpHostBuild::script('', 'php compile.php', false, null, false, false, false, (string) json_encode(self::ILIAS));
 
         $this->assertStringNotContainsString('mkdir', $script);
     }

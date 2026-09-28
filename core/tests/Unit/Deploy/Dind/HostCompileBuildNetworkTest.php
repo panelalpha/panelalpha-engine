@@ -14,8 +14,9 @@ use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 
 /**
- * engine#246: before a host build the network has to exist -- `docker run
- * --network` fails without it -- and its firewall is applied, best-effort.
+ * engine#246: before a host build the network is made if missing and its
+ * firewall applied. Neither may fail a deploy: without them the build runs as
+ * it did before the network existed, with a warning.
  */
 class HostCompileBuildNetworkTest extends TestCase
 {
@@ -49,7 +50,7 @@ class HostCompileBuildNetworkTest extends TestCase
         };
     }
 
-    private function prepare(System $system, ?string $network): void
+    private function prepare(System $system, ?string $network): HostCompile
     {
         $engine = $this->createStub(ContainerEngine::class);
         $engine->method('hostBuilder')->willReturn(new DindHostBuilder(null, '', $network));
@@ -60,8 +61,10 @@ class HostCompileBuildNetworkTest extends TestCase
         $dind->method('engineAccount')->willReturn(new EngineAccount('acme', '/home/acme', '1001:1001'));
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
 
-        $method = new ReflectionMethod(HostCompile::class, 'prepareBuildNetwork');
-        $method->invoke(new HostCompile($dind));
+        $compile = new HostCompile($dind);
+        (new ReflectionMethod(HostCompile::class, 'prepareBuildNetwork'))->invoke($compile);
+
+        return $compile;
     }
 
     private function inspect(): string
@@ -104,12 +107,17 @@ class HostCompileBuildNetworkTest extends TestCase
         $this->assertSame([$this->inspect(), $this->create(), $this->inspect(), $this->firewall()], $system->ran);
     }
 
-    public function test_a_network_that_cannot_be_created_stops_the_build_and_names_the_opt_out(): void
+    public function test_a_network_that_cannot_be_created_falls_back_to_the_default_bridge(): void
     {
+        // What a CSF host answers once CSF has flushed Docker's chains.
         $system = $this->system([$this->inspect(), $this->create(), $this->inspect()]);
+        $compile = $this->prepare($system, 'panelalpha-build');
 
-        $this->expectExceptionMessageMatches('/Could not create the host build network panelalpha-build.*DEPLOY_BUILD_NETWORK=/');
-        $this->prepare($system, 'panelalpha-build');
+        $this->assertSame([$this->inspect(), $this->create(), $this->inspect()], $system->ran);
+        $builder = (new ReflectionMethod(HostCompile::class, 'hostBuilder'))->invoke($compile);
+        $this->assertInstanceOf(DindHostBuilder::class, $builder);
+        $this->assertNull($builder->network(), 'this build goes to the default bridge rather than failing');
+        $this->assertNotContains('--network', $builder->composerInstallArgv(new EngineAccount('acme', '/home/acme', '1001:1001')));
     }
 
     public function test_a_firewall_that_cannot_be_applied_does_not_stop_the_build(): void

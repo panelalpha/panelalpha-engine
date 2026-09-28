@@ -126,6 +126,8 @@ The application gets a little less than the number you set. The project itself n
 
 Memory limits are the ones that bite. A build that runs out of memory fails with a message that looks like a code problem but is not: [Reading errors](../02-getting-started/reading-errors.md).
 
+**Some builds do not use the project's memory limit.** Frontend assets, Java, Rust and PHP dependencies are often built on the server, in a separate build container, before the application starts. When `DEPLOY_BUILD_MEMORY` in `.env-core` is left empty, the default, that container gets a third of the server's RAM, at least 2048 MB and at most 8192 MB. A project whose memory limit is larger than that gets a build container of its own limit, up to half the server's RAM. A smaller project limit never makes the build smaller. Only one such build runs at a time. Setting `DEPLOY_BUILD_MEMORY` fixes the figure for every build on the server, and project limits no longer change it. The deploy log states the figure, and where it came from, in a line starting `Host build container memory`. If a build like this runs out of memory, raise the project's limit (it helps up to half the server's RAM, and only when `DEPLOY_BUILD_MEMORY` is empty), raise `DEPLOY_BUILD_MEMORY`, or deploy on a server with more RAM.
+
 ## Cron jobs
 
 Scheduled commands that belong to the application - clearing a cache, sending a digest, running a queue worker.
@@ -157,7 +159,7 @@ Clones do not copy databases. Create the database and user on the clone, then up
 You did not rebuild. See [Environment variables](#environment-variables).
 
 **I raised the memory limit and the application still runs out.**
-You did not rebuild, or the application needs more than the limit you set. See [Limits](#limits). The application gets a little less than the number you chose.
+You did not rebuild, or the application needs more than the limit you set. See [Limits](#limits). The application gets a little less than the number you chose. If it is the *build* that runs out, check the deploy log for `Host build container memory`: it says whether the build was sized by the server, by the project's limit, or by `DEPLOY_BUILD_MEMORY`. See [Limits](#limits).
 
 ## From the server
 

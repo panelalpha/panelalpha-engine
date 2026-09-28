@@ -176,6 +176,18 @@ class HostNodeBuildTest extends TestCase
         $this->assertSame('', HostNodeBuild::bunBuildCommand(''));
     }
 
+    /** engine#159/#160: a pnpm build printed `cp: cannot stat '/app/package-lock.json'`. */
+    public function test_only_an_existing_lockfile_is_stamped_into_node_modules(): void
+    {
+        $script = HostNodeBuild::innerScript('pnpm install --frozen-lockfile', 'pnpm run build');
+
+        $this->assertStringNotContainsString('cp /app/package-lock.json', $script);
+        $this->assertStringContainsString(
+            'if [ -f "/app/$f" ]; then cp "/app/$f" /app/node_modules/.pa-lock; break; fi',
+            $script
+        );
+    }
+
     public function test_package_manager_setup_runs_even_on_a_node_modules_cache_hit(): void
     {
         $install = 'corepack enable && corepack prepare pnpm@10 --activate && pnpm install --frozen-lockfile';
