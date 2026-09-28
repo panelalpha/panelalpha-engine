@@ -80,9 +80,9 @@ class HostMemoryTest extends TestCase
 
     public function test_a_project_without_a_limit_gets_the_default(): void
     {
-        $this->assertSame(2048, ProjectMemory::defaultMb());
-        $this->assertSame(2048, ProjectMemory::resolve(null));
-        $this->assertSame(2048, ProjectMemory::resolve(0));
+        $this->assertSame(4096, ProjectMemory::defaultMb());
+        $this->assertSame(4096, ProjectMemory::resolve(null));
+        $this->assertSame(4096, ProjectMemory::resolve(0));
         $this->assertSame(512, ProjectMemory::resolve(512));
     }
 
@@ -92,8 +92,8 @@ class HostMemoryTest extends TestCase
         $mb = ProjectMemory::resolve(null);
         $host15g = "MemTotal:       15983292 kB\n";
 
-        $this->assertSame('1792m', ServiceLimits::memoryFor('app', [], $mb));
-        $this->assertSame(1433, ServiceLimits::nodeHeapMbForAccount($mb));
+        $this->assertSame('3584m', ServiceLimits::memoryFor('app', [], $mb));
+        $this->assertSame(2867, ServiceLimits::nodeHeapMbForAccount($mb));
         $this->assertSame(BuildMemory::SERVER, DindEngine::buildMemory('', $host15g, $mb)->source);
     }
 

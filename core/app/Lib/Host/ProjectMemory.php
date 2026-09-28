@@ -15,9 +15,10 @@ final class ProjectMemory
 {
     public const FIELD = 'memory_limit';
 
-    public const DEFAULT_MB = 2048;
+    // Seerr, Casdoor and Stump build in 4096 and are OOM-killed in 2048.
+    public const DEFAULT_MB = 4096;
 
-    /** `DEPLOY_PROJECT_MEMORY_DEFAULT`, 2048 unless the operator says otherwise. */
+    /** `DEPLOY_PROJECT_MEMORY_DEFAULT`, 4096 unless the operator says otherwise. */
     public static function defaultMb(): int
     {
         // Config is not loaded outside the app, e.g. in plain unit tests.

@@ -46,7 +46,7 @@ return [
      * The memory_limit a project is created with when none is given, in MB.
      * Creation fails when the server does not have it free (#294).
      */
-    'project_memory_default' => env('DEPLOY_PROJECT_MEMORY_DEFAULT', 2048),
+    'project_memory_default' => env('DEPLOY_PROJECT_MEMORY_DEFAULT', 4096),
 
     /*
      * Seconds a streamed deploy step may go without printing anything before

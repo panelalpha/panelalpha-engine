@@ -25,7 +25,7 @@ use OpenApi\Attributes as OA;
                 new OA\Property(property: 'projects_pool_source', type: 'string', enum: ['measured', 'configured']),
                 new OA\Property(property: 'free_for_projects_mb', type: 'integer', example: 2172, description: 'What a new project may take right now; creation fails above this'),
                 new OA\Property(property: 'max_project_mb', type: 'integer', example: 2172, description: 'The largest memory_limit any project may have'),
-                new OA\Property(property: 'default_project_mb', type: 'integer', example: 2048, description: 'The memory_limit a project gets when created without one'),
+                new OA\Property(property: 'default_project_mb', type: 'integer', example: 4096, description: 'The memory_limit a project gets when created without one'),
             ],
             type: 'object',
         ),
