@@ -254,12 +254,6 @@ Set DATABASE_URL to <value> on this project and rebuild.
 
 The rebuild matters. Most applications only read their settings when they start.
 
-**Update the engine**
-
-```text
-Update this PanelAlpha Engine to the newest version.
-```
-
 **Check the VPS itself**
 
 ```text
