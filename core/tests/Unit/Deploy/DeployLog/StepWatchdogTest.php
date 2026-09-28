@@ -86,6 +86,96 @@ class StepWatchdogTest extends TestCase
         );
     }
 
+    /**
+     * Warpgate (#153): its last crate compiled silently past the limit and the
+     * build was killed a step from the end. Silent but busy is not stalled.
+     */
+    public function test_a_silent_step_that_is_still_busy_is_not_killed(): void
+    {
+        $asked = 0;
+        $output = '';
+        $process = (new System())->runProcessWithCallbacks(
+            ['sh', '-c', 'echo "Compiling warpgate v0.29.0"; sleep 3; echo Finished'],
+            [],
+            60,
+            null,
+            function (string $type, string $data) use (&$output): void {
+                $output .= $data;
+            },
+            new StepWatchdog(1, 'cargo build', function () use (&$asked): bool {
+                $asked++;
+
+                return true;
+            })
+        );
+
+        $this->assertSame(0, $process->getExitCode());
+        $this->assertStringContainsString('Finished', $output);
+        $this->assertGreaterThanOrEqual(1, $asked);
+    }
+
+    public function test_a_step_that_stops_working_is_killed_and_the_whole_silence_reported(): void
+    {
+        $answers = [true, true];
+        $started = microtime(true);
+        try {
+            (new System())->runProcessWithCallbacks(
+                ['sh', '-c', 'echo "Downloading crates ..."; sleep 30'],
+                [],
+                60,
+                null,
+                null,
+                new StepWatchdog(1, 'cargo build', function () use (&$answers): bool {
+                    return array_shift($answers) ?? false;
+                })
+            );
+            $this->fail('A step that stopped working was not stopped');
+        } catch (BuildStalledException $e) {
+            // Two busy windows and the one that failed: the silence since the
+            // last line, not since the last window.
+            $this->assertMatchesRegularExpression('/printed nothing for [34]s/', $e->getMessage());
+            $this->assertSame('build-stalled', DeployFailureExplainer::match($e->getMessage())['rule'] ?? null);
+        }
+        $this->assertLessThan(12, microtime(true) - $started);
+    }
+
+    public function test_a_probe_that_cannot_answer_leaves_the_limit_as_it_was(): void
+    {
+        $this->expectException(BuildStalledException::class);
+        (new System())->runProcessWithCallbacks(
+            ['sh', '-c', 'sleep 30'],
+            [],
+            60,
+            null,
+            null,
+            new StepWatchdog(1, 'sleep', function (): bool {
+                throw new \RuntimeException('docker stats: no such service');
+            })
+        );
+    }
+
+    /**
+     * killTree() polls the process, which delivers what it printed while dying.
+     * Measured on a live DinD exec: "printed nothing for 0s" after 21s of silence.
+     */
+    public function test_what_the_step_prints_while_being_killed_does_not_reset_the_report(): void
+    {
+        try {
+            (new System())->runProcessWithCallbacks(
+                ['sh', '-c', 'trap "echo terminated; exit 143" TERM; echo "Downloading crates ..."; sleep 30 & wait'],
+                [],
+                60,
+                null,
+                null,
+                new StepWatchdog(2, 'cargo build', fn (): bool => false)
+            );
+            $this->fail('A silent step was not stopped');
+        } catch (BuildStalledException $e) {
+            $this->assertStringContainsString('printed nothing for 2s', $e->getMessage());
+            $this->assertStringContainsString('Last output: "Downloading crates ..."', $e->getMessage());
+        }
+    }
+
     public function test_the_explainer_names_the_step_the_silence_and_the_last_line(): void
     {
         $message = (new StepWatchdog(900, 'docker compose up -d --build'))->message(900);

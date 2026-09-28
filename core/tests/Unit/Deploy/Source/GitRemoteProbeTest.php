@@ -76,11 +76,57 @@ class GitRemoteProbeTest extends TestCase
      * fails fast on some hosts and would exercise the wrong branch.
      *
      * Both bounds matter -- the lower one tells a timeout apart from a
-     * connection refused in milliseconds.
+     * connection refused in milliseconds, and proves the retry happened.
      */
-    public function test_a_host_that_never_answers_times_out_within_its_budget(): void
+    public function test_a_host_that_never_answers_times_out_after_a_retry(): void
     {
-        $budget = 3;
+        $budget = 2;
+        [$problem, $elapsed] = $this->probeSilentListener(new GitRemoteProbe($budget, 2));
+
+        $this->assertNotNull($problem);
+        // Its own code: a timeout is not a refused connection, nor a private repository.
+        $this->assertSame('git_repo_timeout', $problem['code']);
+        $this->assertTrue($problem['retryable'], 'a timeout is not the caller\'s mistake to fix');
+        $this->assertStringContainsString("within {$budget}s (2 attempts)", $problem['message']);
+        $this->assertStringContainsString('nothing was created', $problem['message']);
+        $this->assertStringContainsString('says nothing about whether', $problem['message']);
+        $this->assertStringNotContainsStringIgnoringCase('private', $problem['message']);
+
+        $this->assertGreaterThanOrEqual(2 * $budget - 0.2, $elapsed, 'the timeout was not retried');
+        $this->assertLessThan(2 * $budget + 5.0, $elapsed, 'the probe ran past its own timeout');
+    }
+
+    public function test_a_single_attempt_probe_does_not_retry(): void
+    {
+        $budget = 2;
+        [$problem, $elapsed] = $this->probeSilentListener(new GitRemoteProbe($budget, 1));
+
+        $this->assertNotNull($problem);
+        $this->assertSame('git_repo_timeout', $problem['code']);
+        $this->assertStringContainsString("within {$budget}s.", $problem['message']);
+        $this->assertGreaterThanOrEqual($budget - 0.2, $elapsed);
+        $this->assertLessThan(2 * $budget - 0.2, $elapsed, 'a single-attempt probe retried');
+    }
+
+    /**
+     * A refusal is an answer: retrying it would only double the wait.
+     */
+    public function test_an_unresolvable_host_is_not_retried(): void
+    {
+        $started = microtime(true);
+        $problem = (new GitRemoteProbe(30, 2))->problem(
+            'git_repo',
+            'https://nonexistent-host-' . bin2hex(random_bytes(6)) . '.invalid/o/r.git',
+            null
+        );
+
+        $this->assertSame('git_repo_unreachable', $problem['code'] ?? null);
+        $this->assertLessThan(30.0, microtime(true) - $started);
+    }
+
+    /** @return array{0: ?array<string, mixed>, 1: float} */
+    private function probeSilentListener(GitRemoteProbe $probe): array
+    {
         $server = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
         $this->assertNotFalse($server, "could not open a listener: {$errstr}");
 
@@ -89,32 +135,12 @@ class GitRemoteProbeTest extends TestCase
             $port = (int) substr((string) $name, strrpos((string) $name, ':') + 1);
 
             $started = microtime(true);
-            $problem = (new GitRemoteProbe($budget))->problem(
-                'git_repo',
-                "https://127.0.0.1:{$port}/o/r.git",
-                null
-            );
-            $elapsed = microtime(true) - $started;
+            $problem = $probe->problem('git_repo', "https://127.0.0.1:{$port}/o/r.git", null);
+
+            return [$problem, microtime(true) - $started];
         } finally {
             fclose($server);
         }
-
-        $this->assertNotNull($problem);
-        $this->assertSame('git_repo_unreachable', $problem['code']);
-        $this->assertTrue($problem['retryable'], 'a timeout is not the caller\'s mistake to fix');
-        $this->assertStringContainsString("within {$budget}s", $problem['message']);
-        $this->assertStringContainsString('nothing was created', $problem['message']);
-
-        $this->assertGreaterThanOrEqual(
-            $budget - 0.2,
-            $elapsed,
-            'returned before the budget, so this was not the timeout path'
-        );
-        $this->assertLessThan(
-            $budget + 5.0,
-            $elapsed,
-            'the probe ran past its own timeout'
-        );
     }
 
     /** Nothing named, nothing probed -- and no network call made. */

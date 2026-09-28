@@ -131,7 +131,11 @@ final class FailureOutput
     public static function select(string $output): string
     {
         $lines = preg_split('/\r?\n/', $output) ?: [];
-        $lines = array_values(array_filter($lines, static fn (string $l): bool => !self::isNoise($l)));
+        $built = self::builtTags($lines);
+        $lines = array_values(array_filter(
+            $lines,
+            static fn (string $l): bool => !self::isNoise($l) && !self::isPullOfBuiltTag($l, $built)
+        ));
         if ($lines === []) {
             return '';
         }
@@ -195,5 +199,36 @@ final class FailureOutput
         }
 
         return false;
+    }
+
+    /**
+     * Tags compose says it builds (`Image <tag> Building`). That line is noise
+     * and is dropped, so the explainer cannot see it (#235).
+     *
+     * @param list<string> $lines
+     * @return array<string, true>
+     */
+    private static function builtTags(array $lines): array
+    {
+        $built = [];
+        foreach ($lines as $line) {
+            if (preg_match('/^\s*Image\s+(\S+)\s+Building\b/', $line, $m) === 1) {
+                $built[$m[1]] = true;
+            }
+        }
+
+        return $built;
+    }
+
+    /**
+     * Compose's pull of a tag it then builds itself: benign, not a missing base image.
+     *
+     * @param array<string, true> $built
+     */
+    private static function isPullOfBuiltTag(string $line, array $built): bool
+    {
+        return $built !== []
+            && preg_match('/^\s*Image\s+(\S+)\s+Error\s+failed to resolve reference\b/', $line, $m) === 1
+            && isset($built[$m[1]]);
     }
 }

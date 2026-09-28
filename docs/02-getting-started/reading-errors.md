@@ -36,9 +36,11 @@ Come back here when you want to look up the sentence yourself. If none of the ro
 |---|---|---|
 | The build ran out of disk space | The project's disk allowance is used up. | Free space, or raise the limit: [Limits](../05-capabilities/projects.md#limits). |
 | The build ran out of memory | The build needs more RAM than the plan allows. Common with large JavaScript builds. | Raise the memory limit. |
+| The build ran out of memory in the engine's build container | The build ran on the server, outside the project, and needed more than the server gives one build (`DEPLOY_BUILD_MEMORY`, a third of its RAM by default). | Raising the project's memory limit does not help. The server operator can raise `DEPLOY_BUILD_MEMORY`. |
 | The Java build ran out of heap / The Node build ran out of heap | The compiler or Node was given less heap than this project needs. That cap is inside the engine, not the project's plan. | Raising the project's memory limit does not fix this. Deploy again after an engine update, or report it: [Tell PanelAlpha the engine got it wrong](what-happens.md#step-5-tell-panelalpha-the-engine-got-it-wrong). |
 | Docker Hub temporarily refused further downloads | A public download rate limit, not your fault. | Wait a few minutes and deploy again. To raise the limit for good, give the engine a Docker Hub login: `pae docker-hub:login`. |
 | A base image this project asks for could not be downloaded | Your `Dockerfile` names an image that does not exist or is private. | Check the image name and tag in your `Dockerfile`. |
+| The image name "*name*" is not valid: Docker image names must be lowercase | The compose file or `Dockerfile` spells an image with capitals, such as `Owner/app:1`. Docker reads `Owner` as the address of a registry and fails to find it. | Use the lowercase name the message gives. |
 
 ## The repository
 

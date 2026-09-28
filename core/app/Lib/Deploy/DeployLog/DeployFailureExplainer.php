@@ -9,6 +9,10 @@ namespace App\Lib\Deploy\DeployLog;
  */
 class DeployFailureExplainer
 {
+    private const REGISTRY_ERROR = '/(?:manifest unknown|manifest for \S+ not found|pull access denied'
+        . '|failed to resolve source metadata|failed to do request'
+        . '|failed to resolve reference (?:"([^"\n]+)"|(\S+)))/i';
+
     public static function explain(string $output): ?string
     {
         $match = self::match($output);
@@ -51,6 +55,12 @@ class DeployFailureExplainer
         return array_keys(self::rules());
     }
 
+    /** A quoted line, cut to a length a failure message can carry. */
+    private static function clip(string $line): string
+    {
+        return mb_strlen($line) > 320 ? rtrim(mb_substr($line, 0, 320)) . '…' : $line;
+    }
+
     private static function duration(int $seconds): string
     {
         return $seconds >= 120 && $seconds % 60 === 0 ? intdiv($seconds, 60) . ' minutes' : "{$seconds} seconds";
@@ -63,6 +73,8 @@ class DeployFailureExplainer
      * resolve reference ... not found` is benign, not a missing base image.
      * BuildKit tags what it builds with `naming to <ref>`, so that line for the
      * same repository is the signal the tag was produced here, not fetched.
+     * A build that fails never gets that far, so Compose's own
+     * `Image <ref> Building` counts too.
      */
     private static function tagBuiltLocally(string $output, string $ref): bool
     {
@@ -74,7 +86,76 @@ class DeployFailureExplainer
             return false;
         }
 
-        return preg_match('/naming to \S*' . preg_quote($repo, '/') . '\b/i', $output) === 1;
+        $quoted = preg_quote($repo, '/');
+
+        return preg_match('/naming to \S*' . $quoted . '\b/i', $output) === 1
+            || preg_match('/^\s*(?:Image\s+)?(?:\S*\/)?' . $quoted . '(?::\S+)?\s+Building\b/im', $output) === 1;
+    }
+
+    /**
+     * Which of the three a failed base-image pull was, from the daemon's own
+     * words, naming the image. Null when every registry error in $output is
+     * the benign pull of a tag this same log builds.
+     */
+    private static function baseImageFailure(string $output): ?string
+    {
+        $found = [];
+        foreach (preg_split('/\R/', $output) ?: [] as $line) {
+            if (preg_match(self::REGISTRY_ERROR, $line) !== 1) {
+                continue;
+            }
+            $ref = '';
+            foreach ([
+                '/failed to resolve source metadata for (\S+?):\s/i',
+                '/failed to resolve reference "?([^"\s]+)"?/i',
+                '/manifest for (\S+) not found/i',
+                '/pull access denied for ([^\s,]+)/i',
+                '/(\S+): failed to do request/i',
+            ] as $pattern) {
+                if (preg_match($pattern, $line, $r) === 1 && $r[1] !== 'solve') {
+                    $ref = $r[1];
+                    break;
+                }
+            }
+            if ($ref !== '' && self::tagBuiltLocally($output, $ref)) {
+                continue;
+            }
+            $cause = match (true) {
+                preg_match('/:\s*not found\b|manifest unknown|manifest for \S+ not found|name unknown/i', $line) === 1 => 'missing',
+                preg_match('/repository does not exist or may require/i', $line) === 1 => 'missing-or-private',
+                preg_match('/unauthorized|denied|authentication required|\b40[13]\b/i', $line) === 1 => 'private',
+                preg_match('/failed to do request|dial tcp|no such host|i\/o timeout|connection refused'
+                    . '|TLS handshake|deadline exceeded|server misbehaving/i', $line) === 1 => 'unreachable',
+                default => 'unknown',
+            };
+            $found[$cause] ??= preg_replace('#^docker\.io/(?:library/)?#', '', $ref);
+        }
+        if ($found === []) {
+            return null;
+        }
+
+        foreach (['missing', 'missing-or-private', 'private', 'unreachable', 'unknown'] as $cause) {
+            if (!array_key_exists($cause, $found)) {
+                continue;
+            }
+            $image = $found[$cause] === '' ? 'A base image this project asks for' : "The base image {$found[$cause]}";
+
+            return match ($cause) {
+                'missing' => "{$image} could not be downloaded: its registry says it does not exist. That tag or "
+                    . 'repository was never published or has been removed, so the project has to name one that exists.',
+                'missing-or-private' => "{$image} could not be downloaded: Docker Hub refused it, which it does both for a "
+                    . 'repository that does not exist and for a private one. Check the name the project uses; a private '
+                    . 'image cannot be pulled from here.',
+                'private' => "{$image} could not be downloaded: its registry refused access, so it is private or needs "
+                    . 'credentials this server does not have.',
+                'unreachable' => "{$image} could not be downloaded: its registry could not be reached from this server. "
+                    . 'A registry that only exists on the project\'s own network or CI cannot be used here.',
+                default => "{$image} could not be downloaded — it may not exist, may be private, or its registry may be "
+                    . 'unreachable from here.',
+            };
+        }
+
+        return null;
     }
 
     /**
@@ -91,6 +172,21 @@ class DeployFailureExplainer
                     "The build step \"{$m[1]}\" printed nothing for " . self::duration((int) $m[2])
                         . " and was stopped. Last output: {$m[3]}. It was most likely stuck on a download "
                         . 'or network call; deploy again, and if it stalls at the same point, check that step.',
+            ],
+
+            // A service the app depends on never came up, quoted with what it printed
+            // ({@see DependencyFailure}). Early for the same reason: the quote is another
+            // program's output, which rules below could otherwise match.
+            'dependency-failed' => [
+                '/^' . preg_quote(DependencyFailure::PREFIX, '/') . '(\S+) did not start \(([^)]*)\)(?:: ([^\n]*))?/m',
+                static function (array $m): string {
+                    $said = trim($m[3] ?? '');
+                    $sentence = "The service {$m[1]} did not start ({$m[2]}), so the application was not started either.";
+
+                    return $said === ''
+                        ? $sentence . ' The full output is in the deploy log.'
+                        : $sentence . ' It printed: ' . self::clip($said) . ' The full output is in the deploy log.';
+                },
             ],
 
             // Language toolchain too old for what the project declares.
@@ -127,7 +223,9 @@ class DeployFailureExplainer
             'native-library-headers-missing' => [
                 '/(The pkg-config command could not be found|Unable to find libclang'
                     . '|Package \\S+ was not found in the pkg-config search path'
-                    . '|Could not find \\S+ using pkg-config)/i',
+                    . '|Could not find \\S+ using pkg-config'
+                    // lxml's own sdist build (engine#120).
+                    . '|make sure the \\S+ (?:and \\S+ )?development packages are installed)/i',
                 static fn (): string =>
                     'A dependency has to be compiled and needs development headers that the build '
                         . 'image does not carry (pkg-config, or a library it queries). The full '
@@ -240,16 +338,26 @@ class DeployFailureExplainer
             //
             // A line that is *only* `Killed`, anchored with /m, is what a host build produces:
             // those run `docker run --entrypoint sh -e -c <script>` with no BuildKit, so no
-            // `exit code: 137` is printed. `out of memory` stays bare — the kernel writes it
-            // that way in `Memory cgroup out of memory: Killed process ...`.
+            // `exit code: 137` is printed. Maven's frontend plugin relays it as `[ERROR] Killed`.
+            // `out of memory` stays bare — the kernel writes it that way in `Memory cgroup out
+            // of memory: Killed process ...`.
+            //
+            // A host build is not in the account's cgroup, so the plan is not what ran out:
+            // Graylog's tsgo died at the 5202 MB host build cap on a 2500 MB plan.
             'out-of-memory' => [
                 '/(exit code: 137|signal:\s*killed|OOMKilled'
+                    // BuildKit's form when the step's cgroup refused an allocation (engine#161).
+                    . '|ResourceExhausted:[^\n]*cannot allocate memory'
                     . '|out of memory'
                     . '|(?:task|process)\s+"?[\w\/.-]+"?\s+killed'
-                    . '|^[ \t]*Killed[ \t]*$'
+                    . '|^[ \t]*(?:\[ERROR\][ \t]+)?Killed[ \t]*$'
                     . '|oom-kill)/im',
-                static fn (): string =>
-                    'The build ran out of memory. This project needs more RAM than the plan allows.',
+                static fn (array $m): string => preg_match('/^\s*(?:\[ERROR\]\s+)?Killed\s*$/', $m[1]) === 1
+                    ? 'The build ran out of memory in the engine\'s build container, which is sized for '
+                        . 'the server (DEPLOY_BUILD_MEMORY, a third of its RAM by default), not by the plan. '
+                        . 'Raising the project\'s memory limit does not change it. The full build output is '
+                        . 'in the deploy log.'
+                    : 'The build ran out of memory. This project needs more RAM than the plan allows.',
             ],
 
             // Below `out-of-memory`: a Java build that spawned a Node frontend usually died
@@ -312,6 +420,28 @@ class DeployFailureExplainer
                         . 'retrying the deploy usually works.',
             ],
 
+            // An uppercase image name. The daemon takes a first component it cannot read as a
+            // repository for a registry host, so `HaschekSolutions/pictshare:3` failed as a DNS
+            // lookup of `HaschekSolutions` and read as an unreachable registry (#125).
+            // Above base-image-unavailable, which would otherwise claim it.
+            'image-reference-invalid' => [
+                '/(?:failed to resolve reference "([^"\n]+)"'
+                    . '|invalid reference format: repository name \(([^)\n]+)\) must be lowercase)/i',
+                static function (array $m): ?string {
+                    if (($m[2] ?? '') !== '') {
+                        return "The image name \"{$m[2]}\" is not valid: Docker image names must be lowercase.";
+                    }
+                    $host = self::uppercaseRegistryHost($m[1]);
+                    if ($host === null) {
+                        return null;
+                    }
+
+                    return "The image name \"{$m[1]}\" is not valid: Docker image names must be lowercase, "
+                        . "so \"{$host}\" was read as the address of a registry, which does not exist. "
+                        . 'The file that names it has to say "' . self::lowercaseRepository($m[1]) . '".';
+                },
+            ],
+
             // `docker compose up` failures, ranked above base-image-unavailable: when a
             // compose builds the app image locally and a sibling references that tag, compose
             // first tries to PULL it, prints a benign `failed to resolve reference ... not
@@ -341,24 +471,48 @@ class DeployFailureExplainer
                 },
             ],
 
+            // runc could not reach the account daemon's libnetwork socket, so no RUN step
+            // can start (engine#111). The trailing BuildKit EOF says nothing.
+            'build-daemon-fault' => [
+                '/error running prestart hook[^\n]*libnetwork\/\S+\.sock/',
+                static fn (): string =>
+                    "The account's Docker daemon could not start a build container: its network controller did "
+                        . 'not answer. This is a fault on the server, not in the project; deploy again, and if it '
+                        . "repeats, the account's Docker needs restarting.",
+            ],
+
+            // `FROM ${BASE_IMAGE}` with no default, the value only the repo's CI passes
+            // (livebook, engine#143). BuildKit refuses before pulling anything.
+            'build-arg-unset' => [
+                '/base name \(\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?\) should not be blank/',
+                static fn (array $m): string =>
+                    "The project's Dockerfile starts FROM the build argument {$m[1]}, which has no default: it only "
+                        . "builds when the project's own tooling passes --build-arg {$m[1]}=..., and nothing in the "
+                        . 'repository supplies it. It needs a PanelAlpha recipe that sets build_args, or a default '
+                        . 'in the Dockerfile.',
+            ],
+
             // BuildKit's wording when it cannot reach the registry at all: a pruned patch tag
             // answers `not found` on its own, and a Dockerfile built for someone else's CI
             // names a registry that is not there. The `failed to resolve reference` branch is
             // the ambiguous one: it is also the benign compose pull of a locally-built tag, so
             // a ref this same log then builds (see tagBuiltLocally) is not a missing base image.
+            // The sentence says which of not-found / private / unreachable the daemon
+            // reported (engine#100); the slug stays one, for telemetry's history.
             'base-image-unavailable' => [
-                '/(?:manifest unknown|manifest for \S+ not found|pull access denied'
-                    . '|failed to resolve source metadata|failed to do request'
-                    . '|failed to resolve reference (?:"([^"\n]+)"|(\S+)))/i',
-                static function (array $m, string $output = ''): ?string {
-                    $ref = ($m[1] ?? '') !== '' ? $m[1] : ($m[2] ?? '');
-                    if ($ref !== '' && self::tagBuiltLocally($output, $ref)) {
-                        return null;
-                    }
+                self::REGISTRY_ERROR,
+                static fn (array $m, string $output = ''): ?string => self::baseImageFailure($output),
+            ],
 
-                    return 'A base image this project asks for could not be downloaded — it may not exist, '
-                        . 'may be private, or its registry may be unreachable from here.';
-                },
+            // A base image whose distribution release is end of life: bullseye-security
+            // 404s on the +deb11uN packages its index names (engine#114), CentOS 7's
+            // mirrorlist host is gone (engine#102). The generic exit code named neither.
+            'package-archive-gone' => [
+                '/(E: Failed to fetch \S+\s+404\s+Not Found|Could not resolve host: mirrorlist\.centos\.org)/i',
+                static fn (): string =>
+                    "A package install in the project's Dockerfile could not download its packages: the base "
+                        . "image's distribution release no longer serves them, which is what happens once a release "
+                        . 'reaches end of life (Debian 11, CentOS 7). The Dockerfile has to move to a supported base image.',
             ],
 
             // node-gyp needs a Python interpreter and a C toolchain the slim Node images do
@@ -425,8 +579,31 @@ class DeployFailureExplainer
                     'The project has no "build" script in package.json, so there is nothing to compile.',
             ],
 
+            // `npm ci` refuses a lockfile that no longer matches package.json and
+            // installs nothing; ranked above dependency-conflict because the same log
+            // usually carries `npm warn ERESOLVE overriding peer dependency` lines
+            // (measured: Automad, `Missing: yaml@2.9.1 from lock file`).
+            'npm-lockfile-out-of-sync' => [
+                '/can only install packages when your package\.json and package-lock\.json'
+                    . '(?: or npm-shrinkwrap\.json)? are in sync/i',
+                static function (array $m, string $output = ''): string {
+                    $detail = preg_match('/npm (?:error|ERR!) ((?:Missing|Invalid): [^\n]+)/i', $output, $d) === 1
+                        ? ' (npm: ' . trim($d[1]) . ')'
+                        : '';
+
+                    return "The project's package-lock.json does not match its package.json{$detail}, "
+                        . 'and `npm ci` installs only from a lockfile that does. Regenerate it with '
+                        . '`npm install` and commit it.';
+                },
+            ],
+
+            // npm's error form only: `npm warn ERESOLVE overriding peer dependency` is npm
+            // saying it resolved the conflict, and a log full of them failed for another
+            // reason (the tempered token keeps a warn line from matching). ERESOLVE is
+            // npm's code, matched case-sensitively as a word: Vite's `--debug` config dump
+            // prints `createResolver`, which read as a conflict (Sunshine).
             'dependency-conflict' => [
-                '/(ERESOLVE|unable to resolve dependency tree|conflicting peer dependency)/i',
+                '/^(?:(?!npm warn)[^\n])*?((?-i:\bERESOLVE\b)|unable to resolve dependency tree|conflicting peer dependency)/im',
                 static fn (): string =>
                     'The project\'s dependencies conflict with each other and could not be installed.',
             ],
@@ -515,6 +692,16 @@ class DeployFailureExplainer
                     'Install or build failed: ' . trim($m[1]),
             ],
 
+            // The remote listed its refs, then refused the next request: it is
+            // readable, and a private repo is refused before that line (#188).
+            'repo-read-interrupted' => [
+                '/expected flush after ref listing/i',
+                static fn (): string =>
+                    'The repository started answering and then stopped partway through the clone. '
+                        . 'A private or missing repository is refused before that point, so this is the '
+                        . 'git host limiting or dropping requests, not the repository. Deploy again in a few minutes.',
+            ],
+
             'repo-auth-failed' => [
                 '/(fatal: could not read Username|Authentication failed|remote: Invalid username or password)/i',
                 static fn (): string =>
@@ -529,12 +716,14 @@ class DeployFailureExplainer
 
             // A COPY/ADD of a path the checkout does not have: a packaging Dockerfile that
             // expects CI to have built `target/` or `dist/` into the context first.
+            // Also damselfly's `dotnet publish` output (engine#133).
             'build-context-missing' => [
                 '/failed to (?:compute cache key|calculate checksum of ref)[^\n]*?"\/?([^"\n]+)": not found/i',
                 static fn (array $m): string =>
                     "The repository's Dockerfile copies `{$m[1]}`, which is not in the repository. It is "
                         . 'produced by a step that has to run before the image is built (usually CI), so the '
-                        . 'image cannot be built from a clean checkout.',
+                        . 'image cannot be built from a clean checkout. If the repository does have it, '
+                        . '.dockerignore excludes it.',
             ],
 
             // Generic build failure — last resort, still better than the dump.
@@ -544,5 +733,33 @@ class DeployFailureExplainer
                     "A build step failed (exit code {$m[1]}). The full output is in the deploy log.",
             ],
         ];
+    }
+
+    /**
+     * The first component of $ref when it has capitals and nothing that makes
+     * it a real registry address (a dot, a port, `localhost`), else null.
+     */
+    private static function uppercaseRegistryHost(string $ref): ?string
+    {
+        $parts = explode('/', $ref);
+        if (count($parts) < 2) {
+            return null;
+        }
+        $first = $parts[0];
+        if ($first === 'localhost' || strpbrk($first, '.:') !== false || strtolower($first) === $first) {
+            return null;
+        }
+
+        return $first;
+    }
+
+    /** $ref with its repository lowercased; a tag may legitimately carry capitals. */
+    private static function lowercaseRepository(string $ref): string
+    {
+        if (preg_match('/^(.*?)((?::[\w][\w.-]*)?(?:@\S+)?)$/', $ref, $m) !== 1) {
+            return strtolower($ref);
+        }
+
+        return strtolower($m[1]) . $m[2];
     }
 }

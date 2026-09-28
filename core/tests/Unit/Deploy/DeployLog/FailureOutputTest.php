@@ -328,6 +328,39 @@ class FailureOutputTest extends TestCase
     }
 
     /**
+     * AppLauncher's shape: the failed step's `#N` lines, then compose's stderr.
+     * `Image ... Building` is noise, so without this the region kept the pull
+     * error and lost the proof the tag is built here (live deploy, #235).
+     */
+    public function test_the_pull_of_a_tag_compose_builds_is_not_the_reason(): void
+    {
+        $output = <<<'OUT'
+#6 [2/2] RUN echo "gex296 local build step" && exit 1
+#6 0.421 gex296 local build step
+#6 ERROR: process "/bin/sh -c echo \"gex296 local build step\" && exit 1" did not complete successfully: exit code: 1
+ Image probe-local:latest Pulling 
+ Image probe-local:latest Error failed to resolve reference "docker.io/library/probe-local:latest": docker.io/library/probe-local:latest: not found
+ Image probe-local:latest Building 
+failed to solve: process "/bin/sh -c echo \"gex296 local build step\" && exit 1" did not complete successfully: exit code: 1
+OUT;
+
+        $selected = FailureOutput::select($output);
+
+        $this->assertStringNotContainsString('failed to resolve reference', $selected);
+        $this->assertSame('build-step-failed', DeployFailureExplainer::match($selected)['rule'] ?? null);
+    }
+
+    public function test_the_pull_error_of_a_tag_nothing_builds_is_kept(): void
+    {
+        $output = <<<'OUT'
+ Image other/app:1 Error failed to resolve reference "docker.io/other/app:1": docker.io/other/app:1: not found
+ Image probe-local:latest Building 
+OUT;
+
+        $this->assertStringContainsString('other/app:1 Error failed to resolve', FailureOutput::select($output));
+    }
+
+    /**
      * `docker compose up -d` on a stack whose datastore never turned healthy,
      * captured from Compose on Docker 29.8.1 and trimmed. rero-ils (#112) was
      * reported by the layer downloads above the one line that said why.

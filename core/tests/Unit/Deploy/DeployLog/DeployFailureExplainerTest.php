@@ -49,6 +49,23 @@ OUT;
         );
     }
 
+    /**
+     * The same "could not read Username", told apart by whether refs were
+     * listed first. Both outputs are real: a sweep clone that lost a burst of
+     * requests to github.com, and a clone of a repository that is private.
+     */
+    public function test_an_interrupted_clone_is_not_reported_as_private(): void
+    {
+        $refused = "error: unable to read askpass response from '/bin/false'\n"
+            . "fatal: could not read Username for 'https://github.com': terminal prompts disabled";
+
+        $this->assertSame('repo-auth-failed', DeployFailureExplainer::match($refused)['rule'] ?? null);
+
+        $interrupted = DeployFailureExplainer::match($refused . "\nfatal: expected flush after ref listing");
+        $this->assertSame('repo-read-interrupted', $interrupted['rule'] ?? null);
+        $this->assertStringNotContainsString('Check that it is public', $interrupted['message'] ?? '');
+    }
+
     #[DataProvider('failureProvider')]
     public function test_recognises_common_failures(string $output, string $expectedFragment): void
     {
@@ -70,6 +87,14 @@ OUT;
             'no build script' => ['npm ERR! Missing script: "build"', 'no "build" script'],
             'dependency conflict' => ['npm ERR! code ERESOLVE', 'dependencies conflict'],
             'private repo' => ['fatal: could not read Username for https://github.com', 'access token'],
+            // A 2026-09-20 sweep clone of github.com/BookStackApp/BookStack (#188).
+            'interrupted clone' => [
+                "Cloning into '/home/bookstackwdtu/project'...\n"
+                . "error: unable to read askpass response from '/bin/false'\n"
+                . "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n"
+                . 'fatal: expected flush after ref listing',
+                'not the repository',
+            ],
             'missing repo' => ['fatal: repository https://github.com/x/y not found', 'was not found'],
             'php too old' => [
                 'requires php ^8.4 but your php version (8.1.2) does not satisfy',
@@ -204,6 +229,34 @@ OUT;
         ] as $output) {
             $this->assertSame('out-of-memory', DeployFailureExplainer::match($output)['rule'] ?? null, $output);
         }
+    }
+
+    /**
+     * Graylog on a 2500 MB plan: `yarn tsgo` was killed at the 5202 MB host
+     * build cap, which the plan does not set. Telling the customer to buy a
+     * bigger plan sent them after the wrong limit.
+     */
+    public function test_a_host_build_kill_does_not_blame_the_plan(): void
+    {
+        foreach ([
+            "[INFO] \$ /app/graylog2-web-interface/node_modules/.bin/tsgo\nKilled\n",
+            "[INFO] \$ /app/graylog2-web-interface/node_modules/.bin/tsgo\n[ERROR] Killed\n"
+                . "[ERROR] error Command failed with exit code 137.\n",
+        ] as $output) {
+            $match = DeployFailureExplainer::match($output);
+
+            $this->assertSame('out-of-memory', $match['rule'] ?? null, $output);
+            $this->assertStringContainsString('DEPLOY_BUILD_MEMORY', $match['message']);
+            $this->assertStringNotContainsString('than the plan allows', $match['message']);
+        }
+    }
+
+    public function test_a_kill_inside_the_account_still_names_the_plan(): void
+    {
+        $match = DeployFailureExplainer::match('#12 ERROR: process "/bin/sh -c npm run build" did not complete successfully: exit code: 137');
+
+        $this->assertSame('out-of-memory', $match['rule'] ?? null);
+        $this->assertStringContainsString('than the plan allows', $match['message']);
     }
 
     /**
@@ -375,6 +428,56 @@ OUT;
         $match = DeployFailureExplainer::match('SQLSTATE[HY000] [2002] Connection refused');
 
         $this->assertNotSame('base-image-unavailable', $match['rule'] ?? null);
+    }
+
+    /**
+     * pictshare's compose (#125) names `HaschekSolutions/pictshare:3`. The
+     * daemon takes the capitalised first component for a registry host and
+     * fails on DNS, which read as "may not exist, may be private, or its
+     * registry may be unreachable" -- none of which is what went wrong.
+     */
+    public function test_an_uppercase_image_name_is_named_as_invalid_not_as_unreachable(): void
+    {
+        $output = <<<'OUT'
+ Image HaschekSolutions/pictshare:3 Pulling
+ Image HaschekSolutions/pictshare:3 Error failed to resolve reference "HaschekSolutions/pictshare:3": failed to do request: Head "https://HaschekSolutions/v2/pictshare/manifests/3": dial tcp: lookup HaschekSolutions on 127.0.0.11:53: no such host
+Error response from daemon: failed to resolve reference "HaschekSolutions/pictshare:3": failed to do request: Head "https://HaschekSolutions/v2/pictshare/manifests/3": dial tcp: lookup HaschekSolutions on 127.0.0.11:53: no such host
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('image-reference-invalid', $match['rule'] ?? null);
+        $this->assertStringContainsString('"HaschekSolutions/pictshare:3" is not valid', $match['message']);
+        $this->assertStringContainsString('"hascheksolutions/pictshare:3"', $match['message']);
+    }
+
+    public function test_the_lowercase_form_keeps_the_tag_as_written(): void
+    {
+        $match = DeployFailureExplainer::match(
+            'Error response from daemon: failed to resolve reference "Acme/app:RC1": failed to do request'
+        );
+
+        $this->assertStringContainsString('"acme/app:RC1"', $match['message'] ?? '');
+    }
+
+    public function test_a_real_registry_host_is_not_an_invalid_name(): void
+    {
+        foreach (['Registry.example.com/app:1', 'localhost:5000/app:1', 'ghcr.io/acme/app:1', 'acme/app:1'] as $ref) {
+            $match = DeployFailureExplainer::match(
+                "Error response from daemon: failed to resolve reference \"{$ref}\": not found"
+            );
+
+            $this->assertSame('base-image-unavailable', $match['rule'] ?? null, $ref);
+        }
+    }
+
+    public function test_compose_refusing_a_capitalised_single_name_is_invalid_too(): void
+    {
+        $match = DeployFailureExplainer::match(
+            'invalid reference format: repository name (library/MyApp) must be lowercase'
+        );
+
+        $this->assertSame('image-reference-invalid', $match['rule'] ?? null);
     }
 
     /** Rate limiting is still its own answer, ranked above the general rule. */
@@ -751,6 +854,28 @@ OUT;
     }
 
     /**
+     * The local build itself fails, so BuildKit never prints `naming to`.
+     * Compose's own `Image <ref> Building` is what says the tag is built here.
+     * Real `docker compose up` output (Compose v5.5.1) from a live deploy.
+     */
+    public function test_a_failed_local_build_is_not_a_missing_base_image(): void
+    {
+        $output = <<<'OUT'
+Image probe-local:latest Pulling
+Image probe-local:latest Error failed to resolve reference "docker.io/library/probe-local:latest": docker.io/library/probe-local:latest: not found
+Image probe-local:latest Building
+#1 reading from stdin 489B done
+#6 [2/2] RUN printf '<title>localbuild-app</title>\n' > /usr/share/nginx/html/index.html
+#6 0.415 /bin/sh: can't create /usr/share/nginx/html/index.html: Permission denied
+#6 ERROR: process "/bin/sh -c printf '<title>localbuild-app</title>\\n' > /usr/share/nginx/html/index.html" did not complete successfully: exit code: 1
+failed to solve: process "/bin/sh -c printf '<title>localbuild-app</title>\\n' > /usr/share/nginx/html/index.html" did not complete successfully: exit code: 1
+OUT;
+
+        $this->assertSame('build-step-failed', DeployFailureExplainer::match($output)['rule'] ?? null);
+        $this->assertStringNotContainsString('base image', (string) DeployFailureExplainer::explain($output));
+    }
+
+    /**
      * A base image that really is missing -- nothing in the log builds that tag
      * (no `naming to`) -- still reads as base-image-unavailable.
      */
@@ -778,5 +903,228 @@ failed to solve: process "/bin/sh -c some-post-step" did not complete successful
 OUT;
 
         $this->assertSame('build-step-failed', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    /** url-to-png (engine#100): the host import says "access denied", the pull says "not found". */
+    public function test_a_removed_image_is_named_and_reported_as_missing(): void
+    {
+        $output = <<<'OUT'
+Host import of minio/minio:latest failed: Error response from daemon: pull access denied for minio/minio, repository does not exist or may require 'docker login'
+Pulling base image minio/minio:latest
+Error response from daemon: failed to resolve reference "docker.io/minio/minio:latest": docker.io/minio/minio:latest: not found
+Image minio/minio Error failed to resolve reference "docker.io/minio/minio:latest": docker.io/minio/minio:latest: not found
+Image minio/mc Interrupted
+Error response from daemon: No such image: minio/mc:latest
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('base-image-unavailable', $match['rule'] ?? null);
+        $this->assertStringContainsString('The base image minio/minio:latest could not be downloaded', $match['message']);
+        $this->assertStringContainsString('does not exist', $match['message']);
+        $this->assertStringNotContainsString('private', $match['message']);
+    }
+
+    /** Open Food Network (engine#127): a tag that was never published. */
+    public function test_a_tag_that_does_not_exist_names_the_tag(): void
+    {
+        $output = 'failed to solve: ruby:3.4.8-alpine3.19: failed to resolve source metadata for '
+            . 'docker.io/library/ruby:3.4.8-alpine3.19: docker.io/library/ruby:3.4.8-alpine3.19: not found';
+
+        $this->assertStringStartsWith(
+            'The base image ruby:3.4.8-alpine3.19 could not be downloaded: its registry says it does not exist.',
+            (string) DeployFailureExplainer::explain($output)
+        );
+    }
+
+    public function test_docker_hubs_ambiguous_denial_says_it_is_ambiguous(): void
+    {
+        $output = "Error response from daemon: pull access denied for acme/private-base, repository does not exist "
+            . "or may require 'docker login'";
+
+        $message = (string) DeployFailureExplainer::explain($output);
+
+        $this->assertStringContainsString('acme/private-base', $message);
+        $this->assertStringContainsString('both for a repository that does not exist and for a private one', $message);
+    }
+
+    public function test_an_authentication_failure_is_reported_as_private(): void
+    {
+        $output = 'failed to solve: ghcr.io/acme/base:1: failed to resolve source metadata for ghcr.io/acme/base:1: '
+            . 'failed to authorize: failed to fetch anonymous token: unexpected status from GET request: 401 Unauthorized';
+
+        $message = (string) DeployFailureExplainer::explain($output);
+
+        $this->assertStringContainsString('ghcr.io/acme/base:1', $message);
+        $this->assertStringContainsString('refused access', $message);
+    }
+
+    public function test_an_unreachable_registry_says_so_and_names_the_image(): void
+    {
+        $output = 'failed to solve: localhost:5000/base-php:amd64: failed to do request: '
+            . 'Head "https://localhost:5000/v2/base-php/manifests/amd64": '
+            . 'dial tcp [::1]:5000: connect: connection refused';
+
+        $message = (string) DeployFailureExplainer::explain($output);
+
+        $this->assertStringContainsString('localhost:5000/base-php:amd64', $message);
+        $this->assertStringContainsString('could not be reached from this server', $message);
+    }
+
+    /** Livebook (engine#143): `FROM ${BASE_IMAGE}` that only its CI fills in. */
+    public function test_an_unset_build_arg_in_from_is_named(): void
+    {
+        $output = <<<'OUT'
+#2 WARN: InvalidDefaultArgInFrom: Default value for ARG ${BASE_IMAGE} results in empty or invalid base image name (line 6)
+Dockerfile:6
+--------------------
+   6 | >>> FROM ${BASE_IMAGE} AS base-default
+--------------------
+failed to solve: base name (${BASE_IMAGE}) should not be blank
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('build-arg-unset', $match['rule'] ?? null);
+        $this->assertStringContainsString('build argument BASE_IMAGE', $match['message']);
+    }
+
+    /** Damselfly (engine#133): COPY of `dotnet publish` output nothing in the Dockerfile produces. */
+    public function test_a_copy_of_a_path_the_repository_lacks_is_named(): void
+    {
+        $output = <<<'OUT'
+#7 [3/9] COPY /Models ./Models
+#7 ERROR: failed to calculate checksum of ref 0o51052zxphsee0qs0ltub3k2::hsc2vutbti8fbdic83dmn289f: "/Models": not found
+#10 [1/9] FROM docker.io/webreaper/damselfly-base:2.0.1@sha256:abc
+#10 CANCELED
+failed to solve: failed to compute cache key: failed to calculate checksum of ref 0o51052zxphsee0qs0ltub3k2::hsc2vutbti8fbdic83dmn289f: "/publish": not found
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('build-context-missing', $match['rule'] ?? null);
+        $this->assertStringContainsString('copies `Models`', $match['message']);
+    }
+
+    /**
+     * qpixel (engine#114) on Debian 11 and flexisip (engine#102) on CentOS 7: the
+     * release's archive is gone, which the generic exit code never said.
+     */
+    #[DataProvider('endOfLifeArchiveProvider')]
+    public function test_an_end_of_life_package_archive_is_named(string $output): void
+    {
+        $this->assertSame('package-archive-gone', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function endOfLifeArchiveProvider(): array
+    {
+        return [
+            'debian 11 security pool' => [
+                "#9 4.680 Err:16 http://deb.debian.org/debian-security bullseye-security/main amd64 mariadb-server-core-10.5 amd64 1:10.5.29-0+deb11u1\n"
+                . "#9 4.680   404  Not Found [IP: 151.101.66.132 80]\n"
+                . "#9 4.867 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/libd/libdbi-perl/libdbi-perl_1.643-3%2bdeb11u2_amd64.deb  404  Not Found [IP: 151.101.66.132 80]\n"
+                . "#9 4.867 E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?\n"
+                . '#9 ERROR: process "/bin/sh -c apt-get update && apt-get install -y bison" did not complete successfully: exit code: 100',
+            ],
+            'centos 7 mirrorlist' => [
+                "#9 0.714 Could not retrieve mirrorlist http://mirrorlist.centos.org/?release=7&arch=x86_64&repo=os&infra=container error was\n"
+                . "#9 0.714 14: curl#6 - \"Could not resolve host: mirrorlist.centos.org; Unknown error\"\n"
+                . "#9 0.716 Cannot find a valid baseurl for repo: base/7/x86_64\n"
+                . '#9 ERROR: process "/bin/sh -c yum -y install epel-release  yum-downloadonly gdb" did not complete successfully: exit code: 1',
+            ],
+        ];
+    }
+
+    /** kibitzr (engine#120): lxml's sdist build names the headers it lacks. */
+    public function test_lxml_missing_its_headers_is_a_headers_problem(): void
+    {
+        $output = <<<'OUT'
+#9 13.58   error: subprocess-exited-with-error
+#9 13.58       Building lxml version 5.4.0.
+#9 13.58       Error: Please make sure the libxml2 and libxslt development packages are installed.
+#9 13.58 ERROR: Failed to build 'lxml' when getting requirements to build wheel
+OUT;
+
+        $this->assertSame('native-library-headers-missing', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    /** Ghostfolio (engine#161): BuildKit's own wording for a step its cgroup starved. */
+    public function test_buildkits_resource_exhausted_is_out_of_memory(): void
+    {
+        $output = 'failed to solve: ResourceExhausted: process "/bin/sh -c npm run build:production" '
+            . 'did not complete successfully: cannot allocate memory';
+
+        $this->assertSame('out-of-memory', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    /** minthcm (engine#111): the account daemon's libnetwork socket was missing. */
+    public function test_a_missing_libnetwork_socket_is_a_server_fault(): void
+    {
+        $output = <<<'OUT'
+#11 [ 6/12] RUN ln -s /etc/php/8.2/mods-available/php-minthcm.ini /etc/php/8.2/cli/conf.d/20-minthcm.ini
+#11 0.190 runc run failed: unable to start container process: error during container init: error running prestart hook #0: exit status 1, stdout: , stderr: dial unix /var/run/docker/libnetwork/fbd506163a34.sock: connect: no such file or directory
+failed to receive status: rpc error: code = Unavailable desc = error reading from server: EOF
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('build-daemon-fault', $match['rule'] ?? null);
+        $this->assertStringContainsString('not in the project', $match['message']);
+    }
+
+    /**
+     * engine#126: Automad's `npm ci`, verbatim apart from the log path. The
+     * ERESOLVE lines are warnings npm resolved; the failure is the lockfile.
+     */
+    public function test_an_out_of_sync_lockfile_is_not_a_dependency_conflict(): void
+    {
+        $output = <<<'OUT'
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: @scaleflex/icons@1.0.0-beta.99
+npm warn Found: react@18.2.0
+npm warn Could not resolve dependency:
+npm warn peer react@"^16.13.1" from @scaleflex/icons@1.0.0-beta.99
+npm warn Conflicting peer dependency: react@16.14.0
+npm error code EUSAGE
+npm error
+npm error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync. Please update your lock file with `npm install` before continuing.
+npm error
+npm error Missing: yaml@2.9.1 from lock file
+npm error
+npm error Clean install a project
+OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('npm-lockfile-out-of-sync', $match['rule'] ?? null);
+        $this->assertStringContainsString('Missing: yaml@2.9.1 from lock file', $match['message'] ?? '');
+    }
+
+    public function test_resolved_peer_warnings_alone_are_not_a_dependency_conflict(): void
+    {
+        $output = <<<'OUT'
+#11 12.30 npm warn ERESOLVE overriding peer dependency
+#11 12.31 npm WARN Conflicting peer dependency: react@16.14.0
+OUT;
+
+        $this->assertNull(DeployFailureExplainer::match($output));
+    }
+
+    public function test_an_npm_eresolve_error_is_still_a_dependency_conflict(): void
+    {
+        $output = "#11 9.1 npm error code ERESOLVE\n#11 9.1 npm error ERESOLVE unable to resolve dependency tree\n";
+
+        $this->assertSame('dependency-conflict', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    /** Vite's `--debug` config dump prints `createResolver` (Sunshine, engine#148). */
+    public function test_a_word_containing_eresolve_is_not_a_dependency_conflict(): void
+    {
+        $output = "  createResolver: [Function: createResolver],\nStatic build finished but dist/index.html is missing\n";
+
+        $this->assertNull(DeployFailureExplainer::match($output));
     }
 }

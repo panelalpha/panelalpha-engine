@@ -16,7 +16,12 @@ use Symfony\Component\Process\Process;
  */
 class GitRemoteProbe
 {
-    public const TIMEOUT_SECONDS = 10;
+    // Measured from the core container: github.com 0.4-0.6s idle and under
+    // 2.9s with 120 concurrent probes; a slow forge (code.castopod.org)
+    // 2.4-13s. A timeout is the forge, not the load, so it gets one more try.
+    public const TIMEOUT_SECONDS = 30;
+
+    public const ATTEMPTS = 2;
 
     /** @var array<string, list<string>> stderr needles, by outcome */
     private const SIGNATURES = [
@@ -37,8 +42,10 @@ class GitRemoteProbe
         ],
     ];
 
-    public function __construct(private readonly int $timeout = self::TIMEOUT_SECONDS)
-    {
+    public function __construct(
+        private readonly int $timeout = self::TIMEOUT_SECONDS,
+        private readonly int $attempts = self::ATTEMPTS,
+    ) {
     }
 
     /**
@@ -88,7 +95,13 @@ class GitRemoteProbe
                 $command = GitUrl::withAskPass($command, $askPass);
             }
 
-            return $this->interpret($this->run($command), $repoField, $repoUrl, $hasToken, $tokenField);
+            // Only a timeout is retried: any answer, even a refusal, is final.
+            $attempt = 0;
+            do {
+                $result = $this->run($command);
+            } while ($result['timedOut'] && ++$attempt < $this->attempts);
+
+            return $this->interpret($result, $repoField, $repoUrl, $hasToken, $tokenField);
         } catch (\Throwable $e) {
             return GitProbeResult::unchecked();
         } finally {
@@ -147,10 +160,15 @@ class GitRemoteProbe
     ): GitProbeResult {
         $host = $this->hostOf($repoUrl);
 
+        // Not `unreachable`: nothing refused the connection, and nothing was
+        // learned about the repository -- least of all that it is private.
         if ($result['timedOut']) {
-            return GitProbeResult::unchecked($this->problemOf($repoField, 'unreachable',
-                "{$host} did not answer within {$this->timeout}s. The repository was not checked, "
-                . 'so nothing was created -- retry, or check the host is reachable from this engine.',
+            $tries = $this->attempts > 1 ? " ({$this->attempts} attempts)" : '';
+
+            return GitProbeResult::unchecked($this->problemOf($repoField, 'timeout',
+                "{$host} did not answer within {$this->timeout}s{$tries}. This says nothing about whether "
+                . 'the repository exists or is public: it was not checked, so nothing was created. '
+                . 'Retry; if it keeps timing out, the host is down or slow to reach from this engine.',
                 true));
         }
         if ($result['ok']) {

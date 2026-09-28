@@ -8,7 +8,9 @@ use Symfony\Component\Process\Process;
 /**
  * Kills a deploy step that has gone silent for too long. Deploys share one
  * worker, so a hung step would otherwise block every account until its
- * overall timeout. Any output resets the clock.
+ * overall timeout. Any output resets the clock, and so does a step that is
+ * silent but still using CPU: rustc on a workspace's last crate prints nothing
+ * for longer than the limit (#153).
  */
 class StepWatchdog
 {
@@ -23,15 +25,26 @@ class StepWatchdog
 
     private const MAX_LINE = 200;
 
+    /** When the clock was last reset, by output or by the step being busy. */
     private float $lastOutputAt;
+
+    /** When the step last printed anything; what the message reports. */
+    private float $lastPrintedAt;
 
     private string $lastLine = '';
 
     private string $partial = '';
 
-    public function __construct(private readonly int $idleSeconds, private readonly string $label)
-    {
-        $this->lastOutputAt = microtime(true);
+    /**
+     * @param ?\Closure(): bool $busy asked once the limit is reached; true means
+     *        the step is working, not hung, and gets another window
+     */
+    public function __construct(
+        private readonly int $idleSeconds,
+        private readonly string $label,
+        private readonly ?\Closure $busy = null
+    ) {
+        $this->lastOutputAt = $this->lastPrintedAt = microtime(true);
     }
 
     /**
@@ -40,10 +53,10 @@ class StepWatchdog
      */
     public function watch(?callable $onOutput = null): callable
     {
-        $this->lastOutputAt = microtime(true);
+        $this->lastOutputAt = $this->lastPrintedAt = microtime(true);
 
         return function (string $type, string $data) use ($onOutput): void {
-            $this->lastOutputAt = microtime(true);
+            $this->lastOutputAt = $this->lastPrintedAt = microtime(true);
             $this->remember($data);
             if ($onOutput !== null) {
                 $onOutput($type, $data);
@@ -63,13 +76,33 @@ class StepWatchdog
             $process->checkTimeout();
             $silent = microtime(true) - $this->lastOutputAt;
             if ($silent >= $this->idleSeconds) {
+                if ($this->isBusy()) {
+                    $this->lastOutputAt = microtime(true);
+                    continue;
+                }
+                // Before the kill: killTree() polls the process, and what it
+                // prints while dying would reset the silence and the last line.
+                $message = $this->message((int) round(microtime(true) - $this->lastPrintedAt));
                 self::killTree($process);
-                throw new BuildStalledException($this->message((int) round($silent)));
+                throw new BuildStalledException($message);
             }
             usleep(self::POLL_MICROSECONDS);
         }
 
         return $process->wait();
+    }
+
+    /** A probe that cannot answer says "not busy": the limit then holds as before. */
+    private function isBusy(): bool
+    {
+        if ($this->busy === null) {
+            return false;
+        }
+        try {
+            return ($this->busy)() === true;
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     public function message(int $silentSeconds): string

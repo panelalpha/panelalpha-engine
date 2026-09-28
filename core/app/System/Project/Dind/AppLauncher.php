@@ -4,6 +4,7 @@ namespace App\System\Project\Dind;
 
 use App\Exceptions\DeployCancelledException;
 use App\Lib\Deploy\Compose\DeployCompose;
+use App\Lib\Deploy\DeployLog\DependencyFailure;
 use App\Lib\Deploy\Dind\DindBuildStorage;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\Platform\PlatformManifest;
@@ -60,6 +61,14 @@ final class AppLauncher
 
         if ($process->getExitCode() !== 0) {
             $this->recordContainerOutput();
+            $cause = $this->failedDependencyCause($process->getErrorOutput() . "\n" . $process->getOutput());
+            if ($cause !== '') {
+                return [
+                    'stdout' => $process->getOutput(),
+                    'stderr' => $cause . "\n" . $process->getErrorOutput(),
+                    'exit_code' => $process->getExitCode(),
+                ];
+            }
         }
 
         if ($process->getExitCode() === 0) {
@@ -275,6 +284,32 @@ final class AppLauncher
         $innerDocker->reclaimStorage(true);
 
         return $this->run($command);
+    }
+
+    /**
+     * What the containers compose gave up on printed, to lead the failure
+     * instead of `dependency failed to start` (engine#97). Empty when compose
+     * named none, or their output could not be read.
+     */
+    private function failedDependencyCause(string $composeOutput): string
+    {
+        $shell = $this->project->shell();
+        $described = [];
+        foreach (DependencyFailure::failed($composeOutput) as $failed) {
+            $command = $failed['kind'] === 'container'
+                ? ['docker', 'logs', '--tail=' . self::FAILURE_LOG_LINES, $failed['name']]
+                : $this->project->userAppComposeCommand(['logs', '--tail=' . self::FAILURE_LOG_LINES, '--no-color', $failed['name']]);
+            try {
+                $logs = $shell->execAsUserQuiet(array_merge(['sh', '-c', '"$@" 2>&1', 'sh'], $command), [], self::FAILURE_LOG_TIMEOUT_SECONDS);
+            } catch (\Throwable) {
+                $logs = '';
+            }
+            $line = DependencyFailure::describe($failed['name'], $failed['state'], DependencyFailure::cause($logs));
+            $shell->logger()?->info($line);
+            $described[] = $line;
+        }
+
+        return implode("\n", $described);
     }
 
     private function healthSawARestartLoop(): bool

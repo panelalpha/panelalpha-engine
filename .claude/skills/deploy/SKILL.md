@@ -293,14 +293,19 @@ show the user the `message`:
 | `php-version-mismatch` | `composer.json` requires a PHP the resolved image lacks | fix the constraint in `composer.json`, or name the image in a `panelalpha.yaml` (`image: php:8.3-apache-bookworm`); `php_version_list` says what the host has |
 | `php-extension-missing` | extension not in the image | check `php_version_list`; add a manifest naming an image that has it, or drop the requirement |
 | `composer-unresolvable` | unresolvable lock | fix the project's `composer.json`/lock |
-| `node-engine-mismatch`, `go-toolchain-too-old` | `engines.node` / `go.mod` vs the resolved image | set `.nvmrc`/`engines.node` to something available, or `image:` in a manifest |
+| `node-engine-mismatch`, `go-toolchain-too-old` | `engines.node` / `go.mod` vs the resolved image | Node majors are 18, 20, 22 and 24; a project naming none gets 20, and `engines.node`/`.nvmrc`/`.node-version` pick among them. Tell the user which version the log shows and which one the project or the failing package asks for; changing the pin, or `image:` in a manifest, is their call (section 6) |
 | `disk-full`, `out-of-memory` | build too large for the account limits | raise `disk_space_limit`/`memory_limit` with `project_update`, rebuild |
 | `registry-rate-limited`, `base-image-unavailable` | registry side | wait and `project_rebuild`; check the image name in the Dockerfile |
 | `layer-digest-mismatch` | a layer arrived corrupted from the host's registry mirror | host-side; `project_rebuild` usually succeeds |
+| `build-daemon-fault` | the account's Docker could not start a build container | host-side; `project_rebuild` |
+| `build-arg-unset`, `build-context-missing` | the repo's Dockerfile needs a build arg or a pre-built path only its own CI supplies | `build_args` in a `panelalpha.yaml`, or a Dockerfile that builds on its own |
+| `package-archive-gone` | the Dockerfile's base image is an end-of-life release whose package archive is gone | the Dockerfile has to move to a supported base image |
 | `env-validation-failed` | app-level env validation | read `environment` from `project_inspect`, pass real values in `env_vars`, rebuild |
 | `database-auth-failed` | credentials in `.env` differ from the database | `mysql_user_change_password` or fix `env_vars`; rebuild |
-| `missing-build-script`, `dependency-conflict`, `dependency-not-found`, `missing-package-at-runtime`, `bun-lockfile-*` | the project's own package files | fix the files (`file_write`) and rebuild; or replace the `build` stage via `stages` |
+| `missing-build-script`, `dependency-conflict`, `npm-lockfile-out-of-sync`, `dependency-not-found`, `missing-package-at-runtime`, `bun-lockfile-*` | the project's own package files | tell the user; with their go-ahead fix the files (`file_write`) and rebuild, or replace the `build` stage via `stages` |
 | `repo-auth-failed`, `repo-not-found` | auth or URL | check the URL, pass `git_token`, never put a token in the URL |
+| `repo-read-interrupted` | the git host cut the clone off after listing refs (rate limit or dropped connection); the repository is readable | wait a few minutes and deploy again; do not add a token |
+| `image-reference-invalid` | an image name with capitals (`Owner/app:1`); the daemon reads `Owner` as a registry host | the name must be lowercase in the project's compose/Dockerfile; the message gives the corrected form |
 | `build-step-failed`, `install-error-line`, `prepare-script-failed` | a command in a stage failed | read from `deploy_log_offset` with a real `offset`; the command's own output is there |
 | `app_did_not_start` | the container came up and nothing answered | section B — `container_service_logs` |
 | `deploy_cancelled` | somebody called `deploy_cancel` | nothing to fix |
@@ -383,6 +388,10 @@ with the user's explicit go-ahead.
 - Do not pass secrets in the repository URL; `git_token` is the field for it.
 - Do not read `.env` values back to the user; the inspect tools withhold
   them on purpose, so should you.
+- The application's source is the user's. Do not change its version pins,
+  manifests or lockfiles to get a deploy through without asking, and never
+  commit or push to their repository. A failed build is a finding to report,
+  not permission to rewrite the project.
 - Do not seed, migrate down, or write rows into a project's database
   unless the user asked for it. Surface that a `seed` script exists and let
   them choose.
