@@ -474,6 +474,8 @@ update_files() {
     docker image prune -af || true
     docker builder prune -af || true
     harden_host
+    # down --remove-orphans took the old dockerhub-mirror container; not its volume.
+    bash /opt/panelalpha/shared-hosting/scripts/retire-dockerhub-mirror.sh /opt/panelalpha/shared-hosting/.env
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml up -d
     # run database migrations
     wait_for_database
@@ -605,6 +607,9 @@ post_install_config() {
     fi
     bash /opt/panelalpha/shared-hosting/scripts/letsencrypt-request-cert.sh --ip "$IPV4" || echo_warning "Could not obtain the Let's Encrypt domain certificate; the served certificate is unchanged"
     apt-get install quota at -y
+    # PANELALPHA_QUOTA=0 opts out; see configure-quota.sh (#244).
+    bash /opt/panelalpha/shared-hosting/scripts/configure-quota.sh ||
+        echo_warning "Could not turn on filesystem quota; project disk limits will not be enforced"
     bash /opt/panelalpha/shared-hosting/scripts/pae-command.sh register || echo_warning "Could not install the pae command"
     # Build the shared PHP base images now, in the background: without this the
     # ~150s per PHP minor is paid by whichever customer deploys that minor first.

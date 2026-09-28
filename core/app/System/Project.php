@@ -729,7 +729,11 @@ class Project
         ];
     }
 
-    public function configureQuota(): void
+    /**
+     * False when a limit was asked for and setquota refused it -- typically
+     * because quota is off on the host filesystem (#244), so it is not enforced.
+     */
+    public function configureQuota(): bool
     {
         $limitMb = $this->model->getDiskSpaceLimit();
         $limitBlocks = 0;
@@ -742,7 +746,8 @@ class Project
             $limitInodes = $userLimitInodes;
         }
 
-        $this->system->runProcessOnHost([
+        $mountPoint = $this->system->filesystem()->getHomeFilesystemMountPoint();
+        $process = $this->system->runProcessOnHost([
             'setquota',
             '-u',
             $this->username(),
@@ -750,8 +755,25 @@ class Project
             (string) $limitBlocks,
             (string) $limitInodes,
             (string) $limitInodes,
-            $this->system->filesystem()->getHomeFilesystemMountPoint(),
+            $mountPoint,
         ]);
+
+        // Unlimited on a filesystem without quota is still unlimited.
+        if ($process->getExitCode() === 0 || ($limitBlocks === 0 && $limitInodes === 0)) {
+            return true;
+        }
+
+        Log::warning(sprintf(
+            'Disk limit for project %s (%d MB, %d inodes) is NOT enforced: setquota on %s failed: %s. '
+            . 'Turn quota on with scripts/configure-quota.sh.',
+            $this->username(),
+            intdiv($limitBlocks, 1024),
+            $limitInodes,
+            $mountPoint,
+            trim($process->getErrorOutput()) ?: 'exit ' . (string) $process->getExitCode(),
+        ));
+
+        return false;
     }
 
     public function fixPermissions(): void

@@ -77,7 +77,20 @@ class Telemetry
 
     public static function enabled(): bool
     {
+        // Under test, only the config a test sets. phpunit.xml's
+        // TELEMETRY_ENABLED=false is not enough on its own: on an installed
+        // host the tests read the live database, and the operator's
+        // `telemetry:enable` stored there overrides it.
+        if (self::underTest()) {
+            return (bool) config('telemetry.enabled', false);
+        }
+
         return NotificationPreferences::isTelemetryEnabled();
+    }
+
+    private static function underTest(): bool
+    {
+        return app()->runningUnitTests();
     }
 
     /**
@@ -401,6 +414,12 @@ class Telemetry
      */
     private static function record(array $report): void
     {
+        // Run on a host, the suite would otherwise write its fixtures into the
+        // operator's telemetry log as if they were real deploys (engine#276).
+        if (self::underTest()) {
+            return;
+        }
+
         try {
             $event = self::envelope($report);
 

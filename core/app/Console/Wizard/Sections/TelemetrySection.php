@@ -126,8 +126,10 @@ class TelemetrySection implements Section
             return null;
         }
 
+        // The stored preference this section toggles; Telemetry::enabled()
+        // ignores it under test (engine#276).
         try {
-            return Telemetry::enabled();
+            return NotificationPreferences::isTelemetryEnabled();
         } catch (Throwable) {
             $this->database = false;
 

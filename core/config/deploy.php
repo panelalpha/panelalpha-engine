@@ -48,4 +48,26 @@ return [
      * worker, so a hung step blocks every account. 0 turns the watchdog off.
      */
     'step_idle_timeout' => (int) env('DEPLOY_STEP_IDLE_TIMEOUT', 900),
+
+    /*
+     * Free disk the engine host must have for a deploy to start, checked on
+     * the Docker root and /home. Below it the deploy is refused with that
+     * reason instead of failing later on ENOSPC. A size (3G, 512M); 0 or `off`
+     * turns the check off. See App\System\Project\Dind\HostDiskGuard.
+     */
+    'host_min_free' => env('DEPLOY_HOST_MIN_FREE', '3G'),
+
+    /*
+     * `system:image:prune` (daily) removes deploy base images from the host
+     * that were not pulled, built or named by a deploy for this long. The
+     * prewarm catalogue and images a container uses are always kept. A
+     * duration (3d, 72h); `off` stops the image half of the prune.
+     */
+    'host_image_retention' => env('DEPLOY_HOST_IMAGE_RETENTION', '3d'),
+
+    /*
+     * The same prune drops host build cache unused for this long; `off` keeps
+     * it for the weekly `system:image:prewarm` to clear.
+     */
+    'host_build_cache_retention' => env('DEPLOY_HOST_BUILD_CACHE_RETENTION', '24h'),
 ];

@@ -3,14 +3,15 @@
 namespace App\System\Project\Dind\Services;
 
 use App\System\Project\Dind;
+use App\System\Project\Dind\TenantEgressGuard;
 use LogicException;
 
 /**
  * supervisord, which accounts rendered before s6 still run: their project dir
  * has `supervisord.conf` and a `supervisord.conf.d/` of programs. The template
- * no longer ships these, so this class carries the one program the engine
- * rewrites at runtime. Such an account moves to s6 when it is next rendered
- * from the template, which removes this layout ({@see removeLayout()}).
+ * no longer ships these, so this class carries the programs the engine writes
+ * at runtime. Such an account moves to s6 when it is next rendered from the
+ * template, which removes this layout ({@see removeLayout()}).
  */
 final class SupervisordServiceManager implements ServiceManager
 {
@@ -22,6 +23,7 @@ final class SupervisordServiceManager implements ServiceManager
     /** Programs the engine writes into an account's supervisord.conf.d. */
     private const PROGRAMS = [
         'cloudflared' => ['command' => 'cloudflared --no-autoupdate tunnel run', 'priority' => 30],
+        TenantEgressGuard::SERVICE => ['command' => "sh -c '" . TenantEgressGuard::LOOP . "'", 'priority' => 5],
     ];
 
     public function __construct(private readonly Dind $project)

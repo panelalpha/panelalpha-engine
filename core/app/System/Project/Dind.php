@@ -23,7 +23,9 @@ use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\System\Project\Dind\ComposeWriter;
 use App\System\Project\Dind\DeployStrategy;
 use App\System\Project\Dind\HostCompile;
+use App\System\Project\Dind\HostDiskGuard;
 use App\System\Project\Dind\SystemAppConfigSource;
+use App\System\Project\Dind\TenantEgressGuard;
 use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\Networking;
 use App\System\Project\Dind\OuterLifecycle;
@@ -259,12 +261,33 @@ class Dind implements DeployableDindProject, Runtime
 
     public function preCheckFromSources(): void
     {
+        $this->assertHostHasRoomToDeploy();
         $this->prepareFromSource()->preCheck();
     }
 
     public function prepareFromSources(): void
     {
+        $this->assertHostHasRoomToDeploy();
         $this->prepareFromSource()->prepare();
+    }
+
+    /**
+     * Every deploy path passes through prepareFromSources(), and a git deploy
+     * through preCheckFromSources() before its clone. A full host is not the
+     * app's failure, so it is recorded as a refusal, not a broken deploy.
+     */
+    private function assertHostHasRoomToDeploy(): void
+    {
+        $refusal = (new HostDiskGuard(
+            $this->system(),
+            HostDiskGuard::minimumFrom(config('deploy.host_min_free'))
+        ))->refusal();
+        if ($refusal === null) {
+            return;
+        }
+
+        $this->shell()->logger()?->markPreCheckRejected();
+        throw new \RuntimeException($refusal);
     }
 
     public function importProjectArchive(string $zipPath): void
@@ -595,6 +618,8 @@ class Dind implements DeployableDindProject, Runtime
         foreach ($scriptFiles as $name => $script) {
             $this->system()->filesystem()->filePutContents("{$dir}/{$name}", $script);
         }
+        // The guard runs once at boot from entrypoint.d; its service keeps it applied.
+        $this->services()->configure(TenantEgressGuard::SERVICE, isset($scriptFiles[TenantEgressGuard::FILE]));
     }
 
     protected function requireUserModel(): ModelsUser

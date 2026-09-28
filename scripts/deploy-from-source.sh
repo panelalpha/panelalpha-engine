@@ -60,11 +60,16 @@ EXCLUDES=(
     core/config/logrotate core/config/exim core/config/modsecurity
     core/config/sftp core/config/pure-ftpd
     core/vendor core/storage core/bootstrap/cache
-    tests/api/node_modules tests/api/.playwright tests/api/test-results
+    tests/api/node_modules tests/api/.playwright tests/api/test-results tests/api/playwright-report
+    # The API suite's host config and token. Gitignored, so the uploading tree
+    # never has it and --delete would remove it from the host on every sync.
+    tests/api/env/.env tests/api/env/.env.*
     scripts/dind-test/vendor
 )
 
 RSYNC_ARGS=(-az --delete --human-readable --info=stats1)
+# The template is source, and would otherwise match tests/api/env/.env.* below.
+RSYNC_ARGS+=(--include /tests/api/env/.env.example)
 for e in "${EXCLUDES[@]}"; do RSYNC_ARGS+=(--exclude "/$e"); done
 [ "$DRY_RUN" = 1 ] && RSYNC_ARGS+=(--dry-run)
 
@@ -78,4 +83,8 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 echo ">>> Bootstrapping on ${TARGET}"
-ssh -t "$TARGET" "bash '${REMOTE_DIR}/scripts/bootstrap-from-source.sh' ${BOOTSTRAP_ARGS[*]:-}"
+# ssh joins its arguments into one string for the remote shell, so quote each
+# bootstrap argument: `--services "core mail"` must arrive as two words, not three.
+REMOTE_ARGS=''
+[ ${#BOOTSTRAP_ARGS[@]} -gt 0 ] && REMOTE_ARGS=$(printf ' %q' "${BOOTSTRAP_ARGS[@]}")
+ssh -t "$TARGET" "bash $(printf '%q' "${REMOTE_DIR}/scripts/bootstrap-from-source.sh")${REMOTE_ARGS}"

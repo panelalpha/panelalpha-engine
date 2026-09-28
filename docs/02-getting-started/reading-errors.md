@@ -35,6 +35,7 @@ Come back here when you want to look up the sentence yourself. If none of the ro
 | The message | What it means | What to do |
 |---|---|---|
 | The build ran out of disk space | The project's disk allowance is used up. | Free space, or raise the limit: [Limits](../05-capabilities/projects.md#limits). |
+| Deploy refused before it started: the engine host has … free | The server itself is nearly full (below `DEPLOY_HOST_MIN_FREE`, 3G by default). Nothing was built. | Free disk on the server; `pae system:image:prune` removes base images no project has used recently. Then deploy again. |
 | The build ran out of memory | The build needs more RAM than the plan allows. Common with large JavaScript builds. | Raise the memory limit. |
 | The build ran out of memory in the engine's build container | The build ran on the server, outside the project, and needed more than the server gives one build (`DEPLOY_BUILD_MEMORY`, a third of its RAM by default). | Raising the project's memory limit does not help. The server operator can raise `DEPLOY_BUILD_MEMORY`. |
 | The Java build ran out of heap / The Node build ran out of heap | The compiler or Node was given less heap than this project needs. That cap is inside the engine, not the project's plan. | Raising the project's memory limit does not fix this. Deploy again after an engine update, or report it: [Tell PanelAlpha the engine got it wrong](what-happens.md#step-5-tell-panelalpha-the-engine-got-it-wrong). |

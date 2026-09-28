@@ -4,8 +4,8 @@ namespace App\System\Project\Dind\Services;
 
 /**
  * The long-running processes a DinD account's init keeps up: dockerd, cron,
- * cloudflared. Callers name a service; which init runs it is this class's
- * business, not theirs.
+ * cloudflared, the egress guard. Callers name a service; which init runs it is
+ * this class's business, not theirs.
  */
 interface ServiceManager
 {

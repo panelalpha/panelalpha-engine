@@ -15,8 +15,9 @@ for f in /entrypoint.d/*.sh; do
   bash "$f"
 done
 
-# s6 supervises dockerd, cron and cloudflared: one directory per service,
-# copied into /run (a tmpfs) so every start begins with no stale state.
+# s6 supervises dockerd, cron, cloudflared and the egress guard: one directory
+# per service, copied into /run (a tmpfs) so every start begins with no stale
+# state.
 mkdir -p /run/service
 cp -a /etc/s6/account/. /run/service/
 exec s6-svscan /run/service

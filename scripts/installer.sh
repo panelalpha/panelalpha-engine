@@ -99,6 +99,8 @@ ENGINE_CERT_IP=''
 INSTALL_SYSBOX=''
 HARDEN=''
 UPGRADE=''
+# Filesystem quota on /home; PANELALPHA_QUOTA=0 in the environment also opts out.
+QUOTA="${PANELALPHA_QUOTA:-}"
 DIND_RUNTIME=''
 DOCKER_NETWORK_MTU=''
 IN_CONTAINER=0
@@ -170,6 +172,8 @@ Installing into a container (CI, dev):
       --no-sysbox          do not install the Sysbox runtime
       --no-hardening       skip sysctl, monit and CSF
       --no-upgrade         skip 'apt-get upgrade' and 'apt-get autoremove'
+      --no-quota           leave filesystem quota off; project disk and inode
+                           limits are then recorded but not enforced
       --dind-runtime VALUE DIND_RUNTIME for .env-core: sysbox-runc or privileged
       --mtu VALUE          MTU for pash-default-network (default 1500)
 USAGE
@@ -294,6 +298,10 @@ while true; do
         UPGRADE=0
         shift
         ;;
+    --no-quota)
+        QUOTA=0
+        shift
+        ;;
     --dind-runtime)
         DIND_RUNTIME="$2"
         shift
@@ -356,11 +364,13 @@ done
 if [ "$IN_CONTAINER" = 1 ]; then
     : "${INSTALL_SYSBOX:=0}"
     : "${HARDEN:=0}"
+    : "${QUOTA:=0}"
     : "${DIND_RUNTIME:=privileged}"
     : "${DOCKER_NETWORK_MTU:=1400}"
 fi
 : "${INSTALL_SYSBOX:=1}"
 : "${HARDEN:=1}"
+: "${QUOTA:=1}"
 : "${UPGRADE:=1}"
 : "${DOCKER_NETWORK_MTU:=1500}"
 
@@ -962,6 +972,17 @@ harden_host() {
     bash /opt/panelalpha/shared-hosting/scripts/build-network-firewall.sh --create panelalpha-build || true
 }
 
+# Without it every setquota the engine runs is a no-op (#244). Never fatal: a
+# host that cannot have quota still gets an engine, and is told why.
+configure_quota() {
+    if [ "$QUOTA" != 1 ]; then
+        echo_warning "Skipping filesystem quota (--no-quota): project disk limits will not be enforced"
+        return
+    fi
+    bash /opt/panelalpha/shared-hosting/scripts/configure-quota.sh ||
+        echo_warning "Could not turn on filesystem quota; project disk limits will not be enforced"
+}
+
 remove_renamed_containers() {
     for old in nginx cron database-core webserver database-users phpmyadmin-users dns-proxy exim pure-ftpd redis core-redis queue-worker core-queue core-cron core-http; do
         ids=$(docker ps -aq \
@@ -1087,7 +1108,7 @@ EOF
     bash /opt/panelalpha/shared-hosting/scripts/update-cloudflare-ips.sh || true
 
     # create docker network if not exists
-    docker network ls | grep pash-default-network || docker network create pash-default-network --opt com.docker.network.driver.mtu=${DOCKER_NETWORK_MTU}
+    bash /opt/panelalpha/shared-hosting/scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
 
     # make sure systemd-resolved is disabled / no conflicts with sites-dns
     disable_systemd_resolved || true
@@ -1103,6 +1124,7 @@ EOF
     # host-networked `webserver` would still hold :80/:443 against the new
     # sites-http. Drop the old containers by service label before starting.
     remove_renamed_containers
+    bash /opt/panelalpha/shared-hosting/scripts/retire-dockerhub-mirror.sh /opt/panelalpha/shared-hosting/.env
 
     # run docker stack
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml up -d
@@ -1243,6 +1265,7 @@ render_webserver_config() {
 post_install_config() {
     # Hardening ran before the stack came up, in harden_host.
     set_default_ip
+    configure_quota
     # Before request_certificates: an ACME HTTP-01 challenge is answered through
     # this webserver, so take its restart before any challenge is in flight.
     render_webserver_config

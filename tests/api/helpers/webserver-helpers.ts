@@ -285,8 +285,11 @@ export async function fetchSite(
   siteUrl: string,
   options: Parameters<APIRequestContext['get']>[1] = {}
 ): Promise<APIResponse> {
+  // Ask for a page the way a browser does. The anonymous client sends
+  // `Accept: application/json` for the API, and an HTML-only app (Rails) answers that with 406.
+  const headers = { Accept: 'text/html,application/xhtml+xml,*/*;q=0.8', ...options.headers };
   try {
-    return await httpClient.get(siteUrl, { ignoreHTTPSErrors: true, ...options });
+    return await httpClient.get(siteUrl, { ignoreHTTPSErrors: true, ...options, headers });
   } catch (error) {
     throw new Error(`${siteUrl} is not being served: ${describeTransportFailure(error)}`, {
       cause: error,

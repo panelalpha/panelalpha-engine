@@ -54,8 +54,12 @@ class RebuildQuotas extends Command
         foreach ($users as $user) {
             try {
                 $this->output->write("Rebuilding quota for user '{$user->username}'...\n");
-                $user->project()->configureQuota();
-                $this->info("  Finished.");
+                if ($user->project()->configureQuota()) {
+                    $this->info("  Finished.");
+                } else {
+                    $this->error("  Not enforced: setquota failed, is quota on for the /home filesystem? See the log.");
+                    $ok = false;
+                }
             } catch (\Exception $e) {
                 $this->error($e->getMessage());
                 $ok = false;

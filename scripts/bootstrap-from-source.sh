@@ -13,6 +13,7 @@
 #                                         [--profiles "hosting,mail" | --core-only]
 #                                         [--dind-runtime privileged] [--mtu 1400]
 #                                         [--domain panel.example.com]
+#                                         [--no-quota]
 
 set -euo pipefail
 
@@ -53,6 +54,7 @@ INSTALL_DOCKER=1
 FORCE_COMPOSER=0
 KEEP_RESOLVED=0
 HARDEN=1
+QUOTA="${PANELALPHA_QUOTA:-1}"
 SERVICES=''
 PROFILES=''
 SET_PROFILES=0
@@ -68,6 +70,7 @@ while [ $# -gt 0 ]; do
     --composer) FORCE_COMPOSER=1; shift ;;
     --keep-resolved) KEEP_RESOLVED=1; shift ;;
     --no-hardening) HARDEN=0; shift ;;
+    --no-quota) QUOTA=0; shift ;;
     --services) SERVICES="$2"; shift 2 ;;
     --profiles) PROFILES="$2"; SET_PROFILES=1; shift 2 ;;
     --core-only) PROFILES=''; SET_PROFILES=1; shift ;;
@@ -101,6 +104,7 @@ command -v ssh-keygen >/dev/null || MISSING+=(openssh-client)
 command -v curl >/dev/null || MISSING+=(curl)
 command -v rsync >/dev/null || MISSING+=(rsync)
 command -v ipcalc >/dev/null || MISSING+=(ipcalc)
+[ "$QUOTA" != 1 ] || command -v setquota >/dev/null || MISSING+=(quota)
 if [ ${#MISSING[@]} -gt 0 ]; then
     step "Installing ${MISSING[*]}"
     DEBIAN_FRONTEND=noninteractive apt-get update -y
@@ -264,7 +268,7 @@ bash scripts/update-cloudflare-ips.sh || warn "Could not refresh the Cloudflare 
 
 docker network inspect pash-default-network >/dev/null 2>&1 || {
     step "Creating pash-default-network"
-    docker network create pash-default-network --opt com.docker.network.driver.mtu="${DOCKER_NETWORK_MTU}"
+    bash scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
 }
 
 # ----------------------------------------------------------------------- vendor
@@ -426,7 +430,17 @@ if [ "$HARDEN" = 1 ]; then
     bash scripts/build-network-firewall.sh --create panelalpha-build || warn "Could not create the build network"
 fi
 
+# Same as installer.sh: without it no project disk limit is enforced (#244).
+if [ "$QUOTA" = 1 ]; then
+    step "Turning on filesystem quota for /home"
+    bash scripts/configure-quota.sh || warn "Could not turn on filesystem quota; project disk limits will not be enforced"
+else
+    warn "Skipping filesystem quota (--no-quota): project disk limits will not be enforced"
+fi
+
 step "Starting the stack"
+# A host that ran the old stack still has dockerhub-mirror on registry-proxy's port.
+bash scripts/retire-dockerhub-mirror.sh .env
 # shellcheck disable=SC2086
 docker compose up -d $SERVICES
 

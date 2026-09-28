@@ -14,6 +14,11 @@ return [
     // 'privileged', the latter only for an engine that itself runs inside a
     // sysbox container. See App\System\Project\Dind\AccountRuntime.
     'DIND_RUNTIME' => env('DIND_RUNTIME'),
+    // Filter what a DinD account's own code may reach (engine#217): on the
+    // shared network only the users' MySQL and the image registries, on the
+    // host only mail and the sites, never the metadata address. Applied inside
+    // each account when it is created or recreated. See TenantEgressGuard.
+    'DIND_EGRESS_GUARD' => env('DIND_EGRESS_GUARD', true),
     // Images to seed into an account at once. Unset = derived from the host's
     // cores, load and free memory; set it only to override that.
     'DIND_SEED_CONCURRENCY' => env('DIND_SEED_CONCURRENCY'),

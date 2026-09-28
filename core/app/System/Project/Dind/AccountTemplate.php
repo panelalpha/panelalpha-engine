@@ -83,7 +83,37 @@ BASH;
 
         $script .= $this->cgroupNestingScript();
 
-        return ['useradd.sh' => $script];
+        $scripts = ['useradd.sh' => $script];
+        if (TenantEgressGuard::enabled()) {
+            $scripts[TenantEgressGuard::FILE] = TenantEgressGuard::script($this->hostIpv4Addresses());
+        }
+
+        return $scripts;
+    }
+
+    /**
+     * Every address of the host, for the egress guard to refuse all but mail
+     * and the sites on. Best-effort: the guard adds the gateway and
+     * host.docker.internal itself, so an empty list still covers those.
+     *
+     * @return list<string>
+     */
+    private function hostIpv4Addresses(): array
+    {
+        try {
+            $ips = $this->project->system()->network()->localIpv4Addresses();
+        } catch (\Throwable) {
+            $ips = [];
+        }
+        try {
+            $public = \App\Models\Setting::get('default_ipv4');
+            if (is_string($public) && $public !== '') {
+                $ips[] = $public;
+            }
+        } catch (\Throwable) {
+        }
+
+        return array_values(array_unique($ips));
     }
 
     private function bootstrapWelcomeApp(ModelsUser $model): string

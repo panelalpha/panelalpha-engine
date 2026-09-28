@@ -72,6 +72,10 @@ class Kernel extends ConsoleKernel
         // deploys daily keeps its caches and everything else pays the install
         // it would have paid anyway.
         $schedule->command('deploy:cache:prune')->dailyAt('04:15')->withoutOverlapping();
+        // Host base images outside the prewarm catalogue, and host build
+        // cache, were otherwise only reclaimed by the weekly prewarm, images
+        // only under pressure. It defers itself while any deploy is in flight.
+        $schedule->command('system:image:prune')->dailyAt('04:45')->withoutOverlapping();
         // Deploy telemetry is written to a spool during a deploy and sent from
         // here: QUEUE_CONNECTION is `sync`, so a dispatched job would put a
         // network round trip inside the customer's deploy request.

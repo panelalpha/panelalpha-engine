@@ -151,6 +151,9 @@ pae ssl:engine-cert:request --domain panel.example.com
 **I was told to use another installer option.**
 The installer has a handful more, for testing and for support to point you at. Some of them switch off the protections that keep projects separated from each other, so use one only when support gives you the exact line to run.
 
+**The installer warned that project disk limits will not be enforced.**
+The installer turns on disk quota for the disk that holds `/home`, so a project's disk and file-count limits actually stop it writing. It adds a quota option to that disk's line in `/etc/fstab`, and keeps a copy of the old file next to it. It only does this itself on ext4. On XFS the warning tells you the one setting to add and asks for a restart. On anything else, or inside a container, limits are recorded but not enforced. To leave quota off on purpose, install with `--no-quota`.
+
 **I want a different webserver.**
 Not supported. Sites are served through nginx-proxy only.
 

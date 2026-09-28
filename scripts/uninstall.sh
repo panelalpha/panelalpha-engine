@@ -364,6 +364,10 @@ uninstall_engine_stack() {
 
     echo_info "Stopping and removing PanelAlpha engine stack..."
     compose_down "$ENGINE_DIR/docker-compose.yml"
+    # `down -v` only knows the volumes the current compose file declares.
+    if [ -f "$ENGINE_DIR/scripts/retire-dockerhub-mirror.sh" ]; then
+        bash "$ENGINE_DIR/scripts/retire-dockerhub-mirror.sh" || true
+    fi
     rm -rf "$ENGINE_DIR"
     echo_info "Removed $ENGINE_DIR"
 }

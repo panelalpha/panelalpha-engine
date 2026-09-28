@@ -34,7 +34,7 @@ class AccountServicesTemplateTest extends TestCase
 
         $this->assertStringContainsString('exec dockerd', (string) file_get_contents($base . '/docker/run'));
         $this->assertStringContainsString('exec cron -f', (string) file_get_contents($base . '/cron/run'));
-        foreach (['docker', 'cron', 'cloudflared'] as $service) {
+        foreach (['docker', 'cron', 'cloudflared', 'egress-guard'] as $service) {
             $this->assertTrue(is_executable("{$base}/{$service}/run"), "{$service}/run is executable");
         }
     }
