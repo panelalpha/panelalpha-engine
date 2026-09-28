@@ -83,19 +83,33 @@ final class AppPortAlignment
 
     private function settledPort(int $expected): ?int
     {
+        return self::awaitPort($expected, fn (): array => $this->listeningSockets());
+    }
+
+    /**
+     * Wait out the whole window for the expected port; only if it never binds
+     * is the last candidate seen the answer. MeTube binds a helper on 4416
+     * before its server on 8081, so the first unexpected port is not it.
+     *
+     * @param callable(): list<array{addr: string, port: int}> $sockets
+     * @param (callable(int): void)|null $sleep
+     */
+    public static function awaitPort(int $expected, callable $sockets, ?callable $sleep = null): ?int
+    {
+        $sleep ??= static fn (int $seconds) => sleep($seconds);
+        $candidate = null;
         for ($attempt = 0; $attempt < self::SETTLE_ATTEMPTS; $attempt++) {
-            $sockets = $this->listeningSockets();
-            if (DetectAppPort::servesPort($sockets, $expected)) {
+            if ($attempt > 0) {
+                $sleep(self::SETTLE_INTERVAL_SECONDS);
+            }
+            $seen = $sockets();
+            if (DetectAppPort::servesPort($seen, $expected)) {
                 return null;
             }
-            $actual = DetectAppPort::chooseAppPort($sockets, $expected);
-            if ($actual !== null) {
-                return $actual;
-            }
-            sleep(self::SETTLE_INTERVAL_SECONDS);
+            $candidate = DetectAppPort::chooseAppPort($seen, $expected) ?? $candidate;
         }
 
-        return null;
+        return $candidate;
     }
 
     /**

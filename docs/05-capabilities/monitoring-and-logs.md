@@ -77,6 +77,7 @@ Less often you will also see:
 | `misconfigured_host` | The application is rejecting the domain it is being served on (Django `ALLOWED_HOSTS`, or Rails host authorisation). |
 | `dependency_unreachable` | The application is up but cannot reach a service it depends on, such as a database or cache. |
 | `php_source` | The browser is being sent PHP source instead of a rendered page. The document root is wrong. |
+| `unclaimed_install` | The site sends visitors to the application's own installer, and nobody has finished it yet. Whoever opens it first can create the administrator account, so finish it yourself straight after the deploy. The deploy still counts as successful. |
 
 The `no_root_route` case is worth calling out: on a backend API it is not a fault. If your application is only ever called at `/api/...`, an empty `/` is a correct observation about a site that is working perfectly.
 
@@ -116,6 +117,23 @@ How close is this project to its limits?
 ```
 
 Covers storage, domains, subdomains, FTP and SFTP accounts, and databases. To change a limit: [Limits](projects.md#limits).
+
+**From inside a project.** If you run a monitoring app or agent in a project (Zabbix, Netdata, node_exporter and the like), two files in it describe the whole server, not the project:
+
+| File | Inside a project it shows |
+|---|---|
+| `/proc/meminfo` | the server's total memory, not the project's limit |
+| `/proc/loadavg` | the server's load, which includes every other project |
+
+Linux does not scope these two to a container, so an agent that reads them reports the server's numbers as the project's. The project's own figures are in its cgroup files. Point the agent at these:
+
+| File | What it is |
+|---|---|
+| `/sys/fs/cgroup/memory.max` | the memory limit, in bytes |
+| `/sys/fs/cgroup/memory.current` | the memory in use now, in bytes |
+| `/sys/fs/cgroup/cpu.stat` | CPU time used (`usage_usec`) |
+
+In an app container, `memory.max` reads `max` unless that service sets a limit of its own. The project's plan limit still applies to it.
 
 ## 5. Lighthouse - "is it fast?"
 

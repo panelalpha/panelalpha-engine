@@ -190,7 +190,13 @@ class PrepareFromSource
         $appConfig = $this->dind->appConfig($gitRepo);
         // The app config is loaded already, and at this point it is the engine's:
         // the repository has not been cloned, so it cannot have shipped one.
-        $recipe = SourceRecipes::fromAppConfig($appConfig, AppConfig::YAML_FILENAME);
+        // With the recipe's own checks/, or a check_skip or check: naming one is refused.
+        $recipeDir = SourceRecipes::directoryFor($gitRepo);
+        $recipe = SourceRecipes::fromAppConfig(
+            $appConfig,
+            AppConfig::YAML_FILENAME,
+            $recipeDir === null ? null : SourceRecipes::checksDirectory($recipeDir)
+        );
         $plan = app(DeployPlanContext::class)->get();
 
         // Staged commands keep `before`, `optional`, `timeout` and `when`.

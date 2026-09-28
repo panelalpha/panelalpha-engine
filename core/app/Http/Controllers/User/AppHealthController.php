@@ -67,7 +67,9 @@ class AppHealthController extends Controller
                                 . 'instead - `placeholder`, `missing_entry`, `directory_listing`, `error_page` - or '
                                 . '`unknown` when nothing answered. `restarting` means nothing answered because the '
                                 . 'container keeps exiting, which is a different problem from `unknown`: the process '
-                                . 'is never up rather than up and not publishing.'
+                                . 'is never up rather than up and not publishing. `unclaimed_install` means `/` redirects to the '
+                                . 'application\'s own unfinished installer, which the first visitor can complete; it is a warning '
+                                . 'and does not make the deploy partial.'
                         ),
                         new OA\Property(property: 'ports', type: 'array', items: new OA\Items(properties: [
                             new OA\Property(property: 'port', type: 'integer'),
@@ -83,7 +85,7 @@ class AppHealthController extends Controller
                             new OA\Property(property: 'status', type: 'string', enum: ['pass', 'fail', 'skipped']),
                             new OA\Property(property: 'severity', type: 'string', enum: ['error', 'warning', 'info']),
                             new OA\Property(property: 'title', type: 'string', description: 'What is wrong, in one sentence.'),
-                            new OA\Property(property: 'detail', type: 'string', nullable: true, description: 'Why, read from the project. Only on a failure.'),
+                            new OA\Property(property: 'detail', type: 'string', nullable: true, description: 'Why, read from the project, on a failure; on a check the manifest skips, its stated reason.'),
                             new OA\Property(property: 'fix', type: 'string', nullable: true),
                             new OA\Property(property: 'evidence', type: 'object', nullable: true),
                         ], type: 'object')),

@@ -36,8 +36,8 @@ final class ServerErrorExplainer implements Explainer
 
             return [
                 'detail' => "The {$response->status} came back in about {$ms}ms -- too fast for the application "
-                    . 'to have answered. The engine\'s proxy returned it because nothing is bound on the app '
-                    . 'port: the container never started or is crash-looping.',
+                    . 'to have answered. A proxy returned it -- the engine\'s, or one the image runs in front of '
+                    . 'the app -- because nothing answered behind it: the container never started or is crash-looping.',
                 'fix' => 'Read the container\'s STARTUP output with `docker logs` -- not the application log -- '
                     . 'to see why the entrypoint died; the app-restart-looping check names the service when it '
                     . 'is still looping.',

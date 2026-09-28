@@ -20,6 +20,10 @@ use PHPUnit\Framework\TestCase;
  * a stock server page, a directory listing, a dev server or an unreachable
  * sidecar, and every one of those reads identically whoever built the image.
  * Those live in the baseline, where every runtime is asked them.
+ *
+ * The framework checks in `command` are the exception: Django's DisallowedHost
+ * page reads the same whoever built the image, so compose and dockerfile
+ * borrow that group (#209). Each is guarded by `when: file:`.
  */
 class CommandAndSharedChecksTest extends TestCase
 {
@@ -217,7 +221,8 @@ class CommandAndSharedChecksTest extends TestCase
 
         $this->assertSame(CheckRunner::SERVING_OK, $report['serving']);
         foreach ($report['checks'] as $check) {
-            $this->assertSame(CheckResult::STATUS_PASS, $check['status'], $check['id']);
+            // Guarded framework checks skip a project they do not apply to.
+            $this->assertNotSame(CheckResult::STATUS_FAIL, $check['status'], $check['id']);
         }
     }
 }

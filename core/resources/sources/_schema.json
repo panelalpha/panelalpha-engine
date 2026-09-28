@@ -288,7 +288,7 @@
       ]
     },
     "check": {
-      "description": "Health checks this manifest adds to the ones its runtime already brings — `laravel/app-key-set`, not `php`. A whole group is `<group>`, one check is `<group>/<id>`. Never list your own runtime's group: `runtime: php` already brings `checks/php/`, and repeating it in fifteen manifests is the duplication the groups exist to remove. To skip a check a group brings, put a `when` guard on the check itself.",
+      "description": "Health checks this manifest adds to the ones its runtime already brings — `laravel/app-key-set`, not `php`. A whole group is `<group>`, one check is `<group>/<id>`. Never list your own runtime's group: `runtime: php` already brings `checks/php/`, and repeating it in fifteen manifests is the duplication the groups exist to remove. To skip a check a group brings, put a `when` guard on the check itself; a manifest whose application answers a shipped check wrongly by design lists it under `check_skip`.",
       "anyOf": [
         {
           "oneOf": [
@@ -304,6 +304,41 @@
               }
             }
           ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "check_skip": {
+      "description": "Shipped checks this application answers wrongly by design, each reported as skipped with its reason instead of run — Apaxy's product is the directory listing `_baseline/no-directory-listing` exists to fail. Name one check as `<group>/<id>`; it must be one this manifest is asked. A check of severity `error` can only be skipped with `covered_by` naming another `error` check this manifest is asked, which asks the question instead: a skip must not be able to hide an outage.",
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "check",
+              "reason"
+            ],
+            "properties": {
+              "check": {
+                "type": "string",
+                "pattern": "^[a-z0-9_][a-z0-9_-]*/[a-z0-9][a-z0-9-]*$"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Why the check does not apply. Shown in the health report."
+              },
+              "covered_by": {
+                "type": "string",
+                "pattern": "^[a-z0-9_][a-z0-9_-]*/[a-z0-9][a-z0-9-]*$",
+                "description": "The check that asks the question instead. Required when the skipped check has severity error."
+              }
+            }
+          }
         },
         {
           "type": "null"

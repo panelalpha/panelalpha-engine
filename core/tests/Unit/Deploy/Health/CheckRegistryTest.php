@@ -83,6 +83,69 @@ class CheckRegistryTest extends TestCase
         $this->assertSame(array_unique($ids), $ids);
     }
 
+    /**
+     * A Django app shipping its own compose file or Dockerfile is deployed
+     * under the compose/dockerfile runtime, which has no group of its own, so
+     * `django-allowed-hosts` never ran for it (#209: Tandoor, Shynet).
+     */
+    public function test_compose_and_dockerfile_are_asked_the_framework_checks(): void
+    {
+        foreach ([PlatformManifest::RUNTIME_COMPOSE, PlatformManifest::RUNTIME_DOCKERFILE] as $runtime) {
+            $ids = array_map(
+                static fn (HealthCheck $c): string => $c->reference(),
+                CheckRegistry::for($runtime)
+            );
+
+            $this->assertContains('command/django-allowed-hosts', $ids, $runtime);
+            $this->assertContains('command/rails-blocked-host', $ids, $runtime);
+            $this->assertContains('_baseline/no-server-error', $ids, $runtime);
+        }
+    }
+
+    /** Tandoor's steady state: 400 DisallowedHost on every path, scored `ok`. */
+    public function test_a_compose_django_app_refusing_its_domain_is_not_ok(): void
+    {
+        file_put_contents($this->dir . '/manage.py', '#!/usr/bin/env python');
+
+        $report = CheckRunner::for(PlatformManifest::RUNTIME_COMPOSE)->run(
+            new ProbedResponse(400, '<h1>Bad Request (400)</h1> DisallowedHost at /', 'http://127.0.0.1:8080/'),
+            $this->dir
+        );
+
+        unlink($this->dir . '/manage.py');
+
+        $this->assertSame('misconfigured_host', $report['serving']);
+    }
+
+    /** With DEBUG off (Tandoor's DEBUG=0) the page names nothing but the 400. */
+    public function test_django_production_400_page_is_recognised(): void
+    {
+        file_put_contents($this->dir . '/manage.py', '#!/usr/bin/env python');
+        // Django's stock templates/400 page, as runserver sends it with DEBUG = False.
+        $body = "<!doctype html>\n<html lang=\"en\">\n<head>\n  <title>Bad Request (400)</title>\n</head>\n"
+            . "<body>\n  <h1>Bad Request (400)</h1><p></p>\n</body>\n</html>\n";
+
+        $report = CheckRunner::for(PlatformManifest::RUNTIME_COMPOSE)->run(
+            new ProbedResponse(400, $body, 'http://127.0.0.1:8000/'),
+            $this->dir
+        );
+
+        unlink($this->dir . '/manage.py');
+
+        $this->assertSame('misconfigured_host', $report['serving']);
+    }
+
+    /** The guard keeps it silent for everything that is not Django. */
+    public function test_the_borrowed_django_check_skips_a_project_without_manage_py(): void
+    {
+        $report = CheckRunner::for(PlatformManifest::RUNTIME_COMPOSE)->run(
+            new ProbedResponse(400, 'DisallowedHost', 'http://127.0.0.1:8080/'),
+            $this->dir
+        );
+
+        $this->assertSame(CheckRunner::SERVING_OK, $report['serving']);
+    }
+
     /** A typo must be a failed contract test, never a check that never runs. */
     public function test_an_unknown_reference_throws(): void
     {

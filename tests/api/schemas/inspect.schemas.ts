@@ -123,6 +123,7 @@ export const SERVING_WORDS = [
   'misconfigured_host',
   'dev_server',
   'no_root_route',
+  'unclaimed_install',
 ] as const;
 
 export const servingWordSchema = z.enum(SERVING_WORDS);

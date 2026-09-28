@@ -19,5 +19,7 @@ expect:
   body_not:
     - 'Invalid HTTP_HOST header'
     - 'DisallowedHost'
+    # With DEBUG off Django names nothing: its stock 400 page is all there is.
+    - '<h1>Bad Request (400)</h1>'
 message: 'Django is rejecting the domain this project is served on.'
 fix: 'Add the project domain to ALLOWED_HOSTS in the Django settings, or set it from an environment variable.'

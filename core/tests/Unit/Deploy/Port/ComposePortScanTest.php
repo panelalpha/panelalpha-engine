@@ -87,6 +87,39 @@ class ComposePortScanTest extends TestCase
         $this->assertSame([8000, 4200, 9999], ComposePortScan::of($path)['all']);
     }
 
+    /** Haraka's `EXPOSE 25` was taken for the site (engine#88). */
+    public function test_a_non_web_port_sorts_after_every_other(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          mail:
+            image: haraka/haraka
+            expose:
+              - "25"
+              - "2222"
+          app:
+            image: acme/app
+            ports:
+              - "9999:9999"
+        YAML);
+
+        $this->assertSame([9999, 25, 2222], ComposePortScan::of($path)['all']);
+        $this->assertSame(9999, ComposePortScan::primaryOf($path));
+    }
+
+    public function test_a_lone_non_web_port_is_still_offered(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          smtp:
+            image: haraka/haraka
+            expose:
+              - "25"
+        YAML);
+
+        $this->assertSame(25, ComposePortScan::primaryOf($path));
+    }
+
     public function test_a_database_port_is_not_offered(): void
     {
         $path = $this->compose(<<<'YAML'
@@ -218,6 +251,79 @@ class ComposePortScanTest extends TestCase
         $path = $this->compose("services:\n  app:\n   - ports: [\n");
 
         $this->assertSame(8080, ComposePortScan::primaryOf($path));
+    }
+
+    /**
+     * engine#214: zabbix/zabbix-web-nginx-mysql is the frontend, not the
+     * database -- its MYSQL_* env names the one it connects to. It read as a
+     * datastore, its only port was refused, and the proxy fell back to a port
+     * nothing listens on. Filtering must never empty the set.
+     */
+    public function test_a_web_image_named_after_its_datastore_keeps_its_port(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          web:
+            image: zabbix/zabbix-web-nginx-mysql:alpine-6.4-latest
+            ports:
+              - "8081:8080"
+            environment:
+              DB_SERVER_HOST: db
+              MYSQL_USER: zabbix
+              MYSQL_PASSWORD: zabbix_pwd
+              MYSQL_DATABASE: zabbix
+        YAML);
+
+        $this->assertSame(['all' => [8081], 'primary' => 8081, 'refused' => []], ComposePortScan::of($path));
+    }
+
+    /** The rescue is a last resort: with a web port standing, datastores stay refused. */
+    public function test_a_real_datastore_beside_a_web_service_is_still_refused(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          web:
+            image: zabbix/zabbix-web-nginx-mysql:alpine-6.4-latest
+            ports:
+              - "8081:8080"
+            environment:
+              DB_SERVER_HOST: db
+              MYSQL_USER: zabbix
+              MYSQL_PASSWORD: zabbix_pwd
+              MYSQL_DATABASE: zabbix
+          db:
+            image: mysql:8.0
+            ports:
+              - "3306:3306"
+            environment:
+              MYSQL_ROOT_PASSWORD: secret
+              MYSQL_DATABASE: zabbix
+          store:
+            image: postgres:16
+            ports:
+              - "5432:5432"
+        YAML);
+
+        $scan = ComposePortScan::of($path);
+        $this->assertSame([8081], $scan['all']);
+        $this->assertSame([3306, 5432], array_column($scan['refused'], 'port'));
+    }
+
+    /** A datastore's own port is never rescued, even when nothing else is left. */
+    public function test_a_lone_datastore_on_its_own_port_is_not_rescued(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          db:
+            image: mysql:8.0
+            ports:
+              - "3306:3306"
+        YAML);
+
+        $scan = ComposePortScan::of($path);
+        $this->assertSame([], $scan['all']);
+        $this->assertArrayNotHasKey('primary', $scan);
+        $this->assertSame('datastore', $scan['refused'][0]['reason']);
     }
 
     public function test_a_non_mapping_service_entry_is_ignored(): void

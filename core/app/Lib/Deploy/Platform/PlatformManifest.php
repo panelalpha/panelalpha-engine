@@ -41,6 +41,7 @@ final class PlatformManifest
         'app_root',
         'docroot',
         'check',
+        'check_skip',
         'build_args',
     ];
 
@@ -97,6 +98,14 @@ final class PlatformManifest
          * @var list<string>
          */
         public readonly array $checks,
+        /**
+         * Shipped checks this application answers wrongly by design, each with the
+         * reason, reported as skipped rather than run. Apaxy's product is a
+         * directory listing, which `_baseline/no-directory-listing` exists to fail.
+         *
+         * @var list<array{check: string, reason: string, covered_by: ?string}>
+         */
+        public readonly array $checkSkips,
         public readonly array $commands,
         public readonly array $env,
         public readonly array $extra,
@@ -146,7 +155,7 @@ final class PlatformManifest
             $reader->identifier('strategy', $id),
             $reader->text('label'),
             $reader->integer('priority', 'must be an integer — higher is checked first'),
-            $reader->enum('runtime', self::RUNTIMES, self::RUNTIME_COMMAND),
+            $runtime = $reader->enum('runtime', self::RUNTIMES, self::RUNTIME_COMMAND),
             $reader->port('port'),
             $reader->optionalText('image', 'must be a non-empty string when present'),
             self::readRequires($reader),
@@ -159,7 +168,8 @@ final class PlatformManifest
             self::readDocroot($reader),
             self::readBuildArgs($reader),
             $reader->object('detect', 'must be a non-empty condition object', $requireDetect),
-            self::readChecks($reader, $recipeChecks),
+            $checks = self::readChecks($reader, $recipeChecks),
+            self::readCheckSkips($reader, $runtime, $checks, $recipeChecks),
             self::readCommands($reader),
             self::readEnv($reader),
             $reader->passthrough('extra'),
@@ -255,6 +265,104 @@ final class PlatformManifest
         }
 
         throw $reader->fail("check '{$reference}': group '{$group}' has no check '{$id}'");
+    }
+
+    /**
+     * `check_skip`: shipped checks this application is asked and answers wrongly
+     * by design, e.g. `{check: _baseline/no-directory-listing, reason: "..."}`.
+     *
+     * Refused here rather than ignored at health time: an unknown or unasked
+     * check, a missing reason, or an `error` check waived with no `covered_by`
+     * naming the `error` check that asks the question instead. Without that
+     * last rule a skip could hide an outage.
+     *
+     * @param list<string> $checks this manifest's own `check:` list
+     * @return list<array{check: string, reason: string, covered_by: ?string}>
+     * @throws ManifestException
+     */
+    private static function readCheckSkips(
+        ManifestReader $reader,
+        string $runtime,
+        array $checks,
+        ?string $recipeChecks
+    ): array {
+        $raw = $reader->raw('check_skip');
+        if ($raw === null) {
+            return [];
+        }
+        if (!is_array($raw) || !array_is_list($raw)) {
+            throw $reader->fail('check_skip must be a list of {check, reason} entries');
+        }
+
+        // The checks this manifest is asked, by reference, and which of them ship.
+        // A registry that cannot load is reported by its own file, as in
+        // assertCheckReference(); the runner still refuses an uncovered error skip.
+        try {
+            $asked = [];
+            foreach (CheckRegistry::for($runtime, $checks, $recipeChecks) as $check) {
+                $asked[$check->reference()] = $check;
+            }
+            $shipped = [];
+            foreach (CheckRegistry::all() as $group) {
+                foreach ($group as $check) {
+                    $shipped[$check->reference()] = true;
+                }
+            }
+        } catch (\Throwable $e) {
+            $asked = null;
+            $shipped = null;
+        }
+
+        $skips = [];
+        foreach ($raw as $entry) {
+            if (!is_array($entry) || array_is_list($entry) || array_diff(array_keys($entry), ['check', 'reason', 'covered_by']) !== []) {
+                throw $reader->fail('check_skip entries take check, reason and covered_by only');
+            }
+            $reference = $entry['check'] ?? null;
+            if (!is_string($reference) || preg_match('#^[a-z0-9_][a-z0-9_-]*/[a-z0-9][a-z0-9-]*$#', $reference) !== 1) {
+                throw $reader->fail("check_skip: 'check' must name one check as 'group/id'");
+            }
+            $reason = $entry['reason'] ?? null;
+            if (!is_string($reason) || trim($reason) === '') {
+                throw $reader->fail("check_skip '{$reference}': a reason is required, and it is shown in the health report");
+            }
+            $cover = $entry['covered_by'] ?? null;
+            if ($cover !== null && (!is_string($cover) || preg_match('#^[a-z0-9_][a-z0-9_-]*/[a-z0-9][a-z0-9-]*$#', $cover) !== 1)) {
+                throw $reader->fail("check_skip '{$reference}': covered_by must name one check as 'group/id'");
+            }
+            if (isset($skips[$reference])) {
+                throw $reader->fail("check_skip '{$reference}' is listed twice");
+            }
+            $skips[$reference] = ['check' => $reference, 'reason' => trim($reason), 'covered_by' => $cover];
+        }
+
+        if ($asked !== null && $shipped !== null) {
+            foreach ($skips as $reference => $skip) {
+                if (!isset($shipped[$reference])) {
+                    throw $reader->fail("check_skip '{$reference}': the engine ships no such check");
+                }
+                if (!isset($asked[$reference])) {
+                    throw $reader->fail("check_skip '{$reference}': this manifest is never asked that check");
+                }
+                $cover = $skip['covered_by'];
+                if ($cover !== null) {
+                    if ($cover === $reference || isset($skips[$cover]) || !isset($asked[$cover])) {
+                        throw $reader->fail(
+                            "check_skip '{$reference}': covered_by '{$cover}' must be another check this manifest is asked and does not skip"
+                        );
+                    }
+                }
+                if ($asked[$reference]->severity === \App\Lib\Deploy\Health\HealthCheck::SEVERITY_ERROR
+                    && ($cover === null || $asked[$cover]->severity !== \App\Lib\Deploy\Health\HealthCheck::SEVERITY_ERROR)) {
+                    throw $reader->fail(
+                        "check_skip '{$reference}' has severity error: name the error check that asks the question "
+                        . 'instead in covered_by, or a skip could hide an outage'
+                    );
+                }
+            }
+        }
+
+        return array_values($skips);
     }
 
     /**

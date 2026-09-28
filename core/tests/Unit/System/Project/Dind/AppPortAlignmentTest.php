@@ -178,4 +178,79 @@ class AppPortAlignmentTest extends TestCase
             'the port already served (4321) matches the run file, so nothing should be rewritten'
         );
     }
+
+    /**
+     * Engine #88: sockets over time, one list per poll; the last repeats.
+     *
+     * @param list<list<int>> $timeline
+     * @return array{0: ?int, 1: int, 2: list<int>} port, polls, sleeps
+     */
+    private function awaitOver(int $expected, array $timeline): array
+    {
+        $polls = 0;
+        $sleeps = [];
+        $port = AppPortAlignment::awaitPort(
+            $expected,
+            function () use ($timeline, &$polls): array {
+                $ports = $timeline[min($polls++, count($timeline) - 1)];
+
+                return array_map(fn (int $p): array => ['addr' => '00000000', 'port' => $p], $ports);
+            },
+            function (int $seconds) use (&$sleeps): void {
+                $sleeps[] = $seconds;
+            }
+        );
+
+        return [$port, $polls, $sleeps];
+    }
+
+    public function test_it_returns_at_once_when_the_expected_port_is_bound(): void
+    {
+        [$port, $polls, $sleeps] = $this->awaitOver(8081, [[4416, 8081]]);
+
+        $this->assertNull($port);
+        $this->assertSame(1, $polls);
+        $this->assertSame([], $sleeps);
+    }
+
+    /** MeTube: the helper on 4416 binds before the server on 8081. */
+    public function test_a_helper_bound_first_does_not_win_over_the_expected_port(): void
+    {
+        [$port, $polls] = $this->awaitOver(8081, [[], [4416], [4416], [4416, 8081]]);
+
+        $this->assertNull($port);
+        $this->assertSame(4, $polls);
+    }
+
+    /** php-fpm on 9000 comes up before nginx on 80. */
+    public function test_php_fpm_bound_first_does_not_win_over_the_expected_port(): void
+    {
+        [$port] = $this->awaitOver(80, [[9000], [9000, 80]]);
+
+        $this->assertNull($port);
+    }
+
+    public function test_it_forwards_to_the_candidate_only_after_the_whole_window(): void
+    {
+        [$port, $polls, $sleeps] = $this->awaitOver(8081, [[], [4416]]);
+
+        $this->assertSame(4416, $port);
+        $this->assertSame(12, $polls);
+        $this->assertSame(array_fill(0, 11, 2), $sleeps);
+    }
+
+    public function test_a_candidate_survives_a_poll_that_saw_nothing(): void
+    {
+        [$port] = $this->awaitOver(8081, [[3000], [3000], []]);
+
+        $this->assertSame(3000, $port);
+    }
+
+    /** epmd and unprivileged SSH are never front doors (#259). */
+    public function test_non_web_ports_are_never_chosen(): void
+    {
+        [$port] = $this->awaitOver(4000, [[4369, 2222]]);
+
+        $this->assertNull($port);
+    }
 }

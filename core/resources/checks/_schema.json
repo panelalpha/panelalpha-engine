@@ -72,6 +72,12 @@
       "type": "object",
       "description": "A `detect` node gating this check, evaluated against the project by PlatformMatcher — the same guard a command carries. This is how one member of a group opts out of a check the group brings, without the manifests that opt out having to say so."
     },
+    "landing": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^/[^\\s]*$" },
+      "description": "Ask this check only when the probe, following redirects from `/`, ended under one of these paths (prefix match, query ignored). Any other landing passes. For a page that is only a problem where it lives, like an application's own installer."
+    },
     "message": {
       "type": "string",
       "minLength": 1,

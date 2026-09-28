@@ -10,3 +10,10 @@ extra:
   # without the file name. State what the probe would have found.
   dockerfile: Dockerfile
   port_hint: 8080
+# The listing is the product, so the check for a server that found no page
+# would fail the application working. apaxy-theme-applied (checks/_baseline/)
+# asks the question that matters instead: is this Apaxy's listing?
+check_skip:
+  - check: _baseline/no-directory-listing
+    reason: 'Apaxy is a directory listing: the listing is the application, not a missing index page.'
+    covered_by: _baseline/apaxy-theme-applied

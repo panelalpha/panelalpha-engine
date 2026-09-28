@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=../_schema.json
+#
+# The application's own web installer, open to whoever loads it first.
+#
+# Dolibarr with no conf.php answers / with a 302 to install/index.php, and the
+# wizard there takes the database, the data directory and the administrator
+# password from the first visitor. Every status is a 2xx or 3xx and nothing
+# else here reads the page, so the deploy said `serving: ok` for an account
+# a stranger could claim (#200).
+#
+# Narrow on purpose, so that it never fires on a login form: it is asked only
+# when the redirects from / ended under an installer path, and fails only on a
+# marker measured on that application's unfinished installer. The same paths
+# after an install say "Already Installed" (WordPress), "disabled for
+# security" (Dolibarr) or "already completed" (Baikal), and hold none of them.
+# `<form id="setup"` is WordPress's install and setup-config form; its title
+# alone is not enough, the "Already Installed" page carries it too.
+#
+# A warning, not an error: an installer waiting for its owner is how a fresh
+# WordPress or phpBB deploy looks, and an error would mark every one of them
+# `partial` on the account long after the owner finished it.
+id: not-an-open-installer
+severity: warning
+serving: unclaimed_install
+landing:
+  - /install
+  - /setup
+  - /mw-config
+  - /admin/install
+  - /wp-admin/install.php
+  - /wp-admin/setup-config.php
+expect:
+  body_not:
+    - '<form id="setup"'
+    - 'WordPress &rsaquo; Setup Configuration File'
+    - '<title>Dolibarr install or upgrade</title>'
+    - 'Baïkal initialization wizard'
+    - 'Baïkal Database setup'
+message: 'The site is serving the application''s own installer, and whoever opens it first can complete it and become its administrator.'
+fix: 'Open the site now and finish the installer yourself, or deploy with a recipe that installs the application before it is exposed.'

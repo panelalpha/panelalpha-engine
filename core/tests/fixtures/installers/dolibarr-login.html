@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex,follow">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="author" content="Dolibarr Development Team">
+<meta name="anti-csrf-newtoken" content="996df265dc5d0b17c23d9443d646b6396546ce3f3e7365b27a0cc658092f4e67">
+<meta name="anti-csrf-currenttoken" content="">
+<link rel="shortcut icon" type="image/x-icon" href="/theme/dolibarr_256x256_color.png"/>
+<link rel="apple-touch-icon" href="/theme/apple-touch-icon.png"/>
+<link rel="manifest" href="/theme/manifest.json.php" />
+<title>Login @ 24.0.0</title>
+<script nonce="22e70810" src="/public/includes/dolibarr-js-context/dolibarr-context.umd.js?layout=classic&version=24.0.0" ></script>
+<script nonce="22e70810" src="/public/includes/dolibarr-js-context/dolibarr-tool.seteventmessage.js?layout=classic&version=24.0.0" ></script>
+<script nonce="22e70810" src="/public/includes/dolibarr-js-context/dolibarr-tool.langs.js?layout=classic&version=24.0.0" ></script>
+<script nonce="22e70810">Dolibarr.setContextVars({"DOL_VERSION":"24.0.0","DOL_URL_ROOT":"","MAIN_LANG_DEFAULT":"en_US","DOL_LANG_INTERFACE_URL":"\/public\/langs\/langs-tool-interface.php"});</script>
+<!-- Includes CSS for JQuery (Ajax library) -->
+<link rel="stylesheet" type="text/css" href="/public/includes/jquery/css/base/jquery-ui.css?layout=classic&version=24.0.0">
+<link rel="stylesheet" type="text/css" href="/public/includes/jquery/plugins/jnotify/jquery.jnotify-alt.min.css?layout=classic&version=24.0.0">
+<link rel="stylesheet" type="text/css" href="/public/includes/jquery/plugins/select2/dist/css/select2.css?layout=classic&version=24.0.0">
+<!-- Includes CSS for font awesome -->
+<link rel="stylesheet" type="text/css" href="/theme/common/fontawesome-5/css/all.min.css?layout=classic&version=24.0.0">
+<!-- Includes CSS for Dolibarr theme -->
+<link rel="stylesheet" type="text/css" href="/theme/eldy/style.css.php?lang=en_US&amp;theme=eldy&amp;entity=1&layout=classic&version=24.0.0&revision=0">
+<!-- Includes JS for JQuery -->
+<script nonce="22e70810" src="/public/includes/jquery/js/jquery.min.js?layout=classic&version=24.0.0"></script>
+<script nonce="22e70810" src="/public/includes/jquery/js/jquery-ui.min.js?layout=classic&version=24.0.0"></script>
+<script nonce="22e70810" src="/public/includes/jquery/plugins/jnotify/jquery.jnotify.min.js?layout=classic&version=24.0.0"></script>
+<script nonce="22e70810" src="/public/includes/jquery/plugins/select2/dist/js/select2.full.min.js?layout=classic&version=24.0.0"></script>
+<script nonce="22e70810" src="/public/includes/jquery/plugins/multiselect/jquery.multi-select.js?layout=classic&version=24.0.0"></script>
+<!-- Includes JS of Dolibarr -->
+<script nonce="22e70810" src="/core/js/lib_head.js.php?lang=en_US&layout=classic&version=24.0.0"></script>
+<!-- Includes JS added by page -->
+<script nonce="22e70810" src="/core/js/dst.js?lang=en_US"></script>
+</head>
+
+<!-- BEGIN PHP TEMPLATE LOGIN.TPL.PHP -->
+	<body class="body bodylogin">
+	
+<script>
+$(document).ready(function () {
+	/* Set focus on correct field */
+	$('#username').focus(); 		// Warning to use this only on visible element
+});
+</script>
+
+<div class="login_center center" style="background-size: cover; background-position: center center; background-attachment: fixed; background-repeat: no-repeat; background: linear-gradient(4deg, var(--colorbackbody) 52%, rgb(60,70,100) 52.1%);">
+<div class="login_vertical_align">
+
+
+<form id="login" name="login" method="post" action="/index.php?mainmenu=home">
+
+<input type="hidden" name="token" value="996df265dc5d0b17c23d9443d646b6396546ce3f3e7365b27a0cc658092f4e67" />
+<input type="hidden" name="actionlogin" id="actionlogin" value="login">
+<input type="hidden" name="loginfunction" id="loginfunction" value="loginfunction" />
+<input type="hidden" name="backtopage" value="" />
+<!-- Add fields to store and send local user information. This fields are filled by the core/js/dst.js -->
+<input type="hidden" name="tz" id="tz" value="" />
+<input type="hidden" name="tz_string" id="tz_str

@@ -21,7 +21,9 @@ final class ProbedResponse
         public readonly int $status,
         public readonly string $body,
         public readonly string $url,
-        public readonly float $time = 0.0
+        public readonly float $time = 0.0,
+        // The path that answered, after the probe followed redirects from `/`.
+        public readonly string $path = '/'
     ) {
     }
 
@@ -44,6 +46,24 @@ final class ProbedResponse
     public function answered(): bool
     {
         return $this->status > 0;
+    }
+
+    /**
+     * Did the answer come from under one of these paths? Compared without
+     * the query, by prefix: `/install` covers `/install/index.php`.
+     *
+     * @param list<string> $prefixes
+     */
+    public function landedUnder(array $prefixes): bool
+    {
+        $path = strtolower((string) strtok($this->path, '?'));
+        foreach ($prefixes as $prefix) {
+            if ($prefix !== '' && str_starts_with($path, strtolower($prefix))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function bodyContains(string $needle): bool

@@ -26,7 +26,9 @@ use Illuminate\Support\Facades\Log;
  *
  * - **Did the application come up?** curl runs *inside the account container*
  *   against 127.0.0.1, so the domain, DNS, TLS and nginx-proxy cannot colour
- *   the result. A red answer here means the application is broken.
+ *   the result. It still sends the project's domain as Host, so an app that
+ *   validates Host answers as it does a visitor. A red answer here means the
+ *   application is broken.
  * - **Can anyone reach it?** the same request through the webserver, from the
  *   host, with the project's own Host header. A red answer here means the
  *   routing is broken while the application is fine.
@@ -136,7 +138,7 @@ class AppHealth
 
         try {
             $raw = $this->dind->shell()->execQuiet(
-                ['bash', '-c', self::probeScript($ports, $timeout, $attempts, $delay)],
+                ['bash', '-c', self::probeScript($ports, $timeout, $attempts, $delay, $this->mainDomain())],
                 [],
                 self::timeBudget($ports, $timeout, $attempts, $delay)
             );
@@ -153,7 +155,7 @@ class AppHealth
         }
 
         $results = self::parseProbeOutput($raw, $ports);
-        $verdict = $this->runChecks($results);
+        $verdict = $this->runChecks($results, $timeout);
 
         $checks = $verdict['checks'];
         $looping = $this->restartLoopCheck($results);
@@ -173,6 +175,19 @@ class AppHealth
             'domain' => $this->reachability($results, $timeout),
             'checks' => $checks,
         ];
+    }
+
+    /** The name visitors use, or null before the project has one. */
+    private function mainDomain(): ?string
+    {
+        try {
+            $domain = $this->dind->userModel()->getMainDomain()?->domain;
+        } catch (\Throwable) {
+            // No domain to ask with is a probe as 127.0.0.1, as before.
+            return null;
+        }
+
+        return is_string($domain) && $domain !== '' ? $domain : null;
     }
 
     /**
@@ -312,14 +327,16 @@ class AppHealth
      * @param list<array<string, mixed>> $results as {@see parseProbeOutput} produced them
      * @return array{serving: string, checks: list<array<string, mixed>>}
      */
-    private function runChecks(array $results): array
+    private function runChecks(array $results, int $timeout = 5): array
     {
         try {
-            $details = $this->dind->userModel()->getDetails();
-            $runtime = self::stringOrNull($details[self::DETAIL_RUNTIME] ?? null);
+            $runner = self::checkRunnerFor($this->dind->userModel()->getDetails());
+            $first = self::firstResponse($results);
 
-            return CheckRunner::for($runtime, self::declaredChecks($details))
-                ->run(self::firstResponse($results), $this->dind->userAppDirPath());
+            return $runner->runByPath(
+                [HealthCheck::DEFAULT_PATH => $first] + $this->fetchPaths($runner->paths(), $results, $timeout),
+                $this->dind->userAppDirPath()
+            );
         } catch (\Throwable $e) {
             Log::debug('Health checks could not run: ' . self::trimReason($e->getMessage()));
 
@@ -328,8 +345,119 @@ class AppHealth
     }
 
     /**
-     * The checks the deployed platform's manifest added on top of its
-     * runtime's group.
+     * The checks for this account: its runtime's group, what the platform's
+     * manifest added, and the checks its source recipe ships in `checks/`
+     * (frozen onto the account as `deploy_checks_dir`). engine#182: the
+     * recipe's list and directory were both unreachable from here.
+     *
+     * @param array<string, mixed> $details
+     */
+    public static function checkRunnerFor(array $details): CheckRunner
+    {
+        $manifest = self::declaredManifest($details);
+
+        return CheckRunner::forWithDirectory(
+            self::stringOrNull($details[self::DETAIL_RUNTIME] ?? null),
+            $manifest?->checks ?? [],
+            self::stringOrNull($details[self::DETAIL_CHECKS_DIR] ?? null),
+            $manifest?->checkSkips ?? []
+        );
+    }
+
+    /**
+     * Fetch the paths the checks name besides `/`, once each, from the port
+     * that answered. Nothing when no port answered or nothing asks.
+     *
+     * @param list<string> $paths
+     * @param list<array<string, mixed>> $results
+     * @return array<string, ProbedResponse>
+     */
+    private function fetchPaths(array $paths, array $results, int $timeout): array
+    {
+        // The port firstResponse() chose: any answer, a 5xx included.
+        $answered = null;
+        foreach ($results as $result) {
+            if (is_int($result['http_code'] ?? null) && $result['http_code'] > 0) {
+                $answered = $result;
+                break;
+            }
+        }
+        if ($paths === [] || $answered === null) {
+            return [];
+        }
+        $scheme = is_string($answered['scheme'] ?? null) ? $answered['scheme'] : 'http';
+        $port = (int) $answered['port'];
+
+        $raw = $this->dind->shell()->execQuiet(
+            ['bash', '-c', self::pathProbeScript($scheme, $port, $paths, $timeout, $this->mainDomain())],
+            [],
+            30 + count($paths) * max(1, $timeout)
+        );
+
+        return self::parsePathProbeOutput($raw, $scheme, $port);
+    }
+
+    /**
+     * One curl per path against the port that answered. Echoes
+     * "PATH<tab>CODE TIME<tab>BODY", the body base64 as in {@see probeScript()}.
+     * Sends the same Host as {@see probeScript()}, so a Host-validating app
+     * answers its recipe paths as it answered `/`.
+     *
+     * @param list<string> $paths
+     */
+    public static function pathProbeScript(
+        string $scheme,
+        int $port,
+        array $paths,
+        int $timeout = 5,
+        ?string $domain = null
+    ): string {
+        $timeout = max(1, $timeout);
+        $domain = $domain !== null && trim($domain) !== '' ? strtolower(trim($domain)) : null;
+        $hostHeader = $domain !== null ? '-H ' . escapeshellarg("Host: {$domain}") . ' ' : '';
+        $sample = ProbedResponse::SAMPLE_BYTES;
+        $base = escapeshellarg(($scheme === 'https' ? 'https' : 'http') . '://127.0.0.1:' . $port);
+        $list = implode(' ', array_map('escapeshellarg', $paths));
+
+        return <<<SH
+set -u
+for path in {$list}; do
+    body_file=\$(mktemp)
+    out=\$(curl -sS -k {$hostHeader}-o "\$body_file" -w '%{http_code} %{time_total}' --max-time {$timeout} {$base}"\$path" 2>/dev/null) || true
+    printf '%s\\t%s\\t%s\\n' "\$path" "\${out:-000 0}" "\$(head -c {$sample} "\$body_file" | base64 | tr -d '\\r\\n')"
+    rm -f "\$body_file"
+done
+exit 0
+SH;
+    }
+
+    /**
+     * @return array<string, ProbedResponse> by path; a path that got nothing
+     *         is {@see ProbedResponse::none()}, which the check reports.
+     */
+    public static function parsePathProbeOutput(string $raw, string $scheme, int $port): array
+    {
+        $responses = [];
+        foreach (preg_split('/\r?\n/', $raw) ?: [] as $line) {
+            $fields = explode("\t", $line);
+            if (count($fields) < 2 || !str_starts_with($fields[0], '/')) {
+                continue;
+            }
+            $path = $fields[0];
+            $measured = preg_split('/\s+/', trim($fields[1])) ?: [];
+            $code = (int) ($measured[0] ?? 0);
+            $url = "{$scheme}://127.0.0.1:{$port}{$path}";
+            $responses[$path] = $code > 0
+                ? new ProbedResponse($code, self::decodeSample(trim($fields[2] ?? '')), $url, (float) ($measured[1] ?? 0))
+                : ProbedResponse::none($url);
+        }
+
+        return $responses;
+    }
+
+    /**
+     * The deployed platform's manifest: the checks it added on top of its
+     * runtime's group, and the ones it skips.
      *
      * Read from the manifest rather than frozen onto the account, because a
      * check list is a property of the recipe and not of the deploy: editing a
@@ -337,22 +465,29 @@ class AppHealth
      * account that already deployed having to be redeployed first.
      *
      * @param array<string, mixed> $details
-     * @return list<string>
      */
-    private static function declaredChecks(array $details): array
+    private static function declaredManifest(array $details): ?\App\Lib\Deploy\Platform\PlatformManifest
     {
         $platform = self::stringOrNull($details[self::DETAIL_PLATFORM] ?? null);
         if ($platform === null) {
-            return [];
+            return null;
         }
 
-        foreach (\App\Lib\Deploy\Platform\PlatformRegistry::all() as $manifest) {
-            if ($manifest->id === $platform) {
-                return $manifest->checks;
+        // A source recipe that states no id of its own keeps the one it extends
+        // (Apaxy's is `dockerfile`), so the id alone finds the shipped manifest.
+        // The account's repository names the recipe the deploy applied; the id
+        // check keeps a deploy that pinned another recipe on that one.
+        try {
+            $recipe = \App\Lib\Deploy\Platform\SourceRecipes::for(self::stringOrNull($details['git_repo'] ?? null));
+            if ($recipe !== null && $recipe->id === $platform) {
+                return $recipe;
             }
+        } catch (\Throwable $e) {
+            Log::debug('Source recipe unreadable for health checks: ' . self::trimReason($e->getMessage()));
         }
 
-        return [];
+        // find(), not all(): a source recipe's id resolves only there.
+        return \App\Lib\Deploy\Platform\PlatformRegistry::find($platform);
     }
 
     /**
@@ -371,12 +506,14 @@ class AppHealth
             $code = $result['http_code'] ?? null;
             if (is_int($code) && $code > 0) {
                 $scheme = is_string($result['scheme'] ?? null) ? $result['scheme'] : 'http';
+                $path = is_string($result['path'] ?? null) ? $result['path'] : HealthCheck::DEFAULT_PATH;
 
                 return new ProbedResponse(
                     $code,
                     is_string($result['body'] ?? null) ? $result['body'] : '',
-                    "{$scheme}://127.0.0.1:{$result['port']}/",
-                    is_numeric($result['time'] ?? null) ? (float) $result['time'] : 0.0
+                    "{$scheme}://127.0.0.1:{$result['port']}{$path}",
+                    is_numeric($result['time'] ?? null) ? (float) $result['time'] : 0.0,
+                    $path
                 );
             }
         }
@@ -397,7 +534,7 @@ class AppHealth
     private static function withoutBodies(array $results): array
     {
         return array_map(static function (array $result): array {
-            unset($result['body']);
+            unset($result['body'], $result['path']);
 
             return $result;
         }, $results);
@@ -733,6 +870,18 @@ SH;
     /** Frozen by the deploy; the platform decides which checks it added. */
     public const DETAIL_PLATFORM = 'deploy_platform';
 
+    /** Frozen by the deploy: the source recipe's own `checks/`, or null. */
+    public const DETAIL_CHECKS_DIR = 'deploy_checks_dir';
+
+    /** Wait after an answer before re-asking Docker; MintHCM exited 1s after its first 200. */
+    private const SETTLE_SECONDS = 5;
+
+    /** What {@see restartLoopBetween()} reads, one line per container. */
+    private const INSPECT_FORMAT = '{"name":{{json .Name}},'
+        . '"service":{{json (index .Config.Labels "com.docker.compose.service")}},'
+        . '"state":{{json .State.Status}},"exit":{{.State.ExitCode}},'
+        . '"restarts":{{.RestartCount}}}';
+
     /**
      * The budget the *deploy-time* probe gets, which is not the one an
      * operator asking "is it up right now?" wants.
@@ -769,6 +918,8 @@ SH;
             return;
         }
 
+        // Before the probe, so a restart while it waits still counts.
+        $before = $this->containerSnapshot();
         $report = $this->observe(self::DEPLOY_TIMEOUT, self::DEPLOY_ATTEMPTS, self::DEPLOY_DELAY);
         if ($report === null) {
             return;
@@ -784,6 +935,8 @@ SH;
             return;
         }
 
+        $report = $this->withLateRestartLoop($report, $before);
+
         foreach ($report['ports'] as $result) {
             if ($result['status'] === self::STATUS_OK) {
                 $logger->ok(self::describe($result));
@@ -794,6 +947,138 @@ SH;
 
         $this->reportReachability($report, $logger);
         $this->reportChecks($report, $logger);
+    }
+
+    /**
+     * One answer is not an app that stays up: MintHCM answered 200, exited 0 a
+     * second later and restart-looped behind a 502 while the deploy read green.
+     *
+     * @param array<string, mixed> $report
+     * @return array<string, mixed>
+     */
+    private function withLateRestartLoop(array $report, ?string $before): array
+    {
+        foreach ((array) ($report['checks'] ?? []) as $check) {
+            if (is_array($check) && ($check['id'] ?? null) === self::CHECK_RESTART_LOOPING) {
+                return $report;
+            }
+        }
+
+        foreach ((array) ($report['ports'] ?? []) as $port) {
+            if (is_array($port) && ($port['status'] ?? null) === self::STATUS_OK) {
+                sleep(self::SETTLE_SECONDS);
+                break;
+            }
+        }
+
+        $after = $this->containerSnapshot();
+        $looping = $after === null ? null : self::restartLoopBetween($before, $after);
+        if ($looping === null) {
+            return $report;
+        }
+
+        $report['checks'][] = $looping;
+        $this->remember($report);
+
+        return $report;
+    }
+
+    /** `docker inspect` of the stack in {@see INSPECT_FORMAT}; null when it could not be asked. */
+    private function containerSnapshot(): ?string
+    {
+        $ps = implode(' ', array_map(
+            'escapeshellarg',
+            $this->dind->userAppComposeCommand(['ps', '--all', '--quiet'])
+        ));
+        $script = 'ids=$(' . $ps . ') && [ -n "$ids" ] && docker inspect --format '
+            . escapeshellarg(self::INSPECT_FORMAT) . ' $ids';
+
+        try {
+            return $this->dind->shell()->execAsUserQuiet(
+                ['bash', '-c', $script],
+                [],
+                self::RESTART_PROBE_TIMEOUT_SECONDS
+            );
+        } catch (\Throwable $e) {
+            Log::debug('Container snapshot could not run: ' . self::trimReason($e->getMessage()));
+
+            return null;
+        }
+    }
+
+    /**
+     * Looping = Docker says `restarting`, or the restart count grew between the
+     * snapshots (exit 0 included). No earlier snapshot, no count comparison:
+     * a sidecar kept from an older deploy may carry old restarts.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function restartLoopBetween(?string $before, string $after): ?array
+    {
+        $earlier = null;
+        if ($before !== null) {
+            $earlier = [];
+            foreach (self::inspectRows($before) as $row) {
+                $earlier[$row['name']] = $row['restarts'];
+            }
+        }
+
+        $looping = [];
+        foreach (self::inspectRows($after) as $row) {
+            $grew = $earlier !== null && $row['restarts'] > ($earlier[$row['name']] ?? 0);
+            if ($row['state'] !== self::STATE_RESTARTING && !$grew) {
+                continue;
+            }
+            $looping[] = sprintf(
+                '%s (%s, last exit %d, restarted %d time%s)',
+                $row['service'] ?? $row['name'],
+                $row['state'],
+                $row['exit'],
+                $row['restarts'],
+                $row['restarts'] === 1 ? '' : 's'
+            );
+        }
+
+        if ($looping === []) {
+            return null;
+        }
+
+        return [
+            'id' => self::CHECK_RESTART_LOOPING,
+            'group' => 'runtime',
+            'status' => CheckResult::STATUS_FAIL,
+            'severity' => HealthCheck::SEVERITY_ERROR,
+            'title' => 'The application is restarting, not running.',
+            'detail' => 'Docker reports ' . implode(', ', $looping)
+                . '. It may answer between restarts, but it does not stay up.',
+            'fix' => 'Read the container output with container_service_logs; the reason it exits is there.'
+                . ' A process that exits 0 is restarted too, e.g. a command ending in a shell with no TTY.',
+            'evidence' => ['restarting' => $looping],
+        ];
+    }
+
+    /**
+     * @return list<array{name: string, service: ?string, state: string, exit: int, restarts: int}>
+     */
+    private static function inspectRows(string $raw): array
+    {
+        $rows = [];
+        foreach (preg_split('/\R/', trim($raw)) ?: [] as $line) {
+            $row = json_decode(trim($line), true);
+            $name = is_array($row) ? self::stringOrNull($row['name'] ?? null) : null;
+            if ($name === null) {
+                continue;
+            }
+            $rows[] = [
+                'name' => ltrim($name, '/'),
+                'service' => self::stringOrNull($row['service'] ?? null),
+                'state' => strtolower((string) ($row['state'] ?? '')),
+                'exit' => (int) ($row['exit'] ?? 0),
+                'restarts' => (int) ($row['restarts'] ?? 0),
+            ];
+        }
+
+        return $rows;
     }
 
     /**
@@ -1104,13 +1389,24 @@ SH;
      *
      * @param list<int> $ports
      */
-    public static function probeScript(array $ports, int $timeout = 5, int $attempts = 3, int $delay = 2): string
-    {
+    public static function probeScript(
+        array $ports,
+        int $timeout = 5,
+        int $attempts = 3,
+        int $delay = 2,
+        ?string $domain = null
+    ): string {
         $timeout = max(1, $timeout);
         $attempts = max(1, $attempts);
         $delay = max(0, $delay);
         $sample = ProbedResponse::SAMPLE_BYTES;
         $list = implode(' ', array_map('intval', $ports));
+        // Ask as a visitor does: an app that validates Host (Django's
+        // ALLOWED_HOSTS, Laravel TrustHosts, Phorge's site URIs) refuses
+        // `Host: 127.0.0.1` while serving its domain fine (#165, #190).
+        $domain = $domain !== null && trim($domain) !== '' ? strtolower(trim($domain)) : null;
+        $hostHeader = $domain !== null ? '-H ' . escapeshellarg("Host: {$domain}") . ' ' : '';
+        $ownName = $domain !== null ? ' || [ "$host" = ' . escapeshellarg($domain) . ' ]' : '';
 
         return <<<SH
 set -u
@@ -1120,41 +1416,95 @@ set -u
 # protocol: a page containing a tab or a newline would otherwise be read as
 # three more ports. It is what tells the engine's own placeholder apart from
 # an application, which no status code can.
-# Follows a relative redirect, because the landing page is what a visitor
-# gets and is where the failure usually is: Firefly III answers / with a 302
-# to /login and /login with a 500, and probing only / reported twelve passing
-# checks on a site that served an error page to everyone.
+# Follows a redirect, because the landing page is what a visitor gets and is
+# where the failure usually is: Firefly III answers / with a 302 to /login and
+# /login with a 500, and probing only / reported twelve passing checks on a
+# site that served an error page to everyone.
 #
-# Relative only, and bounded. An application that canonicalises to its own
-# absolute URL -- WordPress on every site -- must not send this probe out of
-# the container and onto the public internet; that case is already understood
-# one layer up, where a local redirect against a remote 200 reads as healthy.
+# Two shapes are followed, and both stay on loopback. A relative `Location:
+# /login` is the common one. An absolute one is followed only when it points
+# back at this same 127.0.0.1 port -- which is what a framework that builds
+# its redirect from the request host produces, and what Firefly does: it
+# answers an http request with `Location: https://127.0.0.1:8000/login`.
+# Following the relative form alone still read 302 on a site whose login page
+# was a 500, so the absolute-but-local case has to be here too.
+#
+# The scheme of that Location is deliberately ignored, and this is the part
+# that would have made things worse rather than better. Firefly names https
+# because the engine sets FORCE_SSL and it believes it is behind a proxy, but
+# the port the probe dials is the container's own Apache, which speaks plain
+# http -- following the scheme it named would fail the TLS handshake and
+# report 000 for a healthy site. The path and the port are taken from the
+# Location; the scheme is the one that already got an answer. An app that
+# really terminates TLS answered nothing on http, and the retry above is
+# already probing it on https, which is then the scheme carried in here.
+#
+# With the project's domain as the Host header, an app that builds its
+# redirect from the request names that domain instead, so it counts as local
+# too -- the connection still goes to 127.0.0.1.
+#
+# Anything else is not followed. An application that canonicalises to its own
+# public name -- WordPress on every site -- must not send this probe out of
+# the container and onto the internet; that case is already understood one
+# layer up, where a local redirect against a remote 200 reads as healthy.
 probe() {
     err_file=\$(mktemp)
     body_file=\$(mktemp)
     head_file=\$(mktemp)
+    scheme=\$1
     path=/
     hops=0
     while :; do
-        out=\$(curl -sS -k -o "\$body_file" -D "\$head_file" -w '%{http_code} %{time_total}' --max-time {$timeout} "\$1://127.0.0.1:\$2\$path" 2>"\$err_file") || true
+        out=\$(curl -sS -k {$hostHeader}-o "\$body_file" -D "\$head_file" -w '%{http_code} %{time_total}' --max-time {$timeout} "\$scheme://127.0.0.1:\$2\$path" 2>"\$err_file") || true
         code=\${out%% *}
         case "\$code" in
             30[12378])
                 location=\$(sed -n 's/^[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]:[[:space:]]*//p' "\$head_file" | tr -d '\r\n' | head -n 1)
+                # Path-relative, made absolute against the current path first:
+                # Dolibarr answers / with `Location: install/index.php`.
+                case "\$location" in
+                    /*|*:*|'') ;;
+                    *) base=\${path%%\?*}; location=\${base%/*}/\$location ;;
+                esac
+                follow=0
+                new_path=/
                 case "\$location" in
                     /*)
-                        hops=\$((hops + 1))
-                        if [ "\$hops" -le 5 ]; then
-                            path=\$location
-                            continue
+                        new_path=\$location
+                        follow=1
+                        ;;
+                    *)
+                        rest=\${location#*//}
+                        # `rest` is the whole string when there was no '//': a
+                        # scheme-relative or malformed Location, not an address.
+                        if [ -n "\$rest" ] && [ "\$rest" != "\$location" ]; then
+                            authority=\${rest%%/*}
+                            case "\$rest" in
+                                */*) new_path=/\${rest#*/} ;;
+                            esac
+                            host=\${authority%%:*}
+                            port=\${authority#*:}
+                            [ "\$port" = "\$authority" ] && port=
+                            if { [ "\$host" = 127.0.0.1 ] || [ "\$host" = localhost ]{$ownName}; } \
+                                && { [ -z "\$port" ] || [ "\$port" = "\$2" ]; }; then
+                                follow=1
+                            fi
                         fi
                         ;;
                 esac
+                if [ "\$follow" = 1 ]; then
+                    hops=\$((hops + 1))
+                    if [ "\$hops" -le 5 ]; then
+                        path=\$new_path
+                        continue
+                    fi
+                fi
                 ;;
         esac
         break
     done
-    printf '%s\\t%s\\t%s' "\${out:-000 0}" "\$(tr -d '\\r\\n' <"\$err_file" | sed -e 's/^curl: ([0-9]*) //' -e 's/ after [0-9]* ms:.*//' | cut -c1-120)" "\$(head -c {$sample} "\$body_file" | base64 | tr -d '\\r\\n')"
+    # Last: the path that answered, after the redirects above.
+    printf '%s\\t%s\\t%s\\t%s' "\${out:-000 0}" "\$(tr -d '\\r\\n' <"\$err_file" | sed -e 's/^curl: ([0-9]*) //' -e 's/ after [0-9]* ms:.*//' | cut -c1-120)" "\$(head -c {$sample} "\$body_file" | base64 | tr -d '\\r\\n')" "\$(printf '%s' "\$path" | tr -d '\\t\\r\\n' | cut -c1-512)"
     rm -f "\$err_file" "\$body_file" "\$head_file"
 }
 
@@ -1170,7 +1520,12 @@ for port in {$list}; do
                 result=\$secure
             fi
         fi
-        [ "\${result%% *}" != "000" ] && break
+        # A proxy bundled in the image (Caddy, nginx) binds the port at once
+        # and answers 502-504 until its backend is up: keep waiting on those.
+        case "\${result%% *}" in
+            000|502|503|504) ;;
+            *) break ;;
+        esac
         [ "\$attempt" -ge {$attempts} ] && break
         attempt=\$((attempt + 1))
         sleep {$delay}
@@ -1220,7 +1575,8 @@ SH;
                 (int) ($measured[0] ?? 0),
                 (float) ($measured[1] ?? 0),
                 isset($fields[3]) ? trim($fields[3]) : '',
-                isset($fields[4]) ? trim($fields[4]) : ''
+                isset($fields[4]) ? trim($fields[4]) : '',
+                isset($fields[5]) ? trim($fields[5]) : ''
             );
         }
 
@@ -1262,7 +1618,8 @@ SH;
         int $code,
         float $time,
         string $error,
-        string $bodyBase64 = ''
+        string $bodyBase64 = '',
+        string $path = ''
     ): array {
         if ($code === 0) {
             return self::blank($port, $error !== '' ? $error : 'no response');
@@ -1281,6 +1638,8 @@ SH;
             // a page of somebody's application does not belong in an API
             // response about whether that application is up.
             'body' => self::decodeSample($bodyBase64),
+            // Where the redirects ended; evidence too, like the body.
+            'path' => str_starts_with($path, '/') ? $path : HealthCheck::DEFAULT_PATH,
         ];
     }
 

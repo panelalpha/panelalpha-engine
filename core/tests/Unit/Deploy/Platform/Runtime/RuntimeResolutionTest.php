@@ -326,6 +326,18 @@ class RuntimeResolutionTest extends TestCase
     }
 
     /**
+     * The start command runs in the runtime image, which is Debian or Ubuntu with
+     * GNU find; busybox find (an Alpine test runner) has no -printf.
+     */
+    private function requireGnuFind(): void
+    {
+        exec('find . -maxdepth 0 -printf "" 2>/dev/null', $out, $code);
+        if ($code !== 0) {
+            $this->markTestSkipped('needs GNU find (-printf), which the runtime images ship');
+        }
+    }
+
+    /**
      * Runs the generated start command against a fake target/release and
      * returns what it printed and which binary it exec'd.
      *
@@ -334,6 +346,7 @@ class RuntimeResolutionTest extends TestCase
      */
     private function runRustStart(array $executables, string $start): array
     {
+        $this->requireGnuFind();
         $release = $this->tmpDir . '/target/release';
         mkdir($release . '/deps', 0o777, true);
         foreach ($executables as $name) {

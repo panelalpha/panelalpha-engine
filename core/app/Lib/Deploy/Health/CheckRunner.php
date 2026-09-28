@@ -27,11 +27,21 @@ final class CheckRunner
      */
     public const SERVING_RESTARTING = 'restarting';
 
+    /** @var array<string, array{check: string, reason: string, covered_by: ?string}> by reference */
+    private readonly array $skips;
+
     /**
      * @param list<HealthCheck> $checks
+     * @param list<array{check: string, reason: string, covered_by: ?string}> $skips
+     *        the manifest's `check_skip` entries
      */
-    public function __construct(private readonly array $checks)
+    public function __construct(private readonly array $checks, array $skips = [])
     {
+        $byReference = [];
+        foreach ($skips as $skip) {
+            $byReference[$skip['check']] = $skip;
+        }
+        $this->skips = $byReference;
     }
 
     /**
@@ -49,10 +59,33 @@ final class CheckRunner
      * The same, plus the checks a source recipe directory ships of its own.
      *
      * @param list<string> $references
+     * @param list<array{check: string, reason: string, covered_by: ?string}> $skips
      */
-    public static function forWithDirectory(?string $runtime, array $references, ?string $directory): self
+    public static function forWithDirectory(
+        ?string $runtime,
+        array $references,
+        ?string $directory,
+        array $skips = []
+    ): self {
+        return new self(CheckRegistry::for($runtime, $references, $directory), $skips);
+    }
+
+    /**
+     * The paths besides `/` these checks ask about, each once.
+     *
+     * @return list<string>
+     */
+    public function paths(): array
     {
-        return new self(CheckRegistry::for($runtime, $references, $directory));
+        $paths = [];
+        foreach ($this->checks as $check) {
+            $path = $check->path();
+            if ($path !== HealthCheck::DEFAULT_PATH && !in_array($path, $paths, true)) {
+                $paths[] = $path;
+            }
+        }
+
+        return $paths;
     }
 
     /**
@@ -126,9 +159,20 @@ final class CheckRunner
         $context = $projectDir !== null && is_dir($projectDir) ? ProjectContext::at($projectDir) : null;
         $matcher = new PlatformMatcher(\App\Lib\Deploy\Platform\Probes\ProbeRegistry::all());
 
+        $applies = [];
+        foreach ($this->checks as $check) {
+            $applies[$check->reference()] = $check->when === null
+                || ($context !== null && $matcher->matches($check->when, $context));
+        }
+
         $results = [];
         foreach ($this->checks as $check) {
-            if ($check->when !== null && ($context === null || !$matcher->matches($check->when, $context))) {
+            $skip = $this->honouredSkip($check, $applies);
+            if ($skip !== null) {
+                $results[] = CheckResult::notApplicable($check, $skip['reason'], $skip['covered_by']);
+                continue;
+            }
+            if (!$applies[$check->reference()]) {
                 $results[] = CheckResult::skipped($check);
                 continue;
             }
@@ -136,6 +180,28 @@ final class CheckRunner
         }
 
         return $results;
+    }
+
+    /**
+     * The manifest's `check_skip` entry for this check, if it holds.
+     *
+     * An `error` check is only waived while the check covering it is actually
+     * asked. The manifest reader refuses the rest; this is the same rule at the
+     * point where a missing cover would otherwise hide an outage.
+     *
+     * @param array<string, bool> $applies by reference: asked, not guarded out
+     * @return array{check: string, reason: string, covered_by: ?string}|null
+     */
+    private function honouredSkip(HealthCheck $check, array $applies): ?array
+    {
+        $skip = $this->skips[$check->reference()] ?? null;
+        if ($skip === null || $check->severity !== HealthCheck::SEVERITY_ERROR) {
+            return $skip;
+        }
+
+        $cover = $skip['covered_by'];
+
+        return $cover !== null && ($applies[$cover] ?? false) && !isset($this->skips[$cover]) ? $skip : null;
     }
 
     /**
@@ -199,6 +265,11 @@ final class CheckRunner
     /** Does the response satisfy every condition the check declared? */
     private static function holds(HealthCheck $check, ProbedResponse $response): bool
     {
+        // Not where this check looks: nothing to object to.
+        if ($check->landing !== [] && !$response->landedUnder($check->landing)) {
+            return true;
+        }
+
         $expect = $check->expect;
 
         if (isset($expect['status']) && !$response->statusMatches((array) $expect['status'])) {

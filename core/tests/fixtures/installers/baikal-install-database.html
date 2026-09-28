@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Baïkal Maintainance</title>
+		<base href="http://127.0.0.1:18203/" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+		<!-- Le styles -->
+		<link href="res/core/TwitterBootstrap/css/bootstrap.css" rel="stylesheet" />
+		<link href="res/core/BaikalAdmin/GlyphiconsPro/glyphpro.css" rel="stylesheet" />
+		<link href="res/core/BaikalAdmin/GlyphiconsPro/glyphpro-2x.css" rel="stylesheet" />
+		<link href="res/core/BaikalAdmin/Templates/Page/style.css" rel="stylesheet" />
+		<link href="res/core/TwitterBootstrap/css/bootstrap-responsive.css" rel="stylesheet" />
+
+		
+	</head>
+	<body>
+		<div class="navbar navbar-inverse navbar-fixed-top">
+	<div class="navbar-inner">
+		<div class="container">
+			<a class="brand"><img style="vertical-align: text-top; line-height: 20px;" src="res/core/BaikalAdmin/Templates/Page/baikal-text-20.png" /> Install Tool</a>
+		</div>
+	</div>
+</div>
+
+
+		<div class="container">
+			<header class="jumbotron subhead" id="overview">
+	<h1><i class="glyph2x-magic"></i>Baïkal Database setup</h1>
+	<p class="lead">Configure Baïkal Database.</p>
+</header>
+
+<a id="formid"></a>
+
+<form class="form-horizontal" action="" method="post" enctype="multipart/form-data">
+    <input type="hidden" name="Baikal_Model_Config_Database::submitted" value="1" />
+    <input type="hidden" name="refreshed" value="0" />
+    <input type="hidden" name="CSRF_TOKEN" value="f3f061036d9fcb3488efba7f86358fbf4f60e7ee" />
+    <fieldset>
+        <legend style="line-height: 40px;">Editing Database<i class=glyph-cogwheel></i><strong>Baïkal Database Settings</strong></legend>
+        
+        	<div class="control-group">
+		<label class="control-label" for="backend">Database Backend</label>
+		<div class="controls">
+			<select class="" id="backend" name="data[backend]" onchange="document.getElementsByTagName('form')[0].elements['refreshed'].value=1;document.getElementsByTagName('form')[0].submit();" >
+				<option selected="selected">sqlite</option>
+<option>mysql</option>
+<option>pgsql</option>
+			</select>
+			
+		</div>
+	</div><input type="hidden" name="witness[backend]" value="1" />
+<div class="control-group">
+	<label class="control-label" for="sqlite_file">SQLite file path</label>
+	<div class="controls">
+		<input type="text" class="input-xxlarge" id="sqlite_file" name="data[sqlite_file]" value="/var/www/baikal/Specific/db/db.sqlite"/>
+		<p class="help-block">The absolute server path to the SQLite file</p>
+	</div>
+</div><input type="hidden" name="witness[sqlite_file]" value="1" />
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save changes</button>
+            
+        </div>
+    </fieldset>
+</form>
+
+
+		</div> <!-- /container -->
+
+		<!-- Le javascript
+		================================================== -->
+		<!-- Placed at the end of the document so the pages load faster -->
+		<script src="res/core/TwitterBootstrap/js/jquery-3.1.0.min.js"></script>
+		<script src="res/core/TwitterBootstrap/js/jquery.color-2.2.0.min.js"></script>
+		<script src="res/core/TwitterBootstrap/js/bootstrap.min.js"></script>
+		<script src="res/core/BaikalAdmin/main.js"></script>
+		
+	</body>
+</html>

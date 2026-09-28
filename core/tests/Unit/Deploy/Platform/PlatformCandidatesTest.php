@@ -182,6 +182,22 @@ class PlatformCandidatesTest extends TestCase
     }
 
     /**
+     * A shipped recipe whose check_skip is covered by one of its own checks/
+     * (Apaxy) loads here too, instead of failing the deploy as an unasked check.
+     */
+    public function test_a_source_recipe_that_skips_a_check_its_own_checks_cover_is_listed(): void
+    {
+        $this->writeFile('Dockerfile', "FROM httpd:2.4\nEXPOSE 8080\n");
+
+        $candidates = PlatformCandidates::forContext(
+            ProjectContext::at($this->tmpDir, 'https://github.com/oupala/apaxy')
+        );
+
+        $this->assertSame(PlatformCandidates::VIA_RECIPE, $candidates[0]['via']);
+        $this->assertSame('dockerfile', $candidates[0]['id']);
+    }
+
+    /**
      * @return list<array<string, mixed>>
      * @throws ManifestException
      */

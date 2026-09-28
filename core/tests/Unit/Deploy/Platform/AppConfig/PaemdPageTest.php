@@ -166,8 +166,9 @@ class PaemdPageTest extends TestCase
                 ['host' => 'github.com', 'owner' => 'n8n-io', 'repo' => 'n8n'],
             ],
             'self-hosted with port and subgroup' => [
+                // A GitLab subgroup is part of the namespace, not the repository name.
                 'https://git.example.com:8443/group/sub/repo',
-                ['host' => 'git.example.com', 'owner' => 'group', 'repo' => 'sub'],
+                ['host' => 'git.example.com', 'owner' => 'group/sub', 'repo' => 'repo'],
             ],
             'owner only' => ['https://github.com/n8n-io', null],
             'not a url' => ['nonsense', null],

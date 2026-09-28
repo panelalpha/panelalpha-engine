@@ -21,6 +21,16 @@ final class CheckRegistry
     /** The group every application is asked, whatever it runs. */
     public const BASELINE = '_baseline';
 
+    /**
+     * Runtimes that run what the repository ships have no group of their own,
+     * so they borrow the framework checks (Django ALLOWED_HOSTS, Rails blocked
+     * host). Each is guarded by `when: file:` (#209).
+     */
+    private const BORROWED_GROUPS = [
+        PlatformManifest::RUNTIME_COMPOSE => PlatformManifest::RUNTIME_COMMAND,
+        PlatformManifest::RUNTIME_DOCKERFILE => PlatformManifest::RUNTIME_COMMAND,
+    ];
+
     /** @var array<string, list<HealthCheck>>|null group => checks */
     private static ?array $groups = null;
 
@@ -82,8 +92,9 @@ final class CheckRegistry
         $groups = self::allWithDirectory($recipeDirectory);
         $selected = $groups[self::BASELINE] ?? [];
 
-        if ($runtime !== null && isset($groups[$runtime])) {
-            $selected = array_merge($selected, $groups[$runtime]);
+        $group = $runtime !== null ? (self::BORROWED_GROUPS[$runtime] ?? $runtime) : null;
+        if ($group !== null && isset($groups[$group])) {
+            $selected = array_merge($selected, $groups[$group]);
         }
 
         foreach ($references as $reference) {

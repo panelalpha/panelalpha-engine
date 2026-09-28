@@ -160,6 +160,18 @@ class JavaRuntimeTest extends TestCase
     }
 
     /**
+     * The start command runs in the runtime image, which is Debian or Ubuntu with
+     * GNU find; busybox find (an Alpine test runner) has no -printf.
+     */
+    private function requireGnuFind(): void
+    {
+        exec('find . -maxdepth 0 -printf "" 2>/dev/null', $out, $code);
+        if ($code !== 0) {
+            $this->markTestSkipped('needs GNU find (-printf), which the runtime images ship');
+        }
+    }
+
+    /**
      * Runs the real generated command against a real directory tree and
      * reports which jar it picked, or '' when it refused to start one.
      *
@@ -170,6 +182,7 @@ class JavaRuntimeTest extends TestCase
      */
     private function jarChosenIn(array $files): string
     {
+        $this->requireGnuFind();
         $root = sys_get_temp_dir() . '/java-jar-' . bin2hex(random_bytes(6));
         mkdir($root . '/target', 0o777, true);
         foreach ($files as $path => $size) {

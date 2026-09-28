@@ -19,13 +19,46 @@ class AppHealthTest extends TestCase
         // proxy. The path is a variable now, because the probe follows a
         // relative redirect to reach the page a visitor actually lands on --
         // but the host it dials never moves off 127.0.0.1.
-        $this->assertStringContainsString('"$1://127.0.0.1:$2$path"', $script);
+        $this->assertStringContainsString('"$scheme://127.0.0.1:$2$path"', $script);
         $this->assertStringContainsString('path=/', $script);
+        // The scheme stays whatever the caller passed in, even when a
+        // redirect named another: the port dialled is the container's own
+        // Apache, and following a Location's `https` there fails the
+        // handshake and reports 000 for a healthy site.
+        $this->assertStringNotContainsString('scheme=$new_scheme', $script);
         $this->assertSame(
             substr_count($script, '://'),
             substr_count($script, '://127.0.0.1:'),
             'every URL the probe builds is loopback'
         );
+    }
+
+    /**
+     * Firefly III answers `/` with `Location: https://127.0.0.1:8000/login`
+     * -- absolute, and loopback. A probe that only followed `Location: /login`
+     * reported 302 for that site, and the login page behind it was the 500.
+     */
+    public function test_probe_script_follows_an_absolute_redirect_only_when_it_is_local(): void
+    {
+        $script = AppHealth::probeScript([8000]);
+
+        $this->assertStringContainsString('rest=${location#*//}', $script);
+        $this->assertStringContainsString('[ "$host" = 127.0.0.1 ] || [ "$host" = localhost ]', $script);
+        $this->assertStringContainsString('[ -z "$port" ] || [ "$port" = "$2" ]', $script);
+        // A public name is not an address this probe may dial: following it
+        // would take the check out of the container and onto the internet.
+        $this->assertStringContainsString('follow=0', $script);
+        $this->assertStringNotContainsString('example.com', $script);
+    }
+
+    public function test_probe_script_sends_the_project_domain_as_host_but_dials_loopback(): void
+    {
+        $script = AppHealth::probeScript([8000], 4, 2, 1, 'Shop.Example.com');
+
+        $this->assertStringContainsString("-H 'Host: shop.example.com' ", $script);
+        $this->assertStringContainsString('"$scheme://127.0.0.1:$2$path"', $script);
+        $this->assertStringNotContainsString('Host:', AppHealth::probeScript([8000], 4, 2, 1));
+        $this->assertStringNotContainsString('Host:', AppHealth::probeScript([8000], 4, 2, 1, '  '));
     }
 
     public function test_probe_script_falls_back_to_https_only_when_http_answers_nothing(): void
@@ -61,6 +94,8 @@ class AppHealthTest extends TestCase
             // returned: no probe output means an empty sample, never a
             // missing key the runner would have to guard against.
             'body' => '',
+            // Evidence too: a line without the path field answered at `/`.
+            'path' => '/',
         ]], $results);
     }
 

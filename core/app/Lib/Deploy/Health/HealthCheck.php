@@ -23,11 +23,12 @@ final class HealthCheck
     public const DEFAULT_PATH = '/';
 
     /** @var list<string> */
-    private const KNOWN_KEYS = ['$schema', 'id', 'severity', 'expect', 'when', 'message', 'fix', 'serving', 'explain'];
+    private const KNOWN_KEYS = ['$schema', 'id', 'severity', 'expect', 'when', 'landing', 'message', 'fix', 'serving', 'explain'];
 
     /**
      * @param array<string, mixed> $expect
      * @param array<string, mixed>|null $when
+     * @param list<string> $landing
      */
     private function __construct(
         public readonly string $group,
@@ -39,7 +40,10 @@ final class HealthCheck
         public readonly ?string $fix,
         public readonly ?string $serving,
         public readonly ?string $explain,
-        public readonly string $source
+        public readonly string $source,
+        // Asked only when the probe's redirects from `/` ended under one of
+        // these paths; any other landing passes. Empty: always asked.
+        public readonly array $landing = []
     ) {
     }
 
@@ -131,6 +135,7 @@ final class HealthCheck
 
         self::assertPath($expect, $group, $id);
         self::assertJson($expect, $group, $id);
+        $landing = self::landing($raw, $group, $id);
 
         return new self(
             $group,
@@ -142,7 +147,8 @@ final class HealthCheck
             self::optionalString($raw, 'fix', $group, $id),
             self::optionalString($raw, 'serving', $group, $id),
             self::optionalString($raw, 'explain', $group, $id),
-            $source
+            $source,
+            $landing
         );
     }
 
@@ -174,6 +180,32 @@ final class HealthCheck
         if (preg_match('/[\s\x00-\x1f]/', $path) === 1) {
             throw new CheckException("{$group}/{$id}: 'path' must not contain whitespace or control characters");
         }
+    }
+
+    /**
+     * `landing` is a non-empty list of local paths, the same shape `path`
+     * must have.
+     *
+     * @param array<string, mixed> $raw
+     * @return list<string>
+     */
+    private static function landing(array $raw, string $group, string $id): array
+    {
+        if (!array_key_exists('landing', $raw)) {
+            return [];
+        }
+
+        $landing = $raw['landing'];
+        if (!is_array($landing) || $landing === [] || !array_is_list($landing)) {
+            throw new CheckException("{$group}/{$id}: 'landing' must be a non-empty list of paths");
+        }
+        foreach ($landing as $path) {
+            if (!is_string($path) || !str_starts_with($path, '/') || preg_match('/[\s\x00-\x1f]/', $path) === 1) {
+                throw new CheckException("{$group}/{$id}: 'landing' paths must begin with '/' and hold no whitespace");
+            }
+        }
+
+        return $landing;
     }
 
     /**

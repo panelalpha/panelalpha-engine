@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<meta name="robots" content="noindex,nofollow" />
+	<title>WordPress &rsaquo; Installation</title>
+	<link rel='stylesheet' id='dashicons-css' href='http://127.0.0.1:18201/wp-includes/css/dashicons.min.css?ver=7.1.2' media='all' />
+<link rel='stylesheet' id='buttons-css' href='http://127.0.0.1:18201/wp-includes/css/buttons.min.css?ver=7.1.2' media='all' />
+<link rel='stylesheet' id='forms-css' href='http://127.0.0.1:18201/wp-admin/css/forms.min.css?ver=7.1.2' media='all' />
+<link rel='stylesheet' id='l10n-css' href='http://127.0.0.1:18201/wp-admin/css/l10n.min.css?ver=7.1.2' media='all' />
+<link rel='stylesheet' id='wp-base-styles-css' href='http://127.0.0.1:18201/wp-includes/css/dist/base-styles/admin-schemes.min.css?ver=7.1.2' media='all' />
+<link rel='stylesheet' id='install-css' href='http://127.0.0.1:18201/wp-admin/css/install.min.css?ver=7.1.2' media='all' />
+</head>
+<body class="wp-core-ui admin-color-modern">
+<p id="logo">WordPress</p>
+
+	<h1>Welcome</h1>
+<p>Welcome to the famous five-minute WordPress installation process! Just fill in the information below and you&#8217;ll be on your way to using the most extendable and powerful personal publishing platform in the world.</p>
+
+<h2>Information needed</h2>
+<p>Please provide the following information. Do not worry, you can always change these settings later.</p>
+
+		<form id="setup" method="post" action="install.php?step=2" novalidate="novalidate">
+	<table class="form-table" role="presentation">
+		<tr>
+			<th scope="row"><label for="weblog_title">Site Title</label></th>
+			<td><input name="weblog_title" type="text" id="weblog_title" size="25" value="" /></td>
+		</tr>
+		<tr>
+			<th scope="row"><label for="user_login">Username</label></th>
+			<td>
+							<input name="user_name" type="text" id="user_login" size="25" aria-describedby="user-name-desc" value="" />
+				<p id="user-name-desc">Usernames can have only alphanumeric characters, spaces, underscores, hyphens, periods, and the @ symbol.</p>
+							</td>
+		</tr>
+				<tr class="form-field form-required user-pass1-wrap">
+			<th scope="row">
+				<label for="pass1">
+					Password				</label>
+			</th>
+			<td>
+				<div class="wp-pwd">
+										<div class="password-input-wrapper">
+						<input type="password" name="admin_password" id="pass1" class="regular-text" autocomplete="new-password" spellcheck="false" data-reveal="1" data-pw="DpDUjbdOR@CI0nvDo9" aria-describedby="pass-strength-result admin-password-desc" />
+						<div id="pass-strength-result" aria-live="polite"></div>
+					</div>
+					<button type="button" class="button wp-hide-pw user-new-password-toggle hide-if-no-js" data-start-masked="0" data-toggle="0" aria-label="Hide password">
+						<span class="dashicons dashicons-hidden"></span>
+						<span class="text">Hide</span>
+					</button>
+				</div>
+				<p id="admin-password-desc"><span class="description important hide-if-no-js">
+				<strong>Important:</strong>
+								You will need this password to log&nbsp;in. Please store it in a secure location.</span></p>
+			</td>
+		</tr>
+		<tr class="form-field form-required user-pass2-wrap hide-if-js">
+			<th scope="row">
+				<label for="pass2">Repeat Password					<span class="description">(required)</span>
+				</label>
+			</th>
+			<td>
+				<input type="password" name="admin_password2" id="pass2" autocomplete="new-password" spellcheck="false" />
+			</td>
+		</tr>
+		<tr class="pw-weak">
+			<th scope="row">Confirm Password</th>
+			<td>
+				<label>
+					<input type="checkbox" name="pw_weak" class="pw-checkbox" />
+					Confirm use of weak password				</label>
+			</td>
+		</tr>
+				<tr>
+			<th scope="row"><label for="admin_email">Your Email</label></th>
+			<td><input name="admin_email" type="email" id="admin_email" size="25" aria-describedby="admin-email-desc" value="" />
+			<p id="admin-email-desc">Double-check your email address before continuing.</p></td>
+		</tr>
+				<tr>
+			<th scope="row">Se

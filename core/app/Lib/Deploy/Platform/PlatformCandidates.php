@@ -75,7 +75,12 @@ final class PlatformCandidates
             return null;
         }
 
-        return SourceRecipes::fromAppConfig($hit['config'], AppConfigLocator::describe($hit));
+        // The recipe's own checks, as PlatformSelector::fromSource() passes them.
+        return SourceRecipes::fromAppConfig(
+            $hit['config'],
+            AppConfigLocator::describe($hit),
+            SourceRecipes::checksDirectory($hit['path'])
+        );
     }
 
     /**

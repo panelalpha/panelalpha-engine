@@ -75,10 +75,10 @@ class HealthProbeRedirectTest extends TestCase
     }
 
     /** The status the probe finally reports for that port. */
-    private function probe(int $port): string
+    private function probe(int $port, ?string $domain = null): string
     {
         $script = tempnam(sys_get_temp_dir(), 'pa-probe') . '.sh';
-        file_put_contents($script, AppHealth::probeScript([$port], 5, 1, 0));
+        file_put_contents($script, AppHealth::probeScript([$port], 5, 1, 0, $domain));
 
         exec('sh ' . escapeshellarg($script) . ' 2>/dev/null', $lines);
         unlink($script);
@@ -182,5 +182,59 @@ class HealthProbeRedirectTest extends TestCase
         $started = microtime(true);
         $this->assertSame('302', $this->probe($port));
         $this->assertLessThan(20.0, microtime(true) - $started, 'the probe must bound its hops');
+    }
+
+    /**
+     * Django's ALLOWED_HOSTS, Laravel's TrustHosts, Phorge's site URIs: the app
+     * refuses any Host it was not configured for. Probed as `127.0.0.1` it
+     * answered 400/500 while its domain served fine (#165, #190).
+     */
+    public function test_it_asks_with_the_project_domain_as_host(): void
+    {
+        $router = <<<'PHP'
+            <?php
+            if (($_SERVER['HTTP_HOST'] ?? '') !== 'app.example.test') {
+                http_response_code(400);
+                echo 'DisallowedHost';
+                exit;
+            }
+            echo '<html><title>Phorge</title></html>';
+            PHP;
+        $port = $this->serve($router);
+
+        $this->assertSame('200', $this->probe($port, 'app.example.test'));
+        $this->assertSame('400', $this->probe($port), 'without a domain the probe still asks as 127.0.0.1');
+    }
+
+    /**
+     * An app that builds its redirect from the request host now names the
+     * domain. That is still this container, so it is followed -- over
+     * 127.0.0.1 -- and the 500 behind it is what gets reported.
+     */
+    public function test_an_absolute_redirect_to_the_project_domain_is_followed_locally(): void
+    {
+        $port = $this->serve(<<<'PHP'
+            <?php
+            if (($_SERVER['HTTP_HOST'] ?? '') !== 'app.example.test') { http_response_code(400); exit; }
+            $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+            if ($path === '/') {
+                header('Location: https://' . $_SERVER['HTTP_HOST'] . '/login', true, 302);
+                exit;
+            }
+            http_response_code(500);
+            echo 'Vite manifest not found';
+            PHP);
+
+        $this->assertSame('500', $this->probe($port, 'App.Example.test'));
+    }
+
+    /** A redirect to some other public name still stays unfollowed. */
+    public function test_an_absolute_redirect_to_another_name_is_not_followed_with_a_domain(): void
+    {
+        $port = $this->serve(<<<'PHP'
+            <?php header('Location: https://example.com/elsewhere', true, 302); exit;
+            PHP);
+
+        $this->assertSame('302', $this->probe($port, 'app.example.test'));
     }
 }

@@ -47,6 +47,22 @@ final class CheckResult
     }
 
     /**
+     * The manifest's `check_skip` said this check does not apply, and why.
+     * Reported, not dropped: a skip nobody can see is a check nobody runs.
+     */
+    public static function notApplicable(HealthCheck $check, string $reason, ?string $coveredBy): self
+    {
+        return new self(
+            $check,
+            self::STATUS_SKIPPED,
+            'Not applicable: the application\'s manifest skips this check.',
+            $reason,
+            null,
+            ['declared_by' => 'check_skip', 'covered_by' => $coveredBy]
+        );
+    }
+
+    /**
      * @param array<string, mixed> $evidence
      */
     public static function fail(
