@@ -110,6 +110,8 @@ class SecretVaultEntry extends Model
 
     protected $attributes = [
         'scope' => self::SCOPE_PROJECT,
+        // The column default, so a freshly created entry does not serialise null.
+        'use_count' => 0,
     ];
 
     /**
