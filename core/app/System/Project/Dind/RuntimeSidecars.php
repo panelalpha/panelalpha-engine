@@ -8,6 +8,7 @@ use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Compose\ServiceDependencies;
 use App\Lib\Deploy\Sidecar\EnvSidecars;
+use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use App\Lib\Deploy\Source\GitUrl;
 
 /**
@@ -19,7 +20,12 @@ use App\Lib\Deploy\Source\GitUrl;
  */
 class RuntimeSidecars
 {
+    /** Words a compose filename uses for a stack that is not the deployment. */
+    private const NON_PRODUCTION_WORDS = ['dev', 'development', 'local', 'test', 'tests', 'testing', 'ci', 'e2e', 'debug'];
+
     private DindProject $dind;
+
+    private ?SidecarPasswords $passwords = null;
 
     public function __construct(DindProject $dind)
     {
@@ -41,13 +47,25 @@ class RuntimeSidecars
             if ($raw === null || !ComposeFileInspector::isLocalDevComposeYaml($raw)) {
                 continue;
             }
+            // The repo says what production runs beside the app: that beats
+            // the workstation stack (LinkAce's dev file adds caddy, a second
+            // database and buggregator; its production file does not).
+            $production = $this->fromTemplates(
+                $projectDir,
+                self::productionComposeFilenames($projectDir),
+                " instead of the development {$candidate}"
+            );
+            if ($production !== null) {
+                return $production;
+            }
             $extracted = ComposeHarden::extractRuntimeSidecarsFromYaml(
                 $raw,
                 false,
                 $this->imagePortLookup(),
                 $this->projectIdentity(),
                 $this->accountMemoryMb(),
-                $this->placeholderSeed()
+                $this->placeholderSeed(),
+                $this->passwords()
             );
             if ($extracted['services'] !== []) {
                 $names = implode(', ', array_keys($extracted['services']));
@@ -59,32 +77,15 @@ class RuntimeSidecars
 
         // Nothing live to learn from: fall back to a template the repo ships
         // (compose.example.yml, docker-compose.mysql.yml, …).
-        foreach (self::exampleComposeFilenames($projectDir) as $candidate) {
-            $raw = $this->dind->projectTree()->read($projectDir . '/' . $candidate);
-            if ($raw === null) {
-                continue;
-            }
-            $extracted = ComposeHarden::extractRuntimeSidecarsFromYaml(
-                $raw,
-                true,
-                $this->imagePortLookup(),
-                $this->projectIdentity(),
-                $this->accountMemoryMb(),
-                $this->placeholderSeed()
-            );
-            if ($extracted['services'] !== []) {
-                $names = implode(', ', array_keys($extracted['services']));
-                $this->dind->shell()->logger()?->info(
-                    "Adding backing services described in {$candidate}: {$names}"
-                );
-
-                return $extracted;
-            }
+        $template = $this->fromTemplates($projectDir, self::exampleComposeFilenames($projectDir));
+        if ($template !== null) {
+            return $template;
         }
 
         // No compose at all — DATABASE_URL / REDIS_URL on localhost still need a
         // companion container or the app 500s on every request (TanStack + Drizzle).
-        $fromEnv = EnvSidecars::fromProjectDir($projectDir);
+        // Through the account's file layer: a 0600 .env is invisible to www-data.
+        $fromEnv = EnvSidecars::fromProjectDir($projectDir, $this->dind->projectTree()->read(...), $this->passwords());
         if ($fromEnv['services'] !== []) {
             $names = implode(', ', array_keys($fromEnv['services']));
             $this->dind->shell()->logger()?->info(
@@ -95,6 +96,71 @@ class RuntimeSidecars
         }
 
         return ['services' => [], 'volumes' => [], 'env' => []];
+    }
+
+    /**
+     * The first template of $candidates that yields a backing service, read
+     * for its datastores only.
+     *
+     * @param list<string> $candidates
+     * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>}|null
+     */
+    private function fromTemplates(string $projectDir, array $candidates, string $note = ''): ?array
+    {
+        foreach ($candidates as $candidate) {
+            $raw = $this->dind->projectTree()->read($projectDir . '/' . $candidate);
+            if ($raw === null) {
+                continue;
+            }
+            $extracted = ComposeHarden::extractRuntimeSidecarsFromYaml(
+                $raw,
+                true,
+                $this->imagePortLookup(),
+                $this->projectIdentity(),
+                $this->accountMemoryMb(),
+                $this->placeholderSeed(),
+                $this->passwords()
+            );
+            if ($extracted['services'] !== []) {
+                $names = implode(', ', array_keys($extracted['services']));
+                $this->dind->shell()->logger()?->info(
+                    "Adding backing services described in {$candidate}{$note}: {$names}"
+                );
+
+                return $extracted;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * `docker-compose.prod.yml`, `compose.production.yaml`: the author's own
+     * production stack, present on disk.
+     *
+     * @return list<string>
+     */
+    private static function productionComposeFilenames(string $projectDir): array
+    {
+        return array_values(array_filter(
+            self::exampleComposeFilenames($projectDir),
+            static fn (string $name): bool => self::suffixWords($name, ['prod', 'production']) !== []
+        ));
+    }
+
+    /**
+     * The words between `compose` and the extension that are in $words:
+     * `docker-compose.local-dev.yml` gives `local`, `dev`.
+     *
+     * @param list<string> $words
+     * @return list<string>
+     */
+    private static function suffixWords(string $filename, array $words): array
+    {
+        $middle = preg_replace('/^(docker-)?compose\.|\.ya?ml$/i', '', strtolower($filename));
+        $found = preg_split('/[._-]+/', (string) $middle) ?: [];
+
+        return array_values(array_intersect($found, $words));
     }
 
     /**
@@ -132,6 +198,7 @@ class RuntimeSidecars
 
         $projectDir = rtrim($projectDir, '/');
         if ($projectDir !== '' && is_dir($projectDir)) {
+            $found = [];
             foreach (['docker-compose.*.yml', 'docker-compose.*.yaml', 'compose.*.yml', 'compose.*.yaml'] as $pattern) {
                 foreach (glob($projectDir . '/' . $pattern) ?: [] as $path) {
                     $base = basename($path);
@@ -148,9 +215,16 @@ class RuntimeSidecars
                     if ($base === Paths::CLIENT_OVERRIDE_FILENAME) {
                         continue;
                     }
-                    $names[] = $base;
+                    $found[] = $base;
                 }
             }
+            // A file its name marks as not for production (`.dev`, `.test`,
+            // `.ci`) is read last, so it only speaks when nothing else does.
+            $nonProduction = array_values(array_filter(
+                $found,
+                static fn (string $name): bool => self::suffixWords($name, self::NON_PRODUCTION_WORDS) !== []
+            ));
+            $names = array_merge($names, array_diff($found, $nonProduction), $nonProduction);
         }
 
         return array_values(array_unique($names));
@@ -213,6 +287,48 @@ class RuntimeSidecars
         }
 
         return $sidecars;
+    }
+
+    /**
+     * The password a database sidecar gets when nobody set one (engine#189):
+     * per account, unless the account's databases were initialised under the
+     * old `app` and would lock the app out if it changed. Decided on the
+     * first deploy that asks and stored with the account.
+     */
+    public function passwords(): SidecarPasswords
+    {
+        if ($this->passwords !== null) {
+            return $this->passwords;
+        }
+        $user = $this->dind->userModel();
+        $stored = $user->getDetails()[SidecarPasswords::DETAILS_KEY] ?? null;
+        $decision = SidecarPasswords::decideMode(
+            is_string($stored) ? $stored : null,
+            is_string($stored) ? null : $this->accountHasVolumes()
+        );
+        if ($decision['store']) {
+            $this->dind->freezeDeploySnapshot([SidecarPasswords::DETAILS_KEY => $decision['mode']]);
+            $this->dind->shell()->logger()?->info($decision['mode'] === SidecarPasswords::MODE_LEGACY
+                ? 'This account already holds data: database sidecars keep the legacy default password where the project sets none'
+                : 'Database sidecars on this account get their own passwords where the project sets none');
+        }
+
+        return $this->passwords = SidecarPasswords::forMode(
+            $decision['mode'],
+            $this->dind->strategy()->secrets()->for('sidecar-passwords')
+        );
+    }
+
+    /** Whether the account's own Docker holds any volume; null when it cannot be asked. */
+    private function accountHasVolumes(): ?bool
+    {
+        try {
+            $out = $this->dind->shell()->execAsUserQuiet(['docker', 'volume', 'ls', '-q'], [], 60);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return trim($out) !== '';
     }
 
     /** The seed {@see Strategy\UserComposeStrategy} fills compose placeholders from, so both paths agree. */

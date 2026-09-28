@@ -196,9 +196,41 @@ class DeployComposeTest extends TestCase
 
         $this->assertSame('mysql:8.4', $parsed['services']['mysql']['image']);
         $this->assertSame('redis:alpine', $parsed['services']['redis']['image']);
-        $this->assertSame(['mysql', 'redis'], $parsed['services']['app']['depends_on']);
+        $this->assertSame(
+            ['mysql' => ['condition' => 'service_started'], 'redis' => ['condition' => 'service_started']],
+            $parsed['services']['app']['depends_on']
+        );
         $this->assertSame('mysql', $parsed['services']['app']['environment']['DB_HOST']);
         $this->assertArrayHasKey('sail-mysql', $parsed['volumes']);
+    }
+
+    /**
+     * A sidecar with a healthcheck is waited on until it passes: Servas runs
+     * `artisan migrate` on boot and lost the race to its MariaDB (engine#187).
+     */
+    public function test_the_app_waits_for_a_sidecar_that_has_a_healthcheck(): void
+    {
+        $parsed = Yaml::parse(DeployCompose::framework(
+            [
+                'runtime' => 'php',
+                'sidecars' => [
+                    'db' => ['image' => 'mariadb:11', 'healthcheck' => ['test' => ['CMD-SHELL', 'mariadb-admin ping']]],
+                    'redis' => ['image' => 'redis:7'],
+                    'cache' => ['image' => 'memcached', 'healthcheck' => ['disable' => true]],
+                ],
+                'depends_on' => ['db', 'redis', 'cache'],
+            ],
+            8000
+        ));
+
+        $this->assertSame(
+            [
+                'db' => ['condition' => 'service_healthy'],
+                'redis' => ['condition' => 'service_started'],
+                'cache' => ['condition' => 'service_started'],
+            ],
+            $parsed['services']['app']['depends_on']
+        );
     }
 
     public function test_railpack_compose_runs_image_without_bind_mount(): void

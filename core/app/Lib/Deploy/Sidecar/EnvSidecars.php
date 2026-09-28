@@ -79,27 +79,31 @@ class EnvSidecars
     ];
 
     /**
+     * @param (callable(string): ?string)|null $read
      * @return array{
      *   services: array<string, array<string, mixed>>,
      *   volumes: array<string, mixed>,
      *   env: array<string, string>,
      * }
      */
-    public static function fromProjectDir(string $projectDir): array
+    public static function fromProjectDir(string $projectDir, ?callable $read = null, ?SidecarPasswords $passwords = null): array
     {
-        return self::fromVariables(self::variableMap($projectDir));
+        return self::fromVariables(self::variableMap($projectDir, $read), $passwords);
     }
 
     /**
      * @param array<string, string> $variables
+     * @param ?SidecarPasswords $passwords fills a password the URL left out;
+     *        null keeps the legacy `app`
      * @return array{
      *   services: array<string, array<string, mixed>>,
      *   volumes: array<string, mixed>,
      *   env: array<string, string>,
      * }
      */
-    public static function fromVariables(array $variables): array
+    public static function fromVariables(array $variables, ?SidecarPasswords $passwords = null): array
     {
+        $passwords ??= SidecarPasswords::legacy();
         $empty = ['services' => [], 'volumes' => [], 'env' => []];
         $draft = [];
         foreach (self::URL_KEYS as $key) {
@@ -137,7 +141,7 @@ class EnvSidecars
             if (isset($services[$name])) {
                 continue;
             }
-            $built = self::serviceDefinition($engine, $spec);
+            $built = self::serviceDefinition($engine, $spec, $passwords);
             if ($built['service'] === []) {
                 continue;
             }
@@ -163,20 +167,19 @@ class EnvSidecars
     }
 
     /**
-     * `.env.example` first, then `.env` so live values win.
+     * `.env.example` first, then `.env` so live values win. `$read` as in
+     * {@see EnvFile::databaseSettings()}.
      *
+     * @param (callable(string): ?string)|null $read
      * @return array<string, string>
      */
-    public static function variableMap(string $projectDir): array
+    public static function variableMap(string $projectDir, ?callable $read = null): array
     {
         $map = [];
         $projectDir = rtrim($projectDir, '/');
+        $read ??= EnvFile::readHostFile(...);
         foreach (['.env.example', '.env'] as $name) {
-            $path = $projectDir . '/' . $name;
-            if (!is_file($path)) {
-                continue;
-            }
-            $contents = @file_get_contents($path);
+            $contents = $read($projectDir . '/' . $name);
             if (!is_string($contents) || $contents === '') {
                 continue;
             }
@@ -280,14 +283,14 @@ class EnvSidecars
      * @param array{engine: string, username: string, password: string, database: string} $spec
      * @return array{service: array<string, mixed>, volumes: array<string, mixed>}
      */
-    private static function serviceDefinition(string $engine, array $spec): array
+    private static function serviceDefinition(string $engine, array $spec, SidecarPasswords $passwords): array
     {
         $image = self::IMAGES[$engine] ?? null;
         if ($image === null) {
             return ['service' => [], 'volumes' => []];
         }
 
-        [$user, $pass, $database] = self::credentials($engine, $spec);
+        [$user, $pass, $database] = self::credentials($engine, $spec, $passwords);
 
         $service = [
             'image' => $image,
@@ -297,7 +300,7 @@ class EnvSidecars
             ],
         ];
 
-        $environment = self::environmentFor($engine, $user, $pass, $database);
+        $environment = self::environmentFor($engine, $user, $pass, $database, $passwords);
         if ($environment !== []) {
             $service['environment'] = $environment;
         }
@@ -332,24 +335,38 @@ class EnvSidecars
     ];
 
     /**
+     * The init variable that holds each engine's password; the engines that
+     * refuse to start without one.
+     *
+     * @var array<string, string>
+     */
+    private const PASSWORD_VARIABLES = [
+        'postgres' => 'POSTGRES_PASSWORD',
+        'mysql' => 'MYSQL_PASSWORD',
+        'mongo' => 'MONGO_INITDB_ROOT_PASSWORD',
+    ];
+
+    /**
      * The credentials this sidecar will accept, filled in where the URL did
      * not say.
      *
      * A datastore with no password is unreachable rather than open — these
      * images refuse to start without one — so the blank is filled for the
-     * engines that demand it. Redis numbers its databases rather than naming
-     * them, which is why its default is `0` and not `app`.
+     * engines that demand it, with a per-account password rather than the
+     * `app` everyone could guess (engine#189). Redis numbers its databases
+     * rather than naming them, which is why its default is `0` and not `app`.
      *
      * @param array{username: string, password: string, database: string} $spec
      * @return array{0: string, 1: string, 2: string} user, password, database
      */
-    private static function credentials(string $engine, array $spec): array
+    private static function credentials(string $engine, array $spec, SidecarPasswords $passwords): array
     {
         $user = trim($spec['username']) !== '' ? trim($spec['username']) : 'app';
 
         $pass = (string) $spec['password'];
-        if ($pass === '' && in_array($engine, ['postgres', 'mysql', 'mongo'], true)) {
-            $pass = 'app';
+        $variable = self::PASSWORD_VARIABLES[$engine] ?? null;
+        if ($pass === '' && $variable !== null) {
+            $pass = $passwords->for($engine === 'mysql' && $user === 'root' ? 'MYSQL_ROOT_PASSWORD' : $variable);
         }
 
         $database = trim($spec['database']);
@@ -365,15 +382,20 @@ class EnvSidecars
      *
      * @return array<string, string>
      */
-    private static function environmentFor(string $engine, string $user, string $pass, string $database): array
-    {
+    private static function environmentFor(
+        string $engine,
+        string $user,
+        string $pass,
+        string $database,
+        SidecarPasswords $passwords
+    ): array {
         return match ($engine) {
             'postgres' => [
                 'POSTGRES_DB' => $database,
                 'POSTGRES_USER' => $user,
                 'POSTGRES_PASSWORD' => $pass,
             ],
-            'mysql' => self::mysqlEnvironment($user, $pass, $database),
+            'mysql' => self::mysqlEnvironment($user, $pass, $database, $passwords),
             'mongo' => [
                 'MONGO_INITDB_DATABASE' => $database,
                 'MONGO_INITDB_ROOT_USERNAME' => $user,
@@ -388,16 +410,18 @@ class EnvSidecars
      * a URL naming root sets the root password instead of a user pair.
      *
      * There is no MYSQL_ALLOW_EMPTY_PASSWORD branch, because there cannot be
-     * one: {@see credentials()} fills an absent password with `app` for every
-     * engine that refuses to start without one, so `$pass` is never empty by
-     * the time it arrives here. The engine used to carry that branch anyway,
-     * unreachable.
+     * one: {@see credentials()} fills an absent password for every engine
+     * that refuses to start without one, so `$pass` is never empty by the
+     * time it arrives here.
+     *
+     * Root no longer shares the user's password unless the account is legacy.
      *
      * @return array<string, string>
      */
-    private static function mysqlEnvironment(string $user, string $pass, string $database): array
+    private static function mysqlEnvironment(string $user, string $pass, string $database, SidecarPasswords $passwords): array
     {
-        $env = ['MYSQL_DATABASE' => $database, 'MYSQL_ROOT_PASSWORD' => $pass];
+        $root = $user === 'root' ? $pass : $passwords->mysqlRoot($pass);
+        $env = ['MYSQL_DATABASE' => $database, 'MYSQL_ROOT_PASSWORD' => $root];
 
         return $user === 'root' ? $env : $env + [
             'MYSQL_USER' => $user,

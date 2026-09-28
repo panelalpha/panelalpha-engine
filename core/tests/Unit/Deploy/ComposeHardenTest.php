@@ -434,6 +434,25 @@ YAML
         );
     }
 
+    public function test_long_form_mount_of_the_socket_directory_is_removed(): void
+    {
+        $compose = ['services' => ['app' => [
+            'image' => 'example/app',
+            'volumes' => [
+                ['type' => 'bind', 'source' => '/var/run', 'target' => '/x'],
+                ['type' => 'bind', 'source' => '/run/', 'target' => '/y'],
+                ['type' => 'bind', 'source' => '/var/running', 'target' => '/app/running'],
+            ],
+        ]]];
+
+        $service = ComposeHarden::apply($compose)['services']['app'];
+
+        $this->assertSame(
+            [['type' => 'bind', 'source' => '/var/running', 'target' => '/app/running']],
+            $service['volumes']
+        );
+    }
+
     public function test_a_path_that_only_starts_like_run_is_kept(): void
     {
         // `/var/running` is not `/var/run`, and the socket pattern must not

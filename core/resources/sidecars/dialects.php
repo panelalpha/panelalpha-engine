@@ -84,6 +84,10 @@ return [
         //    "not found" -- and `mariadb-admin` does not exist in mysql's.
         //    Trying both covers every image either name appears in; measured
         //    exit 0 on mariadb:lts and on mysql:8.
+        //  - Over TCP. On first boot the entrypoint runs a temporary server
+        //    with networking off; a socket ping reports it healthy, and an app
+        //    waiting on `service_healthy` then got "Can't connect to server on
+        //    'db' (115)" (engine#187, measured on mariadb:11).
         'service' => [
             'environment' => ['MYSQL_ROOT_HOST' => '%'],
             'mem_limit' => '512m',
@@ -91,12 +95,15 @@ return [
             'healthcheck' => [
                 'test' => [
                     'CMD-SHELL',
-                    'mariadb-admin ping -uroot -p"$$MYSQL_ROOT_PASSWORD" 2>/dev/null'
-                    . ' || mysqladmin ping -uroot -p"$$MYSQL_ROOT_PASSWORD"',
+                    'mariadb-admin ping -h127.0.0.1 -uroot -p"$$MYSQL_ROOT_PASSWORD" 2>/dev/null'
+                    . ' || mysqladmin ping -h127.0.0.1 -uroot -p"$$MYSQL_ROOT_PASSWORD"',
                 ],
                 'interval' => '2s',
                 'timeout' => '5s',
                 'retries' => 15,
+                // The app now waits for `healthy` (engine#187), so a first boot
+                // that initialises the datadir must not be counted as failing.
+                'start_period' => '60s',
             ],
         ],
         'aliases' => [

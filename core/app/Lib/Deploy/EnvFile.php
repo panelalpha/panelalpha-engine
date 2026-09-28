@@ -243,9 +243,14 @@ class EnvFile
     /**
      * DB_* from `.env`, falling back to `.env.example`.
      *
+     * Pass `$read` to go through the account's own file layer: a 0600 `.env`
+     * is unreadable to the engine's user and would silently lose to the
+     * example (engine#186).
+     *
+     * @param (callable(string): ?string)|null $read path => contents, null when absent
      * @return array{connection: string, host: string, port: string, database: string, username: string, password: string}
      */
-    public static function databaseSettings(string $projectDir): array
+    public static function databaseSettings(string $projectDir, ?callable $read = null): array
     {
         $settings = [
             'connection' => '',
@@ -264,12 +269,9 @@ class EnvFile
             'DB_PASSWORD' => 'password',
         ];
         $projectDir = rtrim($projectDir, '/');
+        $read ??= self::readHostFile(...);
         foreach (['.env', '.env.example'] as $name) {
-            $path = $projectDir . '/' . $name;
-            if (!is_file($path)) {
-                continue;
-            }
-            $contents = @file_get_contents($path);
+            $contents = $read($projectDir . '/' . $name);
             if (!is_string($contents) || $contents === '') {
                 continue;
             }
@@ -286,5 +288,16 @@ class EnvFile
         }
 
         return $settings;
+    }
+
+    /** A file on the engine's own filesystem, or null when absent or unreadable. */
+    public static function readHostFile(string $path): ?string
+    {
+        if (!is_file($path)) {
+            return null;
+        }
+        $contents = @file_get_contents($path);
+
+        return is_string($contents) ? $contents : null;
     }
 }

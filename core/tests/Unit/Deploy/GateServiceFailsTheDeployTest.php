@@ -83,6 +83,39 @@ class GateServiceFailsTheDeployTest extends TestCase
         $this->assertSame(['ready' => 1, 'verified' => 3], AppLauncher::failedServices($output));
     }
 
+    /**
+     * The services worth waiting for: `restart: "no"` in the hardened run
+     * file and nothing published. Everything else got a restart policy.
+     */
+    public function test_one_shots_are_the_unpublished_no_restart_services(): void
+    {
+        $compose = ['services' => [
+            'manticore' => ['image' => 'manticoresearch/manticore', 'restart' => 'unless-stopped', 'ports' => ['9308:9308']],
+            'ready' => ['image' => 'alpine:3', 'restart' => 'no'],
+            'init' => ['image' => 'x', 'restart' => false],
+            'web' => ['image' => 'nginx', 'restart' => 'no', 'ports' => ['8080:8080']],
+            'worker' => ['image' => 'x', 'restart' => 'always'],
+        ]];
+
+        $this->assertSame(['ready', 'init'], AppLauncher::oneShotServices($compose));
+    }
+
+    /**
+     * A gate that decides after a few seconds is still `running` when `up -d`
+     * returns. Measured: a Manticore gate with `sleep 8` before its refusal
+     * exited 1 eight seconds after the deploy was reported successful.
+     */
+    public function test_a_gate_still_running_is_waited_for(): void
+    {
+        $output = '[{"Service":"manticore","State":"running","ExitCode":0},'
+            . '{"Service":"ready","State":"running","ExitCode":0},'
+            . '{"Service":"migrate","State":"exited","ExitCode":0}]';
+
+        $this->assertSame(['ready'], AppLauncher::stillRunning($output, ['ready', 'migrate']));
+        $this->assertSame([], AppLauncher::failedServices($output));
+        $this->assertSame([], AppLauncher::stillRunning(self::PS_LINES, ['ready']));
+    }
+
     /** Output this cannot read must not invent a failure. */
     public function test_unreadable_output_is_not_a_failure(): void
     {

@@ -55,4 +55,18 @@ class DevServicesTest extends TestCase
     {
         $this->assertFalse(DevServices::isDevSidecar('worker', ['image' => 'ghcr.io/acme/shop:latest']));
     }
+
+    public function test_a_tool_is_recognised_by_its_image_under_any_service_name(): void
+    {
+        $this->assertTrue(DevServices::isDevSidecar('debug', ['image' => 'ghcr.io/buggregator/server:latest']));
+        $this->assertTrue(DevServices::isDevSidecar('mail', ['image' => 'axllent/mailpit']));
+        $this->assertTrue(DevServices::isDevSidecar('browser', ['image' => 'selenium/standalone-chrome:4']));
+        $this->assertTrue(DevServices::isDevSidecar('buggregator', ['image' => 'x']));
+    }
+
+    public function test_an_image_that_merely_contains_a_tool_word_is_not_a_tool(): void
+    {
+        $this->assertFalse(DevServices::isDevSidecar('app', ['image' => 'ghcr.io/acme/mailserver:1']));
+        $this->assertFalse(DevServices::isDevSidecar('db', ['image' => 'postgres:16']));
+    }
 }

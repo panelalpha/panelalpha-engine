@@ -85,6 +85,9 @@ final class GeneratedCompose
             $appService['networks'] = ServiceAliases::withAliases($appService['networks'] ?? null, $aliases);
         }
         $sidecars = self::sidecars($decision);
+        if (is_array($appService['depends_on'] ?? null) && array_is_list($appService['depends_on'])) {
+            $appService['depends_on'] = self::dependsOn($appService['depends_on'], $sidecars);
+        }
 
         $compose = ['services' => [self::APP_SERVICE => $appService] + $sidecars];
         $volumes = $decision['volumes'] ?? null;
@@ -93,6 +96,42 @@ final class GeneratedCompose
         }
 
         return Yaml::dump($compose, self::INLINE_DEPTH, self::INDENT);
+    }
+
+    /**
+     * The long form, so the app waits for a sidecar that can say it is ready.
+     * The short form only waits for the container to start, and an app that
+     * migrates on boot then races its own database (engine#187).
+     *
+     * @param list<mixed> $names
+     * @param array<string, array<string, mixed>> $sidecars
+     * @return array<string, array{condition: string}>
+     */
+    private static function dependsOn(array $names, array $sidecars): array
+    {
+        $depends = [];
+        foreach ($names as $name) {
+            if (!is_string($name) || $name === '') {
+                continue;
+            }
+            $depends[$name] = [
+                'condition' => self::hasHealthcheck($sidecars[$name] ?? []) ? 'service_healthy' : 'service_started',
+            ];
+        }
+
+        return $depends;
+    }
+
+    /** @param array<string, mixed> $service */
+    private static function hasHealthcheck(array $service): bool
+    {
+        $check = $service['healthcheck'] ?? null;
+        if (!is_array($check) || ($check['disable'] ?? false) === true) {
+            return false;
+        }
+        $test = $check['test'] ?? null;
+
+        return $test !== null && $test !== [] && $test !== ['NONE'] && $test !== 'NONE';
     }
 
     /**

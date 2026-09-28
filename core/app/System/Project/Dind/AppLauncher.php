@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\Exceptions\DeployCancelledException;
+use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\DeployLog\DependencyFailure;
 use App\Lib\Deploy\Dind\DindBuildStorage;
@@ -27,6 +28,12 @@ final class AppLauncher
     private const FAILURE_LOG_TIMEOUT_SECONDS = 30;
 
     private const PS_TIMEOUT_SECONDS = 30;
+
+    // A gate that waits or retries before its verdict (Manticore's credential
+    // loop, SOGo's 249 s probe) is still running when `up -d` returns.
+    private const ONE_SHOT_WAIT_SECONDS = 180;
+
+    private const ONE_SHOT_POLL_SECONDS = 2;
 
     public function __construct(
         private DindProject $project,
@@ -144,20 +151,47 @@ final class AppLauncher
      * would start delaying or failing deploys that pass today. That is a
      * change worth measuring against real projects first, and it is not
      * needed to close this -- the exit codes are already there to read.
+     *
+     * A one-shot still running when `up -d` returns is waited for, bounded:
+     * a gate that sleeps 8 s and exits 1 was read while running, and the
+     * deploy was reported successful 8 s before the refusal.
      */
     private function gateFailure(): ?string
     {
         $shell = $this->project->shell();
-        try {
-            $output = $shell->execAsUserQuiet(
-                $this->project->userAppComposeCommand(['ps', '--all', '--format', 'json']),
-                [],
-                self::PS_TIMEOUT_SECONDS
-            );
-        } catch (\Throwable) {
-            // Never turn "could not ask" into "failed": that would be the same
-            // defect pointed the other way.
-            return null;
+        $logger = $shell->logger();
+        $oneShots = $this->oneShotServicesToRun();
+        $deadline = time() + self::ONE_SHOT_WAIT_SECONDS;
+        $announced = false;
+        while (true) {
+            try {
+                $output = $shell->execAsUserQuiet(
+                    $this->project->userAppComposeCommand(['ps', '--all', '--format', 'json']),
+                    [],
+                    self::PS_TIMEOUT_SECONDS
+                );
+            } catch (\Throwable) {
+                // Never turn "could not ask" into "failed": that would be the same
+                // defect pointed the other way.
+                return null;
+            }
+            $running = self::stillRunning($output, $oneShots);
+            if ($running === []) {
+                break;
+            }
+            if (time() >= $deadline) {
+                $logger?->warn(
+                    'One-shot services still running after ' . self::ONE_SHOT_WAIT_SECONDS
+                    . 's, their exit code is not checked: ' . implode(', ', $running)
+                );
+                break;
+            }
+            if (!$announced) {
+                $logger?->info('Waiting for one-shot services to finish: ' . implode(', ', $running));
+                $announced = true;
+            }
+            $logger?->throwIfCancelled();
+            sleep(self::ONE_SHOT_POLL_SECONDS);
         }
 
         $failed = self::failedServices($output);
@@ -165,7 +199,6 @@ final class AppLauncher
             return null;
         }
 
-        $logger = $shell->logger();
         foreach ($failed as $service => $code) {
             $logger?->info("Service {$service} exited with code {$code}; the deploy is not successful");
         }
@@ -193,21 +226,8 @@ final class AppLauncher
      */
     public static function failedServices(string $psOutput): array
     {
-        $rows = [];
-        $whole = json_decode(trim($psOutput), true);
-        if (is_array($whole) && array_is_list($whole)) {
-            $rows = $whole;
-        } else {
-            foreach (preg_split('/\R/', $psOutput) ?: [] as $line) {
-                $decoded = json_decode(trim($line), true);
-                if (is_array($decoded)) {
-                    $rows[] = $decoded;
-                }
-            }
-        }
-
         $failed = [];
-        foreach ($rows as $row) {
+        foreach (self::psRows($psOutput) as $row) {
             if (!is_array($row)) {
                 continue;
             }
@@ -220,6 +240,87 @@ final class AppLauncher
         }
 
         return $failed;
+    }
+
+    /**
+     * Services the run file gives `restart: "no"` and no published port: a
+     * one-shot, whether its author said so or the hardener worked it out.
+     * Everything else was given a restart policy and is expected to stay up.
+     *
+     * @param array<string, mixed> $compose
+     * @return list<string>
+     */
+    public static function oneShotServices(array $compose): array
+    {
+        $names = [];
+        foreach (is_array($compose['services'] ?? null) ? $compose['services'] : [] as $name => $service) {
+            if (!is_array($service) || !empty($service['ports'])) {
+                continue;
+            }
+            $restart = $service['restart'] ?? null;
+            if ($restart === false || (is_string($restart) && strtolower(trim($restart)) === 'no')) {
+                $names[] = (string) $name;
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * Which of $services `docker compose ps` still shows running.
+     *
+     * @param list<string> $services
+     * @return list<string>
+     */
+    public static function stillRunning(string $psOutput, array $services): array
+    {
+        $running = [];
+        foreach (self::psRows($psOutput) as $row) {
+            $name = (string) ($row['Service'] ?? '');
+            if (in_array($name, $services, true) && strtolower((string) ($row['State'] ?? '')) === 'running') {
+                $running[] = $name;
+            }
+        }
+
+        return array_values(array_unique($running));
+    }
+
+    /**
+     * `docker compose ps --format json` rows: one JSON array or one object
+     * per line, depending on the compose version.
+     *
+     * @return list<array<mixed>>
+     */
+    private static function psRows(string $psOutput): array
+    {
+        $whole = json_decode(trim($psOutput), true);
+        if (is_array($whole) && array_is_list($whole)) {
+            return array_values(array_filter($whole, 'is_array'));
+        }
+        $rows = [];
+        foreach (preg_split('/\R/', $psOutput) ?: [] as $line) {
+            $decoded = json_decode(trim($line), true);
+            if (is_array($decoded)) {
+                $rows[] = $decoded;
+            }
+        }
+
+        return $rows;
+    }
+
+    /** @return list<string> */
+    private function oneShotServicesToRun(): array
+    {
+        try {
+            $raw = $this->project->system()->filesystem()->fileGetContents(
+                $this->project->userAppComposeFileToRun()
+            );
+            $compose = ComposeYaml::parse((string) $raw);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        return is_array($compose) ? self::oneShotServices($compose) : [];
     }
 
     /**

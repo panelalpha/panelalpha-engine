@@ -175,4 +175,118 @@ class RuntimeSidecarsFromProjectTest extends TestCase
             "the client's own compose file must stay exactly what it shipped"
         );
     }
+
+    /**
+     * @param array<string, string> $files name => contents, written to a real
+     *        directory because the template glob reads the disk
+     * @return array{services: array<string, mixed>, volumes: array<string, mixed>, env: array<string, string>}
+     */
+    private function sidecarsFromFiles(array $files): array
+    {
+        $dir = sys_get_temp_dir() . '/pa-sidecars-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        $byPath = [];
+        foreach ($files as $name => $contents) {
+            file_put_contents($dir . '/' . $name, $contents);
+            $byPath[$dir . '/' . $name] = $contents;
+        }
+        try {
+            return (new RuntimeSidecars($this->stubbedDind($this->stubbedSystem($byPath))))->runtimeSidecarsFromProject($dir);
+        } finally {
+            array_map('unlink', glob($dir . '/*') ?: []);
+            rmdir($dir);
+        }
+    }
+
+    /** LinkAce's shape, reduced: a workstation stack beside a production one. */
+    private const LINKACE_DEV = <<<'YAML'
+    name: linkace_dev
+    services:
+      db:
+        image: docker.io/library/mariadb:12.0
+        environment:
+          - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+          - MYSQL_DATABASE=${DB_DATABASE}
+      pg-db:
+        image: docker.io/library/postgres:17
+        environment:
+          - POSTGRES_PASSWORD=${DB_PASSWORD}
+      php:
+        build:
+          context: .
+          dockerfile: ./resources/docker/dockerfiles/development.Dockerfile
+        depends_on: [db]
+        volumes:
+          - .:/app:delegated
+      caddy:
+        image: docker.io/library/caddy:2
+        depends_on: [php]
+        volumes:
+          - .:/app:delegated
+      buggregator:
+        image: ghcr.io/buggregator/server:latest
+        ports:
+          - "8000:8000"
+        depends_on: [php]
+    YAML;
+
+    private const LINKACE_PRODUCTION = <<<'YAML'
+    services:
+      app:
+        image: docker.io/linkace/linkace:latest
+        depends_on: [db, redis]
+      db:
+        image: docker.io/library/mariadb:12.0
+        environment:
+          - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+          - MYSQL_DATABASE=${DB_DATABASE}
+        volumes:
+          - db:/var/lib/mysql
+      redis:
+        image: docker.io/library/redis:8.2
+    volumes:
+      db:
+    YAML;
+
+    /**
+     * The production file says what runs beside the app; the workstation file
+     * added caddy, a second database and a debug server (engine#166).
+     */
+    public function test_a_production_compose_beats_the_development_one(): void
+    {
+        $result = $this->sidecarsFromFiles([
+            'docker-compose.yml' => self::LINKACE_DEV,
+            'docker-compose.production.yml' => self::LINKACE_PRODUCTION,
+        ]);
+
+        $this->assertSame(['db', 'redis'], array_keys($result['services']));
+    }
+
+    public function test_without_a_production_compose_the_development_one_still_supplies_the_database(): void
+    {
+        $result = $this->sidecarsFromFiles(['docker-compose.yml' => self::LINKACE_DEV]);
+
+        $this->assertArrayHasKey('db', $result['services']);
+        $this->assertArrayNotHasKey('buggregator', $result['services'], 'a debug server is workstation tooling');
+    }
+
+    /** Glob order put `.dev` first; the neutral file is the better description. */
+    public function test_a_development_template_is_read_after_a_neutral_one(): void
+    {
+        $result = $this->sidecarsFromFiles([
+            'docker-compose.dev.yml' => "services:\n  mysql:\n    image: mysql:8\n",
+            'docker-compose.stack.yml' => "services:\n  postgres:\n    image: postgres:16\n",
+        ]);
+
+        $this->assertSame(['postgres'], array_keys($result['services']));
+    }
+
+    public function test_a_development_template_still_speaks_when_it_is_the_only_one(): void
+    {
+        $result = $this->sidecarsFromFiles([
+            'docker-compose.dev.yml' => "services:\n  mysql:\n    image: mysql:8\n",
+        ]);
+
+        $this->assertSame(['mysql'], array_keys($result['services']));
+    }
 }

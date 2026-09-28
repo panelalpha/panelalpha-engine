@@ -30,7 +30,8 @@ It tries the most specific match first.
 
 1. A kind of project it already knows. A Docker Compose file is near the top, then a Dockerfile, then well-known apps and languages, then a folder of HTML pages.
 2. A general build, if none of those matched but the repository still has a language file such as `package.json` or `composer.json`.
-3. Unknown, if nothing matched.
+3. A Docker Compose file in a `docker`, `.docker`, `deploy`, `deployment`, `docker-compose` or `compose` folder, if nothing else matched. It is run from the top of the repository, with its paths adjusted to match.
+4. Unknown, if nothing matched.
 
 The first match is the one it uses. That matters most if you have a `docker-compose.yml` you only use on your own computer. The engine cannot tell that from a file meant for the live site, so it will try to use it. Rename the file if you do not want that.
 

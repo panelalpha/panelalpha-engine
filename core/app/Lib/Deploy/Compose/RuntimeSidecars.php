@@ -2,8 +2,10 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\Port\EnvVarDefault;
 use App\Lib\Deploy\Sidecar\SidecarCredentials;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
+use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use App\Lib\Deploy\Sidecar\ServiceRole;
 use Symfony\Component\Yaml\Yaml;
 
@@ -80,6 +82,8 @@ final class RuntimeSidecars
      *        published image is recognised as the application
      * @param ?string $placeholderSeed per-account secret `${VAR:?}` credentials
      *        derive from; null leaves them unset
+     * @param ?SidecarPasswords $passwords a datastore password nobody set;
+     *        null keeps the legacy `app`
      */
     private function __construct(
         private readonly array $services,
@@ -88,7 +92,8 @@ final class RuntimeSidecars
         private readonly mixed $imagePorts,
         private readonly ?string $projectIdentity,
         private readonly ?int $accountMemoryMb = null,
-        private readonly ?string $placeholderSeed = null
+        private readonly ?string $placeholderSeed = null,
+        private readonly ?SidecarPasswords $passwords = null
     ) {
     }
 
@@ -101,12 +106,13 @@ final class RuntimeSidecars
         ?callable $imagePorts = null,
         ?string $projectIdentity = null,
         ?int $accountMemoryMb = null,
-        ?string $placeholderSeed = null
+        ?string $placeholderSeed = null,
+        ?SidecarPasswords $passwords = null
     ): array {
         $raw = is_file($composePath) && is_readable($composePath) ? @file_get_contents($composePath) : null;
 
         return is_string($raw) && $raw !== ''
-            ? self::fromYaml($raw, $backingServicesOnly, $imagePorts, $projectIdentity, $accountMemoryMb, $placeholderSeed)
+            ? self::fromYaml($raw, $backingServicesOnly, $imagePorts, $projectIdentity, $accountMemoryMb, $placeholderSeed, $passwords)
             : self::EMPTY;
     }
 
@@ -122,7 +128,8 @@ final class RuntimeSidecars
         ?callable $imagePorts = null,
         ?string $projectIdentity = null,
         ?int $accountMemoryMb = null,
-        ?string $placeholderSeed = null
+        ?string $placeholderSeed = null,
+        ?SidecarPasswords $passwords = null
     ): array {
         $parsed = self::parse($raw);
         if ($parsed === null) {
@@ -136,7 +143,8 @@ final class RuntimeSidecars
             $imagePorts,
             $projectIdentity,
             $accountMemoryMb,
-            $placeholderSeed
+            $placeholderSeed,
+            $passwords
         );
 
         $result = $extractor->extract();
@@ -176,6 +184,7 @@ final class RuntimeSidecars
         foreach ($this->services as $name => $service) {
             $this->consider((string) $name, $service);
         }
+        $this->dropAlternativeDatabases();
         $this->clearOfAppService();
         foreach ($this->kept as $name => $service) {
             $this->kept[$name] = ServiceDependencies::withoutDropped($service, $this->dropped);
@@ -269,6 +278,68 @@ final class RuntimeSidecars
     }
 
     /**
+     * A file that offers the app a choice of SQL database (Koillection's
+     * template runs postgres and mysql, its app uses one) keeps only the one
+     * the app's own environment names. With no such evidence all are kept:
+     * a spare database costs memory, a dropped one breaks the app.
+     */
+    private function dropAlternativeDatabases(): void
+    {
+        $engines = [];
+        foreach ($this->kept as $name => $service) {
+            $engine = SidecarEngine::resolve((string) $name, $service, $this->ports[$name] ?? []);
+            if ($engine !== null && SidecarEngine::dialect($engine)['driver'] !== null) {
+                $engines[(string) $name] = $engine;
+            }
+        }
+        if (count(array_unique($engines)) < 2) {
+            return;
+        }
+
+        $named = array_values(array_unique(array_intersect_key($engines, $this->namedByDroppedServices(array_keys($engines)))));
+        if (count($named) !== 1) {
+            return;
+        }
+        foreach ($engines as $name => $engine) {
+            if ($engine !== $named[0]) {
+                unset($this->kept[$name], $this->ports[$name]);
+                $this->dropped[strtolower($name)] = true;
+            }
+        }
+    }
+
+    /**
+     * Which of $candidates a dropped service's environment points at as a host
+     * (`DB_HOST=postgresql`, `postgres://u:p@postgresql:5432/db`).
+     *
+     * @param list<string> $candidates
+     * @return array<string, true>
+     */
+    private function namedByDroppedServices(array $candidates): array
+    {
+        $values = [];
+        foreach ($this->services as $name => $service) {
+            if (isset($this->kept[$name]) || !is_array($service)) {
+                continue;
+            }
+            $values = array_merge($values, array_values(SidecarCredentials::environmentMap($service['environment'] ?? null)));
+        }
+
+        $named = [];
+        foreach ($candidates as $candidate) {
+            $host = '#(^|@|//)' . preg_quote(strtolower($candidate), '#') . '($|[:/?])#';
+            foreach ($values as $value) {
+                if (preg_match($host, strtolower($value)) === 1) {
+                    $named[$candidate] = true;
+                    break;
+                }
+            }
+        }
+
+        return $named;
+    }
+
+    /**
      * A kept sidecar named `app` would clash with the generated app, so it moves
      * to a free name and every reference follows.
      */
@@ -331,7 +402,8 @@ final class RuntimeSidecars
             return false;
         }
 
-        return isset($service['build']) && !ServiceRole::isKnownDatastore($name, $service);
+        return (isset($service['build']) || self::isUnresolvedImage($service))
+            && !ServiceRole::isKnownDatastore($name, $service);
     }
 
     /**
@@ -382,7 +454,7 @@ final class RuntimeSidecars
                 continue;
             }
             $ports = $this->ports[$name] ?? [];
-            $services[$name] = SidecarCredentials::pinSidecarCredentials((string) $name, $service, $ports);
+            $services[$name] = SidecarCredentials::pinSidecarCredentials((string) $name, $service, $ports, $this->passwords);
             // Union keeping what is set: of two candidates the first declared wins.
             $env += SidecarCredentials::envForSidecar((string) $name, $services[$name], $ports);
         }
@@ -428,7 +500,26 @@ final class RuntimeSidecars
      */
     private function hasImage(array $service): bool
     {
-        return trim((string) ($service['image'] ?? '')) !== '';
+        return trim((string) ($service['image'] ?? '')) !== '' && !self::isUnresolvedImage($service);
+    }
+
+    /**
+     * `image: ${IMAGE}` is whatever a CI job built from this repository, and
+     * with nothing to set it compose reads "neither an image nor a build
+     * context" and rejects the project (foodsoft's docker-compose.ci.yml).
+     *
+     * @param array<string, mixed> $service
+     */
+    private static function isUnresolvedImage(array $service): bool
+    {
+        $image = trim((string) ($service['image'] ?? ''));
+        if ($image === '' || !str_contains($image, '$')) {
+            return false;
+        }
+        // `${VAR:?msg}` has no value to fall back on either.
+        $image = (string) preg_replace('/\$\{[A-Za-z_][A-Za-z0-9_]*:?\?[^}]*\}/', '', $image);
+
+        return trim(EnvVarDefault::resolve($image)) === '';
     }
 
     /**

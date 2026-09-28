@@ -10,6 +10,7 @@ use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Compose\ComposeYaml;
+use App\Lib\Deploy\Compose\NestedCompose;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
 use Symfony\Component\Yaml\Yaml;
 
@@ -104,6 +105,13 @@ class UserComposeStrategy
             throw new \InvalidArgumentException(
                 'The compose file in this project could not be read as YAML.'
             );
+        }
+        // The run file sits at the root, so a file kept under docker/ has its
+        // relative paths rewritten to mean the same from there (engine#91).
+        $nested = NestedCompose::relativeDir($composePath, $projectDir);
+        if ($nested !== null) {
+            $parsed = NestedCompose::rebase($parsed, $nested);
+            $logger?->info("Running {$nested}/" . basename($composePath) . ' from the project root, its relative paths rewritten to match');
         }
         if (!isset($parsed['services']) || !is_array($parsed['services'])) {
             if ($missing !== []) {

@@ -175,7 +175,7 @@ YAML);
         $compose = Yaml::parse($yaml);
 
         $this->assertSame(['app', 'db'], array_keys($compose['services']));
-        $this->assertSame(['db'], $compose['services']['app']['depends_on']);
+        $this->assertSame(['db' => ['condition' => 'service_started']], $compose['services']['app']['depends_on']);
         $this->assertSame('db', $compose['services']['app']['environment']['DB_HOST']);
         $this->assertArrayHasKey('postgres-data', $compose['volumes']);
     }

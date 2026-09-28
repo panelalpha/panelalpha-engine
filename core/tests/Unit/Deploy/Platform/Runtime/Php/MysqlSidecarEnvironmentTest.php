@@ -100,6 +100,26 @@ class MysqlSidecarEnvironmentTest extends TestCase
     }
 
     /**
+     * The path PhpStrategy takes when it adds the sidecar: `.env.example`'s
+     * `DB_HOST=db` is in the generated env, and has to lose (engine#288).
+     */
+    public function test_adding_the_sidecar_repoints_an_example_db_host_at_loopback(): void
+    {
+        $decision = MysqlSidecar::withSidecar(
+            ['runtime' => PlatformManifest::RUNTIME_PHP, 'env' => ['DB_HOST' => 'db', 'APP_ENV' => 'production']],
+            array_merge($this->settings(), ['host' => 'db'])
+        );
+
+        $this->assertSame('127.0.0.1', $decision['env']['DB_HOST']);
+        $this->assertSame('production', $decision['env']['APP_ENV']);
+        $this->assertSame('service:app', $decision['sidecars']['db']['network_mode']);
+        $this->assertArrayHasKey('dbdata', $decision['volumes']);
+
+        $app = Yaml::parse(DeployCompose::framework($decision + ['image' => 'php:8.3-apache'], 8000))['services']['app'];
+        $this->assertSame('127.0.0.1', $app['environment']['DB_HOST']);
+    }
+
+    /**
      * The sidecar still shares the namespace -- the loopback pin is only
      * correct while it does. A future change that gives it its own network
      * has to re-point the app at the service name.

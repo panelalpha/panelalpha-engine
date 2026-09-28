@@ -187,4 +187,35 @@ class UserComposeStrategyTest extends TestCase
 
         $this->assertSame([], $this->copiedTo, 'nothing should be written when the project ships no compose file');
     }
+
+    /**
+     * The run file sits at the root, so a stack kept under docker/ is rebased
+     * onto it (engine#91): a `./data` bind is `./docker/data` from there.
+     */
+    public function test_a_nested_compose_keeps_its_paths_from_the_root(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker/docker-compose.yml';
+        $system = $this->stubbedSystem([$clientPath => <<<'YAML'
+        services:
+          app:
+            image: acme/app:latest
+            env_file: .env
+            ports:
+              - "8080:80"
+            volumes:
+              - ./config:/etc/app:ro
+              - data:/var/lib/app
+        volumes:
+          data:
+        YAML]);
+        $dind = $this->stubbedDind($system, $clientPath);
+
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $app = $run['services']['app'];
+        $this->assertContains('./docker/config:/etc/app:ro', $app['volumes']);
+        $this->assertContains('data:/var/lib/app', $app['volumes']);
+        $this->assertContains('./docker/.env', (array) $app['env_file']);
+    }
 }

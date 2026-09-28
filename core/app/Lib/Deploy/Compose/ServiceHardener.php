@@ -445,8 +445,11 @@ final class ServiceHardener
         $source = (string) ($volume['source'] ?? '');
         $target = (string) ($volume['target'] ?? '');
 
+        // The socket's directory counts here too: `source: /var/run` in the long
+        // form hands over the daemon exactly like `/var/run:/var/run` does.
         return in_array($source, self::DOCKER_SOCKETS, true)
             || in_array($target, self::DOCKER_SOCKETS, true)
+            || preg_match(self::DOCKER_SOCKET_PATTERN, trim($source)) === 1
             || self::isForbiddenSource($source);
     }
 

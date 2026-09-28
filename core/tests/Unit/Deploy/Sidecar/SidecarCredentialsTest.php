@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Sidecar;
 
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\Sidecar\SidecarCredentials;
+use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -121,6 +122,36 @@ class SidecarCredentialsTest extends TestCase
             'POSTGRES_PASSWORD' => 'app',
             'POSTGRES_DB' => 'mydb',
         ], $pinned['environment']);
+    }
+
+    public function test_pin_sidecar_credentials_gives_an_unset_password_the_accounts_own(): void
+    {
+        $passwords = SidecarPasswords::derived('account-seed');
+        $service = [
+            'image' => 'mariadb:11',
+            'environment' => ['MYSQL_PASSWORD' => '${DB_PASSWORD}'],
+        ];
+
+        $env = SidecarCredentials::pinSidecarCredentials('db', $service, [], $passwords)['environment'];
+
+        // Names stay `app`; only secrets change (engine#189).
+        $this->assertSame('app', $env['MYSQL_USER']);
+        $this->assertSame('app', $env['MYSQL_DATABASE']);
+        $this->assertSame($passwords->for('MYSQL_PASSWORD'), $env['MYSQL_PASSWORD']);
+        $this->assertSame($passwords->for('MYSQL_ROOT_PASSWORD'), $env['MYSQL_ROOT_PASSWORD']);
+        $this->assertNotSame($env['MYSQL_PASSWORD'], $env['MYSQL_ROOT_PASSWORD']);
+    }
+
+    public function test_pin_sidecar_credentials_keeps_a_compose_default_password(): void
+    {
+        $service = [
+            'image' => 'postgres:16',
+            'environment' => ['POSTGRES_PASSWORD' => '${POSTGRES_PASSWORD:-chosen}'],
+        ];
+
+        $env = SidecarCredentials::pinSidecarCredentials('db', $service, [], SidecarPasswords::derived('s'))['environment'];
+
+        $this->assertSame('chosen', $env['POSTGRES_PASSWORD']);
     }
 
     public function test_pin_sidecar_credentials_is_a_no_op_for_an_engine_without_a_driver(): void

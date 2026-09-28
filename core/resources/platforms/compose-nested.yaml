@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=./_schema.json
+# A compose file under docker/, deploy/ and the like (engine#91). Below every
+# other manifest, and its probe steps aside for anything Railpack recognises,
+# so it only ever takes a repository that would otherwise reach `fallback`.
+id: compose-nested
+strategy: compose
+label: 'Docker Compose'
+priority: 80
+runtime: compose
+detect:
+  probe: compose-usable-nested
+commands: {  }

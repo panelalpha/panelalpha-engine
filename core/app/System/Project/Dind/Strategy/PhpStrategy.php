@@ -73,7 +73,12 @@ class PhpStrategy
         $accountDb = !$hasMysql && ($decision['database'] ?? null) === self::DATABASE_MYSQL;
         $db = $accountDb
             ? AppDatabase::provision($this->dind->userModel())
-            : ($artisan ? EnvFile::databaseSettings($projectDir) : []);
+            : ($artisan ? EnvFile::databaseSettings($projectDir, $this->dind->projectTree()->read(...)) : []);
+        if (!$accountDb && !$hasMysql && MysqlSidecar::isNeeded($db)) {
+            // Before anything reads DB_PASSWORD, so the sidecar and the app
+            // get the same one (engine#189).
+            $db = MysqlSidecar::withPassword($db, $strategy->sidecars()->passwords());
+        }
         $needsMysql = $hasMysql || MysqlSidecar::isNeeded($db);
         $build = $this->build(
             $projectDir,
@@ -407,10 +412,7 @@ class PhpStrategy
             return $decision;
         }
 
-        return $decision + [
-            'sidecars' => ['db' => MysqlSidecar::service($db)],
-            'volumes' => ['dbdata' => null],
-        ];
+        return MysqlSidecar::withSidecar($decision, $db, $this->dind->strategy()->sidecars()->passwords());
     }
 
 }

@@ -175,6 +175,32 @@ class EnvFileTest extends TestCase
         $this->assertSame('5432', $settings['port']);
     }
 
+    /**
+     * Servas's prepare hook writes a 0600 `.env` choosing SQLite. Read as the
+     * engine's user it was invisible and `.env.example`'s mysql won, which
+     * added a MariaDB sidecar the app never used (engine#186).
+     */
+    public function test_database_settings_read_env_through_the_given_reader(): void
+    {
+        file_put_contents($this->tmpDir . '/.env.example', "DB_CONNECTION=mysql\nDB_HOST=127.0.0.1\n");
+        file_put_contents($this->tmpDir . '/.env', "DB_CONNECTION=sqlite\n");
+        chmod($this->tmpDir . '/.env', 0000);
+        if (is_readable($this->tmpDir . '/.env')) {
+            $this->markTestSkipped('running as root, a 0000 file is still readable');
+        }
+
+        // The engine's own view: the unreadable .env reads as absent.
+        $this->assertSame('mysql', EnvFile::databaseSettings($this->tmpDir)['connection']);
+
+        $asAccount = fn (string $path): ?string => match (basename($path)) {
+            '.env' => "DB_CONNECTION=sqlite\n",
+            '.env.example' => "DB_CONNECTION=mysql\nDB_HOST=127.0.0.1\n",
+            default => null,
+        };
+        $this->assertSame('sqlite', EnvFile::databaseSettings($this->tmpDir, $asAccount)['connection']);
+        chmod($this->tmpDir . '/.env', 0644);
+    }
+
     public function test_parse_classifies_each_line_kind(): void
     {
         $rows = EnvFile::parse("# a comment\n\nAPP_ENV=production\nexport TOKEN=abc\nnot a variable\n");

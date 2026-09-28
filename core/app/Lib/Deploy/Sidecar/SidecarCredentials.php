@@ -15,9 +15,16 @@ class SidecarCredentials
     /**
      * @param array<string, mixed> $service
      * @param list<int> $observedPorts ports the image declares, when known
+     * @param ?SidecarPasswords $passwords fills a password nobody set; null
+     *        keeps the legacy `app`
      */
-    public static function pinSidecarCredentials(string $name, array $service, array $observedPorts = []): array
-    {
+    public static function pinSidecarCredentials(
+        string $name,
+        array $service,
+        array $observedPorts = [],
+        ?SidecarPasswords $passwords = null
+    ): array {
+        $passwords ??= SidecarPasswords::legacy();
         $engine = self::sidecarEngine($name, $service, $observedPorts);
         if ($engine === null || SidecarEngine::dialect($engine)['driver'] === null) {
             return $service;
@@ -25,16 +32,20 @@ class SidecarCredentials
 
         // A database started with unresolved ${VAR} credentials comes up with
         // values the application cannot guess; settle them once so both sides
-        // are configured from the same text.
+        // are configured from the same text. A password nobody set is the
+        // account's own, not `app` (engine#189).
         $env = self::environmentMap($service['environment'] ?? null);
         $prefix = strtoupper($engine);
         foreach ($env as $key => $value) {
             if (str_starts_with(strtoupper((string) $key), $prefix . '_')) {
-                $env[$key] = self::resolvedComposeValue((string) $value, 'app');
+                $env[$key] = self::resolvedComposeValue((string) $value, self::fallbackFor((string) $key, $passwords));
             }
         }
         foreach (SidecarEngine::initVariablesFor($engine) as $variable) {
-            $env[$variable] = self::resolvedComposeValue((string) ($env[$variable] ?? ''), 'app');
+            $env[$variable] = self::resolvedComposeValue(
+                (string) ($env[$variable] ?? ''),
+                self::fallbackFor($variable, $passwords)
+            );
         }
         $service['environment'] = $env;
 
@@ -45,6 +56,11 @@ class SidecarCredentials
         }
 
         return $service;
+    }
+
+    private static function fallbackFor(string $variable, SidecarPasswords $passwords): string
+    {
+        return ComposePlaceholders::isSecretKey($variable) ? $passwords->for($variable) : 'app';
     }
 
     /**

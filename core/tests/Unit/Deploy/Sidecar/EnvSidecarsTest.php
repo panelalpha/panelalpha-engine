@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\Sidecar;
 
 use App\Lib\Deploy\Sidecar\EnvSidecars;
+use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use PHPUnit\Framework\TestCase;
 
 class EnvSidecarsTest extends TestCase
@@ -121,6 +122,19 @@ class EnvSidecarsTest extends TestCase
         }
     }
 
+    /** The reader the deploy passes is what is read, not the host path (engine#186). */
+    public function test_from_project_dir_reads_through_the_given_reader(): void
+    {
+        $files = [
+            '/home/acct/project/.env.example' => "DATABASE_URL=postgres://localhost:5432/example\n",
+            '/home/acct/project/.env' => "DATABASE_URL=postgres://localhost:5432/live\n",
+        ];
+
+        $result = EnvSidecars::fromProjectDir('/home/acct/project', fn (string $path): ?string => $files[$path] ?? null);
+
+        $this->assertStringContainsString('/live', $result['env']['DATABASE_URL']);
+    }
+
     public function test_a_mysql_url_seeds_the_user_it_names(): void
     {
         $db = EnvSidecars::fromVariables([
@@ -186,5 +200,53 @@ class EnvSidecarsTest extends TestCase
         $this->assertSame('app', $db['environment']['POSTGRES_USER']);
         $this->assertSame('app', $db['environment']['POSTGRES_PASSWORD']);
         $this->assertSame('app', $db['environment']['POSTGRES_DB']);
+    }
+
+    public function test_a_url_without_a_password_gets_the_accounts_own_not_app(): void
+    {
+        $passwords = SidecarPasswords::derived('account-seed');
+        $result = EnvSidecars::fromVariables(['DATABASE_URL' => 'mysql://localhost/foo'], $passwords);
+        $db = $result['services']['db']['environment'];
+
+        $this->assertSame($passwords->for('MYSQL_PASSWORD'), $db['MYSQL_PASSWORD']);
+        $this->assertSame($passwords->for('MYSQL_ROOT_PASSWORD'), $db['MYSQL_ROOT_PASSWORD']);
+        $this->assertNotSame($db['MYSQL_PASSWORD'], $db['MYSQL_ROOT_PASSWORD']);
+        // The app is told the same password the database was seeded with.
+        $this->assertSame('mysql://app:' . $db['MYSQL_PASSWORD'] . '@db:3306/foo', $result['env']['DATABASE_URL']);
+        $this->assertSame($db['MYSQL_PASSWORD'], $result['env']['DB_PASSWORD']);
+        $this->assertNotContains('app', [$db['MYSQL_PASSWORD'], $db['MYSQL_ROOT_PASSWORD'], $result['env']['DB_PASSWORD']]);
+    }
+
+    public function test_postgres_and_mongo_get_the_accounts_own_password_too(): void
+    {
+        $passwords = SidecarPasswords::derived('account-seed');
+
+        $pg = EnvSidecars::fromVariables(['DATABASE_URL' => 'postgres://localhost:5432/app'], $passwords);
+        $mongo = EnvSidecars::fromVariables(['MONGO_URL' => 'mongodb://localhost/records'], $passwords);
+
+        $this->assertSame($passwords->for('POSTGRES_PASSWORD'), $pg['services']['db']['environment']['POSTGRES_PASSWORD']);
+        $this->assertSame(
+            $passwords->for('MONGO_INITDB_ROOT_PASSWORD'),
+            $mongo['services']['mongo']['environment']['MONGO_INITDB_ROOT_PASSWORD']
+        );
+    }
+
+    public function test_a_password_the_url_names_is_kept_but_root_gets_its_own(): void
+    {
+        $db = EnvSidecars::fromVariables(
+            ['DATABASE_URL' => 'mysql://shop:s3cret@localhost:3306/shopdb'],
+            SidecarPasswords::derived('account-seed')
+        )['services']['db']['environment'];
+
+        $this->assertSame('s3cret', $db['MYSQL_PASSWORD']);
+        $this->assertNotSame('s3cret', $db['MYSQL_ROOT_PASSWORD']);
+    }
+
+    public function test_a_root_url_without_a_password_gets_a_root_password(): void
+    {
+        $passwords = SidecarPasswords::derived('account-seed');
+        $db = EnvSidecars::fromVariables(['DATABASE_URL' => 'mysql://root@localhost/foo'], $passwords)['services']['db'];
+
+        $this->assertSame($passwords->for('MYSQL_ROOT_PASSWORD'), $db['environment']['MYSQL_ROOT_PASSWORD']);
     }
 }

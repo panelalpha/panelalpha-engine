@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\Port\EnvVarDefault;
+
 /**
  * The `volumes:` block a reduced stack still needs.
  *
@@ -55,17 +57,22 @@ final class NamedVolumes
     private static function sourceOf($volume): string
     {
         if (is_string($volume)) {
+            // Resolved first: `${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock`
+            // split as written gives `${DOCKER_SOCKET`, which compose rejects as a volume name.
+            $volume = EnvVarDefault::resolve($volume);
+
             return str_contains($volume, ':') ? explode(':', $volume, 2)[0] : '';
         }
         if (!is_array($volume) || strtolower((string) ($volume['type'] ?? 'volume')) === 'bind') {
             return '';
         }
 
-        return (string) ($volume['source'] ?? '');
+        return EnvVarDefault::resolve((string) ($volume['source'] ?? ''));
     }
 
+    /** Docker's own rule for a volume name; a path or a leftover `${...}` is not one. */
     private static function isNamedVolume(string $source): bool
     {
-        return $source !== '' && $source !== '.' && $source !== './' && !str_contains($source, '/');
+        return preg_match('/^[A-Za-z0-9][A-Za-z0-9_.-]*$/', $source) === 1;
     }
 }

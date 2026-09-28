@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Compose;
 
 use App\Lib\Deploy\Sidecar\SidecarEngine;
+use App\Lib\Deploy\Sidecar\SidecarPasswords;
 
 /**
  * Turning a compose file somebody wrote for their laptop into one an account
@@ -117,7 +118,8 @@ class ComposeHarden
         ?callable $imagePorts = null,
         ?string $projectIdentity = null,
         ?int $accountMemoryMb = null,
-        ?string $placeholderSeed = null
+        ?string $placeholderSeed = null,
+        ?SidecarPasswords $passwords = null
     ): array {
         return RuntimeSidecars::fromFile(
             $composePath,
@@ -125,7 +127,8 @@ class ComposeHarden
             $imagePorts,
             $projectIdentity,
             $accountMemoryMb,
-            $placeholderSeed
+            $placeholderSeed,
+            $passwords
         );
     }
 
@@ -141,7 +144,8 @@ class ComposeHarden
         ?callable $imagePorts = null,
         ?string $projectIdentity = null,
         ?int $accountMemoryMb = null,
-        ?string $placeholderSeed = null
+        ?string $placeholderSeed = null,
+        ?SidecarPasswords $passwords = null
     ): array {
         return RuntimeSidecars::fromYaml(
             $raw,
@@ -149,7 +153,8 @@ class ComposeHarden
             $imagePorts,
             $projectIdentity,
             $accountMemoryMb,
-            $placeholderSeed
+            $placeholderSeed,
+            $passwords
         );
     }
 

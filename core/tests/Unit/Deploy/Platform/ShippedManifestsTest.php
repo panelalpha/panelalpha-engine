@@ -272,7 +272,7 @@ class ShippedManifestsTest extends TestCase
     public function test_platforms_holds_only_languages_and_delivery_mechanisms(): void
     {
         $expected = [
-            'compose', 'dockerfile', 'dotnet', 'go', 'html', 'java', 'java-gradle',
+            'compose', 'compose-nested', 'dockerfile', 'dotnet', 'go', 'html', 'java', 'java-gradle',
             'node', 'not-a-web-app', 'php', 'php-plain', 'python', 'ruby', 'rust',
             'static',
         ];

@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Platform\Runtime\Php;
 
 use App\Lib\Deploy\Compose\GeneratedCompose;
+use App\Lib\Deploy\Sidecar\SidecarPasswords;
 
 /**
  * The database container a MySQL app gets when the account has no MySQL of
@@ -15,8 +16,6 @@ final class MysqlSidecar
 {
     public const IMAGE = 'mariadb:11';
 
-    private const FALLBACK_PASSWORD = 'app';
-
     /**
      * @param array{connection?: string} $db
      */
@@ -26,21 +25,65 @@ final class MysqlSidecar
     }
 
     /**
+     * The settings with a password filled in where the project left it blank,
+     * so the sidecar and the app's DB_PASSWORD agree on it (engine#189).
+     *
+     * A legacy account keeps the blank: its data directory was initialised
+     * with `app` for a user, or an empty root password.
+     *
+     * @param array<string, string> $db
+     * @return array<string, string>
+     */
+    public static function withPassword(array $db, SidecarPasswords $passwords): array
+    {
+        $settings = DatabaseSettings::fromArray($db);
+        if ($passwords->isLegacy() || !$settings->isMysql() || $settings->password() !== '') {
+            return $db;
+        }
+        $db['password'] = $passwords->for(self::isRootAccount($settings) ? 'MYSQL_ROOT_PASSWORD' : 'MYSQL_PASSWORD');
+
+        return $db;
+    }
+
+    /**
      * @param array{connection?: string, host?: string, port?: string, database?: string, username?: string, password?: string} $db
      * @return array<string, mixed>
      */
-    public static function service(array $db): array
+    public static function service(array $db, ?SidecarPasswords $passwords = null): array
     {
         $settings = DatabaseSettings::fromArray($db);
+        $passwords ??= SidecarPasswords::legacy();
 
         return [
             'image' => self::IMAGE,
             'network_mode' => 'service:app',
             'depends_on' => ['app'],
             'restart' => 'unless-stopped',
-            'environment' => self::environment($settings),
+            'environment' => self::environment($settings, $passwords),
             'volumes' => ['dbdata:/var/lib/mysql'],
             'labels' => [GeneratedCompose::LABEL => 'framework-db'],
+        ];
+    }
+
+    /**
+     * A decision with the sidecar added and the app pointed at it. The
+     * connection goes last in `env`, so it outranks the `.env.example` the
+     * decision was built from (engine#288).
+     *
+     * `$db` is expected to have been through {@see withPassword()} already.
+     *
+     * @param array<string, mixed> $decision
+     * @param array{connection?: string, host?: string, port?: string, database?: string, username?: string, password?: string} $db
+     * @return array<string, mixed>
+     */
+    public static function withSidecar(array $decision, array $db, ?SidecarPasswords $passwords = null): array
+    {
+        $env = is_array($decision['env'] ?? null) ? $decision['env'] : [];
+        $decision['env'] = array_merge($env, self::connectionEnvironment(DatabaseSettings::fromArray($db)));
+
+        return $decision + [
+            'sidecars' => ['db' => self::service($db, $passwords)],
+            'volumes' => ['dbdata' => null],
         ];
     }
 
@@ -81,7 +124,7 @@ final class MysqlSidecar
             'DB_PORT' => $db->port(),
             'DB_DATABASE' => $db->database(),
             'DB_USERNAME' => $db->username(),
-            'DB_PASSWORD' => $db->password(),
+            'DB_PASSWORD' => self::provisionedPassword($db),
             // Empty, meaning "not a unix socket": a `.env.example` that
             // leaves it blank is fine, one that fills it in would otherwise
             // send the driver to a socket the sidecar does not create.
@@ -92,11 +135,11 @@ final class MysqlSidecar
     /**
      * @return array<string, string>
      */
-    private static function environment(DatabaseSettings $db): array
+    private static function environment(DatabaseSettings $db, SidecarPasswords $passwords): array
     {
         return array_merge(
             ['MYSQL_DATABASE' => $db->database()],
-            self::isRootAccount($db) ? self::rootCredentials($db) : self::userCredentials($db)
+            self::isRootAccount($db) ? self::rootCredentials($db) : self::userCredentials($db, $passwords)
         );
     }
 
@@ -118,16 +161,25 @@ final class MysqlSidecar
     }
 
     /**
+     * The password the sidecar was started with. A blank one reaches here only
+     * for a legacy account ({@see withPassword()}): root keeps it empty, a user gets `app`.
+     */
+    private static function provisionedPassword(DatabaseSettings $db): string
+    {
+        return self::isRootAccount($db) ? $db->password() : ($db->password() ?: SidecarPasswords::LEGACY);
+    }
+
+    /**
      * @return array<string, string>
      */
-    private static function userCredentials(DatabaseSettings $db): array
+    private static function userCredentials(DatabaseSettings $db, SidecarPasswords $passwords): array
     {
-        $password = $db->password() ?: self::FALLBACK_PASSWORD;
+        $password = self::provisionedPassword($db);
 
         return [
             'MYSQL_USER' => $db->username(),
             'MYSQL_PASSWORD' => $password,
-            'MYSQL_ROOT_PASSWORD' => $password,
+            'MYSQL_ROOT_PASSWORD' => $passwords->mysqlRoot($password),
         ];
     }
 }

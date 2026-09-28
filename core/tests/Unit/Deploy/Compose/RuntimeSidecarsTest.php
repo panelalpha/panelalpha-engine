@@ -9,6 +9,7 @@ use App\System\Project\Dind\ShellOperations;
 use App\Lib\Deploy\Compose\ComposeEnvironment;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\Compose\RuntimeSidecars;
+use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -299,6 +300,29 @@ class RuntimeSidecarsTest extends TestCase
         $environment = $result['services']['db']['environment'];
 
         $this->assertNotEmpty($environment['POSTGRES_PASSWORD']);
+    }
+
+    public function test_a_harvested_database_with_no_credentials_gets_the_accounts_own(): void
+    {
+        // Phorge's recipe ships exactly this: a mysql service with no
+        // environment at all. It used to come up as app/app with root@'%'
+        // on `app` too (engine#189).
+        $passwords = SidecarPasswords::derived('account-seed');
+        $result = RuntimeSidecars::fromYaml(
+            "services:\n  db:\n    image: mysql:8.0\n    volumes:\n      - db:/var/lib/mysql\nvolumes:\n  db: {}\n",
+            true,
+            null,
+            'github.com/acme/shop',
+            null,
+            null,
+            $passwords
+        );
+        $db = $result['services']['db']['environment'];
+
+        $this->assertSame($passwords->for('MYSQL_PASSWORD'), $db['MYSQL_PASSWORD']);
+        $this->assertSame($passwords->for('MYSQL_ROOT_PASSWORD'), $db['MYSQL_ROOT_PASSWORD']);
+        $this->assertSame($db['MYSQL_PASSWORD'], $result['env']['DB_PASSWORD']);
+        $this->assertStringContainsString(':' . $db['MYSQL_PASSWORD'] . '@db:3306', $result['env']['DATABASE_URL']);
     }
 
     public function test_a_dropped_app_services_self_hosting_flag_is_harvested(): void
@@ -890,5 +914,83 @@ class RuntimeSidecarsTest extends TestCase
         $this->assertSame(['mysql', 'redis'], array_keys($result['services']));
         $this->assertSame('mysql', $result['env']['MYSQL_HOST'] ?? $result['env']['DB_HOST'] ?? null);
         $this->assertSame('redis', $result['env']['REDIS_HOST']);
+    }
+
+    /** godoxy's compose.example.yml (#142): the socket proxy's bind source is a variable. */
+    public function test_a_template_bind_mount_through_a_variable_declares_no_volume(): void
+    {
+        $result = RuntimeSidecars::fromYaml(<<<'YAML'
+services:
+  socket-proxy:
+    image: ghcr.io/yusing/socket-proxy:latest
+    environment:
+      - CONTAINERS=1
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+  app:
+    image: ghcr.io/yusing/godoxy:${TAG:-latest}
+    network_mode: host
+    env_file: .env
+YAML, true, null, 'yusing/godoxy');
+
+        $this->assertArrayHasKey('socket-proxy', $result['services']);
+        $this->assertSame([], $result['volumes']);
+    }
+
+    /**
+     * foodsoft's docker-compose.ci.yml (#108): the app service is `image: ${IMAGE}`
+     * with no `build:`. Kept, it interpolated to nothing and compose rejected the
+     * project: service "foodsoft" has neither an image nor a build context.
+     */
+    public function test_a_service_whose_image_is_an_unset_variable_is_the_app_not_a_backing_service(): void
+    {
+        $result = RuntimeSidecars::fromYaml(<<<'YAML'
+services:
+  mariadb:
+    image: mariadb:10.5
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-secret}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-foodsoft}
+  redis:
+    image: redis:6.2-alpine
+  foodsoft:
+    image: ${IMAGE}
+    environment:
+      MYSQL_USER: ${MYSQL_USER:-foodsoft}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-secret}
+      DATABASE_URL: mysql2://foodsoft:secret@mariadb/foodsoft
+    networks:
+      - proxy
+      - internal
+networks:
+  internal:
+  proxy:
+    external: true
+YAML, true, null, 'foodcoops/foodsoft');
+
+        $this->assertSame(['mariadb', 'redis'], array_keys($result['services']));
+    }
+
+    #[DataProvider('imageReferences')]
+    public function test_only_an_image_that_resolves_to_nothing_is_dropped(string $image, bool $kept): void
+    {
+        $result = RuntimeSidecars::fromYaml(
+            "services:\n  db:\n    image: \"{$image}\"\n    environment:\n      POSTGRES_PASSWORD: x\n",
+            true
+        );
+
+        $this->assertSame($kept, isset($result['services']['db']));
+    }
+
+    /** @return array<string, array{string, bool}> */
+    public static function imageReferences(): array
+    {
+        return [
+            'bare variable' => ['${IMAGE}', false],
+            'required variable' => ['${IMAGE:?set IMAGE}', false],
+            'defaulted variable' => ['${PG_IMAGE:-postgres:16}', true],
+            'variable tag with default' => ['postgres:${PG_TAG:-16}', true],
+            'plain image' => ['postgres:16', true],
+        ];
     }
 }

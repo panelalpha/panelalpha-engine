@@ -168,6 +168,11 @@ class ComposeFileInspector
         if (!is_array($parsed) || !isset($parsed['services']) || !is_array($parsed['services'])) {
             return [];
         }
+        // A file under docker/ builds relative to docker/.
+        $nested = NestedCompose::relativeDir($composePath, $projectDir);
+        if ($nested !== null) {
+            $parsed = NestedCompose::rebase($parsed, $nested);
+        }
 
         $refs = [];
         foreach ($parsed['services'] as $service) {
