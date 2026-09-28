@@ -32,9 +32,10 @@ use App\Lib\Project\ProvisionChecks;
 use App\Lib\Project\SystemProvisionEnvironment;
 use App\Rules\ProjectName as ProjectNameRule;
 use App\Lib\Domains\DomainPlan;
+use App\Lib\Domains\MainDomainRename;
+use App\Lib\Limits\ResourceLimit;
 use App\Lib\Vault\RequestVault;
 use App\Models\Domain;
-use App\Models\ProxyRule;
 use App\Models\Setting;
 use App\Models\Task;
 use App\Models\Tunnel;
@@ -1567,108 +1568,14 @@ class UserController extends Controller
         if (array_key_exists('email', $params)) {
             $user->email = $params['email'];
         }
-        if (array_key_exists('disk_space_limit', $params)) {
-            $user->setDetails(['disk_space_limit' => $params['disk_space_limit']]);
-        }
-        if (array_key_exists('memory_limit', $params)) {
-            $user->setDetails(['memory_limit' => $params['memory_limit']]);
-        }
-        if (array_key_exists('cpu_limit', $params)) {
-            $user->setDetails(['cpu_limit' => $params['cpu_limit']]);
-        }
-        if (array_key_exists('device_read_bps', $params)) {
-            $user->setDetails(['device_read_bps' => $params['device_read_bps']]);
-        }
-        if (array_key_exists('device_write_bps', $params)) {
-            $user->setDetails(['device_write_bps' => $params['device_write_bps']]);
-        }
-        if (array_key_exists('bandwidth_limit', $params)) {
-            $user->setDetails(['bandwidth_limit' => $params['bandwidth_limit']]);
-        }
-        if (array_key_exists('mysql_databases_limit', $params)) {
-            $user->setDetails(['mysql_databases_limit' => $params['mysql_databases_limit']]);
-        }
-        if (array_key_exists('ftp_accounts_limit', $params)) {
-            $user->setDetails(['ftp_accounts_limit' => $params['ftp_accounts_limit']]);
-        }
-        if (array_key_exists('sftp_accounts_limit', $params)) {
-            $user->setDetails(['sftp_accounts_limit' => $params['sftp_accounts_limit']]);
-        }
-        if (array_key_exists('addon_domains_limit', $params)) {
-            $user->setDetails(['addon_domains_limit' => $params['addon_domains_limit']]);
-        }
-        if (array_key_exists('subdomains_limit', $params)) {
-            $user->setDetails(['subdomains_limit' => $params['subdomains_limit']]);
-        }
-        if (array_key_exists('inodes_limit', $params)) {
-            $user->setDetails(['inodes_limit' => $params['inodes_limit']]);
-        }
-        if (array_key_exists('php_fpm_pool_settings', $params)) {
-            $user->setDetails(['php_fpm_pool_settings' => $params['php_fpm_pool_settings']]);
-        }
-        if (array_key_exists('lsphp_settings', $params)) {
-            $user->setDetails(['lsphp_settings' => $params['lsphp_settings']]);
-        }
-        if (array_key_exists('redis_config', $params)) {
-            $user->setDetails(['redis_config' => $params['redis_config']]);
+        foreach ([...ResourceLimit::keys(), 'php_fpm_pool_settings', 'lsphp_settings', 'redis_config'] as $key) {
+            if (array_key_exists($key, $params)) {
+                $user->setDetails([$key => $params[$key]]);
+            }
         }
 
         if (array_key_exists('domain', $params)) {
-            $oldFqdn = trim((string) ($user->getMainDomain()?->domain ?? $user->domain ?? ''));
-            $newFqdn = trim((string) $params['domain']);
-
-            // Same FQDN: skip destroy+recreate of the main domain vhost.
-            if ($oldFqdn === '' || strcasecmp($oldFqdn, $newFqdn) !== 0) {
-                $domain = $user->getMainDomain();
-                if (!$domain) {
-                    /** @var Domain */
-                    $domain = Domain::make([
-                        'user_id' => $user->id,
-                        'domain' => $user->domain,
-                        'type' => 'main',
-                        'details' => [
-                            'document_root' => "/{$user->domain}/public_html",
-                            'redirect_enabled' => false,
-                            'redirect_url' => null,
-                            'force_https_redirect' => false,
-                        ],
-                    ]);
-                }
-                $newDomain = $domain->replicate();
-                $newDomain->domain = $newFqdn;
-                $newDomain->removeAliases();
-                foreach ($domain->getAliases() as $alias) {
-                    if ($alias == 'www.' . $domain->domain) {
-                        $newDomain->addAlias('www.' . $newFqdn);
-                        continue;
-                    }
-                    $newDomain->addAlias($alias);
-                }
-
-                // Retarget proxy rules before rendering the new vhost: DinD
-                // routing is driven only by ProxyRule rows (no app_port fallback).
-                // Domain::delete() would otherwise drop rules keyed by the old name.
-                $retargeted = 0;
-                if ($oldFqdn !== '') {
-                    $retargeted = ProxyRule::retargetServerName($user->username, $oldFqdn, $newFqdn);
-                }
-                if (
-                    $retargeted === 0
-                    && $user->getTemplate() === 'dind'
-                    && ($appPort = $user->getAppPort()) !== null
-                ) {
-                    ProxyRule::ensureGeneratedHttpPair($user->username, $newFqdn, $appPort);
-                }
-
-                $newDomain->projectDomain()->create();
-                try {
-                    $domain->projectDomain()->delete();
-                } catch (\Exception $e) {
-                }
-                $domain->delete();
-                $newDomain->save();
-                $user->domain = $newFqdn;
-            }
+            MainDomainRename::apply($user, (string) $params['domain']);
         }
 
         $user->save();
