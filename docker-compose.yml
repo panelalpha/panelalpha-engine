@@ -248,6 +248,10 @@ services:
     environment:
       # The stock 3.x config logs at debug.
       REGISTRY_LOG_LEVEL: ${CACHE_REGISTRY_LOG_LEVEL:-info}
+      # Prewarm's garbage-collect deletes blobs behind the running server; with the
+      # stock in-memory descriptor cache a re-push then skips them as "already exists"
+      # and they serve 200 with 0 bytes until a restart. Uncached, a stat hits disk.
+      REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR: none
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
@@ -271,6 +275,11 @@ services:
   # reclaims nothing. Manifest expiry drops only the tag link, so a few KB per
   # repository survive; `system:registry-proxy:trim` clears them by hand.
   #
+  # Blobs are shared across repositories but expire per repository, so one
+  # repository's expiry deletes a layer others still link to (#299). With the
+  # descriptor cache off, their next pull finds it missing and fetches it again;
+  # with it on, they are served 200 with 0 bytes until a restart.
+  #
   # Storage is a named volume on disk: one uncached base image can be larger
   # than any tmpfs worth reserving in RAM. The tag is pinned because 3.x moved
   # the config path the stock entrypoint reads.
@@ -286,6 +295,8 @@ services:
       REGISTRY_PROXY_PASSWORD: ${REGISTRY_PROXY_PASSWORD:-}
       REGISTRY_PROXY_TTL: ${REGISTRY_PROXY_TTL:-30m}
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      # Logs "unknown cache type ... caching disabled" once at start; that is this.
+      REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR: none
       # The stock 3.x config logs at debug: a trace span every 10s from the
       # storage health check, forever, on an idle host.
       REGISTRY_LOG_LEVEL: ${REGISTRY_PROXY_LOG_LEVEL:-info}
