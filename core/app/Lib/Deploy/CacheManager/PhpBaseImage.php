@@ -138,15 +138,29 @@ class PhpBaseImage
     public const MAX_BAKED_EXTRAS = 4;
 
     /**
+     * Debian packages a manifest may add with `system_packages:`, each set
+     * becoming its own `-x` variant. An allowlist, because every distinct set
+     * is another ~1.1 GB image on the host; ffmpeg alone is +371 MB, which is
+     * why it is not in the plain base (engine#193).
+     *
+     * @var list<string>
+     */
+    public const SYSTEM_PACKAGES = ['ffmpeg', 'mediainfo'];
+
+    /**
      * Null when the image is not a plain official php tag: a custom base is
      * nothing we can prebuild, so the caller keeps the stock path.
      *
      * $extras — extensions needed on top of {@see EXTENSIONS} — get their own
      * suffix, so a variant is a distinct cacheable image.
      *
+     * $packages — allowlisted {@see SYSTEM_PACKAGES} — go into the same
+     * suffix, so ffmpeg is a variant too and the plain base stays unchanged.
+     *
      * @param list<string> $extras
+     * @param list<string> $packages
      */
-    public static function tag(string $phpImage, array $extras = []): ?string
+    public static function tag(string $phpImage, array $extras = [], array $packages = []): ?string
     {
         $repository = self::repository();
         $upstream = self::upstreamRepository();
@@ -166,8 +180,11 @@ class PhpBaseImage
 
         $tag = $repository . ':' . $matches[1] . '-pa' . $fingerprint;
         $extras = self::normalizeExtras($extras);
+        $packages = self::normalizeSystemPackages($packages);
 
-        return $extras === [] ? $tag : $tag . '-x' . self::extrasFingerprint($extras);
+        return $extras === [] && $packages === []
+            ? $tag
+            : $tag . '-x' . self::variantFingerprint($extras, $packages);
     }
 
     /**
@@ -211,6 +228,44 @@ class PhpBaseImage
     public static function extrasFingerprint(array $extras): string
     {
         return substr(sha1(implode(' ', self::normalizeExtras($extras))), 0, 8);
+    }
+
+    /**
+     * The extras-only hash is kept as it was, so every `-x` image a host
+     * already holds keeps its name; packages hash in only when there are any.
+     *
+     * @param list<string> $extras
+     * @param list<string> $packages
+     */
+    public static function variantFingerprint(array $extras, array $packages = []): string
+    {
+        $packages = self::normalizeSystemPackages($packages);
+        if ($packages === []) {
+            return self::extrasFingerprint($extras);
+        }
+
+        return substr(sha1(implode(' ', self::normalizeExtras($extras)) . ' +apt ' . implode(' ', $packages)), 0, 8);
+    }
+
+    /**
+     * Allowlisted, sorted and de-duplicated. Anything else is dropped here as a
+     * last line: the manifest refuses it at load with a message.
+     *
+     * @param list<string> $packages
+     * @return list<string>
+     */
+    public static function normalizeSystemPackages(array $packages): array
+    {
+        $clean = [];
+        foreach ($packages as $name) {
+            if (is_string($name) && in_array(strtolower(trim($name)), self::SYSTEM_PACKAGES, true)) {
+                $clean[strtolower(trim($name))] = true;
+            }
+        }
+        $names = array_keys($clean);
+        sort($names);
+
+        return $names;
     }
 
     /**
@@ -266,8 +321,9 @@ class PhpBaseImage
      * every layer up to the baked set.
      *
      * @param list<string> $extras
+     * @param list<string> $packages
      */
-    public static function dockerfile(string $phpImage, array $extras = []): ?string
+    public static function dockerfile(string $phpImage, array $extras = [], array $packages = []): ?string
     {
         $stub = self::stubName();
         if ($stub === null) {
@@ -279,6 +335,7 @@ class PhpBaseImage
             'installer_image' => Images::PHP_EXTENSION_INSTALLER_IMAGE,
             'extensions' => implode(' ', self::EXTENSIONS),
             'extras' => implode(' ', self::normalizeExtras($extras)),
+            'system_packages' => implode(' ', self::normalizeSystemPackages($packages)),
             'composer_image' => Images::COMPOSER_IMAGE,
             'composer_cache_dir' => self::COMPOSER_CACHE_DIR,
             'apache_modules' => PhpApacheConfig::modules(),

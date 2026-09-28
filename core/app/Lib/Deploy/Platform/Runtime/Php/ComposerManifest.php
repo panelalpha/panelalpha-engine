@@ -65,6 +65,48 @@ final class ComposerManifest
     }
 
     /**
+     * Whether a package is in the project at all: required at the root,
+     * pinned in the lock, or listed in the installed tree's
+     * `vendor/composer/installed.json` (Composer 1 or 2 shape).
+     */
+    public function resolves(string $package, ?string $installedJson = null): bool
+    {
+        if ($this->rootRequires($package)) {
+            return true;
+        }
+        $installed = self::decode($installedJson);
+        $installed = is_array($installed['packages'] ?? null) ? $installed['packages'] : $installed;
+        foreach ([...$this->lockedPackages(), ...array_filter($installed, 'is_array')] as $locked) {
+            if (($locked['name'] ?? null) === $package) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Where Composer installs: `config.vendor-dir`, or `vendor`. A value
+     * that could leave the project (absolute, `..`) reads as `vendor`.
+     */
+    public function vendorDir(): string
+    {
+        $config = $this->json['config'] ?? null;
+        $dir = is_array($config) ? ($config['vendor-dir'] ?? null) : null;
+        if (!is_string($dir) || str_starts_with($dir, '/')) {
+            return 'vendor';
+        }
+        $dir = rtrim($dir, '/');
+        if (preg_match('#^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$#', $dir) !== 1
+            || in_array('..', explode('/', $dir), true)
+        ) {
+            return 'vendor';
+        }
+
+        return $dir;
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     public function suggestMaps(): array

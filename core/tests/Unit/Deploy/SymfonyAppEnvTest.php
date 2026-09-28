@@ -3,7 +3,9 @@
 namespace Tests\Unit\Deploy;
 
 use App\Lib\Deploy\Platform\Runtime\Php\ComposerManifest;
+use App\Lib\Deploy\Platform\Runtime\Php\PhpBuild;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpEnvironment;
+use App\System\Project\Dind\Strategy\PhpStrategy;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
 
@@ -82,6 +84,51 @@ class SymfonyAppEnvTest extends TestCase
             'a locked package requiring it must not make the project Symfony'
         );
         $this->assertFalse($laravel->rootRequires('symfony/symfony'));
+    }
+
+    /** Thelia: the root requires thelia/core, which brings the framework in. */
+    public function test_a_skeleton_whose_core_package_installs_the_framework_is_symfony(): void
+    {
+        $build = new PhpBuild(composerJson: '{"require":{"thelia/core":"^3.1","symfony/flex":"^2.4"}}', artisan: false);
+        $installed = '{"packages":[{"name":"thelia/core"},{"name":"symfony/framework-bundle"}],"dev":false}';
+
+        $this->assertFalse(PhpStrategy::isSymfony($build), 'the root manifest alone does not say so');
+        $this->assertTrue(PhpStrategy::isSymfony($build, $installed));
+    }
+
+    public function test_a_lock_pinning_the_framework_is_symfony(): void
+    {
+        $build = new PhpBuild(
+            composerJson: '{"require":{"shopware/core":"^6.6"}}',
+            composerLock: '{"packages":[{"name":"shopware/core"},{"name":"symfony/framework-bundle"}]}',
+            artisan: false
+        );
+
+        $this->assertTrue(PhpStrategy::isSymfony($build));
+    }
+
+    /** Composer 1 wrote installed.json as a bare list. */
+    public function test_a_composer_1_installed_list_is_read(): void
+    {
+        $build = new PhpBuild(composerJson: '{"require":{"acme/core":"^1"}}', artisan: false);
+
+        $this->assertTrue(PhpStrategy::isSymfony($build, '[{"name":"symfony/symfony"}]'));
+    }
+
+    /** Laravel stays Laravel, whatever a package pulls in. */
+    public function test_laravel_with_the_framework_installed_is_not_symfony(): void
+    {
+        $build = new PhpBuild(composerJson: '{"require":{"laravel/framework":"^11.0"}}', artisan: true);
+
+        $this->assertFalse(PhpStrategy::isSymfony($build, '{"packages":[{"name":"symfony/framework-bundle"}]}'));
+    }
+
+    public function test_the_vendor_dir_follows_composer_config(): void
+    {
+        $this->assertSame('vendor', (new ComposerManifest('{}', null))->vendorDir());
+        $this->assertSame('packages', (new ComposerManifest('{"config":{"vendor-dir":"packages"}}', null))->vendorDir());
+        $this->assertSame('vendor', (new ComposerManifest('{"config":{"vendor-dir":"../up"}}', null))->vendorDir());
+        $this->assertSame('vendor', (new ComposerManifest('{"config":{"vendor-dir":"/etc"}}', null))->vendorDir());
     }
 
     /** No composer.json at all is not Symfony. */

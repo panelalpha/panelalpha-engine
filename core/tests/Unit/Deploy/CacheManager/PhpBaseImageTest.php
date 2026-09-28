@@ -168,6 +168,19 @@ class PhpBaseImageTest extends TestCase
         // The DB clients Laravel's schema:dump replay shells out to.
         $this->assertStringContainsString('default-mysql-client', $dockerfile);
         $this->assertStringContainsString('postgresql-client', $dockerfile);
+        $this->assertStringContainsString('sqlite3', $dockerfile);
+    }
+
+    public function test_dockerfile_bakes_the_media_binaries_apps_exec(): void
+    {
+        $dockerfile = (string) PhpBaseImage::dockerfile('php:8.3-apache-bookworm');
+
+        // ResourceSpace detects an upload's type only through exiftool and
+        // renders previews with `convert` (engine#222).
+        $this->assertStringContainsString('libimage-exiftool-perl', $dockerfile);
+        $this->assertStringContainsString('imagemagick', $dockerfile);
+        // A third of the image for every account; not baked (engine#193).
+        $this->assertStringNotContainsString('ffmpeg', preg_replace('/^#.*$/m', '', $dockerfile));
     }
 
     public function test_extras_get_their_own_variant_tag(): void
@@ -220,6 +233,65 @@ class PhpBaseImageTest extends TestCase
             PhpBaseImage::dockerfile('php:8.1-apache-bookworm'),
             PhpBaseImage::dockerfile('php:8.1-apache-bookworm', [])
         );
+    }
+
+    /**
+     * ffmpeg is +371 MB on a 1.09 GB image, so it goes into a variant of its
+     * own rather than the base every account loads (engine#193).
+     */
+    public function test_system_packages_get_their_own_variant_tag(): void
+    {
+        $plain = (string) PhpBaseImage::tag('php:8.3-apache-bookworm');
+        $ffmpeg = (string) PhpBaseImage::tag('php:8.3-apache-bookworm', [], ['ffmpeg']);
+
+        $this->assertStringStartsWith($plain . '-x', $ffmpeg);
+        $this->assertMatchesRegularExpression('/-x[0-9a-f]{8}$/', $ffmpeg);
+        $this->assertSame('php:8.3-apache-bookworm', PhpBaseImage::sourceImage($ffmpeg));
+        $this->assertNotSame(
+            PhpBaseImage::tag('php:8.3-apache-bookworm', ['grpc']),
+            PhpBaseImage::tag('php:8.3-apache-bookworm', ['grpc'], ['ffmpeg']),
+            'the same extras with ffmpeg must not reuse the image without it'
+        );
+        $this->assertNotSame($ffmpeg, PhpBaseImage::tag('php:8.3-apache-bookworm', [], ['ffmpeg', 'mediainfo']));
+    }
+
+    /** Hosts already hold `-x` images by these names; they must not all rebuild. */
+    public function test_an_extras_only_variant_keeps_the_name_it_had(): void
+    {
+        $this->assertSame(
+            PhpBaseImage::tag('php:8.3-apache-bookworm', ['grpc']),
+            PhpBaseImage::tag('php:8.3-apache-bookworm', ['grpc'], [])
+        );
+        $this->assertSame(substr(sha1('grpc'), 0, 8), PhpBaseImage::variantFingerprint(['grpc']));
+    }
+
+    public function test_system_packages_outside_the_allowlist_never_reach_the_image(): void
+    {
+        $this->assertSame(['ffmpeg'], PhpBaseImage::normalizeSystemPackages(['FFmpeg', 'ffmpeg', 'curl', '; rm -rf /', 3]));
+        $this->assertSame(
+            PhpBaseImage::tag('php:8.3-apache-bookworm'),
+            PhpBaseImage::tag('php:8.3-apache-bookworm', [], ['build-essential'])
+        );
+    }
+
+    public function test_dockerfile_installs_system_packages_in_a_layer_after_the_extras(): void
+    {
+        $dockerfile = (string) PhpBaseImage::dockerfile('php:8.3-apache-bookworm', ['grpc'], ['mediainfo', 'ffmpeg']);
+
+        $extras = strpos($dockerfile, 'install-php-extensions grpc');
+        $packages = strpos($dockerfile, 'apt-get install -y --no-install-recommends ffmpeg mediainfo');
+        $this->assertNotFalse($extras);
+        $this->assertNotFalse($packages);
+        $this->assertGreaterThan($extras, $packages, 'a package layer must not invalidate the layers variants share');
+    }
+
+    public function test_dockerfile_without_system_packages_is_unchanged(): void
+    {
+        $plain = (string) PhpBaseImage::dockerfile('php:8.3-apache-bookworm');
+
+        $this->assertSame($plain, PhpBaseImage::dockerfile('php:8.3-apache-bookworm', [], []));
+        $this->assertStringNotContainsString('system_packages', $plain);
+        $this->assertStringNotContainsString('ffmpeg', (string) preg_replace('/^#.*$/m', '', $plain));
     }
 
     public function test_a_long_tail_of_extensions_is_not_worth_a_host_image(): void

@@ -35,7 +35,7 @@ class RecipeDateBumpTest extends TestCase
      */
     private const EXTENSIONS_FINGERPRINT = '989f11d9c144bca048cbe76b0430bc9317779289';
 
-    private const RECIPE_DATE        = '20260922';
+    private const RECIPE_DATE        = '20260924';
 
     public function test_the_recipe_date_was_bumped_with_the_extension_list(): void
     {
@@ -66,7 +66,7 @@ class RecipeDateBumpTest extends TestCase
      * sha1 of the Apache configuration baked into the same image, as of the
      * same recipe date.
      */
-    private const APACHE_FINGERPRINT = '19c4ee6b8767d051355bba7029ad9f560f3c7715';
+    private const APACHE_FINGERPRINT = '593c9c615cda479e2fa3a349bab4733224507c1a';
 
     /**
      * The extension list is not the only thing baked into that image.
@@ -195,6 +195,37 @@ class RecipeDateBumpTest extends TestCase
             $actual,
             "The serve script changed. Bump `recipe` in config/core/images.yaml,\n"
             . "then set SERVE_FINGERPRINT = '{$actual}' here."
+        );
+    }
+
+    /** sha1 of the stub the image is built from, as of the same recipe date. */
+    private const STUB_FINGERPRINT = '747bb01bdc0da4057b5382f36aaa4cf6592b18e1';
+
+    /**
+     * The stub itself: its apt line decides which binaries every PHP app can
+     * exec, and a host holding the old image would keep lacking them.
+     */
+    public function test_the_recipe_date_was_bumped_with_the_stub(): void
+    {
+        $actual = sha1(TemplateLoader::stub((string) PhpBaseImage::stubName()));
+
+        if ($actual !== self::STUB_FINGERPRINT) {
+            $this->assertNotSame(
+                self::RECIPE_DATE,
+                PhpBaseImage::fingerprint(),
+                "The php-base stub changed but the catalogue's `recipe` date did not.\n"
+                . "Bump `recipe` in config/core/images.yaml, then set\n"
+                . "  STUB_FINGERPRINT = '{$actual}'\n"
+                . "  RECIPE_DATE      = '" . PhpBaseImage::fingerprint() . "'\n"
+                . 'in this test.'
+            );
+        }
+
+        $this->assertSame(
+            self::STUB_FINGERPRINT,
+            $actual,
+            "The php-base stub changed. Bump `recipe` in config/core/images.yaml,\n"
+            . "then set STUB_FINGERPRINT = '{$actual}' here."
         );
     }
 

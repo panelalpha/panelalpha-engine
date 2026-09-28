@@ -3,15 +3,26 @@ LABEL panelalpha.base="php"
 LABEL panelalpha.runnable="1"
 COPY --from={{ installer_image }} /usr/bin/install-php-extensions /usr/local/bin/
 # The DB clients are for Laravel's schema:dump replay: MySqlSchemaState and
-# its Postgres twin shell out to a bare mysql/psql, so an app shipping a
-# squashed schema crash-loops at deploy without these.
+# its Postgres and SQLite twins shell out to a bare mysql/psql/sqlite3, so an
+# app shipping a squashed schema crash-loops at deploy without these.
+# exiftool and the ImageMagick CLI are what media apps exec (ResourceSpace
+# refuses every upload without exiftool); ~25 MB, as imagick already brings
+# ImageMagick's libraries. ffmpeg is not here: +371 MB for every account.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git unzip default-mysql-client postgresql-client \
+ && apt-get install -y --no-install-recommends git unzip default-mysql-client postgresql-client sqlite3 \
+    libimage-exiftool-perl imagemagick \
  && rm -rf /var/lib/apt/lists/*
 RUN install-php-extensions {{ extensions }}
 {{# extras }}
 RUN install-php-extensions {{ extras }}
 {{/ extras }}
+{{# system_packages }}
+# A manifest's `system_packages:` (PhpBaseImage::SYSTEM_PACKAGES), in a variant
+# only: ffmpeg is a third of the image and most accounts never exec it.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends {{ system_packages }} \
+ && rm -rf /var/lib/apt/lists/*
+{{/ system_packages }}
 # Composer belongs to the image, not to a project. Every account resolved its
 # own copy while there was a per-project Dockerfile to put it in; there is not
 # one any more, and the host step that runs `composer install` runs it from

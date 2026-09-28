@@ -14,6 +14,7 @@ services:
       - /home/{{ $user }}/:/home/{{ $user }}/
       - /home/{{ $user }}/:/var/www/
       - ./apache-sites:/etc/apache2/sites-enabled
+      - ./apache-conf/remoteip.conf:/etc/apache2/conf-enabled/remoteip.conf
       - ./ssl-certs:/etc/apache2/ssl-certs
       - ./log:/var/log
       - ./crontabs/www-data:/var/spool/cron/crontabs/{{ $user }}

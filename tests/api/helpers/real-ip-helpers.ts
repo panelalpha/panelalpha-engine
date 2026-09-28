@@ -59,12 +59,12 @@ export function webserverMatchesAssetCheck(slug: string, webserverIncludes?: str
 
 export const REAL_IP_ENGINE_ASSET_CHECKS: RealIpEngineAssetCheck[] = [
   {
-    relativePath: 'templates/user-config/apache-conf/remoteip.conf',
+    relativePath: 'templates/user/default/project/apache-conf/remoteip.conf',
     mustContain: ['RemoteIPHeader X-Real-IP', '172.16.0.0/12'],
     webserverIncludes: 'nginx-proxy',
   },
   {
-    relativePath: 'templates/user-config/docker-compose.yml-fpm-apache.blade.php',
+    relativePath: 'templates/user/default/project/docker-compose.yml-fpm-apache.blade.php',
     mustContain: ['apache-conf/remoteip.conf:/etc/apache2/conf-enabled/remoteip.conf'],
     webserverIncludes: 'nginx-proxy',
   },

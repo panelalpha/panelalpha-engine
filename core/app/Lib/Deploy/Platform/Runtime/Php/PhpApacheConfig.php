@@ -32,11 +32,12 @@ final class PhpApacheConfig
     /**
      * Modules an application expects to exist. `rewrite` is the front
      * controller of every PHP framework there is; `headers` is what a
-     * .htaccess reaches for when it sets CSP or cache policy.
+     * .htaccess reaches for when it sets CSP or cache policy; `remoteip`
+     * restores the visitor's address from the proxy's X-Real-IP.
      *
      * @var list<string>
      */
-    public const MODULES = ['rewrite', 'headers'];
+    public const MODULES = ['rewrite', 'headers', 'remoteip'];
 
     public static function vhost(int $port): string
     {

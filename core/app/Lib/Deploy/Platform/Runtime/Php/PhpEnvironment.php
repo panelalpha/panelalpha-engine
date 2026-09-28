@@ -104,6 +104,8 @@ final class PhpEnvironment
     /**
      * Heimdall wraps the variable in database_path(), so an absolute path doubles.
      * Such a config gets a bare filename; anything else keeps the absolute path.
+     * The wrap may sit anywhere in the `database` entry: Heimdall now puts a
+     * `:memory:` ternary in front of it.
      */
     private static function sqlitePath(?string $databaseConfig): string
     {
@@ -112,8 +114,8 @@ final class PhpEnvironment
         ) {
             return self::SQLITE_PATH;
         }
-        $wrapped = '/([\'"])database\1\s*=>\s*database_path\(\s*env\(\s*([\'"])DB_DATABASE\2\s*'
-            . '(?:,\s*([\'"])([^\'"]*)\3\s*)?\)/';
+        $wrapped = '/([\'"])database\1\s*=>(?:(?![\'"][\w.-]+[\'"]\s*=>).)*?'
+            . 'database_path\(\s*env\(\s*([\'"])DB_DATABASE\2\s*(?:,\s*([\'"])([^\'"]*)\3\s*)?\)/s';
         if (preg_match($wrapped, $block[2], $match) !== 1) {
             return self::SQLITE_PATH;
         }

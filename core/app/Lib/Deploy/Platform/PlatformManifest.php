@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\Platform;
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\Health\CheckRegistry;
 use App\Lib\Deploy\Platform\Runtime\Requirement;
+use App\Lib\Deploy\Platform\Runtime\Php\PhpDocroot;
 
 /**
  * One platform or app, as declared by a YAML file under `resources/platforms/` or
@@ -43,6 +44,7 @@ final class PlatformManifest
         'check',
         'check_skip',
         'build_args',
+        'system_packages',
     ];
 
     /** Databases a manifest can ask the engine to provision. */
@@ -89,6 +91,13 @@ final class PlatformManifest
          * @var array<string, string>
          */
         public readonly array $buildArgs,
+        /**
+         * Debian packages baked into this app's own PHP base variant — ffmpeg for a video
+         * site. Allowlisted by `PhpBaseImage::SYSTEM_PACKAGES`; `runtime: php` only.
+         *
+         * @var list<string>
+         */
+        public readonly array $systemPackages,
         public readonly array $detect,
         /**
          * Health checks this manifest adds to the ones its runtime brings, as `<group>`
@@ -167,6 +176,7 @@ final class PlatformManifest
             self::readAppRoot($reader),
             self::readDocroot($reader),
             self::readBuildArgs($reader),
+            self::readSystemPackages($reader),
             $reader->object('detect', 'must be a non-empty condition object', $requireDetect),
             $checks = self::readChecks($reader, $recipeChecks),
             self::readCheckSkips($reader, $runtime, $checks, $recipeChecks),
@@ -398,7 +408,9 @@ final class PlatformManifest
      * if it escapes: it becomes Apache's DocumentRoot, and '../' would serve the account's
      * home directory.
      *
-     * '' means the application root, which for PHP is /app, as does an absent key.
+     * An absent key is '' and the runtime probes for the root. `.` (or `/`) is a stated
+     * answer, PhpDocroot::ROOT, so the probe cannot move it to a `public/` the
+     * application does not serve from (engine#172, OpenEMR).
      *
      * @throws ManifestException
      */
@@ -411,7 +423,7 @@ final class PlatformManifest
 
         $value = trim($raw, '/');
         if ($value === '' || $value === '.') {
-            return '';
+            return PhpDocroot::ROOT;
         }
         foreach (explode('/', $value) as $segment) {
             if ($segment === '' || $segment === '.' || $segment === '..') {
@@ -449,6 +461,40 @@ final class PlatformManifest
         }
 
         return $args;
+    }
+
+    /**
+     * `system_packages`, a list of allowlisted Debian package names.
+     *
+     * Refused rather than dropped when unknown or on another runtime: a video site
+     * that deploys green without ffmpeg accepts uploads it can never convert.
+     *
+     * @return list<string>
+     * @throws ManifestException
+     */
+    private static function readSystemPackages(ManifestReader $reader): array
+    {
+        if (!$reader->has('system_packages') || $reader->raw('system_packages') === null) {
+            return [];
+        }
+        $raw = $reader->raw('system_packages');
+        if (!is_array($raw) || !array_is_list($raw)) {
+            throw $reader->fail('system_packages must be a list of package names');
+        }
+        $allowed = PhpBaseImage::SYSTEM_PACKAGES;
+        foreach ($raw as $name) {
+            if (!is_string($name) || !in_array($name, $allowed, true)) {
+                $shown = is_scalar($name) ? (string) $name : gettype($name);
+                throw $reader->fail(
+                    "system_packages: '{$shown}' is not one the engine can add; allowed: " . implode(', ', $allowed)
+                );
+            }
+        }
+        if ($raw !== [] && ($reader->raw('runtime') ?? self::RUNTIME_COMMAND) !== self::RUNTIME_PHP) {
+            throw $reader->fail("system_packages is only supported for runtime 'php'");
+        }
+
+        return PhpBaseImage::normalizeSystemPackages($raw);
     }
 
     /**
@@ -631,6 +677,7 @@ final class PlatformManifest
             'app_root' => $this->appRoot,
             'docroot' => $this->docroot,
             'build_args' => $this->buildArgs,
+            'system_packages' => $this->systemPackages,
         ];
     }
 

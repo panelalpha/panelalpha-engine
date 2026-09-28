@@ -39,13 +39,29 @@ class PhpDocrootTest extends TestCase
     }
 
     /**
-     * '.' and an omitted key are the same statement: the application root.
-     * Both leave the image to decide, which it does by looking for public/.
+     * engine#172: `.` is a statement, not an omission. It must reach the
+     * decision as the root so the probe cannot move it to a public/ the
+     * application does not serve from.
      */
-    public function test_a_root_docroot_normalises_to_empty(): void
+    public function test_a_root_docroot_is_kept_as_the_root(): void
     {
-        $this->assertSame('', $this->manifest('.')->docroot);
-        $this->assertSame('', $this->manifest('/')->docroot);
+        $this->assertSame(PhpDocroot::ROOT, $this->manifest('.')->docroot);
+        $this->assertSame(PhpDocroot::ROOT, $this->manifest('/')->docroot);
+        $this->assertSame(PhpDocroot::ROOT, $this->manifest('./')->docroot);
+    }
+
+    /**
+     * OpenEMR's shape: a root front controller and an experimental
+     * public/index.php. Declared `.`, Apache gets /app; undeclared, the probe
+     * still picks public/ as before.
+     */
+    public function test_a_declared_root_wins_over_a_public_index(): void
+    {
+        $openemr = self::tree(['index.php', 'interface/login/login.php', 'public/index.php']);
+        $declared = $this->manifest('.')->describe(ProjectContext::make('/tmp', []))['docroot'];
+
+        $this->assertSame(['PA_DOCROOT' => '/app'], PhpDocroot::environment($declared, $openemr));
+        $this->assertSame(['PA_DOCROOT' => '/app/public'], PhpDocroot::environment('', $openemr));
     }
 
     /**
@@ -71,8 +87,9 @@ class PhpDocrootTest extends TestCase
             'flarum' => 'public',
             'magento' => 'pub',
             'opencart' => 'upload',
-            'matomo' => '',
-            'adminer' => '',
+            // Both say `docroot: .`, which is now kept rather than folded away.
+            'matomo' => PhpDocroot::ROOT,
+            'adminer' => PhpDocroot::ROOT,
             // php, phpmyadmin and chamilo used the `if [ -d /app/public ]`
             // form, which is exactly what an undeclared docroot means.
             'php' => '',

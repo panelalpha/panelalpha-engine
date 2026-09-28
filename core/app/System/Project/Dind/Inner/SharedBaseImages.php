@@ -51,12 +51,17 @@ class SharedBaseImages
      *
      * @param list<string> $extras extensions to bake in on top of the standard
      *                             set, so the account never compiles them
+     * @param list<string> $packages the manifest's `system_packages:`
      * @return array{tag: ?string, baked: list<string>} baked is what $tag has
      *         beyond the standard set, so the caller knows what not to install
      */
-    public function ensurePhp(string $phpImage, array $extras = []): array
+    public function ensurePhp(string $phpImage, array $extras = [], array $packages = []): array
     {
         $extras = PhpBaseImage::normalizeExtras($extras);
+        $packages = PhpBaseImage::normalizeSystemPackages($packages);
+        if ($packages !== []) {
+            return $this->ensurePhpWithPackages($phpImage, $extras, $packages);
+        }
         if ($extras !== []) {
             $tag = PhpBaseImage::tag($phpImage, $extras);
             if ($tag !== null && $this->providePhp($tag, $phpImage, $extras)) {
@@ -79,6 +84,34 @@ class SharedBaseImages
         );
 
         return ['tag' => null, 'baked' => []];
+    }
+
+    /**
+     * A variant carrying system packages is never deferred and never swapped
+     * for the plain base: the plain base has no ffmpeg, so a green deploy on it
+     * accepts uploads it can never convert (ClipBucket, engine#193). The first
+     * deploy of a set waits for the build; one that cannot get it fails.
+     *
+     * @param list<string> $extras
+     * @param list<string> $packages
+     * @return array{tag: string, baked: list<string>}
+     */
+    private function ensurePhpWithPackages(string $phpImage, array $extras, array $packages): array
+    {
+        $tag = PhpBaseImage::tag($phpImage, $extras, $packages);
+        if ($tag !== null && $this->providePhp($tag, $phpImage, $extras, $packages)) {
+            return ['tag' => $tag, 'baked' => $extras];
+        }
+
+        $wanted = implode(', ', $packages);
+        throw new \RuntimeException(
+            $tag === null
+                ? "This application needs {$wanted} (system_packages), which only the shared PHP base image can carry, "
+                    . "and {$phpImage} is not an image this host builds one from."
+                : "This application needs {$wanted} (system_packages), and the PHP base image {$tag} "
+                    . 'carrying them could not be built or loaded; see the lines above. '
+                    . 'Deploying on the plain base would serve an application without them.'
+        );
     }
 
     /**
@@ -230,8 +263,9 @@ class SharedBaseImages
      * image is already where it needs to be, so this is safe to call per deploy.
      *
      * @param list<string> $extras
+     * @param list<string> $packages
      */
-    public function providePhp(string $tag, string $phpImage, array $extras = []): bool
+    public function providePhp(string $tag, string $phpImage, array $extras = [], array $packages = []): bool
     {
         if (!ImageTransfer::isSafeImageRef($tag)) {
             return false;
@@ -240,7 +274,7 @@ class SharedBaseImages
             return true;
         }
 
-        $dockerfile = PhpBaseImage::dockerfile($phpImage, $extras);
+        $dockerfile = PhpBaseImage::dockerfile($phpImage, $extras, $packages);
         // No stub in the catalogue, so there is no recipe to build from and
         // the account uses the stock image.
         if ($dockerfile === null) {
@@ -256,14 +290,16 @@ class SharedBaseImages
         // configuration and entrypoint included -- so a deploy without it has
         // nothing to run. Better a first deploy on this minor that waits for
         // the compile and says so than a green deploy serving nothing.
-        if (!$this->hostHasImage($tag) && $extras !== []) {
+        // System packages are not deferrable either: the plain base lacks them.
+        if (!$this->hostHasImage($tag) && $extras !== [] && $packages === []) {
             $this->queueBackgroundBuild('PHP', $tag, $dockerfile);
 
             return false;
         }
         if (!$this->hostHasImage($tag)) {
             $this->inner->host()->logInfo(
-                "Shared PHP base image {$tag} has not been built on this host yet; building it now. "
+                "Shared PHP base image {$tag} has not been built on this host yet; building it now"
+                . ($packages === [] ? '' : ' with ' . implode(', ', $packages)) . '. '
                 . 'Later deploys on this PHP version load it in seconds. '
                 . '`php artisan system:image:prewarm` builds it ahead of time.'
             );

@@ -48,6 +48,25 @@ return [
 ];
 PHP;
 
+    /** Heimdall's config/database.php today: a `:memory:` ternary ahead of the wrap. */
+    private const HEIMDALL_MEMORY_TERNARY = <<<'PHP'
+<?php
+return [
+    'default' => env('DB_CONNECTION', 'sqlite'),  // Make sure the default connection is set
+    'connections' => [
+        'sqlite' => [
+            'driver' => 'sqlite',
+            // Use the correct path, but let the special in-memory identifier
+            // pass through untouched so tests can run against ':memory:'.
+            'database' => env('DB_DATABASE', 'app.sqlite') === ':memory:'
+                ? ':memory:'
+                : database_path(env('DB_DATABASE', 'app.sqlite')),
+            'prefix' => '',
+        ],
+    ],
+];
+PHP;
+
     private static function database(?string $config): string
     {
         return PhpEnvironment::for([], null, true, false, $config)['DB_DATABASE'];
@@ -61,6 +80,20 @@ PHP;
     public function test_a_heimdall_shaped_config_gets_its_own_default_filename(): void
     {
         $this->assertSame('app.sqlite', self::database(self::HEIMDALL));
+    }
+
+    public function test_a_wrap_behind_a_memory_ternary_still_counts(): void
+    {
+        $this->assertSame('app.sqlite', self::database(self::HEIMDALL_MEMORY_TERNARY));
+    }
+
+    public function test_a_wrap_under_another_key_does_not_count(): void
+    {
+        $config = "<?php return ['connections' => ['sqlite' => [\n"
+            . "    'database' => env('DB_DATABASE', '/data/app.sqlite'),\n"
+            . "    'backup' => database_path(env('DB_DATABASE', 'app.sqlite')),\n]]];";
+
+        $this->assertSame('/app/database/database.sqlite', self::database($config));
     }
 
     public function test_a_wrap_with_no_default_gets_database_sqlite(): void

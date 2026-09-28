@@ -84,7 +84,8 @@ class PhpStrategy
             $projectDir,
             $artisan,
             $needsMysql,
-            is_string($decision['app_root'] ?? null) ? trim($decision['app_root'], '/') : ''
+            is_string($decision['app_root'] ?? null) ? trim($decision['app_root'], '/') : '',
+            is_array($decision['system_packages'] ?? null) ? array_values($decision['system_packages']) : []
         );
 
         $strategy->entrypoint()->write(
@@ -136,13 +137,36 @@ class PhpStrategy
      * old monolithic package requires and `symfony/framework-bundle` is what
      * one on the components requires. Neither is something a non-Symfony
      * project pulls in at the root.
+     *
+     * A product shipped as a thin skeleton (Thelia, Shopware, Pimcore)
+     * requires the framework through its own core package, so the lock and
+     * the installed tree count too -- except for Laravel, which stays Laravel
+     * whatever it pulls in. Missed, the app got `production`, which Symfony
+     * boots as a debug environment.
      */
-    private static function isSymfony(PhpBuild $build): bool
+    public static function isSymfony(PhpBuild $build, ?string $installedJson = null): bool
     {
         $composer = $build->composer();
+        if ($composer->rootRequires('symfony/framework-bundle') || $composer->rootRequires('symfony/symfony')) {
+            return true;
+        }
+        if ($build->artisan) {
+            return false;
+        }
 
-        return $composer->rootRequires('symfony/framework-bundle')
-            || $composer->rootRequires('symfony/symfony');
+        return $composer->resolves('symfony/framework-bundle', $installedJson)
+            || $composer->resolves('symfony/symfony', $installedJson);
+    }
+
+    /** The installed tree's package list, written by the host build before the compose file. */
+    private function installedPackages(string $projectDir, PhpBuild $build): ?string
+    {
+        $prefix = $build->appRoot === '' ? '' : $build->appRoot . '/';
+
+        return $this->dind->projectTree()->readIn(
+            $projectDir,
+            $prefix . $build->composer()->vendorDir() . '/composer/installed.json'
+        );
     }
 
     /**
@@ -155,11 +179,15 @@ class PhpStrategy
         return is_string($platform) && $platform !== '' ? $platform : ($artisan ? 'laravel' : 'php');
     }
 
+    /**
+     * @param list<string> $systemPackages the manifest's `system_packages:`
+     */
     private function build(
         string $projectDir,
         bool $artisan,
         bool $needsMysql,
-        string $appRoot = ''
+        string $appRoot = '',
+        array $systemPackages = []
     ): PhpBuild {
         // The application's manifests, not the repository's: for a project
         // whose manifest declares an app_root these are <root>/composer.json
@@ -171,7 +199,8 @@ class PhpStrategy
         $base = $this->baseImage(
             $composerJson,
             $composerLock,
-            PhpExtensions::for(new ComposerManifest($composerJson, $composerLock), $artisan, $needsMysql)
+            PhpExtensions::for(new ComposerManifest($composerJson, $composerLock), $artisan, $needsMysql),
+            $systemPackages
         );
 
         return new PhpBuild(
@@ -191,13 +220,19 @@ class PhpStrategy
      * set gets them as a ~2s image load.
      *
      * @param list<string> $extensions
+     * @param list<string> $systemPackages
      * @return array{tag: ?string, baked: list<string>}
      */
-    private function baseImage(?string $composerJson, ?string $composerLock, array $extensions): array
-    {
+    private function baseImage(
+        ?string $composerJson,
+        ?string $composerLock,
+        array $extensions,
+        array $systemPackages = []
+    ): array {
         return $this->dind->innerDocker()->ensurePhpBaseImage(
             PhpRuntime::imageFor($composerJson, $composerLock),
-            PhpBaseImage::bakeableExtras(PhpBaseImage::missingExtensions($extensions))
+            PhpBaseImage::bakeableExtras(PhpBaseImage::missingExtensions($extensions)),
+            $systemPackages
         );
     }
 
@@ -339,7 +374,17 @@ class PhpStrategy
             ? $this->dind->projectTree()->readIn($projectDir, ($build->appRoot === '' ? '' : $build->appRoot . '/') . 'config/database.php')
             : null;
         $decision = $strategy->sidecars()->mergeRuntimeSidecars(
-            $this->decision($db, $hasMysql, $publicUrl, $artisan, $accountDb, $build, $manifestDecision, $databaseConfig),
+            $this->decision(
+                $db,
+                $hasMysql,
+                $publicUrl,
+                $artisan,
+                $accountDb,
+                $build,
+                $manifestDecision,
+                $databaseConfig,
+                self::isSymfony($build, $this->installedPackages($projectDir, $build))
+            ),
             $sidecars
         );
         $this->dind->composeWriter()->writeGeneratedCompose(
@@ -368,7 +413,8 @@ class PhpStrategy
         bool $accountDb,
         PhpBuild $build,
         array $decision,
-        ?string $databaseConfig = null
+        ?string $databaseConfig = null,
+        bool $symfony = false
     ): array {
         $decision = [
             'runtime' => 'php',
@@ -391,7 +437,7 @@ class PhpStrategy
                     $hasMysql ? array_merge($db, ['connection' => 'mysql']) : $db,
                     $publicUrl,
                     $artisan,
-                    self::isSymfony($build),
+                    $symfony,
                     $databaseConfig
                 ),
                 $this->documentRoot($decision, $build),

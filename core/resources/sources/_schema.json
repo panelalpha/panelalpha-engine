@@ -152,6 +152,24 @@
         }
       ]
     },
+    "system_packages": {
+      "description": "Debian packages to add to this application's PHP base image, for a binary the app execs that no PHP extension supplies — `ffmpeg` for a video site. Allowlisted (`PhpBaseImage::SYSTEM_PACKAGES`): each distinct set is a separate ~1.1 GB variant image the host builds once and only accounts deploying such an app load. The first deploy of a new set waits for that build, and fails rather than deploying without the packages. `runtime: php` only.",
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "enum": [
+              "ffmpeg",
+              "mediainfo"
+            ]
+          },
+          "uniqueItems": true
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "image": {
       "description": "Literal base image. Omit and use `requires` when the version comes from the project.",
       "anyOf": [
