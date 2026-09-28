@@ -5,6 +5,8 @@ namespace App\Models;
 use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\ResourceLimit;
 use App\Lib\Project\NewProjectDetails;
+use App\Lib\Project\ProjectIpAddresses;
+use App\Lib\Project\RuntimeSettings;
 use App\System\Project as AppSystemProject;
 use App\System\Services\Webserver\AbstractWebserver;
 use Illuminate\Database\Eloquent\Collection;
@@ -778,62 +780,7 @@ class User extends Authenticatable
      */
     public function getPhpFpmPoolSettings(): array
     {
-        $default = [
-            'pm' => 'dynamic',
-            'pm.max_children' => '5',
-            'pm.start_servers' => '2',
-            'pm.min_spare_servers' => '1',
-            'pm.max_spare_servers' => '3',
-            'pm.max_requests' => '0',
-        ];
-
-        $details = $this->getDetails();
-        if (
-            empty($details['php_fpm_pool_settings'])
-            || !is_string($details['php_fpm_pool_settings'])
-        ) {
-            return $default;
-        }
-
-        $parsed = [];
-        $raw = trim($details['php_fpm_pool_settings']);
-        $lines = explode("\n", $raw);
-        foreach ($lines as $line) {
-            $line = trim($line);
-            $parts = explode(" = ", $line, 2);
-            if (count($parts) < 2) {
-                continue;
-            }
-            $parsed[$parts[0]] = $parts[1];
-        }
-
-        $validated = $default;
-        if (
-            array_key_exists('pm', $parsed)
-            && in_array($parsed['pm'], ['static', 'dynamic', 'ondemand'])
-        ) {
-            $validated['pm'] = $parsed['pm'];
-        }
-        foreach (
-            [
-                'pm.max_children',
-                'pm.start_servers',
-                'pm.min_spare_servers',
-                'pm.max_spare_servers',
-                'pm.max_requests',
-            ] as $key
-        ) {
-            if (
-                array_key_exists($key, $parsed)
-                && filter_var($parsed[$key], FILTER_VALIDATE_INT) !== false
-            ) {
-                $validated[$key] = $parsed[$key];
-            }
-        }
-
-        $settings = array_merge($parsed, $validated);
-
-        return $settings;
+        return RuntimeSettings::phpFpmPool($this->getDetails()['php_fpm_pool_settings'] ?? null);
     }
 
     /**
@@ -841,49 +788,7 @@ class User extends Authenticatable
      */
     public function getLsPhpSettings(): array
     {
-        $default = [
-            'PHP_LSAPI_CHILDREN' => '35',
-            'PHP_LSAPI_MAX_REQUESTS' => '5000',
-        ];
-
-        $details = $this->getDetails();
-        if (
-            empty($details['lsphp_settings'])
-            || !is_string($details['lsphp_settings'])
-        ) {
-            return $default;
-        }
-
-        $parsed = [];
-        $raw = trim($details['lsphp_settings']);
-        $lines = explode("\n", $raw);
-        foreach ($lines as $line) {
-            $line = trim($line);
-            $parts = explode("=", $line, 2);
-            if (count($parts) < 2) {
-                continue;
-            }
-            $parsed[$parts[0]] = $parts[1];
-        }
-
-        $validated = $default;
-        foreach (
-            [
-                'PHP_LSAPI_CHILDREN',
-                'PHP_LSAPI_MAX_REQUESTS',
-            ] as $key
-        ) {
-            if (
-                array_key_exists($key, $parsed)
-                && filter_var($parsed[$key], FILTER_VALIDATE_INT) !== false
-            ) {
-                $validated[$key] = $parsed[$key];
-            }
-        }
-
-        $settings = array_merge($parsed, $validated);
-
-        return $settings;
+        return RuntimeSettings::lsphp($this->getDetails()['lsphp_settings'] ?? null);
     }
 
     // The vhost's lsphp maxConns must equal the plan's PHP_LSAPI_CHILDREN;
@@ -898,113 +803,22 @@ class User extends Authenticatable
      */
     public function getRedisConfig(): array
     {
-        $default = [
-            'maxmemory' => '128mb',
-            'maxmemory-policy' => 'allkeys-lru',
-            'maxmemory-samples' => '5',
-            'save' => '""',
-            'hz' => '10',
-            'timeout' => '0',
-            'lazyfree-lazy-eviction' => 'no',
-            'lazyfree-lazy-expire' => 'no',
-            'activedefrag' => 'no',
-            'lfu-log-factor' => '10',
-            'lfu-decay-time' => '1',
-        ];
+        return RuntimeSettings::redis($this->getDetails()['redis_config'] ?? null);
+    }
 
-        $details = $this->getDetails();
-        if (
-            empty($details['redis_config'])
-            || !is_string($details['redis_config'])
-        ) {
-            return $default;
-        }
-
-        $parsed = [];
-        $raw = trim($details['redis_config']);
-        $lines = explode("\n", $raw);
-        foreach ($lines as $line) {
-            $line = trim($line);
-            $parts = explode(" ", $line, 2);
-            if (count($parts) < 2) {
-                continue;
-            }
-            $parsed[$parts[0]] = $parts[1];
-        }
-
-        $allowedKeys = [
-            'maxmemory',
-            'maxmemory-policy',
-            'save',
-            'hz',
-            'timeout',
-            'maxmemory-samples',
-            'lazyfree-lazy-eviction',
-            'lazyfree-lazy-expire',
-            'activedefrag',
-            'lfu-decay-time',
-            'lfu-log-factor',
-        ];
-
-        $allowedMaxmemoryPolicies = [
-            'noeviction',
-            'allkeys-lru',
-            'volatile-lru',
-            'allkeys-random',
-            'volatile-random',
-            'volatile-ttl',
-            'allkeys-lfu',
-            'volatile-lfu',
-        ];
-
-        $validated = $default;
-        foreach ($allowedKeys as $key) {
-            if (!array_key_exists($key, $parsed)) {
-                continue;
-            }
-            $value = $parsed[$key];
-            if ($key === 'maxmemory-policy') {
-                if (in_array($value, $allowedMaxmemoryPolicies)) {
-                    $validated[$key] = $value;
-                }
-                continue;
-            }
-            if (in_array($key, ['hz', 'timeout', 'maxmemory-samples', 'lfu-decay-time', 'lfu-log-factor'])) {
-                if (filter_var($value, FILTER_VALIDATE_INT) !== false) {
-                    $validated[$key] = $value;
-                }
-                continue;
-            }
-            if (in_array($key, ['lazyfree-lazy-eviction', 'lazyfree-lazy-expire', 'activedefrag'])) {
-                if (in_array($value, ['yes', 'no'])) {
-                    $validated[$key] = $value;
-                }
-                continue;
-            }
-            $validated[$key] = $value;
-        }
-
-        return $validated;
+    public function ipAddresses(): ProjectIpAddresses
+    {
+        return new ProjectIpAddresses($this);
     }
 
     public function dedicatedIpv4Enabled(): bool
     {
-        $default = false;
-        $details = $this->getDetails();
-        if (empty($details['dedicated_ipv4']) || !is_bool($details['dedicated_ipv4'])) {
-            return $default;
-        }
-        return $details['dedicated_ipv4'];
+        return $this->ipAddresses()->dedicatedIpv4Enabled();
     }
 
     public function dedicatedIpv6Enabled(): bool
     {
-        $default = false;
-        $details = $this->getDetails();
-        if (empty($details['dedicated_ipv6']) || !is_bool($details['dedicated_ipv6'])) {
-            return $default;
-        }
-        return $details['dedicated_ipv6'];
+        return $this->ipAddresses()->dedicatedIpv6Enabled();
     }
 
     /**
@@ -1015,24 +829,10 @@ class User extends Authenticatable
      */
     public function getIpAddresses(): array
     {
-        $ips = $this->resolveIpAddresses(false);
-
-        // When NAT mode is active, map local IPs to their public counterparts
-        // so clients and DNS see the public address.
-        if (Ipv4NatMap::isNatModeEnabled()) {
-            $localToPublic = Ipv4NatMap::getLocalToPublicMap();
-            $ips['ipv4'] = self::mapIps($ips['ipv4'], $localToPublic);
-        }
-
-        return $ips;
+        return $this->ipAddresses()->getIpAddresses();
     }
 
     /**
-     * Returns the IPs that should be used for webserver bind/listen directives.
-     * Under NAT mode public IPs are translated back to local IPs. When no NAT
-     * maps exist, non-local default IPv4 addresses are filtered out to prevent
-     * webserver bind failures on cloud VMs.
-     *
      * @return array{
      *   ipv4: array<string>,
      *   ipv6: array<string>,
@@ -1040,64 +840,10 @@ class User extends Authenticatable
      */
     public function getBindIpAddresses(): array
     {
-        $ips = $this->resolveIpAddresses(true);
-
-        if (Ipv4NatMap::isNatModeEnabled()) {
-            $publicToLocal = Ipv4NatMap::getPublicToLocalMap();
-            $ips['ipv4'] = self::mapIps($ips['ipv4'], $publicToLocal);
-        }
-
-        return $ips;
+        return $this->ipAddresses()->getBindIpAddresses();
     }
 
     /**
-     * @return array{
-     *   ipv4: array<string>,
-     *   ipv6: array<string>,
-     * }
-     */
-    private function resolveIpAddresses(bool $forBinding): array
-    {
-        $ips = [
-            'ipv4' => [],
-            'ipv6' => [],
-        ];
-
-        if (!empty(Setting::get('disable-user-ip-assign'))) {
-            return $ips;
-        }
-
-        $assigned = $this->getAssignedIpAddresses();
-        if (!empty($assigned)) {
-            foreach ($assigned as $ip) {
-                if (filter_var($ip->ip_address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-                    $ips['ipv6'][] = $ip->ip_address;
-                    continue;
-                }
-                $ips['ipv4'][] = $ip->ip_address;
-            }
-        }
-
-        $defaults = self::defaultIpAddresses();
-        if (empty($ips['ipv4'])) {
-            $ips['ipv4'] = $defaults['ipv4'];
-        }
-        if (empty($ips['ipv6'])) {
-            $ips['ipv6'] = $defaults['ipv6'];
-        }
-
-        return $ips;
-    }
-
-    /**
-     * The engine's own addresses: what a user with no dedicated IP resolves to.
-     *
-     * Static and user-independent on purpose. The webserver's main config has
-     * to declare these listen addresses from install time, and there are no
-     * users then -- deriving them from the user table instead makes them
-     * appear only once somebody is hosted, which is a bind address nginx
-     * cannot adopt on a reload. {@see AbstractWebserver::getAllIpsVars()}.
-     *
      * @return array{
      *   ipv4: array<string>,
      *   ipv6: array<string>,
@@ -1105,32 +851,10 @@ class User extends Authenticatable
      */
     public static function defaultIpAddresses(): array
     {
-        $ips = [
-            'ipv4' => [],
-            'ipv6' => [],
-        ];
-
-        if (!empty(Setting::get('disable-user-ip-assign'))) {
-            return $ips;
-        }
-
-        $defaultIpv4 = Setting::get('default_ipv4');
-        if (!empty($defaultIpv4)) {
-            $ips['ipv4'][] = $defaultIpv4;
-        }
-
-        $defaultIpv6 = Setting::get('default_ipv6');
-        if (!empty($defaultIpv6)) {
-            $ips['ipv6'][] = $defaultIpv6;
-        }
-
-        return $ips;
+        return ProjectIpAddresses::defaultIpAddresses();
     }
 
     /**
-     * {@see defaultIpAddresses()} translated for binding, the way
-     * {@see getBindIpAddresses()} translates a user's own addresses.
-     *
      * @return array{
      *   ipv4: array<string>,
      *   ipv6: array<string>,
@@ -1138,124 +862,17 @@ class User extends Authenticatable
      */
     public static function defaultBindIpAddresses(): array
     {
-        $ips = self::defaultIpAddresses();
-
-        if (Ipv4NatMap::isNatModeEnabled()) {
-            $ips['ipv4'] = self::mapIps($ips['ipv4'], Ipv4NatMap::getPublicToLocalMap());
-        }
-
-        return $ips;
-    }
-
-    /**
-     * @param array<string> $ips
-     * @param array<string, string> $map
-     * @return array<string>
-     */
-    private static function mapIps(array $ips, array $map): array
-    {
-        $mapped = [];
-        foreach ($ips as $ip) {
-            $mapped[] = $map[$ip] ?? $ip;
-        }
-        return array_values(array_unique($mapped));
-    }
-
-    private function isBindableIpv4(string $ip): bool
-    {
-        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            return false;
-        }
-
-        // NAT mode handles public IPs via the mapping table.
-        if (Ipv4NatMap::isNatModeEnabled()) {
-            return true;
-        }
-
-        return $this->isLocalIpv4($ip);
-    }
-
-    private function isLocalIpv4(string $ip): bool
-    {
-        // 127.0.0.0/8 is local but not usable as a default bind address.
-        if (strpos($ip, '127.') === 0) {
-            return false;
-        }
-
-        // 0.0.0.0/8 is invalid.
-        if (strpos($ip, '0.') === 0) {
-            return false;
-        }
-
-        // RFC 1918 private ranges and RFC 6598 CGNAT range are local bindable.
-        $privateRanges = [
-            '10.0.0.0/8',
-            '172.16.0.0/12',
-            '192.168.0.0/16',
-            '100.64.0.0/10',
-        ];
-
-        foreach ($privateRanges as $range) {
-            if (\Symfony\Component\HttpFoundation\IpUtils::checkIp($ip, $range)) {
-                return true;
-            }
-        }
-
-        return false;
+        return ProjectIpAddresses::defaultBindIpAddresses();
     }
 
     public function assignFreeDedicatedIpv4(): bool
     {
-        /** @var Collection<array-key, IpSubnet> */
-        $subnets = IpSubnet::query()
-            ->where('family', 4)
-            ->where('is_shared', 0)
-            ->get();
-        /** @var array<IpSubnet> */
-        $subnets = $subnets->all();
-
-        /** @var string */
-        $defaultIpv4 = Setting::get('default_ipv4');
-
-        foreach ($subnets as $subnet) {
-            if ($freeIp = $subnet->findFreeIp([$defaultIpv4])) {
-                IpAssigned::create([
-                    'user_id' => $this->id,
-                    'ip_subnet_id' => $subnet->id,
-                    'ip_address' => $freeIp,
-                ]);
-                return true;
-            }
-        }
-
-        return false;
+        return $this->ipAddresses()->assignFreeDedicatedIpv4();
     }
 
     public function assignFreeDedicatedIpv6(): bool
     {
-        /** @var Collection<array-key, IpSubnet> */
-        $subnets = IpSubnet::query()
-            ->where('family', 4)
-            ->where('is_shared', 0)
-            ->get();
-        /** @var array<IpSubnet> */
-        $subnets = $subnets->all();
-
-        /** @var string */
-        $defaultIpv6 = Setting::get('default_ipv6');
-
-        foreach ($subnets as $subnet) {
-            if ($freeIp = $subnet->findFreeIp([$defaultIpv6])) {
-                IpAssigned::create([
-                    'user_id' => $this->id,
-                    'ip_subnet_id' => $subnet->id,
-                    'ip_address' => $freeIp,
-                ]);
-                return true;
-            }
-        }
-
-        return false;
+        return $this->ipAddresses()->assignFreeDedicatedIpv6();
     }
 
     public function getTemplate(): ?string
