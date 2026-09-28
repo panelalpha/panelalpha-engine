@@ -33,12 +33,13 @@ class Filesystem
     public function copyFile(string $source, string $target, ?string $chown = null, ?string $chmod = null): void
     {
         $this->makeDirWithParents(dirname($target), $chown);
-        $this->system->exec("sudo cp {$source} {$target}");
+        // argv, not a shell string: $target is often a path a caller chose.
+        $this->system->exec(['sudo', 'cp', $source, $target]);
         if ($chown) {
-            $this->system->exec("sudo chown {$chown} {$target}");
+            $this->system->exec(['sudo', 'chown', $chown, $target]);
         }
         if ($chmod) {
-            $this->system->exec("sudo chmod {$chmod} {$target}");
+            $this->system->exec(['sudo', 'chmod', $chmod, $target]);
         }
     }
 
@@ -131,7 +132,7 @@ class Filesystem
     public function fileGetContents(string $path): string
     {
         $tmpFile = tempnam(sys_get_temp_dir(), 'tmp_');
-        $this->system->exec("sudo cp {$path} {$tmpFile}");
+        $this->system->exec(['sudo', 'cp', $path, $tmpFile]);
         $contents = file_get_contents($tmpFile);
         unlink($tmpFile);
         return $contents;

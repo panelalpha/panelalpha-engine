@@ -277,19 +277,12 @@ class AppUserController extends Controller
     {
         $tokenStr = (string) request()->query('token', '');
 
-        /** @var ?AppSsoToken */
-        $record = AppSsoToken::where('token', $tokenStr)
-            ->where('username', $username)
-            ->whereNull('used_at')
-            ->where('expires_at', '>', now())
-            ->first();
+        // Claimed atomically, so a replayed or concurrent request gets a 404.
+        $record = AppSsoToken::redeem($tokenStr, $username);
 
         if (!$record) {
             abort(new JsonResponse(['message' => 'Not found'], 404));
         }
-
-        // Mark used before issuing the redirect to prevent replay.
-        $record->update(['used_at' => now()]);
 
         $cookie = cookie(
             $record->cookie_name,

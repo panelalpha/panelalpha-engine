@@ -6,12 +6,14 @@ use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Compose\ComposeHarden;
+use App\Lib\Deploy\Compose\ComposeOverride;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\NestedCompose;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
+use App\System\Project\Dind\Paths;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -92,6 +94,7 @@ class UserComposeStrategy
         $logger = $this->dind->shell()->logger();
         $system = $this->dind->system();
         $runPath = $this->dind->userAppComposeFilePath();
+        $this->writeClientOverride($projectDir, $chown, $logger);
         $missing = ComposeFileInspector::missingComposeDockerfileRefs($composePath, $projectDir);
         $raw = $system->filesystem()->fileGetContents($composePath);
         // Through ComposeYaml, not Yaml::parse: this was the one unguarded
@@ -193,6 +196,38 @@ class UserComposeStrategy
         $system->filesystem()->filePutContents($runPath, Yaml::dump($parsed, 6, 2), $chown, '644');
         $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
         $logger?->info('Hardened compose for hosting (resource limits, restart policy, isolation)');
+    }
+
+    /**
+     * The repository's own `docker-compose.override.yml`, which compose layers
+     * over the run file, copied with its escapes removed to a name the engine
+     * owns ({@see Paths::composeFiles()} layers the copy). It used to be
+     * layered as written, bringing back `privileged:` and host mounts the run
+     * file had just been cleared of (engine#48, item 9).
+     */
+    private function writeClientOverride(string $projectDir, ?string $chown, ?DeployLogger $logger): void
+    {
+        $fs = $this->dind->system()->filesystem();
+        $source = rtrim($projectDir, '/') . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
+        $copy = rtrim($projectDir, '/') . '/' . EngineArtifacts::RUN_CLIENT_OVERRIDE;
+        if (!$fs->fileExists($source)) {
+            if ($fs->fileExists($copy)) {
+                $this->dind->system()->exec(['sudo', 'rm', '-f', $copy]);
+            }
+
+            return;
+        }
+
+        $hardened = ComposeOverride::harden($fs->fileGetContents($source));
+        if ($hardened['yaml'] === null) {
+            throw new \InvalidArgumentException(
+                'The compose override in this project (' . Paths::CLIENT_OVERRIDE_FILENAME . ') could not be read as YAML.'
+            );
+        }
+        foreach ($hardened['removed'] as $what) {
+            $logger?->warn('Removed from ' . Paths::CLIENT_OVERRIDE_FILENAME . ", not allowed in hosting: {$what}");
+        }
+        $fs->filePutContents($copy, $hardened['yaml'], $chown, '644');
     }
 
     /**

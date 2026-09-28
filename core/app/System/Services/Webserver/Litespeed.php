@@ -639,7 +639,8 @@ CONFIG;
         $dir = $this->system->engineDirPath() . '/webserver-config/litespeed/vhosts';
         foreach ($domainNames as $domainName) {
             $configFile = $dir . '/' . $domainName . '.xml';
-            $this->system->exec("sudo rm -f {$configFile}*");
+            // The glob stays a glob; the name is a positional argument, never shell.
+            $this->system->exec(['sudo', 'sh', '-c', 'rm -f -- "$1"*', 'sh', $configFile]);
         }
     }
 }

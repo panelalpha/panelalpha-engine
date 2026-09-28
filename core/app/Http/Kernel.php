@@ -42,7 +42,7 @@ class Kernel extends HttpKernel
         'api' => [
             JsonMiddleware::class,
             // \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
-            // 'throttle:api',
+            'throttle:api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
             'auth:api',
             // Straight after authentication: who the token is, then what it

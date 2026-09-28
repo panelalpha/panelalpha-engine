@@ -81,6 +81,22 @@ class AppConfigBootstrapTest extends TestCase
         $this->assertFileDoesNotExist($this->projectDir.'/'.EngineArtifacts::APP_CONFIG_COMPOSE);
     }
 
+    public function test_override_mode_is_written_without_the_escapes_the_run_file_is_cleared_of(): void
+    {
+        $appConfig = AppConfig::fromYaml(
+            "compose:\n  mode: override\n  content: |\n    services:\n      app:\n        privileged: true\n"
+            . "        volumes: ['/var/run/docker.sock:/var/run/docker.sock', './x:/x']\n"
+        );
+        $this->assertNotNull($appConfig);
+
+        $this->writeCompose($appConfig);
+
+        $written = (string) file_get_contents($this->projectDir.'/'.EngineArtifacts::RUN_COMPOSE_OVERRIDE);
+        $this->assertStringNotContainsString('privileged', $written);
+        $this->assertStringNotContainsString('docker.sock', $written);
+        $this->assertStringContainsString('./x:/x', $written);
+    }
+
     public function test_switching_from_replace_to_override_removes_the_stale_replace_file(): void
     {
         $replace = AppConfig::fromYaml("compose:\n  content: |\n    services: {}\n");

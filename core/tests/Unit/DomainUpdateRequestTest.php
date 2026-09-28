@@ -52,4 +52,38 @@ class DomainUpdateRequestTest extends TestCase
     {
         $this->assertTrue(Validator::make(['document_root' => '/public_html/../../etc'], $this->rules())->fails());
     }
+
+    public function test_ordinary_document_roots_pass(): void
+    {
+        foreach (['/', '/public_html', '/example.com/public_html', '/xn--bcher-kva.de/web_root-2/', '/a/b~c/d@e+f,g=h'] as $root) {
+            $this->assertFalse(Validator::make(['document_root' => $root], $this->rules())->fails(), $root);
+        }
+    }
+
+    // engine#7: the vhost templates write the root unquoted, so anything that
+    // ends a directive there must never reach them.
+    public function test_characters_that_end_a_config_directive_fail(): void
+    {
+        foreach ([
+            'https://example.com/wp-admin',
+            "/public_html\n",
+            "/public_html\nX",
+            "/public_html\r",
+            '/public html',
+            "/public\thtml",
+            '/public_html;',
+            '/public_html{',
+            '/public_html}',
+            '/pub"lic',
+            "/pub'lic",
+            '/pub<lic>',
+            '/pub\\lic',
+            '/pub$host',
+            '/pub#lic',
+            '//',
+            'public_html',
+        ] as $root) {
+            $this->assertTrue(Validator::make(['document_root' => $root], $this->rules())->fails(), (string) json_encode($root));
+        }
+    }
 }

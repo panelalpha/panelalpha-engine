@@ -617,7 +617,8 @@ class SystemController extends Controller
          * } $params
          */
         $params = $request->validate([
-            'email' => 'string|required',
+            // Goes into the message's To: header; a line break there adds headers.
+            'email' => 'required|string|email|max:254',
             'config.smarthost_provider' => 'string|nullable',
             'config.sendgrid_api_token' => 'string|nullable',
             'config.mailchannels_username' => 'string|nullable',

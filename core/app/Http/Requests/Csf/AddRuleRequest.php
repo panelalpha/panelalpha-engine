@@ -17,10 +17,13 @@ class AddRuleRequest extends FormRequest
             'protocol' => 'nullable|string|in:tcp,udp',
             'direction' => 'nullable|string|in:in,out',
             'port_prefix' => 'nullable|string|in:s=,d=',
-            'port' => 'nullable|string',
+            // One csf.allow/csf.deny line is built from these; a newline in
+            // any of them would be a second, unvalidated rule.
+            'port' => ['nullable', 'string', 'regex:/\A[0-9]+(?:[_:][0-9]+)?(?:,[0-9]+(?:[_:][0-9]+)?)*\z/'],
             'target_prefix' => 'nullable|string|in:s=,d=,u=',
-            'target' => 'required|string',
-            'comment' => 'nullable|string',
+            // An IP, a CIDR, a hostname, or a uid for `u=`.
+            'target' => ['required', 'string', 'max:64', 'regex:/\A[A-Za-z0-9.:_-]+(?:\/[0-9]{1,3})?\z/'],
+            'comment' => ['nullable', 'string', 'max:255', 'not_regex:/[\r\n]/'],
         ];
     }
 }

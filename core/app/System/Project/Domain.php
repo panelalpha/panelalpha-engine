@@ -126,12 +126,12 @@ class Domain implements IssuableDomain
         $domainDir = $home . '/' . $domainName;
         $domainRootDir = $home . $this->model->getDocumentRoot();
 
-        $system->exec("sudo mkdir -p {$domainDir}");
-        $system->exec("sudo chown {$owner} {$domainDir}");
+        $system->exec(['sudo', 'mkdir', '-p', $domainDir]);
+        $system->exec(['sudo', 'chown', $owner, $domainDir]);
 
         $publicHtmlMissing = !$fs->isDir($domainRootDir);
-        $system->exec("sudo mkdir -p {$domainRootDir}");
-        $system->exec("sudo chown {$owner} {$domainRootDir}");
+        $system->exec(['sudo', 'mkdir', '-p', $domainRootDir]);
+        $system->exec(['sudo', 'chown', $owner, $domainRootDir]);
 
         if ($publicHtmlMissing) {
             $template = $user->getTemplate() ?? 'default';
@@ -140,7 +140,7 @@ class Domain implements IssuableDomain
                 $domainTemplateDir = $system->templatesDirPath() . '/user-home/default-site';
             }
             $fs->makeDirFromTemplate($domainRootDir, $domainTemplateDir, $templateVars, $owner);
-            $system->exec("sudo chmod -R ugo-rwx,u+rwX,go+rX " . $domainRootDir);
+            $system->exec(['sudo', 'chmod', '-R', 'ugo-rwx,u+rwX,go+rX', $domainRootDir]);
         }
     }
 
@@ -158,14 +158,14 @@ class Domain implements IssuableDomain
             $pemFile = "{$certDir}/{$this->model->domain}.pem";
             $keyFile = "{$certDir}/{$this->model->domain}.key";
 
-            $system->exec("sudo mkdir -p {$certDir}");
-            $system->exec("sudo cp {$serverCertFile} {$certFile}");
-            $system->exec("sudo cp {$serverCertFile} {$caFile}");
-            $system->exec("sudo cp {$serverCertFile} {$pemFile}");
-            $system->exec("sudo cp {$serverKeyFile} {$keyFile}");
-            $system->exec("sudo chmod 600 {$keyFile}");
-            $system->exec("sudo chmod a+r {$certFile} {$caFile} {$pemFile}");
-            $system->exec("sudo chown -R www-data:www-data {$certDir}");
+            $system->exec(['sudo', 'mkdir', '-p', $certDir]);
+            $system->exec(['sudo', 'cp', $serverCertFile, $certFile]);
+            $system->exec(['sudo', 'cp', $serverCertFile, $caFile]);
+            $system->exec(['sudo', 'cp', $serverCertFile, $pemFile]);
+            $system->exec(['sudo', 'cp', $serverKeyFile, $keyFile]);
+            $system->exec(['sudo', 'chmod', '600', $keyFile]);
+            $system->exec(['sudo', 'chmod', 'a+r', $certFile, $caFile, $pemFile]);
+            $system->exec(['sudo', 'chown', '-R', 'www-data:www-data', $certDir]);
             return;
         }
 
@@ -213,12 +213,12 @@ class Domain implements IssuableDomain
             $subj,
         ];
 
-        $this->system()->exec("sudo mkdir -p {$certDir}");
+        $this->system()->exec(['sudo', 'mkdir', '-p', $certDir]);
         $this->system()->exec($command);
-        $this->system()->exec("sudo chmod 600 {$certFile}");
-        $this->system()->exec("sudo cp {$certFile} {$caFile}");
-        $this->system()->exec("sudo cp {$certFile} {$pemFile}");
-        $this->system()->exec("sudo chmod a+r {$certFile} {$caFile} {$pemFile}");
+        $this->system()->exec(['sudo', 'chmod', '600', $certFile]);
+        $this->system()->exec(['sudo', 'cp', $certFile, $caFile]);
+        $this->system()->exec(['sudo', 'cp', $certFile, $pemFile]);
+        $this->system()->exec(['sudo', 'chmod', 'a+r', $certFile, $caFile, $pemFile]);
     }
 
     public function hasSslCertificate(): bool
@@ -464,7 +464,7 @@ class Domain implements IssuableDomain
     public function deleteApacheConfig(): void
     {
         $domainConfigFile = "{$this->projectDirPath()}/apache-sites/{$this->model->domain}.conf";
-        $this->system()->exec("sudo rm {$domainConfigFile}");
+        $this->system()->exec(['sudo', 'rm', $domainConfigFile]);
     }
 
     public function deleteNginxConfig(): void

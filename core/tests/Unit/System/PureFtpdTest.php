@@ -107,7 +107,13 @@ class PureFtpdTest extends TestCase
         $this->assertCount(2, $system->execJournal);
         $addCmd = $system->execJournal[0];
         $this->assertStringContainsString('/bin/sh -c', $addCmd);
-        $this->assertStringContainsString("echo 'secret'", $addCmd);
+        $this->assertStringNotContainsString('secret', $addCmd, 'the password is on a command line');
+        $this->assertSame(['PA_FTP_PASSWORD' => 'secret'], $system->envJournal[0]);
+        // sudo resets the environment unless told to keep the variable, and
+        // compose copies it into the exec only when named.
+        $this->assertStringContainsString('sudo --preserve-env=PA_FTP_PASSWORD docker compose', $addCmd);
+        $this->assertStringContainsString('exec -T -e PA_FTP_PASSWORD ftp', $addCmd);
+        $this->assertStringContainsString('"$PA_FTP_PASSWORD" | pure-pw useradd', $addCmd);
         $this->assertStringContainsString('pure-pw useradd', $addCmd);
         $this->assertStringContainsString('/home/ftpuser/alice/public_html', $addCmd);
         $this->assertStringContainsString('-N', $addCmd);
@@ -115,14 +121,27 @@ class PureFtpdTest extends TestCase
         $this->assertStringContainsString('pure-pw mkdb', $system->execJournal[1]);
     }
 
+    public function test_passwd_keeps_the_password_off_the_command_line(): void
+    {
+        $system = $this->recordingSystem();
+        $system->ftp()->passwd('ftp@example.com', "p'w d");
+
+        $this->assertStringNotContainsString("p'w d", $system->execJournal[0]);
+        $this->assertStringContainsString('pure-pw passwd', $system->execJournal[0]);
+        $this->assertSame(['PA_FTP_PASSWORD' => "p'w d"], $system->envJournal[0]);
+    }
+
     /**
-     * @return System&object{execJournal: list<string>}
+     * @return System&object{execJournal: list<string>, envJournal: list<array<string, string>>}
      */
     private function recordingSystem(int $exitCode = 0, string $errorOutput = ''): System
     {
         return new class ($this->tmpRoot, $exitCode, $errorOutput) extends System {
             /** @var list<string> */
             public array $execJournal = [];
+
+            /** @var list<array<string, string>> */
+            public array $envJournal = [];
 
             public function __construct(
                 private string $engineRoot,
@@ -144,6 +163,7 @@ class PureFtpdTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $this->execJournal[] = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                $this->envJournal[] = $env;
 
                 return '';
             }

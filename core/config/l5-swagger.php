@@ -69,7 +69,7 @@ return [
             'middleware' => [
                 'api' => ['swagger.enabled'],
                 'asset' => ['swagger.enabled'],
-                'docs' => [],
+                'docs' => ['swagger.enabled'],
                 'oauth2_callback' => [],
             ],
 

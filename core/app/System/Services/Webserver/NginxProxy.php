@@ -351,7 +351,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
         }
 
         $domainLogsDir = "{$this->logsDirPath()}/{$domainName}";
-        $this->system->exec("sudo mkdir -p {$domainLogsDir}");
+        $this->system->exec(['sudo', 'mkdir', '-p', $domainLogsDir]);
 
         $domainConfigFile = "{$this->domainsConfigsDirPath()}/{$domainName}.conf";
         $templatesDir = $this->system->templatesDirPath();
@@ -470,14 +470,14 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
     public function deleteDomainConfig(string $domainName): void
     {
         $configFile = $this->domainsConfigDirPath() . '/' . $domainName . '.conf';
-        $this->system->exec("sudo rm -f {$configFile}");
+        $this->system->exec(['sudo', 'rm', '-f', $configFile]);
     }
 
     public function deleteDomainsConfigs(array $domainNames): void
     {
         foreach ($domainNames as $domainName) {
             $configFile = $this->domainsConfigDirPath() . '/' . $domainName . '.conf';
-            $this->system->exec("sudo rm -f {$configFile}");
+            $this->system->exec(['sudo', 'rm', '-f', $configFile]);
         }
     }
 

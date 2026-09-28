@@ -15,6 +15,9 @@ use Illuminate\Support\Str;
  */
 class Modsec
 {
+    /** A rule file name as toggleConfigFiles() accepts it. */
+    public const CONFIG_FILE_NAME = '/\A[A-Za-z0-9_][A-Za-z0-9._-]*\.conf\z/';
+
     public function __construct(
         private EngineSystem $system,
     ) {
@@ -164,6 +167,13 @@ class Modsec
      */
     public function toggleConfigFiles(string $ruleset, array $enable = [], array $disable = []): void
     {
+        // Joined to a path and renamed as root: a `../` would rename any file.
+        foreach ([$ruleset, ...$enable, ...$disable] as $name) {
+            if ($name !== basename($name) || $name === '..' || $name === '.') {
+                throw new \InvalidArgumentException("Invalid ModSecurity file name: {$name}");
+            }
+        }
+
         $dir = $this->system->engineDirPath() . '/config/modsecurity/rulesets/' . $ruleset . '/rules';
         if (!is_dir($dir)) {
             return;

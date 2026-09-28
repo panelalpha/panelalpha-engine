@@ -53,7 +53,7 @@ The token was truncated, or it is the wrong type. Assistants need a token from `
 `--transport streamable-http` was missing or set to something else.
 
 **Connection times out.**
-Port 2011 is not reachable from your computer. Check any firewall between you and your VPS, then confirm the engine is answering with `pae mcp:check <token>` on your VPS itself.
+Port 2011 is not reachable from your computer. Check any firewall between you and your VPS, then confirm the engine is answering with `pae mcp:check` on your VPS itself.
 
 **It connects but can barely do anything.**
 The permission settings on your VPS are filtering its abilities. See [Decide what the assistant may do](your-assistant.md#decide-what-the-assistant-may-do).

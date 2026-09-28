@@ -26,16 +26,21 @@ class DomainUpdateRequest extends FormRequest
             // the account and nothing else. A full URL lands in the config as
             // "/var/wwwhttps:/example.com/wp-admin", which Apache then denies
             // for the whole account; a ".." segment would point the site
-            // outside the account altogether.
+            // outside the account altogether. The vhost templates write it
+            // unquoted (Blade escapes HTML only), so whitespace, `;`, `{`, `"`,
+            // `$` and newlines would end the directive: only plain path
+            // characters are taken (engine#7).
             'document_root' => [
                 'sometimes',
                 'string',
                 'max:4096',
-                'regex:/^\\/[^\\0]*$/',
+                'regex:/^\\/(?:[A-Za-z0-9._~@+,=-]+\\/?)*$/D',
                 'not_regex:/(?:^|\\/)\\.\\.(?:\\/|$)/',
             ],
             'redirect_enabled' => 'sometimes|boolean',
-            'redirect_url' => 'url|nullable',
+            // Written into nginx's `return 301 "<url>"` verbatim: `$` is a
+            // variable there (`$http_cookie`), a quote or space ends the string.
+            'redirect_url' => ['url', 'nullable', 'max:2048', 'not_regex:/[\s"\'\\\\$;{}`]/'],
             'force_https_redirect' => 'sometimes|boolean',
             'aliases' => 'array|nullable',
             'aliases.*' => 'string|nullable',

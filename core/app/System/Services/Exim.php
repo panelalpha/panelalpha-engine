@@ -132,6 +132,11 @@ class Exim
 
     public function sendTestEmail(string $email): array
     {
+        // Interpolated into the To: header below.
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            throw new \InvalidArgumentException('Invalid test email address.');
+        }
+
         $message = ""
             . "From: Tester <wordpress@userdomain.com>\n"
             . "To: {$email}\n"

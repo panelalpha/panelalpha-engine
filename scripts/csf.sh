@@ -80,6 +80,7 @@ install_csf() {
     fi
 
     install_docker_build_rules
+    install_core_publish_rules
 
     # CSF's own installer enables the units but never starts them, and the
     # TESTING = 0 above only takes effect once the ruleset is applied — so an
@@ -178,6 +179,31 @@ EOF
 
     # Apply now as well, so an install does not have to wait for a restart.
     sh "$post" || true
+}
+
+# engine#241: every CSF start flushes Docker's DNAT, and :2011 then reaches core
+# through docker-proxy from the bridge gateway -- one private address for every
+# client. scripts/csf-publish-core.sh puts that DNAT back; csfpost.sh is what
+# runs after each start and `csf -r`. Core's entrypoint runs it as well, since
+# a restarted core can come back on another address.
+install_core_publish_rules() {
+    local post script
+    post="/usr/local/csf/bin/csfpost.sh"
+    script="/opt/panelalpha/shared-hosting/scripts/csf-publish-core.sh"
+    mkdir -p "$(dirname "$post")"
+    [ -f "$post" ] || printf '#!/bin/sh\n' >"$post"
+
+    if grep -q "panelalpha-publish-core" "$post" 2>/dev/null; then
+        echo "csf: core publish rules already present in csfpost.sh"
+    else
+        cat >>"$post" <<EOF
+
+# panelalpha-publish-core: keep the real client address on :2011 (engine#241).
+[ -f $script ] && sh $script || true
+EOF
+        echo "csf: added core publish rules to csfpost.sh"
+    fi
+    chmod 700 "$post"
 }
 
 uninstall_csf() {

@@ -119,6 +119,7 @@ class McpTokensCreateCommand extends Command
         }
 
         $this->newLine();
-        $this->line(sprintf('Verify the endpoint with: pae mcp:check %s', $token));
+        // Not with the token on the command line: that lands in shell history.
+        $this->line('Verify the endpoint with: pae mcp:check (it asks for the token)');
     }
 }

@@ -6,6 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\ProxyRuleResource;
 use App\System;
 use App\Models\ProxyRule;
+use App\Rules\ListenIp;
+use App\Rules\ProxyServerName;
+use App\Rules\UpstreamHost;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -116,12 +119,13 @@ class ProxyRuleController extends Controller
             'owner_scope' => ['nullable', Rule::in(['system', 'user'])],
             'username' => ['nullable', 'string', 'exists:users,username'],
             'transport' => ['required', Rule::in(['http', 'tcp', 'udp'])],
-            'listen_ip' => ['nullable', 'string'],
+            // These four are written into the shared nginx-proxy config verbatim.
+            'listen_ip' => ['nullable', 'string', new ListenIp()],
             'listen_port' => ['required', 'integer', 'min:1', 'max:65535'],
-            'server_name' => ['nullable', 'string'],
-            'upstream_host' => ['required', 'string'],
+            'server_name' => ['nullable', 'string', new ProxyServerName()],
+            'upstream_host' => ['required', 'string', new UpstreamHost()],
             'upstream_port' => ['required', 'integer', 'min:1', 'max:65535'],
-            'upstream_protocol' => ['nullable', 'string'],
+            'upstream_protocol' => ['nullable', Rule::in(['http', 'https'])],
             'enabled' => ['boolean'],
             'metadata' => ['nullable', 'array'],
         ]);
@@ -226,9 +230,9 @@ class ProxyRuleController extends Controller
 
 
         $validated = $request->validate([
-            'upstream_host' => ['nullable', 'string'],
+            'upstream_host' => ['nullable', 'string', new UpstreamHost()],
             'upstream_port' => ['nullable', 'integer', 'min:1', 'max:65535'],
-            'upstream_protocol' => ['nullable', 'string'],
+            'upstream_protocol' => ['nullable', Rule::in(['http', 'https'])],
             'enabled' => ['nullable', 'boolean'],
             'metadata' => ['nullable', 'array'],
         ]);

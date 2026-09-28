@@ -120,6 +120,7 @@ final class Paths
         if (in_array(basename($path), [
             EngineArtifacts::RUN_COMPOSE,
             EngineArtifacts::RUN_COMPOSE_OVERRIDE,
+            EngineArtifacts::RUN_CLIENT_OVERRIDE,
             EngineArtifacts::APP_CONFIG_COMPOSE,
         ], true)) {
             return true;
@@ -142,8 +143,8 @@ final class Paths
         $fs = $this->project->system()->filesystem();
 
         if ($this->layersClientOverride()) {
-            $clientOverride = $this->appDir() . '/' . self::CLIENT_OVERRIDE_FILENAME;
-            if (!in_array($clientOverride, $files, true) && $fs->fileExists($clientOverride)) {
+            $clientOverride = $this->clientOverrideIn($this->appDir());
+            if ($clientOverride !== null && !in_array($clientOverride, $files, true)) {
                 $files[] = $clientOverride;
             }
         }
@@ -154,6 +155,23 @@ final class Paths
         }
 
         return $files;
+    }
+
+    /**
+     * The client's override as the engine layers it: the hardened copy the
+     * last deploy wrote ({@see EngineArtifacts::RUN_CLIENT_OVERRIDE}), else
+     * the file itself for an account not redeployed since that copy existed.
+     */
+    private function clientOverrideIn(string $appDir): ?string
+    {
+        $fs = $this->project->system()->filesystem();
+        foreach ([EngineArtifacts::RUN_CLIENT_OVERRIDE, self::CLIENT_OVERRIDE_FILENAME] as $name) {
+            if ($fs->fileExists($appDir . '/' . $name)) {
+                return $appDir . '/' . $name;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -221,8 +239,8 @@ final class Paths
         // Same layering as composeFiles() (D8): the client's override only
         // under the compose strategies, then the app config's override.
         if ($this->layersClientOverride()) {
-            $clientOverride = $appDir . '/' . self::CLIENT_OVERRIDE_FILENAME;
-            if (!in_array($clientOverride, $files, true) && $fs->fileExists($clientOverride)) {
+            $clientOverride = $this->clientOverrideIn($appDir);
+            if ($clientOverride !== null && !in_array($clientOverride, $files, true)) {
                 $files[] = $clientOverride;
             }
         }

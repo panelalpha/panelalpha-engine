@@ -136,6 +136,7 @@ step "Using host address ${PUBLIC_IP}"
 step "Preparing .env and .env-core"
 cp -n .env.example .env
 cp -n .env-core.example .env-core
+bash scripts/secure-env-core.sh "$PWD/.env-core"
 grep -q '^USERS_MYSQL_ROOT_PASSWORD=.\+' .env ||
     sed -i "s/^USERS_MYSQL_ROOT_PASSWORD=.*/USERS_MYSQL_ROOT_PASSWORD=$(rand)/" .env
 # Append when the line is absent rather than only rewriting one that exists:

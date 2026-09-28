@@ -55,6 +55,11 @@ class Kernel extends ConsoleKernel
         // disk either. Hourly, with a built-in grace hour, so a status check
         // on a just-expired ref still says `expired` rather than vanishing.
         $schedule->command('vault:purge')->hourly();
+        // Spent and expired SSO tokens; an unredeemed app token still holds a
+        // live session cookie.
+        $schedule->command('model:prune', [
+            '--model' => [\App\Models\AppSsoToken::class, \App\Models\MysqlSsoToken::class],
+        ])->hourly();
         // Renewals are exempt from Let's Encrypt's new-certificate rate
         // limit, and a certificate nobody renews is an outage with a 90-day
         // fuse. Off-peak, and never two at once.

@@ -123,4 +123,45 @@ class CsfRuleTest extends TestCase
 
         (new Csf($this->system(self::RULE)))->deleteRule('allow', md5('nope'));
     }
+
+    public function test_a_line_break_in_any_field_is_refused_before_anything_is_written(): void
+    {
+        $system = $this->system(self::RULE);
+
+        foreach (['target' => "1.2.3.4\n0.0.0.0/0", 'comment' => "x\ntcp|in|d=3306|s=0.0.0.0/0"] as $field => $value) {
+            try {
+                (new Csf($system))->addRule('allow', [
+                    'protocol' => null, 'direction' => null, 'port_prefix' => null, 'port' => null,
+                    'target_prefix' => null, 'target' => '1.2.3.4', 'comment' => null, $field => $value,
+                ]);
+                $this->fail("{$field} with a line break was accepted");
+            } catch (ValidationException) {
+            }
+        }
+        $this->assertNull($system->written);
+    }
+
+    public function test_the_request_pins_target_port_and_comment_to_one_line(): void
+    {
+        $rules = (new \App\Http\Requests\Csf\AddRuleRequest())->rules();
+        $bad = [
+            ['target' => "1.2.3.4\n0.0.0.0/0"],
+            ['target' => '1.2.3.4 # x'],
+            ['target' => '1.2.3.4', 'port' => "22\n3306"],
+            ['target' => '1.2.3.4', 'comment' => "ok\ntcp|in|d=3306|s=0.0.0.0/0"],
+        ];
+        foreach ($bad as $payload) {
+            $this->assertTrue(\Illuminate\Support\Facades\Validator::make($payload, $rules)->fails(), json_encode($payload));
+        }
+        $good = [
+            ['target' => '1.2.3.4'],
+            ['target' => '10.0.0.0/8', 'comment' => 'office'],
+            ['target' => '2001:db8::/32'],
+            ['target' => 'backup.example.com'],
+            ['target' => '1000', 'target_prefix' => 'u=', 'protocol' => 'tcp', 'direction' => 'out', 'port_prefix' => 'd=', 'port' => '80,443,2000_3000'],
+        ];
+        foreach ($good as $payload) {
+            $this->assertTrue(\Illuminate\Support\Facades\Validator::make($payload, $rules)->passes(), json_encode($payload));
+        }
+    }
 }

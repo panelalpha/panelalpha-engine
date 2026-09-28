@@ -13,6 +13,13 @@ class FileStreamWrapper
     public $context;
 
     /**
+     * The directory every stream opened through this wrapper must resolve
+     * into, symlinks followed. Null means unconfined. Process-wide because
+     * BinaryFileResponse opens the file itself, without a stream context.
+     */
+    private static ?string $root = null;
+
+    /**
      * @var resource|false|null $proc
      */
     private $proc = null;
@@ -29,6 +36,17 @@ class FileStreamWrapper
         }
     }
 
+    /**
+     * Refuse any path that does not resolve to a file under $root. The check
+     * runs in the privileged helper, on the real path, so a symlink planted
+     * inside an account that points at /etc/shadow or another account's home
+     * is turned away where it would otherwise be read as root.
+     */
+    public static function confineTo(?string $root): void
+    {
+        self::$root = $root === null ? null : rtrim($root, '/');
+    }
+
     public function stream_open(string $path, string $mode, int $options, ?string &$opened_path): bool
     {
         $realPath = preg_replace('#^sudophp://#', '', $path);
@@ -39,6 +57,9 @@ class FileStreamWrapper
             $mode,
             $realPath,
         ];
+        if (self::$root !== null) {
+            $cmd[] = self::$root;
+        }
         $desc = [
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
@@ -144,6 +165,9 @@ class FileStreamWrapper
     public function url_stat(string $path, int $flags): array|bool
     {
         $realPath = preg_replace('#^sudophp://#', '', $path);
+        if (self::$root !== null && !self::isUnder(self::$root, $realPath)) {
+            return false;
+        }
         $stat = @stat($realPath);
         if ($stat === false) {
             return false;
@@ -173,5 +197,21 @@ class FileStreamWrapper
     public function stream_cast(int $cast_as): bool
     {
         return false;
+    }
+
+    /**
+     * Whether $path, with every symlink followed, lies inside $root. This is
+     * the unprivileged view; the helper repeats it as root, since a
+     * root-only directory in the chain is unreadable from here.
+     */
+    public static function isUnder(string $root, string $path): bool
+    {
+        $realRoot = realpath($root);
+        $real = realpath($path);
+        if ($realRoot === false || $real === false) {
+            return false;
+        }
+
+        return str_starts_with($real, rtrim($realRoot, '/') . '/');
     }
 }

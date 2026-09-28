@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Platform\Dockerfile;
 
 use App\Lib\Deploy\Platform\PlatformStage;
+use InvalidArgumentException;
 
 /**
  * `ENV key=value`, one per entry, in the order the caller settled on.
@@ -14,6 +15,13 @@ use App\Lib\Deploy\Platform\PlatformStage;
 final class EnvironmentLines
 {
     /**
+     * Values written bare, exactly as before, so an existing Dockerfile and
+     * its layer cache do not change. `$` stays: a Dockerfile expands it inside
+     * double quotes too, and `PATH=/x:$PATH` relies on that.
+     */
+    private const BARE = '/^[A-Za-z0-9_.,:\/@%+=~${}-]*$/';
+
+    /**
      * @param array<string, string> $env
      * @return list<string>
      */
@@ -24,7 +32,7 @@ final class EnvironmentLines
             if ($key === PlatformStage::PHASE_ENV) {
                 continue;
             }
-            $lines[] = 'ENV ' . $key . '=' . $value;
+            $lines[] = 'ENV ' . self::pair($key, $value);
         }
 
         return $lines;
@@ -43,9 +51,29 @@ final class EnvironmentLines
     {
         $lines = [];
         foreach ($env as $key => $value) {
-            $lines[] = 'ARG ' . $key . '=' . $value;
+            $lines[] = 'ARG ' . self::pair($key, $value);
         }
 
         return $lines;
+    }
+
+    /**
+     * `key=value`, double-quoted when the value holds anything else. Written
+     * bare, `ENV A=x y` fails the build ("can't find = in y") and a newline
+     * starts a new Dockerfile instruction (engine#48 item 23).
+     */
+    private static function pair(string $key, string $value): string
+    {
+        if (preg_match('/^[A-Za-z0-9_.-]+$/', $key) !== 1) {
+            throw new InvalidArgumentException("'{$key}' cannot be written to a Dockerfile as a variable name.");
+        }
+        if (preg_match('/[\r\n]/', $value) === 1) {
+            throw new InvalidArgumentException("The value of {$key} spans more than one line, which a Dockerfile cannot hold.");
+        }
+        if (preg_match(self::BARE, $value) === 1) {
+            return $key . '=' . $value;
+        }
+
+        return $key . '="' . str_replace(['\\', '"'], ['\\\\', '\\"'], $value) . '"';
     }
 }

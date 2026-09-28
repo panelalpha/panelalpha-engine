@@ -168,7 +168,7 @@ class Nginx extends AbstractWebserver implements WebserverInterface
     {
         $dir = $this->system->engineDirPath() . '/webserver-config/nginx/vhosts';
         $configFile = $dir . '/' . $domainName . '.conf';
-        $this->system->exec("sudo rm -f {$configFile}");
+        $this->system->exec(['sudo', 'rm', '-f', $configFile]);
     }
 
     public function deleteDomainsConfigs(array $domainNames): void
@@ -176,7 +176,7 @@ class Nginx extends AbstractWebserver implements WebserverInterface
         $dir = $this->system->engineDirPath() . '/webserver-config/nginx/vhosts';
         foreach ($domainNames as $domainName) {
             $configFile = $dir . '/' . $domainName . '.conf';
-            $this->system->exec("sudo rm -f {$configFile}");
+            $this->system->exec(['sudo', 'rm', '-f', $configFile]);
         }
     }
 

@@ -183,7 +183,7 @@ Context: [Domains and HTTPS](../05-capabilities/domains-and-ssl.md) · [Cloudfla
 | `pae mcp:token:list` | Lists assistant tokens. |
 | `pae mcp:token:revoke {id}` | Stops a token working immediately. |
 | `pae mcp:token:delete {id}` | Removes a token from the list. |
-| `pae mcp:check {token}` | Checks HTTPS, the token, and that an assistant can connect. |
+| `pae mcp:check` | Checks HTTPS, the token, and that an assistant can connect. Asks for the token, or reads it with `--stdin`. |
 | `pae mcp:tool:list` | Lists what a connected assistant is currently allowed to do. |
 | `pae configure mcp-tokens` | Changes that, by asking. See [Configuring the engine](#configuring-the-engine). |
 | `pae mcp:log:list` | Lists recent assistant requests. |

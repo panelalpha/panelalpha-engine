@@ -18,7 +18,8 @@ Route::get('/', function () {
     return new Response(null, 204);
 });
 
-if (config('app.debug')){
+// Unauthenticated, so a development convenience only: never on an install.
+if (app()->environment('local') && config('app.debug')) {
     Route::get('logs', [\Rap2hpoutre\LaravelLogViewer\LogViewerController::class, 'index']);
 }
 

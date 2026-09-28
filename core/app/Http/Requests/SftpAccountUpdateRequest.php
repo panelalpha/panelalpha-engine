@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\SshPublicKey;
 use Illuminate\Foundation\Http\FormRequest;
 
 class SftpAccountUpdateRequest extends FormRequest
@@ -11,7 +12,7 @@ class SftpAccountUpdateRequest extends FormRequest
         return [
             'auth_method' => 'string|required',
             'password' => 'string|nullable|min:8|max:255',
-            'public_key' => 'string|nullable|max:4096',
+            'public_key' => ['string', 'nullable', 'max:4096', new SshPublicKey()],
         ];
     }
 

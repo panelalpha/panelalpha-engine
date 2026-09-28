@@ -37,14 +37,64 @@ class EnvironmentLinesTest extends TestCase
         $this->assertSame(['ENV HOST=::', 'ENV PORT=3000'], EnvironmentLines::of($env));
     }
 
-    public function test_a_value_is_written_exactly_as_given(): void
+    public function test_a_plain_value_is_written_bare_as_before(): void
     {
-        // Including one with spaces: the generators pass through what a
-        // manifest wrote, and quoting it here would change its value.
+        // Byte-for-byte what the generators wrote before quoting existed, so
+        // no existing Dockerfile changes and no layer cache is invalidated.
         $this->assertSame(
-            ['ENV JAVA_OPTS=-Xmx256m -XX:+UseSerialGC'],
-            EnvironmentLines::of(['JAVA_OPTS' => '-Xmx256m -XX:+UseSerialGC'])
+            ['ENV PATH=/app/node_modules/.bin:$PATH', 'ENV NODE_OPTIONS=--max-old-space-size=1433', 'ENV EMPTY='],
+            EnvironmentLines::of([
+                'PATH' => '/app/node_modules/.bin:$PATH',
+                'NODE_OPTIONS' => '--max-old-space-size=1433',
+                'EMPTY' => '',
+            ])
         );
+    }
+
+    /**
+     * engine#48 item 23. Bare, `ENV JAVA_OPTS=-Xmx256m -XX:+UseSerialGC` fails
+     * the build with "can't find = in -XX:+UseSerialGC", and quotes inside a
+     * bare value are stripped by the Dockerfile parser. Each expected line was
+     * built with docker and read back as the value on the left.
+     */
+    public function test_a_value_with_spaces_or_quotes_is_quoted_and_survives_the_build(): void
+    {
+        $this->assertSame(
+            [
+                'ENV JAVA_OPTS="-Xmx256m -XX:+UseSerialGC"',
+                'ENV NODE_CONFIG="{\\"hostname\\":\\"0.0.0.0\\"}"',
+                'ENV WIN="C:\\\\app"',
+                'ENV GREETING="it\'s # not a comment"',
+                'ENV BIN="$HOME/bin dir"',
+            ],
+            EnvironmentLines::of([
+                'JAVA_OPTS' => '-Xmx256m -XX:+UseSerialGC',
+                'NODE_CONFIG' => '{"hostname":"0.0.0.0"}',
+                'WIN' => 'C:\\app',
+                'GREETING' => "it's # not a comment",
+                'BIN' => '$HOME/bin dir',
+            ])
+        );
+    }
+
+    public function test_a_build_arg_is_quoted_the_same_way(): void
+    {
+        $this->assertSame(['ARG OPTS="a b"'], EnvironmentLines::buildArgs(['OPTS' => 'a b']));
+    }
+
+    public function test_a_value_on_two_lines_is_refused_rather_than_injected(): void
+    {
+        // Written bare, the second line is a Dockerfile instruction of its own.
+        $this->expectException(\InvalidArgumentException::class);
+
+        EnvironmentLines::of(['X' => "1\nRUN echo injected"]);
+    }
+
+    public function test_a_name_that_would_break_the_line_is_refused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        EnvironmentLines::of(['A=1 B' => '2']);
     }
 
     public function test_nothing_to_set_produces_no_lines(): void

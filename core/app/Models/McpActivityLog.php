@@ -39,10 +39,36 @@ class McpActivityLog extends Model
     public const REDACT_SUFFIXES = [
         'password',
         'passwd',
+        'passphrase',
         'token',
         'secret',
         'private_key',
         'api_key',
+        'license_key',
+    ];
+
+    /**
+     * Objects whose keys are worth keeping but whose values never are:
+     * `env_vars` holds APP_KEY, DATABASE_URL, AWS_SECRET_ACCESS_KEY, and
+     * backup `credentials` holds `secret_access_key` -- none of which a
+     * suffix list can name.
+     */
+    public const REDACT_VALUES_UNDER = [
+        'env_vars',
+        'credentials',
+    ];
+
+    /**
+     * Free-form payloads a secret is routinely typed into (`ssh_run.command`,
+     * `wp_cli_run.args`, `file_write.contents`, `project_setting_set.value`).
+     * Only their size is kept.
+     */
+    public const SUMMARISE_KEYS = [
+        'command',
+        'args',
+        'contents',
+        'file_contents',
+        'value',
     ];
 
     public const REDACTED = '[redacted]';
@@ -69,12 +95,19 @@ class McpActivityLog extends Model
         $out = [];
 
         foreach ($input as $key => $value) {
-            if (is_string($key) && self::isSecretKey($key)) {
-                $out[$key] = self::REDACTED;
-                continue;
-            }
+            $name = is_string($key) ? strtolower($key) : null;
 
-            $out[$key] = is_array($value) ? self::redact($value) : $value;
+            if ($name !== null && self::isSecretKey($name)) {
+                $out[$key] = self::REDACTED;
+            } elseif ($name !== null && in_array($name, self::REDACT_VALUES_UNDER, true)) {
+                $out[$key] = self::redactValues($value);
+            } elseif ($name !== null && in_array($name, self::SUMMARISE_KEYS, true)) {
+                $out[$key] = self::summarise($value);
+            } elseif (is_array($value)) {
+                $out[$key] = self::redact($value);
+            } else {
+                $out[$key] = is_string($value) ? self::scrubString($value) : $value;
+            }
         }
 
         return $out;
@@ -91,6 +124,35 @@ class McpActivityLog extends Model
         }
 
         return false;
+    }
+
+    /** Keys stay, every leaf value goes; a non-array is redacted whole. */
+    private static function redactValues(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value === null ? null : self::REDACTED;
+        }
+
+        return array_map(static fn (mixed $v): mixed => self::redactValues($v), $value);
+    }
+
+    private static function summarise(mixed $value): mixed
+    {
+        return match (true) {
+            is_string($value) => sprintf('%s (%d bytes)', self::REDACTED, strlen($value)),
+            is_array($value) => sprintf('%s (%d items)', self::REDACTED, count($value)),
+            default => $value,
+        };
+    }
+
+    /** A private key or URL credentials can turn up under any argument name. */
+    private static function scrubString(string $value): string
+    {
+        if (preg_match('/-----BEGIN [A-Z ]*PRIVATE KEY-----/', $value) === 1) {
+            return self::REDACTED;
+        }
+
+        return (string) preg_replace('#([a-z][a-z0-9+.-]*://)[^\s/@]+@#i', '$1' . self::REDACTED . '@', $value);
     }
 
     public function token(): BelongsTo

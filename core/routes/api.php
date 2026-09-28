@@ -63,10 +63,13 @@ Route::get('/test-connection', function (Request $request) {
 });
 
 // nginx-proxy auth_request + custom password form (no API bearer).
+// check and gate are out of the api throttle: sites-http calls them for every
+// request to a protected site without X-Forwarded-For, so they all arrive from
+// one gateway address and would share one per-address bucket.
 Route::get('/internal/site-password/{username}/check', [SitePasswordGateController::class, 'check'])
-    ->withoutMiddleware('auth:api');
+    ->withoutMiddleware(['auth:api', 'throttle:api']);
 Route::get('/internal/site-password/{username}/gate', [SitePasswordGateController::class, 'gate'])
-    ->withoutMiddleware('auth:api');
+    ->withoutMiddleware(['auth:api', 'throttle:api']);
 Route::post('/internal/site-password/{username}/login', [SitePasswordGateController::class, 'login'])
     ->withoutMiddleware('auth:api');
 
@@ -267,9 +270,8 @@ $projectRoutes = function (): void {
     Route::put('/{username}/app/users/{userId}/password', [AppUserController::class, 'resetPassword']);
     Route::post('/{username}/app/users/{userId}/sso', [AppUserController::class, 'createSsoToken']);
     // Unauthenticated: the token in the query string is the capability. The
-    // throttle is the brute-force floor the api group does not provide -- it
-    // has `throttle:api` commented out, so without this the route answers as
-    // fast as a client can ask.
+    // group's `throttle:api` allows an address far more than a brute-force
+    // floor should, so this route keeps its own tighter one.
     Route::get('/{username}/app/sso-token', [AppUserController::class, 'useAppSsoToken'])
         ->withoutMiddleware('auth:api')
         ->middleware('throttle:60,1');
@@ -298,8 +300,8 @@ Route::delete('/backup-containers/{id}', [BackupContainerController::class, 'des
 Route::post('/backup-containers/{id}/test', [BackupContainerController::class, 'test']);
 
 // Same shape, and this one hands back MySQL credentials, so it gets the same
-// floor. PmaSso is a second gate, not the only one: it reads the client address,
-// and an address is only as good as the proxy chain that produced it.
+// floor. PmaSso is the second gate: only the phpMyAdmin container's own TCP
+// address may redeem (services.phpmyadmin.sso_sources).
 Route::put('/mysql/phpmyadmin-sso-token', [MysqlController::class, 'usePhpmyadminSsoToken'])
     ->withoutMiddleware('auth:api')
     ->middleware([PmaSso::class, 'throttle:60,1']);

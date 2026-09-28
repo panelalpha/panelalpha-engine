@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\McpActivityLog;
+use App\Models\PersonalAccessToken;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -36,6 +37,12 @@ class McpActivityLogController extends Controller
             'status'        => 'required|in:success,error',
             'error_message' => 'nullable|string',
         ]);
+
+        // `token_name` names a panel-side token the engine cannot check, so the
+        // row records which engine token actually wrote it.
+        $user = $request->user();
+        $token = $user !== null && method_exists($user, 'currentAccessToken') ? $user->currentAccessToken() : null;
+        $data['token_id'] = $token instanceof PersonalAccessToken ? $token->id : null;
 
         $log = McpActivityLog::create($data);
 

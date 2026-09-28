@@ -37,7 +37,7 @@ An empty list on a new engine is a success.
 ## Troubleshooting
 
 **I cannot tell whether the engine or the assistant is at fault.**
-On your VPS, run `pae mcp:check <token>`. If it passes, the engine is fine and the problem is in your assistant's configuration. If it fails, fix that first. This check cannot tell you whether *your computer* trusts the engine's certificate, because your VPS already trusts its own.
+On your VPS, run `pae mcp:check`. If it passes, the engine is fine and the problem is in your assistant's configuration. If it fails, fix that first. This check cannot tell you whether *your computer* trusts the engine's certificate, because your VPS already trusts its own.
 
 **It registered, then will not connect.**
 A self-signed certificate on your engine that your computer does not trust. Fix it on your computer, not on the engine.
@@ -59,4 +59,4 @@ Your assistant is not using HTTP transport. It needs HTTP, not an SSE-only or st
 The permission settings on your VPS are filtering them. Run `pae mcp:tool:list` on your VPS: [Decide what the assistant may do](your-assistant.md#decide-what-the-assistant-may-do).
 
 **Connection times out.**
-Port 2011 is not reachable from your computer. Check any firewall between you and your VPS, and confirm the address is right with `pae mcp:check <token>` on your VPS itself.
+Port 2011 is not reachable from your computer. Check any firewall between you and your VPS, and confirm the address is right with `pae mcp:check` on your VPS itself.

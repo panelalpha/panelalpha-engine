@@ -19,8 +19,9 @@ class Ftp
     {
         $directory = trim($directory, '/');
 
-        $hostPath = $this->project->homeDirPath() . '/' . $directory;
-        if (!File::isDirectory($hostPath)) {
+        $home = $this->project->homeDirPath();
+        $hostPath = $home . '/' . $directory;
+        if (!File::isDirectory($hostPath) || !self::staysInside($home, $directory, $hostPath)) {
             throw ValidationException::withMessages([
                 'directory invalid',
             ]);
@@ -39,6 +40,24 @@ class Ftp
             $containerPath,
             $quota,
         );
+    }
+
+    /**
+     * The FTP container mounts every home, so the account is chrooted into
+     * this path: `..` or a symlink out of the home would be another tenant's.
+     */
+    public static function staysInside(string $home, string $directory, string $hostPath): bool
+    {
+        if (preg_match('#(?:^|/)\.\.?(?:/|$)#', $directory) === 1 || str_contains($directory, "\0")) {
+            return false;
+        }
+        $realHome = realpath($home);
+        $real = realpath($hostPath);
+        if ($realHome === false || $real === false) {
+            return false;
+        }
+
+        return $real === $realHome || str_starts_with($real, rtrim($realHome, '/') . '/');
     }
 
     /**

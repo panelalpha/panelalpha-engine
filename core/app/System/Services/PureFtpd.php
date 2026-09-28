@@ -7,6 +7,9 @@ use App\System as EngineSystem;
 
 class PureFtpd
 {
+    /** Carries the password from core to the ftp container's shell, never on a command line. */
+    public const PASSWORD_ENV = 'PA_FTP_PASSWORD';
+
     public function __construct(
         private EngineSystem $system,
     ) {
@@ -148,6 +151,12 @@ class PureFtpd
     }
 
     /**
+     * pure-pw reads the password twice from stdin. It used to be spliced into
+     * the command as `echo '<password>'`, which put it in the argv of sudo,
+     * docker and the container's shell, where any `ps` shows it. It travels in
+     * the environment now: sudo keeps only the one named variable, compose
+     * copies it into the exec, and printf is a shell builtin.
+     *
      * @throws DockerErrorException
      */
     private function execPasswordPipe(string $password, string $pureftpdCmd): void
@@ -155,16 +164,19 @@ class PureFtpd
         $composeFile = $this->system->composeFilePath();
         $this->system->exec([
             'sudo',
+            '--preserve-env=' . self::PASSWORD_ENV,
             'docker',
             'compose',
             '-f',
             $composeFile,
             'exec',
             '-T',
+            '-e',
+            self::PASSWORD_ENV,
             'ftp',
             '/bin/sh',
             '-c',
-            '(echo ' . escapeshellarg($password) . '; echo ' . escapeshellarg($password) . ') | ' . $pureftpdCmd,
-        ]);
+            'printf \'%s\\n%s\\n\' "$' . self::PASSWORD_ENV . '" "$' . self::PASSWORD_ENV . '" | ' . $pureftpdCmd,
+        ], [self::PASSWORD_ENV => $password]);
     }
 }

@@ -323,6 +323,8 @@ prepare_config_files() {
     mkdir -p /opt/panelalpha/shared-hosting/config/modsecurity
     mkdir -p /opt/panelalpha/shared-hosting/logs/modsecurity
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/modsecurity/. /opt/panelalpha/shared-hosting/config/modsecurity/.
+    # Installs from before engine#48 item 23 have it world-readable.
+    bash /opt/panelalpha/shared-hosting/scripts/secure-env-core.sh /opt/panelalpha/shared-hosting/.env-core
 }
 
 disable_systemd_resolved() {

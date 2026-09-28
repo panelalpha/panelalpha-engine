@@ -131,7 +131,9 @@ class EnvFile
         // Kept beside the file rather than swapped in, for the inode reason
         // above; one rolling copy, so the state before the last edit is always
         // recoverable and the directory does not fill up with them.
-        $this->write($this->path . self::BACKUP_SUFFIX, $original);
+        $backup = $this->path . self::BACKUP_SUFFIX;
+        $this->write($backup, $original);
+        $this->keepModeOf($this->path, $backup);
         $this->write($this->path, $updated);
 
         return $changed;
@@ -228,6 +230,22 @@ class EnvFile
         }
 
         return $contents;
+    }
+
+    /**
+     * The backup holds every secret the file does; under the default umask it
+     * would come out world-readable beside a 0640 original.
+     */
+    private function keepModeOf(string $source, string $copy): void
+    {
+        $mode = @fileperms($source);
+        $group = @filegroup($source);
+        if ($mode !== false) {
+            @chmod($copy, $mode & 0777);
+        }
+        if ($group !== false && @filegroup($copy) !== $group) {
+            @chgrp($copy, $group);
+        }
     }
 
     private function write(string $path, string $contents): void

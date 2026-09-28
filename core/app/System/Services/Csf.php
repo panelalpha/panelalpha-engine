@@ -147,6 +147,15 @@ class Csf
      */
     public function unparseRule(array $params): string
     {
+        // Each rule is one line of csf.allow/csf.deny, whoever the caller is.
+        foreach ($params as $field => $value) {
+            if (is_string($value) && preg_match('/[\r\n]/', $value) === 1) {
+                throw ValidationException::withMessages([
+                    (string) $field => 'Must not contain a line break.',
+                ]);
+            }
+        }
+
         $suffix = "";
         if ($params['comment'] !== null) {
             $suffix = " # " . $params['comment'];

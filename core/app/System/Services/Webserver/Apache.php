@@ -178,7 +178,7 @@ class Apache extends AbstractWebserver implements WebserverInterface
     {
         $dir = $this->system->engineDirPath() . '/webserver-config/apache/vhosts';
         $configFile = $dir . '/' . $domainName . '.conf';
-        $this->system->exec("sudo rm -f {$configFile}");
+        $this->system->exec(['sudo', 'rm', '-f', $configFile]);
     }
 
     public function deleteDomainsConfigs(array $domainNames): void
@@ -186,7 +186,8 @@ class Apache extends AbstractWebserver implements WebserverInterface
         $dir = $this->system->engineDirPath() . '/webserver-config/apache/vhosts';
         foreach ($domainNames as $domainName) {
             $configFile = $dir . '/' . $domainName . '.conf';
-            $this->system->exec("sudo rm -f {$configFile}*");
+            // The glob stays a glob; the name is a positional argument, never shell.
+            $this->system->exec(['sudo', 'sh', '-c', 'rm -f -- "$1"*', 'sh', $configFile]);
         }
     }
 

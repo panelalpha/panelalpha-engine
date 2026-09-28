@@ -100,7 +100,7 @@ Open **Customize**, then **Plugins**, import `https://github.com/panelalpha/agen
 The file has a syntax error, most often a missing or extra comma when adding to an existing config. Paste it into any JSON checker. Cursor tends to skip a broken file silently rather than complain.
 
 **It appears but shows an error or no abilities.**
-Restart Cursor first. A stale connection from before the edit looks exactly like this. If it persists, run `pae mcp:check <token>` on your VPS.
+Restart Cursor first. A stale connection from before the edit looks exactly like this. If it persists, run `pae mcp:check` on your VPS.
 
 **401 Unauthorized.**
 The token is truncated, or it is the wrong type. Assistants need a token from `pae connect`, not `pae api:token:create`.

@@ -234,10 +234,13 @@ final class ServiceHardener
     }
 
     /**
+     * Only the isolation part of {@see harden()}: no limits or defaults, so a
+     * compose override that sets none does not start overriding its base.
+     *
      * @param array<string, mixed> $service
      * @return array<string, mixed>
      */
-    private static function withoutEscapes(array $service): array
+    public static function withoutEscapes(array $service): array
     {
         foreach (self::FORBIDDEN_KEYS as $key) {
             unset($service[$key]);

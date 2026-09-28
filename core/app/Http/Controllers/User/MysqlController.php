@@ -115,8 +115,9 @@ class MysqlController extends Controller
         /** @var array{token: string} */
         $params = $request->validated();
 
-        /** @var ?MysqlSsoToken */
-        $token = MysqlSsoToken::query()->where('token', $params['token'])->first();
+        // Deleted before anything is handed out: only the request whose delete
+        // removed the row gets credentials.
+        $token = MysqlSsoToken::claim($params['token']);
 
         if (!$token) {
             throw ValidationException::withMessages([
@@ -125,14 +126,12 @@ class MysqlController extends Controller
         }
 
         if ($token->expired()) {
-            $token->delete();
             throw ValidationException::withMessages([
                 'Invalid token expired'
             ]);
         }
 
         $credentials = $token->getCredentials();
-        $token->delete();
 
         return new JsonResponse(['data' => $credentials]);
     }

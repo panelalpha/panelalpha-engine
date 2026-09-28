@@ -26,7 +26,11 @@ class CoreNginxForwardedSchemeTest extends TestCase
     {
         $conf = $this->config();
 
-        $this->assertMatchesRegularExpression('/geo \$realip_remote_addr \$pa_trusted_hop \{[^}]*127\.0\.0\.1 1;[^}]*172\.16\.0\.0\/12 1;/s', $conf);
+        // The loopback, and the gateway entrypoint-core.sh writes into
+        // $pa_gateway -- the same two hops the :80 server's realip trusts.
+        $this->assertStringContainsString('map "$realip_remote_addr $pa_gateway" $pa_trusted_hop {', $conf);
+        $this->assertStringContainsString('"~^127\.0\.0\.1 " 1;', $conf);
+        $this->assertStringContainsString('"~^(\S+) \1$" 1;', $conf);
         $this->assertStringContainsString('"1:https" on;', $conf);
     }
 

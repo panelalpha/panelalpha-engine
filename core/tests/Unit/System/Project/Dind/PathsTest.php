@@ -100,6 +100,20 @@ class PathsTest extends TestCase
         );
     }
 
+    public function test_compose_files_layers_the_hardened_copy_of_the_client_override_in_its_place(): void
+    {
+        $dind = $this->dindProject('gina', Strategies::COMPOSE);
+        $this->writeRunFile('gina');
+        file_put_contents($this->appDir('gina').'/'.Paths::CLIENT_OVERRIDE_FILENAME, "services:\n  app:\n    privileged: true\n");
+        file_put_contents($this->appDir('gina').'/'.EngineArtifacts::RUN_CLIENT_OVERRIDE, "services:\n  app: {}\n");
+
+        $files = $this->composeFileArgs($dind);
+
+        $this->assertContains($this->appDir('gina').'/'.EngineArtifacts::RUN_CLIENT_OVERRIDE, $files);
+        $this->assertNotContains($this->appDir('gina').'/'.Paths::CLIENT_OVERRIDE_FILENAME, $files);
+        $this->assertTrue(Paths::isEngineComposeFile($this->appDir('gina').'/'.EngineArtifacts::RUN_CLIENT_OVERRIDE));
+    }
+
     public function test_compose_files_never_layers_the_client_override_for_a_recipe_strategy(): void
     {
         $dind = $this->dindProject('bob', 'express');

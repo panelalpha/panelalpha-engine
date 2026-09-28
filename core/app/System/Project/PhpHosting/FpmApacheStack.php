@@ -183,7 +183,7 @@ final class FpmApacheStack implements PhpStack
     {
         $dir = $project->system()->projectDirPath($project->username()) . '/apache-sites';
         $configFile = $dir . '/' . $domainName . '.conf';
-        $project->system()->exec("sudo rm -f {$configFile}");
+        $project->system()->exec(['sudo', 'rm', '-f', $configFile]);
     }
 
     public function reloadApache(PhpHosting $project): void

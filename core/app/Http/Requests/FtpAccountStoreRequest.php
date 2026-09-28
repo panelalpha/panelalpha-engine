@@ -24,7 +24,7 @@ class FtpAccountStoreRequest extends FormRequest
     {
         return [
             'user' => 'string|required|alpha_num:ascii|max:32',
-            'domain' => 'string|required|regex:/^(?!:\/\/)(?=.{1,255}$)((.{1,63}\.){1,127}(?![0-9]*$)[a-z0-9-]+\.?)$/i',
+            'domain' => 'string|required|regex:/^(?!:\/\/)(?=.{1,255}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i',
             'password' => 'required|string|min:8|max:255',
             'directory' => 'string|nullable|max:4096',
             'unlimited_quota' => 'boolean',

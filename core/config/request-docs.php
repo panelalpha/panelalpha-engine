@@ -1,6 +1,10 @@
 <?php
 
 return [
+    // Off unless asked for: the package's own default is true, which served
+    // the route map to anyone. When on, it answers only to an API token.
+    'enabled' => env('REQUEST_DOCS_ENABLED', false),
+
      // change it to true will make lrd to throw exception if rules in request class need to be changed
      // keep it false
     'debug'  => false,
@@ -12,8 +16,7 @@ return [
     */
     'url' => 'request-docs',
     'middlewares' => [
-        //Example
-        // \App\Http\Middleware\NotFoundWhenProduction::class,
+        'auth:api',
     ],
     /**
      * Path to to static HTML if using command line.

@@ -48,7 +48,8 @@ class ProjectFtpTest extends TestCase
         $this->assertGreaterThanOrEqual(2, count($system->execJournal));
         $addCmd = $system->execJournal[0];
         $this->assertStringContainsString('/bin/sh -c', $addCmd);
-        $this->assertStringContainsString("echo 'secret'", $addCmd);
+        $this->assertStringNotContainsString('secret', $addCmd, 'the password is on a command line');
+        $this->assertSame(['PA_FTP_PASSWORD' => 'secret'], $system->envJournal[0]);
         $this->assertStringContainsString('pure-pw useradd', $addCmd);
         $this->assertStringContainsString('1001', $addCmd);
         $this->assertStringContainsString('/home/ftpuser/alice/public_html', $addCmd);
@@ -74,7 +75,8 @@ class ProjectFtpTest extends TestCase
 
         $this->assertCount(3, $system->execJournal);
         $this->assertStringContainsString('pure-pw passwd', $system->execJournal[0]);
-        $this->assertStringContainsString("echo 'newpass'", $system->execJournal[0]);
+        $this->assertStringNotContainsString('newpass', $system->execJournal[0], 'the password is on a command line');
+        $this->assertSame(['PA_FTP_PASSWORD' => 'newpass'], $system->envJournal[0]);
         $this->assertStringContainsString('pure-pw usermod ftp@example.com -N 128', $system->execJournal[1]);
         $this->assertStringContainsString('pure-pw mkdb', $system->execJournal[2]);
     }
@@ -176,6 +178,8 @@ class ProjectFtpTest extends TestCase
         return new class ($this->tmpRoot, $userExistsExitCode, $duOutput) extends System {
             /** @var list<string> */
             public array $execJournal = [];
+            /** @var list<array<string, string>> */
+            public array $envJournal = [];
 
             /** @var list<string> */
             public array $processJournal = [];
@@ -211,6 +215,7 @@ class ProjectFtpTest extends TestCase
             {
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 $this->execJournal[] = $line;
+                $this->envJournal[] = $env;
                 if (str_contains($line, 'du -shm')) {
                     return $this->duOutput;
                 }

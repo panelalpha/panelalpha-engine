@@ -705,6 +705,9 @@ class FileController extends Controller
         }
 
         FileStreamWrapper::register();
+        // The path is confined as a string only; the read runs as root and
+        // follows symlinks, so the helper re-checks the resolved file.
+        FileStreamWrapper::confineTo($user->project()->homeDirPath());
 
         /** @var BinaryFileResponse */
         return response()->download('sudophp://' . $path);

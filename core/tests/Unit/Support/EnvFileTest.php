@@ -157,6 +157,24 @@ class EnvFileTest extends TestCase
         $this->assertSame("MCP_PERMISSION_MODE=full\n", file_get_contents($this->path . EnvFile::BACKUP_SUFFIX));
     }
 
+    /** engine#48 item 23: the backup holds the same secrets, so it gets the same mode. */
+    public function test_the_backup_is_no_more_readable_than_the_file(): void
+    {
+        $this->write("MCP_PERMISSION_MODE=full\n");
+        chmod($this->path, 0640);
+        $umask = umask(0022);
+
+        try {
+            $this->env()->set(['MCP_PERMISSION_MODE' => 'readonly']);
+        } finally {
+            umask($umask);
+        }
+
+        clearstatcache();
+        $this->assertSame('0640', substr(sprintf('%o', fileperms($this->path . EnvFile::BACKUP_SUFFIX)), -4));
+        $this->assertSame(filegroup($this->path), filegroup($this->path . EnvFile::BACKUP_SUFFIX));
+    }
+
     public function test_get_reports_what_is_written_down(): void
     {
         $this->write("MCP_TOOLSETS=projects\nexport MCP_TOOLS=project_list\n# MCP_DENIED_TOOLS=x\n");

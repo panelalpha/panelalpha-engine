@@ -26,6 +26,12 @@ final class EngineArtifacts
     /** An app config's compose file in `override` mode, layered over the run file. */
     public const RUN_COMPOSE_OVERRIDE = 'docker-compose.panelalpha.override.yml';
 
+    /**
+     * The repository's own `docker-compose.override.yml` with its escapes
+     * removed, layered in its place (engine#48, item 9).
+     */
+    public const RUN_CLIENT_OVERRIDE = 'docker-compose.panelalpha.client-override.yml';
+
     /** An app config's compose file in `replace` mode, read ahead of the repository's. */
     public const APP_CONFIG_COMPOSE = 'docker-compose.panelalpha.app-config.yml';
 
@@ -66,6 +72,7 @@ final class EngineArtifacts
             self::ENV_OVERRIDES,
             self::RUN_COMPOSE,
             self::RUN_COMPOSE_OVERRIDE,
+            self::RUN_CLIENT_OVERRIDE,
             self::APP_CONFIG_COMPOSE,
             self::RAILS_HOST_INITIALIZER,
         ]);

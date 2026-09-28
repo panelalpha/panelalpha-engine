@@ -4,6 +4,7 @@ namespace App\System\Project\Dind\Strategy;
 
 use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\Lib\Deploy\Compose\ComposeOverride;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\HostScript;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
@@ -102,7 +103,18 @@ class AppConfigBootstrap
         }
 
         if ($appConfig->composeMode() === AppConfig::COMPOSE_OVERRIDE) {
-            $fs->filePutContents($engineOverride, $content, $chown, '644');
+            // Layered over the run file as written, so it gets the run file's
+            // isolation rules first (engine#48, item 9).
+            $hardened = ComposeOverride::harden($content);
+            if ($hardened['yaml'] === null) {
+                throw new \InvalidArgumentException('The app config\'s compose override could not be read as YAML.');
+            }
+            foreach ($hardened['removed'] as $what) {
+                $this->dind->shell()->logger()?->warn(
+                    "Removed from the app config's compose override, not allowed in hosting: {$what}"
+                );
+            }
+            $fs->filePutContents($engineOverride, $hardened['yaml'], $chown, '644');
             $this->removeIfExists($appConfigCompose, $system, $fs);
 
             return;

@@ -1065,6 +1065,8 @@ EOF
 
     # create .env-core files based on example, only if not exists
     cp -n /opt/panelalpha/shared-hosting/.env-core.example /opt/panelalpha/shared-hosting/.env-core
+    # 0640 root:www-data before any secret goes in; sed -i keeps both.
+    bash /opt/panelalpha/shared-hosting/scripts/secure-env-core.sh /opt/panelalpha/shared-hosting/.env-core
 
     # set APP_URL in .env-core if not set
     CORE_APP_URL=$(grep ^APP_URL= /opt/panelalpha/shared-hosting/.env-core | cut -d '=' -f2-)

@@ -7,6 +7,7 @@ use App\System;
 use App\System\Filesystem as SystemFilesystem;
 use App\System\Project\Dind;
 use App\System\Project\Dind\DeployStrategy;
+use App\System\Project\Dind\Paths;
 use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\Strategy\AccountSecrets;
 use App\System\Project\Dind\Strategy\UserComposeStrategy;
@@ -174,6 +175,24 @@ class UserComposeStrategyTest extends TestCase
             $hardened['services']['app']['restart'],
             'hardening must apply a restart policy the client compose file did not declare'
         );
+    }
+
+    public function test_the_clients_override_is_layered_as_a_hardened_copy_and_left_untouched(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $overridePath = self::PROJECT_DIR . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
+        $system = $this->stubbedSystem([
+            $clientPath => "services:\n  app:\n    image: acme/app:latest\n",
+            $overridePath => "services:\n  app:\n    privileged: true\n    volumes:\n      - /var/run:/var/run\n      - ./x:/x\n",
+        ]);
+        $dind = $this->stubbedDind($system, $clientPath);
+
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $copyPath = self::PROJECT_DIR . '/' . EngineArtifacts::RUN_CLIENT_OVERRIDE;
+        $this->assertArrayNotHasKey($overridePath, $this->copiedTo, "the client's own override must never be written to");
+        $this->assertArrayHasKey($copyPath, $this->copiedTo);
+        $this->assertSame(['volumes' => ['./x:/x']], Yaml::parse($this->copiedTo[$copyPath])['services']['app']);
     }
 
     public function test_refresh_run_file_is_a_noop_when_the_project_ships_no_compose_file(): void

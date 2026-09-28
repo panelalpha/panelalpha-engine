@@ -117,4 +117,15 @@ return [
 
     'password_timeout' => 10800,
 
+    // Requests per minute on /api (the `api` rate limiter): per token for an
+    // authenticated caller, per client address on the routes that take no
+    // token. Laravel runs auth before throttle, so a 401 is not counted. 0
+    // turns a limit off. 3000 is 50/s: a client that waits for each answer
+    // stays under it unless every answer takes less than 20 ms.
+    // MCP tool calls count here too and /mcp already holds them to 60.
+    'api_rate_limit' => [
+        'per_token' => (int) env('API_RATE_LIMIT', 3000),
+        'per_ip' => (int) env('API_RATE_LIMIT_ANONYMOUS', 120),
+    ],
+
 ];

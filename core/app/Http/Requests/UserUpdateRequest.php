@@ -21,7 +21,9 @@ class UserUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'domain' => 'string|regex:/^(?!:\/\/)(?=.{1,255}$)((.{1,63}\.){1,127}(?![0-9]*$)[a-z0-9-]+\.?)$/i',
+            // Same hostname grammar as UserStoreRequest: the domain becomes a vhost
+            // filename, a certificate path and a directory under the account.
+            'domain' => 'string|regex:/^(?!:\/\/)(?=.{1,255}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i',
             'email' => 'nullable|email',
             // -1 is the documented "unlimited" sentinel for disk space only;
             // the other limits have no negative meaning, and a negative one

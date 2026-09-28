@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Resources\ModsecRulesetCollection;
 use App\System;
+use App\System\Services\Modsec;
 use App\Models\Setting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -188,10 +189,12 @@ class ModsecController extends Controller
          * } $params
          */
         $params = $request->validate([
+            // A file name in the ruleset's rules/ directory, nothing more: it
+            // is joined to that path and renamed as root.
             'enable' => 'array',
-            'enable.*' => 'string',
+            'enable.*' => ['string', 'regex:' . Modsec::CONFIG_FILE_NAME],
             'disable' => 'array',
-            'disable.*' => 'string',
+            'disable.*' => ['string', 'regex:' . Modsec::CONFIG_FILE_NAME],
         ]);
         $enable = !empty($params['enable']) ? $params['enable'] : [];
         $disable = !empty($params['disable']) ? $params['disable'] : [];

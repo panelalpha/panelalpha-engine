@@ -4,7 +4,13 @@
  * file-stream.php
  *
  * Called as:
- *   sudo php file-stream.php <mode> <path>
+ *   sudo php file-stream.php <mode> <path> [<root>]
+ *
+ * With <root> given, <path> is opened only if it resolves (symlinks
+ * followed) to a file under <root>; anything else is refused before the
+ * privileged open. The opened handle is then compared against the resolved
+ * file, so a symlink swapped in between the check and the open is refused
+ * too.
  * 
  * The script reads commands from STDIN and writes results to STDOUT.
  * Each command is a line terminated by "\n".
@@ -26,18 +32,48 @@ if (!isset($argc)) {
     return;
 }
 
-if ($argc !== 3) {
-    fwrite(STDERR, "Usage: php file-stream.php <mode> <path>\n");
+if ($argc !== 3 && $argc !== 4) {
+    fwrite(STDERR, "Usage: php file-stream.php <mode> <path> [<root>]\n");
     exit(1);
 }
 
 $mode = $argv[1];
 $path = $argv[2];
+$root = $argv[3] ?? null;
+
+$resolved = null;
+if ($root !== null) {
+    $realRoot = realpath($root);
+    $resolved = realpath($path);
+    if (
+        $realRoot === false
+        || $resolved === false
+        || !str_starts_with($resolved, rtrim($realRoot, '/') . '/')
+    ) {
+        fwrite(STDERR, "Refusing $path: it does not resolve to a file under $root\n");
+        exit(1);
+    }
+}
 
 $fh = @fopen($path, $mode);
 if ($fh === false) {
     fwrite(STDERR, "Cannot open $path with mode $mode\n");
     exit(1);
+}
+
+if ($resolved !== null) {
+    $opened = fstat($fh);
+    $expected = @stat($resolved);
+    if (
+        $opened === false
+        || $expected === false
+        || $opened['dev'] !== $expected['dev']
+        || $opened['ino'] !== $expected['ino']
+    ) {
+        fclose($fh);
+        fwrite(STDERR, "Refusing $path: it changed between the check and the open\n");
+        exit(1);
+    }
 }
 
 /* Helper to send a line */

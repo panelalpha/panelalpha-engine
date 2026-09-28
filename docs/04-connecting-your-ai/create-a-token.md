@@ -27,10 +27,10 @@ You should see a new token, shown once, and the exact command or prompt to use o
 ## 2. Check that it works
 
 ```bash
-pae mcp:check <token>
+pae mcp:check
 ```
 
-Replace `<token>` with what step 1 printed. It checks that HTTPS on your engine is working, that your token is accepted, and that an assistant can complete the connection.
+Paste the token step 1 printed when it asks; nothing is shown as you type, so it stays out of your screen and your shell history. From a script, pipe it in instead: `printf %s "$TOKEN" | pae mcp:check --stdin`. It checks that HTTPS on your engine is working, that your token is accepted, and that an assistant can complete the connection.
 
 ## Managing tokens later
 

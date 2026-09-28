@@ -50,7 +50,7 @@ Check the header separator first. `Authorization=Bearer <token>` is correct for 
 The connection was set up as something other than HTTP.
 
 **Connection times out.**
-Port 2011 is not reachable from your computer. Check any firewall in between, then confirm the engine is answering with `pae mcp:check <token>` on your VPS itself.
+Port 2011 is not reachable from your computer. Check any firewall in between, then confirm the engine is answering with `pae mcp:check` on your VPS itself.
 
 **It connects but can barely do anything.**
 The permission settings on your VPS are filtering its abilities. See [Decide what the assistant may do](your-assistant.md#decide-what-the-assistant-may-do).

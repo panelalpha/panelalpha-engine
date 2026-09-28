@@ -97,6 +97,7 @@ class DindAccountCleanup
             ...ComposeFileInspector::COMPOSE_FILE_CANDIDATES,
             EngineArtifacts::RUN_COMPOSE,
             EngineArtifacts::RUN_COMPOSE_OVERRIDE,
+            EngineArtifacts::RUN_CLIENT_OVERRIDE,
             EngineArtifacts::APP_CONFIG_COMPOSE,
         ];
         $globs = [];

@@ -594,7 +594,8 @@ CONFIG;
         $dir = $this->system->engineDirPath() . '/webserver-config/openlitespeed/vhosts';
         foreach ($domainNames as $domainName) {
             $configFile = $dir . '/' . $domainName . '.conf';
-            $this->system->exec("sudo rm -f {$configFile}*");
+            // The glob stays a glob; the name is a positional argument, never shell.
+            $this->system->exec(['sudo', 'sh', '-c', 'rm -f -- "$1"*', 'sh', $configFile]);
         }
     }
 
@@ -607,7 +608,7 @@ CONFIG;
             throw new \Exception('Unsupported config entry for current webserver');
         }
 
-        // $this->validateSerialNumber($value);
+        $this->validateSerialNumber($value);
         $this->updateSerialNumber($value);
     }
 

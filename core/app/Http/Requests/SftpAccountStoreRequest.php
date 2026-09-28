@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\SshPublicKey;
 use Illuminate\Foundation\Http\FormRequest;
 
 class SftpAccountStoreRequest extends FormRequest
@@ -29,7 +30,7 @@ class SftpAccountStoreRequest extends FormRequest
             'username' => 'string|required|max:32|regex:/^[a-zA-Z0-9_]+$/',
             'auth_method' => 'string|required',
             'password' => 'string|nullable|min:8|max:255',
-            'public_key' => 'string|nullable|max:4096',
+            'public_key' => ['string', 'nullable', 'max:4096', new SshPublicKey()],
         ];
     }
 

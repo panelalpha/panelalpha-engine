@@ -15,7 +15,11 @@ use Illuminate\Support\Facades\Http;
  */
 class CheckCommand extends Command
 {
-    protected $signature = 'mcp:check {token : An MCP token to authenticate with}';
+    // The token as an argument still works, but it shows in `ps` and in shell
+    // history (engine#48 item 23): prompt for it, or read it from stdin.
+    protected $signature = 'mcp:check
+        {token? : Deprecated - visible in ps and shell history. Omit it to be prompted}
+        {--stdin : Read the token from standard input}';
 
     protected $description = 'Verify the MCP endpoint: TLS, token, auth enforcement and handshake';
 
@@ -26,9 +30,10 @@ class CheckCommand extends Command
 
     public function handle(): int
     {
-        $token = $this->argument('token');
-        if (!is_string($token) || $token === '') {
-            $this->error("Invalid 'token' argument");
+        $token = $this->token();
+        if ($token === null) {
+            $this->error('No token given. Run `pae mcp:check` and paste it at the prompt, '
+                . 'or pipe it in: `printf %s "$TOKEN" | pae mcp:check --stdin`.');
             return 1;
         }
 
@@ -119,6 +124,34 @@ class CheckCommand extends Command
         }
 
         return 0;
+    }
+
+    private function token(): ?string
+    {
+        $argument = $this->argument('token');
+        if (is_string($argument) && $argument !== '') {
+            $this->getOutput()->getErrorStyle()->writeln(
+                '<comment>Passing the token as an argument is deprecated: it shows in ps and in your '
+                . 'shell history. Run `pae mcp:check` without it to be prompted.</comment>'
+            );
+            return $argument;
+        }
+
+        $stdin = $this->stdin();
+        if ($this->option('stdin') || !stream_isatty($stdin)) {
+            $line = fgets($stdin);
+            $token = is_string($line) ? trim($line) : '';
+            return $token === '' ? null : $token;
+        }
+
+        $token = $this->secret('MCP token');
+        return is_string($token) && trim($token) !== '' ? trim($token) : null;
+    }
+
+    /** @return resource */
+    protected function stdin()
+    {
+        return STDIN;
     }
 
     /**

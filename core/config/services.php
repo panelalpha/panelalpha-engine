@@ -31,4 +31,11 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    // Who may redeem a phpMyAdmin SSO token (PmaSso): comma-separated
+    // hostnames, addresses or CIDR ranges. `172.16.0.0/12` restores the old
+    // "any private address" rule for a topology this default does not fit.
+    'phpmyadmin' => [
+        'sso_sources' => env('PMA_SSO_SOURCES', 'phpmyadmin-users.shared-hosting.palocal'),
+    ],
+
 ];

@@ -7,7 +7,6 @@ use App\Lib\Deploy\Source\ArchiveUnpackedSize;
 use App\System\Project as UserProject;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -66,61 +65,53 @@ class FileManager
         return $home . '/' . ltrim($clean, '/') . ($dir ? '/' : '');
     }
 
+    /**
+     * Written as the account, like every other operation here. As root, a
+     * symlink the account planted (`~/x -> /etc/cron.d/x`, or into another
+     * account's home) was followed and the file written and chowned there.
+     */
     public function putContents(string $path, string $contents): void
     {
         $path = $this->resolvePath($path);
-        $model = $this->project->model();
-        $chown = $model->getChownString();
-        if ($chown === null) {
-            Log::warning("Cannot put file contents as user {$this->project->username()}, UID/GID is missing", [
-                'path' => $path,
-            ]);
+        $staged = tempnam(sys_get_temp_dir(), 'pa-put-');
+        if ($staged === false) {
+            throw new \RuntimeException('Cannot stage the file contents');
         }
-        $this->project->system()->filesystem()->filePutContents($path, $contents, $chown, '644');
+        try {
+            file_put_contents($staged, $contents);
+            $this->writeAsUser($staged, $path);
+        } finally {
+            @unlink($staged);
+        }
     }
 
     public function mkdir(string $path, bool $parents = false): void
     {
         $path = $this->resolvePath($path);
-        $system = $this->project->system();
-        $filesystem = $system->filesystem();
-        $chown = $this->project->model()->getChownString() ?? '33:33';
-        if ($parents) {
-            $filesystem->makeDirWithParents($path, $chown);
-
-            return;
-        }
-        $system->exec(['sudo', 'mkdir', $path]);
-        $system->exec(['sudo', 'chown', $chown, $path]);
+        $this->assertSucceeded($this->runOnCore($parents ? ['mkdir', '-p', '--', $path] : ['mkdir', '--', $path]));
     }
 
     public function moveUploadedFile(string $path, UploadedFile $file): void
     {
         $path = $this->resolvePath($path);
         $targetDir = rtrim($path, '/');
-        $targetFilename = $file->getClientOriginalName();
-        $target = $targetDir . '/' . $targetFilename;
+        $target = $targetDir . '/' . $file->getClientOriginalName();
 
-        $system = $this->project->system();
-        $uidgid = $this->project->model()->getChownString() ?? '33:33';
+        $this->writeAsUser($file->path(), $target);
+    }
 
-        if (!is_dir($targetDir)) {
-            $system->filesystem()->makeDirWithParents($targetDir, $uidgid);
-        }
-
-        $system->runProcess([
-            'sudo',
-            'sh',
-            '-c',
-            sprintf(
-                'mv %s %s && chmod 644 %s && chown %s %s',
-                escapeshellarg($file->path()),
-                escapeshellarg($target),
-                escapeshellarg($target),
-                escapeshellarg($uidgid),
-                escapeshellarg($target),
-            ),
-        ]);
+    /**
+     * Copy an engine-side file to $target as the account, creating its parent
+     * directories as root used to. The source is made readable for that: it
+     * is in the engine's own temp directory, which no account can reach.
+     */
+    private function writeAsUser(string $source, string $target): void
+    {
+        @chmod($source, 0644);
+        $this->assertSucceeded($this->runOnCore([
+            'sh', '-c', 'mkdir -p -- "$(dirname -- "$2")" && cat -- "$1" > "$2" && chmod 644 -- "$2"',
+            'sh', $source, $target,
+        ]));
     }
 
     public function exists(string $path): bool
