@@ -344,7 +344,7 @@ class RuntimeSidecars
      */
     private function accountMemoryMb(): ?int
     {
-        return $this->dind->userModel()->getMemoryLimit();
+        return $this->dind->userModel()->effectiveMemoryLimit();
     }
 
     /**

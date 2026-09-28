@@ -84,7 +84,7 @@ class ProjectUpdateTool extends ApiTool
             'domain' => $schema->string(),
             'email' => $schema->string(),
             'disk_space_limit' => $schema->integer(),
-            'memory_limit' => $schema->integer(),
+            'memory_limit' => $schema->integer()->description('MB. Can be changed, not removed. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
             'cpu_limit' => $schema->number(),
             'bandwidth_limit' => $schema->integer(),
             'mysql_databases_limit' => $schema->integer(),

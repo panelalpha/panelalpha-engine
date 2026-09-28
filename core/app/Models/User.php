@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Lib\Host\ProjectMemory;
 use App\System\Project as AppSystemProject;
 use App\System\Services\Webserver\AbstractWebserver;
 use Illuminate\Database\Eloquent\Collection;
@@ -170,7 +171,9 @@ class User extends Authenticatable
             'home_dir'               => "/home/{$destUsername}",
             'mysql_prefix'           => $destUsername . '_',
             'disk_space_limit'       => $srcDetails['disk_space_limit'] ?? -1,
-            'memory_limit'           => $srcDetails['memory_limit'] ?? null,
+            'memory_limit'           => ProjectMemory::resolve(
+                isset($srcDetails['memory_limit']) ? (int) $srcDetails['memory_limit'] : null
+            ),
             'cpu_limit'              => $srcDetails['cpu_limit'] ?? null,
             'device_read_bps'        => $srcDetails['device_read_bps'] ?? null,
             'device_write_bps'       => $srcDetails['device_write_bps'] ?? null,
@@ -758,6 +761,15 @@ class User extends Authenticatable
     public function setMemoryLimit(?int $value): void
     {
         $this->setDetails(['memory_limit' => $value]);
+    }
+
+    /**
+     * The limit the account runs with: its own, or the default for a project
+     * made before every project had one (#294).
+     */
+    public function effectiveMemoryLimit(): int
+    {
+        return ProjectMemory::resolve($this->getMemoryLimit());
     }
 
     public function getRealFtpAccountQuota(?int $ftpAccountQuota): ?int

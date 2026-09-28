@@ -102,32 +102,6 @@ final class DindEngine implements ContainerEngine
     }
 
     /**
-     * The memory limit an account container runs under, in MB; null means none.
-     *
-     * The plan's own number wins, and 0 there stays an explicit "unlimited".
-     * Unset used to mean unlimited too, which let one tenant's build take the
-     * whole host (engine#110): now it means the operator's
-     * `DEPLOY_ACCOUNT_MEMORY` (`0` opts back out), else half of this host.
-     */
-    public static function resolveAccountMemoryMb(?int $planLimitMb, string $configured, string $procMeminfo): ?int
-    {
-        if ($planLimitMb !== null) {
-            return $planLimitMb > 0 ? $planLimitMb : null;
-        }
-        $configured = trim($configured);
-        if ($configured === '0') {
-            return null;
-        }
-
-        return ServiceLimits::toMegabytes($configured) ?? ServiceLimits::accountDefaultMemoryMb($procMeminfo);
-    }
-
-    public static function accountMemoryMb(?int $planLimitMb): ?int
-    {
-        return self::resolveAccountMemoryMb($planLimitMb, (string) config('deploy.account_memory', ''), self::hostMeminfo());
-    }
-
-    /**
      * What this host has, for sizing a build container. `/proc/meminfo` is not
      * namespaced, so inside the engine container it reports host RAM rather
      * than the core container's 3g mem_limit. Unreadable yields ''.

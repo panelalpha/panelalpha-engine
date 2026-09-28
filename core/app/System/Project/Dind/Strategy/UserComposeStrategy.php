@@ -185,7 +185,7 @@ class UserComposeStrategy
         // The account's own ceiling, so a project the operator has given more
         // memory actually gets it. Null when none is set, which keeps the
         // built-in defaults.
-        $parsed = ComposeHarden::apply($parsed, $this->dind->userModel()->getMemoryLimit());
+        $parsed = ComposeHarden::apply($parsed, $this->dind->userModel()->effectiveMemoryLimit());
         $parsed = $this->fillPlaceholders($parsed, $logger);
         // A tracked .env's overrides (ADR-0001 D3). ProjectEnvironment decides
         // on every deploy whether the file should exist; this only keeps it

@@ -122,6 +122,19 @@ Show this project's limits. Raise its memory limit to 2048 MB and rebuild.
 
 **The rebuild is not optional.** The new limit is written into the running application when it is deployed, so changing the number without rebuilding changes nothing you can see.
 
+**Every project has a memory limit.** If you create a project without one, it gets 2048 MB. The engine creates a project only if the server has that much memory free at that moment; otherwise creation fails and the message says how much is free. To create it anyway, give it a lower limit.
+
+What projects can have is measured on the server:
+
+- **engine**: the engine's own services, typically 350–500 MB;
+- **system**: the kernel, Docker and the operating system, typically 800–900 MB;
+- **headroom**: 256 MB kept free for the engine during deploys;
+- **projects**: everything else, and no single project may have more than that.
+
+On a 4 GB server that is about 2.1 GB for projects; on a 2 GB server, about 0.5 GB, so there you have to set lower limits. Ask for the server's current metrics to see the numbers; they are under `memory_budget`, and `free_for_projects_mb` is what a new project can have right now.
+
+To cap what projects may use together, set `DEPLOY_PROJECTS_MEMORY` (in MB) in the engine's environment, for example 16384 on a 32 GB server that also runs other things. `DEPLOY_PROJECT_MEMORY_DEFAULT` changes the 2048 MB default.
+
 The application gets a little less than the number you set. The project itself needs some memory to keep running, so a 2048 MB limit leaves the application with about 1792 MB. That is expected.
 
 Memory limits are the ones that bite. A build that runs out of memory fails with a message that looks like a code problem but is not: [Reading errors](../02-getting-started/reading-errors.md).

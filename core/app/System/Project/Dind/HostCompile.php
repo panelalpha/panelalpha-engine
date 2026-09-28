@@ -909,12 +909,10 @@ class HostCompile
         );
     }
 
-    /** The account's memory limit in MB, or null when it has none. */
-    private function projectMemoryLimitMb(): ?int
+    /** The account's memory limit in MB. */
+    private function projectMemoryLimitMb(): int
     {
-        $limit = $this->project->userModel()->getMemoryLimit();
-
-        return $limit !== null && $limit > 0 ? $limit : null;
+        return $this->project->userModel()->effectiveMemoryLimit();
     }
 
     /**

@@ -59,7 +59,9 @@ class GetLimits extends Command
             $formatted = ($limit === -1 || $limit === null) ? "no limit" : ((string)$limit . " MB");
             $this->info("  disk_space_limit: " . $formatted);
             $limit = $user->getMemoryLimit();
-            $formatted = ($limit === null) ? "no limit" : ((string)$limit . " MB");
+            $formatted = ($limit === null || $limit <= 0)
+                ? "not set, runs with the default ({$user->effectiveMemoryLimit()} MB)"
+                : ((string)$limit . " MB");
             $this->info("  memory_limit:     " . $formatted);
             $limit = $user->getCpuLimit();
             $formatted = ($limit === null) ? "no limit" : ((string)$limit . " CPUs");

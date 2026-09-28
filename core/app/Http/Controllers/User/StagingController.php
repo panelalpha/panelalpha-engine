@@ -8,6 +8,7 @@ use App\Http\Requests\ProjectStagingRequest;
 use App\Http\Resources\UserResource;
 use App\Jobs\CreateStaging;
 use App\Jobs\PushState;
+use App\Lib\Host\ProjectMemory;
 use App\System;
 use App\System\Projects;
 use App\Lib\Helper;
@@ -116,6 +117,9 @@ class StagingController extends Controller
                 'new_username' => 'Username not available.',
             ]);
         }
+
+        // A staging copy is a new project: it needs the source's memory free now.
+        ProjectMemory::assertCanCreate(ProjectMemory::resolve($source->getMemoryLimit()));
 
         $dest = $source->makePendingStaging($newUsername, $destDomain);
 

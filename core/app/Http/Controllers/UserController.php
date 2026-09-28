@@ -7,6 +7,7 @@ use App\Exceptions\ProblemException;
 use App\Http\Requests\DeployPlanInput;
 use App\Http\Requests\RecipeChoiceInput;
 use App\Http\Requests\UserCloneRequest;
+use App\Lib\Host\ProjectMemory;
 use App\Http\Requests\UserStoreRequest;
 use App\Http\Requests\UserUpdateRequest;
 use App\Http\Requests\UserVerifyNewUsernameRequest;
@@ -164,7 +165,7 @@ class UserController extends Controller
                 new OA\Property(property: 'domain_redirect_url', type: 'string', nullable: true),
                 new OA\Property(property: 'email', type: 'string', format: 'email', example: 'john@example.com'),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', example: 10240, description: 'MB, -1 for unlimited'),
-                new OA\Property(property: 'memory_limit', type: 'integer', example: 512, nullable: true),
+                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: 2048, the default. Refused when larger than memory_budget.max_project_mb, or when the server does not have it free now (memory_budget.free_for_projects_mb in GET /metrics/current)'),
                 new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true),
                 new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true),
                 new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true),
@@ -335,7 +336,7 @@ class UserController extends Controller
                 new OA\Property(property: 'domain_redirect_url', type: 'string', nullable: true),
                 new OA\Property(property: 'email', type: 'string', format: 'email', example: 'john@example.com'),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', example: 10240, description: 'MB, -1 for unlimited'),
-                new OA\Property(property: 'memory_limit', type: 'integer', example: 512, nullable: true),
+                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: 2048, the default. Refused when larger than memory_budget.max_project_mb, or when the server does not have it free now (memory_budget.free_for_projects_mb in GET /metrics/current)'),
                 new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true),
                 new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true),
                 new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true),
@@ -675,7 +676,7 @@ class UserController extends Controller
                 'home_dir' => "/home/{$params['username']}",
                 'mysql_prefix' => $params['username'] . '_',
                 'disk_space_limit' => $diskSpaceLimit,
-                'memory_limit' => $params['memory_limit'] ?? null,
+                'memory_limit' => (int) ($params['memory_limit'] ?? ProjectMemory::defaultMb()),
                 'cpu_limit' => $params['cpu_limit'] ?? null,
                 'device_read_bps' => $params['device_read_bps'] ?? null,
                 'device_write_bps' => $params['device_write_bps'] ?? null,
@@ -1712,6 +1713,9 @@ class UserController extends Controller
             ]);
         }
 
+        // A clone is a new project: it needs the source's memory free now.
+        ProjectMemory::assertCanCreate(ProjectMemory::resolve($srcUser->getMemoryLimit()));
+
         // ── Copy resource limits, settings and frozen deploy snapshot ────────
         $newDetails = $srcUser->detailsForCopiedProject($newUsername);
 
@@ -1867,7 +1871,7 @@ class UserController extends Controller
                 new OA\Property(property: 'domain', type: 'string', nullable: true),
                 new OA\Property(property: 'email', type: 'string', format: 'email', nullable: true),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'memory_limit', type: 'integer', nullable: true),
+                new OA\Property(property: 'memory_limit', type: 'integer', description: 'MB. Can be changed, not removed. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
                 new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', nullable: true),
                 new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true),
                 new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true),
@@ -2027,6 +2031,12 @@ class UserController extends Controller
         }
 
         $user->save();
+
+        // Applied now, not at the next rebuild: the account keeps running.
+        $runtime = $user->project()->runtime();
+        if (array_key_exists('memory_limit', $params) && $runtime instanceof Dind) {
+            $runtime->applyMemoryLimit();
+        }
 
         return new UserResource($user);
     }

@@ -36,11 +36,17 @@ return [
     'build_memory' => env('DEPLOY_BUILD_MEMORY', ''),
 
     /*
-     * Memory limit for an account whose plan sets none (engine#110). Empty is
-     * half of this host's RAM, floored at 2g; `0` leaves such accounts
-     * unlimited, as they were before. A plan's own memory_limit always wins.
+     * MB all projects together may use, e.g. 16384 on a 32 GB host that runs
+     * other things too. Empty: whatever the engine and the system leave free,
+     * measured, minus 256 MB of headroom. No project may be larger than this.
      */
-    'account_memory' => env('DEPLOY_ACCOUNT_MEMORY', ''),
+    'projects_memory' => env('DEPLOY_PROJECTS_MEMORY', ''),
+
+    /*
+     * The memory_limit a project is created with when none is given, in MB.
+     * Creation fails when the server does not have it free (#294).
+     */
+    'project_memory_default' => env('DEPLOY_PROJECT_MEMORY_DEFAULT', 2048),
 
     /*
      * Seconds a streamed deploy step may go without printing anything before

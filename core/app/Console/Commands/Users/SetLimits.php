@@ -2,7 +2,9 @@
 
 namespace App\Console\Commands\Users;
 
+use App\Lib\Host\ProjectMemory;
 use App\Models\User;
+use App\System\Project\Dind;
 use App\Console\Commands\Concerns\ResolvesProject;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
@@ -101,14 +103,20 @@ class SetLimits extends Command
             ];
         }
         if ($options['memory-limit'] !== null) {
+            // Every project has a memory limit: it can be changed, not removed.
             $value = (int)$options['memory-limit'];
-            $value = max(-1, $value);
-            if ($value === -1) {
-                $value = null;
+            if ($value < 1) {
+                $this->error('The memory limit is in MB and must be a positive number.');
+                return 1;
+            }
+            $problem = ProjectMemory::changeProblem($value);
+            if ($problem !== null) {
+                $this->error($problem['message']);
+                return 1;
             }
             $newLimits['memory_limit'] = [
                 'value' => $value,
-                'formatted' => $value === null ? "no limit" : ((string)$value . " MB"),
+                'formatted' => (string)$value . " MB",
             ];
         }
         if ($options['cpu-limit'] !== null) {
@@ -276,7 +284,10 @@ class SetLimits extends Command
             }
             if (array_key_exists('memory_limit', $limits)) {
                 $user->setMemoryLimit($limits['memory_limit']['value']);
-                $this->shouldRebuild = true;
+                // A DinD account takes it live below; anything else at its rebuild.
+                if (!($user->project()->runtime() instanceof Dind)) {
+                    $this->shouldRebuild = true;
+                }
             }
             if (array_key_exists('cpu_limit', $limits)) {
                 $user->setCpuLimit($limits['cpu_limit']['value']);
@@ -314,6 +325,12 @@ class SetLimits extends Command
             }
 
             $user->save();
+
+            $runtime = $user->project()->runtime();
+            if (array_key_exists('memory_limit', $limits) && $runtime instanceof Dind) {
+                $runtime->applyMemoryLimit();
+                $this->info("  {$user->username}: memory limit applied to the running account.");
+            }
         }
         $this->info("Limits have been updated.");
         if ($this->shouldRebuild) {

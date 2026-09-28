@@ -2,10 +2,15 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ReportsProblems;
+use App\Rules\AccountMemoryLimit;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UserUpdateRequest extends FormRequest
 {
+    // A refused memory_limit carries its code, as on create.
+    use ReportsProblems;
+
     public function authorize(): bool
     {
         return true;
@@ -29,7 +34,8 @@ class UserUpdateRequest extends FormRequest
             // the other limits have no negative meaning, and a negative one
             // reaches docker as an invalid mem_limit/cpus value.
             'disk_space_limit' => 'nullable|integer|min:-1',
-            'memory_limit' => 'nullable|integer|min:0',
+            // Can be changed, never removed: every project has one.
+            'memory_limit' => ['sometimes', 'integer', 'min:1', new AccountMemoryLimit(false)],
             'cpu_limit' => 'nullable|numeric|min:0',
             'device_read_bps' => 'integer|nullable',
             'device_write_bps' => 'integer|nullable',

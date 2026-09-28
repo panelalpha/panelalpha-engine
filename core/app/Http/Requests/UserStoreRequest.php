@@ -6,6 +6,8 @@ use App\Http\Requests\Concerns\ReportsProblems;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitTokenInput;
 use App\Lib\Domains\DomainPlan;
+use App\Lib\Host\ProjectMemory;
+use App\Rules\AccountMemoryLimit;
 use App\Rules\GitAccessToken;
 use App\Rules\GitRepositoryUrl;
 use App\Rules\ProjectName;
@@ -45,6 +47,11 @@ class UserStoreRequest extends FormRequest
             $this->merge(['domain' => strtolower($this->domain)]);
         }
 
+        // Every project has a memory limit; one not given is the default.
+        if ($this->input('memory_limit') === null) {
+            $this->merge(['memory_limit' => ProjectMemory::defaultMb()]);
+        }
+
         // Accept schemeless host/path URLs like "github.com/owner/repo".
         $gitRepo = $this->input('git_repo');
         if (is_string($gitRepo) && trim($gitRepo) !== '') {
@@ -60,7 +67,8 @@ class UserStoreRequest extends FormRequest
             'domain_redirect_url' => 'url|nullable',
             'email' => 'email',
             'disk_space_limit' => 'integer|nullable|min:-1',
-            'memory_limit' => 'integer|nullable|min:0',
+            // prepareForValidation() fills in the default, so it is always there.
+            'memory_limit' => ['integer', 'min:1', new AccountMemoryLimit(true)],
             'cpu_limit' => 'numeric|nullable|min:0',
             'device_read_bps' => 'integer|nullable',
             'device_write_bps' => 'integer|nullable',

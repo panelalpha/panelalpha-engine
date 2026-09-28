@@ -9,6 +9,7 @@ use App\System\Project as ProjectAggregate;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
 use App\Lib\Deploy\Engine\EngineFactory;
+use App\System\Project\Dind\AccountMemory;
 use App\System\Project\Dind\AccountTeardown;
 use App\System\Project\Dind\AccountTemplate;
 use App\System\Project\Dind\AppCertificate;
@@ -165,6 +166,12 @@ class Dind implements DeployableDindProject, Runtime
     public function shell(): ShellOperations
     {
         return $this->shell ??= new ShellOperations($this);
+    }
+
+    /** Put the project's memory limit on its account container, live. */
+    public function applyMemoryLimit(): void
+    {
+        (new AccountMemory($this))->apply();
     }
 
     /**

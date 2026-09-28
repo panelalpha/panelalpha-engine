@@ -81,7 +81,7 @@ final class PhpRuntime
             $this->project->defaultServiceName(),
             $this->phpBinaryPath($wpPath),
             '-d',
-            'memory_limit=' . $this->wpCliMemoryLimit($user->getMemoryLimit()),
+            'memory_limit=' . $this->wpCliMemoryLimit($user->effectiveMemoryLimit()),
             '/opt/wp-cli.phar',
             ...$args,
         ];

@@ -147,7 +147,7 @@ BASH;
             'uid' => $user->getUid() ?? 33,
             'gid' => $user->getGid() ?? 33,
             'cpu_limit' => (string) $user->getCpuLimit(),
-            'memory_limit' => (string) DindEngine::accountMemoryMb($user->getMemoryLimit()),
+            'memory_limit' => (string) $user->effectiveMemoryLimit(),
             'device_read_bps' => $deviceReadBps,
             'device_write_bps' => $deviceWriteBps,
             'block_device' => $blockDevice,

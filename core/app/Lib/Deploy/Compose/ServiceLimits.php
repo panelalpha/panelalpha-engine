@@ -54,15 +54,6 @@ final class ServiceLimits
     private const MAX_BUILD_MEMORY_MB = 8192;
 
     /**
-     * An account whose plan names no memory limit gets half the host, so one
-     * tenant's build is OOM-killed inside its own cgroup instead of taking the
-     * host and core with it (engine#110).
-     */
-    private const ACCOUNT_MEMORY_DIVISOR = 2;
-
-    private const MIN_ACCOUNT_MEMORY_MB = 2048;
-
-    /**
      * A project's memory limit may raise its build up to half of MemTotal,
      * never lower it (engine#184). Safe only because builds run one at a time.
      */
@@ -147,20 +138,6 @@ final class ServiceLimits
         $share = intdiv($totalMb, self::BUILD_MEMORY_DIVISOR);
 
         return max(self::MIN_BUILD_MEMORY_MB, min(self::MAX_BUILD_MEMORY_MB, $share));
-    }
-
-    /**
-     * The account container's limit when neither the plan nor the operator set
-     * one: half of MemTotal, floored at 2g. Unreadable falls back to the floor.
-     */
-    public static function accountDefaultMemoryMb(string $procMeminfo): int
-    {
-        if (preg_match(self::PROC_MEMTOTAL_PATTERN, $procMeminfo, $m) !== 1) {
-            return self::MIN_ACCOUNT_MEMORY_MB;
-        }
-        $totalMb = (int) floor((int) $m[1] / 1024);
-
-        return max(self::MIN_ACCOUNT_MEMORY_MB, intdiv($totalMb, self::ACCOUNT_MEMORY_DIVISOR));
     }
 
     /**

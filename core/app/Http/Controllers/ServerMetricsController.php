@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Lib\Host\HostMemoryProbe;
+use App\Lib\Host\ProjectMemory;
 use Carbon\CarbonPeriod;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
@@ -56,6 +58,9 @@ class ServerMetricsController extends Controller
             'disk_free' => $diskFree,
             'disk_used' => $diskUsed,
             'disk_usage_percent' => $diskUsagePercent,
+            // Where the RAM goes, and how much projects may have.
+            'memory_budget' => HostMemoryProbe::current()->toArray()
+                + ['default_project_mb' => ProjectMemory::defaultMb()],
         ]]);
     }
 
