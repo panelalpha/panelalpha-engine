@@ -16,12 +16,14 @@ Seconds, and creates nothing. Do this before a first deploy of anything unusual.
 
 Everything in the middle column must be at the **top level** of the repository - not in a subfolder.
 
+PHP and Laravel run Apache **inside the project's container**. The VPS still serves your sites through nginx-proxy only: [Install](../02-getting-started/install.md).
+
 | Your application | Needs at the top level | How it gets started |
 |---|---|---|
 | Docker Compose | A working `docker-compose.yml` | Your compose file |
 | Dockerfile | A `Dockerfile` or `Containerfile` | The image's own `CMD` or `ENTRYPOINT` |
-| Laravel | `composer.json` and `artisan` | The PHP/Apache setup |
-| PHP | `composer.json`, or a recognised application. Plain PHP just needs source files and no Composer | Apache |
+| Laravel | `composer.json` and `artisan` | PHP with Apache inside the project |
+| PHP | `composer.json`, or a recognised application. Plain PHP just needs source files and no Composer | Apache inside the project |
 | Rails | `Gemfile` and `config/application.rb` | `rails server` |
 | Ruby | `Gemfile`, plus `config.ru` or a Procfile web entry | `rackup` |
 | Django | `manage.py`, and `requirements.txt` if you have one | `manage.py runserver` |

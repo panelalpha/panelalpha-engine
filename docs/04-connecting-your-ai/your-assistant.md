@@ -582,10 +582,10 @@ pae mcp:tool:list
 | `system_ssl_config_get` | How certificates for project sites are obtained |
 | `system_ssl_config_set` | Set how certificates for project sites are obtained |
 | `system_test_email_send` | Send a test email via Exim |
-| `system_update` | Trigger a system update |
+| `system_update` | Starts a background updater on the VPS. Not how you update day to day: [Updating](../02-getting-started/updating.md) |
 | `system_webserver_change` | Change the active webserver. Not supported: the engine runs nginx-proxy only |
 | `system_webserver_config_set` | Update webserver configuration |
-| `system_webserver_password_reset` | Reset the webserver panel password |
+| `system_webserver_password_reset` | Reset a webserver admin panel password. Not supported on the default nginx-proxy install |
 
 ## Server metrics
 

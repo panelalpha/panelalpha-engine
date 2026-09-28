@@ -100,15 +100,6 @@ Show me this engine's outgoing email settings, then send a test message to me@ex
 
 To send through a provider, tell the assistant which one and give it your details. Avoid pasting live passwords or keys into a chat you might share later.
 
-## Where everything lives
-
-| Path | What is there |
-|---|---|
-| `/opt/panelalpha/shared-hosting` | The engine software and its settings files. |
-| `/opt/panelalpha/log/engine-updates/` | Update logs, newest in `latest/`. |
-| `/opt/panelalpha/backups/` | The engine's own database backups, taken before each update. |
-| `/opt/panelalpha/shared-hosting/crt/server.cert` | The engine's certificate, for computers that need to trust a self-signed one. |
-
 ## Next
 
 [Put your project online](../README.md#3-put-your-project-online).
