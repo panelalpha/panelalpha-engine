@@ -183,6 +183,18 @@ export const DEPLOY_KIND_FIXTURES: readonly DeployKindFixture[] = [
     },
   },
   {
+    // The compose file lives under docker/ and builds from there, not from the root.
+    id: 'compose-nested',
+    strategy: 'compose',
+    pageMarker: 'pae-frontend:compose-nested',
+    files: {
+      'docker/docker-compose.yml': 'services:\n  web:\n    build: .\n    ports:\n      - "80:80"\n',
+      'docker/Dockerfile':
+        'FROM nginx:alpine\nCOPY index.html /usr/share/nginx/html/index.html\nEXPOSE 80\n',
+      'docker/index.html': HTML_PAGE('pae-frontend:compose-nested'),
+    },
+  },
+  {
     id: 'dockerfile',
     strategy: 'dockerfile',
     pageMarker: 'pae-frontend:dockerfile',

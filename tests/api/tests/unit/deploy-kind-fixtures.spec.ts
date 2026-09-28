@@ -42,6 +42,7 @@ test.describe('deploy-kind fixture catalogue', () => {
       'astro-ssr',
       'bundler-spa',
       'compose',
+      'compose-nested',
       'cra',
       'django',
       'dockerfile',
