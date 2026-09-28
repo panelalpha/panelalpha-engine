@@ -290,12 +290,10 @@ runtimes:
         why: "Go minor pinned via go.mod"
 
   node:
-    # Deliberately an older LTS rather than the newest release. A project
-    # needing recent Node says so in engines.node, .nvmrc or .node-version and
-    # is honoured; one that says nothing is usually one nobody has touched in a
-    # while, and newer Node is where its dependencies break -- native bindings,
-    # old webpack, packages reaching into V8 internals.
-    default: "20"
+    # The oldest maintained LTS. 20 went end-of-life in April 2026, and current
+    # build tools already require 22 (Babel 8: ^22.18.0 || >=24.11.0) even in a
+    # project whose own engines.node says only ">=14".
+    default: "22"
     image:
       from: "node:{version}-bookworm-slim"
       # No build block, but note what the recipe's answer does *not* survive: a
@@ -308,11 +306,11 @@ runtimes:
         prewarm: 170
         why: "Node major pinned via engines.node or .nvmrc"
       - version: "20"
+        prewarm: 790
+        why: "Node major pinned via engines.node or .nvmrc"
+      - version: "22"
         prewarm: 840
         why: "default Node major for JS frameworks and PHP/Vite asset stages"
-      - version: "22"
-        prewarm: 790
-        why: "Node major for projects that ask for a newer one"
       - version: "24"
         prewarm: 165
         why: "Node major pinned via engines.node or .nvmrc"

@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Platform\Runtime;
 
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
+use App\Lib\Deploy\Platform\Runtime\RuntimeImageCatalog;
 use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
 use PHPUnit\Framework\TestCase;
 
@@ -16,15 +17,36 @@ class NodeToolchainFloorTest extends TestCase
 {
     private string $tmpDir;
 
+    private string $catalogue;
+
     protected function setUp(): void
     {
         $this->tmpDir = sys_get_temp_dir() . '/node-floor-' . bin2hex(random_bytes(8));
         mkdir($this->tmpDir, 0o777, true);
+
+        // A default below the floors, so a raise is visible whatever the shipped default is.
+        $this->catalogue = $this->tmpDir . '.yaml';
+        file_put_contents($this->catalogue, <<<'YAML'
+runtimes:
+  node:
+    default: "20"
+    image:
+      from: "node:{version}-bookworm-slim"
+    versions:
+      - version: "18"
+      - version: "20"
+      - version: "22"
+      - version: "24"
+YAML);
+        RuntimeImageCatalog::flush();
+        RuntimeImageCatalog::useConfig($this->catalogue);
     }
 
     protected function tearDown(): void
     {
-        exec('rm -rf ' . escapeshellarg($this->tmpDir));
+        RuntimeImageCatalog::useConfig(null);
+        RuntimeImageCatalog::flush();
+        exec('rm -rf ' . escapeshellarg($this->tmpDir) . ' ' . escapeshellarg($this->catalogue));
     }
 
     public function test_pnpm_11_pin_raises_an_undeclared_project_to_22(): void

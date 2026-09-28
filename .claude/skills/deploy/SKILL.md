@@ -293,7 +293,7 @@ show the user the `message`:
 | `php-version-mismatch` | `composer.json` requires a PHP the resolved image lacks | fix the constraint in `composer.json`, or name the image in a `panelalpha.yaml` (`image: php:8.3-apache-bookworm`); `php_version_list` says what the host has |
 | `php-extension-missing` | extension not in the image | check `php_version_list`; add a manifest naming an image that has it, or drop the requirement |
 | `composer-unresolvable` | unresolvable lock | fix the project's `composer.json`/lock |
-| `node-engine-mismatch`, `go-toolchain-too-old` | `engines.node` / `go.mod` vs the resolved image | Node majors are 18, 20, 22 and 24; a project naming none gets 20, and `engines.node`/`.nvmrc`/`.node-version` pick among them. Tell the user which version the log shows and which one the project or the failing package asks for; changing the pin, or `image:` in a manifest, is their call (section 6) |
+| `node-engine-mismatch`, `go-toolchain-too-old` | `engines.node` / `go.mod` vs the resolved image | Node majors are 18, 20, 22 and 24; a project naming none gets 22, and `engines.node`/`.nvmrc`/`.node-version` pick among them. Tell the user which version the log shows and which one the project or the failing package asks for; changing the pin, or `image:` in a manifest, is their call (section 6) |
 | `disk-full`, `out-of-memory` | build too large for the account limits | raise `disk_space_limit`/`memory_limit` with `project_update`, rebuild |
 | `registry-rate-limited`, `base-image-unavailable` | registry side | wait and `project_rebuild`; check the image name in the Dockerfile |
 | `layer-digest-mismatch` | a layer arrived corrupted from the host's registry mirror | host-side; `project_rebuild` usually succeeds |

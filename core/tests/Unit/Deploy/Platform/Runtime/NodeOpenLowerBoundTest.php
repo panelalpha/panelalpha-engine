@@ -33,11 +33,11 @@ class NodeOpenLowerBoundTest extends TestCase
     public static function constraints(): array
     {
         return [
-            'open floor below the default' => ['>=14', '20'],
-            'open floor with spaces and a full version' => ['>= 14.17.0', '20'],
-            'strict floor' => ['>16', '20'],
+            'open floor below the default' => ['>=14', '22'],
+            'open floor with spaces and a full version' => ['>= 14.17.0', '22'],
+            'strict floor' => ['>16', '22'],
             'open floor above the default' => ['>=24', '24'],
-            'open floor at a non-default shipped major' => ['>=22', '22'],
+            'open floor at the default' => ['>=22', '22'],
             'bounded range takes the newest shipped major in it' => ['>=16 <21', '20'],
             'bounded range, inclusive ceiling' => ['>=18 <=22', '22'],
             'bounded range, ceiling below the default' => ['>=14 <19', '18'],
@@ -75,7 +75,7 @@ class NodeOpenLowerBoundTest extends TestCase
             ProjectContext::make($this->tmpDir, ['package.json' => true, '.nvmrc' => true])
         );
 
-        $this->assertSame('20', $requirement?->version);
+        $this->assertSame('22', $requirement?->version);
         $this->assertSame('.nvmrc', $requirement?->source);
     }
 }

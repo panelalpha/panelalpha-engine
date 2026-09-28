@@ -253,11 +253,11 @@ class RuntimeResolutionTest extends TestCase
         $this->assertSame('.nvmrc', $requirement?->source);
     }
 
-    public function test_node_defaults_to_an_older_lts_when_the_project_says_nothing(): void
+    public function test_node_defaults_to_the_oldest_maintained_lts_when_the_project_says_nothing(): void
     {
         $this->write('package.json', '{}');
 
-        $this->assertSame('20', RuntimeRegistry::get('node')->resolve($this->context())?->version);
+        $this->assertSame('22', RuntimeRegistry::get('node')->resolve($this->context())?->version);
     }
 
     public function test_go_honours_a_version_newer_than_anything_listed(): void

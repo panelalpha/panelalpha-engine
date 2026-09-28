@@ -43,7 +43,7 @@ class HostCompileJavaNodeTest extends TestCase
             $bases->expects($this->never())->method('ensureNodeBuild');
         } else {
             $bases->expects($this->once())->method('ensureNodeBuild')
-                ->with('gradle:9-jdk25', 'node:20-bookworm-slim')
+                ->with('gradle:9-jdk25', 'node:22-bookworm-slim')
                 ->willReturn($tag);
         }
         $inner = $this->createStub(InnerDocker::class);
@@ -63,7 +63,7 @@ class HostCompileJavaNodeTest extends TestCase
     public function test_gradle_build_that_looks_npm_up_compiles_with_node(): void
     {
         file_put_contents($this->dir . '/gradle/utils.gradle', "ext { npmCommandName = resolveExecutable(\"npm\") }\n");
-        $tag = (string) NodeBuildImage::tag('gradle:9-jdk25', 'node:20-bookworm-slim');
+        $tag = (string) NodeBuildImage::tag('gradle:9-jdk25', 'node:22-bookworm-slim');
 
         $this->assertSame($tag, $this->buildImage($tag));
     }

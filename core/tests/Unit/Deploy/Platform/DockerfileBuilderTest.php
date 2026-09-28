@@ -215,12 +215,12 @@ class DockerfileBuilderTest extends TestCase
         // Deliberately a major the default is not, so this proves the engines
         // field decides rather than coinciding with the fallback.
         $this->write('package.json', json_encode([
-            'engines' => ['node' => '>=22'],
+            'engines' => ['node' => '>=24'],
             'dependencies' => ['express' => '4.21.0'],
         ]));
         $this->write('index.js', 'require("express")');
 
-        $this->assertSame('node:22-bookworm-slim', Images::nodeImage($this->tmpDir));
+        $this->assertSame('node:24-bookworm-slim', Images::nodeImage($this->tmpDir));
         $this->assertNotSame(Images::NODE_IMAGE, Images::nodeImage($this->tmpDir));
 
         $recipe = DetectProjectStrategy::detect($this->tmpDir);
@@ -229,7 +229,7 @@ class DockerfileBuilderTest extends TestCase
             ProjectContext::listRootFiles($this->tmpDir),
             $this->tmpDir
         );
-        $this->assertStringContainsString('FROM node:22-bookworm-slim', $docker);
+        $this->assertStringContainsString('FROM node:24-bookworm-slim', $docker);
         $this->assertStringNotContainsString('FROM ' . Images::NODE_IMAGE, $docker);
     }
 
@@ -467,9 +467,8 @@ class DockerfileBuilderTest extends TestCase
     }
 
     /**
-     * A project that says nothing about Node gets an older LTS, not the newest
-     * release. Newer Node is where an untouched project's dependencies break,
-     * and older runs nearly everything newer runs.
+     * A project that says nothing about Node gets the oldest maintained LTS,
+     * not the newest release.
      */
     public function test_a_project_that_declares_no_node_version_gets_a_conservative_lts(): void
     {
@@ -479,6 +478,6 @@ class DockerfileBuilderTest extends TestCase
         $image = Images::nodeImage($this->tmpDir);
 
         $this->assertSame(Images::NODE_IMAGE, $image);
-        $this->assertMatchesRegularExpression('/^node:(18|20)-/', $image);
+        $this->assertMatchesRegularExpression('/^node:22-/', $image);
     }
 }

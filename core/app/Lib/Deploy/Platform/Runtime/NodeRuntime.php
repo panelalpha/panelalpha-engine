@@ -7,10 +7,10 @@ use App\Lib\Deploy\Platform\ProjectContext;
 /**
  * Node, versioned by `engines.node`, then `.nvmrc`, then `.node-version`.
  *
- * `DEFAULT_MAJOR = 20` is an older LTS on purpose: a project that says nothing
- * usually has stale dependencies (native bindings, old webpack) that newer
- * Node breaks. A project gets `bookworm` (not `-slim`) when it compiles a
- * dependency, because node-gyp needs python3, make and g++.
+ * `DEFAULT_MAJOR = 22` is the oldest maintained LTS: 20 is end-of-life and
+ * current build tools (Babel 8) require 22. A project gets `bookworm` (not
+ * `-slim`) when it compiles a dependency, because node-gyp needs python3,
+ * make and g++.
  */
 final class NodeRuntime implements Runtime
 {
@@ -22,8 +22,8 @@ final class NodeRuntime implements Runtime
      */
     public const MAJORS = [18, 20, 22, 24];
 
-    /** The major a project that states no version gets. Older LTS on purpose. */
-    public const DEFAULT_MAJOR = 20;
+    /** The major a project that states no version gets: the oldest maintained LTS. */
+    public const DEFAULT_MAJOR = 22;
 
     /** The slim variant, which carries no C toolchain. */
     public const IMAGE_VARIANT = 'bookworm-slim';

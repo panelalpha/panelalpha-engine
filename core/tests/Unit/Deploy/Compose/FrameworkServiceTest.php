@@ -92,7 +92,7 @@ class FrameworkServiceTest extends TestCase
         // nothing left to build, only something to run.
         $service = $this->service(['strategy' => 'nuxt'], 3000);
 
-        $this->assertSame('node:20-bookworm-slim', $service['image']);
+        $this->assertSame('node:22-bookworm-slim', $service['image']);
         $this->assertSame('node panelalpha.serve.mjs', $service['command']);
         $this->assertSame('/app', $service['working_dir']);
         $this->assertSame(['3000:3000'], $service['ports']);

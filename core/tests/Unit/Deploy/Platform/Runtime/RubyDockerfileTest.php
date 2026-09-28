@@ -56,7 +56,7 @@ class RubyDockerfileTest extends TestCase
         $docker = RubyDockerfile::generate($dir, ['gemfile' => true, 'package.json' => true, 'pnpm-lock.yaml' => true]);
 
         $this->assertStringContainsString('FROM ruby:4.0.1-slim-bookworm AS base', $docker);
-        $this->assertStringContainsString('FROM node:20-bookworm-slim AS assets', $docker);
+        $this->assertStringContainsString('FROM node:22-bookworm-slim AS assets', $docker);
         $this->assertStringContainsString('pnpm run build', $docker);
         $this->assertStringContainsString('--ignore-scripts', $docker);
         $this->assertStringNotContainsString('assets:precompile', $docker);
