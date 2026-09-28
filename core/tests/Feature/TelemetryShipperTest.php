@@ -341,6 +341,92 @@ class TelemetryShipperTest extends TestCase
         $this->assertSame(1, $this->pendingCount(), 'a monitoring host that never answers must not cost a report');
     }
 
+    private const FP = '0123456789abcdef0123456789abcdef';
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function failedReport(): array
+    {
+        return ['id' => 'report-now', 'outcome' => DeployReport::OUTCOME_FAILED, 'fingerprint' => self::FP];
+    }
+
+    /**
+     * @param array<string, mixed> $problem
+     * @return array<string, mixed>
+     */
+    private function answerWith(array $problem, string $fingerprint = self::FP): array
+    {
+        return [
+            'accepted' => 1,
+            'results' => [['index' => 0, 'type' => Telemetry::EVENT_FAIL, 'fingerprint' => $fingerprint, 'problem' => $problem]],
+        ];
+    }
+
+    public function test_a_failure_sent_now_comes_back_with_monitorings_fix(): void
+    {
+        Http::fake(['*' => Http::response($this->answerWith([
+            'title' => 'Old Node', 'status' => 'resolve_ready', 'body_fix' => 'Use Node 20', 'extra' => 'dropped',
+        ]), 202)]);
+
+        $sent = (new TelemetryShipper())->sendNow($this->failedReport());
+
+        $this->assertTrue($sent['sent']);
+        $this->assertSame('Old Node', $sent['problem']['title']);
+        $this->assertSame('Use Node 20', $sent['problem']['body_fix']);
+        $this->assertArrayNotHasKey('extra', $sent['problem']);
+        $this->assertSame(0, $this->pendingCount(), 'sendNow never touches the spool');
+    }
+
+    public function test_a_failure_with_no_known_fix_is_sent_with_no_problem(): void
+    {
+        Http::fake(['*' => Http::response(['accepted' => 1], 202)]);
+
+        $this->assertSame(['sent' => true, 'problem' => null], (new TelemetryShipper())->sendNow($this->failedReport()));
+    }
+
+    public function test_a_fix_for_another_fingerprint_is_not_returned(): void
+    {
+        Http::fake(['*' => Http::response($this->answerWith(['title' => 'x'], 'ffffffffffffffffffffffffffffffff'), 202)]);
+
+        $this->assertNull((new TelemetryShipper())->sendNow($this->failedReport())['problem']);
+    }
+
+    public function test_remote_text_is_stripped_and_capped(): void
+    {
+        Http::fake(['*' => Http::response($this->answerWith([
+            'title' => "a\x1b[31mb\x00c", 'body_fix' => str_repeat('x', 20000), 'body_why' => ['not' => 'text'],
+        ]), 202)]);
+
+        $problem = (new TelemetryShipper())->sendNow($this->failedReport())['problem'];
+
+        $this->assertSame('a[31mbc', $problem['title']);
+        $this->assertSame(8000, mb_strlen($problem['body_fix']));
+        $this->assertNull($problem['body_why']);
+    }
+
+    public function test_a_failure_that_does_not_get_through_is_left_for_the_spool(): void
+    {
+        foreach ([Http::response('down', 503), Http::response('nope', 404)] as $answer) {
+            Http::fake(['*' => $answer]);
+            $this->assertFalse((new TelemetryShipper())->sendNow($this->failedReport())['sent']);
+        }
+
+        Http::fake(function (): void {
+            throw new \RuntimeException('timed out');
+        });
+        $this->assertFalse((new TelemetryShipper())->sendNow($this->failedReport())['sent']);
+    }
+
+    public function test_a_zero_failure_timeout_sends_nothing_now(): void
+    {
+        config(['telemetry.failure_timeout' => 0]);
+        Http::fake();
+
+        $this->assertFalse((new TelemetryShipper())->sendNow($this->failedReport())['sent']);
+        Http::assertNothingSent();
+    }
+
     /** Pretend the backoff for every queued report has elapsed. */
     private function clearBackoff(): void
     {

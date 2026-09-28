@@ -82,6 +82,15 @@ return [
     'timeout' => (int) env('TELEMETRY_TIMEOUT', 15),
 
     /*
+    | A failed deploy's report is sent the moment the deploy fails, not by the
+    | schedule: monitoring answers a failure it knows how to fix with the fix,
+    | and the deploy log carries it as `problem`. This is how long a failed
+    | deploy waits for that answer; nothing answering in time costs nothing,
+    | the report goes to the spool as usual. 0 sends every report on schedule.
+    */
+    'failure_timeout' => (int) env('TELEMETRY_FAILURE_TIMEOUT', 5),
+
+    /*
     | Reports per request. The receiving end is expected to accept a batch and
     | answer per report, so this is a size trade-off, not a semantic one.
     */

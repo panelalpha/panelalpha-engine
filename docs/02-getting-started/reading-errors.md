@@ -9,6 +9,8 @@ That deploy failed. Read the deploy log and tell me what went wrong, then fix
 what you can.
 ```
 
+If PanelAlpha already knows the fix for this failure, the deploy log ends with `Known problem:`, why it happened and how to fix it. Your assistant sees it too. See [What it gives you](what-is-collected.md#what-it-gives-you).
+
 Come back here when you want to look up the sentence yourself. If none of the rows below match, the log usually says `A build step failed (exit code N)`. That means the engine did not recognise the cause, not that there is no cause. The command that failed is in the log just above it. This page is the common wording, not every sentence the engine can produce.
 
 ## Wrong version of something

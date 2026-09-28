@@ -18,6 +18,10 @@ use App\System;
  * directory on a schedule. The queue survives a reboot, an offline box, and an
  * ingest endpoint that is down for a week.
  *
+ * One exception: a failed deploy's report is sent at once with a short
+ * timeout ({@see TelemetryShipper::sendNow()}), because monitoring may answer
+ * with the fix. It lands here only when that send does not get through.
+ *
  * Every method swallows its own errors and reports failure by return value. A
  * full disk is exactly when deploys fail, and exactly when telemetry must not
  * make it worse.

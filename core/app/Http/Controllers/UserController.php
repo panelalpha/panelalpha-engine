@@ -1246,6 +1246,7 @@ class UserController extends Controller
                 'stages' => $latest['stages'] ?? [],
                 'error' => $latest['error'] ?? null,
                 'finished_at' => $latest['finished_at'] ?? null,
+                'problem' => $latest['problem'] ?? null,
             ];
             if (
                 $userFrame !== null

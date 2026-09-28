@@ -30,6 +30,8 @@ class DeployLogController extends Controller
     #[OA\Get(
         path: '/projects/{username}/deploy-log',
         summary: 'Poll the deploy log (JSON-lines) from a byte-like line offset',
+        description: 'When the latest deploy failed and PanelAlpha monitoring knows how to fix that failure, '
+            . '`problem` carries the fix (title, body_why, body_fix, fixed_in_version, ...); otherwise it is null.',
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [
@@ -61,6 +63,7 @@ class DeployLogController extends Controller
                 'started_at' => null,
                 'finished_at' => null,
                 'timings' => null,
+                'problem' => null,
             ]]);
         }
 
@@ -88,6 +91,8 @@ class DeployLogController extends Controller
                 is_array($latest) ? $latest : [],
                 $wantsBuild ? $logger->entries() : []
             ),
+            // Monitoring's fix for this failure, when it has one: see DeployLogger::finish().
+            'problem' => $latest['problem'] ?? null,
         ]]);
     }
 

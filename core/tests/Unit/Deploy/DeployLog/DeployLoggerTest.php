@@ -66,6 +66,43 @@ class DeployLoggerTest extends TestCase
         $logger->finish(DeployLogger::STATUS_SUCCESS);
     }
 
+    public function test_a_known_problem_is_written_to_the_log_line_by_line(): void
+    {
+        $logger = DeployLogger::start($this->username());
+        $write = new \ReflectionMethod(DeployLogger::class, 'writeProblem');
+        $write->invoke($logger, [
+            'title' => 'Node 18 is too old',
+            'body_why' => 'The lockfile needs npm 9.',
+            'body_fix' => "Add to package.json:\n\n\"engines\": {\"node\": \"20\"}",
+            'fixed_in_version' => '2.0.3',
+        ], null);
+
+        $lines = $logger->read()['lines'];
+        $this->assertSame([
+            'Known problem: Node 18 is too old',
+            'Why:',
+            'The lockfile needs npm 9.',
+            'How to fix:',
+            'Add to package.json:',
+            '"engines": {"node": "20"}',
+            'Fixed in engine version 2.0.3',
+        ], array_column($lines, 'msg'));
+        $this->assertSame(DeployLogger::LEVEL_WARN, $lines[0]['level']);
+
+        $logger->finish(DeployLogger::STATUS_SUCCESS);
+    }
+
+    public function test_a_finished_deploy_without_a_known_problem_says_so(): void
+    {
+        $logger = DeployLogger::start($this->username());
+        $logger->finish(DeployLogger::STATUS_FAILED, 'boom');
+
+        $latest = $logger->readLatest();
+        $this->assertSame(DeployLogger::STATUS_FAILED, $latest['status']);
+        $this->assertArrayHasKey('problem', $latest);
+        $this->assertNull($latest['problem']);
+    }
+
     public function test_log_level_wrappers_write_the_expected_level(): void
     {
         $logger = DeployLogger::start($this->username());

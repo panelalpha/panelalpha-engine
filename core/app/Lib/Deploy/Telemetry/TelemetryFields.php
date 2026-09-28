@@ -444,14 +444,6 @@ final class TelemetryFields
     }
 
     /**
-     * @return array<string, mixed>
-     */
-    public function latestDeploy(DeployLogger $logger): array
-    {
-        return self::safely(fn (): array => $logger->readLatest() ?? [], []);
-    }
-
-    /**
      * @return list<string>
      */
     public function logTail(DeployLogger $logger, int $lines): array

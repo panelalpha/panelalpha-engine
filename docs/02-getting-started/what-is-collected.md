@@ -30,11 +30,13 @@ The loop is: the engine reports what happened, PanelAlpha sees the shape of it a
 
 ## What it gives you
 
-Three things, and none of them is a reply in your inbox.
+Four things, and none of them is a reply in your inbox.
 
 **A product that improves from what happens on every install.** Repeating detection misses and recipe failures become something PanelAlpha can see. When that becomes a product fix, it arrives as an engine update, not as a reply to your report.
 
 **A check that a site is still serving itself after the deploy already succeeded.** A deploy log is a photograph of one moment. It says nothing about the site a month later, after a database filled up, a certificate lapsed, or someone deleted the index page over FTP. Every six hours the engine opens each deployed application and lists the ones that are not serving themselves any more. It also checks that the public name for the project serves this application, not a different one. That sweep does not run when telemetry is fully off. You can still ask about any site whenever you want: [Monitoring and logs](../05-capabilities/monitoring-and-logs.md). To keep the sweep without sending anything off your VPS: [Keep the checks, send nothing](how-to-turn-it-off.md#keep-the-checks-send-nothing).
+
+**The fix for a failure PanelAlpha already knows.** A failed deploy's report is sent the moment the deploy fails. If PanelAlpha already has a fix for that failure, it comes back in the answer. The deploy log then ends with `Known problem:` and what to do, and carries the same fix as `problem`, so you or your assistant can apply it straight away. A failed deploy waits up to 5 seconds for that answer. If nothing answers in time, the report is queued as usual and the deploy has no fix attached. With telemetry off nothing is sent, so no fix comes back.
 
 **A way to say the engine was wrong.** When a deploy "succeeded" and the engine mishandled the project, nothing automatic will catch it, because from the engine's point of view nothing failed. You file a bug report and the engine attaches the evidence. See [Bug reports](#bug-reports).
 

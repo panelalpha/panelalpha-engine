@@ -25,6 +25,12 @@ use Illuminate\Support\Facades\Log;
  */
 class TelemetryShipper
 {
+    /** Fields of monitoring's `IngestProblemHint` passed on to the user. */
+    public const PROBLEM_FIELDS = [
+        'title', 'status', 'rejected_reason', 'external_id', 'fixed_in_version',
+        'stacks_hint', 'body_why', 'body_fix', 'body_log', 'body_engine',
+    ];
+
     private System $system;
 
     public function __construct(?System $system = null)
@@ -122,9 +128,87 @@ class TelemetryShipper
     }
 
     /**
+     * Send one failed deploy's report straight away and return the fix
+     * monitoring has for it, if any.
+     *
+     * `sent` false means the report still has to go through the spool: nothing
+     * answered in time, or the server did not take it.
+     *
+     * @param array<string, mixed> $report
+     * @return array{sent: bool, problem: ?array<string, ?string>}
+     */
+    public function sendNow(array $report): array
+    {
+        $notSent = ['sent' => false, 'problem' => null];
+        $timeout = (int) config('telemetry.failure_timeout', 5);
+        $installId = Telemetry::installId();
+        $endpoint = Telemetry::endpoint();
+        if ($timeout <= 0 || $installId === '' || $endpoint === '') {
+            return $notSent;
+        }
+
+        $events = $this->events([['report' => $report]], $installId);
+
+        try {
+            $response = $this->post($endpoint, ['events' => $events], $timeout);
+        } catch (\Throwable $e) {
+            Log::debug('Telemetry could not send a failure straight away: ' . $e->getMessage());
+
+            return $notSent;
+        }
+
+        if (!$response->successful()) {
+            return $notSent;
+        }
+
+        $body = $response->json();
+        $id = (string) ($report['id'] ?? '');
+        ['accepted' => $accepted, 'rejected' => $rejected] = self::verdict($body);
+        if (!in_array($id, $rejected, true) && $accepted !== null && !in_array($id, $accepted, true)) {
+            return $notSent;
+        }
+
+        return ['sent' => true, 'problem' => self::problem($body, (string) ($report['fingerprint'] ?? ''))];
+    }
+
+    /**
+     * The fix monitoring sent for the one event in a batch: `results[].problem`
+     * at index 0, for this fingerprint. Remote text shown to users and agents,
+     * so only known fields, strings only, capped, no control characters.
+     *
+     * @return array<string, ?string>|null
+     */
+    public static function problem(mixed $body, string $fingerprint): ?array
+    {
+        foreach (is_array($body) && is_array($body['results'] ?? null) ? $body['results'] : [] as $entry) {
+            if (
+                !is_array($entry)
+                || ($entry['index'] ?? null) !== 0
+                || !is_array($entry['problem'] ?? null)
+                || ($entry['fingerprint'] ?? $fingerprint) !== $fingerprint
+            ) {
+                continue;
+            }
+
+            $problem = [];
+            foreach (self::PROBLEM_FIELDS as $field) {
+                $value = $entry['problem'][$field] ?? null;
+                $problem[$field] = is_string($value) && trim($value) !== ''
+                    ? mb_substr((string) preg_replace('/[^\P{C}\n\t]/u', '', $value), 0, 8000)
+                    : null;
+            }
+
+            // Neither a title nor a fix tells nobody anything.
+            return $problem['title'] === null && $problem['body_fix'] === null ? null : $problem;
+        }
+
+        return null;
+    }
+
+    /**
      * One envelope per queued report, each carrying the same install facts.
      *
-     * @param list<array{path: string, id: string, attempts: int, report: array<string, mixed>, bundle: ?string}> $items
+     * @param list<array{report: array<string, mixed>}> $items
      * @return list<array<string, mixed>>
      */
     private function events(array $items, string $installId): array
@@ -144,9 +228,9 @@ class TelemetryShipper
     /**
      * @param array<string, mixed> $payload
      */
-    private function post(string $endpoint, array $payload): \Illuminate\Http\Client\Response
+    private function post(string $endpoint, array $payload, ?int $timeout = null): \Illuminate\Http\Client\Response
     {
-        $timeout = (int) config('telemetry.timeout', 15);
+        $timeout ??= (int) config('telemetry.timeout', 15);
 
         return Http::withHeaders([
                 'Content-Type' => 'application/json',

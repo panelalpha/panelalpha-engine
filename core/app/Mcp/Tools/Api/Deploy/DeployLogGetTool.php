@@ -17,6 +17,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Poll the deploy log (JSON-lines) from a byte-like line offset
 
+    When the latest deploy failed and PanelAlpha monitoring knows how to fix that failure, `problem` carries the fix (title, body_why, body_fix, fixed_in_version, ...); otherwise it is null.
+
     Calls GET /api/projects/{username}/deploy-log.
     MARKDOWN)]
 #[IsReadOnly]

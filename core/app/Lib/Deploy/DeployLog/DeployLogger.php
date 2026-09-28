@@ -53,6 +53,9 @@ class DeployLogger
         self::STATUS_FAILED => 'Deploy failed',
     ];
 
+    /** Lines of a known problem's text written to the log, per section. */
+    private const PROBLEM_MAX_LINES = 40;
+
     /** latest.json key set by {@see markPreCheckRejected()}. */
     public const PRECHECK_REJECTED = 'precheck_rejected';
 
@@ -434,27 +437,33 @@ class DeployLogger
         [$stages] = DeployStatus::closeOpenStage($latest['stages'] ?? [], $now = time());
         $error = $error === null ? null : LogLine::sanitize($error);
 
-        $this->status->write(array_merge($latest, [
+        $final = array_merge($latest, [
             'status' => $status,
             'pid' => null,
             'finished_at' => $now,
             'error' => $error,
             'stages' => $stages,
-        ]));
+        ]);
         $this->writeLine(
             $status === self::STATUS_SUCCESS ? self::LEVEL_OK : self::LEVEL_ERROR,
             self::finishMessage($status, $error),
             $latest['stage'] ?? null
         );
-        $this->lock->release();
 
         // Every terminal status passes through here, which is why the
         // telemetry hook lives at this one point rather than at each of
-        // UserController's exits. Capture is fire-and-forget and cannot
-        // throw; see Telemetry. The raw output wins when a caller kept it:
-        // the explainer has to see what the build actually printed, not the
-        // sentence it already turned that into.
-        Telemetry::captureDeploy($this, $this->username, $status, $this->rawFailureOutput ?? $error);
+        // UserController's exits. Capture cannot throw; see Telemetry. The raw
+        // output wins when a caller kept it: the explainer has to see what the
+        // build actually printed, not the sentence it already turned that into.
+        // It runs before the status is published so a failure's fix from
+        // monitoring is in the same answer as the failure.
+        $problem = Telemetry::captureDeploy($this, $this->username, $status, $this->rawFailureOutput ?? $error, $final);
+        if ($problem !== null) {
+            $this->writeProblem($problem, $latest['stage'] ?? null);
+        }
+
+        $this->status->write(array_merge($final, ['problem' => $problem]));
+        $this->lock->release();
 
         // Same reasoning, same choke point: a push that coalesced while this
         // deploy ran -- of any kind, for any reason -- is followed up from
@@ -477,6 +486,35 @@ class DeployLogger
         return $wasCancelled && $status === self::STATUS_FAILED
             ? [self::STATUS_CANCELLED, null]
             : [$status, $error];
+    }
+
+    /**
+     * Monitoring's fix for this failure, as log lines, so every reader of the
+     * log sees it and not only the `problem` field.
+     *
+     * @param array<string, ?string> $problem
+     */
+    private function writeProblem(array $problem, ?string $stage): void
+    {
+        $this->writeLine(self::LEVEL_WARN, 'Known problem: ' . ($problem['title'] ?? 'PanelAlpha has a fix for this failure'), $stage);
+
+        foreach (['body_why' => 'Why', 'body_fix' => 'How to fix'] as $field => $label) {
+            $lines = array_values(array_filter(
+                array_map('trim', explode("\n", (string) ($problem[$field] ?? ''))),
+                static fn (string $line): bool => $line !== ''
+            ));
+            if ($lines === []) {
+                continue;
+            }
+            $this->writeLine(self::LEVEL_INFO, $label . ':', $stage);
+            foreach (array_slice($lines, 0, self::PROBLEM_MAX_LINES) as $line) {
+                $this->writeLine(self::LEVEL_INFO, $line, $stage);
+            }
+        }
+
+        if (($problem['fixed_in_version'] ?? null) !== null) {
+            $this->writeLine(self::LEVEL_INFO, 'Fixed in engine version ' . $problem['fixed_in_version'], $stage);
+        }
     }
 
     private static function finishMessage(string $status, ?string $error): string

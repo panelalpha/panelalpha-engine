@@ -213,18 +213,27 @@ class Telemetry
 
     /**
      * A deploy finished. Called from {@see DeployLogger::finish()}, the single
-     * choke point every terminal status passes through.
+     * choke point every terminal status passes through, before it publishes
+     * the final status (`$latest`).
+     *
+     * A failed deploy's report is sent straight away, and the fix monitoring
+     * answers with is returned so the failure can carry it. Anything else, or
+     * a send that does not get through, goes to the spool as before.
+     *
+     * @param array<string, mixed> $latest the deploy's final status record
+     * @return array<string, ?string>|null the fix, see {@see TelemetryShipper::problem()}
      */
     public static function captureDeploy(
         DeployLogger $logger,
         string $username,
         string $outcome,
-        ?string $error
-    ): void {
+        ?string $error,
+        array $latest
+    ): ?array {
         try {
             $fields = new TelemetryFields($username);
             $reportId = (string) Str::ulid();
-            $input = self::deployInput($fields, $logger, $outcome, $error, $reportId);
+            $input = self::deployInput($fields, $logger, $outcome, $error, $reportId, $latest);
             $sendable = self::isSendable($fields, $outcome, $input['latest']);
 
             if ($sendable) {
@@ -241,15 +250,29 @@ class Telemetry
 
             self::record($report);
 
-            if ($sendable) {
-                self::spool()->put($report);
+            if (!$sendable) {
+                return null;
             }
+
+            // A report carrying source waits for the scheduler: the server may
+            // ask for the bundle, and uploading it does not belong on this path.
+            if ($outcome === DeployReport::OUTCOME_FAILED && !isset($input['source_bundle'])) {
+                $sent = (new TelemetryShipper())->sendNow($report);
+                if ($sent['sent']) {
+                    return $sent['problem'];
+                }
+            }
+
+            self::spool()->put($report);
         } catch (\Throwable $e) {
             Log::debug('Telemetry capture failed: ' . $e->getMessage());
         }
+
+        return null;
     }
 
     /**
+     * @param array<string, mixed> $latest
      * @return array<string, mixed>
      */
     private static function deployInput(
@@ -257,7 +280,8 @@ class Telemetry
         DeployLogger $logger,
         string $outcome,
         ?string $error,
-        string $reportId
+        string $reportId,
+        array $latest
     ): array {
         $tier = self::safely(fn (): int => self::tier(), DeployReport::TIER_METADATA);
         $details = $fields->accountDetails();
@@ -269,7 +293,8 @@ class Telemetry
             'tier' => $tier,
             'install_id' => self::safely(fn (): string => self::installId(), ''),
             'username' => $fields->username,
-            'latest' => $fields->latestDeploy($logger),
+            // Passed in: latest.json still says `running` at this point.
+            'latest' => $latest,
             'details' => $details,
             'error' => $error,
             // A partial deploy that a health check caused names the check
