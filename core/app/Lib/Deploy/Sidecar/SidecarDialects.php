@@ -101,6 +101,23 @@ final class SidecarDialects
         return is_array($vars) ? array_values(array_map('strval', $vars)) : [];
     }
 
+    /**
+     * The superuser password a server image refuses to start without, and the
+     * variables that stand in for it (a `_FILE`, trust auth, a random one).
+     *
+     * @return array{passwords: list<string>, waivers: list<string>}|null
+     */
+    public static function passwordVariablesFor(string $engine): ?array
+    {
+        $entry = self::entry($engine)['init_password'] ?? null;
+        if (!is_array($entry)) {
+            return null;
+        }
+        $list = static fn ($v): array => is_array($v) ? array_values(array_map('strval', $v)) : [];
+
+        return ['passwords' => $list($entry['passwords'] ?? null), 'waivers' => $list($entry['waivers'] ?? null)];
+    }
+
     /** How much memory an engine needs, or null when the catalogue is silent. */
     public static function memoryLimitFor(string $engine): ?string
     {

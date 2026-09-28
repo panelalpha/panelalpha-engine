@@ -123,6 +123,21 @@ class EnvExampleBlanksTest extends TestCase
         );
     }
 
+    /**
+     * Homarr checks the key is exactly 64 characters; a 48-character
+     * replacement crash-looped it ("SECRET_ENCRYPTION_KEY has to be 64
+     * characters"), measured on a live account.
+     */
+    public function test_a_fixed_length_placeholder_keeps_its_length(): void
+    {
+        [$filled] = ProjectEnvironment::withoutPublishedSecrets(self::ENV_EXAMPLE, 'seed-for-tests');
+
+        $this->assertMatchesRegularExpression(
+            '/^[0-9a-f]{64}$/',
+            $this->values($filled)['SECRET_ENCRYPTION_KEY'] ?? ''
+        );
+    }
+
     /** Seeded, so a redeploy does not invalidate everything it encrypted. */
     public function test_the_generated_secret_survives_a_redeploy(): void
     {
@@ -169,5 +184,37 @@ class EnvExampleBlanksTest extends TestCase
                 "{$value} was treated as a value"
             );
         }
+    }
+
+    /**
+     * wishlist ships `ORIGIN=`; set-but-empty made adapter-node exit on
+     * "Invalid ORIGIN: ''" while unset would have been fine (engine#192).
+     */
+    public function test_a_blank_public_url_key_gets_the_accounts_address(): void
+    {
+        $example = "ORIGIN=\nAPP_URL=\"\"\nDOMAIN=\nTOKEN=\nPUBLIC_URL=https://kept.example\n";
+
+        $this->assertSame(['ORIGIN', 'APP_URL'], ProjectEnvironment::blankPublicUrlKeys($example));
+        [$contents, $filled] = ProjectEnvironment::withPublicUrlBlanksFilled($example, 'https://wish.example.net');
+
+        $this->assertSame(['ORIGIN', 'APP_URL'], $filled);
+        $vars = [];
+        foreach (EnvFile::parse($contents) as $row) {
+            if (($row['type'] ?? '') === 'variable') {
+                $vars[$row['key']] = $row['value'];
+            }
+        }
+        $this->assertSame('https://wish.example.net', $vars['ORIGIN']);
+        $this->assertSame('https://wish.example.net', $vars['APP_URL']);
+        // Not a whole-URL key, or not blank: left as the template has it.
+        $this->assertSame('', $vars['DOMAIN']);
+        $this->assertSame('', $vars['TOKEN']);
+        $this->assertSame('https://kept.example', $vars['PUBLIC_URL']);
+    }
+
+    public function test_an_account_override_or_no_address_leaves_the_blank_alone(): void
+    {
+        $this->assertSame([], ProjectEnvironment::blankPublicUrlKeys("ORIGIN=\n", ['ORIGIN' => 'https://mine.example']));
+        $this->assertSame(["ORIGIN=\n", []], ProjectEnvironment::withPublicUrlBlanksFilled("ORIGIN=\n", null));
     }
 }

@@ -496,6 +496,24 @@ YAML);
         $this->assertFalse(ComposePlaceholders::isPublishedSecret('LICENSE_KEY', 'changeme'));
     }
 
+    /** A long one-character placeholder is a fixed length; shorter ones keep the 48 default. */
+    public function test_a_published_secret_keeps_a_fixed_length_placeholders_length(): void
+    {
+        $env = ComposePlaceholders::fill(['services' => ['app' => ['environment' => [
+            'SECRET_ENCRYPTION_KEY' => str_repeat('0', 64),
+            'JWT_SECRET' => str_repeat('0', 100),
+            'SESSION_SECRET' => str_repeat('x', 8),
+        ]]]], self::SEED)['compose']['services']['app']['environment'];
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $env['SECRET_ENCRYPTION_KEY']);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{100}$/', $env['JWT_SECRET']);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{48}$/', $env['SESSION_SECRET']);
+        $this->assertStringStartsWith(
+            ComposePlaceholders::generatedSecret('SECRET_ENCRYPTION_KEY', self::SEED),
+            $env['SECRET_ENCRYPTION_KEY']
+        );
+    }
+
     /** Laravel only boots on base64:<32 bytes>, so a published APP_KEY gets that shape. */
     public function test_a_published_app_key_gets_a_valid_laravel_key(): void
     {

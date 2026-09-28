@@ -1034,7 +1034,7 @@ deploying.
 
 ### Read the repository first
 
-Five questions, from `ls -A` and the manifests:
+Six questions, from `ls -A` and the manifests:
 
 | Question | How to tell | What it decides |
 |---|---|---|
@@ -1043,6 +1043,7 @@ Five questions, from `ls -A` and the manifests:
 | Does it need a database? | no `.env`, no bundled compose, installer with a DB step | `database: mysql` |
 | Does it need a build? | `.scss`/`.ts`, a `build` script, a `Makefile` | a `build`-stage command |
 | Does it hold state on disk? | flat-file storage, uploads, generated config | there is **no** persist key; redeploy wipes `/app` |
+| Does it derive a secret from its own path? | `realpath(`, `__DIR__`, `getcwd()`, `DOCUMENT_ROOT` near `salt`/`key`/`secret`/`session_name` | every account's checkout is `/app`, so that secret is the same on every tenant: use `PA_INSTANCE_SECRET` instead (engine#175) |
 
 A root `docker-compose.yml` is often a *developer environment*, not a
 deployment. Compose has priority 980, so it wins by default. Read it first.

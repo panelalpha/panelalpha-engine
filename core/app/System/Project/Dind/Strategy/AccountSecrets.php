@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind\Strategy;
 
+use App\Lib\Deploy\Compose\ComposeEnvironment;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -44,6 +45,15 @@ class AccountSecrets
     public function generatedSecretKeyBase(): string
     {
         return $this->for('rails-secret-key-base');
+    }
+
+    /**
+     * The app's own per-account secret ({@see ComposeEnvironment::INSTANCE_SECRET}),
+     * for a recipe to salt what the app would otherwise take from `/app`.
+     */
+    public function instanceSecret(): string
+    {
+        return $this->for('instance-secret');
     }
 
     /**

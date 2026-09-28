@@ -32,6 +32,13 @@ final class ComposeEnvironment
     public const RESERVED_PREFIX = 'PA_';
 
     /**
+     * A stable secret per account, for an app that would otherwise derive one
+     * from its install path: every account's app is at `/app`, so a salt or
+     * session name taken from `__DIR__` is the same on every tenant (engine#175).
+     */
+    public const INSTANCE_SECRET = 'PA_INSTANCE_SECRET';
+
+    /**
      * Where the application is published and probed.
      *
      * @var list<string>
@@ -66,6 +73,23 @@ final class ComposeEnvironment
         $decision['env'] = array_merge(
             ComposeValues::stringMap($decision['env'] ?? null),
             $overrides
+        );
+
+        return $decision;
+    }
+
+    /**
+     * The decision with the engine's own per-account variables added. Reserved,
+     * so neither the app config nor the account's env_vars can replace them.
+     *
+     * @param array<string, mixed> $decision
+     * @return array<string, mixed>
+     */
+    public static function withInstanceSecret(array $decision, string $secret): array
+    {
+        $decision['env'] = array_merge(
+            ComposeValues::stringMap($decision['env'] ?? null),
+            [self::INSTANCE_SECRET => $secret]
         );
 
         return $decision;

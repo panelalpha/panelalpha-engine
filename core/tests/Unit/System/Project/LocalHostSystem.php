@@ -125,6 +125,14 @@ final class LocalHostSystem extends System
 
             return;
         }
+        if ($op === 'chmod') {
+            $path = $argv[3] ?? '';
+            if ($path !== '' && file_exists($path)) {
+                chmod($path, (int) octdec((string) ($argv[2] ?? '')));
+            }
+
+            return;
+        }
         if ($op === 'mv') {
             $from = $argv[count($argv) - 2] ?? '';
             $to = $argv[count($argv) - 1] ?? '';

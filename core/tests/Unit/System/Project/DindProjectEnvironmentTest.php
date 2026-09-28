@@ -187,6 +187,51 @@ class DindProjectEnvironmentTest extends TestCase
     }
 
     /**
+     * #179: a nested .env.example gets the root copy's secrets rule. Plainpad's
+     * Laravel API is server/ (its app_root) and its template ships
+     * APP_KEY={KEY}; a well-known signing key is replaced the same way.
+     */
+    public function test_a_nested_env_example_does_not_keep_its_published_secrets(): void
+    {
+        mkdir($this->projectDir . '/server');
+        file_put_contents(
+            $this->projectDir . '/server/.env.example',
+            "APP_NAME=Plainpad\nAPP_KEY={KEY}\nSECRET_KEY=changeme\nDB_HOST=127.0.0.1\n"
+        );
+
+        $dind = $this->dind($this->dindModel());
+        $dind->applyProjectEnvVars();
+
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/server/.env'));
+        $this->assertStringStartsWith('base64:', $env['APP_KEY']);
+        $this->assertSame(32, strlen((string) base64_decode(substr($env['APP_KEY'], 7), true)));
+        // Seeded like the root copy (#178), so a redeploy keeps the key.
+        $this->assertSame(
+            ComposePlaceholders::publishedSecret('APP_KEY', $dind->strategy()->secrets()->for('compose-placeholders')),
+            $env['APP_KEY']
+        );
+        $this->assertNotSame('changeme', $env['SECRET_KEY']);
+        $this->assertNotSame('', $env['SECRET_KEY']);
+        $this->assertSame('Plainpad', $env['APP_NAME']);
+        $this->assertSame('127.0.0.1', $env['DB_HOST']);
+    }
+
+    /** A nested file copied from a real .env (not a template) is left exactly as it is. */
+    public function test_a_nested_copy_of_a_real_env_is_not_rewritten(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "APP_KEY=base64:theirs\nSECRET_KEY=changeme\n");
+        file_put_contents($this->projectDir . '/package.json', '{"scripts":{"dev":"next dev --env-file=.env.local"}}');
+
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+
+        $this->assertSame(
+            "APP_KEY=base64:theirs\nSECRET_KEY=changeme\n",
+            file_get_contents($this->projectDir . '/.env.local')
+        );
+        $this->assertSame("APP_KEY=base64:theirs\nSECRET_KEY=changeme\n", file_get_contents($this->projectDir . '/.env'));
+    }
+
+    /**
      * ADR-0001 D3: a tracked `.env` is the client's. The overrides go to
      * `.env.panelalpha` instead, attached only to the service whose own
      * `env_file` already loads `.env` -- not the database sidecar, which
@@ -275,6 +320,119 @@ class DindProjectEnvironmentTest extends TestCase
         // detach() drops the entry rather than collapsing a lone survivor back
         // to a bare scalar, so the round trip leaves a one-item list.
         $this->assertSame(['.env'], $compose['services']['app']['env_file']);
+    }
+
+    /**
+     * kaneo (#144): postgres reads its password from `.env` through
+     * `env_file:`, the repo ships no `.env.example`, and an empty `.env`
+     * left the database refusing its first start.
+     */
+    public function test_compose_database_password_read_through_env_file_is_generated_into_env(): void
+    {
+        file_put_contents($this->projectDir . '/compose.yml', <<<'YAML'
+        services:
+          postgres:
+            image: postgres:16-alpine
+            env_file:
+              - .env
+          kaneo:
+            image: ghcr.io/usekaneo/kaneo:latest
+            env_file:
+              - .env
+        YAML);
+
+        $model = $this->dindModel(['deploy_strategy' => 'compose']);
+        $dind = $this->dind($model);
+        $dind->applyProjectEnvVars();
+
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame(
+            ComposePlaceholders::generatedSecret(
+                'POSTGRES_PASSWORD',
+                $dind->strategy()->secrets()->for('compose-placeholders')
+            ),
+            $env['POSTGRES_PASSWORD']
+        );
+
+        // A redeploy over the .env it wrote keeps the same value.
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $this->assertSame($env, $this->vars((string) file_get_contents($this->projectDir . '/.env')));
+    }
+
+    /** onetimesecret (#140): `${VAR:?}` in an included file's `command:`. */
+    public function test_compose_required_variables_in_an_included_file_are_generated_into_an_existing_env(): void
+    {
+        mkdir($this->projectDir . '/docker/compose', 0777, true);
+        file_put_contents($this->projectDir . '/docker-compose.yml', "include:\n  - path: docker/compose/simple.yml\n");
+        file_put_contents($this->projectDir . '/docker/compose/simple.yml', <<<'YAML'
+        services:
+          maindb:
+            image: valkey/valkey:8.1
+            command: valkey-server --requirepass ${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set}
+        YAML);
+        file_put_contents($this->projectDir . '/.env', "SMTP_HOST=\n");
+
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'compose']), tracked: false)->apply();
+
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('', $env['SMTP_HOST']);
+        $this->assertSame(48, strlen($env['VALKEY_PASSWORD']));
+    }
+
+    public function test_a_tracked_env_is_not_given_generated_values(): void
+    {
+        file_put_contents($this->projectDir . '/docker-compose.yml', "services:\n  db:\n    image: postgres:16\n    env_file: .env\n");
+        file_put_contents($this->projectDir . '/.env', "APP_NAME=Demo\n");
+
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'compose']), tracked: true)->apply();
+
+        $this->assertSame("APP_NAME=Demo\n", file_get_contents($this->projectDir . '/.env'));
+    }
+
+    /**
+     * #173: `.env.default` copies `.env` after the prepare hook wrote its
+     * secrets, and ~/project is traversable by every uid on the host. An
+     * earlier deploy's 0644 copy is tightened on the next apply().
+     */
+    public function test_env_default_is_written_owner_only_and_env_keeps_its_mode(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "ADMIN_PASS=generated-by-the-hook\n");
+        chmod($this->projectDir . '/.env', 0644);
+        file_put_contents($this->projectDir . '/.env.default', "stale\n");
+        chmod($this->projectDir . '/.env.default', 0644);
+
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+
+        $this->assertSame('0600', $this->mode('.env.default'));
+        $this->assertSame("ADMIN_PASS=generated-by-the-hook\n", file_get_contents($this->projectDir . '/.env.default'));
+        // The app's own file: containers read it as their own uid.
+        $this->assertSame('0644', $this->mode('.env'));
+    }
+
+    public function test_env_overrides_are_written_owner_only(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "APP_NAME=Demo\n");
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE, <<<'YAML'
+        services:
+          app:
+            image: acme/app
+            env_file: .env
+        YAML);
+
+        $model = $this->dindModel(['env_vars' => ['DB_PASSWORD' => 'hunter2']]);
+        $this->forcedEnvironment($model, tracked: true)->apply();
+
+        $this->assertSame('0600', $this->mode(EngineArtifacts::ENV_OVERRIDES));
+        $this->assertSame('0600', $this->mode('.env.default'));
+        // Still 0644: port detection reads it as www-data, not through sudo.
+        $this->assertSame('0644', $this->mode(EngineArtifacts::RUN_COMPOSE));
+    }
+
+    private function mode(string $name): string
+    {
+        clearstatcache();
+
+        return sprintf('%04o', fileperms($this->projectDir . '/' . $name) & 0777);
     }
 
     public function test_defer_to_compose_defaults_matches_lib_lychee_case(): void

@@ -151,6 +151,31 @@ Under the compose strategy every service that is not a database gets `PA_PUBLIC_
 
 ---
 
+### Secrets derived from the install path
+
+Every account's checkout is mounted at `/app`, so any value an application
+derives from its own location is **the same on every tenant**. On a normal host
+two installations are two directories; here they are not.
+
+Look for it before calling a recipe done: `realpath(`, `__DIR__`, `getcwd()` or
+`$_SERVER['DOCUMENT_ROOT']` feeding a salt, key, token, session name, cache
+namespace or lock name. Known cases:
+
+- Kirby's content salt is `realpath()` of `content/`, and it keys the tokens
+  guarding private media, so a token minted on one account is valid on another.
+- Atheos names its session cookie `md5(BASE_PATH)`, which is `md5("/app")`
+  everywhere.
+
+When you find one, feed the app `PA_INSTANCE_SECRET` (or a hash of it per
+purpose) through its own config. The engine sets it in the generated app
+service: 64 hex characters, per account, stable across deploys and wipe
+rebuilds. A repository's own compose services and Railpack builds do not get
+it; there, generate a value per account (`openssl rand -hex 32`) and keep it in
+`~/.panelalpha/`, not in `~/project`: a wipe rebuild clears `~/project`, and a
+secret regenerated against surviving data is lost for good (engine#173).
+
+---
+
 ## Repositories described here
 
 - [n8n](github.com/n8n-io/n8n/) — workflow automation; provides a custom `docker-compose.yml` with a named volume for persistence, and includes an `overrides/app.sh` for app management (info/install/users:list/users:add/users:delete/users:reset-password/users:sso). **Strategy: direct SQLite** — all user management bypasses the REST API entirely and writes to the SQLite database using `node:sqlite` (built into Node.js v22+). `install` calls `POST /rest/owner/setup` with the real public `Host` header so n8n stores the correct instance URL. SSO uses Pattern B (cookie): derives the JWT signing secret from SQLite (auto-persisted by n8n on first boot) and mints a valid `n8n-auth` token by replicating n8n's own `JwtService` + `AuthService` hash logic.

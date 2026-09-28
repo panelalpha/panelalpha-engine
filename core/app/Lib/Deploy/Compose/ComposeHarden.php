@@ -17,11 +17,14 @@ use App\Lib\Deploy\Sidecar\SidecarEngine;
 class ComposeHarden
 {
     /**
+     * For the Dockerfile and Ruby strategies, which run an image the repository
+     * wrote: the URL aliases, without the generic HTTPS/SSL flags.
+     *
      * @return array<string, string>
      */
     public static function urlEnvironment(?string $publicUrl): array
     {
-        return PublicUrlEnvironment::for($publicUrl);
+        return PublicUrlEnvironment::for($publicUrl, false);
     }
 
     /**

@@ -9,8 +9,13 @@ namespace App\Lib\Deploy\Compose;
  */
 final class PublicUrlEnvironment
 {
-    /** @var list<string> */
-    private const URL_KEYS = ['URL', 'PUBLIC_URL', 'BASE_URL', 'APP_URL', 'ASSET_URL', 'SITE_URL', 'ENDURAIN_HOST'];
+    /**
+     * `ORIGIN` is SvelteKit adapter-node's, which refuses to start on an
+     * invalid one (engine#192).
+     *
+     * @var list<string>
+     */
+    private const URL_KEYS = ['URL', 'PUBLIC_URL', 'BASE_URL', 'APP_URL', 'ASSET_URL', 'SITE_URL', 'ENDURAIN_HOST', 'ORIGIN'];
 
     /**
      * The same fact spelled as a bare hostname: an Apache `php:*-apache` image
@@ -26,9 +31,13 @@ final class PublicUrlEnvironment
     private const HTTPS_FLAGS = ['HTTPS' => 'on', 'SSL' => 'true', 'FORCE_SSL' => 'true'];
 
     /**
+     * `$httpsFlags` is false for an image the engine did not write: MeTube
+     * reads `HTTPS=on` as "terminate TLS here" and dies looking for a
+     * certificate (engine#289). TLS ends at the proxy; the URL keys say https.
+     *
      * @return array<string, string>
      */
-    public static function for(?string $publicUrl): array
+    public static function for(?string $publicUrl, bool $httpsFlags = true): array
     {
         $url = is_string($publicUrl) ? trim($publicUrl) : '';
         if (preg_match('#^https?://#i', $url) !== 1) {
@@ -42,7 +51,17 @@ final class PublicUrlEnvironment
             $env = array_merge($env, array_fill_keys(self::HOST_KEYS, $host));
         }
 
-        return self::isHttps($url) ? array_merge($env, self::HTTPS_FLAGS) : $env;
+        return $httpsFlags && self::isHttps($url) ? array_merge($env, self::HTTPS_FLAGS) : $env;
+    }
+
+    /**
+     * The keys that carry the whole public URL.
+     *
+     * @return list<string>
+     */
+    public static function urlKeys(): array
+    {
+        return self::URL_KEYS;
     }
 
     /** The host a vhost would match on, without the scheme, port or path. */

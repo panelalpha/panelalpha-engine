@@ -20,7 +20,7 @@ class PublicUrlEnvironmentTest extends TestCase
     {
         $env = PublicUrlEnvironment::for('https://shop.example.com');
 
-        foreach (['URL', 'PUBLIC_URL', 'BASE_URL', 'APP_URL', 'ASSET_URL', 'SITE_URL'] as $key) {
+        foreach (['URL', 'PUBLIC_URL', 'BASE_URL', 'APP_URL', 'ASSET_URL', 'SITE_URL', 'ORIGIN'] as $key) {
             $this->assertSame('https://shop.example.com', $env[$key], $key);
         }
     }

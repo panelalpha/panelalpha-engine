@@ -177,7 +177,7 @@ class ComposePlaceholders
                         }
                         $touchedPublished[$key] = true;
 
-                        return self::publishedSecret($key, $seed);
+                        return self::publishedSecret($key, $seed, $value);
                     }
                     if ($publicUrl !== null && self::isLocalPublicUrl($key, $value)) {
                         $touchedUrls[$key] = true;
@@ -330,11 +330,21 @@ class ComposePlaceholders
         '/(^|_)(YOUR|YOURS|CHANGE|CHANGEME|REPLACE|TODO|FIXME|PLACEHOLDER|INSERT|ENTER|SOME)(_|$)'
         . '|PATH_TO|_HERE$|^XXX/';
 
-    /** Seeded by key name, so it survives redeploys; APP_KEY gets Laravel's format. */
-    public static function publishedSecret(string $key, string $seed): string
+    /**
+     * Seeded by key name, so it survives redeploys; APP_KEY gets Laravel's format.
+     * A placeholder longer than 48 that is one character repeated keeps its
+     * length: that is a fixed-length key, and Homarr refuses its 64-zero
+     * SECRET_ENCRYPTION_KEY's replacement at 48 ("has to be 64 characters").
+     */
+    public static function publishedSecret(string $key, string $seed, string $placeholder = ''): string
     {
         if (strcasecmp($key, 'APP_KEY') === 0) {
             return 'base64:' . base64_encode(hash_hmac('sha256', 'compose-placeholder:APP_KEY', $seed, true));
+        }
+
+        $placeholder = trim(trim($placeholder), '"\'');
+        if (strlen($placeholder) > 48 && preg_match('/^(.)\1+$/', $placeholder) === 1) {
+            return self::generatedSecretOfLength($key, $seed, strlen($placeholder));
         }
 
         return self::generatedSecret($key, $seed);
@@ -365,6 +375,17 @@ class ComposePlaceholders
     public static function generatedSecret(string $token, string $seed): string
     {
         return substr(hash_hmac('sha256', 'compose-placeholder:' . $token, $seed), 0, 48);
+    }
+
+    /** Hex of exactly $length characters, starting with {@see generatedSecret()}. */
+    private static function generatedSecretOfLength(string $token, string $seed, int $length): string
+    {
+        $hex = hash_hmac('sha256', 'compose-placeholder:' . $token, $seed);
+        for ($block = 1; strlen($hex) < $length; $block++) {
+            $hex .= hash_hmac('sha256', 'compose-placeholder:' . $token . ':' . $block, $seed);
+        }
+
+        return substr($hex, 0, $length);
     }
 
     /**

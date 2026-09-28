@@ -29,6 +29,9 @@
  *   default_database  path to use in the URL when the file names none
  *   env               extra settings a framework expects; {host} and {port}
  *                     are substituted
+ *   init_password     the superuser password the image will not start
+ *                     without (`passwords`, first one is generated) and the
+ *                     variables that stand in for it (`waivers`)
  *   aliases           other names for this same engine
  */
 
@@ -40,6 +43,10 @@ return [
         'unambiguous_port' => true,
         'driver' => 'pgsql',
         'init_vars' => ['POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD'],
+        'init_password' => [
+            'passwords' => ['POSTGRES_PASSWORD'],
+            'waivers' => ['POSTGRES_PASSWORD_FILE', 'POSTGRES_HOST_AUTH_METHOD'],
+        ],
         'aliases' => [
             'postgresql', 'postgis', 'pgvector', 'timescaledb',
             'pgautoupgrade', 'supabase-postgres', 'citus', 'pgsql',
@@ -52,6 +59,14 @@ return [
         'unambiguous_port' => true,
         'driver' => 'mysql',
         'init_vars' => ['MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD'],
+        'init_password' => [
+            'passwords' => ['MYSQL_ROOT_PASSWORD', 'MARIADB_ROOT_PASSWORD'],
+            'waivers' => [
+                'MYSQL_ROOT_PASSWORD_FILE', 'MARIADB_ROOT_PASSWORD_FILE',
+                'MYSQL_ALLOW_EMPTY_PASSWORD', 'MARIADB_ALLOW_EMPTY_ROOT_PASSWORD',
+                'MYSQL_RANDOM_ROOT_PASSWORD', 'MARIADB_RANDOM_ROOT_PASSWORD',
+            ],
+        ],
         // The image refuses remote root connections unless told otherwise, and
         // waits to be asked whether it is ready before the app connects.
         //

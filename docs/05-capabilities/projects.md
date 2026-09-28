@@ -104,6 +104,14 @@ If your repository commits its own `.env` file, the engine leaves that file exac
 
 If your application refuses to start because a setting is missing or still has a placeholder value, the engine recognises that specifically and says so: [Reading errors](../02-getting-started/reading-errors.md).
 
+### A secret of the project's own
+
+Every project's application is served from `/app`, the same path on every project on the server. An application that builds a salt, a key or a session name from its own install path therefore builds the same one everywhere. Kirby's content salt and Atheos's session cookie name are two examples.
+
+So the engine gives every project's application `PA_INSTANCE_SECRET`: 64 hexadecimal characters, different for every project, and the same on every deploy and rebuild of that project. Use it, or a hash of it, where the application would otherwise use its path. In PHP, read it with `getenv('PA_INSTANCE_SECRET')`. Under Apache it is not in `$_SERVER`.
+
+You cannot set it yourself: names starting with `PA_` belong to the engine. Three kinds of project do not receive it: services from your own Docker Compose file, apps from the general build (`railpack` in the log), and websites made only of files. It changes only if the engine's own key changes.
+
 ## Limits
 
 Every project has plan limits: disk, memory, CPU, bandwidth, and how many databases, FTP accounts, subdomains and domains it may have.

@@ -166,6 +166,21 @@ class ComposeHardenTest extends TestCase
         $this->assertSame([], ComposeHarden::urlEnvironment('not-a-url'));
     }
 
+    /**
+     * A repository's own image reads its own variables: MeTube took `HTTPS=on`
+     * as "serve TLS" and crash-looped without a certificate (engine#289).
+     */
+    public function test_url_environment_for_an_image_names_the_https_url_but_sets_no_tls_flags(): void
+    {
+        $env = ComposeHarden::urlEnvironment('https://metube.example.com');
+
+        $this->assertSame('https://metube.example.com', $env['BASE_URL']);
+        $this->assertSame('metube.example.com', $env['SERVER_NAME']);
+        foreach (['HTTPS', 'SSL', 'FORCE_SSL'] as $key) {
+            $this->assertArrayNotHasKey($key, $env, $key);
+        }
+    }
+
     public function test_extract_runtime_sidecars_keeps_datastores_drops_dev_app(): void
     {
         $path = sys_get_temp_dir() . '/compose-sidecars-' . bin2hex(random_bytes(4)) . '.yaml';
