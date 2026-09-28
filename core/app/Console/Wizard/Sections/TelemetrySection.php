@@ -197,10 +197,9 @@ class TelemetrySection implements Section
                     . 'username, no repository token, no host address.'
         );
 
-        // Yes by default. Someone who opened this row came to change it, and
-        // a No default made Enter a no-op that redrew the same screen — which
-        // reads as the wizard being broken rather than as an answer.
-        if (!confirm(label: $on ? 'Stop sending reports?' : 'Start sending reports?', default: true)) {
+        // No by default: Enter leaves a toggle as it is (#255). unchanged()
+        // says so, so a No does not read as the wizard ignoring the key.
+        if (!confirm(label: $on ? 'Stop sending reports?' : 'Start sending reports?', default: false)) {
             $this->unchanged();
 
             return;
@@ -342,7 +341,7 @@ class TelemetrySection implements Section
             . 'Filing is refused outright when sending is off, whatever this says.'
         );
 
-        if (!confirm(label: $on ? 'Stop allowing bug reports?' : 'Allow bug reports?', default: true)) {
+        if (!confirm(label: $on ? 'Stop allowing bug reports?' : 'Allow bug reports?', default: false)) {
             $this->unchanged();
 
             return;

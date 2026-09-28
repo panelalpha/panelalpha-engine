@@ -164,6 +164,43 @@ class DeploymentWorkflowTest extends TestCase
         $this->assertSame("Deploy started (source: push, commit: {$commit})", $started);
     }
 
+    public function test_a_working_fallback_domain_is_said_in_the_deploy_log_without_a_partial(): void
+    {
+        // #79: Online refused, panelalpha_direct resolves, and the deploy used
+        // to finish clean with the refusal written nowhere a person looks.
+        $model = $this->dindModel([
+            'deploy_strategy' => 'static',
+            'domain' => [
+                'source' => 'panelalpha_direct',
+                'publicly_resolvable' => true,
+                'tls_terminated_at' => 'engine',
+                'fallback_reason' => 'panelalpha_online: PanelAlpha Online create failed: Sites limit reached for this service (HTTP 200).',
+            ],
+        ]);
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+        $mechanics = new RecordingDeployMechanics($model, $domain);
+        $mechanics->hasGit = true;
+        $mechanics->applicationRunning = true;
+
+        $warned = [];
+        $finished = [];
+        $logger = $this->silentDeployLogger();
+        $logger->method('warn')->willReturnCallback(function (string $message) use (&$warned): void {
+            $warned[] = $message;
+        });
+        $logger->method('finish')->willReturnCallback(function (string $status) use (&$finished): void {
+            $finished[] = $status;
+        });
+
+        (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->rebuildFromCheckout($logger);
+
+        $this->assertCount(1, $warned);
+        $this->assertStringContainsString('Sites limit reached for this service', $warned[0]);
+        $this->assertStringContainsString('panelalpha_direct', $warned[0]);
+        $this->assertSame([DeployLogger::STATUS_SUCCESS], $finished);
+    }
+
     /**
      * @param callable(DeploymentWorkflow, DeployLogger): void $run
      */

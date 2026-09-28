@@ -233,7 +233,8 @@ class Create extends Command
         // resolves nowhere, and the deploy itself succeeded all the same.
         $user = User::findByUsername($username);
         if ($user !== null && $domain !== '') {
-            foreach (PublicUrl::warnings($domain, $user->getDetails()) as $warning) {
+            $details = $user->getDetails();
+            foreach ([...PublicUrl::warnings($domain, $details), ...PublicUrl::notices($domain, $details)] as $warning) {
                 $this->warn($warning);
             }
         }

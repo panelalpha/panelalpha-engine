@@ -73,6 +73,33 @@ final class PublicUrl
     }
 
     /**
+     * Said in the deploy log without marking the deploy partial (#79).
+     *
+     * A fallback that still resolves publicly, such as `panelalpha_direct`
+     * after PanelAlpha Online refused a label, works, so it is not a warning.
+     * It used to be said nowhere but `details.domain`, so a used-up quota went
+     * unnoticed. A fallback that does not resolve is left to the warning,
+     * which already carries the reason.
+     *
+     * @param array<string, mixed> $details the account's details
+     * @return list<string>
+     */
+    public static function notices(string $domain, array $details): array
+    {
+        $allocation = self::allocation($details);
+        $reason = $allocation['fallback_reason'] ?? null;
+
+        if (!is_string($reason) || trim($reason) === '' || ($allocation['publicly_resolvable'] ?? null) === false) {
+            return [];
+        }
+
+        $source = is_string($allocation['source'] ?? null) ? " ({$allocation['source']})" : '';
+
+        return ["Serving under {$domain}{$source}, a fallback name: the preferred public name was skipped: "
+            . rtrim(trim($reason), '.') . '.'];
+    }
+
+    /**
      * A name that answers only on this host.
      *
      * Strictly `false`, never null. Null is what

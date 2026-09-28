@@ -59,6 +59,11 @@ final class SourceResolver
             return self::TYPE_GIT;
         }
 
+        // owner/repo: a repository, refused with the URL it probably means.
+        if (GitRepoInput::isShorthand($source)) {
+            return self::TYPE_GIT;
+        }
+
         if (preg_match('/^[a-z][a-z0-9]{2,14}$/', $source) === 1) {
             return self::TYPE_PROJECT;
         }

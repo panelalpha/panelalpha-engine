@@ -22,6 +22,8 @@ use Illuminate\Support\Facades\Log;
  */
 class DomainAllocator
 {
+    public const SETTING_ONLINE_LAST_ERROR = 'panelalpha_online_last_error';
+
     /** Labels to try under panelalpha.online before giving up on the rung. */
     private const ONLINE_ATTEMPTS = 5;
 
@@ -143,15 +145,19 @@ class DomainAllocator
                     continue;
                 }
 
+                self::rememberOnlineError($e->getMessage());
+
                 if ($requestedByCaller) {
                     throw new DomainAllocationException($e->getMessage(), 'allocation_failed');
                 }
 
-                Log::info("PanelAlpha Online allocation unavailable: {$e->getMessage()}");
+                Log::warning("PanelAlpha Online allocation unavailable: {$e->getMessage()}");
                 $skipped[] = DomainPlan::SOURCE_PANELALPHA_ONLINE . ': ' . $e->getMessage();
 
                 return null;
             }
+
+            self::rememberOnlineError(null);
 
             return new AllocatedDomain(
                 domain: $created['path_fqdn'],
@@ -170,6 +176,43 @@ class DomainAllocator
             . ': every label tried is already registered';
 
         return null;
+    }
+
+    /**
+     * The last time PanelAlpha Online refused or failed, for `GET /system/info`
+     * (#79): a used-up site quota is an engine-wide fact, not one project's.
+     * Cleared by the next label it sells.
+     */
+    public static function lastOnlineError(): ?array
+    {
+        try {
+            $stored = Setting::get(self::SETTING_ONLINE_LAST_ERROR);
+        } catch (\Throwable) {
+            return null;
+        }
+        $decoded = is_string($stored) && $stored !== '' ? json_decode($stored, true) : null;
+
+        return is_array($decoded) && is_string($decoded['message'] ?? null) ? $decoded : null;
+    }
+
+    private static function rememberOnlineError(?string $message): void
+    {
+        try {
+            if ($message === null) {
+                if (!in_array(Setting::get(self::SETTING_ONLINE_LAST_ERROR), [null, ''], true)) {
+                    Setting::set(self::SETTING_ONLINE_LAST_ERROR, '');
+                }
+
+                return;
+            }
+            Setting::set(self::SETTING_ONLINE_LAST_ERROR, (string) json_encode([
+                'message' => $message,
+                'at' => now()->toIso8601String(),
+            ]));
+        } catch (\Throwable $e) {
+            // Advisory: never the reason an allocation fails.
+            Log::warning("Could not record the PanelAlpha Online error: {$e->getMessage()}");
+        }
     }
 
     /** The candidate name, or a suffixed one, that nothing on this engine holds. */

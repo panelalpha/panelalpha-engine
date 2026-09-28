@@ -174,6 +174,7 @@ class Litespeed extends AbstractWebserver implements WebserverInterface
                 'user' => $user->username,
                 'suspended' => $user->status === 'suspended',
                 'php_port' => $this->phpPortForVersion($domain->getPhpVersion()),
+                'lsphp_max_conns' => $user->getLsPhpMaxConns(),
                 'cache_engine' => $cacheEnabled ? "7" : "0",
                 'cache_store_path' => $cacheStorePath,
                 'cache_check_public' => $cacheEnabled ? "1" : "0",

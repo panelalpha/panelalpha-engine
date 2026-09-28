@@ -163,4 +163,70 @@ class GitRemoteProbeTest extends TestCase
         $this->assertNotNull($problem);
         $this->assertStringNotContainsString($token, json_encode($problem) ?: '');
     }
+
+    // ---- #83: a branch the remote does not have ----------------------------
+
+    /** Output of `git ls-remote --symref -- <url> HEAD refs/heads/* refs/tags/*`. */
+    private const REFS = "ref: refs/heads/main\tHEAD\n"
+        . "65b89cc633a2192724681c211c46e74b5ae8f50e\tHEAD\n"
+        . "65b89cc633a2192724681c211c46e74b5ae8f50e\trefs/heads/feature/nested\n"
+        . "65b89cc633a2192724681c211c46e74b5ae8f50e\trefs/heads/main\n"
+        . "65b89cc633a2192724681c211c46e74b5ae8f50e\trefs/tags/v1.0\n"
+        . "0dfb2685d04204d4232f1075904de619b900fcb0\trefs/tags/v2.0\n"
+        . "65b89cc633a2192724681c211c46e74b5ae8f50e\trefs/tags/v2.0^{}\n";
+
+    public function test_a_listed_branch_or_tag_is_not_a_problem(): void
+    {
+        foreach (['main', 'feature/nested', 'v1.0', 'v2.0'] as $ref) {
+            $this->assertNull(GitRemoteProbe::branchProblem('git_branch', $ref, self::REFS, 'github.com'), $ref);
+        }
+    }
+
+    public function test_a_missing_branch_names_the_default_and_the_closest(): void
+    {
+        $problem = GitRemoteProbe::branchProblem('git_branch', 'mian', self::REFS, 'github.com');
+
+        $this->assertSame('git_branch', $problem['field']);
+        $this->assertSame('git_branch_not_found', $problem['code']);
+        $this->assertSame('main', $problem['suggestion']);
+        $this->assertSame(['main', 'feature/nested'], $problem['examples']);
+        $this->assertStringContainsString("no branch or tag named 'mian'", $problem['message']);
+        $this->assertStringContainsString("The default branch is 'main'", $problem['message']);
+        $this->assertArrayNotHasKey('retryable', $problem);
+    }
+
+    public function test_nothing_close_is_not_guessed(): void
+    {
+        $problem = GitRemoteProbe::branchProblem('git_branch', 'no-such-branch-xyz', self::REFS, 'github.com');
+
+        $this->assertArrayNotHasKey('suggestion', $problem);
+        $this->assertSame(['main', 'feature/nested'], $problem['examples']);
+    }
+
+    /** Through the real probe and a real git, against a local remote. */
+    public function test_the_probe_asks_about_the_branch_in_the_same_ls_remote(): void
+    {
+        $dir = sys_get_temp_dir() . '/pa-branch-probe-' . bin2hex(random_bytes(4));
+        $git = static fn (string ...$args): string => (string) shell_exec(
+            'git -C ' . escapeshellarg($dir) . ' ' . implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1'
+        );
+        mkdir($dir);
+
+        try {
+            $git('init', '-q', '-b', 'main');
+            $git('-c', 'user.email=t@e.st', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'x');
+            $git('tag', 'v1.0');
+
+            $probe = new GitRemoteProbe();
+            $this->assertNull($probe->problem('git_repo', 'file://' . $dir, null, 'git_token', 'main'));
+            $this->assertNull($probe->problem('git_repo', 'file://' . $dir, null, 'git_token', 'v1.0'));
+            $this->assertNull($probe->problem('git_repo', 'file://' . $dir, null), 'no branch, no branch check');
+
+            $problem = $probe->problem('git_repo', 'file://' . $dir, null, 'git_token', 'no-such-branch-xyz');
+            $this->assertSame('git_branch_not_found', $problem['code'] ?? null);
+            $this->assertSame(['main'], $problem['examples']);
+        } finally {
+            shell_exec('rm -rf ' . escapeshellarg($dir));
+        }
+    }
 }

@@ -44,6 +44,7 @@ class SourceInspectRequestTest extends TestCase
             'ftp' => ['ftp://github.com/o/r.git', 'source_unsupported_scheme'],
             'bare forge host' => ['https://github.com', 'source_incomplete'],
             'credentials in url' => ['https://u:p@github.com/o/r.git', 'source_embedded_credentials'],
+            'owner/repo shorthand' => ['vvolv/market-radar', 'source_shorthand'],
         ];
     }
 

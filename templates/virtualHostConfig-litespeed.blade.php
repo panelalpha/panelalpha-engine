@@ -113,9 +113,9 @@ RewriteRule ^ - [R=503,L]
       <type>lsapi</type>
       <name>{{ $user }}-lsphp</name>
       <address>{{ $user }}:{{ $php_port }}</address>
-      <maxConns>35</maxConns>
+      <maxConns>{{ $lsphp_max_conns ?? 35 }}</maxConns>
       <env>PHP_LSAPI_MAX_REQUESTS=5000</env>
-      <env>PHP_LSAPI_CHILDREN=35</env>
+      <env>PHP_LSAPI_CHILDREN={{ $lsphp_max_conns ?? 35 }}</env>
       <initTimeout>1</initTimeout>
       <retryTimeout>3</retryTimeout>
       <pcKeepAliveTimeout>1</pcKeepAliveTimeout>

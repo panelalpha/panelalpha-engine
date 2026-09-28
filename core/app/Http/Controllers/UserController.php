@@ -27,6 +27,7 @@ use App\Lib\Deploy\ProjectName;
 use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Domains\DomainAllocationException;
 use App\Lib\Domains\DomainAllocator;
+use App\Rules\ProjectName as ProjectNameRule;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Domains\PublicUrl;
 use App\Lib\Vault\RequestVault;
@@ -39,10 +40,12 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\AppHealth;
 use App\System\Project as ProjectAggregate;
 use App\Models\User;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
@@ -523,9 +526,10 @@ class UserController extends Controller
         }
         if (empty($params['username'])) {
             throw ProblemException::one(
-                'username',
+                $request->nameField(),
                 'username_required',
-                'No username was given and none could be generated; pass `username`.'
+                'No project name was given and none could be generated; pass `name` ('
+                    . ProjectNameRule::EXPECTED . ').'
             );
         }
 
@@ -536,14 +540,23 @@ class UserController extends Controller
         // mistakes the server could see all of together.
         $problems = [];
 
+        $nameField = $request->nameField();
         if (User::existsByUsername($params['username'])) {
-            $problems[] = ['field' => 'username', 'code' => 'name_taken', 'message' => 'User already exists.'];
+            $problems[] = [
+                'field' => $nameField,
+                'code' => 'name_taken',
+                'message' => "A project named '{$params['username']}' already exists. Choose another name.",
+            ];
         } elseif (!(new System())->isUsernameAvailable($params['username'])) {
             // Asked here as well as after the account is built, because the
             // allocation below spends a label out of a namespace the whole
             // fleet shares. A name burnt on a project that was never going to
             // be created is gone for good -- PanelAlpha Online has no release.
-            $problems[] = ['field' => 'username', 'code' => 'name_unavailable', 'message' => 'Username not available.'];
+            $problems[] = [
+                'field' => $nameField,
+                'code' => 'name_unavailable',
+                'message' => "'{$params['username']}' is reserved or already used by the system. Choose another name.",
+            ];
         }
 
         // dind is what a git_repo deploys into anyway, so naming it is no conflict.
@@ -567,7 +580,8 @@ class UserController extends Controller
             $problems[] = [
                 'field' => 'disk_space_limit',
                 'code' => 'invalid_value',
-                'message' => 'Invalid value.',
+                'message' => 'disk_space_limit must be an integer number of MB, or -1 for unlimited.',
+                'expected' => 'an integer number of MB, -1 for unlimited',
             ];
         }
 
@@ -604,7 +618,11 @@ class UserController extends Controller
                 $params['git_repo'],
                 // The token the clone will use. None sent means an anonymous
                 // probe, as the clone will be.
-                $params['git_token']
+                $params['git_token'],
+                'git_token',
+                // Asked in the same round trip: a branch the remote lacks
+                // used to be accepted here and fail the deploy at clone.
+                $params['git_branch'] ?? null,
             );
             if ($probe !== null) {
                 throw ProblemException::of([$probe]);
@@ -716,15 +734,6 @@ class UserController extends Controller
         ) {
             throw ProblemException::one('domain', 'domain_taken', 'Domain name not available.');
         }
-        $user->save();
-
-        if ($dedicatedIpv4) {
-            $user->assignFreeDedicatedIpv4();
-        }
-
-        if ($dedicatedIpv6) {
-            $user->assignFreeDedicatedIpv6();
-        }
 
         $redirectEnabled = false;
         $redirectUrl = null;
@@ -739,8 +748,7 @@ class UserController extends Controller
         $aliasAvailable = DomainPlan::wwwAliasWouldAnswer($params['domain'])
             && !Domain::domainOrAliasExists('www.' . $params['domain']);
 
-        /** @var Domain $domain */
-        $domain = Domain::make([
+        $domain = self::saveNewProject($user, fn (User $user): Domain => Domain::make([
             'user_id' => $user->id,
             'domain' => $params['domain'],
             'type' => 'main',
@@ -750,8 +758,15 @@ class UserController extends Controller
                 'redirect_url' => $redirectUrl,
                 'aliases' => $aliasAvailable ? ['www.' . $params['domain']] : [],
             ],
-        ]);
-        $domain->save();
+        ]), $nameField);
+
+        if ($dedicatedIpv4) {
+            $user->assignFreeDedicatedIpv4();
+        }
+
+        if ($dedicatedIpv6) {
+            $user->assignFreeDedicatedIpv6();
+        }
 
         // The public name was bought before the account existed; this is the
         // row that ties it to the domain it now serves. Attached to the
@@ -762,6 +777,40 @@ class UserController extends Controller
         }
 
         return $user;
+    }
+
+    /**
+     * Two creates of one name can both pass the checks in provision(); the
+     * unique index picks the winner, and the loser gets the 422 a sequential
+     * duplicate gets instead of a 500 (engine#8). One transaction, so the
+     * loser leaves no user row without its main domain.
+     *
+     * @param \Closure(User): Domain $mainDomain
+     * @param string $nameField the field the caller sent the name as
+     */
+    private static function saveNewProject(User $user, \Closure $mainDomain, string $nameField = 'username'): Domain
+    {
+        try {
+            return DB::transaction(function () use ($user, $mainDomain): Domain {
+                $user->save();
+                $domain = $mainDomain($user);
+                $domain->save();
+
+                return $domain;
+            });
+        } catch (UniqueConstraintViolationException $e) {
+            if (User::existsByUsername($user->username)) {
+                throw ProblemException::one(
+                    $nameField,
+                    'name_taken',
+                    "A project named '{$user->username}' already exists. Choose another name."
+                );
+            }
+            if (Domain::domainOrAliasExists($user->domain)) {
+                throw ProblemException::one('domain', 'domain_taken', "{$user->domain} is already on this engine.");
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -958,6 +1007,9 @@ class UserController extends Controller
         // certificate no browser accepts both got past it. See {@see PublicUrl}.
         foreach (PublicUrl::warnings($user->domain, $user->getDetails()) as $unreachable) {
             $warnings[] = $unreachable;
+        }
+        foreach (PublicUrl::notices((string) $user->domain, $user->getDetails()) as $notice) {
+            $deployLogger?->warn($notice);
         }
 
         if (!empty($warnings)) {
@@ -1321,7 +1373,7 @@ class UserController extends Controller
                 $this->recordRebuildSucceeded($user);
             } catch (DeployCancelledException $e) {
                 $stage = $deployLogger?->currentStage();
-                $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
+                self::finishRebuildLog($deployLogger, DeployLogger::STATUS_CANCELLED, $e->getMessage());
                 throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
             } catch (ValidationException $e) {
                 // ProblemException is one of these, so anything already in the
@@ -1360,9 +1412,28 @@ class UserController extends Controller
         $match = DeployFailureExplainer::match($e->getMessage());
         $message = $match['message'] ?? $e->getMessage();
         $stage = $deployLogger?->currentStage();
-        $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
+        self::finishRebuildLog($deployLogger, DeployLogger::STATUS_FAILED, $message);
 
         return self::deployProblem($match['rule'] ?? 'rebuild_failed', $message, $stage);
+    }
+
+    /**
+     * The workflow finishes the log itself when a rebuild fails or is cancelled.
+     * Finishing it again wrote a second "Deploy failed" line and filed a second
+     * telemetry report for the same rebuild. A cancel request alone sets the
+     * status without finishing, so `finished_at` is what says it was done.
+     */
+    private static function finishRebuildLog(?DeployLogger $deployLogger, string $status, string $error): void
+    {
+        if ($deployLogger === null) {
+            return;
+        }
+        $latest = $deployLogger->readLatest() ?? [];
+        $settled = in_array($latest['status'] ?? null, [DeployLogger::STATUS_FAILED, DeployLogger::STATUS_CANCELLED], true);
+        if ($settled && ($latest['finished_at'] ?? null) !== null) {
+            return;
+        }
+        $deployLogger->finish($status, $error);
     }
 
     /**

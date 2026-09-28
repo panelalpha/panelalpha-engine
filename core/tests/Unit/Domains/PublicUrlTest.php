@@ -144,4 +144,35 @@ class PublicUrlTest extends TestCase
         $this->assertSame([], PublicUrl::warnings('shop.hoster.example', []));
         $this->assertSame([], PublicUrl::warnings('shop.hoster.example', ['domain' => 'shop.hoster.example']));
     }
+
+    public function test_a_resolvable_fallback_is_a_notice_not_a_warning(): void
+    {
+        $details = $this->details(
+            [
+                'source' => DomainPlan::SOURCE_PANELALPHA_DIRECT,
+                'publicly_resolvable' => true,
+                'tls_terminated_at' => 'engine',
+                'fallback_reason' => 'panelalpha_online: PanelAlpha Online create failed: Sites limit reached for this service (HTTP 200).',
+            ],
+            ['status' => CertificateStatus::TRUSTED, 'issuer' => "Let's Encrypt", 'self_signed' => false],
+        );
+
+        $this->assertSame([], PublicUrl::warnings('shop.1-2-3-4.panelalpha.direct', $details));
+
+        $notices = PublicUrl::notices('shop.1-2-3-4.panelalpha.direct', $details);
+        $this->assertCount(1, $notices);
+        $this->assertStringContainsString('shop.1-2-3-4.panelalpha.direct (panelalpha_direct)', $notices[0]);
+        $this->assertStringContainsString('Sites limit reached for this service (HTTP 200).', $notices[0]);
+    }
+
+    public function test_no_notice_without_a_reason_or_when_the_warning_already_says_it(): void
+    {
+        $this->assertSame([], PublicUrl::notices('shop-4f2a.panelalpha.online', $this->details()));
+        $this->assertSame([], PublicUrl::notices('shop.local', $this->details([
+            'source' => DomainPlan::SOURCE_LOCAL,
+            'publicly_resolvable' => false,
+            'fallback_reason' => 'panelalpha_online: License is not valid (HTTP 403)',
+        ])));
+        $this->assertSame([], PublicUrl::notices('old.example.test', []));
+    }
 }

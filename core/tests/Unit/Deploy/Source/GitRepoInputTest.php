@@ -60,6 +60,8 @@ class GitRepoInputTest extends TestCase
             'bare self-hosted host' => ['https://git.internal/', 'git_repo_incomplete'],
             'a forge account is not a repository' => ['https://github.com/vvolv', 'git_repo_incomplete'],
             'embedded credentials' => ['https://user:pw@github.com/o/r.git', 'git_repo_embedded_credentials'],
+            // #83: this used to become https://vvolv/market-radar, "Could not reach vvolv".
+            'owner/repo shorthand' => ['vvolv/market-radar', 'git_repo_shorthand'],
         ];
     }
 
@@ -91,6 +93,10 @@ class GitRepoInputTest extends TestCase
             'credentials are stripped, not kept' => [
                 'https://user:pw@github.com/o/r.git',
                 'https://github.com/o/r.git',
+            ],
+            'owner/repo is spelled out on GitHub' => [
+                'vvolv/market-radar',
+                'https://github.com/vvolv/market-radar',
             ],
         ];
     }
@@ -147,6 +153,8 @@ class GitRepoInputTest extends TestCase
             // Suggest, never substitute -- an SSH-only host cannot serve HTTPS.
             'scp-style is left alone' => ['git@github.com:o/r.git', 'git@github.com:o/r.git'],
             'ssh:// is left alone' => ['ssh://git@github.com/o/r', 'ssh://git@github.com/o/r'],
+            // Not https://o/r: problem() suggests the URL instead of guessing a host.
+            'owner/repo is left alone' => ['o/r', 'o/r'],
             'empty stays empty' => ['', ''],
         ];
     }

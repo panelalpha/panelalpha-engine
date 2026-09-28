@@ -352,8 +352,22 @@ class Project
         // hook_deliveries cascades from deploy_hooks at the DB level.
         $user->deployHooks()->delete();
         DeployLogger::deleteUserLogs($username);
-        $this->system->webserver()->rebuildDomains();
+        $this->deleteAccountRow($user);
+    }
+
+    /**
+     * The row goes before the proxy rebuild, and the rebuild is best-effort: a
+     * sites-http that is down or restarting left the deleted project's row behind (#63).
+     */
+    public function deleteAccountRow(ModelsUser $user): void
+    {
         $user->delete();
+        try {
+            // Defers the reload to the background when the container is not running.
+            $this->system->rebuildDomains();
+        } catch (\Throwable $e) {
+            Log::warning("Webserver rebuild after deleting '{$user->username}' failed: " . $e->getMessage());
+        }
     }
 
     public function tearDownHosting(): void

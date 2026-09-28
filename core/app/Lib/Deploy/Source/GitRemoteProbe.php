@@ -61,9 +61,17 @@ class GitRemoteProbe
         string $repoField,
         string $repoUrl,
         ?string $token,
-        string $tokenField = 'git_token'
+        string $tokenField = 'git_token',
+        ?string $branch = null,
+        string $branchField = 'git_branch'
     ): ?array {
-        return $this->check($repoField, $repoUrl, $token, $tokenField)->problem;
+        $branch = $branch === null || trim($branch) === '' ? null : trim($branch);
+
+        // With a branch, the same ls-remote also says whether the remote has
+        // it, so a typo is a 422 instead of a deploy that fails at clone (#83).
+        return $branch === null
+            ? $this->check($repoField, $repoUrl, $token, $tokenField)->problem
+            : $this->probe($repoField, $repoUrl, $token, $tokenField, $branch, $branchField)->problem;
     }
 
     /** The same probe, telling "the remote answered" apart from "nothing was learned". */
@@ -72,6 +80,17 @@ class GitRemoteProbe
         string $repoUrl,
         ?string $token,
         string $tokenField = 'git_token'
+    ): GitProbeResult {
+        return $this->probe($repoField, $repoUrl, $token, $tokenField, null, 'git_branch');
+    }
+
+    private function probe(
+        string $repoField,
+        string $repoUrl,
+        ?string $token,
+        string $tokenField,
+        ?string $branch,
+        string $branchField
     ): GitProbeResult {
         $repoUrl = trim($repoUrl);
         if ($repoUrl === '') {
@@ -85,6 +104,11 @@ class GitRemoteProbe
         try {
             $command = ['git', '-c', 'credential.helper=', '-c', 'core.askpass=',
                 'ls-remote', '--heads', '--', $repoUrl];
+            if ($branch !== null) {
+                // Tags too, since the clone's --branch takes one; HEAD for the default.
+                $command = ['git', '-c', 'credential.helper=', '-c', 'core.askpass=',
+                    'ls-remote', '--symref', '--', $repoUrl, 'HEAD', 'refs/heads/*', 'refs/tags/*'];
+            }
 
             if ($hasToken) {
                 $workspace = $this->makeWorkspace();
@@ -98,10 +122,18 @@ class GitRemoteProbe
             // Only a timeout is retried: any answer, even a refusal, is final.
             $attempt = 0;
             do {
-                $result = $this->run($command);
-            } while ($result['timedOut'] && ++$attempt < $this->attempts);
+                $run = $this->run($command);
+            } while ($run['timedOut'] && ++$attempt < $this->attempts);
 
-            return $this->interpret($result, $repoField, $repoUrl, $hasToken, $tokenField);
+            $result = $this->interpret($run, $repoField, $repoUrl, $hasToken, $tokenField);
+            if ($branch !== null && $result->outcome === GitProbeResult::VERIFIED) {
+                $missing = self::branchProblem($branchField, $branch, $this->lastOutput, $this->hostOf($repoUrl));
+                if ($missing !== null) {
+                    return GitProbeResult::refused($missing);
+                }
+            }
+
+            return $result;
         } catch (\Throwable $e) {
             return GitProbeResult::unchecked();
         } finally {
@@ -114,12 +146,17 @@ class GitRemoteProbe
         }
     }
 
+    /** What the last ls-remote printed: its refs, when it succeeded. */
+    private string $lastOutput = '';
+
     /**
      * @param list<string> $command
      * @return array{timedOut: bool, ok: bool, stderr: string}
      */
     private function run(array $command): array
     {
+        $this->lastOutput = '';
+
         // ls-remote needs no repository, and a broken one in the cwd would fail it.
         $process = new Process($command, sys_get_temp_dir(), [
             'GIT_TERMINAL_PROMPT' => '0',
@@ -139,6 +176,7 @@ class GitRemoteProbe
         }
 
         $stderr = trim($process->getErrorOutput() ?: $process->getOutput());
+        $this->lastOutput = $process->getOutput();
 
         return [
             // A kill can also land as a signal rather than an exception.
@@ -201,6 +239,73 @@ class GitRemoteProbe
 
         return GitProbeResult::refused($this->problemOf($repoField, 'unreadable',
             'The repository could not be read: ' . $this->firstLine($result['stderr'])));
+    }
+
+    /**
+     * Null when `ls-remote --symref` output lists the branch or tag.
+     *
+     * @return ?array<string, mixed>
+     */
+    public static function branchProblem(string $field, string $branch, string $refs, string $host): ?array
+    {
+        $heads = [];
+        $tags = [];
+        $default = null;
+        foreach (preg_split('/\R/', $refs) ?: [] as $line) {
+            if (preg_match('#^ref: refs/heads/(\S+)\s+HEAD$#', $line, $m) === 1) {
+                $default = $m[1];
+            } elseif (preg_match('#^[0-9a-f]{40,64}\s+refs/heads/(\S+)$#', $line, $m) === 1) {
+                $heads[] = $m[1];
+            } elseif (preg_match('#^[0-9a-f]{40,64}\s+refs/tags/(\S+?)(\^\{\})?$#', $line, $m) === 1) {
+                $tags[$m[1]] = true;
+            }
+        }
+        $tags = array_keys($tags);
+
+        if (in_array($branch, $heads, true) || in_array($branch, $tags, true)) {
+            return null;
+        }
+
+        $suggestion = self::closestRef($branch, $heads, $tags);
+        $examples = array_values(array_unique(array_filter([$default, ...array_slice($heads, 0, 10)])));
+
+        $message = $heads === [] && $tags === []
+            ? "{$host} lists no branches or tags for this repository, so '{$branch}' cannot be checked out."
+            : "{$host} has no branch or tag named '{$branch}'."
+                . ($suggestion !== null ? " Did you mean '{$suggestion}'?" : '')
+                . ($default !== null ? " The default branch is '{$default}'; omit `{$field}` to use it." : '');
+
+        return array_filter([
+            'field' => $field,
+            'code' => $field . '_not_found',
+            'message' => $message,
+            'expected' => 'the name of a branch or tag in the repository',
+            'suggestion' => $suggestion,
+            'examples' => $examples === [] ? null : $examples,
+        ], static fn (mixed $v): bool => $v !== null);
+    }
+
+    /**
+     * @param list<string> $heads
+     * @param list<string> $tags
+     */
+    private static function closestRef(string $branch, array $heads, array $tags): ?string
+    {
+        $short = (string) preg_replace('#^refs/(heads|tags)/#', '', $branch);
+        $best = null;
+        $bestDistance = 3;
+        foreach (array_slice([...$heads, ...$tags], 0, 2000) as $ref) {
+            if ($ref === $short || strcasecmp($ref, $short) === 0) {
+                return $ref;
+            }
+            $distance = levenshtein(strtolower($short), strtolower($ref));
+            if ($distance < $bestDistance) {
+                $best = $ref;
+                $bestDistance = $distance;
+            }
+        }
+
+        return $best;
     }
 
     private function matches(string $stderr, string $outcome): bool

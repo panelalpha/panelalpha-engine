@@ -52,6 +52,7 @@ class ProjectCreateAsyncTest extends TestCase
         Schema::dropIfExists('task_logs');
         Schema::dropIfExists('tasks');
         Schema::dropIfExists('users');
+        \App\Models\Setting::clearRuntimeSettings();
         parent::tearDown();
     }
 
@@ -130,5 +131,50 @@ class ProjectCreateAsyncTest extends TestCase
         $response->assertStatus(422);
         Queue::assertNothingPushed();
         Queue::assertNotPushed(DeployProject::class);
+    }
+
+    /** #83: a caller that sent `name` hears about `name`, not `username`. */
+    public function test_a_taken_name_is_reported_under_the_field_sent(): void
+    {
+        Queue::fake();
+
+        User::query()->create([
+            'username' => 'takenname',
+            'domain' => 'takenname.test',
+            'email' => 't@example.com',
+            'details' => [],
+        ]);
+
+        $response = $this->postJson('/api/projects', ['name' => 'takenname', 'tunnel' => 'none']);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('problems.0.field', 'name');
+        $response->assertJsonPath('problems.0.code', 'name_taken');
+        Queue::assertNothingPushed();
+    }
+
+    /**
+     * #83: a branch the remote does not have was accepted (202) and failed the
+     * deploy at clone, after the account and its domain had been made.
+     */
+    #[\PHPUnit\Framework\Attributes\Group('network')]
+    public function test_a_branch_the_remote_lacks_is_refused_before_anything_is_created(): void
+    {
+        Queue::fake();
+        // No git_token sent, so the probe runs anonymously.
+
+        $response = $this->postJson('/api/projects', [
+            'name' => 'branchprobe',
+            'tunnel' => 'none',
+            'git_repo' => 'https://github.com/octocat/Hello-World.git',
+            'git_branch' => 'no-such-branch-xyz',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonPath('problems.0.field', 'git_branch');
+        $response->assertJsonPath('problems.0.code', 'git_branch_not_found');
+        $response->assertJsonPath('problems.0.examples.0', 'master');
+        $this->assertFalse(User::query()->where('username', 'branchprobe')->exists());
+        Queue::assertNothingPushed();
     }
 }

@@ -113,6 +113,7 @@ final class DeploymentWorkflow
 
         $warnings = array_merge($warnings, $mechanics->servingWarnings());
         $warnings = array_merge($warnings, $mechanics->publicUrlWarnings($domain));
+        self::logDomainNotices($deployLogger, $mechanics->user());
 
         if ($warnings !== []) {
             $hint = $mechanics->customEnvFailureHint();
@@ -179,6 +180,7 @@ final class DeploymentWorkflow
                 $mechanics->servingWarnings(),
                 $mechanics->publicUrlWarnings($domain),
             );
+            self::logDomainNotices($deployLogger, $user);
             if ($warnings !== []) {
                 $hint = $mechanics->customEnvFailureHint();
                 if ($hint !== null) {
@@ -315,10 +317,19 @@ final class DeploymentWorkflow
             $mechanics->servingWarnings(),
             PublicUrl::warnings((string) $user->domain, $user->getDetails()),
         );
+        self::logDomainNotices($logger, $user);
 
         $warnings === []
             ? $logger?->finish(DeployLogger::STATUS_SUCCESS)
             : $logger?->finish(DeployLogger::STATUS_PARTIAL, implode(' | ', $warnings));
+    }
+
+    /** A fallback domain that still works: said in the log, not a warning (#79). */
+    private static function logDomainNotices(?DeployLogger $logger, $user): void
+    {
+        foreach (PublicUrl::notices((string) $user->domain, $user->getDetails()) as $notice) {
+            $logger?->warn($notice);
+        }
     }
 
     private function resolveMechanics(): DeployMechanics

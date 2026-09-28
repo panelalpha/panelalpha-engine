@@ -87,6 +87,61 @@ class RebuildExceptionMappingTest extends TestCase
     }
 
     /**
+     * The workflow finishes the log itself when a rebuild fails. Finishing it
+     * again here wrote a second "Deploy failed" line and filed a second
+     * telemetry report for the same rebuild.
+     */
+    public function test_a_log_the_workflow_already_finished_is_not_finished_again(): void
+    {
+        $username = 'rbonce' . bin2hex(random_bytes(3));
+        $this->beforeApplicationDestroyed(static fn () => DeployLogger::deleteUserLogs($username));
+        $logger = DeployLogger::start($username);
+        $logger->stage(DeployLogger::STAGE_RUNNING);
+        $logger->finish(DeployLogger::STATUS_FAILED, 'exited with code 33');
+
+        $problem = (new ReflectionMethod(UserController::class, 'rebuildFailure'))
+            ->invoke(new UserController(), new \RuntimeException('exited with code 33'), $logger);
+
+        $finished = array_filter(
+            $logger->entries(),
+            static fn (array $line): bool => str_starts_with($line['msg'], 'Deploy failed')
+        );
+        $this->assertCount(1, $finished);
+        $this->assertSame('failed', $logger->readLatest()['status'] ?? null);
+        $this->assertSame('running', $problem->problems[0]['stage']);
+    }
+
+    /** A failure the workflow never reached still finishes the log. */
+    public function test_a_log_still_running_is_finished(): void
+    {
+        $username = 'rbopen' . bin2hex(random_bytes(3));
+        $this->beforeApplicationDestroyed(static fn () => DeployLogger::deleteUserLogs($username));
+        $logger = DeployLogger::start($username);
+        $logger->stage(DeployLogger::STAGE_RUNNING);
+
+        (new ReflectionMethod(UserController::class, 'rebuildFailure'))
+            ->invoke(new UserController(), new \RuntimeException('exited with code 1'), $logger);
+
+        $this->assertSame('failed', $logger->readLatest()['status'] ?? null);
+    }
+
+    /** A cancel request sets the status but finishes nothing, so it is finished here. */
+    public function test_a_cancel_request_alone_does_not_count_as_finished(): void
+    {
+        $username = 'rbcanc' . bin2hex(random_bytes(3));
+        $this->beforeApplicationDestroyed(static fn () => DeployLogger::deleteUserLogs($username));
+        $logger = DeployLogger::start($username);
+        $logger->stage(DeployLogger::STAGE_RUNNING);
+        DeployLogger::requestCancel($username);
+
+        (new ReflectionMethod(UserController::class, 'rebuildFailure'))
+            ->invoke(new UserController(), new \RuntimeException('killed'), $logger);
+
+        $this->assertNotNull($logger->readLatest()['finished_at'] ?? null);
+        $this->assertSame('cancelled', $logger->readLatest()['status'] ?? null);
+    }
+
+    /**
      * The plain JSON rebuild used to get no logger (only the stream opened
      * one), so its failures could not say where they happened.
      */

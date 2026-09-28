@@ -54,12 +54,21 @@ final class GitRepoInput
             return $value;
         }
 
-        // A host carries a dot and an owner does not, so `gitea.com/repo` is a
-        // URL with its scheme left off -- normalise()'s job -- and only a
-        // dotless `owner/repo` is the shorthand.
-        return preg_match('#^[^/\s.]+/[^/\s]+$#', $value) === 1
+        return self::isShorthand($value)
             ? 'https://' . self::shorthandHost($host) . '/' . $value
             : $value;
+    }
+
+    /**
+     * A bare `owner/repo`. A host carries a dot and an owner does not, so
+     * `gitea.com/repo` is a URL with its scheme left off -- normalise()'s
+     * job -- and only a dotless first segment is the shorthand.
+     */
+    public static function isShorthand(string $raw): bool
+    {
+        $value = trim($raw);
+
+        return !self::isSsh($value) && preg_match('#^[^/\s.:@]+/[^/\s]+$#', $value) === 1;
     }
 
     /**
@@ -75,11 +84,16 @@ final class GitRepoInput
         return $host === '' ? self::DEFAULT_SHORTHAND_HOST : $host;
     }
 
-    /** Supply the scheme a caller left off `github.com/owner/repo`. */
+    /**
+     * Supply the scheme a caller left off `github.com/owner/repo`. A bare
+     * `owner/repo` is left alone: `https://owner/repo` would send the probe
+     * to a host called `owner` (#83), and problem() suggests the URL instead.
+     */
     public static function normalise(string $raw): string
     {
         $raw = trim($raw);
-        if ($raw === '' || self::isSsh($raw) || preg_match('#^[a-z][a-z0-9+.-]*://#i', $raw) === 1) {
+        if ($raw === '' || self::isSsh($raw) || self::isShorthand($raw)
+            || preg_match('#^[a-z][a-z0-9+.-]*://#i', $raw) === 1) {
             return $raw;
         }
 
@@ -119,6 +133,16 @@ final class GitRepoInput
         }
         if (self::isSsh($value)) {
             return self::sshProblem($field, $value);
+        }
+        // Suggested, not expanded: the CLI assumes GitHub for its operator,
+        // but an API caller may mean any forge.
+        if (self::isShorthand($value)) {
+            $url = self::expandShorthand($value);
+
+            return self::problemOf($field, 'shorthand',
+                "'{$value}' is owner/repo shorthand, not a repository URL, and the host is not guessed. "
+                . "If it is on GitHub, send {$url}.",
+                $url);
         }
 
         $url = self::normalise($value);

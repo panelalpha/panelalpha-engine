@@ -8,11 +8,16 @@ use App\Lib\Deploy\Source\GitTokenInput;
 use App\Lib\Domains\DomainPlan;
 use App\Rules\GitAccessToken;
 use App\Rules\GitRepositoryUrl;
+use App\Rules\ProjectName;
+use App\System\Project\Git\Ref as GitRef;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UserStoreRequest extends FormRequest
 {
     use ReportsProblems;
+
+    /** What the caller called the project name: problems are reported under it. */
+    private string $nameField = 'username';
 
     public function authorize(): bool
     {
@@ -33,6 +38,7 @@ class UserStoreRequest extends FormRequest
         // the rest of the API documents and both spellings have to keep working.
         if (!$this->has('username') && $this->has('name')) {
             $this->merge(['username' => $this->input('name')]);
+            $this->nameField = 'name';
         }
 
         if ($this->has('domain')) {
@@ -49,7 +55,7 @@ class UserStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'username' => 'string|alpha_num:ascii|regex:/^[a-z]{1}/|lowercase|between:3,15',
+            'username' => ['string', new ProjectName($this->nameField)],
             'domain' => 'string|regex:/^(?!:\/\/)(?=.{1,255}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i',
             'domain_redirect_url' => 'url|nullable',
             'email' => 'email',
@@ -94,7 +100,18 @@ class UserStoreRequest extends FormRequest
                 },
             ],
             'git_repo' => ['nullable', 'string', 'max:' . GitRepoInput::MAX_LENGTH, new GitRepositoryUrl()],
-            'git_branch' => 'string|nullable|max:255',
+            // Whether the remote has it is asked with the repository probe,
+            // in the controller: that is the one check that leaves the host.
+            'git_branch' => [
+                'string',
+                'nullable',
+                'max:255',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (is_string($value) && $value !== '' && !GitRef::isValidName($value)) {
+                        $fail("'{$value}' is not a valid branch or tag name.");
+                    }
+                },
+            ],
             'git_token' => [
                 'nullable',
                 'string',
@@ -110,6 +127,48 @@ class UserStoreRequest extends FormRequest
             // Likewise: whether the engine has a recipe by this name is
             // settled by the registry, not by a list restated here.
             'recipe' => 'string|nullable|max:64',
+        ];
+    }
+
+    /** `name` or `username`, whichever the caller sent. */
+    public function nameField(): string
+    {
+        return $this->nameField;
+    }
+
+    public function attributes(): array
+    {
+        return ['username' => $this->nameField];
+    }
+
+    protected function reportedField(string $field): string
+    {
+        return $field === 'username' ? $this->nameField : $field;
+    }
+
+    protected function expectations(): array
+    {
+        $count = static fn (string $what, string $example): array => [
+            'expected' => $what,
+            'examples' => [$example],
+        ];
+
+        return [
+            'username' => ['expected' => ProjectName::EXPECTED, 'examples' => ProjectName::EXAMPLES],
+            'domain' => ['expected' => 'a hostname, lowercase, without scheme or path', 'examples' => ['shop.example.com']],
+            'domain_redirect_url' => ['expected' => 'an absolute URL', 'examples' => ['https://example.com/']],
+            'email' => ['expected' => 'an email address', 'examples' => ['ops@example.com']],
+            'disk_space_limit' => $count('an integer number of MB, -1 for unlimited', '10240'),
+            'memory_limit' => $count('an integer number of MB, 0 or more; omit or null for no limit', '512'),
+            'cpu_limit' => $count('a number of CPU cores, 0 or more, fractions allowed; omit or null for no limit', '1.5'),
+            'bandwidth_limit' => $count('an integer, 0 or more; omit or null for no limit', '100000'),
+            'inodes_limit' => $count('an integer; omit or null for no limit', '500000'),
+            'tunnel' => ['expected' => 'one of: ' . implode(', ', DomainPlan::TUNNELS), 'examples' => DomainPlan::TUNNELS],
+            'git_branch' => ['expected' => 'the name of a branch or tag in the repository', 'examples' => ['main', 'v1.2.0']],
+            'env_vars' => ['expected' => 'an object of KEY: "value" strings, at most 200', 'examples' => ['{"APP_ENV": "production"}']],
+            'password' => ['expected' => 'a string of 1-255 characters'],
+            'recipe' => ['expected' => 'a recipe name, at most 64 characters'],
+            'template' => ['expected' => 'a template name; dind for a git_repo', 'examples' => ['dind']],
         ];
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\DockerErrorException;
+use App\Lib\Domains\DomainAllocator;
 use App\Lib\Ssl\CertificateFacts;
 use App\Lib\Ssl\CertificateStatus;
 use App\Lib\Ssl\EngineCertificate;
@@ -70,6 +71,11 @@ class SystemController extends Controller
             'webserver' => $webserver->getDetails(),
             'latest_webserver_change' => $system->getLatestChangeWebserverInfo(),
             'latest_update' => $system->getLatestUpdateInfo(),
+            // Why new projects stopped getting panelalpha.online names, e.g. a
+            // used-up site quota; null once a label is sold again (#79).
+            'panelalpha_online' => [
+                'last_error' => DomainAllocator::lastOnlineError(),
+            ],
         ];
 
         return new JsonResponse([

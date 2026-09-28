@@ -48,6 +48,9 @@ server {
             proxy_send_timeout 3600s;
             set $proxyupstream {{ $proxy_http['host'] }};
             proxy_pass {{ $proxy_http['protocol'] ?? 'http' }}://$proxyupstream:{{ $proxy_http['port'] }};
+            # An absolute redirect built upstream (Apache's DirectorySlash, a
+            # .htaccess Redirect) carries the container's port. Make it relative.
+            proxy_redirect {{ $proxy_http['protocol'] ?? 'http' }}://$host:{{ $proxy_http['port'] }}/ /;
         @else
 @if (!empty($site_password_enabled))
             {!! $site_password_auth_request !!}
@@ -151,6 +154,10 @@ server {
                 @else
                 proxy_pass http://$proxyupstream:{{ $proxy_https['port'] }};
                 @endif
+                # As on :80, plus plain http to this host: the upstream only ever
+                # saw http, so that is a downgrade of the visitor's https.
+                proxy_redirect {{ $proxy_https['protocol'] ?? 'http' }}://$host:{{ $proxy_https['port'] }}/ /;
+                proxy_redirect http://$host/ /;
             @else
 @if (!empty($site_password_enabled))
                 {!! $site_password_auth_request !!}
@@ -236,6 +243,7 @@ server {
             proxy_send_timeout 3600s;
             set $proxyupstream {{ $extra['host'] }};
             proxy_pass {{ $extra['protocol'] ?? 'http' }}://$proxyupstream:{{ $extra['port'] }};
+            proxy_redirect {{ $extra['protocol'] ?? 'http' }}://$host:{{ $extra['port'] }}/ /;
         @endif
     }
 @if (!empty($site_password_enabled))

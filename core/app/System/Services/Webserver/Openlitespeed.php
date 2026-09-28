@@ -177,6 +177,7 @@ class Openlitespeed extends AbstractWebserver implements WebserverInterface
                 'user' => $user->username,
                 'suspended' => $user->status === 'suspended',
                 'php_port' => $this->phpPortForVersion($domain->getPhpVersion()),
+                'lsphp_max_conns' => $user->getLsPhpMaxConns(),
                 'cache_enabled' => $cacheEnabled ? "1" : "0",
                 'cache_store_path' => $cacheStorePath,
             ];

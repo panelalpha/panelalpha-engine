@@ -73,7 +73,7 @@ accessControl  {
 extprocessor {{ $user }}-{{ $domain }} {
   type                    lsapi
   address                 {{ $user }}:{{ $php_port }}
-  maxConns                35
+  maxConns                {{ $lsphp_max_conns ?? 35 }}
   initTimeout             1
   retryTimeout            1
   respBuffer              0

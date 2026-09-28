@@ -960,6 +960,13 @@ class User extends Authenticatable
         return $settings;
     }
 
+    // The vhost's lsphp maxConns must equal the plan's PHP_LSAPI_CHILDREN;
+    // more connections than children queue inside lsphp and requests hang.
+    public function getLsPhpMaxConns(): int
+    {
+        return max(1, (int) $this->getLsPhpSettings()['PHP_LSAPI_CHILDREN']);
+    }
+
     /**
      * @return array<string,string>
      */
