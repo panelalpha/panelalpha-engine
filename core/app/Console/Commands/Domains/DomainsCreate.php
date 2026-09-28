@@ -4,6 +4,7 @@ namespace App\Console\Commands\Domains;
 
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\System;
+use App\Lib\Domains\NewDomain;
 use App\Lib\Helpers\UpstreamSpec;
 use App\Models\Domain;
 use App\Models\ProxyRule;
@@ -36,55 +37,11 @@ class DomainsCreate extends Command
     {
         $this->foldProjectOption();
 
-        $positional = strtolower(trim((string) ($this->argument('domain') ?? '')));
-        $optionDomain = strtolower(trim((string) ($this->option('domain') ?? '')));
-        if ($positional !== '' && $optionDomain !== '' && $positional !== $optionDomain) {
-            $this->error("Conflicting domain names: argument '{$positional}' vs --domain='{$optionDomain}'.");
+        $input = $this->readInput();
+        if ($input === null) {
             return 1;
         }
-        $domainName = $positional !== '' ? $positional : $optionDomain;
-        $project = trim((string) $this->option('username'));
-        $type = strtolower(trim((string) $this->option('type')));
-        $parentDomain = strtolower(trim((string) $this->option('parent-domain')));
-        $noSsl = (bool) $this->option('no-ssl');
-        $proxyToRaw = trim((string) ($this->option('proxy-to') ?? ''));
-
-        if ($domainName === '') {
-            $this->error('Domain name is required (positional argument or --domain).');
-            return 1;
-        }
-        if ($project === '') {
-            $this->error('--project is required.');
-            return 1;
-        }
-
-        if ($type === 'subdomain') {
-            $type = 'sub';
-        }
-        if (!in_array($type, ['addon', 'sub'], true)) {
-            $this->error("--type must be 'addon' or 'sub'.");
-            return 1;
-        }
-
-        $aliases = [];
-        $rawAliases = $this->option('alias');
-        if (is_array($rawAliases)) {
-            foreach ($rawAliases as $alias) {
-                if (!is_string($alias) || trim($alias) === '') {
-                    continue;
-                }
-                $aliases[] = strtolower(trim($alias));
-            }
-        }
-        $aliases = array_values(array_unique($aliases));
-
-        // Match DomainController::store — www.* becomes primary without www + alias.
-        if (Str::startsWith($domainName, 'www.')) {
-            if (!in_array($domainName, $aliases, true)) {
-                $aliases[] = $domainName;
-            }
-            $domainName = Str::after($domainName, 'www.');
-        }
+        [$domainName, $project, $type, $parentDomain, $aliases] = $input;
 
         $user = User::findByUsername($project);
         if (!$user) {
@@ -94,6 +51,7 @@ class DomainsCreate extends Command
 
         $upstreamHost = null;
         $upstreamPort = null;
+        $proxyToRaw = trim((string) ($this->option('proxy-to') ?? ''));
         if ($proxyToRaw !== '') {
             try {
                 [$upstreamHost, $upstreamPort] = UpstreamSpec::parse($proxyToRaw, $user->username);
@@ -103,91 +61,22 @@ class DomainsCreate extends Command
             }
         }
 
-        if ($type === 'addon') {
-            $limit = $user->getAddonDomainsLimit();
-            if ($limit !== null) {
-                $count = $user->domains()->getQuery()->where('type', 'addon')->count();
-                if ($limit <= $count) {
-                    $this->error("Addon domains limit of {$limit} reached.");
-                    return 1;
-                }
-            }
-        } else {
-            $limit = $user->getSubdomainsLimit();
-            if ($limit !== null) {
-                $count = $user->domains()->getQuery()->where('type', 'sub')->count();
-                if ($limit <= $count) {
-                    $this->error("Subdomains limit of {$limit} reached.");
-                    return 1;
-                }
-            }
-            if ($parentDomain === '') {
-                $this->error('--parent-domain is required when --type=sub.');
-                return 1;
-            }
-            if (!$user->domains()->getQuery()->where('domain', $parentDomain)->exists()) {
-                $this->error("Parent domain '{$parentDomain}' not found for project '{$project}'.");
-                return 1;
-            }
-            if (!Str::endsWith($domainName, $parentDomain)) {
-                $this->error("Domain '{$domainName}' must end with parent domain '{$parentDomain}'.");
-                return 1;
-            }
-        }
-
-        if (!filter_var($domainName, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
-            $this->error("Invalid domain name '{$domainName}'.");
-            return 1;
-        }
-        if (Domain::domainOrAliasExists($domainName)) {
-            $this->error("Domain '{$domainName}' already exists.");
+        $refusal = $this->typeRefusal($user, $project, $type, $domainName, $parentDomain)
+            ?? $this->nameRefusal($domainName, $aliases);
+        if ($refusal !== null) {
+            $this->error($refusal);
             return 1;
         }
 
-        foreach ($aliases as $alias) {
-            if (!filter_var($alias, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
-                $this->error("Invalid alias '{$alias}'.");
-                return 1;
-            }
-            if (Domain::domainOrAliasExists($alias)) {
-                $this->error("Alias '{$alias}' already exists.");
-                return 1;
-            }
-        }
-
-        $docRoot = "/{$domainName}/public_html";
-        $proxyLabel = ($upstreamHost !== null && $upstreamPort !== null)
-            ? "{$upstreamHost}:{$upstreamPort}"
-            : '-';
-
-        $this->line('');
-        $this->info('Create domain');
-        $table = new Table($this->output);
-        $table->setRows([
-            ['Domain', $domainName],
-            ['Project', $user->username],
-            ['Type', $type],
-            ['Parent domain', $type === 'sub' ? $parentDomain : '-'],
-            ['Aliases', $aliases === [] ? '-' : implode("\n", $aliases)],
-            ['SSL', $noSsl ? 'disabled' : 'enabled'],
-            ['Document root', $docRoot],
-            ['Proxy to', $proxyLabel],
-        ]);
-        $table->render();
+        $noSsl = (bool) $this->option('no-ssl');
+        $this->summarize($user, $domainName, $type, $parentDomain, $aliases, $noSsl, $upstreamHost, $upstreamPort);
 
         if (!$this->option('force') && !$this->confirm('Create this domain?')) {
             $this->info('Cancelled.');
             return 0;
         }
 
-        $details = [
-            'document_root' => $docRoot,
-            'redirect_enabled' => false,
-            'redirect_url' => null,
-            'force_https_redirect' => false,
-            'ssl_disabled' => $noSsl,
-            'aliases' => $aliases,
-        ];
+        $details = NewDomain::details($domainName, $noSsl, $aliases);
         if ($type === 'sub') {
             $details['parent_domain'] = $parentDomain;
         }
@@ -206,31 +95,7 @@ class DomainsCreate extends Command
             $user->project()->runEntrypointScriptsSync();
 
             if ($upstreamHost !== null && $upstreamPort !== null) {
-                foreach ([80, 443] as $listenPort) {
-                    ProxyRule::updateOrCreate(
-                        [
-                            'owner_scope' => 'user',
-                            'username' => $user->username,
-                            'transport' => 'http',
-                            'listen_port' => $listenPort,
-                            'server_name' => $domainName,
-                        ],
-                        [
-                            'enabled' => true,
-                            'listen_ip' => '*',
-                            'upstream_host' => $upstreamHost,
-                            'upstream_port' => $upstreamPort,
-                            'upstream_protocol' => 'http',
-                            'is_generated' => false,
-                            'metadata' => [
-                                'source' => 'domain-create',
-                                'description' => "{$listenPort}→{$upstreamPort} for {$domainName}",
-                            ],
-                        ]
-                    );
-                }
-                $domain->projectDomain()->rebuild();
-                (new System())->webserver()->scheduleWebserverReloadInBackground();
+                $this->proxyTo($user, $domain, $upstreamHost, $upstreamPort);
             }
         } catch (\Throwable $e) {
             try {
@@ -249,5 +114,161 @@ class DomainsCreate extends Command
         $this->line('');
 
         return 0;
+    }
+
+    /**
+     * The options, normalised, or null once a refusal has been printed.
+     *
+     * @return ?array{0: string, 1: string, 2: string, 3: string, 4: list<string>}
+     */
+    private function readInput(): ?array
+    {
+        $positional = strtolower(trim((string) ($this->argument('domain') ?? '')));
+        $optionDomain = strtolower(trim((string) ($this->option('domain') ?? '')));
+        if ($positional !== '' && $optionDomain !== '' && $positional !== $optionDomain) {
+            $this->error("Conflicting domain names: argument '{$positional}' vs --domain='{$optionDomain}'.");
+            return null;
+        }
+        $domainName = $positional !== '' ? $positional : $optionDomain;
+        $project = trim((string) $this->option('username'));
+        $type = strtolower(trim((string) $this->option('type')));
+        $parentDomain = strtolower(trim((string) $this->option('parent-domain')));
+
+        if ($domainName === '') {
+            $this->error('Domain name is required (positional argument or --domain).');
+            return null;
+        }
+        if ($project === '') {
+            $this->error('--project is required.');
+            return null;
+        }
+
+        if ($type === 'subdomain') {
+            $type = 'sub';
+        }
+        if (!in_array($type, ['addon', 'sub'], true)) {
+            $this->error("--type must be 'addon' or 'sub'.");
+            return null;
+        }
+
+        $aliases = [];
+        $rawAliases = $this->option('alias');
+        if (is_array($rawAliases)) {
+            foreach ($rawAliases as $alias) {
+                if (!is_string($alias) || trim($alias) === '') {
+                    continue;
+                }
+                $aliases[] = strtolower(trim($alias));
+            }
+        }
+        [$domainName, $aliases] = NewDomain::withoutWww($domainName, array_values(array_unique($aliases)));
+
+        return [$domainName, $project, $type, $parentDomain, $aliases];
+    }
+
+    /** Why the project cannot take a domain of this type here, or null. */
+    private function typeRefusal(User $user, string $project, string $type, string $domainName, string $parentDomain): ?string
+    {
+        $limit = NewDomain::reachedLimit($user, $type);
+        if ($limit !== null) {
+            return $type === 'addon'
+                ? "Addon domains limit of {$limit} reached."
+                : "Subdomains limit of {$limit} reached.";
+        }
+        if ($type !== 'sub') {
+            return null;
+        }
+
+        if ($parentDomain === '') {
+            return '--parent-domain is required when --type=sub.';
+        }
+        if (!$user->domains()->getQuery()->where('domain', $parentDomain)->exists()) {
+            return "Parent domain '{$parentDomain}' not found for project '{$project}'.";
+        }
+        if (!Str::endsWith($domainName, $parentDomain)) {
+            return "Domain '{$domainName}' must end with parent domain '{$parentDomain}'.";
+        }
+
+        return null;
+    }
+
+    /** @param list<string> $aliases */
+    private function nameRefusal(string $domainName, array $aliases): ?string
+    {
+        $problem = NewDomain::nameProblem($domainName, $aliases);
+        if ($problem === null) {
+            return null;
+        }
+
+        [$kind, $name] = $problem;
+
+        return match ($kind) {
+            NewDomain::INVALID_DOMAIN => "Invalid domain name '{$name}'.",
+            NewDomain::DOMAIN_EXISTS => "Domain '{$name}' already exists.",
+            NewDomain::INVALID_ALIAS => "Invalid alias '{$name}'.",
+            NewDomain::ALIAS_EXISTS => "Alias '{$name}' already exists.",
+        };
+    }
+
+    /** @param list<string> $aliases */
+    private function summarize(
+        User $user,
+        string $domainName,
+        string $type,
+        string $parentDomain,
+        array $aliases,
+        bool $noSsl,
+        ?string $upstreamHost,
+        ?int $upstreamPort,
+    ): void {
+        $proxyLabel = ($upstreamHost !== null && $upstreamPort !== null)
+            ? "{$upstreamHost}:{$upstreamPort}"
+            : '-';
+
+        $this->line('');
+        $this->info('Create domain');
+        $table = new Table($this->output);
+        $table->setRows([
+            ['Domain', $domainName],
+            ['Project', $user->username],
+            ['Type', $type],
+            ['Parent domain', $type === 'sub' ? $parentDomain : '-'],
+            ['Aliases', $aliases === [] ? '-' : implode("\n", $aliases)],
+            ['SSL', $noSsl ? 'disabled' : 'enabled'],
+            ['Document root', "/{$domainName}/public_html"],
+            ['Proxy to', $proxyLabel],
+        ]);
+        $table->render();
+    }
+
+    /** Route the domain's 80 and 443 to the upstream, then rebuild it. */
+    private function proxyTo(User $user, Domain $domain, string $upstreamHost, int $upstreamPort): void
+    {
+        $domainName = $domain->domain;
+        foreach ([80, 443] as $listenPort) {
+            ProxyRule::updateOrCreate(
+                [
+                    'owner_scope' => 'user',
+                    'username' => $user->username,
+                    'transport' => 'http',
+                    'listen_port' => $listenPort,
+                    'server_name' => $domainName,
+                ],
+                [
+                    'enabled' => true,
+                    'listen_ip' => '*',
+                    'upstream_host' => $upstreamHost,
+                    'upstream_port' => $upstreamPort,
+                    'upstream_protocol' => 'http',
+                    'is_generated' => false,
+                    'metadata' => [
+                        'source' => 'domain-create',
+                        'description' => "{$listenPort}→{$upstreamPort} for {$domainName}",
+                    ],
+                ]
+            );
+        }
+        $domain->projectDomain()->rebuild();
+        (new System())->webserver()->scheduleWebserverReloadInBackground();
     }
 }

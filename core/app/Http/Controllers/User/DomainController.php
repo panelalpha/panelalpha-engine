@@ -11,6 +11,7 @@ use App\Http\Resources\DomainResource;
 use App\Http\Resources\SslCertificateCollection;
 use App\Http\Resources\SslCertificateResource;
 use App\System;
+use App\Lib\Domains\NewDomain;
 use App\Lib\Ssl\ProjectCertificate;
 use App\Models\Domain;
 use App\Models\User;
@@ -197,73 +198,23 @@ class DomainController extends Controller
          */
         $params = $request->validated();
 
-        if (Str::startsWith($params['domain'], 'www.')) {
-            if (
-                !array_key_exists('aliases', $params)
-                || !is_array($params['aliases'])
-            ) {
-                $params['aliases'] = [];
-            }
-            if (!in_array($params['domain'], $params['aliases'])) {
-                $params['aliases'][] = $params['domain'];
-            }
-            $params['domain'] = Str::after($params['domain'], 'www.');
+        [$params['domain'], $params['aliases']] = NewDomain::withoutWww($params['domain'], $params['aliases'] ?? []);
+
+        $limit = NewDomain::reachedLimit($user, $params['type']);
+        if ($limit !== null) {
+            abort(new JsonResponse($params['type'] === 'addon'
+                ? ['message' => "Addon domains limit of {$limit} reached.", 'error_type' => 'addon_domains_limit_reached']
+                : ['message' => "Subdomains limit of {$limit} reached.", 'error_type' => 'subdomains_limit_reached'], 422));
         }
 
-        switch ($params['type']) {
-            case 'addon':
-                $limit = $user->getAddonDomainsLimit();
-                if ($limit !== null) {
-                    /** @var int */
-                    $count = $user->domains()->getQuery()->where('type', 'addon')->count();
-                    if ($limit <= $count) {
-                        abort(new JsonResponse([
-                            'message' => "Addon domains limit of {$limit} reached.",
-                            'error_type' => 'addon_domains_limit_reached',
-                        ], 422));
-                    }
-                }
-                break;
-            case 'sub':
-                $limit = $user->getSubdomainsLimit();
-                if ($limit !== null) {
-                    /** @var int */
-                    $count = $user->domains()->getQuery()->where('type', 'sub')->count();
-                    if ($limit <= $count) {
-                        abort(new JsonResponse([
-                            'message' => "Subdomains limit of {$limit} reached.",
-                            'error_type' => 'subdomains_limit_reached',
-                        ], 422));
-                    }
-                }
-                break;
-        }
-
-        if (!filter_var($params['domain'], FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
-            throw ValidationException::withMessages([
-                'domain' => 'Invalid domain name.'
-            ]);
-        }
-
-        if (Domain::domainOrAliasExists($params['domain'])) {
-            throw ValidationException::withMessages([
-                'domain' => 'Domain already exists.'
-            ]);
-        }
-
-        if (!empty($params['aliases'])) {
-            foreach ($params['aliases'] as $alias) {
-                if (!filter_var($alias, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
-                    throw ValidationException::withMessages([
-                        'aliases' => 'Invalid alias domain name.'
-                    ]);
-                }
-                if (Domain::domainOrAliasExists($alias)) {
-                    throw ValidationException::withMessages([
-                        'aliases' => 'Domain already exists.',
-                    ]);
-                }
-            }
+        $problem = NewDomain::nameProblem($params['domain'], $params['aliases']);
+        if ($problem !== null) {
+            throw ValidationException::withMessages(match ($problem[0]) {
+                NewDomain::INVALID_DOMAIN => ['domain' => 'Invalid domain name.'],
+                NewDomain::DOMAIN_EXISTS => ['domain' => 'Domain already exists.'],
+                NewDomain::INVALID_ALIAS => ['aliases' => 'Invalid alias domain name.'],
+                NewDomain::ALIAS_EXISTS => ['aliases' => 'Domain already exists.'],
+            });
         }
 
         /** @var Domain */
@@ -271,14 +222,7 @@ class DomainController extends Controller
             'user_id' => $user->id,
             'domain' => $params['domain'],
             'type' => $params['type'],
-            'details' => [
-                'document_root' => "/{$params['domain']}/public_html",
-                'redirect_enabled' => false,
-                'redirect_url' => null,
-                'force_https_redirect' => false,
-                'ssl_disabled' => !empty($params['no_ssl']),
-                'aliases' => $params['aliases'] ?? [],
-            ],
+            'details' => NewDomain::details($params['domain'], !empty($params['no_ssl']), $params['aliases']),
         ]);
 
         try {
