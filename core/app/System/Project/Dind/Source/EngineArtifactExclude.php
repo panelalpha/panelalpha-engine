@@ -5,6 +5,7 @@ namespace App\System\Project\Dind\Source;
 use App\Lib\Deploy\Checkout\CheckoutExclude;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Detect\PlaceholderPage;
+use App\Lib\Deploy\Platform\Dockerfile\BuildContextIgnore;
 use App\Lib\Deploy\Env\EnvExampleCopies;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Strategy\EntrypointWriter;
@@ -99,6 +100,15 @@ final class EngineArtifactExclude
         }
         if (PlaceholderPage::isOneOf($checkout . '/index.html')) {
             $files[] = 'index.html';
+        }
+        // `<Dockerfile>.dockerignore` next to a project's own Dockerfile.
+        foreach (['*', '*/*', '*/*/*'] as $depth) {
+            foreach (glob($checkout . '/' . $depth . '.dockerignore') ?: [] as $path) {
+                $head = is_file($path) ? (string) file_get_contents($path, false, null, 0, 256) : null;
+                if (BuildContextIgnore::isEngineWritten($head)) {
+                    $files[] = substr($path, strlen($checkout) + 1);
+                }
+            }
         }
 
         return array_values(array_unique([...$files, ...EnvExampleCopies::made($checkout)]));

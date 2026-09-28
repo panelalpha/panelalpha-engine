@@ -40,6 +40,16 @@ Everything in the middle column must be at the **top level** of the repository -
 
 The engine never runs your `docker-compose.yml` as it is. It runs a copy made fit for hosting, with resource limits and a restart policy, and your own file stays unchanged. If you edit your compose file on the account, over SSH or with the file tools, start the project again with the `up` or `pull` action. The engine rebuilds that copy from your edited file before it starts the containers. It does not clone the repository again. The same applies to an account with no repository where you created a `docker-compose.yml` yourself.
 
+## Dockerfile projects: what goes into the build
+
+The engine leaves the `.git` folder and its own compose files out of the build, so a redeploy of an unchanged commit can reuse the build cache. It writes `Dockerfile.dockerignore` next to your Dockerfile for this. Docker reads that file instead of `.dockerignore`, so the engine copies your `.dockerignore` rules into it. Your own `.dockerignore` is never changed.
+
+The engine also leaves out `.env.panelalpha`, which holds the project's environment variables when your repository tracks its own `.env`. An empty `.env`, which the engine creates when the project has no environment of its own, is left out too, unless your Dockerfile copies `.env` by name. A `.env` with values stays in the build, so a build step such as Vite or Next.js can read it.
+
+The engine keeps `.git` in the build when your build reads git history: the Dockerfile copies `.git` or runs a command such as `git describe`, or the project takes its version from git (for example `setuptools-scm`). Each redeploy then rebuilds from the first `COPY . .`.
+
+To decide this yourself, put `!.git` in your `.dockerignore` to keep `.git`. You can also commit your own `Dockerfile.dockerignore`. The engine then uses your file as it is.
+
 ## Node projects: the lockfile decides the tool
 
 Whichever lockfile is present is the package manager that gets used:

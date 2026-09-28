@@ -125,6 +125,17 @@ class DetectProjectStrategyTest extends TestCase
         DeployabilityCheck::assert($decision, $this->tmpDir);
     }
 
+    /** #183: a compose file that is there but was not accepted is not "missing". */
+    public function test_a_skipped_compose_file_is_named_rather_than_called_missing(): void
+    {
+        $this->writeFile('docker-compose.yml', "services:\n  db:\n    image: mariadb:11\n");
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('docker-compose.yml was not accepted as a runnable compose file');
+
+        DeployabilityCheck::assert(['strategy' => Strategies::COMPOSE, 'compose_path' => null], $this->tmpDir);
+    }
+
     public function test_a_strategy_that_needs_no_particular_file_is_deployable(): void
     {
         $this->writeFile('README.md', 'hello');

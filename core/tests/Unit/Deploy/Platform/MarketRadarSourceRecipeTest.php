@@ -2,6 +2,8 @@
 
 namespace Tests\Unit\Deploy\Platform;
 
+use App\Lib\Deploy\Detect\DeployabilityCheck;
+use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Health\CheckRegistry;
 use App\Lib\Deploy\Health\CheckRunner;
 use App\Lib\Deploy\Health\ProbedResponse;
@@ -213,6 +215,34 @@ class MarketRadarSourceRecipeTest extends TestCase
         ]);
 
         $this->assertSame('fail', $this->check($report, 'api-health')['status']);
+    }
+
+    /**
+     * engine#221: the recipe is found by its URL, so no detect ran and nothing
+     * told the decision where the compose file is. The deployability check then
+     * refused a checkout that has one.
+     */
+    public function test_a_checkout_with_its_compose_file_is_deployable_through_the_recipe(): void
+    {
+        $project = sys_get_temp_dir() . '/pa-market-radar-' . bin2hex(random_bytes(6));
+        mkdir($project, 0777, true);
+        file_put_contents(
+            $project . '/docker-compose.yml',
+            "services:\n  app:\n    image: nginx:1.27\n    ports:\n      - \"8080:80\"\n"
+        );
+
+        try {
+            SourceRecipes::flush();
+            $decision = DetectProjectStrategy::detect($project, self::URL);
+
+            $this->assertSame('market-radar', $decision['platform']);
+            $this->assertSame('compose', $decision['strategy']);
+            $this->assertSame($project . '/docker-compose.yml', $decision['compose_path']);
+            DeployabilityCheck::assert($decision, $project);
+        } finally {
+            @unlink($project . '/docker-compose.yml');
+            @rmdir($project);
+        }
     }
 
     /**

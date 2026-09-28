@@ -304,14 +304,17 @@ final class DockerfileFinder
     /**
      * A `COPY`/`ADD` source the build context does not contain: GoReleaser
      * copies a CI binary that is gitignored, and building fails late as
-     * `failed to compute cache key`. A build arg counts by its literal prefix
-     * (`build/` in `build/app-${VERSION}`) only; `--from` is another stage.
+     * `failed to compute cache key`. A variable the file assigns a default
+     * (`ARG JAR_FILE=build/libs/*.jar`) is read as that default, since nothing
+     * passes another; any other counts by its literal prefix (`build/` in
+     * `build/app-${VERSION}`) only. `--from` is another stage.
      */
     public static function missingContextSource(string $contents, string $contextDir): ?string
     {
+        $declared = self::declaredValues($contents);
         foreach (self::copyInstructions($contents) as $sources) {
             foreach ($sources as $source) {
-                $required = self::literalPrefix(self::withPlatformArgs($source));
+                $required = self::literalPrefix(self::withPlatformArgs(self::substitute($source, $declared)));
                 if ($required === null) {
                     continue;
                 }

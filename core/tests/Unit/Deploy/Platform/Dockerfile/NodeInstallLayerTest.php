@@ -85,6 +85,29 @@ class NodeInstallLayerTest extends TestCase
         $this->assertStringNotContainsString('pnpm-workspace.yaml', $layer);
     }
 
+    /**
+     * engine#152: zigbee2mqtt ships `.npmrc` and lists it in its own
+     * `.dockerignore`, so BuildKit has no `/.npmrc` to COPY.
+     */
+    public function test_a_file_the_projects_dockerignore_drops_is_not_copied(): void
+    {
+        $dir = sys_get_temp_dir() . '/node-install-ignore-' . bin2hex(random_bytes(6));
+        mkdir($dir);
+        file_put_contents($dir . '/.dockerignore', ".eslintignore\n.git\n.npmrc\nnode_modules\n");
+
+        try {
+            $layer = (new NodeInstallLayer(
+                new BuildRecipe(['package_manager' => 'pnpm'], ['package.json' => true, 'pnpm-lock.yaml' => true, '.npmrc' => true], $dir),
+                'pnpm install --frozen-lockfile'
+            ))->render();
+
+            $this->assertStringNotContainsString('COPY .npmrc', $layer);
+            $this->assertStringContainsString('COPY pnpm-lock.yaml ./', $layer);
+        } finally {
+            exec('rm -rf ' . escapeshellarg($dir));
+        }
+    }
+
     public function test_a_project_with_no_lockfile_copies_only_its_manifest(): void
     {
         $layer = $this->render(['package.json' => true]);

@@ -4,6 +4,7 @@ namespace App\Lib\Deploy\Platform;
 
 use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
+use App\Lib\Deploy\Platform\Probes\ComposeUsableProbe;
 use App\Lib\Deploy\Platform\Probes\ProbeRegistry;
 
 /**
@@ -108,11 +109,30 @@ final class PlatformSelector
             return null;
         }
 
-        $decision = $manifest->describe($context);
+        $decision = $manifest->describe($context, self::composeProbeData($manifest, $context));
         // So a deploy log and an inspection say why this recipe was chosen.
         $decision['source_recipe'] = AppConfigLocator::describe($hit);
 
         return ['manifest' => $manifest, 'decision' => $decision];
+    }
+
+    /**
+     * Where the compose file is, for a recipe that runs one. A recipe is found
+     * by its path, so no detect ran and nothing else fills `compose_path`
+     * (engine#221, #183). Compose only: other strategies' probes would change
+     * what existing recipes build.
+     *
+     * @return array<string, mixed>
+     */
+    private static function composeProbeData(PlatformManifest $manifest, ProjectContext $context): array
+    {
+        if ($manifest->strategy !== Strategies::COMPOSE) {
+            return [];
+        }
+
+        $found = (new ComposeUsableProbe())->evaluate($context);
+
+        return is_array($found) ? $found : [];
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Lib\Deploy\Platform\Dockerfile\BuildContextIgnore;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project as ProjectAggregate;
@@ -72,6 +73,22 @@ class DindEngineArtifactExcludeTest extends TestCase
         $this->assertNotContains('/.env', $lines);
         $this->assertNotContains('/.dockerignore', $lines);
         $this->assertContains('/panelalpha.Dockerfile', $lines);
+    }
+
+    public function test_the_engines_dockerfile_ignore_is_excluded_and_a_projects_is_not(): void
+    {
+        $this->gitInit();
+        $this->put('Dockerfile', "FROM nginx\n");
+        $this->put('api.Dockerfile.dockerignore', "secrets\n");
+        $this->commitAll();
+
+        $this->put('Dockerfile.dockerignore', BuildContextIgnore::render(null, 'Dockerfile', true, false));
+        $this->put('panelalpha.Dockerfile.dockerignore', BuildContextIgnore::render(null, 'panelalpha.Dockerfile', true, true));
+        $this->put('api.Dockerfile.dockerignore', "secrets\nlogs\n");
+
+        $this->exclude()->write();
+
+        $this->assertSame(' M api.Dockerfile.dockerignore', rtrim($this->git('status', '--porcelain')));
     }
 
     public function test_client_lines_are_kept_and_a_second_write_changes_nothing(): void

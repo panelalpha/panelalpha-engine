@@ -21,6 +21,7 @@ use App\Lib\Deploy\Platform\SourceRecipes;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Deploy\Telemetry\DetectionSignal;
 use App\Lib\Deploy\Telemetry\Telemetry;
+use App\System\Project\Dind\Strategy\ManifestDatabase;
 
 /**
  * Turning a checkout into something the account can run: bootstrap it from
@@ -151,6 +152,13 @@ class PrepareFromSource
             ));
         }
 
+        // `database:` is provisioned only by the writers that generate the app
+        // service; anywhere else it used to do nothing, silently (engine#210).
+        $inertDatabase = ManifestDatabase::inertWarning($decision);
+        if ($inertDatabase !== null) {
+            $logger?->warn($inertDatabase);
+        }
+
         // Detection reaching past the manifests is not a failure — Railpack
         // usually builds the project, and where even it has nothing to go on
         // the fallback compose still serves something. Either way nobody has
@@ -172,6 +180,7 @@ class PrepareFromSource
 
         $this->dind->networking()->detectAndCreateProxyRules($user);
         $this->dind->applyProjectEnvVars();
+        $this->dind->strategy()->keepEngineFilesOutOfBuildContext($decision, $projectDir, $chown);
     }
 
     /**

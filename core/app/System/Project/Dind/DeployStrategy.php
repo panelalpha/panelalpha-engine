@@ -4,9 +4,11 @@ namespace App\System\Project\Dind;
 
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Strategy\AccountSecrets;
+use App\System\Project\Dind\Strategy\BuildContextIgnoreWriter;
 use App\System\Project\Dind\Strategy\DockerfileStrategy;
 use App\System\Project\Dind\Strategy\EntrypointWriter;
 use App\System\Project\Dind\Strategy\FrameworkStrategy;
+use App\System\Project\Dind\Strategy\ManifestDatabase;
 use App\System\Project\Dind\Strategy\AppConfigBootstrap;
 use App\System\Project\Dind\Strategy\PhpStrategy;
 use App\System\Project\Dind\Strategy\PrepareStage;
@@ -36,6 +38,7 @@ use App\Lib\Deploy\Platform\Strategies;
  *   {@see PrepareStage}        host-side work between the clone and the build
  *   {@see EntrypointWriter}    the staged entrypoint a generated image installs
  *   {@see AccountSecrets}      stable per-account secrets nobody supplied
+ *   {@see ManifestDatabase}    a manifest's `database:` outside the PHP strategy
  *   {@see UserComposeStrategy} the project's own compose file, hardened
  *   {@see DockerfileStrategy}  a repository that ships its own Dockerfile
  *   {@see RubyStrategy}        Rails and plain Rack applications
@@ -52,6 +55,7 @@ class DeployStrategy
     private ?PrepareStage $prepare = null;
     private ?EntrypointWriter $entrypoint = null;
     private ?AccountSecrets $secrets = null;
+    private ?ManifestDatabase $database = null;
     /** The app config of the deploy in flight, for {@see composeDecision()}. */
     private ?AppConfig $appConfig = null;
     private ?UserComposeStrategy $userCompose = null;
@@ -60,6 +64,7 @@ class DeployStrategy
     private ?PhpStrategy $php = null;
     private ?FrameworkStrategy $framework = null;
     private ?RailpackStrategy $railpack = null;
+    private ?BuildContextIgnoreWriter $contextIgnore = null;
 
     public function __construct(DindProject $dind)
     {
@@ -85,9 +90,20 @@ class DeployStrategy
         return $this->entrypoint ??= new EntrypointWriter($this->dind);
     }
 
+    public function contextIgnore(): BuildContextIgnoreWriter
+    {
+        return $this->contextIgnore ??= new BuildContextIgnoreWriter($this->dind);
+    }
+
     public function secrets(): AccountSecrets
     {
         return $this->secrets ??= new AccountSecrets($this->dind);
+    }
+
+    /** A manifest's `database:` for the writers outside the PHP strategy. */
+    public function database(): ManifestDatabase
+    {
+        return $this->database ??= new ManifestDatabase($this->dind);
     }
 
     /**
@@ -123,6 +139,19 @@ class DeployStrategy
     private function userCompose(): UserComposeStrategy
     {
         return $this->userCompose ??= new UserComposeStrategy($this->dind);
+    }
+
+    /**
+     * Once `.env` is final: keep the engine's files out of a repository
+     * Dockerfile's build context (engine#162).
+     *
+     * @param array<string, mixed> $decision
+     */
+    public function keepEngineFilesOutOfBuildContext(array $decision, string $projectDir, ?string $chown): void
+    {
+        if (($decision['strategy'] ?? null) === Strategies::DOCKERFILE) {
+            $this->dockerfile()->keepEngineFilesOutOfContext($decision, $projectDir, $chown);
+        }
     }
 
     private function dockerfile(): DockerfileStrategy

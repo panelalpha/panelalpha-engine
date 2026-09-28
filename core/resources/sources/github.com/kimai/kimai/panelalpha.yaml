@@ -15,8 +15,8 @@ description: >-
   mysql` for the account's own server and passes the credentials in that URL.
   The database is reachable from the account's nested Docker by the
   engine-managed name, which resolves on the host but not inside the account;
-  the prepare hook pins it into the checkout's `/etc/hosts` via a compose
-  `extra_hosts` layer, the same way the PHP strategy does for Matomo.
+  the dockerfile strategy pins it into the app service's `extra_hosts`, the
+  same way the PHP strategy does for Matomo.
 
   APP_SECRET is generated per account rather than left empty — the entrypoint
   only invents one when the value is blank, persisting it into the `var` volume

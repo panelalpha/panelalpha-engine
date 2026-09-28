@@ -4,7 +4,6 @@ namespace App\System\Project\Dind\Strategy;
 
 use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Compose\DeployCompose;
-use App\Lib\Deploy\Platform\Dockerfile\DockerIgnore;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\DockerfileBuilder;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
@@ -172,29 +171,10 @@ class FrameworkStrategy
             $chown,
             '644'
         );
-        $this->ensureDockerignore($projectDir, $chown);
+        $this->dind->strategy()->contextIgnore()
+            ->write($projectDir, DockerfileBuilder::FILENAME, true, $chown);
 
         $this->writeCompose($decision, $projectDir, $chown, (int) ($decision['port_hint'] ?? self::NODE_PORT));
-    }
-
-    /**
-     * Give the build a `.dockerignore` when the project has none, and never
-     * touch one it wrote itself.
-     *
-     * The engine used to edit the customer's file, stripping any rule that
-     * excluded `.git` so content pipelines could read history during the
-     * build. Nothing needs that now — every recipe whose build reads git runs
-     * on the host against the real checkout — and the edit was what made the
-     * build cache unhittable. {@see DockerIgnore}.
-     */
-    private function ensureDockerignore(string $projectDir, ?string $chown): void
-    {
-        $system = $this->dind->system();
-        $dockerignore = $projectDir . '/.dockerignore';
-
-        if (!$system->filesystem()->fileExists($dockerignore)) {
-            $system->filesystem()->filePutContents($dockerignore, DockerIgnore::contents(), $chown, '644');
-        }
     }
 
     /**
@@ -203,10 +183,17 @@ class FrameworkStrategy
     private function writeCompose(array $decision, string $projectDir, ?string $chown, int $port): void
     {
         $strategy = $this->dind->strategy();
-        $decision = $strategy->sidecars()->mergeRuntimeSidecars(
-            $decision,
-            $strategy->sidecars()->runtimeSidecarsFromProject($projectDir)
-        );
+        $sidecars = $strategy->sidecars()->runtimeSidecarsFromProject($projectDir);
+        // A manifest's `database: mysql`: its DB_* sit under the manifest's
+        // own env, so a recipe that spells a variable itself keeps its value.
+        $database = $strategy->database()->forService($decision, $sidecars['services']);
+        if ($database !== []) {
+            $decision['env'] = array_merge($database['env'] ?? [], is_array($decision['env'] ?? null) ? $decision['env'] : []);
+            if (isset($database['extra_hosts'])) {
+                $decision['extra_hosts'] = $database['extra_hosts'];
+            }
+        }
+        $decision = $strategy->sidecars()->mergeRuntimeSidecars($decision, $sidecars);
         $this->dind->composeWriter()->writeGeneratedCompose(
             $projectDir,
             DeployCompose::framework(

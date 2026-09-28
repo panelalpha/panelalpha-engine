@@ -83,7 +83,12 @@ final class NodeInstallLayer
             }
         }
 
-        return $manifests;
+        // A file the project's .dockerignore drops is not in the build
+        // context, and COPYing it fails the whole build.
+        return array_values(array_filter(
+            $manifests,
+            fn (string $name): bool => !DockerIgnore::excludes($this->recipe->projectDir, $name)
+        ));
     }
 
     private function stripGitHooks(bool $sourcePresent): string

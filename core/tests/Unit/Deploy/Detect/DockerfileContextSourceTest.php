@@ -87,6 +87,49 @@ final class DockerfileContextSourceTest extends TestCase
         );
     }
 
+    /**
+     * github.com/halo-dev/halo: the jar comes from a build arg's default, which
+     * nothing overrides, and Gradle has not run. BuildKit failed with
+     * `lstat /application/build/libs: no such file or directory`.
+     */
+    public function testHaloCopiesAJarNamedByABuildArgDefault(): void
+    {
+        $this->assertSame('${JAR_FILE}', DockerfileFinder::missingContextSource(
+            "FROM eclipse-temurin:21-jre AS builder\nWORKDIR /application\n"
+            . "ARG JAR_FILE=/application/build/libs/*.jar\nCOPY \${JAR_FILE} application.jar\n",
+            $this->dir
+        ));
+    }
+
+    /** github.com/bayang/jelu: `ARG DEPENDENCY=build/dependency`, a layertools extract. */
+    public function testJeluCopiesALayeredJarExtractNamedByABuildArg(): void
+    {
+        $this->assertSame('${DEPENDENCY}/dependencies/', DockerfileFinder::missingContextSource(
+            "FROM eclipse-temurin:17-jre-noble\nARG DEPENDENCY=build/dependency\n"
+            . "COPY \${DEPENDENCY}/dependencies/ ./\nCOPY \${DEPENDENCY}/application/jelu-*.jar ./jelu.jar\n",
+            $this->dir
+        ));
+    }
+
+    public function testABuildArgDefaultThatExistsIsAccepted(): void
+    {
+        mkdir($this->dir . '/src');
+
+        $this->assertNull(DockerfileFinder::missingContextSource(
+            "FROM alpine\nARG SRC=src\nENV DEST=/app\nCOPY \$SRC \$DEST\n",
+            $this->dir
+        ));
+    }
+
+    /** With the packaging Dockerfile out of the way, the Gradle build is what deploys. */
+    public function testAPackagingDockerfileLeavesNoDockerfileCandidate(): void
+    {
+        file_put_contents($this->dir . '/Dockerfile', "FROM eclipse-temurin:21-jre\n"
+            . "ARG JAR_FILE=build/libs/*.jar\nCOPY \${JAR_FILE} app.jar\n");
+
+        $this->assertNull(DockerfileFinder::find($this->dir, ['dockerfile' => true]));
+    }
+
     public function testSlskdCopiesAHeredocNotAContextFile(): void
     {
         // github.com/slskd/slskd: `COPY <<'SCRIPT'` is inline content, and the

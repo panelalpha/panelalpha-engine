@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Checkout;
 
 use App\Lib\Deploy\Platform\AppConfig\PaemdPage;
+use App\Lib\Deploy\Platform\Dockerfile\BuildContextIgnore;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Platform\DockerfileBuilder;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
@@ -53,6 +54,7 @@ final class EngineArtifacts
     {
         return array_map(CheckoutExclude::anchoredPath(...), [
             DockerfileBuilder::FILENAME,
+            BuildContextIgnore::pathFor(DockerfileBuilder::FILENAME),
             NginxConfig::FILENAME,
             StandaloneNodeServe::FILENAME,
             StageScript::FILENAME,

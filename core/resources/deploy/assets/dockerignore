@@ -1,19 +1,13 @@
-# Written only when a project has none of its own; a project's .dockerignore
-# is left exactly as the customer wrote it.
+# The rules a generated build uses when the project has no .dockerignore.
+# The engine writes them into panelalpha.Dockerfile.dockerignore, which
+# BuildKit reads instead of .dockerignore, together with .git and the engine's
+# own files; see BuildContextIgnore. A project's .dockerignore is never edited.
 #
 # .git is the load-bearing line. Two clones of one repository give an
 # identical worktree and different .git bytes, so leaving it in the build
 # context made `COPY . .` hash differently on every deploy and rebuilt every
-# layer below it. See DockerIgnore for the measurement.
+# layer below it.
 .git
 node_modules
 .panelalpha
 npm-debug.log
-
-# The engine's own generated files. They are regenerated every deploy and they
-# live in the build context, so any change to them -- a new port, a changed
-# URL -- rebuilt every layer from `COPY . .` down. Nothing inside the image
-# reads either of them. panelalpha-entrypoint.sh is NOT here: the Dockerfile
-# copies it by name.
-panelalpha.Dockerfile
-docker-compose.yml

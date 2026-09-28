@@ -127,6 +127,8 @@ class RubyStrategy
             $chown,
             '644'
         );
+        $this->dind->strategy()->contextIgnore()
+            ->write($app->project->projectDir, RubyDockerfile::FILENAME, true, $chown);
     }
 
     /**

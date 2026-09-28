@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Deploy\Platform;
 
+use App\Lib\Deploy\Detect\DeployabilityCheck;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigDirectory;
@@ -445,6 +446,50 @@ class SourceRecipeTest extends TestCase
 
         $this->assertSame('matomo', $decision['platform']);
         $this->assertSame(AppConfigDirectory::DIRNAME, $decision['source_recipe']);
+    }
+
+    /**
+     * engine#221 / #183: `extends: compose` from a recipe directory. The file
+     * bootstrap wrote is there, and the decision has to say where.
+     */
+    public function test_a_recipe_extending_compose_carries_its_compose_path(): void
+    {
+        $project = $this->tmpDir . '/stack';
+        mkdir($project . '/' . AppConfigDirectory::DIRNAME, 0777, true);
+        file_put_contents(
+            $project . '/' . AppConfigDirectory::DIRNAME . '/' . AppConfigDirectory::CONFIG,
+            "id: acme-stack\nextends: compose\n"
+        );
+        file_put_contents(
+            $project . '/compose.yaml',
+            "services:\n  web:\n    image: nginx:1.27\n    ports:\n      - \"8080:80\"\n"
+        );
+
+        $decision = DetectProjectStrategy::detect($project, 'https://github.com/acme/stack');
+
+        $this->assertSame('acme-stack', $decision['platform']);
+        $this->assertSame('compose', $decision['strategy']);
+        $this->assertSame($project . '/compose.yaml', $decision['compose_path']);
+        DeployabilityCheck::assert($decision, $project);
+    }
+
+    /** Other strategies are untouched: no probe fills a dockerfile recipe's decision. */
+    public function test_a_recipe_extending_dockerfile_gets_no_probe_data(): void
+    {
+        $project = $this->tmpDir . '/image';
+        mkdir($project . '/' . AppConfigDirectory::DIRNAME, 0777, true);
+        file_put_contents(
+            $project . '/' . AppConfigDirectory::DIRNAME . '/' . AppConfigDirectory::CONFIG,
+            "id: acme-image\nextends: dockerfile\n"
+        );
+        file_put_contents($project . '/Dockerfile.prod', "FROM nginx:1.27\n");
+        file_put_contents($project . '/docker-compose.yml', "services:\n  web:\n    image: nginx:1.27\n");
+
+        $decision = DetectProjectStrategy::detect($project, 'https://github.com/acme/image');
+
+        $this->assertSame('dockerfile', $decision['strategy']);
+        $this->assertNull($decision['compose_path']);
+        $this->assertNull($decision['dockerfile']);
     }
 
     private function write(string $contents): void
