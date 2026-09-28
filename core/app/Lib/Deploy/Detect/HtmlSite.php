@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Detect;
 
+use App\Lib\Deploy\Platform\ProjectContext;
+
 /**
  * A site that is nothing but web documents: HTML, the stylesheets and images
  * it references, and no program of any kind. Every file must be something a
@@ -123,7 +125,7 @@ final class HtmlSite
             }
 
             $absolute = $relative === '' ? $this->projectDir : $this->projectDir . '/' . $relative;
-            foreach (scandir($absolute) ?: [] as $entry) {
+            foreach (ProjectContext::entries($absolute) as $entry) {
                 // Dotfiles are the repository's housekeeping (.gitignore,
                 // .nojekyll, .htaccess), never the reason a tree is a site.
                 if ($entry === '.' || $entry === '..' || str_starts_with($entry, '.')) {

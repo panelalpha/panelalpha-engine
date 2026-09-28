@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform;
 
+use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Runtime\ImageResolver;
 use App\Lib\Deploy\Platform\Runtime\Requirement;
 use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
@@ -78,6 +79,13 @@ final class PlatformValues
         $decision['build_images'] = ImageResolver::buildImages($requirements);
         $decision['output_directory'] = self::outputDirectory($manifest, $context, $decision);
         $decision['runtime_image'] = self::runtimeImage($manifest, $runtimeContext);
+        if (isset($manifest->requires['dotnet'])) {
+            $node = DotnetRuntime::nodeBuildImage($runtimeContext->projectDir);
+            if ($node !== null) {
+                $decision['build_node_image'] = $node;
+                $decision['toolchain'][] = "{$node} in the build stage (an MSBuild target runs a JS tool)";
+            }
+        }
         $decision['resolved_commands'] = self::resolvedCommands($manifest, $context);
 
         if (self::isJsProject($manifest, $context)) {
@@ -113,6 +121,7 @@ final class PlatformValues
                 'go.build' => GoRuntime::buildCommand($dir, $context->sourceUrl),
                 'dotnet.build' => DotnetRuntime::buildCommand($dir),
                 'dotnet.start' => DotnetRuntime::startCommand(),
+                'java.build-gradle' => JavaRuntime::gradleBuildCommand($dir),
                 'java.start' => JavaRuntime::startCommand(false),
                 'java.start-gradle' => JavaRuntime::startCommand(true),
                 'laravel.assets' => AssetPublish::buildCommand(self::appRootContext($manifest, $context)->composer()),
@@ -123,6 +132,50 @@ final class PlatformValues
         }
 
         return $resolved;
+    }
+
+    /**
+     * `install_command` / `build_command` with an app config's own build
+     * commands folded in. The app config's commands are stripped from the
+     * manifest it describes, and the host build reads only these two strings,
+     * so a recipe's `stage: build` never ran (engine#171). Unchanged when the
+     * app config declares no build command.
+     *
+     * @param array<string, mixed> $decision
+     * @return array<string, mixed>
+     */
+    public static function withAppConfigBuild(
+        PlatformManifest $manifest,
+        ?AppConfig $appConfig,
+        ProjectContext $context,
+        array $decision
+    ): array {
+        $own = $appConfig?->commands(PlatformStage::BUILD) ?? [];
+        if ($own === []) {
+            return $decision;
+        }
+
+        $resolved = is_array($decision['resolved_commands'] ?? null) ? $decision['resolved_commands'] : [];
+        $dependencies = [];
+        $assets = [];
+        foreach (StageResolver::commandsFor(PlatformStage::BUILD, $manifest, $appConfig, null, $context) as $command) {
+            // A resolver answers for the manifest's command, never for the app
+            // config's replacement of it.
+            $run = in_array($command, $own, true) ? $command->run : ($resolved[$command->id] ?? $command->run);
+            if (trim($run) === '') {
+                continue;
+            }
+            $run = $command->tolerantRun($run);
+            if ($command->role === PlatformCommand::ROLE_DEPENDENCIES) {
+                $dependencies[] = $run;
+            } else {
+                $assets[] = $run;
+            }
+        }
+        $decision['install_command'] = implode(' && ', $dependencies);
+        $decision['build_command'] = implode(' && ', $assets);
+
+        return $decision;
     }
 
     /**
@@ -292,7 +345,7 @@ final class PlatformValues
             'default_start' => self::placeholderDefault($decision['start_command'] ?? ''),
             'env' => $manifest->env,
         ];
-        foreach (['workspace_package', 'workspace_slug'] as $key) {
+        foreach (['workspace_package', 'workspace_slug', 'workspace_relative'] as $key) {
             if (isset($decision[$key]) && is_string($decision[$key]) && $decision[$key] !== '') {
                 $partial[$key] = $decision[$key];
             }

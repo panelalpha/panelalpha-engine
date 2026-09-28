@@ -239,7 +239,7 @@ class SourceBundle
 
                 return !($file->isDir() && SourceBundlePolicy::isExcludedDirectory($file->getFilename()));
             }
-        ));
+        ), \RecursiveIteratorIterator::LEAVES_ONLY, \RecursiveIteratorIterator::CATCH_GET_CHILD);
     }
 
     /**

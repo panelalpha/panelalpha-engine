@@ -36,6 +36,18 @@ final class SystemPackages
     ];
 
     /**
+     * Gems whose C extension links a system library they do not vendor, by
+     * gem => apt package. Looked up in Gemfile.lock too, since these arrive
+     * transitively: idn-ruby through twitter-text, and extconf fails without
+     * the headers.
+     *
+     * @var array<string, string>
+     */
+    private const NATIVE_GEM_PACKAGES = [
+        'idn-ruby' => 'libidn-dev',
+    ];
+
+    /**
      * Postgres is the Rails 7+ default and the cheapest safe guess when no
      * database gem is recognised; an unused -dev package only costs build time.
      */
@@ -46,7 +58,22 @@ final class SystemPackages
      */
     public static function for(Gemfile $gemfile): array
     {
-        return array_merge(self::ALWAYS, self::databasePackages($gemfile));
+        return array_merge(self::ALWAYS, self::databasePackages($gemfile), self::nativeGemPackages($gemfile));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function nativeGemPackages(Gemfile $gemfile): array
+    {
+        $packages = [];
+        foreach (self::NATIVE_GEM_PACKAGES as $gem => $package) {
+            if (($gemfile->requires($gem) || $gemfile->locks($gem)) && !in_array($package, $packages, true)) {
+                $packages[] = $package;
+            }
+        }
+
+        return $packages;
     }
 
     /**

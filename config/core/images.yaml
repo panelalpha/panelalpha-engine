@@ -343,7 +343,9 @@ runtimes:
   java:
     # Java's "version" is a JDK release *and* a build tool, because that is what
     # has to be decided: a Gradle project built in the Maven image has no gradle
-    # on PATH. Both entries are JDK 21; they differ in the builder.
+    # on PATH. The JDK comes from the project (JavaRuntime::resolve): javac
+    # cannot compile `release 25` on 21, and a Gradle toolchain wants its
+    # exact version.
     default: "21-maven"
     image:
       # maven and gradle publish under different names, so there is no one
@@ -351,13 +353,27 @@ runtimes:
       # default for anything not overridden.
       from: "maven:3-eclipse-temurin-21"
       overrides:
+        "25-maven":
+          from: "maven:3-eclipse-temurin-25"
+        "17-gradle":
+          from: "gradle:8-jdk17"
         "21-gradle":
           from: "gradle:8-jdk21"
+        # Gradle 8 cannot run on JDK 25; 9.1 is the first that can.
+        "25-gradle":
+          from: "gradle:9-jdk25"
+    # Only the 21 pair is the everyday case; the rest are pulled on demand.
     versions:
       - version: "21-maven"
         why: "Java builds under Maven"
+      - version: "25-maven"
+        why: "Maven projects compiling for Java 22+"
+      - version: "17-gradle"
+        why: "Gradle toolchain 17, or a wrapper older than Gradle 8.5"
       - version: "21-gradle"
         why: "Java builds under Gradle"
+      - version: "25-gradle"
+        why: "Gradle projects compiling for Java 22+"
 
   dotnet:
     # The target framework a project declares, not an SDK release: a .csproj

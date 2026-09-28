@@ -419,6 +419,31 @@ class JsPackageManagerTest extends TestCase
         $this->assertSame('', $noDefault);
     }
 
+    public function test_resolve_lifecycle_command_runs_a_framework_default_inside_the_workspace(): void
+    {
+        // engine#160: `npx next build` at a pnpm workspace root finds no next.
+        $partial = [
+            'default_build' => 'npx next build',
+            'default_start' => 'npx next start -H 0.0.0.0 -p 3000',
+            'workspace_relative' => 'apps/nextjs-app',
+            'workspace_slug' => 'nextjs-app',
+        ];
+
+        $this->assertSame(
+            "cd 'apps/nextjs-app' && npx next build",
+            JsPackageManager::resolveLifecycleCommand('pnpm', [], 'build', $partial)
+        );
+        $this->assertSame(
+            "cd 'apps/nextjs-app' && npx next start -H 0.0.0.0 -p 3000",
+            JsPackageManager::resolveLifecycleCommand('pnpm', [], 'start', $partial)
+        );
+        // The root's own script still runs at the root.
+        $this->assertSame(
+            'pnpm run build',
+            JsPackageManager::resolveLifecycleCommand('pnpm', ['build' => 'turbo run build --filter=web'], 'build', $partial)
+        );
+    }
+
     public function test_resolve_lifecycle_command_leaves_already_filtered_turbo_script_untouched(): void
     {
         $command = JsPackageManager::resolveLifecycleCommand(

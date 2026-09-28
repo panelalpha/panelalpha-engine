@@ -28,6 +28,9 @@ final class BuildRecipe
 
     public readonly string $outputDirectory;
 
+    /** A Node image whose toolchain the build stage copies in, or ''. */
+    public readonly string $buildNodeImage;
+
     /** @var array<string, string> */
     public readonly array $env;
 
@@ -57,6 +60,7 @@ final class BuildRecipe
         $this->buildCommand = self::text($decision, 'build_command');
         $this->runtimeImage = self::text($decision, 'runtime_image');
         $this->outputDirectory = self::text($decision, 'output_directory');
+        $this->buildNodeImage = self::text($decision, 'build_node_image');
         $this->portHint = (int) ($decision['port_hint'] ?? 0);
         $this->env = self::environment($decision);
         $this->packageManager = self::text($decision, 'package_manager')

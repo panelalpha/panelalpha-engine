@@ -90,6 +90,19 @@ class NextWorkspaceProbeTest extends ProbeTestCase
         $this->assertSame('packages/site', $this->probe()->evaluate($this->context())['workspace_relative']);
     }
 
+    public function test_the_app_with_its_own_next_config_beats_a_server_that_imports_next(): void
+    {
+        // engine#160, Teable: nestjs-backend depends on next to serve the app
+        // and sorts first; nextjs-app is the app.
+        $this->writeJson('package.json', ['name' => '@teable/teable']);
+        $this->write('pnpm-workspace.yaml', "packages:\n  - apps/*\n");
+        $this->writeJson('apps/nestjs-backend/package.json', ['dependencies' => ['next' => '14.2.0']]);
+        $this->writeJson('apps/nextjs-app/package.json', ['name' => '@teable/app', 'dependencies' => ['next' => '14.2.0']]);
+        $this->write('apps/nextjs-app/next.config.js', 'module.exports = {};');
+
+        $this->assertSame('apps/nextjs-app', $this->probe()->evaluate($this->context())['workspace_relative']);
+    }
+
     public function test_a_web_directory_that_is_itself_the_package_is_found(): void
     {
         // `web/` holding the app directly, rather than `web/<name>/`.

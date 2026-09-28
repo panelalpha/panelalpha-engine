@@ -6,6 +6,7 @@ use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Compose\AppRoot;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
+use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\PlatformRegistry;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Platform\ProjectContext;
@@ -49,6 +50,24 @@ class EntrypointWriter
                 $this->dind->userModel()->getDeploymentStatus()
             ),
         ];
+    }
+
+    /**
+     * Detection named a platform the registry cannot find (engine#169: a
+     * worker's stale recipe list). No entrypoint follows, so every stage
+     * command is dropped; this is the line that says so.
+     *
+     * @param array<string, mixed> $decision
+     */
+    public static function unresolvedPlatformWarning(array $decision, ?PlatformManifest $manifest): ?string
+    {
+        $platform = $decision['platform'] ?? null;
+        if ($manifest !== null || !is_string($platform) || $platform === '') {
+            return null;
+        }
+
+        return "Platform '{$platform}' was detected but could not be resolved;"
+            . ' no entrypoint was written, so its install, upgrade and start commands will not run.';
     }
 
     /**
@@ -141,6 +160,10 @@ class EntrypointWriter
 
         $plan = app(DeployPlanContext::class)->get();
         $manifest = PlatformRegistry::forDecision($decision);
+        $unresolved = self::unresolvedPlatformWarning($decision, $manifest);
+        if ($unresolved !== null) {
+            $this->dind->shell()->logger()?->warn($unresolved);
+        }
         if ($manifest === null || $manifest->serveCommand() === null) {
             // A project that ships its own compose file or Dockerfile defines
             // its own runtime, so there is no generated entrypoint for a plan

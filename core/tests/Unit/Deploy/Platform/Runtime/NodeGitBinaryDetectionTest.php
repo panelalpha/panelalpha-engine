@@ -133,4 +133,59 @@ class NodeGitBinaryDetectionTest extends TestCase
 
         $this->assertFalse(NodeRuntime::needsGitBinary(ProjectContext::at($this->tmpDir)));
     }
+
+    /** grocy: an https URL to a `.git` repo, which yarn 1 clones with the git binary. */
+    public function test_an_https_git_repository_dependency_counts(): void
+    {
+        $this->write('package.json', (string) json_encode([
+            'dependencies' => [
+                '@danielfarrell/bootstrap-combobox' => 'https://github.com/berrnd/bootstrap-combobox.git#master-fork',
+            ],
+        ]));
+
+        $this->assertTrue(NodeRuntime::needsGitBinary(ProjectContext::at($this->tmpDir)));
+    }
+
+    /** yarn.lock records the same dependency without any `git+`. */
+    public function test_a_yarn_lock_git_resolution_counts(): void
+    {
+        $this->write('package.json', (string) json_encode(['dependencies' => ['bootstrap' => '^4.6.2']]));
+        $this->write('yarn.lock', "\"@danielfarrell/bootstrap-combobox@https://github.com/berrnd/bootstrap-combobox.git#master-fork\":\n"
+            . "  version \"1.2.0\"\n"
+            . "  resolved \"https://github.com/berrnd/bootstrap-combobox.git#76d7b5a17bfaaad5ed2296b321d85bf60a900e2b\"\n");
+
+        $this->assertTrue(NodeRuntime::needsGitBinary(ProjectContext::at($this->tmpDir)));
+    }
+
+    public function test_a_pnpm_git_resolution_counts(): void
+    {
+        $this->write('package.json', (string) json_encode(['dependencies' => ['a' => '^1.0.0']]));
+        $this->write('pnpm-lock.yaml', "packages:\n  a@1.0.0:\n"
+            . "    resolution: {commit: 0123abc, repo: https://github.com/acme/a, type: git}\n");
+
+        $this->assertTrue(NodeRuntime::needsGitBinary(ProjectContext::at($this->tmpDir)));
+    }
+
+    public function test_the_github_shorthand_counts(): void
+    {
+        $this->write('package.json', (string) json_encode(['dependencies' => ['a' => 'acme/a#v2']]));
+
+        $this->assertTrue(NodeRuntime::needsGitBinary(ProjectContext::at($this->tmpDir)));
+    }
+
+    /** Specs that look path- or URL-ish but never clone. */
+    public function test_non_git_specs_do_not_count(): void
+    {
+        $this->write('package.json', (string) json_encode(['dependencies' => [
+            'a' => '^1.2.3',
+            'b' => 'workspace:*',
+            'c' => 'file:../c',
+            'd' => 'npm:other@^2',
+            'e' => 'https://example.com/e-1.0.0.tgz',
+            'f' => './vendor/f',
+            'g' => '1.x || 2.x',
+        ]]));
+
+        $this->assertFalse(NodeRuntime::needsGitBinary(ProjectContext::at($this->tmpDir)));
+    }
 }

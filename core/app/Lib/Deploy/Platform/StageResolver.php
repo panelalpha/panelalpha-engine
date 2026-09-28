@@ -37,16 +37,34 @@ final class StageResolver
     ): array {
         $commands = $plan !== null && $plan->definesStage($stage)
             ? $plan->commandsFor($stage)
-            : array_merge(
-                $manifest?->stage($stage) ?? [],
-                $appConfig?->commands($stage) ?? []
-            );
+            : self::merge($manifest?->stage($stage) ?? [], $appConfig?->commands($stage) ?? []);
 
         if ($context !== null) {
             $commands = PlatformMatcher::applicable($commands, $context);
         }
 
         return PlatformCommand::ordered($commands);
+    }
+
+    /**
+     * The manifest's commands, then the app config's. An app config command
+     * with a manifest command's id replaces it rather than running beside it:
+     * a recipe restating `composer-install` means "instead of", and running
+     * both paid for the dependency tree twice (engine#171).
+     *
+     * @param list<PlatformCommand> $manifest
+     * @param list<PlatformCommand> $own
+     * @return list<PlatformCommand>
+     */
+    private static function merge(array $manifest, array $own): array
+    {
+        $replaced = array_map(static fn (PlatformCommand $c): string => $c->id, $own);
+        $kept = array_filter(
+            $manifest,
+            static fn (PlatformCommand $c): bool => !in_array($c->id, $replaced, true)
+        );
+
+        return array_merge(array_values($kept), $own);
     }
 
     /**

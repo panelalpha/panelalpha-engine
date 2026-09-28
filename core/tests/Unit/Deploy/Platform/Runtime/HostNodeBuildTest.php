@@ -94,9 +94,17 @@ class HostNodeBuildTest extends TestCase
             ])
         );
         $this->assertSame(
-            'PATH=/app/node_modules/.bin:$PATH astro build',
+            'export PATH=/app/node_modules/.bin:$PATH && astro build',
             NodeRuntime::nginxAssetBuildCommand('npm', [
                 'build' => 'astro check && astro build',
+            ])
+        );
+        // engine#151: every command after the stripped prefix needs the
+        // project's binaries, not only the first (reveal.js).
+        $this->assertSame(
+            'export PATH=/app/node_modules/.bin:$PATH && vite build && vite build -c vite.config.styles.ts',
+            NodeRuntime::nginxAssetBuildCommand('npm', [
+                'build' => 'tsc && vite build && vite build -c vite.config.styles.ts',
             ])
         );
         $this->assertSame(

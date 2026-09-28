@@ -104,4 +104,36 @@ class CommandDockerfileTest extends TestCase
 
         $this->assertStringContainsString('FROM node:', $dockerfile);
     }
+
+    /**
+     * Memtly.Core's csproj runs `npm ci` during publish; the SDK image has no
+     * Node, so the build died with MSB3073 / exit 127.
+     */
+    public function test_a_build_needing_node_gets_it_copied_into_the_build_stage(): void
+    {
+        $dockerfile = $this->render([
+            'image' => 'mcr.microsoft.com/dotnet/sdk:10.0',
+            'runtime_image' => 'mcr.microsoft.com/dotnet/aspnet:10.0',
+            'output_directory' => 'out',
+            'install_command' => 'dotnet publish -c Release -o out',
+            'build_node_image' => 'node:20-bookworm-slim',
+        ]);
+        [$build, $runtime] = explode("\nFROM ", $dockerfile, 2);
+
+        $this->assertStringContainsString('COPY --from=node:20-bookworm-slim /usr/local/bin/ /usr/local/bin/', $build);
+        $this->assertStringContainsString('COPY --from=node:20-bookworm-slim /usr/local/lib/node_modules/', $build);
+        $this->assertLessThan(strpos($build, 'RUN dotnet publish'), strpos($build, '--from=node:20'));
+        $this->assertStringNotContainsString('node:20', $runtime, 'Node stays out of the image that runs');
+    }
+
+    public function test_a_build_not_needing_node_gets_none(): void
+    {
+        $dockerfile = $this->render([
+            'image' => 'mcr.microsoft.com/dotnet/sdk:8.0',
+            'runtime_image' => 'mcr.microsoft.com/dotnet/aspnet:8.0',
+            'output_directory' => 'out',
+        ]);
+
+        $this->assertStringNotContainsString('node', $dockerfile);
+    }
 }

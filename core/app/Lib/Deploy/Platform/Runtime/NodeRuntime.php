@@ -37,6 +37,12 @@ final class NodeRuntime implements Runtime
     public const FALLBACK_START = 'node index.js';
 
     /**
+     * What `npm run` would have put on PATH, for a build script run without
+     * it (see {@see nginxAssetBuildCommand()}).
+     */
+    public const NODE_MODULES_BIN_PATH = 'export PATH=/app/node_modules/.bin:$PATH';
+
+    /**
      * The variant a project that has to compile a dependency gets: the same
      * Debian release and Node, without `-slim`. `node:*-bookworm` carries
      * python3, make and g++, all three of which `node-gyp rebuild` needs.
@@ -233,10 +239,9 @@ final class NodeRuntime implements Runtime
         }
 
         $context = ProjectContext::at($projectDir);
-        [$raw] = self::declaredVersion($context, $package);
-        $major = self::resolveMajor($raw) ?? self::defaultMajor();
+        [, , $major] = self::selectedVersion($context, $package);
 
-        return self::withToolchain(self::imageTag($major), $context, $package);
+        return self::withToolchain(self::imageTag($major ?? self::defaultMajor()), $context, $package);
     }
 
     /**
@@ -374,7 +379,7 @@ final class NodeRuntime implements Runtime
     {
         foreach (['dependencies', 'devDependencies', 'optionalDependencies'] as $section) {
             foreach ((array) ($dependencies[$section] ?? []) as $spec) {
-                if (is_string($spec) && preg_match('#^(?:git\+|git://|github:|bitbucket:|gitlab:)#', $spec) === 1) {
+                if (is_string($spec) && self::isGitSpec($spec)) {
                     return true;
                 }
             }
@@ -386,12 +391,33 @@ final class NodeRuntime implements Runtime
         // build decision.
         foreach (self::LOCKFILES as $lockfile) {
             $contents = $context->contents($lockfile);
-            if ($contents !== null && str_contains($contents, 'git+')) {
+            if ($contents !== null && preg_match(self::GIT_IN_LOCKFILE, $contents) === 1) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * A git source as a lockfile records it: npm's `git+ssh://`, yarn's
+     * `https://github.com/o/r.git#<sha>` (grocy), pnpm's `type: git`.
+     */
+    private const GIT_IN_LOCKFILE = '~git\+|git://|\.git#|\btype: git\b~';
+
+    /**
+     * A package.json dependency value npm or yarn fetches by cloning: an
+     * explicit git URL or host prefix, an https URL to a `.git` repository
+     * (grocy's `https://github.com/berrnd/bootstrap-combobox.git#master-fork`),
+     * or the bare `owner/repo` GitHub shorthand.
+     */
+    private static function isGitSpec(string $spec): bool
+    {
+        $spec = trim($spec);
+
+        return preg_match('#^(?:git\+|git://|github:|bitbucket:|gitlab:)#', $spec) === 1
+            || preg_match('#^https?://[^\s\#]+\.git(?:\#|$)#', $spec) === 1
+            || preg_match('#^[A-Za-z0-9][\w.-]*/[\w.-]+(?:\#\S*)?$#', $spec) === 1;
     }
 
 
@@ -635,14 +661,13 @@ final class NodeRuntime implements Runtime
             return null;
         }
 
-        [$raw, $source] = self::declaredVersion($context);
+        [$raw, $source, $resolved] = self::selectedVersion($context);
         if ($raw === '') {
             return new Requirement('node', self::defaultMajor(), '', 'engine default');
         }
 
         // Reported as the engine's when unresolved: crediting package.json for
         // a version it did not produce makes the deploy log a liar.
-        $resolved = self::resolveMajor($raw);
 
         return new Requirement(
             'node',
@@ -655,6 +680,157 @@ final class NodeRuntime implements Runtime
     public function image(Requirement $requirement): string
     {
         return self::imageTag($requirement->version);
+    }
+
+    /**
+     * The declared version, raised to the oldest major the project's own
+     * toolchain runs on when that is newer.
+     *
+     * A pinned package manager always counts: pnpm 11 imports `node:sqlite`
+     * and dies on Node 20 whatever `engines.node` says. A direct dependency's
+     * `engines.node` counts only when the project declared nothing: Angular 22
+     * refuses Node 20, and the engine default was picking it.
+     *
+     * @param array<string, mixed> $package an already-parsed package.json
+     * @return array{0: string, 1: string, 2: ?string} raw constraint, source, resolved major
+     */
+    private static function selectedVersion(ProjectContext $context, array $package = []): array
+    {
+        $package = $package !== [] ? $package : ($context->package() ?? []);
+        [$raw, $source] = self::declaredVersion($context, $package);
+        $major = self::resolveMajor($raw);
+
+        $floors = [self::packageManagerFloor($package)];
+        if ($major === null) {
+            $floors[] = self::dependencyFloor($context, $package);
+        }
+        foreach ($floors as $floor) {
+            if ($floor === null) {
+                continue;
+            }
+            $floorMajor = self::resolveMajor($floor[0]);
+            if ($floorMajor !== null && (int) $floorMajor > (int) ($major ?? self::defaultMajor())) {
+                [$raw, $source, $major] = [$floor[0], $floor[1], $floorMajor];
+            }
+        }
+
+        return [$raw, $source, $major];
+    }
+
+    /**
+     * Node a pinned package manager needs, from its own `engines.node`.
+     * Only majors with a floor above what the images have always shipped.
+     *
+     * @param array<string, mixed> $package
+     * @return array{0: string, 1: string}|null
+     */
+    private static function packageManagerFloor(array $package): ?array
+    {
+        $field = $package['packageManager'] ?? null;
+        if (!is_string($field) || preg_match('/^pnpm@(\d+)/', trim($field), $m) !== 1 || (int) $m[1] < 11) {
+            return null;
+        }
+
+        return ['>=22.13', 'package.json packageManager ' . trim($field)];
+    }
+
+    /**
+     * The highest `engines.node` floor among the root's direct dependencies,
+     * as the lockfile recorded it. Yarn and Bun lockfiles carry no engines.
+     *
+     * @param array<string, mixed> $package
+     * @return array{0: string, 1: string}|null
+     */
+    private static function dependencyFloor(ProjectContext $context, array $package): ?array
+    {
+        $names = [];
+        foreach (['dependencies', 'devDependencies'] as $section) {
+            foreach (array_keys(is_array($package[$section] ?? null) ? $package[$section] : []) as $name) {
+                $names[] = (string) $name;
+            }
+        }
+        if ($names === [] || $context->projectDir === '') {
+            return null;
+        }
+
+        foreach (['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml'] as $lockfile) {
+            if (!$context->hasFile($lockfile)) {
+                continue;
+            }
+            $engines = $lockfile === 'pnpm-lock.yaml'
+                ? self::pnpmLockEngines((string) $context->contents($lockfile))
+                : self::npmLockEngines($context->json($lockfile) ?? []);
+
+            $best = null;
+            foreach ($names as $name) {
+                $constraint = $engines[$name] ?? null;
+                $major = $constraint === null ? null : self::parseMajor($constraint);
+                if ($major !== null && ($best === null || $major > $best[2])) {
+                    $best = [$constraint, $name . ' engines.node in ' . $lockfile, $major];
+                }
+            }
+
+            return $best === null ? null : [$best[0], $best[1]];
+        }
+
+        return null;
+    }
+
+    /**
+     * `engines.node` per top-level package in an npm lockfile (v2/v3).
+     *
+     * @param array<string, mixed> $lock
+     * @return array<string, string>
+     */
+    private static function npmLockEngines(array $lock): array
+    {
+        $engines = [];
+        foreach ((array) ($lock['packages'] ?? []) as $path => $entry) {
+            if (!is_string($path) || !str_starts_with($path, 'node_modules/') || !is_array($entry)) {
+                continue;
+            }
+            $name = substr($path, strlen('node_modules/'));
+            $node = $entry['engines']['node'] ?? null;
+            if (!str_contains($name, '/node_modules/') && is_string($node)) {
+                $engines[$name] = $node;
+            }
+        }
+
+        return $engines;
+    }
+
+    /**
+     * `engines.node` per package in a pnpm lockfile, read line by line: the
+     * file runs to megabytes, and only `name@version:` headers under
+     * `packages:` and their `engines: {node: ...}` line matter.
+     *
+     * @return array<string, string>
+     */
+    private static function pnpmLockEngines(string $lock): array
+    {
+        $engines = [];
+        $current = null;
+        $inPackages = false;
+        foreach (preg_split('/\R/', $lock) ?: [] as $line) {
+            if ($line !== '' && $line[0] !== ' ') {
+                $inPackages = rtrim($line) === 'packages:';
+                $current = null;
+                continue;
+            }
+            if (!$inPackages) {
+                continue;
+            }
+            // v9 `'@scope/name@1.2.3':`, v6 `/@scope/name@1.2.3:`.
+            if (preg_match("#^  '?/?((?:@[^/\\s']+/)?[^@\\s'/]+)@\\S*:\\s*$#", $line, $m) === 1) {
+                $current = $m[1];
+                continue;
+            }
+            if ($current !== null && preg_match("/^    engines: \\{node: '?([^',}]+)'?/", $line, $m) === 1) {
+                $engines[$current] ??= trim($m[1]);
+            }
+        }
+
+        return $engines;
     }
 
     /**
@@ -954,7 +1130,10 @@ final class NodeRuntime implements Runtime
             if (is_string($raw)) {
                 $stripped = self::stripTypecheckPrefix($raw);
                 if ($stripped !== '' && $stripped !== trim($raw)) {
-                    return 'PATH=/app/node_modules/.bin:$PATH ' . $stripped;
+                    // Exported, not a `PATH=… cmd` prefix: that reaches only the
+                    // first command, and reveal.js's `vite build && vite build -c …`
+                    // died on `sh: 1: vite: not found` at the second.
+                    return self::NODE_MODULES_BIN_PATH . ' && ' . $stripped;
                 }
             }
 

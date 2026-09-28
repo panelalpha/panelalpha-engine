@@ -195,6 +195,21 @@ class DockerfileBuilderTest extends TestCase
         );
     }
 
+    /** The Node image a .NET build copies from is preloaded with the SDK. */
+    public function test_preload_images_for_dotnet_includes_node_when_a_target_runs_npm(): void
+    {
+        $this->write('App.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"><TargetFramework>net8.0</TargetFramework></Project>');
+        $plain = Images::preloadImagesFor(Strategies::DOTNET, null, $this->tmpDir);
+        $this->assertNotContains(Images::NODE_IMAGE, $plain);
+
+        $this->write('App.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"><TargetFramework>net8.0</TargetFramework>'
+            . '<Target Name="Npm"><Exec Command="npm ci" /></Target></Project>');
+        $this->assertSame(
+            [...$plain, Images::NODE_IMAGE],
+            Images::preloadImagesFor(Strategies::DOTNET, null, $this->tmpDir)
+        );
+    }
+
     public function test_node_image_follows_engines_field(): void
     {
         // Deliberately a major the default is not, so this proves the engines

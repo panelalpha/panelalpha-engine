@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Platform\AppConfig;
 
+use App\Lib\Deploy\Platform\ProjectContext;
+
 /**
  * Plain filesystem reads, for callers that need no privilege escalation —
  * tests, and anything inspecting a directory the process already owns.
@@ -36,7 +38,7 @@ final class LocalAppConfigSource implements AppConfigSource
         }
 
         $found = [];
-        foreach (scandir($dir) ?: [] as $entry) {
+        foreach (ProjectContext::entries($dir) as $entry) {
             if ($entry === '.' || $entry === '..') {
                 continue;
             }

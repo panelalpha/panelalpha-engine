@@ -530,7 +530,18 @@ class JsPackageManager
             return self::scriptCommand($pm, $kind);
         }
 
-        return !empty($partial[$defaultKey]) ? (string) $partial[$defaultKey] : '';
+        if (empty($partial[$defaultKey])) {
+            return '';
+        }
+
+        // The framework's own default names its binary (`npx next build`),
+        // which a workspace installs under the app, not the root: Teable's
+        // root has no `next`, so the build died on `sh: 1: next: not found`.
+        $relative = trim((string) ($partial['workspace_relative'] ?? ''), '/');
+
+        return $relative === ''
+            ? (string) $partial[$defaultKey]
+            : self::inWorkspace((string) $partial[$defaultKey], $relative);
     }
 
     /** True for `turbo` with no `--filter`/`--scope` of its own. */

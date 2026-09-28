@@ -204,6 +204,15 @@ final class GoRuntime implements Runtime
             static fn (string $dir): bool => preg_match('#(^|/)cmd/#', $dir) === 1
         ));
         $pool = $underCmd !== [] ? $underCmd : $candidates;
+        // `ds-dev` beside `ds-host` (Dropserver): a development helper is not
+        // what gets served, and being shorter used to make it the pick.
+        $serving = array_values(array_filter(
+            $pool,
+            static fn (string $dir): bool => !self::isHelper(basename($dir))
+        ));
+        if ($serving !== []) {
+            $pool = $serving;
+        }
 
         foreach ($pool as $dir) {
             if (in_array(strtolower(basename($dir)), $names, true)) {
@@ -222,6 +231,19 @@ final class GoRuntime implements Runtime
         });
 
         return $pool[0];
+    }
+
+    /** Words that mark a program as a helper: `ds-dev`, `api-mock`, `schema-gen`. */
+    private const HELPER_WORDS = [
+        'dev', 'devel', 'debug', 'mock', 'fake', 'gen', 'generate', 'generator', 'codegen',
+        'bench', 'benchmark', 'example', 'demo', 'test', 'testing', 'tool', 'tools', 'lint',
+    ];
+
+    private static function isHelper(string $name): bool
+    {
+        $words = preg_split('/[-_.]/', strtolower($name)) ?: [];
+
+        return array_intersect($words, self::HELPER_WORDS) !== [];
     }
 
     /**
@@ -249,7 +271,10 @@ final class GoRuntime implements Runtime
 
                     return str_ends_with($name, '.go') && !str_ends_with($name, '_test.go');
                 }
-            )
+            ),
+            // An unreadable directory is skipped, not fatal (#191).
+            \RecursiveIteratorIterator::LEAVES_ONLY,
+            \RecursiveIteratorIterator::CATCH_GET_CHILD
         );
 
         foreach ($iterator as $file) {

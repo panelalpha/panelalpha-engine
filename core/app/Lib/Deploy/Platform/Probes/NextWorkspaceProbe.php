@@ -79,7 +79,7 @@ final class NextWorkspaceProbe implements PlatformProbe
             if (!is_dir($base)) {
                 continue;
             }
-            $entries = scandir($base) ?: [];
+            $entries = ProjectContext::entries($base);
             foreach ($entries as $name) {
                 if ($name === '.' || $name === '..' || !is_dir($base . '/' . $name)) {
                     continue;
@@ -99,6 +99,13 @@ final class NextWorkspaceProbe implements PlatformProbe
                 // Prefer packages that declare next over config-only stubs.
                 if ($hasNext) {
                     $score += 5;
+                }
+                // And one with its own next.config over one that only depends
+                // on next: Teable's nestjs-backend imports next to serve the
+                // app, apps/nextjs-app is the app, and the scandir order picked
+                // the backend.
+                if ($hasNext && $hasConfig) {
+                    $score += 2;
                 }
                 if ($score > $bestScore) {
                     $bestScore = $score;

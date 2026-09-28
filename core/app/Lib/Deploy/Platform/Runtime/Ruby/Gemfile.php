@@ -14,19 +14,29 @@ final class Gemfile
 
     public const LOCKFILE = 'Gemfile.lock';
 
-    private function __construct(private readonly string $contents)
+    private function __construct(private readonly string $contents, private readonly string $lock = '')
     {
     }
 
     public static function of(ProjectContext $project): self
     {
-        return new self($project->contents(self::FILENAME) ?? '');
+        return new self($project->contents(self::FILENAME) ?? '', $project->contents(self::LOCKFILE) ?? '');
     }
 
     /** Same, for a caller that has the text. */
-    public static function fromContents(string $contents): self
+    public static function fromContents(string $contents, string $lock = ''): self
     {
-        return new self($contents);
+        return new self($contents, $lock);
+    }
+
+    /**
+     * Whether Gemfile.lock resolves the gem, directly or through another one:
+     * a spec line at four spaces (`    idn-ruby (0.1.5)`), not a dependency
+     * line at six. Diaspora gets idn-ruby only through twitter-text.
+     */
+    public function locks(string $gem): bool
+    {
+        return preg_match('/^ {4}' . preg_quote($gem, '/') . ' \(/m', $this->lock) === 1;
     }
 
     public function requires(string $gem): bool

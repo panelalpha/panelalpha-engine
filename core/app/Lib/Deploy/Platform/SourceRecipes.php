@@ -26,7 +26,12 @@ final class SourceRecipes
     /** @var array<string, ?PlatformManifest> directory:slug => manifest */
     private static array $cache = [];
 
-    /** @var array<string, list<PlatformManifest>> */
+    /**
+     * root => the walk's signature and what it found. The signature is checked
+     * on every call, so a recipe added to a running worker is seen (engine#169).
+     *
+     * @var array<string, array{signature: string, manifests: list<PlatformManifest>}>
+     */
     private static array $allCache = [];
 
     /**
@@ -61,7 +66,9 @@ final class SourceRecipes
         }
 
         $root = rtrim($directory ?? self::defaultDirectory(), '/');
-        $key = $root . ':' . $slug;
+        // Keyed on the file's stamp too, so an added or edited recipe is read
+        // again rather than served from a long-lived worker's memory.
+        $key = $root . ':' . $slug . ':' . self::stamp($root . '/' . $slug);
         if (array_key_exists($key, self::$cache)) {
             return self::$cache[$key];
         }
@@ -244,14 +251,19 @@ final class SourceRecipes
     public static function all(?string $directory = null): array
     {
         $root = rtrim($directory ?? self::defaultDirectory(), '/');
-        if (isset(self::$allCache[$root])) {
-            return self::$allCache[$root];
+        // A queue worker outlives the tree it first read. Caching the walk
+        // unconditionally made findById() miss a recipe for() had just found,
+        // and the deploy then ran none of its commands (engine#169).
+        $directories = self::directories($root);
+        $signature = self::signature($directories);
+        if (isset(self::$allCache[$root]) && self::$allCache[$root]['signature'] === $signature) {
+            return self::$allCache[$root]['manifests'];
         }
 
         $manifests = [];
         $seen = [];
         $skipped = [];
-        foreach (self::directories($root) as $slug => $dir) {
+        foreach ($directories as $slug => $dir) {
             // A directory this cannot read breaks its own app, not the
             // registry. `at()` throwing is right when a caller named that
             // repository -- silence there would hide a typo -- but `all()` is
@@ -284,8 +296,35 @@ final class SourceRecipes
         }
 
         self::$skipped[$root] = $skipped;
+        self::$allCache[$root] = ['signature' => $signature, 'manifests' => $manifests];
 
-        return self::$allCache[$root] = $manifests;
+        return $manifests;
+    }
+
+    /**
+     * Which recipe files exist and when each last changed: cheap to take (one
+     * stat per recipe) and different whenever a parse would be.
+     *
+     * @param array<string, string> $directories slug => directory
+     */
+    private static function signature(array $directories): string
+    {
+        $parts = [];
+        foreach ($directories as $slug => $dir) {
+            $parts[] = $slug . '=' . self::stamp($dir);
+        }
+
+        return md5(implode("\n", $parts));
+    }
+
+    /** The recipe file's mtime and size, or 'none' when it is not there. */
+    private static function stamp(string $dir): string
+    {
+        $file = $dir . '/' . AppConfigDirectory::CONFIG;
+        clearstatcache(true, $file);
+        $stat = @stat($file);
+
+        return $stat === false ? 'none' : $stat['mtime'] . '.' . $stat['size'];
     }
 
     /**
@@ -357,7 +396,7 @@ final class SourceRecipes
         }
     }
 
-    /** Drop the cache. Tests that write directories to a temp dir need this. */
+    /** Drop the cache outright. The cache checks itself; tests still reset it. */
     public static function flush(): void
     {
         self::$cache = [];

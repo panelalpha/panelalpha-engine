@@ -99,6 +99,12 @@ final class Images
         foreach (ImageResolver::buildImages($requirements) as $image) {
             $images[] = $image;
         }
+        if (isset($manifest->requires['dotnet'])) {
+            $node = DotnetRuntime::nodeBuildImage($projectDir);
+            if ($node !== null) {
+                $images[] = $node;
+            }
+        }
         // A build-only toolchain leaves nothing behind; name the serving image
         // separately.
         if ($manifest->runtime === PlatformManifest::RUNTIME_NGINX) {

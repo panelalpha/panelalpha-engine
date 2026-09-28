@@ -68,13 +68,24 @@ class ProjectContext
         }
 
         $files = [];
-        foreach (scandir($projectDir) ?: [] as $entry) {
+        foreach (self::entries($projectDir) as $entry) {
             if ($entry !== '.' && $entry !== '..' && file_exists($projectDir . '/' . $entry)) {
                 $files[strtolower($entry)] = true;
             }
         }
 
         return $files;
+    }
+
+    /**
+     * scandir() that lists an unreadable directory as empty. The account owns
+     * its checkout and may chmod 700 anything in it (#191); a walk skips it.
+     *
+     * @return list<string>
+     */
+    public static function entries(string $dir): array
+    {
+        return @scandir($dir) ?: [];
     }
 
     /** Is $name in the root listing? Pass a lowercase basename. */
@@ -257,7 +268,7 @@ class ProjectContext
     {
         $root = rtrim($projectDir, '/');
         $prefix = strtolower($stem) . '.';
-        foreach (scandir($root) ?: [] as $entry) {
+        foreach (self::entries($root) as $entry) {
             if ($entry === '.' || $entry === '..') {
                 continue;
             }

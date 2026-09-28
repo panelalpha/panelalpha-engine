@@ -582,7 +582,7 @@ class DetectProjectStrategyTest extends TestCase
         $this->assertSame('pnpm', $result['package_manager']);
         $this->assertSame('', $result['start_command']);
         $this->assertSame(
-            'PATH=/app/node_modules/.bin:$PATH astro build && node process-html.mjs',
+            'export PATH=/app/node_modules/.bin:$PATH && astro build && node process-html.mjs',
             $result['build_command']
         );
     }

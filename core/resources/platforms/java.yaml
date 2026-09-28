@@ -4,6 +4,12 @@ label: 'Java (Maven)'
 priority: 740
 runtime: command
 port: 8080
+# Spring Boot binds server.address, and an app that pins it to localhost
+# (BinPastes' application-default.properties) is unreachable from outside the
+# container. The env var outranks packaged properties; an account env var
+# still overrides it. The same reason dotnet.yaml sets ASPNETCORE_URLS.
+env:
+  SERVER_ADDRESS: '0.0.0.0'
 requires:
   java: runtime
 detect:
@@ -11,7 +17,10 @@ detect:
 commands:
   - id: maven-package
     stage: build
-    run: 'mvn -B -DskipTests package'
+    # A deploy builds what is committed; it does not reformat it. Spotless
+    # `apply` bound to the build rewrites sources, and its Prettier step needs
+    # npm, which the Maven image lacks (OpenTripPlanner failed on 41 files).
+    run: 'mvn -B -DskipTests -Dspotless.apply.skip=true -Dspotless.check.skip=true package'
   - id: serve
     stage: start
     serve: true

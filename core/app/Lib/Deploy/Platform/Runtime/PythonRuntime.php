@@ -532,7 +532,7 @@ final class PythonRuntime implements Runtime
         foreach (self::managePyDirs($projectDir) as $relative) {
             $projectDirOf = $relative === '' ? $projectDir : $projectDir . '/' . $relative;
             foreach (self::WSGI_MODULES as $module) {
-                foreach (scandir($projectDirOf) ?: [] as $entry) {
+                foreach (ProjectContext::entries($projectDirOf) as $entry) {
                     if ($entry === '.' || $entry === '..' || $entry[0] === '.' || self::isNoiseDir($entry)) {
                         continue;
                     }
@@ -641,7 +641,7 @@ final class PythonRuntime implements Runtime
             return true;
         }
 
-        foreach (scandir($dir) ?: [] as $entry) {
+        foreach (ProjectContext::entries($dir) as $entry) {
             if ($entry === '.' || $entry === '..' || $entry[0] === '.' || self::isNoiseDir($entry)) {
                 continue;
             }
@@ -676,7 +676,7 @@ final class PythonRuntime implements Runtime
         if ($depth >= 3) {
             return $dirs;
         }
-        foreach (scandir($dir) ?: [] as $entry) {
+        foreach (ProjectContext::entries($dir) as $entry) {
             if ($entry === '.' || $entry === '..' || $entry[0] === '.' || self::isNoiseDir($entry)) {
                 continue;
             }

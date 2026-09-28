@@ -229,6 +229,129 @@ class DotnetRuntimeTest extends TestCase
         $this->assertSame('src/Worker/Worker.csproj', DotnetRuntime::entryProject($this->dir));
     }
 
+    public function test_a_project_whose_targets_run_npm_needs_node_in_its_build(): void
+    {
+        // Memtly.Core/Memtly.Core/Memtly.Core.csproj, verbatim target.
+        $this->write('Memtly.Core/Memtly.Core/Memtly.Core.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web">'
+            . '<Target Name="NpmInstall" BeforeTargets="BuildAssetsDebug;BuildAssetsProd">'
+            . '<Exec Command="npm ci" WorkingDirectory="$(ProjectDir)" /></Target></Project>');
+        $this->write('Memtly.Core/Memtly.Core/package.json', '{"engines":{"node":">=22"}}');
+
+        $this->assertSame('node:22-bookworm-slim', DotnetRuntime::nodeBuildImage($this->dir));
+    }
+
+    public function test_node_run_from_a_shared_targets_file_counts_too(): void
+    {
+        $this->write('App/App.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>');
+        $this->write('Directory.Build.targets', '<Project><Target Name="Ui"><Exec Command=" yarn build" /></Target></Project>');
+
+        $this->assertNotNull(DotnetRuntime::nodeBuildImage($this->dir));
+    }
+
+    public function test_a_project_running_no_js_tool_needs_no_node(): void
+    {
+        $this->write('App/App.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web">'
+            . '<Target Name="Tool"><Exec Command="dotnet tool restore" /></Target></Project>');
+        $this->write('App/package.json', '{}');
+
+        $this->assertNull(DotnetRuntime::nodeBuildImage($this->dir));
+    }
+
+    /**
+     * Prowlarr, Sonarr and Radarr: every project says `<TargetFrameworks>`
+     * (plural, one entry), and publish without `-f` fails with NETSDK1129.
+     */
+    public function test_a_multi_target_project_is_published_for_one_framework(): void
+    {
+        $this->write(
+            'src/NzbDrone.Console/Prowlarr.Console.csproj',
+            '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType>'
+            . '<TargetFrameworks>net8.0</TargetFrameworks></PropertyGroup></Project>'
+        );
+
+        $this->assertStringContainsString(
+            "dotnet publish 'src/NzbDrone.Console/Prowlarr.Console.csproj' -f net8.0 -c Release",
+            DotnetRuntime::buildCommand($this->dir)
+        );
+    }
+
+    /**
+     * Prowlarr's props read `$(SolutionDir)stylecop.json`; publishing only the
+     * project left it undefined and every file failed SA1200 as an error.
+     */
+    public function test_a_project_inside_a_solution_is_published_with_its_solution_dir(): void
+    {
+        $this->write('src/Prowlarr.sln', $this->solution('NzbDrone.Console\\Prowlarr.Console.csproj'));
+        $this->write('src/NzbDrone.Console/Prowlarr.Console.csproj', '<Project Sdk="Microsoft.NET.Sdk"><OutputType>Exe</OutputType></Project>');
+
+        $this->assertSame('src', DotnetRuntime::solutionDir($this->dir, 'src/NzbDrone.Console/Prowlarr.Console.csproj'));
+        $this->assertStringContainsString('-p:SolutionDir="$PWD/src/"', DotnetRuntime::buildCommand($this->dir));
+    }
+
+    public function test_a_solution_at_the_root_is_the_root(): void
+    {
+        $this->write('App.sln', $this->solution('App\\App.csproj'));
+        $this->write('App/App.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>');
+
+        $this->assertStringContainsString('-p:SolutionDir="$PWD/"', DotnetRuntime::buildCommand($this->dir));
+    }
+
+    public function test_a_project_outside_any_solution_sets_no_solution_dir(): void
+    {
+        $this->write('App/App.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>');
+
+        $this->assertNull(DotnetRuntime::solutionDir($this->dir, 'App/App.csproj'));
+        $this->assertStringNotContainsString('SolutionDir', DotnetRuntime::buildCommand($this->dir));
+    }
+
+    public function test_the_newest_plain_framework_of_several_is_chosen(): void
+    {
+        $this->write('App/App.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web">'
+            . '<TargetFrameworks>netstandard2.0;net8.0;net9.0-windows;net9.0</TargetFrameworks></Project>');
+
+        $this->assertSame('net9.0', DotnetRuntime::publishFramework($this->dir, 'App/App.csproj'));
+    }
+
+    public function test_a_single_framework_needs_no_flag(): void
+    {
+        $this->write('App/App.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"><TargetFramework>net8.0</TargetFramework></Project>');
+
+        $this->assertNull(DotnetRuntime::publishFramework($this->dir, 'App/App.csproj'));
+        $this->assertStringNotContainsString(' -f ', DotnetRuntime::buildCommand($this->dir));
+    }
+
+    public function test_frameworks_inherited_from_directory_build_props_are_honoured(): void
+    {
+        $this->write('src/Directory.Build.props', '<Project><PropertyGroup>'
+            . '<TargetFrameworks>net8.0;net10.0</TargetFrameworks></PropertyGroup></Project>');
+        $this->write('src/Api/Api.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"></Project>');
+
+        $this->assertSame('net10.0', DotnetRuntime::publishFramework($this->dir, 'src/Api/Api.csproj'));
+    }
+
+    /**
+     * Sonarr.SignalR uses the web SDK but declares itself a Library, and was
+     * published instead of the console host.
+     */
+    public function test_a_web_sdk_library_is_not_the_entry_point(): void
+    {
+        $this->write('src/NzbDrone.SignalR/Sonarr.SignalR.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web">'
+            . '<PropertyGroup><TargetFrameworks>net10.0</TargetFrameworks><OutputType>Library</OutputType></PropertyGroup></Project>');
+        $this->write('src/NzbDrone.Console/Sonarr.Console.csproj', '<Project Sdk="Microsoft.NET.Sdk">'
+            . '<PropertyGroup><OutputType>Exe</OutputType><TargetFrameworks>net10.0</TargetFrameworks></PropertyGroup></Project>');
+
+        $this->assertSame('src/NzbDrone.Console/Sonarr.Console.csproj', DotnetRuntime::entryProject($this->dir));
+    }
+
+    /** Radarr.csproj is the Windows tray app; the SDK on Linux cannot build it. */
+    public function test_a_windows_only_project_is_not_the_entry_point(): void
+    {
+        $this->write('src/NzbDrone/Radarr.csproj', '<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">'
+            . '<PropertyGroup><OutputType>Exe</OutputType><TargetFrameworks>net8.0-windows</TargetFrameworks></PropertyGroup></Project>');
+
+        $this->assertNull(DotnetRuntime::entryProject($this->dir));
+    }
+
     /**
      * A single-project repository needs no target: publishing the directory
      * is right there, and is what the command falls back to.

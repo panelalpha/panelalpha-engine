@@ -40,6 +40,9 @@ final class CommandDockerfile implements DockerfileWriter
         return Template::named('dockerfile/command-multistage')->render($values + [
             'runtime_image' => $this->recipe->runtimeImage,
             'output_directory' => trim($this->recipe->outputDirectory, '/'),
+            // node, npm/npx, corepack and yarn 1, copied rather than installed:
+            // the build stage is the SDK image, and apt there is a guess.
+            'build_node_image' => $this->recipe->buildNodeImage ?: null,
         ]);
     }
 

@@ -93,4 +93,28 @@ class SystemPackagesTest extends TestCase
     {
         $this->assertContains('libpq-dev', SystemPackages::for($this->gemfile("source 'x'\ngem 'sinatra'\n")));
     }
+
+    /**
+     * Diaspora (#147): twitter-text pulls in idn-ruby, whose extconf needs the
+     * libidn headers. The Gemfile never names it; only the lock does.
+     */
+    public function test_a_native_gem_resolved_only_by_the_lock_gets_its_library(): void
+    {
+        $lock = "GEM\n  remote: https://rubygems.org/\n  specs:\n    idn-ruby (0.1.5)\n"
+            . "    twitter-text (3.1.0)\n      idn-ruby\n      unf (~> 0.1.0)\n";
+        file_put_contents($this->dir . '/' . Gemfile::LOCKFILE, $lock);
+
+        $packages = SystemPackages::for($this->gemfile("source 'x'\ngem 'twitter-text', '3.1.0'\n"));
+
+        $this->assertContains('libidn-dev', $packages);
+    }
+
+    /** A dependency line (six spaces) is not a resolved spec, and no lock means no guess. */
+    public function test_a_gem_the_lock_only_mentions_as_a_dependency_is_not_resolved(): void
+    {
+        $this->assertNotContains('libidn-dev', SystemPackages::for($this->gemfile("source 'x'\ngem 'rails'\n")));
+        $this->assertFalse(Gemfile::fromContents('', "  specs:\n    twitter-text (3.1.0)\n      idn-ruby\n")->locks('idn-ruby'));
+        $this->assertTrue(Gemfile::fromContents("gem 'idn-ruby'\n")->requires('idn-ruby'));
+        $this->assertContains('libidn-dev', SystemPackages::for(Gemfile::fromContents("gem 'idn-ruby'\n")));
+    }
 }

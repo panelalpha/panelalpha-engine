@@ -116,4 +116,30 @@ class GoRuntimeTest extends TestCase
         $this->assertStringContainsString('several Go main packages (cmd/alpha, cmd/beta); building ./cmd/beta', $command);
         $this->assertStringContainsString('go build -o app ./cmd/beta &&', $command);
     }
+
+    /**
+     * Dropserver (#94): `ds-dev` is a development helper beside the server
+     * `ds-host`, and won only by being the shorter name.
+     */
+    public function test_a_development_helper_is_not_picked_over_the_server(): void
+    {
+        $this->write('go.mod', "module github.com/teleclimber/DropServer\n\ngo 1.22\n");
+        $this->write('cmd/ds-dev/ds-dev.go');
+        $this->write('cmd/ds-host/ds-host.go');
+
+        $command = GoRuntime::buildCommand($this->dir, 'https://github.com/teleclimber/Dropserver');
+
+        $this->assertStringContainsString('go build -o app ./cmd/ds-host &&', $command);
+        // Still a guess, so the candidates are still named.
+        $this->assertStringContainsString('several Go main packages (cmd/ds-dev, cmd/ds-host)', $command);
+    }
+
+    public function test_only_helpers_still_builds_one_of_them(): void
+    {
+        $this->write('go.mod', "module example.com/widget\n\ngo 1.22\n");
+        $this->write('cmd/schema-gen/main.go');
+        $this->write('cmd/api-mock/main.go');
+
+        $this->assertSame('./cmd/api-mock', GoRuntime::mainPackage($this->dir));
+    }
 }

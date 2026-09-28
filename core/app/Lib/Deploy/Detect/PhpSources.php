@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Detect;
 
+use App\Lib\Deploy\Platform\ProjectContext;
+
 /**
  * PHP source files in a project that carries no Composer manifest: an
  * index.php and a few includes is PHP hosting with no manifest, and php.yaml
@@ -35,7 +37,7 @@ final class PhpSources
                 return false;
             }
 
-            foreach (scandir($dir) ?: [] as $entry) {
+            foreach (ProjectContext::entries($dir) as $entry) {
                 if ($entry === '.' || $entry === '..' || str_starts_with($entry, '.')) {
                     continue;
                 }

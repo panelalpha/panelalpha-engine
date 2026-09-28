@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Env;
 
 use App\Lib\Deploy\Compose\ComposeFileInspector;
+use App\Lib\Deploy\Platform\ProjectContext;
 
 /**
  * The `.env` files a checkout is missing and cannot start without.
@@ -194,7 +195,7 @@ final class EnvExampleCopies
     private static function childDirectories(string $projectDir, string $rel, string $dir): array
     {
         $children = [];
-        foreach (scandir($dir) ?: [] as $entry) {
+        foreach (ProjectContext::entries($dir) as $entry) {
             if ($entry === '.' || $entry === '..' || isset(self::SKIP_DIRS[strtolower($entry)])) {
                 continue;
             }

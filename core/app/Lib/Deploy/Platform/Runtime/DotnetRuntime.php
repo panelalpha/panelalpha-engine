@@ -20,6 +20,9 @@ final class DotnetRuntime implements Runtime
     /** `dotnet publish` output directory, relative to the project. */
     public const PUBLISH_DIR = 'out';
 
+    /** An MSBuild `<Exec>` running a JS tool, e.g. Memtly.Core's `npm ci` target. */
+    private const NODE_EXEC = '/<Exec\b[^>]*\bCommand\s*=\s*"\s*(?:npm|npx|yarn|pnpm|node)\b/i';
+
     public static function defaultImage(): string
     {
         return self::imageTag(self::VERSION);
@@ -131,7 +134,9 @@ final class DotnetRuntime implements Runtime
      * The one project to publish: a web SDK project, else one declaring
      * `OutputType Exe`. Publishing a solution instead fails with `NETSDK1194`
      * (test projects error and MSBuild's exit code is the build's). Tests are
-     * excluded by path and name. Null when nothing looks like an application.
+     * excluded by path and name, and so is a web SDK project that says it is a
+     * `Library` (Sonarr.SignalR) or targets only Windows. Null when nothing
+     * looks like an application.
      */
     public static function entryProject(string $projectDir): ?string
     {
@@ -144,6 +149,11 @@ final class DotnetRuntime implements Runtime
             }
             $contents = @file_get_contents(rtrim($projectDir, '/') . '/' . $relative);
             if (!is_string($contents)) {
+                continue;
+            }
+            if (preg_match('/<OutputType>\s*Library\s*<\/OutputType>/i', $contents) === 1
+                || self::targetsOnlyWindows($contents)
+            ) {
                 continue;
             }
             if (stripos($contents, 'Microsoft.NET.Sdk.Web') !== false) {
@@ -201,6 +211,44 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
+     * The Node image a build needs beside the SDK, or null. The SDK image has
+     * no Node, and an ASP.NET project whose targets run `npm ci` during
+     * publish fails with MSB3073 / exit 127. Chosen from the package.json next
+     * to the project that runs it, else the engine's default Node.
+     */
+    public static function nodeBuildImage(string $projectDir): ?string
+    {
+        $root = rtrim($projectDir, '/');
+        if ($root === '') {
+            return null;
+        }
+
+        $files = self::findProjectFiles($root);
+        foreach (['/', '/*/', '/*/*/'] as $depth) {
+            foreach (['*.props', '*.targets'] as $pattern) {
+                foreach (glob($root . $depth . $pattern) ?: [] as $path) {
+                    $files[] = ltrim(substr($path, strlen($root)), '/');
+                }
+            }
+        }
+
+        foreach ($files as $relative) {
+            if (str_ends_with($relative, '.sln') || str_ends_with($relative, '.slnx')) {
+                continue;
+            }
+            $contents = @file_get_contents($root . '/' . $relative);
+            if (!is_string($contents) || preg_match(self::NODE_EXEC, $contents) !== 1) {
+                continue;
+            }
+            $dir = dirname($root . '/' . $relative);
+
+            return NodeRuntime::imageFor(is_file($dir . '/package.json') ? $dir : '');
+        }
+
+        return null;
+    }
+
+    /**
      * `dotnet build` scatters output across each project's bin/; publish
      * gathers one runnable directory. No `--no-restore`: restore is skipped
      * nowhere and omitting it fails a clean checkout.
@@ -208,9 +256,110 @@ final class DotnetRuntime implements Runtime
     public static function buildCommand(string $projectDir = ''): string
     {
         $target = $projectDir === '' ? null : self::entryProject($projectDir);
+        $framework = $target === null ? null : self::publishFramework($projectDir, $target);
+        $solutionDir = $target === null ? null : self::solutionDir($projectDir, $target);
 
         return 'dotnet publish' . ($target === null ? '' : ' ' . escapeshellarg($target))
+            . ($framework === null ? '' : ' -f ' . $framework)
+            . ($solutionDir === null ? '' : ' -p:SolutionDir="$PWD/' . ($solutionDir === '.' ? '' : $solutionDir . '/') . '"')
             . ' -c Release -o ' . self::PUBLISH_DIR . ' --nologo';
+    }
+
+    /**
+     * The directory of the nearest solution above a project, relative to the
+     * project root ('.' for the root), or null outside any solution.
+     *
+     * Publishing one project leaves `$(SolutionDir)` undefined, where building
+     * the solution sets it; Prowlarr's props find stylecop.json through it, and
+     * without it every file failed SA1200 under TreatWarningsAsErrors.
+     */
+    public static function solutionDir(string $projectDir, string $project): ?string
+    {
+        $root = rtrim($projectDir, '/');
+        $dir = dirname($project);
+        while (true) {
+            $path = $root . ($dir === '.' ? '' : '/' . $dir);
+            if ((glob($path . '/*.sln') ?: []) !== [] || (glob($path . '/*.slnx') ?: []) !== []) {
+                return $dir;
+            }
+            if ($dir === '.' || $dir === '/' || $dir === '') {
+                return null;
+            }
+            $dir = dirname($dir);
+        }
+    }
+
+    /**
+     * The framework to publish a project for, or null when the SDK needs no
+     * `-f`. `<TargetFrameworks>` -- plural, even with one entry -- makes
+     * publish refuse to guess (`NETSDK1129`; Prowlarr, Sonarr, Radarr), so the
+     * newest plain `netX.Y` in it is named. The list may come from a
+     * Directory.Build.props above the project.
+     */
+    public static function publishFramework(string $projectDir, string $project): ?string
+    {
+        $root = rtrim($projectDir, '/');
+        $contents = @file_get_contents($root . '/' . $project);
+        if (!is_string($contents)) {
+            return null;
+        }
+
+        $list = self::frameworkList($contents);
+        if ($list === null && preg_match('/<TargetFramework>/i', $contents) !== 1) {
+            $list = self::inheritedFrameworkList($root, dirname($project));
+        }
+        if ($list === null) {
+            return null;
+        }
+
+        $best = null;
+        foreach (explode(';', $list) as $framework) {
+            $framework = strtolower(trim($framework));
+            if (preg_match('/^net(\d+)\.(\d+)$/', $framework, $m) === 1
+                && ($best === null || version_compare($m[1] . '.' . $m[2], substr($best, 3), '>'))
+            ) {
+                $best = $framework;
+            }
+        }
+
+        return $best;
+    }
+
+    /** The nearest Directory.Build.props that sets a framework decides. */
+    private static function inheritedFrameworkList(string $root, string $dir): ?string
+    {
+        while (true) {
+            $props = @file_get_contents($root . ($dir === '.' ? '' : '/' . $dir) . '/Directory.Build.props');
+            if (is_string($props) && preg_match('/<TargetFrameworks?>/i', $props) === 1) {
+                return self::frameworkList($props);
+            }
+            if ($dir === '.' || $dir === '/' || $dir === '') {
+                return null;
+            }
+            $dir = dirname($dir);
+        }
+    }
+
+    private static function frameworkList(string $contents): ?string
+    {
+        return preg_match('/<TargetFrameworks>\s*([^<]+?)\s*<\/TargetFrameworks>/i', $contents, $m) === 1
+            ? $m[1]
+            : null;
+    }
+
+    /** Radarr.csproj targets net8.0-windows: a WinForms tray app, not a server. */
+    private static function targetsOnlyWindows(string $contents): bool
+    {
+        if (preg_match('/<TargetFrameworks?>\s*([^<]+?)\s*<\/TargetFrameworks?>/i', $contents, $m) !== 1) {
+            return false;
+        }
+        foreach (explode(';', $m[1]) as $framework) {
+            if (trim($framework) !== '' && stripos($framework, '-windows') === false) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

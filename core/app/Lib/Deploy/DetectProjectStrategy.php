@@ -3,7 +3,10 @@
 namespace App\Lib\Deploy;
 
 use App\Lib\Deploy\Detect\DetectionResult;
+use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
+use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\PlatformSelector;
+use App\Lib\Deploy\Platform\PlatformValues;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
 use App\Lib\Deploy\Platform\Strategies;
@@ -67,8 +70,20 @@ class DetectProjectStrategy
     private static function fromPlatforms(ProjectContext $context, ?string $recipe = null): ?array
     {
         $hit = PlatformSelector::forContext($context, null, $recipe);
+        if ($hit === null) {
+            return null;
+        }
 
-        return $hit === null ? null : DetectionResult::fromPlatform($hit['decision']);
+        // The project's app config speaks for the build stage too (engine#171).
+        $appConfig = AppConfigLocator::findCandidate(
+            new LocalAppConfigSource(),
+            $context->projectDir,
+            $context->sourceUrl
+        )['config'] ?? null;
+
+        return DetectionResult::fromPlatform(
+            PlatformValues::withAppConfigBuild($hit['manifest'], $appConfig, $context, $hit['decision'])
+        );
     }
 
     /**

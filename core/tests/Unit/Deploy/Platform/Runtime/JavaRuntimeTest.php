@@ -246,4 +246,152 @@ class JavaRuntimeTest extends TestCase
     {
         $this->assertSame(JavaRuntime::MAVEN_IMAGE, JavaRuntime::imageFor(''));
     }
+
+    /**
+     * @param array<string, string> $files relative path => contents
+     */
+    private function project(array $files): string
+    {
+        $dir = sys_get_temp_dir() . '/pa-java-' . bin2hex(random_bytes(6));
+        foreach ($files as $path => $contents) {
+            @mkdir(dirname($dir . '/' . $path), 0o777, true);
+            file_put_contents($dir . '/' . $path, $contents);
+        }
+        $this->dirs[] = $dir;
+
+        return $dir;
+    }
+
+    /** @var list<string> */
+    private array $dirs = [];
+
+    protected function tearDown(): void
+    {
+        foreach ($this->dirs as $dir) {
+            exec('rm -rf ' . escapeshellarg($dir));
+        }
+        parent::tearDown();
+    }
+
+    private function resolveIn(string $dir): Requirement
+    {
+        $requirement = $this->runtime->resolve(ProjectContext::at($dir));
+        $this->assertNotNull($requirement);
+
+        return $requirement;
+    }
+
+    /**
+     * Tigase, GraphHopper, Druid and ThingsBoard compile for Java 25, and the
+     * JDK 21 image failed each with `release version 25 not supported`.
+     */
+    public function test_a_pom_compiling_for_java_25_gets_a_jdk_25_image(): void
+    {
+        $dir = $this->project(['pom.xml' => '<project><build><plugins><plugin>'
+            . '<artifactId>maven-compiler-plugin</artifactId><configuration><release>25</release>'
+            . '</configuration></plugin></plugins></build></project>']);
+
+        $requirement = $this->resolveIn($dir);
+
+        $this->assertSame('25-maven', $requirement->version);
+        $this->assertSame('maven:3-eclipse-temurin-25', $this->runtime->image($requirement));
+        $this->assertStringContainsString('release 25', $requirement->explain());
+    }
+
+    public function test_a_property_reference_is_followed_to_its_value(): void
+    {
+        // Druid: <maven.compiler.release>${java.version}</maven.compiler.release>
+        $dir = $this->project(['pom.xml' => '<project><properties><java.version>25</java.version>'
+            . '<maven.compiler.release>${java.version}</maven.compiler.release></properties></project>']);
+
+        $this->assertSame('25-maven', $this->resolveIn($dir)->version);
+    }
+
+    public function test_an_older_release_still_builds_on_the_default_jdk(): void
+    {
+        // javac 21 compiles --release 17 and 8; nothing is gained by a second image.
+        foreach (['17', '1.8', '21'] as $release) {
+            $dir = $this->project(['pom.xml' => "<project><properties><maven.compiler.release>{$release}"
+                . '</maven.compiler.release></properties></project>']);
+
+            $this->assertSame(JavaRuntime::MAVEN, $this->resolveIn($dir)->version, $release);
+        }
+        $this->assertSame(JavaRuntime::MAVEN, $this->resolveIn($this->project(['pom.xml' => '<project/>']))->version);
+    }
+
+    public function test_a_release_past_the_newest_jdk_gets_the_newest(): void
+    {
+        $this->assertSame('25-maven', JavaRuntime::toolchain('maven', 30));
+        $this->assertSame('21-maven', JavaRuntime::toolchain('maven', 11));
+    }
+
+    /**
+     * alf.io declares a Java 25 toolchain; on gradle:8-jdk21 Gradle stopped
+     * with `Cannot find a Java installation ... languageVersion=25`.
+     */
+    public function test_a_gradle_toolchain_is_matched_exactly(): void
+    {
+        foreach (['25' => '25-gradle', '17' => '17-gradle', '21' => '21-gradle'] as $version => $toolchain) {
+            $dir = $this->project(['build.gradle' => "java { toolchain { languageVersion = JavaLanguageVersion.of({$version}) } }"]);
+
+            $this->assertSame($toolchain, $this->resolveIn($dir)->version, $version);
+        }
+
+        $kotlin = $this->project(['build.gradle.kts' => 'kotlin { jvmToolchain(17) }']);
+        $this->assertSame('17-gradle', $this->resolveIn($kotlin)->version);
+    }
+
+    public function test_a_toolchain_named_in_gradle_properties_in_a_subproject_is_found(): void
+    {
+        // Tolgee: backend/app/build.gradle says JavaLanguageVersion.of(javaVersion.toInteger()).
+        $dir = $this->project([
+            'build.gradle' => 'plugins {}',
+            'gradle.properties' => "kotlinVersion=2.2\njavaVersion=25\n",
+            'backend/app/build.gradle' => 'java { toolchain { languageVersion = JavaLanguageVersion.of(javaVersion.toInteger()) } }',
+        ]);
+
+        $this->assertSame('25-gradle', $this->resolveIn($dir)->version);
+    }
+
+    /**
+     * scm-manager's wrapper is Gradle 7.6.4, which cannot start on JDK 21 at
+     * all; 8.5 is the first that can.
+     */
+    public function test_an_old_gradle_wrapper_gets_a_jdk_it_can_run_on(): void
+    {
+        $this->assertSame('17-gradle', $this->resolveIn($this->gradleProject('7.6.4'))->version);
+        $this->assertSame('21-gradle', $this->resolveIn($this->gradleProject('8.14.3'))->version);
+        $this->assertSame('21-gradle', $this->resolveIn($this->gradleProject('9.7.0'))->version);
+    }
+
+    /**
+     * scm-manager (Gradle 7) and Solr (Gradle 9.7) both failed on the image's
+     * Gradle 8.14; Gradle's own error says "use the gradlew script".
+     */
+    public function test_a_project_with_a_gradle_wrapper_builds_with_it(): void
+    {
+        $dir = $this->gradleProject('9.7.0');
+
+        $this->assertStringContainsString('./gradlew --no-daemon -x test build', JavaRuntime::gradleBuildCommand($dir));
+        $this->assertSame('9.7.0', JavaRuntime::gradleWrapperVersion($dir));
+    }
+
+    public function test_without_a_complete_wrapper_the_images_gradle_builds(): void
+    {
+        $this->assertSame('gradle --no-daemon -x test build', JavaRuntime::gradleBuildCommand($this->project(['build.gradle' => ''])));
+
+        // gradlew without its jar cannot run.
+        $dir = $this->project(['build.gradle' => '', 'gradlew' => '#!/bin/sh']);
+        $this->assertSame('gradle --no-daemon -x test build', JavaRuntime::gradleBuildCommand($dir));
+    }
+
+    private function gradleProject(string $wrapper): string
+    {
+        return $this->project([
+            'build.gradle' => 'plugins { id "java" }',
+            'gradlew' => "#!/bin/sh\n",
+            'gradle/wrapper/gradle-wrapper.jar' => 'jar',
+            'gradle/wrapper/gradle-wrapper.properties' => "distributionUrl=https\\://services.gradle.org/distributions/gradle-{$wrapper}-bin.zip\n",
+        ]);
+    }
 }

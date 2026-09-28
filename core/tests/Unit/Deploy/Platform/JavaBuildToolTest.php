@@ -67,4 +67,54 @@ class JavaBuildToolTest extends TestCase
         $this->assertSame('Java (Gradle)', $decision['label']);
         $this->assertStringContainsString('build/libs', $decision['start_command']);
     }
+
+    public function test_a_gradle_project_with_a_wrapper_builds_with_it(): void
+    {
+        mkdir($this->dir . '/gradle/wrapper', 0o777, true);
+        file_put_contents($this->dir . '/build.gradle', 'plugins {}');
+        file_put_contents($this->dir . '/gradlew', "#!/bin/sh\n");
+        file_put_contents($this->dir . '/gradle/wrapper/gradle-wrapper.jar', 'jar');
+        file_put_contents(
+            $this->dir . '/gradle/wrapper/gradle-wrapper.properties',
+            "distributionUrl=https\\://services.gradle.org/distributions/gradle-7.6.4-bin.zip\n"
+        );
+
+        try {
+            $decision = DetectProjectStrategy::detect($this->dir);
+
+            $this->assertStringContainsString('./gradlew ', $decision['build_command']);
+            $this->assertSame('gradle:8-jdk17', $decision['image']);
+        } finally {
+            exec('rm -rf ' . escapeshellarg($this->dir . '/gradle'));
+        }
+    }
+
+    /**
+     * engine#283: a Spring Boot app that sets `server.address=localhost` binds
+     * 127.0.0.1 and nothing outside the container reaches it. Both Java
+     * platforms put the env var that outranks it into the container.
+     */
+    public function test_both_java_platforms_bind_spring_to_every_interface(): void
+    {
+        file_put_contents($this->dir . '/pom.xml', '<project></project>');
+        $this->assertSame('0.0.0.0', DetectProjectStrategy::detect($this->dir)['env']['SERVER_ADDRESS'] ?? null);
+
+        unlink($this->dir . '/pom.xml');
+        file_put_contents($this->dir . '/build.gradle', 'plugins {}');
+        $gradle = DetectProjectStrategy::detect($this->dir);
+        $this->assertSame('java-gradle', $gradle['platform']);
+        $this->assertSame('0.0.0.0', $gradle['env']['SERVER_ADDRESS'] ?? null);
+    }
+
+    /** OpenTripPlanner binds `spotless:apply` with Prettier, which needs npm, to its build. */
+    public function test_a_maven_build_does_not_run_the_source_formatter(): void
+    {
+        file_put_contents($this->dir . '/pom.xml', '<project></project>');
+
+        $build = DetectProjectStrategy::detect($this->dir)['build_command'];
+
+        $this->assertStringContainsString('-Dspotless.apply.skip=true', $build);
+        $this->assertStringContainsString('-Dspotless.check.skip=true', $build);
+        $this->assertStringContainsString('-DskipTests', $build);
+    }
 }

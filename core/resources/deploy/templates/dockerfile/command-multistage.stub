@@ -1,5 +1,10 @@
 FROM {{ image }} AS build
 WORKDIR /app
+{{# build_node_image }}
+COPY --from={{ build_node_image }} /usr/local/bin/ /usr/local/bin/
+COPY --from={{ build_node_image }} /usr/local/lib/node_modules/ /usr/local/lib/node_modules/
+COPY --from={{ build_node_image }} /opt/ /opt/
+{{/ build_node_image }}
 COPY . .
 {{ env }}
 {{# install_command }}

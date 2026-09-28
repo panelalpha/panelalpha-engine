@@ -5,6 +5,12 @@ label: 'Java (Gradle)'
 priority: 745
 runtime: command
 port: 8080
+# Spring Boot binds server.address, and an app that pins it to localhost
+# (BinPastes' application-default.properties) is unreachable from outside the
+# container. The env var outranks packaged properties; an account env var
+# still overrides it. The same reason dotnet.yaml sets ASPNETCORE_URLS.
+env:
+  SERVER_ADDRESS: '0.0.0.0'
 requires:
   java: runtime
 detect:
@@ -33,4 +39,6 @@ commands:
     serve: true
     run: 'java -jar build/libs/*.jar'
 commands_from:
+  # ./gradlew when the project ships a wrapper, the image's gradle otherwise.
+  gradle-build: java.build-gradle
   serve: java.start-gradle

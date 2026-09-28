@@ -244,6 +244,7 @@
               "rust.build",
               "rust.start",
               "go.build",
+              "java.build-gradle",
               "java.start",
               "java.start-gradle"
             ]
