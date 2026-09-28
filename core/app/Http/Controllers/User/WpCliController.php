@@ -42,10 +42,7 @@ class WpCliController extends Controller
      */
     public function run($username, WpCliCommandRunRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         $args = [];
         foreach ($request->validated()['args'] as $arg) {

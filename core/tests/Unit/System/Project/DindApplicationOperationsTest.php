@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project;
 
+use Tests\Support\FakeProcess;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System;
@@ -9,7 +10,7 @@ use App\System\Filesystem;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppCertificate;
-use PHPUnit\Framework\TestCase;
+use Tests\TestCase;
 
 class DindApplicationOperationsTest extends TestCase
 {
@@ -160,10 +161,7 @@ class DindApplicationOperationsTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process
             {
-                $process = new \Symfony\Component\Process\Process(['true']);
-                $process->run();
-
-                return $process;
+                return FakeProcess::ok();
             }
         };
 
@@ -227,10 +225,8 @@ class DindApplicationOperationsTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process
             {
                 $this->executed[] = $cmd;
-                $process = new \Symfony\Component\Process\Process(is_array($cmd) ? $cmd : [$cmd]);
-                $process->run();
 
-                return $process;
+                return FakeProcess::forCommand($cmd);
             }
 
             public function filesystem(): Filesystem

@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Telemetry;
 
 use App\System;
+use App\System\ProcessRunner;
 
 /**
  * The outbox: reports waiting to be sent.
@@ -45,9 +46,16 @@ class Spool
 
     private string $dir;
 
-    public function __construct(string $dir)
+    private ?ProcessRunner $processes;
+
+    /**
+     * @param ?ProcessRunner $processes only the chown below needs it; built on
+     *                                  demand so no caller has to supply one.
+     */
+    public function __construct(string $dir, ?ProcessRunner $processes = null)
     {
         $this->dir = rtrim($dir, '/');
+        $this->processes = $processes;
     }
 
     public function dir(): string
@@ -423,6 +431,11 @@ class Spool
         return true;
     }
 
+    private function processes(): ProcessRunner
+    {
+        return $this->processes ??= new System();
+    }
+
     private function fixOwnership(string $path): void
     {
         if ($path === '' || $path === '/') {
@@ -433,7 +446,7 @@ class Spool
         // chown must not fail put() — cron simply will not see a root-owned
         // file, which is the same outcome as not trying.
         try {
-            (new System())->runProcess(['sudo', 'chown', '-R', self::OWNER, $path]);
+            $this->processes()->runProcess(['sudo', 'chown', '-R', self::OWNER, $path]);
         } catch (\Throwable) {
             // ignore
         }

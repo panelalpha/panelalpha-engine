@@ -10,7 +10,7 @@ use App\System\Project\Deployment\DeployableDindProject;
 use App\System\Project\Deployment\DeployMechanics;
 use App\System\Project\Deployment\DeploymentWorkflow;
 use App\System\Project\Deployment\FailureRetention;
-use PHPUnit\Framework\TestCase;
+use Tests\TestCase;
 
 class DeploymentWorkflowTest extends TestCase
 {
@@ -29,11 +29,28 @@ class DeploymentWorkflowTest extends TestCase
         $this->assertStringContainsString('function deployment(): DeploymentWorkflow', $source);
     }
 
+    /**
+     * The workflow is shared with the template path now, so the "keep the
+     * project" rule lives in the disposition it defaults to rather than in
+     * the workflow body.
+     */
     public function test_workflow_source_never_deletes_project_on_failure(): void
     {
         $source = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/DeploymentWorkflow.php');
         $this->assertStringNotContainsString('UserAccountDeletion', $source);
-        $this->assertStringContainsString('FailureRetention::', $source);
+        $this->assertStringNotContainsString('destroy()', $source);
+        $this->assertStringContainsString('new RetainProject()', $source);
+
+        $retain = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/RetainProject.php');
+        $this->assertStringContainsString('FailureRetention::', $retain);
+        $this->assertStringNotContainsString('destroy()', $retain);
+    }
+
+    public function test_the_template_path_rolls_back_instead_of_retaining(): void
+    {
+        $rollback = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/RollBackProject.php');
+        $this->assertStringContainsString('implements FailureDisposition', $rollback);
+        $this->assertStringContainsString('->project()->destroy()', $rollback);
     }
 
     public function test_workflow_does_not_default_to_lib_user_deploy_mechanics(): void
@@ -329,6 +346,7 @@ class DeploymentWorkflowTest extends TestCase
         $model->setDetails(array_merge([
             'UID' => 1000,
             'GID' => 1000,
+            'template' => 'dind',
         ], $details));
 
         return $model;

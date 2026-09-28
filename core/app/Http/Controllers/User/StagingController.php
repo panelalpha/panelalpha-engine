@@ -48,12 +48,7 @@ class StagingController extends Controller
     )]
     public function staging(string $username, ProjectStagingRequest $request): JsonResponse
     {
-        $source = User::findByUsername($username);
-        if (!$source) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $source = $this->projectOr404($username);
 
         try {
             Projects::assertIdle($source);
@@ -172,21 +167,11 @@ class StagingController extends Controller
     )]
     public function push(string $username, ProjectPushRequest $request): JsonResponse
     {
-        $from = User::findByUsername($username);
-        if (!$from) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $from = $this->projectOr404($username);
 
         /** @var array{target: string} */
         $params = $request->validated();
-        $to = User::findByUsername($params['target']);
-        if (!$to) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $to = $this->projectOr404($params['target']);
 
         try {
             Projects::assertIdle($from);

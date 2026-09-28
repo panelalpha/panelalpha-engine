@@ -325,10 +325,7 @@ class DeployHookController extends Controller
      */
     private function withCheckout(string $username, GitPathRequest $request, callable $work): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            return new JsonResponse(['message' => 'User not found'], 404);
-        }
+        $user = $this->projectOr404($username);
 
         try {
             $git = $user->project()->git($request->validated()['path'] ?? null);

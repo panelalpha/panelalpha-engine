@@ -34,12 +34,7 @@ class BackupController extends Controller
     )]
     public function index(string $username): BackupCollection|JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         $backups = BackupRecord::query()
             ->where('user_id', $user->id)
@@ -68,12 +63,7 @@ class BackupController extends Controller
     )]
     public function store(string $username, Request $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         if ($user->getTemplate() !== 'dind') {
             abort(new JsonResponse([
@@ -129,12 +119,7 @@ class BackupController extends Controller
     )]
     public function show(string $username, int $id): BackupResource|JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         $backup = BackupRecord::query()->find($id);
         if ($backup === null || $backup->user_id !== $user->id) {
@@ -173,12 +158,7 @@ class BackupController extends Controller
     )]
     public function restore(string $username, int $id, BackupRestoreRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         if ($user->getTemplate() !== 'dind') {
             abort(new JsonResponse([
@@ -244,12 +224,7 @@ class BackupController extends Controller
     )]
     public function destroy(string $username, int $id): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         $backup = BackupRecord::query()->find($id);
         if ($backup === null || $backup->user_id !== $user->id) {

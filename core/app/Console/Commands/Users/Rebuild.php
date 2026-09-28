@@ -2,94 +2,69 @@
 
 namespace App\Console\Commands\Users;
 
-use App\System;
+use App\Console\Commands\Concerns\ProjectOptions;
+use App\Console\Commands\ProjectFleetCommand;
 use App\Models\User;
-use App\Console\Commands\Concerns\ResolvesProject;
-use Illuminate\Console\Command;
-use Illuminate\Database\Eloquent\Collection;
+use App\System;
 
-class Rebuild extends Command
+class Rebuild extends ProjectFleetCommand
 {
-    use ResolvesProject;
-
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['projects:rebuild', 'users:rebuild'];
 
-    protected $signature = 'project:rebuild {--project= : Project username} {--username= : Deprecated alias for --project} {--all} {--wipe-vhosts-dir}';
+    protected $signature = 'project:rebuild' . ProjectOptions::SIGNATURE . ' {--wipe-vhosts-dir}';
 
     protected $description = 'Rebuild a project\'s docker compose stack and recreate its domain configuration files';
 
-    public function handle(): int
+    private System $system;
+
+    private string $webserver;
+
+    protected function beforeAll(): void
     {
-        $this->foldProjectOption();
-
-        /** @var string */
-        $username = $this->option('username');
-        /** @var bool */
-        $all = $this->option('all');
-
-        if (!$username && !$all) {
-            $this->error('One of following options is required: `--project=NAME` or `--all`');
-            return 1;
-        }
-
-        if ($username) {
-            $user = User::findByUsername($username);
-            if (!$user) {
-                $this->error('Invalid username');
-                return 1;
-            }
-            return $this->rebuildUsers([$user]);
-        }
-
-        $users = User::all();
-        return $this->rebuildUsers($users);
+        $this->system = new System();
+        $this->webserver = $this->system->webserver()->getCurrentWebserver();
     }
 
-    /**
-     * @param array<User>|Collection<int, User> $users
-     */
-    private function rebuildUsers($users): int
+    protected function progress(User $user): string
     {
-        $wipe = $this->option('wipe-vhosts-dir');
+        return "Rebuilding user '{$user->username}'...";
+    }
 
-        $system = new System();
-        $webserver = $system->webserver()->getCurrentWebserver();
-        $ok = true;
-        foreach ($users as $user) {
+    protected function applyTo(User $user): void
+    {
+        $project = $user->project();
+
+        if ($this->option('wipe-vhosts-dir')) {
+            $project->deleteAllDomainsConfigs();
+        }
+
+        $project->rebuildFromSource();
+
+        $user->save();
+
+        if (count($user->domains)) {
+            $project->rebuildDomains();
+            $project->waitForAllRunning();
+            $project->reloadWebserver();
+        }
+    }
+
+    protected function finished(User $user): string
+    {
+        return '  Finished rebuilding user.';
+    }
+
+    protected function afterAll(): void
+    {
+        if ($this->option('wipe-vhosts-dir')) {
             try {
-                $this->output->write("Rebuilding user '{$user->username}'...\n");
-                $project = $user->project();
-                if ($wipe) {
-                    $project->deleteAllDomainsConfigs();
-                }
-                $workflow = $project->deployment();
-                if ($workflow !== null) {
-                    $workflow->rebuildFromSource();
-                } else {
-                    $project->prepareLinuxIsolation();
-                    $project->recreateOuterCompose();
-                }
-                $user->save();
-                if (count($user->domains)) {
-                    $project->rebuildDomains();
-                    $project->waitForAllRunning();
-                    $project->reloadWebserver();
-                }
-                $this->info("  Finished rebuilding user.");
-            } catch (\Exception $e) {
-                $this->error($e->getMessage());
-                $ok = false;
+                $dir = $this->system->engineDirPath() . "/webserver-config/{$this->webserver}/vhosts";
+                $this->system->exec("rm -rf {$dir}/* {$dir}/.*");
+            } catch (\Exception) {
             }
         }
-        if ($wipe) {
-            try {
-                $dir = $system->engineDirPath() . "/webserver-config/{$webserver}/vhosts";
-                $system->exec("rm -rf {$dir}/* {$dir}/.*");
-            } catch (\Exception $e) {
-            }
-        }
-        $system->webserver()->rebuildDomains();
-        return (int)!$ok;
+
+        $this->system->webserver()->rebuildDomains();
     }
 }

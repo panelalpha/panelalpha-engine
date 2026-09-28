@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Log;
  *
  * Runs inside {@see Telemetry::captureDeploy()}, which is called from
  * `DeployLogger::finish()` — and that timing is not incidental. A failed
- * account creation is rolled back by `UserController::deleteFailedAccount()`
+ * account creation is rolled back by `RollBackProject`
  * immediately after the log is finished, so by the time the shipper runs five
  * minutes later the source is gone. If a bundle is going to exist at all it has
  * to be written while the tree is still on disk.

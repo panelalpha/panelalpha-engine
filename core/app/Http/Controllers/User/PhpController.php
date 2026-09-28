@@ -29,10 +29,7 @@ class PhpController extends Controller
     )]
     public function listCustomIniSettings(string $username, UserPhpListCustomIniSettingsRequest $request, EngineSystem $system): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if(!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         /** @var array{php_version: string} */
         $params = $request->validated();
@@ -69,10 +66,7 @@ class PhpController extends Controller
     )]
     public function updateCustomIniSettings(string $username, UserPhpUpdateCustomIniSettingsRequest $request, EngineSystem $system): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if(!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         /** @var array{php_version: string, settings: array<string,string>} */
         $params = $request->validated();

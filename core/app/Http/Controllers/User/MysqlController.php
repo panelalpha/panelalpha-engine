@@ -63,10 +63,7 @@ class MysqlController extends Controller
     )]
     public function createPhpmyadminSsoToken(string $username): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         $user->mysqlSsoTokens()->delete();
 

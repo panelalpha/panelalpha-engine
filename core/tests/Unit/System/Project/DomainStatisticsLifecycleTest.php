@@ -154,6 +154,11 @@ class DomainStatisticsLifecycleTest extends TestCase
                         return is_dir($target);
                     }
 
+                    public function directoryExists(string $path): bool
+                    {
+                        return is_dir($path);
+                    }
+
                     public function makeDirFromTemplate(
                         string $dir,
                         string $templateDir,

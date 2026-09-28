@@ -33,12 +33,7 @@ class UsageController extends Controller
     )]
     public function getUsage(string $username): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         $diskUsage = $user->project()->fileManager()->diskUsage();
 
@@ -117,12 +112,7 @@ class UsageController extends Controller
     )]
     public function getBandwidth(BandwidthSeriesRequest $request, string $username): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         return new JsonResponse($this->statistics->projectBandwidth(
             $this->domainNames($user),
@@ -161,12 +151,7 @@ class UsageController extends Controller
     )]
     public function getDomainBandwidth(BandwidthSeriesRequest $request, string $username, string $domain): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?Domain $owned */
         $owned = $user->domains()->getQuery()->where('domain', $domain)->first();
@@ -204,12 +189,7 @@ class UsageController extends Controller
     )]
     public function getDomainVisitors(VisitorsRangeRequest $request, string $username, string $domain): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?Domain $owned */
         $owned = $user->domains()->getQuery()->where('domain', $domain)->first();
@@ -256,12 +236,7 @@ class UsageController extends Controller
     )]
     public function getDomainVisitorBreakdown(VisitorsBreakdownRequest $request, string $username, string $domain, string $dimension): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?Domain $owned */
         $owned = $user->domains()->getQuery()->where('domain', $domain)->first();

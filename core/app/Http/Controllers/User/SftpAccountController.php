@@ -201,12 +201,7 @@ class SftpAccountController extends Controller
      */
     public function update($username, string $sftpUsername, SftpAccountUpdateRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -297,12 +292,7 @@ class SftpAccountController extends Controller
      */
     public function destroy(string $username, string $sftpUsername): SftpAccountResource
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?SftpAccount */
         $sftpAccount = SftpAccount::query()

@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Lib\Host\ProjectMemory;
+use App\Lib\Limits\ResourceLimit;
+use App\Lib\Project\NewProjectDetails;
 use App\System\Project as AppSystemProject;
 use App\System\Services\Webserver\AbstractWebserver;
 use Illuminate\Database\Eloquent\Collection;
@@ -167,32 +169,11 @@ class User extends Authenticatable
     {
         $srcDetails = $this->getDetails();
 
-        return array_merge([
-            'home_dir'               => "/home/{$destUsername}",
-            'mysql_prefix'           => $destUsername . '_',
-            'disk_space_limit'       => $srcDetails['disk_space_limit'] ?? -1,
-            'memory_limit'           => ProjectMemory::resolve(
-                isset($srcDetails['memory_limit']) ? (int) $srcDetails['memory_limit'] : null
-            ),
-            'cpu_limit'              => $srcDetails['cpu_limit'] ?? null,
-            'device_read_bps'        => $srcDetails['device_read_bps'] ?? null,
-            'device_write_bps'       => $srcDetails['device_write_bps'] ?? null,
-            'bandwidth_limit'        => $srcDetails['bandwidth_limit'] ?? null,
-            'mysql_databases_limit'  => $srcDetails['mysql_databases_limit'] ?? null,
-            'ftp_accounts_limit'     => $srcDetails['ftp_accounts_limit'] ?? null,
-            'sftp_accounts_limit'    => $srcDetails['sftp_accounts_limit'] ?? null,
-            'addon_domains_limit'    => $srcDetails['addon_domains_limit'] ?? null,
-            'subdomains_limit'       => $srcDetails['subdomains_limit'] ?? null,
-            'inodes_limit'           => $srcDetails['inodes_limit'] ?? null,
-            'php_fpm_pool_settings'  => $srcDetails['php_fpm_pool_settings'] ?? null,
-            'lsphp_settings'         => $srcDetails['lsphp_settings'] ?? null,
-            'redis_config'           => $srcDetails['redis_config'] ?? null,
-            'dedicated_ipv4'         => false,
-            'dedicated_ipv6'         => false,
-            'template'               => $srcDetails['template'] ?? null,
-            'git_repo'               => $srcDetails['git_repo'] ?? null,
-            'app_port'               => $srcDetails['app_port'] ?? null,
-        ], self::copiedDeploySnapshot($srcDetails), $extra);
+        return array_merge(
+            NewProjectDetails::forCopy($destUsername, $srcDetails),
+            self::copiedDeploySnapshot($srcDetails),
+            $extra
+        );
     }
 
     public function applyDeploySnapshotFrom(self $source): void
@@ -558,209 +539,136 @@ class User extends Authenticatable
         return ($system ?? new \App\System())->project($this);
     }
 
+    /** The stored value for one limit, cast, or null when it is unset. */
+    public function limit(ResourceLimit $limit): int|float|null
+    {
+        return $limit->read($this->getDetails());
+    }
+
+    public function setLimit(ResourceLimit $limit, int|float|null $value): void
+    {
+        $this->setDetails([$limit->key => $value]);
+    }
+
     public function getDiskSpaceLimit(): ?int
     {
-        $details = $this->getDetails();
-        if (array_key_exists('disk_space_limit', $details)) {
-            if ($details['disk_space_limit'] === null) {
-                return null;
-            }
-            return (int)$details['disk_space_limit'];
-        }
-        return null;
+        return $this->limit(ResourceLimit::byKey('disk_space_limit'));
     }
 
     public function setDiskSpaceLimit(?int $value): void
     {
-        $this->setDetails(['disk_space_limit' => $value]);
+        $this->setLimit(ResourceLimit::byKey('disk_space_limit'), $value);
     }
 
     public function getCpuLimit(): ?float
     {
-        $details = $this->getDetails();
-        if (array_key_exists('cpu_limit', $details)) {
-            if ($details['cpu_limit'] === null) {
-                return null;
-            }
-            return (float)$details['cpu_limit'];
-        }
-        return null;
+        return $this->limit(ResourceLimit::byKey('cpu_limit'));
     }
 
     public function setCpuLimit(?float $value): void
     {
-        $this->setDetails(['cpu_limit' => $value]);
+        $this->setLimit(ResourceLimit::byKey('cpu_limit'), $value);
     }
 
     public function getDeviceReadBps(): ?int
     {
-        $details = $this->getDetails();
-        if (array_key_exists('device_read_bps', $details)) {
-            if ($details['device_read_bps'] === null) {
-                return null;
-            }
-            return (int)$details['device_read_bps'];
-        }
-        return null;
+        return $this->limit(ResourceLimit::byKey('device_read_bps'));
     }
 
     public function setDeviceReadBps(?int $value): void
     {
-        $this->setDetails(['device_read_bps' => $value]);
+        $this->setLimit(ResourceLimit::byKey('device_read_bps'), $value);
     }
 
     public function getDeviceWriteBps(): ?int
     {
-        $details = $this->getDetails();
-        if (array_key_exists('device_write_bps', $details)) {
-            if ($details['device_write_bps'] === null) {
-                return null;
-            }
-            return (int)$details['device_write_bps'];
-        }
-        return null;
+        return $this->limit(ResourceLimit::byKey('device_write_bps'));
     }
 
     public function setDeviceWriteBps(?int $value): void
     {
-        $this->setDetails(['device_write_bps' => $value]);
+        $this->setLimit(ResourceLimit::byKey('device_write_bps'), $value);
     }
 
     public function getBandwidthLimit(): ?int
     {
-        $details = $this->getDetails();
-        if (array_key_exists('bandwidth_limit', $details)) {
-            if ($details['bandwidth_limit'] === null) {
-                return null;
-            }
-            return (int)$details['bandwidth_limit'];
-        }
-        return null;
+        return $this->limit(ResourceLimit::byKey('bandwidth_limit'));
     }
 
     public function setBandwidthLimit(?int $value): void
     {
-        $this->setDetails(['bandwidth_limit' => $value]);
+        $this->setLimit(ResourceLimit::byKey('bandwidth_limit'), $value);
     }
 
     public function getMysqlDatabasesLimit(): ?int
     {
-        $details = $this->getDetails();
-        if (array_key_exists('mysql_databases_limit', $details)) {
-            if ($details['mysql_databases_limit'] === null) {
-                return null;
-            }
-            return (int)$details['mysql_databases_limit'];
-        }
-        return null;
+        return $this->limit(ResourceLimit::byKey('mysql_databases_limit'));
     }
 
     public function setMysqlDatabasesLimit(?int $value): void
     {
-        $this->setDetails(['mysql_databases_limit' => $value]);
+        $this->setLimit(ResourceLimit::byKey('mysql_databases_limit'), $value);
     }
 
     public function getFtpAccountsLimit(): ?int
     {
-        $details = $this->getDetails();
-        if (array_key_exists('ftp_accounts_limit', $details)) {
-            if ($details['ftp_accounts_limit'] === null) {
-                return null;
-            }
-            return (int)$details['ftp_accounts_limit'];
-        }
-        return null;
+        return $this->limit(ResourceLimit::byKey('ftp_accounts_limit'));
     }
 
     public function setFtpAccountsLimit(?int $value): void
     {
-        $this->setDetails(['ftp_accounts_limit' => $value]);
+        $this->setLimit(ResourceLimit::byKey('ftp_accounts_limit'), $value);
     }
 
     public function getSftpAccountsLimit(): ?int
     {
-        $details = $this->getDetails();
-        if (array_key_exists('sftp_accounts_limit', $details)) {
-            if ($details['sftp_accounts_limit'] === null) {
-                return null;
-            }
-            return (int)$details['sftp_accounts_limit'];
-        }
-        return null;
+        return $this->limit(ResourceLimit::byKey('sftp_accounts_limit'));
     }
 
     public function setSftpAccountsLimit(?int $value): void
     {
-        $this->setDetails(['sftp_accounts_limit' => $value]);
+        $this->setLimit(ResourceLimit::byKey('sftp_accounts_limit'), $value);
     }
 
     public function getAddonDomainsLimit(): ?int
     {
-        $details = $this->getDetails();
-        if (array_key_exists('addon_domains_limit', $details)) {
-            if ($details['addon_domains_limit'] === null) {
-                return null;
-            }
-            return (int)$details['addon_domains_limit'];
-        }
-        return null;
+        return $this->limit(ResourceLimit::byKey('addon_domains_limit'));
     }
 
     public function setAddonDomainsLimit(?int $value): void
     {
-        $this->setDetails(['addon_domains_limit' => $value]);
+        $this->setLimit(ResourceLimit::byKey('addon_domains_limit'), $value);
     }
 
     // 'subdomains_limit' => 'integer|nullable',
     public function getSubdomainsLimit(): ?int
     {
-        $details = $this->getDetails();
-        if (array_key_exists('subdomains_limit', $details)) {
-            if ($details['subdomains_limit'] === null) {
-                return null;
-            }
-            return (int)$details['subdomains_limit'];
-        }
-        return null;
+        return $this->limit(ResourceLimit::byKey('subdomains_limit'));
     }
 
     public function setSubdomainsLimit(?int $value): void
     {
-        $this->setDetails(['subdomains_limit' => $value]);
+        $this->setLimit(ResourceLimit::byKey('subdomains_limit'), $value);
     }
 
     public function getInodesLimit(): ?int
     {
-        $details = $this->getDetails();
-        if (array_key_exists('inodes_limit', $details)) {
-            if ($details['inodes_limit'] === null) {
-                return null;
-            }
-            return (int)$details['inodes_limit'];
-        }
-        return null;
+        return $this->limit(ResourceLimit::byKey('inodes_limit'));
     }
 
     public function setInodesLimit(?int $value): void
     {
-        $this->setDetails(['inodes_limit' => $value]);
+        $this->setLimit(ResourceLimit::byKey('inodes_limit'), $value);
     }
 
     public function getMemoryLimit(): ?int
     {
-        $details = $this->getDetails();
-        if (array_key_exists('memory_limit', $details)) {
-            if ($details['memory_limit'] === null) {
-                return null;
-            }
-            return (int)$details['memory_limit'];
-        }
-        return null;
+        return $this->limit(ResourceLimit::byKey('memory_limit'));
     }
 
     public function setMemoryLimit(?int $value): void
     {
-        $this->setDetails(['memory_limit' => $value]);
+        $this->setLimit(ResourceLimit::byKey('memory_limit'), $value);
     }
 
     /**
@@ -770,6 +678,12 @@ class User extends Authenticatable
     public function effectiveMemoryLimit(): int
     {
         return ProjectMemory::resolve($this->getMemoryLimit());
+    }
+
+    /** The value a limit that cannot be unset falls back to when it is unset. */
+    public function effectiveLimit(ResourceLimit $limit): int|float|null
+    {
+        return $limit->alwaysApplies ? $this->effectiveMemoryLimit() : $this->limit($limit);
     }
 
     public function getRealFtpAccountQuota(?int $ftpAccountQuota): ?int

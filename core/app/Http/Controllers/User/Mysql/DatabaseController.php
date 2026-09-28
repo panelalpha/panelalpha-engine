@@ -31,12 +31,7 @@ class DatabaseController extends Controller
     )]
     public function index(string $username): MysqlDatabaseCollection
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         $mysql = (new System())->mysql();
 
@@ -70,12 +65,7 @@ class DatabaseController extends Controller
      */
     public function show($username, $dbname)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?MysqlDatabase */
         $db = $user->mysqlDatabases()->getQuery()->where('database', $user->qualifyMysqlDatabase($dbname))->first();
@@ -193,12 +183,7 @@ class DatabaseController extends Controller
      */
     public function destroy($username, $dbname)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var ?MysqlDatabase $db

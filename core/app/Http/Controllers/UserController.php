@@ -18,7 +18,6 @@ use App\Jobs\DeployProject;
 use App\System;
 use App\Lib\Helper;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
-use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\PlatformStage;
@@ -28,9 +27,11 @@ use App\Lib\Deploy\ProjectName;
 use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Lib\Domains\DomainAllocationException;
 use App\Lib\Domains\DomainAllocator;
+use App\Lib\Project\NewProjectDetails;
+use App\Lib\Project\ProvisionChecks;
+use App\Lib\Project\SystemProvisionEnvironment;
 use App\Rules\ProjectName as ProjectNameRule;
 use App\Lib\Domains\DomainPlan;
-use App\Lib\Domains\PublicUrl;
 use App\Lib\Vault\RequestVault;
 use App\Models\Domain;
 use App\Models\ProxyRule;
@@ -535,67 +536,9 @@ class UserController extends Controller
         }
 
         // Everything knowable from the request alone, asked at once and
-        // answered at once. These used to be five sequential throws, so a
-        // caller with a taken name *and* a bad template learned about the
-        // second only after fixing the first -- a round trip per mistake, for
-        // mistakes the server could see all of together.
-        $problems = [];
-
+        // answered at once. {@see ProvisionChecks}
         $nameField = $request->nameField();
-        if (User::existsByUsername($params['username'])) {
-            $problems[] = [
-                'field' => $nameField,
-                'code' => 'name_taken',
-                'message' => "A project named '{$params['username']}' already exists. Choose another name.",
-            ];
-        } elseif (!(new System())->isUsernameAvailable($params['username'])) {
-            // Asked here as well as after the account is built, because the
-            // allocation below spends a label out of a namespace the whole
-            // fleet shares. A name burnt on a project that was never going to
-            // be created is gone for good -- PanelAlpha Online has no release.
-            $problems[] = [
-                'field' => $nameField,
-                'code' => 'name_unavailable',
-                'message' => "'{$params['username']}' is reserved or already used by the system. Choose another name.",
-            ];
-        }
-
-        // dind is what a git_repo deploys into anyway, so naming it is no conflict.
-        if (!empty($params['template']) && $params['template'] !== 'dind' && !empty($params['git_repo'])) {
-            $problems[] = [
-                'field' => 'template',
-                'code' => 'template_conflicts_with_git',
-                'message' => 'A git_repo deploys into the dind template; no other template can take one.',
-            ];
-        } elseif (!empty($params['template'])
-            && !is_dir((new System())->projectFilesTemplateDirPath($params['template']))
-        ) {
-            $problems[] = [
-                'field' => 'template',
-                'code' => 'template_not_found',
-                'message' => 'Template directory does not exist.',
-            ];
-        }
-
-        if (($params['disk_space_limit'] ?? -1) < -1) {
-            $problems[] = [
-                'field' => 'disk_space_limit',
-                'code' => 'invalid_value',
-                'message' => 'disk_space_limit must be an integer number of MB, or -1 for unlimited.',
-                'expected' => 'an integer number of MB, -1 for unlimited',
-            ];
-        }
-
-        // A domain the caller named, checked before the allocator is asked --
-        // it is the one candidate that never has an alternative, so learning
-        // it is taken is worth doing before anything is bought.
-        if (!empty($params['domain']) && Domain::domainOrAliasExists($params['domain'])) {
-            $problems[] = [
-                'field' => 'domain',
-                'code' => 'domain_taken',
-                'message' => "{$params['domain']} is already on this engine.",
-            ];
-        }
+        $problems = (new ProvisionChecks(new SystemProvisionEnvironment()))->problems($params, $nameField);
 
         if ($problems !== []) {
             throw ProblemException::of($problems);
@@ -662,8 +605,6 @@ class UserController extends Controller
             $params['template'] = 'dind';
         }
 
-        $diskSpaceLimit = $params['disk_space_limit'] ?? -1;
-
         $dedicatedIpv4 = !empty($params['dedicated_ipv4']);
         $dedicatedIpv6 = !empty($params['dedicated_ipv6']);
 
@@ -672,37 +613,11 @@ class UserController extends Controller
             'username' => $params['username'],
             'domain' => $params['domain'],
             'email' => $params['email'] ?? null,
-            'details' => [
-                'home_dir' => "/home/{$params['username']}",
-                'mysql_prefix' => $params['username'] . '_',
-                'disk_space_limit' => $diskSpaceLimit,
-                'memory_limit' => (int) ($params['memory_limit'] ?? ProjectMemory::defaultMb()),
-                'cpu_limit' => $params['cpu_limit'] ?? null,
-                'device_read_bps' => $params['device_read_bps'] ?? null,
-                'device_write_bps' => $params['device_write_bps'] ?? null,
-                'bandwidth_limit' => $params['bandwidth_limit'] ?? null,
-                'mysql_databases_limit' => $params['mysql_databases_limit'] ?? null,
-                'ftp_accounts_limit' => $params['ftp_accounts_limit'] ?? null,
-                'sftp_accounts_limit' => $params['sftp_accounts_limit'] ?? null,
-                'addon_domains_limit' => $params['addon_domains_limit'] ?? null,
-                'subdomains_limit' => $params['subdomains_limit'] ?? null,
-                'inodes_limit' => $params['inodes_limit'] ?? null,
-                'php_fpm_pool_settings' => $params['php_fpm_pool_settings'] ?? null,
-                'lsphp_settings' => $params['lsphp_settings'] ?? null,
-                'redis_config' => $params['redis_config'] ?? null,
-                'dedicated_ipv4' => $dedicatedIpv4,
-                'dedicated_ipv6' => $dedicatedIpv6,
-                'template' => $params['template'] ?? null,
-                'git_repo' => $params['git_repo'] ?? null,
-                'git_branch' => $params['git_branch'] ?? null,
-                'git_token' => $params['git_token'],
-                'env_vars' => $this->mergedEnvVars($params['env_vars'] ?? [], []),
-                // Where the name came from and what it is worth: whether it
-                // reaches this host from outside, which side terminates TLS,
-                // and which preferred rung was skipped and why. A caller that
-                // reads this never has to infer any of it from the zone.
-                'domain' => $allocated->toDetails(),
-            ],
+            'details' => NewProjectDetails::build(
+                $params,
+                $allocated->toDetails(),
+                $this->mergedEnvVars($params['env_vars'] ?? [], []),
+            ),
         ]);
 
         if (!empty($params['password']) && is_string($params['password'])) {
@@ -865,234 +780,7 @@ class UserController extends Controller
      */
     public function runDeployPipeline(User $user, ?DeployLogger $deployLogger, ?callable $beforeRollback = null): void
     {
-        $project = $user->project();
-        $runtime = $project->runtime();
-        if ($runtime instanceof Dind) {
-            $runtime->deployment()->run($deployLogger, $beforeRollback);
-
-            return;
-        }
-
-        $domain = $user->getMainDomain();
-        if ($domain === null) {
-            throw new \RuntimeException("Project '{$user->username}' has no main domain.");
-        }
-
-        try {
-            $deployLogger?->stage(DeployLogger::STAGE_PREPARING);
-            $project->createDirectories();
-            $osUser = $project->syncLinuxUser();
-            $user->setDetails([
-                'UID' => $osUser['UID'],
-                'GID' => $osUser['GID'],
-            ]);
-            $user->save();
-            $project->createFromTemplate();
-            $project->up();
-            $project->fixPermissions();
-            $project->configureQuota();
-            $project->waitForAllRunning();
-            // Zip installs create the account first, then copy files and rebuild.
-            // Stop after preparing so the UI does not complete a fake Static
-            // deploy and then rewind to cloning when rebuild starts.
-            if ($user->getTemplate() === 'dind' && !$user->hasGitProject()) {
-                $domain->projectDomain()->create();
-                $deployLogger?->info('Environment ready, waiting for project files');
-
-                return;
-            }
-            $deployLogger?->stage(DeployLogger::STAGE_CLONING);
-            if ($user->hasGitProject()) {
-                $project->preCheckUserApp();
-                $project->cloneUserApp();
-            } else {
-                $project->prepareUserAppFromSources();
-            }
-            $deployLogger?->stage(DeployLogger::STAGE_RUNNING);
-            $domain->projectDomain()->create();
-        } catch (DeployCancelledException $e) {
-            $stage = $deployLogger?->currentStage();
-            $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
-            $this->deleteFailedAccount($user->username);
-            throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
-        } catch (\Exception $e) {
-            $deployLogger?->recordFailureOutput($e->getMessage());
-            // The rule slug the explainer already matched on, kept rather than
-            // thrown away: it is the same identifier deploy telemetry reports,
-            // so a client and a dashboard name the same failure the same way.
-            $match = DeployFailureExplainer::match($e->getMessage());
-            $message = $match['message'] ?? $e->getMessage();
-            $hint = $this->customEnvFailureHint($user);
-            if ($hint !== null) {
-                $message .= ' | ' . $hint;
-            }
-            $stage = $deployLogger?->currentStage();
-            $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
-            $this->rollbackFailedDeploy($user->username, $deployLogger, $beforeRollback);
-            throw self::deployProblem($match['rule'] ?? 'deploy_failed', $message, $stage);
-        }
-
-        // Two kinds of bad news, and they must not be told the same way. A
-        // hint about a setting is a warning; an application that will not
-        // start is a failed deploy, whatever else went right. Reporting the
-        // second as the first is what puts "successfully installed" on the
-        // screen above a site that serves nothing.
-        $warnings = [];
-        $failures = [];
-        // The raw output as well as the sentence: startFailureMessage()
-        // replaces one with the other, and the slug can only be matched
-        // against what the tool actually printed.
-        $failureOutputs = [];
-        if ($user->hasGitProject() || $user->getTemplate() === 'dind') {
-            try {
-                $result = $project->startUserApp();
-                if ($result['exit_code'] !== 0) {
-                    try {
-                        $project->abortRunningDeploy();
-                    } catch (\Exception $cleanup) {
-                        Log::warning(
-                            "Partial deploy cleanup failed for {$user->username}: {$cleanup->getMessage()}",
-                        );
-                    }
-                    $output = $result['stderr'] ?: $result['stdout'];
-                    $failureOutputs[] = $output;
-                    $failures[] = $this->startFailureMessage($output, $deployLogger);
-                }
-            } catch (DeployCancelledException $e) {
-                $stage = $deployLogger?->currentStage();
-                $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
-                $this->deleteFailedAccount($user->username);
-                throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
-            } catch (\Exception $e) {
-                $failureOutputs[] = $e->getMessage();
-                $failures[] = $this->startFailureMessage($e->getMessage(), $deployLogger);
-            }
-        }
-
-        if (!empty($failures)) {
-            $hint = $this->customEnvFailureHint($user);
-            if ($hint !== null) {
-                $warnings[] = $hint;
-            }
-            $messages = array_merge($failures, $warnings);
-            $summary = implode(' | ', $messages);
-            $stage = $deployLogger?->currentStage();
-            $deployLogger?->finish(DeployLogger::STATUS_FAILED, $summary);
-            // App never started — roll the account back so Try Again can
-            // reuse the same username instead of colliding with a zombie.
-            $this->rollbackFailedDeploy($user->username, $deployLogger, $beforeRollback);
-            // `app_did_not_start` is only the right word when something did
-            // start. A build that never produced an image ends up here too,
-            // and that slug sends the reader to container logs there are none
-            // of. Ask the explainer first, exactly as the catch branch does --
-            // of the raw output, because $summary is the explained sentence
-            // and no longer contains the words the rules match on.
-            $match = DeployFailureExplainer::match(implode("\n", $failureOutputs));
-            throw self::deployProblem($match['rule'] ?? 'app_did_not_start', $summary, $stage);
-        }
-
-        // The app came up. Whether it is actually *serving* is a different
-        // question, and AppHealth has just answered it -- see
-        // {@see AppHealth::report()}, which probes every published port from
-        // inside the container. A deploy is not failed by it: a queue
-        // consumer answering nothing on HTTP is a legitimate install, and
-        // that case reports `checked: false` rather than a failure. But an
-        // application that publishes ports and answers on none of them is not
-        // a clean success either, and saying so here is what "finished with
-        // warnings" was always for.
-        $warnings = array_merge($warnings, AppHealth::servingWarnings($user->getDetails()));
-
-        // Whether the URL this deploy is about to be reported under can be
-        // opened at all. AppHealth answered the layer below this one against
-        // 127.0.0.1 on purpose, so a name that resolves nowhere and a
-        // certificate no browser accepts both got past it. See {@see PublicUrl}.
-        foreach (PublicUrl::warnings($user->domain, $user->getDetails()) as $unreachable) {
-            $warnings[] = $unreachable;
-        }
-        foreach (PublicUrl::notices((string) $user->domain, $user->getDetails()) as $notice) {
-            $deployLogger?->warn($notice);
-        }
-
-        if (!empty($warnings)) {
-            $hint = $this->customEnvFailureHint($user);
-            if ($hint !== null) {
-                $warnings[] = $hint;
-            }
-            $user->setDetails([
-                'deployment_warnings' => $warnings,
-                'deployment_status' => 'partial',
-            ]);
-            $user->save();
-            $deployLogger?->finish(
-                DeployLogger::STATUS_PARTIAL,
-                implode(' | ', $warnings)
-            );
-        } else {
-            $user->markDeploySucceeded();
-            $user->save();
-            $deployLogger?->finish(DeployLogger::STATUS_SUCCESS);
-        }
-    }
-
-    /**
-     * What the customer sees when the app fails to start.
-     *
-     * Raw BuildKit output is a wall of layer digests with the one useful line
-     * buried in it. Lead with a plain sentence when we recognise the cause;
-     * the full output is always in the deploy log either way.
-     *
-     * This is also the last point that still holds the unabridged output, so
-     * it hands it to the logger for telemetry before reducing it to a sentence.
-     */
-    private function startFailureMessage(string $output, ?DeployLogger $logger = null): string
-    {
-        $logger?->recordFailureOutput($output);
-
-        // The failing region first, for the same reason the host build does it:
-        // a `docker compose up --build` writes a layer banner per step and
-        // megabytes of build log, and the explainer matches anywhere in it, so
-        // the sentence it produced was often the banner printed before
-        // anything went wrong -- "Image project-hitkeep Building" for a build
-        // that had died on `#6 ERROR: golang:required-by-hk: not found`.
-        // {@see FailureOutput::select()}
-        $explanation = DeployFailureExplainer::explain(FailureOutput::select($output));
-        if ($explanation !== null) {
-            return 'Failed to start app: ' . $explanation;
-        }
-
-        // Nothing recognised: still lead with the failing region rather than
-        // the whole stream, which is thousands of lines and names the cause
-        // somewhere near the end.
-        $selected = trim(FailureOutput::select($output));
-        if ($selected !== '') {
-            return 'Failed to start app: ' . $selected;
-        }
-
-        return 'Failed to start app: ' . trim($output);
-    }
-
-    /**
-     * The rollback deletes the deploy log, so the caller gets it first. A
-     * failing hook is logged and never stops the rollback.
-     */
-    private function rollbackFailedDeploy(string $username, ?DeployLogger $logger, ?callable $beforeRollback): void
-    {
-        if ($beforeRollback !== null && $logger !== null) {
-            try {
-                $beforeRollback($logger);
-            } catch (\Throwable $e) {
-                Log::warning("Before-rollback hook failed for {$username}: {$e->getMessage()}");
-            }
-        }
-        $this->deleteFailedAccount($username);
-    }
-
-    private function deleteFailedAccount(string $username): void
-    {
-        $user = User::findByUsername($username);
-        if ($user !== null) {
-            $user->project()->destroy();
-        }
+        $user->project()->runDeployment($deployLogger, $beforeRollback);
     }
 
     /**
@@ -1152,20 +840,6 @@ class UserController extends Controller
         }
 
         return $result;
-    }
-
-    /**
-     * The hint for a deploy that ran with environment variables somebody set
-     * by hand, added alongside whatever else went wrong.
-     */
-    private function customEnvFailureHint(User $user): ?string
-    {
-        if (!$user->usedCustomEnvVars()) {
-            return null;
-        }
-
-        // A failed create is rolled back, .env.default included, so point nowhere on disk.
-        return 'Deploy failed with custom environment variables — consider retrying without them to see whether they caused it.';
     }
 
     /**
@@ -1319,12 +993,7 @@ class UserController extends Controller
      */
     public function rebuild(string $username, Request $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var array{env_vars?: array<string, string>, zip_path?: string} $params */
         $params = $request->validate([
@@ -1443,15 +1112,7 @@ class UserController extends Controller
      */
     private function runProjectRebuild(ProjectAggregate $project, ?DeployLogger $deployLogger, ?string $zipPath): void
     {
-        $workflow = $project->deployment();
-        if ($workflow !== null) {
-            $workflow->rebuildFromSource($deployLogger, $zipPath);
-
-            return;
-        }
-
-        $project->prepareLinuxIsolation();
-        $project->recreateOuterCompose();
+        $project->rebuildFromSource($deployLogger, $zipPath);
     }
 
     /**
@@ -1549,12 +1210,7 @@ class UserController extends Controller
     )]
     public function deployArchive(string $username, Request $request): UserResource|StreamedResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
         if ($user->getTemplate() !== 'dind') {
             throw ValidationException::withMessages([
                 'zip_path' => 'Archive deploy is only supported for dind users.',
@@ -1659,12 +1315,7 @@ class UserController extends Controller
      */
     public function clone(string $username, UserCloneRequest $request): UserResource
     {
-        $srcUser = User::findByUsername($username);
-        if (!$srcUser) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $srcUser = $this->projectOr404($username);
 
         /** @var array{new_username?: ?string, domain?: ?string} */
         $params = $request->validated();
@@ -1849,12 +1500,7 @@ class UserController extends Controller
      */
     public function show($username)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
         $user->loadMissing(['liveUser', 'stagingUser']);
 
         return new UserResource($user);
@@ -1894,12 +1540,7 @@ class UserController extends Controller
      */
     public function update($username, UserUpdateRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var array{
          *   domain?: string,
@@ -2054,12 +1695,7 @@ class UserController extends Controller
     )]
     public function suspend(string $username): UserResource
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         $user->status = "suspended";
         $user->save();
@@ -2083,12 +1719,7 @@ class UserController extends Controller
     )]
     public function unsuspend(string $username): UserResource
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         $user->status = "active";
         $user->save();
@@ -2116,12 +1747,7 @@ class UserController extends Controller
      */
     public function destroy($username)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         try {
             $user->project()->destroy();

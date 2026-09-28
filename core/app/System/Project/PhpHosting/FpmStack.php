@@ -3,7 +3,7 @@
 namespace App\System\Project\PhpHosting;
 
 use App\Models\User as ModelsUser;
-use App\System;
+use App\System\ProcessRunner;
 use App\System\Project\PhpHosting;
 
 final class FpmStack implements PhpStack
@@ -14,7 +14,7 @@ final class FpmStack implements PhpStack
     public const EXIT_NOT_MANAGED = 3;
 
     public function __construct(
-        private System $system,
+        private ProcessRunner $system,
         private ModelsUser $model,
     ) {
     }

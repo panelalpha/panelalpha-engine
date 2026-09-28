@@ -4,7 +4,6 @@ namespace App\System;
 
 use App\Models\Ipv4NatMap;
 use App\Models\Setting;
-use App\System as EngineSystem;
 use Exception;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -22,7 +21,7 @@ class Network
     private static ?array $defaultIpv6Route = null;
 
     public function __construct(
-        private EngineSystem $system,
+        private ProcessRunner $system,
     ) {
     }
 

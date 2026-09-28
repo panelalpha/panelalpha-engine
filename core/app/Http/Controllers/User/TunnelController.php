@@ -179,10 +179,7 @@ class TunnelController extends Controller
      */
     private function resolve(string $username, string $domain): array
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse(['message' => 'User not found'], 404));
-        }
+        $user = $this->projectOr404($username);
 
         $domainModel = Domain::findByNameOrAlias(strtolower(trim($domain)));
         if (!$domainModel || (int) $domainModel->user_id !== (int) $user->id) {

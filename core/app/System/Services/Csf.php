@@ -2,7 +2,7 @@
 
 namespace App\System\Services;
 
-use App\System as EngineSystem;
+use App\System\ProcessRunner;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -35,7 +35,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 class Csf
 {
     public function __construct(
-        private EngineSystem $system,
+        private ProcessRunner $system,
     ) {
     }
 

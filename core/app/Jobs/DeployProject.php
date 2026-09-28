@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Http\Controllers\UserController;
 use App\Jobs\Concerns\AttachTask;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\DeployPlan;
@@ -77,7 +76,7 @@ class DeployProject implements ShouldQueue
                 };
 
                 try {
-                    (new UserController())->runDeployPipeline($user, $logger, $keepTail);
+                    $user->project()->runDeployment($logger, $keepTail);
                 } catch (ValidationException $e) {
                     // Pipeline already rolled the account back and finished the
                     // deploy log. Surface the message on the task and stop.

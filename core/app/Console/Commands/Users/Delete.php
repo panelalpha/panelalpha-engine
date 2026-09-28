@@ -2,9 +2,9 @@
 
 namespace App\Console\Commands\Users;
 
-use App\Http\Controllers\UserController;
 use App\Models\User;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 class Delete extends Command
 {
@@ -52,8 +52,6 @@ class Delete extends Command
 
         $failed = false;
 
-        $controller = new UserController();
-
         foreach ($usernames as $username) {
             $user = User::findByUsername($username);
             if (!$user) {
@@ -65,9 +63,13 @@ class Delete extends Command
             
             if ($shouldDelete) {
                 try{
-                    $controller->destroy($username);
+                    $user->project()->destroy();
                     $this->info("User `{$username}` deleted.");
                 } catch (\Exception $e) {
+                    Log::warning(
+                        "Could not delete user '{$user->username}': " . $e->getMessage(),
+                        ['exception' => $e],
+                    );
                     $this->error("ERROR deleting user `{$username}`: " . $e->getMessage());
                     $failed = true;
                 }

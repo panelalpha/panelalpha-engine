@@ -2,65 +2,26 @@
 
 namespace App\Console\Commands\Users;
 
+use App\Console\Commands\Concerns\ProjectOptions;
+use App\Console\Commands\ProjectFleetCommand;
 use App\Models\User;
-use App\Console\Commands\Concerns\ResolvesProject;
-use Illuminate\Console\Command;
-use Illuminate\Database\Eloquent\Collection;
 
-class FixFilePermissions extends Command
+class FixFilePermissions extends ProjectFleetCommand
 {
-    use ResolvesProject;
-
     /** Older spellings still answer, so nothing scripted against them breaks. */
     protected $aliases = ['projects:fix-file-permissions', 'users:fix-file-permissions'];
 
-    protected $signature = 'project:permission:fix {--project= : Project username} {--username= : Deprecated alias for --project} {--all}';
+    protected $signature = 'project:permission:fix' . ProjectOptions::SIGNATURE;
 
     protected $description = 'Fix file permissions under a project\'s home directory';
 
-    public function handle(): int
+    protected function progress(User $user): string
     {
-        $this->foldProjectOption();
-
-        /** @var string */
-        $username = $this->option('username');
-        /** @var bool */
-        $all = $this->option('all');
-
-        if (!$username && !$all) {
-            $this->error('One of following options is required: `--project=NAME` or `--all`');
-            return 1;
-        }
-
-        if ($username) {
-            $user = User::findByUsername($username);
-            if (!$user) {
-                $this->error('Invalid username');
-                return 1;
-            }
-            return $this->fix([$user]);
-        }
-
-        $users = User::all();
-        return $this->fix($users);
+        return "Fixing '{$user->username}'...";
     }
 
-    /**
-     * @param array<User>|Collection<int, User> $users
-     */
-    private function fix($users): int
+    protected function applyTo(User $user): void
     {
-        $ok = true;
-        foreach ($users as $user) {
-            try {
-                $this->output->write("Fixing '{$user->username}'...\n");
-                $user->project()->fixPermissions();
-                $this->info("  Finished.");
-            } catch (\Exception $e) {
-                $this->error($e->getMessage());
-                $ok = false;
-            }
-        }
-        return (int)!$ok;
+        $user->project()->fixPermissions();
     }
 }

@@ -166,12 +166,7 @@ class FtpAccountController extends Controller
      */
     public function update($username, $ftpUser, FtpAccountUpdateRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?FtpAccount */
         $ftpAccount = $user->ftpAccounts()->getQuery()->where('user', $ftpUser)->first();
@@ -232,12 +227,7 @@ class FtpAccountController extends Controller
      */
     public function destroy($username, $ftpUser)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?FtpAccount */
         $ftpAccount = $user->ftpAccounts()->getQuery()->where('user', $ftpUser)->first();

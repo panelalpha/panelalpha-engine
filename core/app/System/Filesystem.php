@@ -2,7 +2,6 @@
 
 namespace App\System;
 
-use App\System as EngineSystem;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
@@ -26,7 +25,7 @@ class Filesystem
     private static ?string $homeFilesystemParentBlockDevice = null;
 
     public function __construct(
-        private EngineSystem $system,
+        private ProcessRunner $system,
     ) {
     }
 

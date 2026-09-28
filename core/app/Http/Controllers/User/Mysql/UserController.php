@@ -35,10 +35,7 @@ class UserController extends Controller
      */
     public function index($username): MysqlUserCollection
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         $mysql = (new System())->mysql();
         $mysqlUsers = [];
@@ -72,10 +69,7 @@ class UserController extends Controller
      */
     public function show($username, $dbuser)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         /** @var ?MysqlUser $dbuser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
@@ -111,10 +105,7 @@ class UserController extends Controller
      */
     public function store($username, MysqlUserStoreRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         /** @var array{name: string, password: string} */
         $params = $request->validated();
@@ -178,10 +169,7 @@ class UserController extends Controller
      */
     public function destroy($username, $dbuser)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         /** @var ?MysqlUser $dbuser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
@@ -222,10 +210,7 @@ class UserController extends Controller
      */
     public function rename($username, $dbuser, MysqlUserRenameRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         /** @var ?MysqlUser $dbuser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
@@ -292,10 +277,7 @@ class UserController extends Controller
      */
     public function changePassword($username, $dbuser, MysqlUserChangePasswordRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         /** @var ?MysqlUser $dbuser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();

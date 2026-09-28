@@ -21,10 +21,7 @@ class AppHealthController extends Controller
 {
     private function getDind(string $username): Dind
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse(['message' => 'Not found'], 404));
-        }
+        $user = $this->projectOr404($username, 'Not found');
         if ($user->getTemplate() !== 'dind') {
             abort(new JsonResponse(['message' => 'App health checks are only available for dind users'], 403));
         }

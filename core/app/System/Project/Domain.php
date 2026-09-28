@@ -105,7 +105,7 @@ class Domain implements IssuableDomain
         $this->project->deleteDomainConfig($this->model->domain);
         $this->project->reloadWebserver();
 
-        (new HttpAcmeChallengeStore())->deleteDomainDir($this->model->domain);
+        (new HttpAcmeChallengeStore($this->system()))->deleteDomainDir($this->model->domain);
     }
 
     public function createDomainRootDir(): void

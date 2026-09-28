@@ -83,14 +83,26 @@ final class ProvisionCutoverTest extends TestCase
 
         $this->assertFileDoesNotExist($appRoot . '/System/Project/EnvironmentRebuild.php');
 
-        $controller = file_get_contents($appRoot . '/Http/Controllers/UserController.php');
-        $this->assertIsString($controller);
-        $this->assertStringContainsString('rebuildFromSource', $controller);
-        $this->assertStringContainsString('prepareLinuxIsolation', $controller);
+        // The template fallback used to be written out at each call site, which
+        // is what this checked for by name. It now lives once on the aggregate;
+        // the callers just ask for a rebuild. DeploymentWiringTest covers the
+        // branch itself.
+        $this->assertStringContainsString('function rebuildFromSource(', $source);
+        $this->assertStringContainsString('prepareLinuxIsolation', $source);
 
-        $rebuildCmd = file_get_contents($appRoot . '/Console/Commands/Users/Rebuild.php');
-        $this->assertIsString($rebuildCmd);
-        $this->assertStringContainsString('rebuildFromSource', $rebuildCmd);
-        $this->assertStringContainsString('prepareLinuxIsolation', $rebuildCmd);
+        foreach ([
+            '/Http/Controllers/UserController.php',
+            '/Console/Commands/Users/Rebuild.php',
+            '/Console/Commands/Users/RecoverDind.php',
+        ] as $caller) {
+            $callerSource = file_get_contents($appRoot . $caller);
+            $this->assertIsString($callerSource);
+            $this->assertStringContainsString('rebuildFromSource', $callerSource);
+            $this->assertStringNotContainsString(
+                'prepareLinuxIsolation',
+                $callerSource,
+                $caller . ' must not re-implement the template fallback'
+            );
+        }
     }
 }

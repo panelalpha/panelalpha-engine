@@ -18,9 +18,32 @@ use Illuminate\Support\Facades\Log;
 final class DeploymentWorkflow
 {
     public function __construct(
-        private DeployableDindProject $project,
+        private ?DeployableDindProject $project = null,
         private ?DeployMechanics $mechanics = null,
+        private ?FailureDisposition $disposition = null,
+        private bool $explainNoiseOnlyOutput = true,
     ) {
+    }
+
+    /**
+     * A workflow over mechanics that are not the DinD default.
+     *
+     * $explainNoiseOnlyOutput false keeps the template path's own reporting: a
+     * start failure whose output is all noise is reported as it stands, where
+     * DinD still asks the explainer about the whole of it.
+     */
+    public static function forMechanics(
+        DeployMechanics $mechanics,
+        FailureDisposition $disposition,
+        bool $explainNoiseOnlyOutput = true,
+    ): self {
+        return new self(null, $mechanics, $disposition, $explainNoiseOnlyOutput);
+    }
+
+    /** DinD keeps a failed project; the template path rolls it back. */
+    private function disposition(): FailureDisposition
+    {
+        return $this->disposition ??= new RetainProject();
     }
 
     public function run(?DeployLogger $deployLogger = null, ?callable $beforeRetention = null): void
@@ -47,8 +70,8 @@ final class DeploymentWorkflow
         } catch (DeployCancelledException $e) {
             $stage = $deployLogger?->currentStage();
             $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
-            $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username);
-            FailureRetention::retainAfterDeployCancelled($user, $e->getMessage());
+            $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username, cancelled: true);
+            $this->disposition()->afterCancelled($user, $e->getMessage());
             throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
         } catch (\Exception $e) {
             $deployLogger?->recordFailureOutput($e->getMessage());
@@ -61,7 +84,7 @@ final class DeploymentWorkflow
             $stage = $deployLogger?->currentStage();
             $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
             $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username);
-            FailureRetention::retainAfterDeployFailure($user, $message);
+            $this->disposition()->afterFailure($user, $message);
             throw self::deployProblem($match['rule'] ?? 'deploy_failed', $message, $stage);
         }
 
@@ -87,8 +110,8 @@ final class DeploymentWorkflow
             } catch (DeployCancelledException $e) {
                 $stage = $deployLogger?->currentStage();
                 $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
-                $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username);
-                FailureRetention::retainAfterDeployCancelled($user, $e->getMessage());
+                $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username, cancelled: true);
+                $this->disposition()->afterCancelled($user, $e->getMessage());
                 throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
             } catch (\Exception $e) {
                 $failureOutputs[] = $e->getMessage();
@@ -106,7 +129,7 @@ final class DeploymentWorkflow
             $stage = $deployLogger?->currentStage();
             $deployLogger?->finish(DeployLogger::STATUS_FAILED, $summary);
             $this->invokeBeforeRetention($beforeRetention, $deployLogger, $user->username);
-            FailureRetention::retainAfterDeployFailure($user, $summary);
+            $this->disposition()->afterFailure($user, $summary);
             $match = DeployFailureExplainer::match(implode("\n", $failureOutputs));
             throw self::deployProblem($match['rule'] ?? 'app_did_not_start', $summary, $stage);
         }
@@ -171,7 +194,7 @@ final class DeploymentWorkflow
                 $output = $result['stderr'] ?: $result['stdout'];
                 $message = $this->startFailureMessage($output, $deployLogger);
                 $deployLogger->finish(DeployLogger::STATUS_FAILED, $message);
-                FailureRetention::retainAfterDeployFailure($user, $message);
+                $this->disposition()->afterFailure($user, $message);
                 $match = DeployFailureExplainer::match($output);
                 throw self::deployProblem($match['rule'] ?? 'app_did_not_start', $message, $deployLogger->currentStage());
             }
@@ -195,7 +218,7 @@ final class DeploymentWorkflow
         } catch (DeployCancelledException $e) {
             $stage = $deployLogger->currentStage();
             $deployLogger->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
-            FailureRetention::retainAfterDeployCancelled($user, $e->getMessage());
+            $this->disposition()->afterCancelled($user, $e->getMessage());
             throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
         } catch (ProblemException $e) {
             throw $e;
@@ -204,7 +227,7 @@ final class DeploymentWorkflow
             $match = DeployFailureExplainer::match($e->getMessage());
             $message = $match['message'] ?? $e->getMessage();
             $deployLogger->finish(DeployLogger::STATUS_FAILED, $message);
-            FailureRetention::retainAfterDeployFailure($user, $message);
+            $this->disposition()->afterFailure($user, $message);
             throw self::deployProblem($match['rule'] ?? 'deploy_failed', $message, $deployLogger->currentStage());
         }
     }
@@ -295,7 +318,7 @@ final class DeploymentWorkflow
         if ($result['exit_code'] !== 0) {
             $raw = $result['stderr'] ?: $result['stdout'];
             $deployLogger?->recordFailureOutput($raw);
-            $message = self::failureSentence($raw);
+            $message = $this->failureSentence($raw);
             $hint = $mechanics->customEnvFailureHint();
             if ($hint !== null) {
                 $deployLogger?->info($hint);
@@ -344,11 +367,16 @@ final class DeploymentWorkflow
         return new DindDeployMechanics($this->project);
     }
 
+    /**
+     * A build writes a layer banner per step and megabytes of log, and the
+     * explainer matches anywhere in it -- so narrow to the failing region
+     * first, or the sentence names the banner printed before anything broke.
+     */
     private function startFailureMessage(string $output, ?DeployLogger $logger = null): string
     {
         $logger?->recordFailureOutput($output);
 
-        return 'Failed to start app: ' . self::failureSentence($output);
+        return 'Failed to start app: ' . $this->failureSentence($output);
     }
 
     /**
@@ -356,9 +384,12 @@ final class DeploymentWorkflow
      * reports it ({@see \App\Http\Controllers\UserController}). The whole
      * output of a compose up is mostly pull progress.
      */
-    private static function failureSentence(string $output): string
+    private function failureSentence(string $output): string
     {
         $region = trim(FailureOutput::select($output));
+        if ($region === '' && !$this->explainNoiseOnlyOutput) {
+            return trim($output);
+        }
         $explanation = DeployFailureExplainer::explain($region !== '' ? $region : $output);
         if ($explanation !== null) {
             return $explanation;
@@ -367,15 +398,22 @@ final class DeploymentWorkflow
         return $region !== '' ? $region : trim($output);
     }
 
-    private function invokeBeforeRetention(?callable $beforeRetention, ?DeployLogger $logger, string $username): void
-    {
+    private function invokeBeforeRetention(
+        ?callable $beforeRetention,
+        ?DeployLogger $logger,
+        string $username,
+        bool $cancelled = false,
+    ): void {
         if ($beforeRetention === null || $logger === null) {
+            return;
+        }
+        if ($cancelled && !$this->disposition()->hookRunsOnCancel()) {
             return;
         }
         try {
             $beforeRetention($logger);
         } catch (\Throwable $e) {
-            Log::warning("Before-retention hook failed for {$username}: {$e->getMessage()}");
+            Log::warning('Before-' . $this->disposition()->hookName() . " hook failed for {$username}: {$e->getMessage()}");
         }
     }
 

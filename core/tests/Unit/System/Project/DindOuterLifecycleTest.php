@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project;
 
+use Tests\Support\FakeProcess;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Filesystem;
@@ -103,10 +104,8 @@ class DindOuterLifecycleTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process
             {
                 $this->executed[] = $cmd;
-                $process = new \Symfony\Component\Process\Process(is_array($cmd) ? $cmd : [$cmd]);
-                $process->run();
 
-                return $process;
+                return FakeProcess::forCommand($cmd);
             }
 
             public function filesystem(): Filesystem
@@ -300,10 +299,8 @@ class DindOuterLifecycleTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process
             {
                 $this->executed[] = $cmd;
-                $process = new \Symfony\Component\Process\Process(is_array($cmd) ? $cmd : [$cmd]);
-                $process->run();
 
-                return $process;
+                return FakeProcess::forCommand($cmd);
             }
 
             public function filesystem(): Filesystem

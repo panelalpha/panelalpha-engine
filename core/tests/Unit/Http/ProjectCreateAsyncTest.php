@@ -40,6 +40,27 @@ class ProjectCreateAsyncTest extends TestCase
             $table->timestamps();
         });
 
+        // provision() asks whether the requested domain is taken before it
+        // dispatches, so the table has to exist even when no row is inserted.
+        Schema::create('domains', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->nullable();
+            $table->string('domain');
+            $table->string('type')->nullable();
+            $table->json('details')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('tunnels', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->nullable();
+            $table->foreignId('domain_id')->nullable();
+            $table->string('provider')->nullable();
+            $table->string('hostname')->nullable();
+            $table->json('details')->nullable();
+            $table->timestamps();
+        });
+
         $path = base_path('database/migrations/2026_09_04_000000_create_tasks_tables.php');
         require_once $path;
         (new \CreateTasksTables())->up();
@@ -51,6 +72,8 @@ class ProjectCreateAsyncTest extends TestCase
     {
         Schema::dropIfExists('task_logs');
         Schema::dropIfExists('tasks');
+        Schema::dropIfExists('tunnels');
+        Schema::dropIfExists('domains');
         Schema::dropIfExists('users');
         \App\Models\Setting::clearRuntimeSettings();
         parent::tearDown();

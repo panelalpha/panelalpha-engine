@@ -23,10 +23,7 @@ class AppUserController extends Controller
      */
     private function appManager(string $username): AppManager
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse(['message' => 'Not found'], 404));
-        }
+        $user = $this->projectOr404($username, 'Not found');
         if ($user->getTemplate() !== 'dind') {
             abort(new JsonResponse(['message' => 'App user management is only available for dind users'], 403));
         }

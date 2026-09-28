@@ -40,10 +40,7 @@ class LogFileController extends Controller
             'all_webservers' => 'nullable',
         ]);
 
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         /** @var ?Domain $domain */
         $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
@@ -86,10 +83,7 @@ class LogFileController extends Controller
             'all_webservers' => 'nullable',
         ]);
 
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         /** @var ?Domain $domain */
         $domain = $user->domains()->getQuery()->where('domain', $domain)->first();

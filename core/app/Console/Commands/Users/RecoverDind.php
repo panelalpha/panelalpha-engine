@@ -107,13 +107,7 @@ class RecoverDind extends Command
                 if ($user) {
                     $this->info("Rebuilding user `{$username}` project config...");
                     $project = $user->project();
-                    $workflow = $project->deployment();
-                    if ($workflow !== null) {
-                        $workflow->rebuildFromSource();
-                    } else {
-                        $project->prepareLinuxIsolation();
-                        $project->recreateOuterCompose();
-                    }
+                    $project->rebuildFromSource();
                 }
             } catch (\Throwable $e) {
                 $this->warn('Container recovered but rebuild failed: ' . $e->getMessage());

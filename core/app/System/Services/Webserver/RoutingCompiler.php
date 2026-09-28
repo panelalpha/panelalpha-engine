@@ -179,20 +179,14 @@ class RoutingCompiler
                     }
                 }
                 $this->finalHttpRules = $filteredHttpRules;
-            } elseif (in_array($persistedRule->transport, ['tcp', 'udp'])) {
-                // For stream: remove generated rules with same transport and port and IP
-                $filteredStreamRules = [];
-                foreach ($this->finalStreamRules as $rule) {
-                    if (
-                        $rule['transport'] !== $persistedRule->transport ||
-                        $rule['listen_port'] !== $persistedRule->listen_port ||
-                        $rule['listen_ip'] !== ($persistedRule->listen_ip ?? '*')
-                    ) {
-                        $filteredStreamRules[] = $rule;
-                        continue;
-                    }
-                }
             }
+
+            // No stream branch: generateDomainRules() only ever produces http
+            // defaults, so at this point finalStreamRules is always empty and
+            // there is nothing for a tcp/udp rule to suppress. There used to be
+            // a branch here that filtered it into a local and then dropped the
+            // result on the floor -- dead either way, but misleading.
+            // {@see RoutingCompilerTest::test_no_generated_stream_rules_exist_to_suppress}
         }
 
         // Add persisted rules to final rule sets

@@ -13,6 +13,8 @@ use App\System\Project\Backup;
 use App\System\Project\Cron;
 use App\System\Project\Dind;
 use App\System\Project\Deployment\DeploymentWorkflow;
+use App\System\Project\Deployment\RollBackProject;
+use App\System\Project\Deployment\TemplateDeployMechanics;
 use App\System\Project\Domain as DomainProject;
 use App\System\Project\FileManager;
 use App\System\Project\Ftp;
@@ -28,6 +30,8 @@ use Illuminate\Support\Facades\Log;
 class Project
 {
     private Runtime $runtime;
+
+    private ?DeploymentWorkflow $templateDeployment = null;
 
     public function __construct(
         private readonly EngineSystem $system,
@@ -399,9 +403,47 @@ class Project
         $this->tearDownLinuxIsolation();
     }
 
+    /** The DinD deploy pipeline; null for a project on a plain template. */
     public function deployment(): ?DeploymentWorkflow
     {
         return $this->runtime instanceof Dind ? $this->runtime->deployment() : null;
+    }
+
+    /**
+     * Run a project's first deploy. A template project goes through the same
+     * workflow as DinD, with its own mechanics, and is rolled back on failure.
+     */
+    public function runDeployment(?DeployLogger $deployLogger = null, ?callable $beforeRollback = null): void
+    {
+        ($this->deployment() ?? $this->templateDeployment())->run($deployLogger, $beforeRollback);
+    }
+
+    private function templateDeployment(): DeploymentWorkflow
+    {
+        return $this->templateDeployment ??= DeploymentWorkflow::forMechanics(
+            new TemplateDeployMechanics($this),
+            new RollBackProject(),
+            explainNoiseOnlyOutput: false,
+        );
+    }
+
+    /**
+     * Rebuild the project from its source.
+     *
+     * Only a DinD project has a source to re-ingest; a template project has
+     * its host side recreated instead. Every caller used to write that branch
+     * out for itself, keyed on deployment() returning null.
+     */
+    public function rebuildFromSource(?DeployLogger $deployLogger = null, ?string $zipPath = null): void
+    {
+        if ($this->runtime instanceof Dind) {
+            $this->deployment()->rebuildFromSource($deployLogger, $zipPath);
+
+            return;
+        }
+
+        $this->prepareLinuxIsolation();
+        $this->recreateOuterCompose();
     }
 
     public function prepareLinuxIsolation(): void

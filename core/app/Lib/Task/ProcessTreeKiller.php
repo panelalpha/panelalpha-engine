@@ -2,11 +2,11 @@
 
 namespace App\Lib\Task;
 
-use App\System;
+use App\System\ProcessRunner;
 
 class ProcessTreeKiller
 {
-    public function __construct(private System $system)
+    public function __construct(private ProcessRunner $system)
     {
     }
 

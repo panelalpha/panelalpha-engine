@@ -36,10 +36,7 @@ class PrivilegesController extends Controller
      */
     public function show($username, $dbuser, $dbname)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         /** @var ?MysqlUser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
@@ -88,10 +85,7 @@ class PrivilegesController extends Controller
      */
     public function update($username, $dbuser, $dbname, MysqlPrivilegesUpdateRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         /** @var ?MysqlUser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();
@@ -142,10 +136,7 @@ class PrivilegesController extends Controller
      */
     public function destroy($username, $dbuser, $dbname)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(404, 'Not found');
-        }
+        $user = $this->projectOrNotFound($username);
 
         /** @var ?MysqlUser */
         $dbuser = $user->mysqlUsers()->getQuery()->where('user', $user->qualifyMysqlUser($dbuser))->first();

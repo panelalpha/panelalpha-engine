@@ -36,10 +36,7 @@ class ProjectPasswordController extends Controller
     )]
     public function update(string $username, ProjectPasswordSetRequest $request): UserResource
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse(['message' => 'User not found'], 404));
-        }
+        $user = $this->projectOr404($username);
 
         SitePasswordProtection::set($user, (string) $request->validated('password'));
         $user->refresh();
@@ -60,10 +57,7 @@ class ProjectPasswordController extends Controller
     )]
     public function destroy(string $username): UserResource
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse(['message' => 'User not found'], 404));
-        }
+        $user = $this->projectOr404($username);
 
         SitePasswordProtection::unset($user);
         $user->refresh();

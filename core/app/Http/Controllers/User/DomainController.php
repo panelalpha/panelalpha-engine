@@ -42,12 +42,7 @@ class DomainController extends Controller
      */
     public function index($username, Request $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         $domains = $user->domains;
 
@@ -73,12 +68,7 @@ class DomainController extends Controller
      */
     public function indexInstalledSslCerts($username)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         $domains = $user->domains;
         $certs = [];
@@ -112,12 +102,7 @@ class DomainController extends Controller
      */
     public function installedSslCert($username, $domain)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?Domain */
         $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
@@ -157,12 +142,7 @@ class DomainController extends Controller
      */
     public function show($username, $domain)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?Domain */
         $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
@@ -204,12 +184,7 @@ class DomainController extends Controller
      */
     public function store($username, DomainStoreRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -378,12 +353,7 @@ class DomainController extends Controller
      */
     public function update($username, $domain, DomainUpdateRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?Domain */
         $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
@@ -473,12 +443,7 @@ class DomainController extends Controller
      */
     public function destroy($username, $domain)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?Domain */
         $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
@@ -541,10 +506,7 @@ class DomainController extends Controller
     )]
     public function requestSslCert(string $username, string $domain, Request $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            return new JsonResponse(['message' => 'User not found'], 404);
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?Domain $model */
         $model = $user->domains()->getQuery()->where('domain', $domain)->first();
@@ -609,12 +571,7 @@ class DomainController extends Controller
      */
     public function installSslCert($username, $domain, DomainInstallSslCertRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /** @var ?Domain */
         $domain = $user->domains()->getQuery()->where('domain', $domain)->first();

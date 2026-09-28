@@ -4,15 +4,20 @@ namespace Tests\Unit\Deploy\Telemetry;
 
 use App\Lib\Deploy\Telemetry\Spool;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RecordingRunner;
 
 class SpoolTest extends TestCase
 {
     private string $dir;
 
+    /** The chown the spool does is faked: a test must not run sudo. */
+    private RecordingRunner $processes;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->dir = sys_get_temp_dir() . '/pa-spool-' . bin2hex(random_bytes(6));
+        $this->processes = new RecordingRunner();
     }
 
     protected function tearDown(): void
@@ -26,7 +31,7 @@ class SpoolTest extends TestCase
 
     private function spool(): Spool
     {
-        return new Spool($this->dir);
+        return new Spool($this->dir, $this->processes);
     }
 
     /**
@@ -294,7 +299,7 @@ class SpoolTest extends TestCase
     }
     public function test_a_file_with_no_report_inside_it_is_dropped_rather_than_sent(): void
     {
-        $spool = new Spool($this->dir);
+        $spool = new Spool($this->dir, $this->processes);
         mkdir($this->dir, 0700, true);
 
         // Valid JSON, no report: shipping this would produce a payload with no
@@ -311,5 +316,79 @@ class SpoolTest extends TestCase
         $this->assertSame('01JGXR0000000000000000000A', $pending[0]['id']);
         $this->assertFileDoesNotExist($this->dir . '/hollow.json');
         $this->assertFileDoesNotExist($this->dir . '/half.json');
+    }
+
+    /** @return list<string> the paths the spool asked to chown */
+    private function chowned(): array
+    {
+        $paths = [];
+        foreach ($this->processes->commands as $cmd) {
+            if (is_array($cmd) && ($cmd[1] ?? '') === 'chown') {
+                $paths[] = (string) end($cmd);
+            }
+        }
+
+        return $paths;
+    }
+
+    public function test_the_outbox_itself_is_claimed_for_www_data(): void
+    {
+        $this->spool()->ensureDirectory();
+
+        $this->assertContains($this->dir, $this->chowned());
+    }
+
+    /**
+     * The outbox's parent is claimed whatever it is named -- here the shared
+     * temp dir, which is why these tests fake the runner. Never `/` itself.
+     */
+    public function test_the_parent_is_claimed_whatever_it_is_named(): void
+    {
+        $this->spool()->ensureDirectory();
+
+        $chowned = $this->chowned();
+        $this->assertContains(dirname($this->dir), $chowned);
+        $this->assertNotContains('/', $chowned);
+    }
+
+    /** In the storage layout the walk claims outbox, telemetry and app, and stops there. */
+    public function test_only_the_telemetry_and_app_parents_are_claimed(): void
+    {
+        $root = sys_get_temp_dir() . '/pa-spool-layout-' . bin2hex(random_bytes(4));
+        $outbox = $root . '/storage/app/telemetry/outbox';
+        mkdir($outbox, 0777, true);
+
+        $runner = new RecordingRunner();
+        (new Spool($outbox, $runner))->ensureDirectory();
+
+        $chowned = [];
+        foreach ($runner->commands as $cmd) {
+            if (is_array($cmd) && ($cmd[1] ?? '') === 'chown') {
+                $chowned[] = (string) end($cmd);
+            }
+        }
+
+        $this->assertContains($outbox, $chowned);
+        $this->assertContains($root . '/storage/app/telemetry', $chowned);
+        $this->assertContains($root . '/storage/app', $chowned);
+        $this->assertNotContains($root . '/storage', $chowned, 'the walk stops at app');
+
+        foreach (array_reverse(glob($root . '/storage/app/telemetry/outbox') ?: []) as $d) {
+            @rmdir($d);
+        }
+        foreach (['/storage/app/telemetry', '/storage/app', '/storage', ''] as $suffix) {
+            @rmdir($root . $suffix);
+        }
+    }
+
+    public function test_a_spool_test_never_runs_a_real_command(): void
+    {
+        $this->spool()->put(['id' => '01JGXR0000000000000000000A', 'outcome' => 'success']);
+
+        $this->assertNotSame([], $this->processes->commands, 'the fake saw the chown');
+        foreach ($this->processes->commands as $cmd) {
+            $this->assertSame('sudo', $cmd[0] ?? null, 'only the ownership fix shells out');
+            $this->assertSame('chown', $cmd[1] ?? null);
+        }
     }
 }

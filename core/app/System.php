@@ -5,10 +5,15 @@ namespace App;
 use App\Exceptions\DockerErrorException;
 use App\Lib\Deploy\DeployLog\StepWatchdog;
 use App\Models\User as ModelsUser;
+use App\System\EnginePaths;
+use App\System\EngineUpdate;
 use App\System\Filesystem;
+use App\System\HostProcess;
 use App\System\Network;
 use App\System\Project as SystemProject;
+use App\System\ProcessRunner;
 use App\System\Projects;
+use App\System\UsernamePolicy;
 use App\System\Services\Csf;
 use App\System\Services\Exim;
 use App\System\Services\Modsec;
@@ -18,74 +23,70 @@ use App\System\Services\PureFtpd;
 use App\System\Services\Sftp;
 use App\System\Services\Webserver;
 use Exception;
-use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
-use Laravel\Prompts\Output\ConsoleOutput;
 use Symfony\Component\Process\Process;
 
-class System
+class System implements ProcessRunner
 {
-    private const string HOMES_DIR_PATH = '/home';
-    private const string ENGINE_DIR_PATH = '/opt/panelalpha/shared-hosting';
-
+    /**
+     * The two roots every other path derives from. Kept as methods rather than
+     * constants because 44 test files subclass System to redirect them at a
+     * temporary tree, and every derived path below has to follow.
+     */
     public function homesDirPath(): string
     {
-        return self::HOMES_DIR_PATH;
+        return EnginePaths::HOMES_DIR;
     }
 
     public function engineDirPath(): string
     {
-        return self::ENGINE_DIR_PATH;
+        return EnginePaths::ENGINE_DIR;
+    }
+
+    /** Built from this instance's roots, so a subclass's override still wins. */
+    public function paths(): EnginePaths
+    {
+        return new EnginePaths($this->engineDirPath(), $this->homesDirPath());
     }
 
     public function projectsDirPath(): string
     {
-        return $this->engineDirPath() . '/users';
+        return $this->paths()->projectsDir();
     }
 
     public function templatesDirPath(): string
     {
-        return $this->engineDirPath() . '/templates';
+        return $this->paths()->templatesDir();
     }
 
     public function projectFilesTemplateDirPath(?string $template = null): string
     {
-        $template = $template ?? 'default';
-        return $this->templatesDirPath() . '/user/' . $template . '/project';
+        return $this->paths()->projectFilesTemplateDir($template);
     }
 
     public function projectDomainTemplateDirPath(?string $template = null): string
     {
-        $template = $template ?? 'default';
-        $newPath = $this->templatesDirPath() . '/user/' . $template . '/domain';
-
-        if (!is_dir($newPath)) {
-            return $this->templatesDirPath() . '/user-home';
-        }
-
-        return $newPath;
+        return $this->paths()->projectDomainTemplateDir($template);
     }
 
     public function projectHomeTemplateDirPath(?string $template = null): string
     {
-        $template = $template ?? 'default';
-        return $this->templatesDirPath() . '/user/' . $template . '/home';
+        return $this->paths()->projectHomeTemplateDir($template);
     }
 
     public function composeFilePath(): string
     {
-        return $this->engineDirPath() . '/docker-compose.yml';
+        return $this->paths()->composeFile();
     }
 
     public function projectDirPath(string $username): string
     {
-        return $this->projectsDirPath() . '/' . $username;
+        return $this->paths()->projectDir($username);
     }
 
     public function projectHomeDirPath(string $username): string
     {
-        return $this->homesDirPath() . '/' . $username;
+        return $this->paths()->projectHomeDir($username);
     }
 
     public function filesystem(): Filesystem
@@ -247,32 +248,14 @@ class System
         return new Projects($this);
     }
 
+    /**
+     * Whether this host could take a project by that name: the name itself has
+     * to be acceptable ({@see UsernamePolicy}) and nothing here may hold it
+     * already -- an OS user, a home directory, or a project directory.
+     */
     public function isUsernameAvailable(string $username): bool
     {
-        $reserved = [
-            'root',
-            'daemon',
-            'bin',
-            'sys',
-            'sync',
-            'games',
-            'man',
-            'lp',
-            'mail',
-            'news',
-            'uucp',
-            'proxy',
-            'www-data',
-            'backup',
-            'list',
-            'irc',
-            'nobody',
-            'systemd-network',
-            'systemd-resolve',
-        ];
-
-        return (bool) preg_match('/^[a-z][a-z0-9_-]{0,31}$/', $username)
-            && !in_array($username, $reserved, true)
+        return UsernamePolicy::isAcceptable($username)
             && !$this->isUidExists($username)
             && !is_dir($this->projectHomeDirPath($username))
             && !is_dir($this->projectDirPath($username));
@@ -303,41 +286,26 @@ class System
 
     // --- HOST PROCESSES ---
 
-    private static function debugProcesses(): bool
+    public function processes(): HostProcess
     {
-        if (!App::runningInConsole()) {
-            return false;
-        }
-        if (empty($_SERVER['argv'])) {
-            return false;
-        }
-        foreach ($_SERVER['argv'] as $arg) {
-            if (in_array($arg, ['-v', '-vv', '-vvv'])) {
-                return true;
-            }
-        }
-        return false;
+        return new HostProcess($this);
     }
 
     /**
+     * Run to completion and return stdout, or throw.
+     *
+     * These five stay on System, and keep calling each other through $this,
+     * because about thirty test files override one or another of them to keep a
+     * test from running a real command -- some override only exec(), some only
+     * runProcess(). {@see HostProcess}
+     *
      * @param string|list<string> $cmd
      * @throws DockerErrorException
      * @throws Exception
      */
     public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
     {
-        $process = $this->runProcess($cmd, $env, $timeout);
-        if (!$process->isSuccessful()) {
-            $message = $process->getErrorOutput() ?: $process->getOutput();
-            if (
-                Str::contains($message, 'Error response from daemon')
-                || DockerErrorException::meansContainerUnavailable($message)
-            ) {
-                throw new DockerErrorException($message);
-            }
-            throw new Exception($message);
-        }
-        return $process->getOutput();
+        return $this->processes()->exec($cmd, $env, $timeout);
     }
 
     /**
@@ -346,18 +314,7 @@ class System
      */
     public function execOnHost(string|array $cmd, array $env = []): string
     {
-        $args = [
-            'sudo',
-            'nsenter',
-            '--target',
-            '1',
-            '--all',
-        ];
-        if (is_string($cmd)) {
-            $cmd = implode(" ", $args) . " " . $cmd;
-            return $this->exec($cmd, $env);
-        }
-        return $this->exec([...$args, ...$cmd], $env);
+        return $this->exec(HostProcess::onHost($cmd), $env);
     }
 
     /**
@@ -365,27 +322,7 @@ class System
      */
     public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
     {
-        $cmd = $this->normalizeCommand($cmd);
-        $process = $this->makeProcess($cmd);
-        $process->setTimeout($timeout);
-
-        if (!self::debugProcesses()) {
-            $process->run(null, $env);
-            return $process;
-        }
-
-        $output = new ConsoleOutput();
-        $output->writeln("<comment>Running process: " . (is_array($cmd) ? implode(' ', $cmd) : $cmd) . "</comment>");
-        $process->run(function (string $type, string $data) use ($output) {
-            if ($type === Process::OUT) {
-                $output->writeln("<info>{$data}</info>");
-            } else {
-                $output->writeln("<comment>{$data}</comment>");
-            }
-        }, $env);
-        $output->writeln("<comment>Process exited with code: " . (string)$process->getExitCode() . "</comment>");
-
-        return $process;
+        return $this->processes()->run($cmd, $env, $timeout);
     }
 
     /**
@@ -399,26 +336,7 @@ class System
         ?callable $onOutput = null,
         ?StepWatchdog $watchdog = null
     ): Process {
-        $cmd = $this->normalizeCommand($cmd);
-        $process = $this->makeProcess($cmd);
-        $process->setTimeout($timeout);
-        if ($watchdog !== null) {
-            $process->start($watchdog->watch($onOutput), $env);
-            if ($onStart !== null) {
-                $onStart($process);
-            }
-            $watchdog->wait($process);
-
-            return $process;
-        }
-
-        $process->start(null, $env);
-        if ($onStart !== null) {
-            $onStart($process);
-        }
-        $process->wait($onOutput);
-
-        return $process;
+        return $this->processes()->runWithCallbacks($cmd, $env, $timeout, $onStart, $onOutput, $watchdog);
     }
 
     /**
@@ -426,43 +344,7 @@ class System
      */
     public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
     {
-        $args = [
-            'sudo',
-            'nsenter',
-            '--target',
-            '1',
-            '--all',
-        ];
-        if (is_string($cmd)) {
-            $cmd = implode(" ", $args) . " " . $cmd;
-            return $this->runProcess($cmd, $env, $timeout);
-        }
-
-        return $this->runProcess([...$args, ...$cmd], $env, $timeout);
-    }
-
-    /**
-     * @param string|list<string> $cmd
-     */
-    private function makeProcess(string|array $cmd): Process
-    {
-        if (is_array($cmd)) {
-            return new Process($cmd);
-        }
-        return Process::fromShellCommandline($cmd);
-    }
-
-    /**
-     * @param string|array<string> $cmd
-     * @return string|list<string>
-     */
-    private function normalizeCommand(string|array $cmd): string|array
-    {
-        if (is_array($cmd)) {
-            return array_values($cmd);
-        }
-
-        return $cmd;
+        return $this->runProcess(HostProcess::onHost($cmd), $env, $timeout);
     }
 
     public function getEnv(): array
@@ -486,6 +368,11 @@ class System
 
     // --- UPDATE ENGINE ---
 
+    public function update(): EngineUpdate
+    {
+        return new EngineUpdate($this);
+    }
+
     /**
      * @return ?array{
      *   started_at: ?int,
@@ -501,116 +388,16 @@ class System
      */
     public function getLatestUpdateInfo(): ?array
     {
-        $latestLink = "/opt/panelalpha/log/engine-updates/latest";
-        $fs = $this->filesystem();
-        if (!$fs->directoryExists($latestLink)) {
-            return null;
-        }
-
-        $pidFile = "$latestLink/pid";
-        $exitCodeFile = "$latestLink/exit_code";
-        $stdoutFile = "$latestLink/stdout";
-        $stderrFile = "$latestLink/stderr";
-        $fromVersionFile = "$latestLink/from_version";
-        $toVersionFile = "$latestLink/to_version";
-
-        $pid = $fs->cat($pidFile);
-        $exitCode = $fs->cat($exitCodeFile);
-
-        $tailStdout = $fs->tail($stdoutFile, 2);
-        if ($tailStdout) {
-            $tailStdout = preg_replace('/\x1B\[[0-9;]*[mK]/', '', $tailStdout);
-        }
-        $tailStderr = $fs->tail($stderrFile, 2);
-        if ($tailStderr) {
-            $tailStderr = preg_replace('/\x1B\[[0-9;]*[mK]/', '', $tailStderr);
-        }
-
-        return [
-            'started_at' => $fs->mtime($latestLink),
-            'finished_at' => $fs->mtime($exitCodeFile),
-            'pid' => (is_numeric($pid) ? (int)$pid : null),
-            'exit_code' => (is_numeric($exitCode) ? (int)$exitCode : null),
-            'tail_stdout' => $tailStdout,
-            'tail_stderr' => $tailStderr,
-            'from_version' => $fs->cat($fromVersionFile),
-            'to_version' => $fs->cat($toVersionFile),
-            'logs_path' => $latestLink,
-        ];
+        return $this->update()->latest();
     }
 
     public function runUpdateScript(?string $licenseKey = null): void
     {
-        $updaterPath = $this->engineDirPath() . '/updater.sh';
-
-        $updaterScript = 'bash ' . escapeshellarg($updaterPath) . ' -f --background';
-        if (!empty($licenseKey)) {
-            $updaterScript .= ' ' . escapeshellarg($licenseKey);
-        }
-        $atScript = 'echo ' . escapeshellarg($updaterScript) . ' | at now';
-        $args = [
-            "sudo",
-            "nsenter",
-            "--target",
-            "1",
-            "--all",
-            "bash",
-            "-c",
-            $atScript,
-        ];
-
-        $process = $this->runProcess($args);
-
-        if ($process->getExitCode() !== 0) {
-            $message = "Failed to run update script: ";
-            $message .= ($process->getErrorOutput() ?: $process->getOutput());
-            $message .= " (exit code " . (string)$process->getExitCode() . ")";
-            throw new \Exception($message);
-        }
-
-        $logsDir = "/opt/panelalpha/log/engine-updates";
-        $tmpDirScript = "mkdir -p {$logsDir}/tmp && echo '2' > {$logsDir}/tmp/pid && ln -sfn {$logsDir}/tmp {$logsDir}/latest";
-        $this->runProcess([
-            "sudo",
-            "nsenter",
-            "--target",
-            "1",
-            "--all",
-            "bash",
-            "-c",
-            $tmpDirScript,
-        ]);
+        $this->update()->run($licenseKey);
     }
 
     public function isUpdateScriptRunning(): bool
     {
-        $latestLink = "/opt/panelalpha/log/engine-updates/latest";
-        if (!$this->filesystem()->directoryExists($latestLink)) {
-            return false;
-        }
-
-        $pidFile = "$latestLink/pid";
-        if (!file_exists($pidFile)) {
-            return false;
-        }
-
-        $pid = trim(file_get_contents($pidFile));
-
-        if (!ctype_digit($pid)) {
-            return false;
-        }
-
-        $process = $this->runProcess([
-            'sudo',
-            'nsenter',
-            '--target',
-            '1',
-            '--all',
-            'kill',
-            '-0',
-            $pid,
-        ]);
-
-        return $process->getExitCode() === 0;
+        return $this->update()->isRunning();
     }
 }

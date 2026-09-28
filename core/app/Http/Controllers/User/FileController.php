@@ -44,12 +44,7 @@ class FileController extends Controller
     )]
     public function exists(string $username, FileExistsRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{path: string}
@@ -88,12 +83,7 @@ class FileController extends Controller
     )]
     public function remove(string $username, FileRemoveRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -146,12 +136,7 @@ class FileController extends Controller
     )]
     public function mkdir(string $username, MkdirRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -198,12 +183,7 @@ class FileController extends Controller
     )]
     public function zip(string $username, ZipRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -259,12 +239,7 @@ class FileController extends Controller
     )]
     public function unzip(string $username, ZipRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -310,12 +285,7 @@ class FileController extends Controller
     )]
     public function moveContents(string $username, MoveContentsRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -362,12 +332,7 @@ class FileController extends Controller
     )]
     public function fetch(string $username, FetchRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -412,12 +377,7 @@ class FileController extends Controller
     )]
     public function chmod(string $username, ChmodRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -461,12 +421,7 @@ class FileController extends Controller
     )]
     public function mv(string $username, MvRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -517,12 +472,7 @@ class FileController extends Controller
     )]
     public function cp(string $username, CpRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -574,12 +524,7 @@ class FileController extends Controller
     )]
     public function stat(string $username, StatRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -629,12 +574,7 @@ class FileController extends Controller
     )]
     public function upload(string $username, UploadRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -682,12 +622,7 @@ class FileController extends Controller
      */
     public function download(string $username, DownloadRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{
@@ -732,12 +667,7 @@ class FileController extends Controller
     )]
     public function putContents(string $username, PutContentsRequest $request): JsonResponse
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'User not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username);
 
         /**
          * @var array{

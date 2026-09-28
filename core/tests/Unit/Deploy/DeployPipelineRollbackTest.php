@@ -3,8 +3,11 @@
 namespace Tests\Unit\Deploy;
 
 use App\Exceptions\ProblemException;
-use App\Http\Controllers\UserController;
+use App\Exceptions\DeployCancelledException;
 use App\System\Project as SystemProject;
+use App\System\Project\Deployment\DeploymentWorkflow;
+use App\System\Project\Deployment\RollBackProject;
+use App\System\Project\Deployment\TemplateDeployMechanics;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\Domain;
 use App\Models\User;
@@ -44,11 +47,12 @@ class DeployPipelineRollbackTest extends SqliteTaskTestCase
         parent::tearDown();
     }
 
-    private function failingUser(): User
+    /** The template deploy pipeline, failing in its first step. */
+    private function failingDeployment(?\Exception $thrown = null): DeploymentWorkflow
     {
         $project = Mockery::mock(SystemProject::class);
         $project->shouldReceive('createDirectories')
-            ->andThrow(new \Exception('process "/bin/sh -c npm run build" did not complete successfully: exit code: 1'));
+            ->andThrow($thrown ?? new \Exception('process "/bin/sh -c npm run build" did not complete successfully: exit code: 1'));
 
         $user = Mockery::mock(User::class)->makePartial();
         $user->shouldReceive('getMainDomain')->andReturn(Mockery::mock(Domain::class));
@@ -56,10 +60,14 @@ class DeployPipelineRollbackTest extends SqliteTaskTestCase
         $user->shouldReceive('getTemplate')->andReturn('default');
         $user->shouldReceive('hasGitProject')->andReturn(false);
         $project->shouldReceive('runtime')->andReturn(Mockery::mock(\App\System\Project\PhpHosting::class));
+        $project->shouldReceive('model')->andReturn($user);
         $user->shouldReceive('usedCustomEnvVars')->andReturn(false);
         $user->username = $this->username;
 
-        return $user;
+        return DeploymentWorkflow::forMechanics(
+            new TemplateDeployMechanics($project),
+            new RollBackProject(),
+        );
     }
 
     public function test_hook_reads_the_deploy_log_before_the_rollback(): void
@@ -68,8 +76,7 @@ class DeployPipelineRollbackTest extends SqliteTaskTestCase
         $seen = null;
 
         try {
-            (new UserController())->runDeployPipeline(
-                $this->failingUser(),
+            $this->failingDeployment()->run(
                 $logger,
                 function (DeployLogger $failed) use (&$seen): void {
                     $seen = array_column($failed->tail(150), 'msg');
@@ -84,13 +91,33 @@ class DeployPipelineRollbackTest extends SqliteTaskTestCase
         $this->assertStringStartsWith('Deploy failed: A build step failed', (string) end($seen));
     }
 
+    /** A cancelled template deploy is rolled back without the hook: it never kept that log tail. */
+    public function test_a_cancelled_template_deploy_does_not_run_the_hook(): void
+    {
+        $logger = DeployLogger::start($this->username);
+        $ran = false;
+
+        try {
+            $this->failingDeployment(new DeployCancelledException('operator cancelled'))->run(
+                $logger,
+                function () use (&$ran): void {
+                    $ran = true;
+                },
+            );
+            $this->fail('Expected the cancelled deploy to throw');
+        } catch (ProblemException $e) {
+            $this->assertSame('deploy_cancelled', $e->problems[0]['code'] ?? null);
+        }
+
+        $this->assertFalse($ran);
+    }
+
     public function test_failing_hook_does_not_mask_the_deploy_error(): void
     {
         $logger = DeployLogger::start($this->username);
 
         try {
-            (new UserController())->runDeployPipeline(
-                $this->failingUser(),
+            $this->failingDeployment()->run(
                 $logger,
                 static function (): void {
                     throw new RuntimeException('tail copy exploded');

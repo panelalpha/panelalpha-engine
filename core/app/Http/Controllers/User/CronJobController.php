@@ -34,12 +34,7 @@ class CronJobController extends Controller
      */
     public function index($username)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'Not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username, 'Not found');
 
         return new CronJobCollection($user->project()->cron()->list());
     }
@@ -84,12 +79,7 @@ class CronJobController extends Controller
      */
     public function store($username, CronJobStoreRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'Not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username, 'Not found');
 
         /**
          * @var array{
@@ -147,12 +137,7 @@ class CronJobController extends Controller
      */
     public function update($username, $hash, CronJobUpdateRequest $request)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'Not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username, 'Not found');
 
         /**
          * @var array{
@@ -203,12 +188,7 @@ class CronJobController extends Controller
      */
     public function destroy($username, $hash)
     {
-        $user = User::findByUsername($username);
-        if (!$user) {
-            abort(new JsonResponse([
-                'message' => 'Not found',
-            ], 404));
-        }
+        $user = $this->projectOr404($username, 'Not found');
 
         $cron = $user->project()->cron();
         if (!$cron->exists($hash)) {

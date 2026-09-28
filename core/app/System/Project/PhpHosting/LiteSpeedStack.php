@@ -3,13 +3,13 @@
 namespace App\System\Project\PhpHosting;
 
 use App\Models\User as ModelsUser;
-use App\System;
+use App\System\ProcessRunner;
 use App\System\Project\PhpHosting;
 
 final class LiteSpeedStack implements PhpStack
 {
     public function __construct(
-        private System $system,
+        private ProcessRunner $system,
         private ModelsUser $model,
     ) {
     }
