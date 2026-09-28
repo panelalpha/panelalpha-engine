@@ -9,7 +9,6 @@ use App\Lib\Deploy\Health\CheckResult;
 use App\Lib\Deploy\Health\CheckRunner;
 use App\Lib\Deploy\Health\HealthCheck;
 use App\Lib\Deploy\Health\ProbedResponse;
-use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -62,19 +61,19 @@ class AppHealth
     private const RESTART_PROBE_TIMEOUT_SECONDS = 20;
 
     /** The domain answers with what the application answers. */
-    public const REACH_OK = 'ok';
+    public const REACH_OK = AppReachability::OK;
 
     /** The webserver answered its own 404: no vhost is loaded for this name. */
-    public const REACH_NOT_ROUTED = 'not_routed';
+    public const REACH_NOT_ROUTED = AppReachability::NOT_ROUTED;
 
     /** Something answered, but not this application. */
-    public const REACH_DIFFERS = 'differs';
+    public const REACH_DIFFERS = AppReachability::DIFFERS;
 
     /** Nothing accepted the connection at all. */
-    public const REACH_UNREACHABLE = 'unreachable';
+    public const REACH_UNREACHABLE = AppReachability::UNREACHABLE;
 
     /** No domain, or no answering port to compare against. */
-    public const REACH_SKIPPED = 'skipped';
+    public const REACH_SKIPPED = AppReachability::SKIPPED;
 
     /**
      * From here up, the application answered but is failing. This is the
@@ -546,74 +545,21 @@ SH;
     }
 
     /**
-     * Ask the question a visitor asks: does this project's domain serve this
-     * project's application?
-     *
-     * Compared by content, not by status code. The outage this exists for
-     * answered 200 through the proxy and 200 in the container while serving a
-     * different customer's site -- statuses matched, and only the bytes told
-     * them apart. A hash of the first 2KB is enough to separate two documents
-     * without carrying either of them back.
-     *
-     * Never throws: a check that cannot run reports that it could not.
+     * Does this project's domain serve this project's application? See
+     * {@see AppReachability}. Never throws.
      *
      * @param list<array<string, mixed>> $ports as {@see check()} produced them
      * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
      */
     public function reachability(array $ports, int $timeout = 5): array
     {
-        try {
-            return $this->probeReachability($ports, $timeout);
-        } catch (\Throwable $e) {
-            return self::reachSkipped(null, 'the check could not run: ' . self::trimReason($e->getMessage()));
-        }
-    }
-
-    /**
-     * @param list<array<string, mixed>> $ports
-     * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
-     */
-    private function probeReachability(array $ports, int $timeout): array
-    {
-        $domain = $this->dind->userModel()->getMainDomain()?->domain;
-        if ($domain === null || $domain === '') {
-            return self::reachSkipped(null, 'the project has no domain yet');
-        }
-
-        $served = self::firstAnsweringPort($ports);
-        if ($served === null) {
-            // Nothing answered in the container, which report() has already
-            // said. Routing cannot be judged against a silent application, and
-            // saying "unreachable" here would blame the proxy for the app.
-            return self::reachSkipped($domain, 'the application is not answering, so there is nothing to compare');
-        }
-
-        // The address the vhost listens on, which is the address a visitor
-        // arrives at -- and under NAT the local one, not the public one.
-        $ip = User::defaultBindIpAddresses()['ipv4'][0] ?? '127.0.0.1';
-
-        $app = self::parseFingerprint($this->dind->shell()->execQuiet(
-            ['bash', '-c', self::appProbeScript((string) $served['scheme'], (int) $served['port'], $timeout, $domain)],
-            [],
-            $timeout + 10
-        ));
-
-        return self::awaitRoute(
-            $domain,
-            fn (): array => self::parseFingerprint($this->dind->system()->execOnHost(
-                ['bash', '-c', self::edgeProbeScript($domain, $ip, $timeout)],
-            )),
-            $app
-        );
+        return (new AppReachability($this->dind))->check($ports, $timeout);
     }
 
     /** Seconds between edge re-probes while a just-reloaded vhost settles. */
-    public const EDGE_RETRY_DELAYS = [1, 2, 4, 8, 15];
+    public const EDGE_RETRY_DELAYS = AppReachability::EDGE_RETRY_DELAYS;
 
     /**
-     * Probe the edge and compare, re-probing while it looks unrouted: the
-     * webserver reload the deploy just issued may not have taken effect yet.
-     *
      * @param callable(): array{code: int, hash: string, default404: bool} $probeEdge
      * @param array{code: int, hash: string, default404: bool} $app
      * @param (callable(int): void)|null $sleep
@@ -621,18 +567,7 @@ SH;
      */
     public static function awaitRoute(string $domain, callable $probeEdge, array $app, ?callable $sleep = null): array
     {
-        $sleep ??= static fn (int $seconds) => sleep($seconds);
-        $verdict = self::compareFingerprints($domain, $probeEdge(), $app);
-
-        foreach (self::EDGE_RETRY_DELAYS as $delay) {
-            if (!in_array($verdict['verdict'], [self::REACH_NOT_ROUTED, self::REACH_UNREACHABLE], true)) {
-                break;
-            }
-            $sleep($delay);
-            $verdict = self::compareFingerprints($domain, $probeEdge(), $app);
-        }
-
-        return $verdict;
+        return AppReachability::awaitRoute($domain, $probeEdge, $app, $sleep);
     }
 
     /**
@@ -642,200 +577,29 @@ SH;
      */
     public static function compareFingerprints(string $domain, array $edge, array $app): array
     {
-        if ($edge['code'] === 0) {
-            return [
-                'verdict' => self::REACH_UNREACHABLE,
-                'domain' => $domain,
-                'http_code' => null,
-                'detail' => 'the webserver did not accept the connection',
-            ];
-        }
-
-        if ($edge['default404']) {
-            return [
-                'verdict' => self::REACH_NOT_ROUTED,
-                'domain' => $domain,
-                'http_code' => $edge['code'],
-                'detail' => 'the webserver answered its own 404 page, so no vhost is loaded for this domain',
-            ];
-        }
-
-        if ($edge['hash'] === $app['hash'] && $edge['hash'] !== '') {
-            return [
-                'verdict' => self::REACH_OK,
-                'domain' => $domain,
-                'http_code' => $edge['code'],
-                'detail' => (string) $edge['code'],
-            ];
-        }
-
-        // The bodies differ because the application canonicalises: probed on
-        // 127.0.0.1 it redirects to the address it was installed under, and
-        // through the domain it serves the page. That is WordPress on every
-        // site, and it is the healthy shape -- the request that matters
-        // succeeded. Comparing content is still what catches a domain serving
-        // somebody else's application, which answers 200 at both ends.
-        if ($edge['code'] >= 200 && $edge['code'] < 300 && $app['code'] >= 300 && $app['code'] < 400) {
-            return [
-                'verdict' => self::REACH_OK,
-                'domain' => $domain,
-                'http_code' => $edge['code'],
-                'detail' => $edge['code'] . ' (the application redirects to its own address when probed locally)',
-            ];
-        }
-
-        // The application does not reproduce its own bytes, so a difference
-        // between it and the edge says nothing. Comparing what is left --
-        // the status code -- still catches the domain that answers with
-        // somebody else's error page, and stops reporting every CSRF-token
-        // application on the host as unreachable.
-        if (!self::bodyIsReproducible($app) && $edge['code'] === $app['code']) {
-            return [
-                'verdict' => self::REACH_OK,
-                'domain' => $domain,
-                'http_code' => $edge['code'],
-                'detail' => $edge['code'] . ' (the application varies its own response, so only the status was compared)',
-            ];
-        }
-
-        // Deliberately not called "another project's site": an application
-        // that varies by Host -- a framework redirecting to its configured
-        // APP_URL -- lands here too, and is not broken.
-        return [
-            'verdict' => self::REACH_DIFFERS,
-            'domain' => $domain,
-            'http_code' => $edge['code'],
-            'detail' => "answered {$edge['code']} with a different response than the application itself",
-        ];
+        return AppReachability::compareFingerprints($domain, $edge, $app);
     }
 
-    /** @return array{verdict: string, domain: ?string, http_code: ?int, detail: string} */
-    private static function reachSkipped(?string $domain, string $detail): array
-    {
-        return ['verdict' => self::REACH_SKIPPED, 'domain' => $domain, 'http_code' => null, 'detail' => $detail];
-    }
-
-    /**
-     * @param list<array<string, mixed>> $ports
-     * @return array<string, mixed>|null
-     */
-    private static function firstAnsweringPort(array $ports): ?array
-    {
-        foreach ($ports as $port) {
-            if (($port['status'] ?? null) === self::STATUS_OK) {
-                return $port;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Fetch through the webserver as a visitor would, from the host.
-     *
-     * No DNS: the Host header carries the name and the address is the one the
-     * vhost binds, so the check works for a domain whose DNS has not been
-     * pointed here yet -- which is most of them, most of the time.
-     */
     public static function edgeProbeScript(string $domain, string $ip, int $timeout = 5): string
     {
-        $timeout = max(1, $timeout);
-        $domain = escapeshellarg($domain);
-        $ip = escapeshellarg($ip);
-
-        return <<<SH
-set -u
-host={$domain}
-addr={$ip}
-f=\$(mktemp)
-code=\$(curl -sS -m {$timeout} -o "\$f" -w '%{http_code}' -H "Host: \$host" "http://\$addr/" 2>/dev/null) || code=000
-marker=no
-if [ "\$code" = "404" ] && grep -q 'Page Not Found' "\$f" && grep -q 'error-page' "\$f"; then marker=yes; fi
-printf '%s\t%s\t%s' "\${code:-000}" "\$(head -c 2048 "\$f" | sha256sum | cut -d' ' -f1)" "\$marker"
-rm -f "\$f"
-exit 0
-SH;
+        return AppReachability::edgeProbeScript($domain, $ip, $timeout);
     }
 
-    /**
-     * The same fetch against the application itself, for the comparison --
-     * twice, so the caller can tell whether this application's body is stable
-     * enough to compare at all.
-     *
-     * Nextcloud, ownCloud and every framework with CSRF protection stamp a
-     * fresh token into each response, so two identical requests a millisecond
-     * apart already differ. Hashing one of them and comparing it to the edge
-     * declared healthy sites unreachable. Fetching twice answers that without
-     * having to guess at token formats: if the application cannot reproduce
-     * its own bytes, neither can the edge, and the body is not evidence.
-     */
     public static function appProbeScript(string $scheme, int $port, int $timeout = 5, ?string $domain = null): string
     {
-        $timeout = max(1, $timeout);
-        $scheme = $scheme === 'https' ? 'https' : 'http';
-        // Same Host as the edge fetch, so an app that echoes it into the page still matches.
-        $host = $domain !== null && $domain !== '' ? '-H ' . escapeshellarg("Host: {$domain}") . ' ' : '';
-
-        return <<<SH
-set -u
-f=\$(mktemp)
-g=\$(mktemp)
-code=\$(curl -sS -k -m {$timeout} {$host}-o "\$f" -w '%{http_code}' '{$scheme}://127.0.0.1:{$port}/' 2>/dev/null) || code=000
-curl -sS -k -m {$timeout} {$host}-o "\$g" '{$scheme}://127.0.0.1:{$port}/' >/dev/null 2>&1 || :
-printf '%s\t%s\t%s\t%s' "\${code:-000}" "\$(head -c 2048 "\$f" | sha256sum | cut -d' ' -f1)" "no" "\$(head -c 2048 "\$g" | sha256sum | cut -d' ' -f1)"
-rm -f "\$f" "\$g"
-exit 0
-SH;
+        return AppReachability::appProbeScript($scheme, $port, $timeout, $domain);
     }
 
-    /**
-     * @return array{code: int, hash: string, default404: bool, hash2: string}
-     */
+    /** @return array{code: int, hash: string, default404: bool, hash2: string} */
     public static function parseFingerprint(string $raw): array
     {
-        $parts = explode("\t", trim($raw));
-
-        return [
-            'code' => (int) ($parts[0] ?? '0'),
-            'hash' => trim($parts[1] ?? ''),
-            'default404' => trim($parts[2] ?? 'no') === 'yes',
-            // Only the application probe sends this: the hash of a second,
-            // identical fetch. Empty from the edge probe, which fetches once.
-            'hash2' => trim($parts[3] ?? ''),
-        ];
+        return AppReachability::parseFingerprint($raw);
     }
 
-    /**
-     * Whether this application reproduces its own bytes between two identical
-     * requests. When it does not -- a CSRF token, a nonce, a timestamp -- the
-     * body cannot be used as evidence about the edge.
-     *
-     * Absent means not measured, which reads as reproducible: a probe that
-     * did not ask the question must not weaken the comparison.
-     *
-     * @param array<string, mixed> $app
-     */
-    private static function bodyIsReproducible(array $app): bool
-    {
-        $second = (string) ($app['hash2'] ?? '');
-
-        return $second === '' || $second === (string) ($app['hash'] ?? '');
-    }
-
-    /**
-     * One human-readable line for the reachability verdict.
-     *
-     * @param array{verdict: string, domain: ?string, http_code: ?int, detail: string} $result
-     */
+    /** @param array{verdict: string, domain: ?string, http_code: ?int, detail: string} $result */
     public static function describeReach(array $result): string
     {
-        $url = 'http://' . ($result['domain'] ?? '?') . '/';
-
-        return match ($result['verdict']) {
-            self::REACH_OK => "Reachable: {$url} answered {$result['detail']} through the webserver",
-            self::REACH_SKIPPED => "Reachability check skipped: {$result['detail']}",
-            default => "Not reachable: {$url} {$result['detail']}",
-        };
+        return AppReachability::describe($result);
     }
 
     /**
