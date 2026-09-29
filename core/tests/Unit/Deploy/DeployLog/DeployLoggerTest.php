@@ -190,7 +190,7 @@ class DeployLoggerTest extends TestCase
         $logger->finish(DeployLogger::STATUS_SUCCESS);
     }
 
-    public function test_read_paginates_from_an_offset_and_next_offset_is_the_total_line_count(): void
+    public function test_read_paginates_from_an_offset_and_next_offset_is_where_the_page_ended(): void
     {
         $logger = DeployLogger::start($this->username());
         $logger->info('a');
@@ -199,11 +199,13 @@ class DeployLoggerTest extends TestCase
 
         $first = $logger->read(0, 2);
         $this->assertSame(['a', 'b'], array_column($first['lines'], 'msg'));
-        $this->assertSame(3, $first['next_offset']);
+        $this->assertSame(2, $first['next_offset']);
+        $this->assertTrue($first['more']);
 
         $second = $logger->read(2, 2);
         $this->assertSame(['c'], array_column($second['lines'], 'msg'));
         $this->assertSame(3, $second['next_offset']);
+        $this->assertFalse($second['more']);
 
         $logger->finish(DeployLogger::STATUS_SUCCESS);
     }
@@ -212,7 +214,7 @@ class DeployLoggerTest extends TestCase
     {
         $logger = DeployLogger::forDeploy($this->username(), 'nonexistent-deploy-id');
 
-        $this->assertSame(['lines' => [], 'next_offset' => 0], $logger->read());
+        $this->assertSame(['lines' => [], 'next_offset' => 0, 'more' => false], $logger->read());
     }
 
     public function test_message_longer_than_the_limit_is_truncated_with_an_ellipsis(): void

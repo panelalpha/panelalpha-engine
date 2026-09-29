@@ -41,15 +41,36 @@ final class DeployLogReader
     }
 
     /**
-     * @return array{lines: list<array{ts: int, stage: ?string, level: string, msg: string}>, next_offset: int}
+     * Lines from `$offset` on, at most `$limit` of them and, when given, about
+     * `$maxBytes` of log. `next_offset` is where the next page starts, so a
+     * caller that pages until `more` is false reads every line exactly once.
+     *
+     * A single line longer than the whole budget is still returned, cut to
+     * it, so a page never comes back empty while lines remain.
+     *
+     * @return array{lines: list<array{ts: int, stage: ?string, level: string, msg: string}>, next_offset: int, more: bool}
      */
-    public function page(int $offset = 0, int $limit = self::MAX_READ_LINES): array
+    public function page(int $offset = 0, int $limit = self::MAX_READ_LINES, ?int $maxBytes = null): array
     {
         $raw = $this->rawLines();
+        $offset = max(0, $offset);
+
+        $taken = [];
+        $bytes = 0;
+        foreach (array_slice($raw, $offset, $limit) as $line) {
+            if ($maxBytes !== null && $taken !== [] && $bytes + strlen($line) > $maxBytes) {
+                break;
+            }
+            $taken[] = $line;
+            $bytes += strlen($line);
+        }
+
+        $next = min(count($raw), $offset + count($taken));
 
         return [
-            'lines' => $this->parse(array_slice($raw, max(0, $offset), $limit)),
-            'next_offset' => count($raw),
+            'lines' => $this->parse($taken, $maxBytes),
+            'next_offset' => $next,
+            'more' => $next < count($raw),
         ];
     }
 
@@ -69,7 +90,7 @@ final class DeployLogReader
      * @param list<string> $raw
      * @return list<array{ts: int, stage: ?string, level: string, msg: string}>
      */
-    private function parse(array $raw): array
+    private function parse(array $raw, ?int $maxBytes = null): array
     {
         $lines = [];
         foreach ($raw as $line) {
@@ -79,12 +100,21 @@ final class DeployLogReader
                     'ts' => (int) ($decoded['ts'] ?? 0),
                     'stage' => $decoded['stage'] ?? null,
                     'level' => (string) ($decoded['level'] ?? DeployLogger::LEVEL_DIM),
-                    'msg' => (string) ($decoded['msg'] ?? ''),
+                    'msg' => self::cut((string) ($decoded['msg'] ?? ''), $maxBytes),
                 ];
             }
         }
 
         return $lines;
+    }
+
+    private static function cut(string $msg, ?int $maxBytes): string
+    {
+        if ($maxBytes === null || strlen($msg) <= $maxBytes) {
+            return $msg;
+        }
+
+        return mb_strcut($msg, 0, $maxBytes) . ' [... ' . (strlen($msg) - $maxBytes) . ' more bytes cut]';
     }
 
     /**

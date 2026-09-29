@@ -535,11 +535,11 @@ class DeployLogger
     }
 
     /**
-     * @return array{lines: list<array<string, mixed>>, next_offset: int}
+     * @return array{lines: list<array<string, mixed>>, next_offset: int, more: bool}
      */
-    public function read(int $offset = 0, int $limit = DeployLogReader::MAX_READ_LINES): array
+    public function read(int $offset = 0, int $limit = DeployLogReader::MAX_READ_LINES, ?int $maxBytes = null): array
     {
-        return $this->reader()->page($offset, $limit);
+        return $this->reader()->page($offset, $limit, $maxBytes);
     }
 
     /**

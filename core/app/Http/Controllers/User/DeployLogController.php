@@ -27,13 +27,25 @@ class DeployLogController extends Controller
     #[OA\Get(
         path: '/projects/{username}/deploy-log',
         summary: 'Poll the deploy log (JSON-lines) from a byte-like line offset',
-        description: 'When the latest deploy failed and PanelAlpha monitoring knows how to fix that failure, '
+        description: 'Returns a page of lines from `offset`. While `more` is true there are lines after this '
+            . 'page: ask again with `offset` set to `next_offset`. `max_bytes` bounds a page by size as well '
+            . 'as by line count.'
+            . "\n\n"
+            . 'When the latest deploy failed and PanelAlpha monitoring knows how to fix that failure, '
             . '`problem` carries the fix (title, body_why, body_fix, fixed_in_version, ...); otherwise it is null.',
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'offset', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 0)),
+            new OA\Parameter(
+                name: 'max_bytes',
+                in: 'query',
+                required: false,
+                description: 'Upper bound on the log text in one page, at least 1024. Omitted: up to 2000 lines, whatever their size.',
+                schema: new OA\Schema(type: 'integer', minimum: 1024),
+                x: ['mcp-default' => '49152'],
+            ),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Deploy log chunk', content: new OA\JsonContent(
@@ -46,6 +58,7 @@ class DeployLogController extends Controller
         $this->getDindUser($username);
 
         $offset = max(0, (int)$request->query('offset', 0));
+        $maxBytes = $request->filled('max_bytes') ? max(1024, (int)$request->query('max_bytes')) : null;
 
         $logger = DeployLogger::current($username);
         if ($logger === null) {
@@ -56,6 +69,7 @@ class DeployLogController extends Controller
                 'stages' => [],
                 'lines' => [],
                 'next_offset' => 0,
+                'more' => false,
                 'error' => null,
                 'started_at' => null,
                 'finished_at' => null,
@@ -65,7 +79,7 @@ class DeployLogController extends Controller
         }
 
         $latest = $logger->readLatest();
-        $read = $logger->read($offset);
+        $read = $logger->read($offset, maxBytes: $maxBytes);
 
         // Stage durations come from latest.json and cost nothing. The build
         // breakdown has to re-read the whole log — hundreds of kilobytes on a
@@ -81,6 +95,7 @@ class DeployLogController extends Controller
             'stages' => $latest['stages'] ?? [],
             'lines' => $read['lines'],
             'next_offset' => $read['next_offset'],
+            'more' => $read['more'],
             'error' => $latest['error'] ?? null,
             'started_at' => $latest['started_at'] ?? null,
             'finished_at' => $latest['finished_at'] ?? null,

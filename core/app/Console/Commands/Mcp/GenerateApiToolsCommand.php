@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands\Mcp;
 
+use App\Mcp\Tools\Api\DownloadWindow;
 use App\Mcp\Tools\Api\UploadArguments;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
@@ -187,6 +188,7 @@ class GenerateApiToolsCommand extends Command
                     'tags' => $op['tags'] ?? [],
                     'parameters' => $op['parameters'] ?? [],
                     'requestBody' => $op['requestBody'] ?? null,
+                    'responses' => $op['responses'] ?? [],
                 ];
             }
         }
@@ -344,6 +346,12 @@ class GenerateApiToolsCommand extends Command
         $methods[] = $this->arrayMethod('fileParams', $fileParams);
         $methods[] = $this->mapMethod('argumentNames', $argumentNames);
         $methods[] = $this->mapMethod('defaults', $defaults);
+        $methods[] = $this->returnsFile($op) ? <<<'PHP'
+                protected function returnsFile(): bool
+                {
+                    return true;
+                }
+            PHP : '';
         $extra = implode("\n\n", array_filter($methods));
 
         return <<<PHP
@@ -389,6 +397,20 @@ class GenerateApiToolsCommand extends Command
     /**
      * @param array<int, string> $values
      */
+    /**
+     * @param array<string, mixed> $op
+     */
+    private function returnsFile(array $op): bool
+    {
+        foreach ((array)($op['responses']['200']['content'] ?? []) as $media) {
+            if ((is_array($media) ? ($media['schema']['format'] ?? null) : null) === 'binary') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function arrayMethod(string $name, array $values): string
     {
         if ($values === []) {
@@ -511,10 +533,16 @@ class GenerateApiToolsCommand extends Command
             }
 
             $seen[$name] = true;
+            $definition = (array)($p['schema'] ?? []);
+            // On a parameter the extension sits on the parameter, not its schema.
+            if (is_scalar($p['x-mcp-default'] ?? null)) {
+                $definition['x-mcp-default'] = $p['x-mcp-default'];
+                $defaults[$name] = (string)$p['x-mcp-default'];
+            }
             $schema[] = $this->argumentLine(
                 $op,
                 $name,
-                $p['schema'] ?? [],
+                $definition,
                 (bool)($p['required'] ?? $in === 'path'),
                 $p['description'] ?? null,
                 $argumentNames
@@ -579,12 +607,22 @@ class GenerateApiToolsCommand extends Command
             );
         }
 
+        // A file response is read one window at a time; see DownloadWindow.
+        if ($this->returnsFile($op)) {
+            foreach (DownloadWindow::describe() as [$virtual, $definition, $required, $description]) {
+                $schema[] = $this->schemaLine($virtual, $definition, $required, $description);
+            }
+        }
+
         // A rename that lands on a name the operation already uses would make
         // one argument feed two parameters. That is an entry to add to
         // ARGUMENT_NAMES for this operation, and generation stops until it is.
         $exposed = array_map(fn (string $n): string => $this->argumentName($op, $n), [...$path, ...$query, ...$body]);
         foreach ($files as $file) {
             array_push($exposed, ...UploadArguments::virtualNames($file));
+        }
+        if ($this->returnsFile($op)) {
+            array_push($exposed, ...DownloadWindow::names());
         }
         $clashes = array_keys(array_filter(array_count_values($exposed), fn (int $n): bool => $n > 1));
         if ($clashes !== []) {

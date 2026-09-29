@@ -69,12 +69,51 @@ class DeployLogReaderTest extends TestCase
 
     public function test_a_page_reports_where_to_resume_from(): void
     {
-        // The total, not the end of this page: a poll that asks again with
-        // this offset gets only what was appended since.
+        // The end of this page, not the end of the log: jumping to the total
+        // skipped every line between the two for good. A page that reaches
+        // the end is the same number either way, so a poll that asks again
+        // still gets only what was appended since.
         $reader = $this->write($this->entry(100, 'a'), $this->entry(200, 'b'), $this->entry(300, 'c'));
 
-        $this->assertSame(3, $reader->page(0, 1)['next_offset']);
-        $this->assertSame(3, $reader->page(2, 10)['next_offset']);
+        $this->assertSame(['next_offset' => 1, 'more' => true], array_diff_key($reader->page(0, 1), ['lines' => 0]));
+        $this->assertSame(['next_offset' => 3, 'more' => false], array_diff_key($reader->page(2, 10), ['lines' => 0]));
+    }
+
+    public function test_paging_until_there_is_no_more_reads_every_line_once(): void
+    {
+        $reader = $this->write(...array_map(fn (int $i): string => $this->entry($i, "line {$i}"), range(1, 7)));
+
+        $seen = [];
+        $offset = 0;
+        do {
+            $page = $reader->page($offset, 3);
+            array_push($seen, ...array_column($page['lines'], 'msg'));
+            $offset = $page['next_offset'];
+        } while ($page['more']);
+
+        $this->assertSame(array_map(fn (int $i): string => "line {$i}", range(1, 7)), $seen);
+    }
+
+    public function test_a_byte_budget_ends_a_page_early(): void
+    {
+        $reader = $this->write($this->entry(100, str_repeat('a', 600)), $this->entry(200, str_repeat('b', 600)), $this->entry(300, 'c'));
+
+        $page = $reader->page(0, 10, 1024);
+
+        $this->assertCount(1, $page['lines']);
+        $this->assertSame(1, $page['next_offset']);
+        $this->assertTrue($page['more']);
+    }
+
+    public function test_a_line_bigger_than_the_budget_is_cut_rather_than_stalling_the_reader(): void
+    {
+        $reader = $this->write($this->entry(100, str_repeat('x', 5000)), $this->entry(200, 'next'));
+
+        $page = $reader->page(0, 10, 1024);
+
+        $this->assertCount(1, $page['lines']);
+        $this->assertStringStartsWith(str_repeat('x', 1024) . ' [... 3976 more bytes cut]', $page['lines'][0]['msg']);
+        $this->assertSame(['next'], array_column($reader->page($page['next_offset'], 10, 1024)['lines'], 'msg'));
     }
 
     public function test_a_page_past_the_end_is_empty_but_still_says_where_to_resume(): void
@@ -159,6 +198,6 @@ class DeployLogReaderTest extends TestCase
 
         $this->assertSame([], $reader->entries());
         $this->assertSame([], $reader->tail(10));
-        $this->assertSame(['lines' => [], 'next_offset' => 0], $reader->page());
+        $this->assertSame(['lines' => [], 'next_offset' => 0, 'more' => false], $reader->page());
     }
 }
