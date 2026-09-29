@@ -1,7 +1,12 @@
 import { expect, test } from '@/fixtures/test-options';
 import { uniqueId } from '@/helpers/random';
 import { skipUnless } from '@/helpers/test-helpers';
-import { HAND_WRITTEN_MCP_TOOLS, McpSession, readMcpToolCatalogue } from '@/helpers/mcp-helpers';
+import {
+  HAND_WRITTEN_MCP_TOOLS,
+  McpSession,
+  TOOL_SEARCH_MCP_TOOLS,
+  readMcpToolCatalogue,
+} from '@/helpers/mcp-helpers';
 
 /**
  * `tools/list` against `core/app/Mcp/tool-names.php`.
@@ -44,6 +49,7 @@ test.describe('MCP tool catalogue', () => {
       const known = new Set<string>([
         ...catalogue.map((entry) => entry.tool),
         ...HAND_WRITTEN_MCP_TOOLS,
+        ...TOOL_SEARCH_MCP_TOOLS,
       ]);
       const unknown = exposed.filter((name) => !known.has(name)).sort();
       expect(
@@ -74,11 +80,16 @@ test.describe('MCP tool catalogue', () => {
 
     try {
       const session = await McpSession.open(anonymousRequest, settings.apiBaseUrl, token);
-      const exposed = new Set((await session.listTools()).map((tool) => tool.name));
 
-      const missing = [...catalogue.map((entry) => entry.tool), ...HAND_WRITTEN_MCP_TOOLS]
-        .filter((name) => !exposed.has(name))
-        .sort();
+      // With tool search on most tools are not listed, so each is looked up
+      // the way an assistant would find it.
+      const missing: string[] = [];
+      for (const name of [...catalogue.map((entry) => entry.tool), ...HAND_WRITTEN_MCP_TOOLS]) {
+        if (!(await session.describeTool(name))) {
+          missing.push(name);
+        }
+      }
+      missing.sort();
 
       expect(
         missing,

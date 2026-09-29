@@ -54,6 +54,14 @@ use Laravel\Mcp\Server\Attributes\Version;
 
     Which tools exist here is controlled by the operator, so this list may be
     narrower than the full API — see MCP_TOOLSETS and MCP_PERMISSION_MODE.
+
+    **Most tools are not listed directly.** When `search_tools` is present,
+    only the everyday tools are listed; everything else — MySQL, FTP, cron,
+    backups, CSF, ModSecurity, system settings and more — is found with
+    `search_tools` (search by resource or action, e.g. `mysql user`) and run
+    with `execute_tools`, using the exact name and arguments it returned.
+    Search results carry each tool's annotations, so read them there. A tool
+    that search cannot find is not available on this server.
     MARKDOWN)]
 class EngineServer extends Server
 {
@@ -81,7 +89,11 @@ class EngineServer extends Server
      * tool surface follows the API's own #[OA\...] attributes rather than
      * drifting from them.
      *
-     * @var array<int, class-string<\Laravel\Mcp\Server\Tool>>
+     * The constructor filters this and, with tool search on, regroups it under
+     * ToolSearch::class (see ToolPolicy::layout()). The default value stays a
+     * plain list, since ToolRegistry reads it.
+     *
+     * @var array<int|string, class-string<\Laravel\Mcp\Server\Tool>|array<int, class-string<\Laravel\Mcp\Server\Tool>>>
      */
     protected array $tools = [
         MetricsLatestTool::class,
@@ -115,5 +127,8 @@ class EngineServer extends Server
         // authenticated here — which is what makes a per-token tools/list
         // possible rather than one list for everyone and a refusal later.
         $this->tools = TokenAbilities::forCurrentRequest()->filterTools($this->tools);
+
+        // Last, so the catalogue holds exactly what the filters above left.
+        $this->tools = (new ToolPolicy())->layout($this->tools);
     }
 }

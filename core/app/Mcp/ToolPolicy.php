@@ -6,6 +6,7 @@ use App\Mcp\Tools\Api\ApiTool;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Laravel\Mcp\Server\Tool;
+use Laravel\Mcp\Server\Tools\ToolSearch;
 use Throwable;
 
 /**
@@ -93,6 +94,34 @@ class ToolPolicy
         }
 
         return $kept;
+    }
+
+    /**
+     * The server's tool list in laravel/mcp's shape, from tools already
+     * filtered. With tool search on, only the direct tools are listed and every
+     * tool -- direct ones too, so a search never misses one -- sits in the
+     * catalogue behind search_tools / execute_tools.
+     *
+     * @param array<int, class-string<Tool>> $tools
+     * @return array<int|string, class-string<Tool>|array<int, class-string<Tool>>>
+     */
+    public function layout(array $tools): array
+    {
+        if (!filter_var($this->config['tool_search'] ?? false, FILTER_VALIDATE_BOOL)) {
+            return $tools;
+        }
+
+        $patterns = $this->listOf('direct');
+        $direct = array_values(array_filter(
+            $tools,
+            fn (string $class): bool => $this->matchesAny($this->nameOf($class), $patterns)
+        ));
+
+        if (count($direct) === count($tools)) {
+            return $tools;
+        }
+
+        return [...$direct, ToolSearch::class => $tools];
     }
 
     /**

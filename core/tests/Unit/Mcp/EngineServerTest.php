@@ -125,6 +125,8 @@ class EngineServerTest extends TestCase
 
     public function test_tools_list_returns_every_tool_in_one_unpaginated_page(): void
     {
+        config(['mcp-tools.tool_search' => false]);
+
         $reply = $this->dispatch(['jsonrpc' => '2.0', 'id' => 4, 'method' => 'tools/list', 'params' => []]);
 
         $this->assertArrayNotHasKey(
@@ -187,13 +189,120 @@ class EngineServerTest extends TestCase
                 return 'test-session';
             }
 
-            public function stream(\Closure $stream): void {}
+            // execute_tools answers as a stream; the reply is its last message.
+            public function stream(\Closure $stream): void
+            {
+                $stream();
+            }
         };
 
         $server = new EngineServer($transport);
         $server->start();
         $server->handle(json_encode($message, JSON_THROW_ON_ERROR));
 
-        return json_decode($transport->sent[0], true, 512, JSON_THROW_ON_ERROR);
+        return json_decode(end($transport->sent), true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     * @return array<string, mixed> the JSON a catalogue tool put in its text
+     */
+    private function callCatalogue(string $tool, array $arguments): array
+    {
+        $reply = $this->dispatch([
+            'jsonrpc' => '2.0',
+            'id' => 9,
+            'method' => 'tools/call',
+            'params' => ['name' => $tool, 'arguments' => $arguments],
+        ]);
+
+        $this->assertArrayNotHasKey('error', $reply, json_encode($reply));
+
+        return json_decode($reply['result']['content'][0]['text'], true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    /** @return array<int, string> */
+    private function listedNames(): array
+    {
+        $reply = $this->dispatch(['jsonrpc' => '2.0', 'id' => 5, 'method' => 'tools/list', 'params' => []]);
+
+        return array_column($reply['result']['tools'], 'name');
+    }
+
+    public function test_tool_search_lists_only_the_direct_tools_and_the_two_catalogue_tools(): void
+    {
+        config(['mcp-tools.tool_search' => true]);
+
+        $names = $this->listedNames();
+
+        $this->assertContains('search_tools', $names);
+        $this->assertContains('execute_tools', $names);
+        $this->assertContains('project_create', $names);
+        $this->assertContains('deploy_log_get', $names);
+        $this->assertNotContains('mysql_database_list', $names);
+        $this->assertLessThan(20, count($names), 'the default direct set is meant to be small');
+    }
+
+    public function test_search_tools_finds_catalogued_and_direct_tools_alike(): void
+    {
+        config(['mcp-tools.tool_search' => true]);
+
+        $found = array_column($this->callCatalogue('search_tools', ['query' => 'mysql database'])['tools'], 'name');
+        $this->assertContains('mysql_database_list', $found);
+
+        // Direct tools are in the catalogue too, so a search never misses one.
+        $found = array_column($this->callCatalogue('search_tools', ['query' => 'project_create'])['tools'], 'name');
+        $this->assertSame('project_create', $found[0]);
+    }
+
+    public function test_search_results_carry_the_annotations_tools_list_would(): void
+    {
+        config(['mcp-tools.tool_search' => true]);
+
+        $tools = $this->callCatalogue('search_tools', ['query' => 'project_delete'])['tools'];
+        $delete = collect($tools)->firstWhere('name', 'project_delete');
+
+        $this->assertNotNull($delete);
+        $this->assertTrue($delete['annotations']['destructiveHint'] ?? false);
+    }
+
+    public function test_execute_tools_runs_a_catalogued_tool(): void
+    {
+        config(['mcp-tools.tool_search' => true]);
+
+        // No `name`: the tool's own validation answers, which proves the call
+        // reached it without needing a project to exist.
+        $out = $this->callCatalogue('execute_tools', ['calls' => [
+            ['name' => 'mysql_database_list', 'arguments' => (object) []],
+        ]]);
+
+        $this->assertFalse($out['ok']);
+        $this->assertSame('mysql_database_list', $out['results'][0]['name']);
+        $this->assertStringContainsString('name', $out['results'][0]['content'][0]['text']);
+    }
+
+    public function test_the_catalogue_holds_only_what_the_filters_left(): void
+    {
+        config(['mcp-tools.tool_search' => true, 'mcp-tools.permission_mode' => ToolPolicy::MODE_READONLY]);
+
+        $found = array_column($this->callCatalogue('search_tools', ['query' => 'project_delete'])['tools'], 'name');
+        $this->assertNotContains('project_delete', $found);
+
+        $out = $this->callCatalogue('execute_tools', ['calls' => [
+            ['name' => 'project_delete', 'arguments' => ['name' => 'shop']],
+        ]]);
+
+        $this->assertFalse($out['ok']);
+        $this->assertStringContainsString('not found', $out['results'][0]['content'][0]['text']);
+    }
+
+    public function test_a_direct_list_covering_everything_turns_the_catalogue_off(): void
+    {
+        config(['mcp-tools.tool_search' => true, 'mcp-tools.direct' => '*']);
+
+        $names = $this->listedNames();
+
+        $this->assertNotContains('search_tools', $names);
+        $this->assertContains('mysql_database_list', $names);
     }
 }

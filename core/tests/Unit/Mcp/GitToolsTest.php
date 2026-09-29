@@ -113,6 +113,8 @@ class GitToolsTest extends TestCase
             $this->assertSame($name, (new $class())->name());
         }
 
+        config(['mcp-tools.tool_search' => false]);
+
         $server = new EngineServer(new FakeTransporter());
         $merged = (new ReflectionClass($server))->getProperty('tools');
         $merged->setAccessible(true);

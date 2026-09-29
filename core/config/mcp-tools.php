@@ -109,4 +109,38 @@ return [
     */
     'denied_regex' => env('MCP_DENIED_TOOLS_REGEX'),
 
+    /*
+    | Tool search. The full surface is ~200 tools and ~130 KB of schemas that
+    | every client loads into its context up front. With this on, tools/list
+    | carries only the direct tools below plus search_tools and execute_tools,
+    | and every exposed tool -- direct ones included -- is reachable through
+    | those two.
+    |
+    | It changes what is listed, not what is exposed: the catalogue is built
+    | from what survived the filters above, so a tool they remove cannot be
+    | found or executed either.
+    |
+    | MCP_TOOL_SEARCH=false lists every exposed tool directly, as before.
+    */
+    'tool_search' => env('MCP_TOOL_SEARCH', true),
+
+    /*
+    | Tools listed directly while tool search is on, comma-separated, "*"
+    | wildcards supported. The default is the create -> deploy -> debug loop.
+    | "*" lists everything and is the same as MCP_TOOL_SEARCH=false.
+    */
+    'direct' => env('MCP_DIRECT_TOOLS', implode(',', [
+        'metrics_latest',
+        'project_list_summary',
+        'project_get',
+        'project_create',
+        'project_rebuild',
+        'project_inspect',
+        'deploy_log_get',
+        'app_health_check',
+        'container_service_logs',
+        'file_write',
+        'file_upload',
+    ])),
+
 ];

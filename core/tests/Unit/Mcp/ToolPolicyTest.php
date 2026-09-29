@@ -15,6 +15,7 @@ use App\Mcp\Tools\Api\Projects\ProjectUpdateTool;
 use App\Mcp\Tools\Api\ServerMetrics\MetricsCurrentTool;
 use App\Mcp\Tools\MetricsLatestTool;
 use App\Mcp\Tools\ProjectListSummaryTool;
+use Laravel\Mcp\Server\Tools\ToolSearch;
 use Tests\TestCase;
 
 class ToolPolicyTest extends TestCase
@@ -45,6 +46,23 @@ class ToolPolicyTest extends TestCase
             fn (string $c): string => $policy->nameOf($c),
             $policy->filter(self::SAMPLE)
         );
+    }
+
+    public function test_layout_lists_direct_tools_and_catalogues_every_tool(): void
+    {
+        $policy = new ToolPolicy(['tool_search' => true, 'direct' => 'project_create, metrics_*']);
+
+        $this->assertSame(
+            [MetricsLatestTool::class, ProjectCreateTool::class, MetricsCurrentTool::class, ToolSearch::class => self::SAMPLE],
+            $policy->layout(self::SAMPLE)
+        );
+    }
+
+    public function test_layout_is_flat_when_tool_search_is_off_or_everything_is_direct(): void
+    {
+        $this->assertSame(self::SAMPLE, (new ToolPolicy(['tool_search' => false, 'direct' => 'project_create']))->layout(self::SAMPLE));
+        $this->assertSame(self::SAMPLE, (new ToolPolicy(['tool_search' => 'false']))->layout(self::SAMPLE));
+        $this->assertSame(self::SAMPLE, (new ToolPolicy(['tool_search' => true, 'direct' => '*']))->layout(self::SAMPLE));
     }
 
     public function test_everything_is_exposed_by_default(): void

@@ -11,6 +11,12 @@ root access: an account's files, containers and logs are all reachable
 through the tools. Verified on a fresh install with a PHP app, an Express
 app and a static site; the timings below come from that run.
 
+The engine lists only the everyday tools by default (`project_create`,
+`project_get`, `project_rebuild`, `deploy_log_get`, `file_write`, ...). A tool
+named here that is not in your list (`ssh_run`, `task_get`, `mysql_*`, ...)
+is still there: find it with `search_tools` and run it with `execute_tools`,
+passing the exact name and arguments. The arguments are the same either way.
+
 A **project** is one hosting account: a container of its own, `~/project`
 holding the application, one main domain, and the FTP/SFTP/MySQL resources
 under it. The engine **detects** what the files are (29 recipes: static,

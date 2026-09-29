@@ -72,16 +72,15 @@ test.describe('MCP streamable HTTP', () => {
       const listed = parseMcpJsonRpc(await tools.text());
       expect(listed).toBeTruthy();
       const names = mcpToolNames(listed);
+      expect(names).toEqual(expect.arrayContaining(['project_create', 'project_list_summary']));
+      // With tool search on (the default) the rest are behind search_tools;
+      // with MCP_TOOL_SEARCH=false they are listed directly.
       expect(names).toEqual(
-        expect.arrayContaining([
-          'backup_list',
-          'git_status',
-          'git_connect',
-          'task_get',
-          'task_log_list',
-          'project_create',
-          'project_list_summary',
-        ])
+        expect.arrayContaining(
+          names.includes('search_tools')
+            ? ['search_tools', 'execute_tools']
+            : ['backup_list', 'git_status', 'git_connect', 'task_get', 'task_log_list']
+        )
       );
 
       const called = await client.send(

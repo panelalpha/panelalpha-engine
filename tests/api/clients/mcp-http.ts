@@ -57,9 +57,23 @@ export class McpHttpClient {
 }
 
 export function parseMcpJsonRpc(body: string): Record<string, unknown> | null {
-  const stripped = body.replace(/^data: /gm, '');
+  // An SSE body can carry notifications ahead of the reply (execute_tools
+  // always answers as a stream); the reply is the last message with a result
+  // or an error.
+  const events = body
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('data: '))
+    .map((line) => decode(line.slice(6)))
+    .filter((message) => message !== null && ('result' in message || 'error' in message));
+  if (events.length > 0) {
+    return events[events.length - 1];
+  }
+  return decode(body);
+}
+
+function decode(text: string): Record<string, unknown> | null {
   try {
-    const decoded: unknown = JSON.parse(stripped);
+    const decoded: unknown = JSON.parse(text);
     return decoded !== null && typeof decoded === 'object'
       ? (decoded as Record<string, unknown>)
       : null;

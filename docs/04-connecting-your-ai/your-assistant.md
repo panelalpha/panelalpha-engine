@@ -104,6 +104,24 @@ A regular expression, without delimiters, is also accepted as `MCP_DENIED_TOOLS_
 
 A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the permission ceiling, and not denied. Denials always win. Naming a destructive tool in `MCP_TOOLS` does not get it past `MCP_PERMISSION_MODE=readonly`.
 
+### How many tools the assistant loads
+
+The full list is about 200 tools, and an assistant loads every listed tool's description when it connects. That is about 130 KB of text it carries around before you have asked for anything. So by default the engine lists only the everyday tools (creating, deploying and debugging a project) plus two more:
+
+- `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
+- `execute_tools` runs the tool it found.
+
+The assistant does this on its own when you ask for something that is not in the short list. Nothing is hidden this way. Everything the settings above allow can still be found and run, and nothing they remove can.
+
+```bash
+MCP_TOOL_SEARCH=true
+MCP_DIRECT_TOOLS=project_get,project_create,project_rebuild,deploy_log_get
+```
+
+`MCP_DIRECT_TOOLS` is the short list, comma-separated, with `*` wildcards. Left unset, it is the create, deploy and debug tools. To list every tool directly, as older engines did, set `MCP_TOOL_SEARCH=false`.
+
+One thing to know if your assistant asks before it runs a tool: it sees `execute_tools`, not the tool inside it. If you tell it to always allow `execute_tools`, you have allowed every tool it can find. Use `MCP_PERMISSION_MODE` and `MCP_DENIED_TOOLS` for the limits that must hold. The engine enforces those itself.
+
 These settings only affect the assistant. They do not change the REST API or `pae`.
 
 ### Check what is on offer
@@ -279,7 +297,7 @@ Almost always the certificate. Your engine is self-signed and the assistant's ma
 Wrong token type. Assistants need a token from `pae connect` or `pae mcp:token:create`, not `pae api:token:create`. Or the token was truncated when you copied it.
 
 **The assistant says it cannot do something you know the engine can do.**
-The permission settings are filtering it out. Run `pae mcp:tool:list` on your VPS. Check `MCP_PERMISSION_MODE`, `MCP_TOOLSETS`, `MCP_TOOLS` and `MCP_DENIED_TOOLS` in `.env-core`. [Every tool](#every-tool) is the full list. That list is not the same as what your assistant is currently allowed to call.
+The permission settings are filtering it out. Run `pae mcp:tool:list` on your VPS. Check `MCP_PERMISSION_MODE`, `MCP_TOOLSETS`, `MCP_TOOLS` and `MCP_DENIED_TOOLS` in `.env-core`. If the tool is allowed but not in the assistant's list, ask it to look for it with `search_tools` (see [How many tools the assistant loads](#how-many-tools-the-assistant-loads)). [Every tool](#every-tool) is the full list. That list is not the same as what your assistant is currently allowed to call.
 
 **I set a permission mode and everything became read-only.**
 The value must be exactly `readonly`, `modify` or `full`. Anything else is treated as `readonly`.

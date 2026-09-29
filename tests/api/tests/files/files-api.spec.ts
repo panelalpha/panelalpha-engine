@@ -134,9 +134,8 @@ test.describe('file manager API', () => {
 
     try {
       const session = await McpSession.open(anonymousRequest, settings.apiBaseUrl, token);
-      const tools = new Set((await session.listTools()).map((tool) => tool.name));
       skipUnless(
-        tools.has('file_write') && tools.has('file_stat'),
+        (await session.describeTool('file_write')) && (await session.describeTool('file_stat')),
         'this engine does not expose the file MCP tools.'
       );
 

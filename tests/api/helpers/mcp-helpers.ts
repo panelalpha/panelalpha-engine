@@ -19,6 +19,13 @@ const CATALOGUE_FILE = path.resolve(suiteRoot, '../../core/app/Mcp/tool-names.ph
 /** Tools written by hand rather than derived from an API route. */
 export const HAND_WRITTEN_MCP_TOOLS = ['metrics_latest', 'project_list_summary'] as const;
 
+/**
+ * Listed in place of the catalogued tools when the engine runs with tool search
+ * on (MCP_TOOL_SEARCH, the default): every exposed tool is reachable through
+ * these two, and only the direct ones are listed beside them.
+ */
+export const TOOL_SEARCH_MCP_TOOLS = ['search_tools', 'execute_tools'] as const;
+
 export interface McpCatalogueEntry {
   /** HTTP verb of the API operation the tool wraps. */
   verb: string;
@@ -120,9 +127,62 @@ export class McpSession {
     return tools;
   }
 
-  /** Calls a tool and returns the JSON-RPC payload without judging it. */
+  private listing?: Map<string, McpToolDescriptor>;
+
+  /** `tools/list`, fetched once per session. */
+  private async listed(): Promise<Map<string, McpToolDescriptor>> {
+    this.listing ??= new Map((await this.listTools()).map((tool) => [tool.name, tool]));
+    return this.listing;
+  }
+
+  /**
+   * A tool's descriptor, whether it is listed directly or only reachable
+   * through `search_tools`; undefined when the server does not expose it.
+   */
+  async describeTool(name: string): Promise<McpToolDescriptor | undefined> {
+    const listed = await this.listed();
+    const direct = listed.get(name);
+    if (direct || !listed.has('search_tools')) {
+      return direct;
+    }
+    const payload = await this.send('tools/call', {
+      name: 'search_tools',
+      arguments: { query: name, limit: 5 },
+    });
+    expectMcpToolOk(payload, 'search_tools');
+    const found = JSON.parse(mcpResultText(payload)) as { tools?: McpToolDescriptor[] };
+    return (found.tools ?? []).find((tool) => tool.name === name);
+  }
+
+  /**
+   * Calls a tool and returns the JSON-RPC payload without judging it.
+   *
+   * A tool that is not listed directly is run through `execute_tools`, and its
+   * own result is returned in the shape a direct `tools/call` would have, so a
+   * spec does not care which way the engine exposes it.
+   */
   async call(name: string, args: Record<string, unknown> = {}): Promise<McpPayload> {
-    return this.send('tools/call', { name, arguments: args });
+    const listed = await this.listed();
+    if (listed.has(name) || !listed.has('execute_tools')) {
+      return this.send('tools/call', { name, arguments: args });
+    }
+
+    const payload = await this.send('tools/call', {
+      name: 'execute_tools',
+      arguments: { calls: [{ name, arguments: args }] },
+    });
+    if (payload.error !== undefined) {
+      return payload;
+    }
+    try {
+      const summary = JSON.parse(mcpResultText(payload)) as { results?: unknown[] };
+      const result = summary.results?.[0];
+      // No result means execute_tools refused the batch itself; its own error
+      // is the more useful thing to report.
+      return result === undefined ? payload : { ...payload, result };
+    } catch {
+      return payload;
+    }
   }
 
   /** Calls a tool and fails the test unless it succeeded. */

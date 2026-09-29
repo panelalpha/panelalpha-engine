@@ -308,7 +308,8 @@ class GeneratedApiToolsTest extends TestCase
 
         // With every group on, the merge must lose nothing; what the shipped
         // default exposes is ToolPolicy's business and is covered separately.
-        config(['mcp-tools.toolsets' => 'all', 'mcp-tools.permission_mode' => 'full']);
+        // Tool search off: the catalogue regrouping is covered in EngineServerTest.
+        config(['mcp-tools.toolsets' => 'all', 'mcp-tools.permission_mode' => 'full', 'mcp-tools.tool_search' => false]);
 
         $server = new \App\Mcp\Servers\EngineServer(new \Laravel\Mcp\Server\Transport\FakeTransporter());
         $merged = (new ReflectionClass($server))->getProperty('tools');

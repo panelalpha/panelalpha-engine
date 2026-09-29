@@ -122,9 +122,8 @@ test.describe('PHP custom INI settings', () => {
 
     try {
       const session = await McpSession.open(anonymousRequest, settings.apiBaseUrl, token);
-      const tools = new Set((await session.listTools()).map((tool) => tool.name));
       skipUnless(
-        tools.has('php_ini_get') && tools.has('php_ini_set'),
+        (await session.describeTool('php_ini_get')) && (await session.describeTool('php_ini_set')),
         'this engine does not expose php_ini_get / php_ini_set.'
       );
 

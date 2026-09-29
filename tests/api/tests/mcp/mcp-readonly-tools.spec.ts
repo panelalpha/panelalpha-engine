@@ -102,7 +102,6 @@ test.describe('MCP read-only tools', () => {
 
     try {
       const session = await McpSession.open(anonymousRequest, settings.apiBaseUrl, token);
-      const exposed = new Map((await session.listTools()).map((tool) => [tool.name, tool]));
       const context = smokeArguments(setupUser.username, setupUser.domain);
 
       const failures: string[] = [];
@@ -111,7 +110,7 @@ test.describe('MCP read-only tools', () => {
       let called = 0;
 
       for (const entry of catalogue.filter((item) => item.readOnly)) {
-        const tool = exposed.get(entry.tool);
+        const tool = await session.describeTool(entry.tool);
         if (!tool) {
           // Whether a tool is exposed at all is mcp-tool-catalogue.spec.ts's job.
           continue;
