@@ -106,7 +106,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is about 200 tools, and an assistant loads every listed tool's description when it connects. That is about 130 KB of text it carries around before you have asked for anything. So by default the engine lists only the everyday tools (creating, deploying and debugging a project) plus two more:
+The full list is about 200 tools, and an assistant loads every listed tool's description when it connects. That is about 130 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
@@ -118,7 +118,16 @@ MCP_TOOL_SEARCH=true
 MCP_DIRECT_TOOLS=project_get,project_create,project_rebuild,deploy_log_get
 ```
 
-`MCP_DIRECT_TOOLS` is the short list, comma-separated, with `*` wildcards. Left unset, it is the create, deploy and debug tools. To list every tool directly, as older engines did, set `MCP_TOOL_SEARCH=false`.
+`MCP_DIRECT_TOOLS` is the short list, comma-separated, with `*` wildcards. To list every tool directly, as older engines did, set `MCP_TOOL_SEARCH=false`. Left unset, the short list is:
+
+| For | Tools |
+|---|---|
+| Overview | `metrics_latest`, `project_list_summary`, `project_list` |
+| Deploying | `project_create`, `project_deploy_archive`, `file_upload`, `file_write`, `project_rebuild`, `deploy_log_get`, `deploy_cancel`, `task_get` |
+| Checking | `project_get`, `project_inspect`, `app_health_check`, `container_service_logs` |
+| Running | `project_suspend`, `project_unsuspend`, `project_delete`, `container_project_action`, `domain_list`, `domain_create`, `ssl_cert_request` |
+
+Large results come back in pieces. `deploy_log_get` returns about 48 KB of log at a time, and `file_download` and `domain_log_download` return about 48 KB of a file at a time, as text when the file is text. Each result says whether there is `more` and where the next piece starts. Any other result over 256 KB is refused with a note on how to ask for less. The assistant handles this itself.
 
 One thing to know if your assistant asks before it runs a tool: it sees `execute_tools`, not the tool inside it. If you tell it to always allow `execute_tools`, you have allowed every tool it can find. Use `MCP_PERMISSION_MODE` and `MCP_DENIED_TOOLS` for the limits that must hold. The engine enforces those itself.
 

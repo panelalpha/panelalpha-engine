@@ -55,6 +55,11 @@ class DomainLogDownloadTool extends ApiTool
         ];
     }
 
+    protected function returnsFile(): bool
+    {
+        return true;
+    }
+
     /**
      * @return array<string, \Illuminate\JsonSchema\Types\Type>
      */
@@ -64,6 +69,8 @@ class DomainLogDownloadTool extends ApiTool
             'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
             'domain' => $schema->string()->required(),
             'filename' => $schema->string()->required(),
+            'offset' => $schema->integer()->description('Byte to start reading at. Default 0; pass the previous result\'s next_offset to continue.'),
+            'length' => $schema->integer()->description('Bytes to read, at most 49152 (the default). The result says whether there is `more`.'),
         ];
     }
 }

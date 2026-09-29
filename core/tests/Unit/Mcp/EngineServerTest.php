@@ -239,8 +239,10 @@ class EngineServerTest extends TestCase
         $this->assertContains('execute_tools', $names);
         $this->assertContains('project_create', $names);
         $this->assertContains('deploy_log_get', $names);
+        $this->assertContains('project_list', $names);
+        $this->assertContains('project_delete', $names);
         $this->assertNotContains('mysql_database_list', $names);
-        $this->assertLessThan(20, count($names), 'the default direct set is meant to be small');
+        $this->assertLessThan(30, count($names), 'the default direct set is meant to be small');
     }
 
     public function test_search_tools_finds_catalogued_and_direct_tools_alike(): void

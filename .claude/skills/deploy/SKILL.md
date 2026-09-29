@@ -11,11 +11,12 @@ root access: an account's files, containers and logs are all reachable
 through the tools. Verified on a fresh install with a PHP app, an Express
 app and a static site; the timings below come from that run.
 
-The engine lists only the everyday tools by default (`project_create`,
-`project_get`, `project_rebuild`, `deploy_log_get`, `file_write`, ...). A tool
-named here that is not in your list (`ssh_run`, `task_get`, `mysql_*`, ...)
-is still there: find it with `search_tools` and run it with `execute_tools`,
-passing the exact name and arguments. The arguments are the same either way.
+The engine lists only the deploy, check and run tools by default
+(`project_create`, `project_get`, `project_rebuild`, `deploy_log_get`,
+`file_write`, `project_delete`, ...). A tool named here that is not in your
+list (`ssh_run`, `mysql_*`, `file_download`, ...) is still there: find it
+with `search_tools` and run it with `execute_tools`, passing the exact name
+and arguments. The arguments are the same either way.
 
 A **project** is one hosting account: a container of its own, `~/project`
 holding the application, one main domain, and the FTP/SFTP/MySQL resources
@@ -209,9 +210,10 @@ same name. Instead:
    terminal too: the container came up and nothing answered on the detected
    port, so treat it as failed and go to section 5.
 3. Only when you need the actual file-log output, call `deploy_log_get`
-   again with `offset: 0` (then `next_offset` to continue): `lines` are
-   `{at, level, step}` entries, and composer/npm output is one entry per
-   line, so it is long.
+   again with `offset: 0`, then with `next_offset` while `more` is true:
+   each call returns about 48 KB of `lines`, `{at, level, step}` entries.
+   Composer/npm output is one entry per line, so a build is several pages;
+   when only the end matters, skip ahead rather than reading every page.
 
 `deploy_cancel` kills a deploy that is clearly stuck (a stage not advancing
 for many minutes with no output).

@@ -126,21 +126,37 @@ return [
 
     /*
     | Tools listed directly while tool search is on, comma-separated, "*"
-    | wildcards supported. The default is the create -> deploy -> debug loop.
+    | wildcards supported. The default is what deploying, verifying and
+    | running a project takes; everything else is one search away.
     | "*" lists everything and is the same as MCP_TOOL_SEARCH=false.
     */
     'direct' => env('MCP_DIRECT_TOOLS', implode(',', [
+        // Overview
         'metrics_latest',
         'project_list_summary',
-        'project_get',
+        'project_list',
+        // Deploy
         'project_create',
+        'project_deploy_archive',
+        'file_upload',
+        'file_write',
         'project_rebuild',
-        'project_inspect',
         'deploy_log_get',
+        'deploy_cancel',
+        'task_get',
+        // Verify
+        'project_get',
+        'project_inspect',
         'app_health_check',
         'container_service_logs',
-        'file_write',
-        'file_upload',
+        // Manage
+        'project_suspend',
+        'project_unsuspend',
+        'project_delete',
+        'container_project_action',
+        'domain_list',
+        'domain_create',
+        'ssl_cert_request',
     ])),
 
 ];

@@ -47,8 +47,14 @@ abstract class ApiTool extends Tool
     /** Marks a request as this class's own in-process dispatch. */
     public const VIA_ATTRIBUTE = 'panelalpha.via_mcp';
 
-    /** Largest file a tool returns inline; base64 grows it by a third. */
-    public const MAX_DOWNLOAD_BYTES = 1048576;
+    /**
+     * Largest result any tool returns. Tools that are big by nature page
+     * well under it (deploy_log_get's max_bytes, DownloadWindow); this is the
+     * backstop for the rest -- an ssh_run that cats a log, a huge listing --
+     * so they answer with what to narrow instead of a result the client
+     * cannot take.
+     */
+    public const MAX_RESULT_BYTES = 262144;
 
     /** The HTTP verb this tool performs. */
     abstract protected function method(): string;
@@ -94,6 +100,15 @@ abstract class ApiTool extends Tool
     protected function fileParams(): array
     {
         return [];
+    }
+
+    /**
+     * Whether the endpoint answers with a file. Such a tool takes the
+     * {@see DownloadWindow} arguments and returns the file one window at a time.
+     */
+    protected function returnsFile(): bool
+    {
+        return false;
     }
 
     /**
@@ -147,7 +162,7 @@ abstract class ApiTool extends Tool
 
         // getContent() is false for both, so they would read as {data: null}.
         if ($response instanceof BinaryFileResponse) {
-            return $this->fileResult($response);
+            return $this->fileResult($response, (int)($input['offset'] ?? 0), (int)($input['length'] ?? DownloadWindow::MAX_BYTES));
         }
         if ($response instanceof StreamedResponse) {
             return Response::error('This endpoint streams its response, which cannot be relayed over MCP. Use the non-streaming equivalent (e.g. task_log_list).');
@@ -157,6 +172,16 @@ abstract class ApiTool extends Tool
         $status = $response->getStatusCode();
 
         $payload = ['status' => $status, 'data' => $body];
+
+        $size = strlen($this->encode($payload));
+        if ($size > self::MAX_RESULT_BYTES) {
+            return Response::error(sprintf(
+                'The result is %d KB, over the %d KB a tool returns. Ask for less: use the paging or filter '
+                . 'arguments this tool has, or for command output pipe it through head, tail or grep.',
+                intdiv($size, 1024),
+                intdiv(self::MAX_RESULT_BYTES, 1024)
+            ));
+        }
 
         // A 4xx/5xx from the API is the tool failing, not the transport: it
         // comes back as a tool error so the model retries or reports rather
@@ -192,6 +217,9 @@ abstract class ApiTool extends Tool
             foreach (UploadArguments::virtualNames($param) as $name) {
                 $rules[$name] ??= 'sometimes';
             }
+        }
+        if ($this->returnsFile()) {
+            $rules = DownloadWindow::rules() + $rules;
         }
 
         return $rules;
@@ -323,23 +351,19 @@ abstract class ApiTool extends Tool
         return json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}';
     }
 
-    /** A downloaded file, base64-encoded, up to MAX_DOWNLOAD_BYTES. */
-    private function fileResult(BinaryFileResponse $response): Response
+    /** One {@see DownloadWindow} of a downloaded file. */
+    private function fileResult(BinaryFileResponse $response, int $offset, int $length): Response
     {
         $file = $response->getFile();
-        $limitMb = self::MAX_DOWNLOAD_BYTES / 1048576;
 
         // Read through the stream rather than stat(): the path may be sudophp://.
         $handle = @fopen($file->getPathname(), 'rb');
-        $bytes = $handle === false ? false : stream_get_contents($handle, self::MAX_DOWNLOAD_BYTES + 1);
+        $window = $handle === false ? null : DownloadWindow::read($handle, max(0, $offset), $length);
         if ($handle !== false) {
             fclose($handle);
         }
-        if ($bytes === false) {
+        if ($window === null) {
             return Response::error("Could not read {$file->getFilename()}.");
-        }
-        if (strlen($bytes) > self::MAX_DOWNLOAD_BYTES) {
-            return Response::error("{$file->getFilename()} is larger than the {$limitMb} MB MCP download limit. Fetch it over the REST API instead.");
         }
 
         // Content sniffing cannot see through sudophp://, so fall back to the extension.
@@ -348,15 +372,15 @@ abstract class ApiTool extends Tool
             $mimeType = MimeTypes::getDefault()->getMimeTypes($file->getExtension())[0] ?? 'application/octet-stream';
         }
 
+        $size = @filesize($file->getPathname());
+
         return Response::json([
             'status' => $response->getStatusCode(),
             'data' => [
                 'filename' => $file->getFilename(),
                 'mime_type' => $mimeType,
-                'size' => strlen($bytes),
-                'encoding' => 'base64',
-                'content' => base64_encode($bytes),
-            ],
+                'size' => $size === false ? null : $size,
+            ] + $window,
         ]);
     }
 

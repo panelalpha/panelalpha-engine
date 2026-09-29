@@ -3,6 +3,7 @@
 namespace Tests\Unit\Mcp;
 
 use App\Mcp\Tools\Api\ApiTool;
+use App\Mcp\Tools\Api\DownloadWindow;
 use Illuminate\Support\Facades\Route;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -23,6 +24,7 @@ class ApiToolFileResponseTest extends TestCase
 
         Route::get('/api/test-mcp/download', fn () => response()->download($this->file));
         Route::get('/api/test-mcp/stream', fn () => response()->stream(fn () => print('x')));
+        Route::get('/api/test-mcp/huge', fn () => response()->json(['blob' => str_repeat('a', ApiTool::MAX_RESULT_BYTES)]));
     }
 
     protected function tearDown(): void
@@ -31,7 +33,7 @@ class ApiToolFileResponseTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_a_download_comes_back_as_base64_with_its_metadata(): void
+    public function test_a_binary_download_comes_back_as_base64_with_its_metadata(): void
     {
         file_put_contents($this->file, "hello\0world");
 
@@ -45,16 +47,59 @@ class ApiToolFileResponseTest extends TestCase
         $this->assertSame(11, $payload['data']['size']);
         $this->assertSame('base64', $payload['data']['encoding']);
         $this->assertSame("hello\0world", base64_decode($payload['data']['content']));
+        $this->assertFalse($payload['data']['more']);
+        $this->assertNull($payload['data']['next_offset']);
     }
 
-    public function test_a_file_over_the_limit_is_an_error_not_a_truncation(): void
+    public function test_text_comes_back_as_text(): void
     {
-        file_put_contents($this->file, str_repeat('a', ApiTool::MAX_DOWNLOAD_BYTES + 1));
+        file_put_contents($this->file, "GET / 200\n");
 
-        $response = $this->tool('/test-mcp/download')->handle(new Request());
+        $data = $this->payload($this->tool('/test-mcp/download')->handle(new Request()))['data'];
+
+        $this->assertSame('utf-8', $data['encoding']);
+        $this->assertSame("GET / 200\n", $data['content']);
+    }
+
+    public function test_a_big_file_is_read_one_window_at_a_time_to_the_last_byte(): void
+    {
+        // Multibyte characters straddle the window edges, so text windows have
+        // to back off to a whole character and still lose nothing.
+        $contents = str_repeat("zażółć gęślą jaźń\n", 8000);
+        file_put_contents($this->file, $contents);
+
+        $read = '';
+        $offset = 0;
+        $windows = 0;
+        do {
+            $data = $this->payload($this->tool('/test-mcp/download')->handle(new Request(['offset' => $offset])))['data'];
+            $this->assertSame('utf-8', $data['encoding']);
+            $this->assertLessThanOrEqual(DownloadWindow::MAX_BYTES, $data['length']);
+            $this->assertSame(strlen($contents), $data['size']);
+            $read .= $data['content'];
+            $offset = $data['next_offset'] ?? $offset;
+            $windows++;
+        } while ($data['more']);
+
+        $this->assertSame($contents, $read);
+        $this->assertGreaterThan(1, $windows);
+    }
+
+    public function test_length_is_capped_by_validation(): void
+    {
+        file_put_contents($this->file, 'x');
+
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+
+        $this->tool('/test-mcp/download')->handle(new Request(['length' => DownloadWindow::MAX_BYTES + 1]));
+    }
+
+    public function test_a_result_over_the_limit_says_what_to_narrow_instead_of_being_sent(): void
+    {
+        $response = $this->tool('/test-mcp/huge')->handle(new Request());
 
         $this->assertTrue($response->isError());
-        $this->assertStringContainsString('larger than the 1 MB MCP download limit', (string)$response->content());
+        $this->assertStringContainsString('over the 256 KB a tool returns', (string)$response->content());
     }
 
     public function test_a_stream_is_refused_rather_than_read_as_null(): void
@@ -80,6 +125,11 @@ class ApiToolFileResponseTest extends TestCase
             protected function path(): string
             {
                 return $this->apiPath;
+            }
+
+            protected function returnsFile(): bool
+            {
+                return true;
             }
         };
     }
