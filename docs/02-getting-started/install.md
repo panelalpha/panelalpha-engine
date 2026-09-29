@@ -32,6 +32,39 @@ curl -fsSL https://get.panelalpha.com/engine | sh
 
 A few minutes later the engine is running. It prints its addresses and a command to connect your assistant. Want a name of your own, or a VPS the internet cannot reach by IP? Read [Troubleshooting](#troubleshooting) before you install.
 
+## Install and deploy a repository
+
+You can install the engine and put an application from a public git repository online in one command. The installer finishes setting up the engine, then creates a new **project** from that repository. It picks the project name and the site's address for you.
+
+Pass flags after `sh -s --` so they reach the installer:
+
+```bash
+curl -fsSL https://get.panelalpha.com/engine | sh -s -- \
+  --repo https://github.com/n8n-io/n8n
+```
+
+When it finishes, it prints the project's web address (HTTPS). Unless you passed `--no-password`, it also prints a site password you can use to open that address. It then prints the same assistant connection information as a normal install. Continue with [Connect your AI assistant](#2-connect-your-ai-assistant) on your own computer.
+
+`--repo` is the application you want hosted. It is not where the engine software comes from. You do not pass a licence key.
+
+| Flag | What it does |
+|---|---|
+| `--repo URL` | Git repository to deploy. A full clone URL, or `owner/repo` on GitHub unless your engine uses another default. |
+| `--branch REF` | Branch, tag, or commit to deploy. Omit to use the repository default. |
+| `--git-token TOKEN` | Read access for a private repository. Without it, a private or missing repository is refused before install starts. |
+| `--password PASS` | Site password for the new project. |
+| `--no-password` | Do not set a site password on the project. |
+
+If the deploy fails, the engine is still installed and usable. The installer prints what went wrong. Deploy again from the VPS:
+
+```bash
+pae project:create --repo https://github.com/org/app
+```
+
+Or connect an assistant and ask in chat: [Put your project online](../README.md#3-put-your-project-online).
+
+**The engine is already on this VPS.** Run the same `curl` line with `--repo` again. If a newer engine build is available, the installer asks whether to update the engine and deploy, or only deploy the project. Without an interactive terminal it deploys the project only. Pass `--update-engine` to update and deploy without being asked, or `--deploy-only` to deploy without updating.
+
 ## 2. Connect your AI assistant
 
 Connecting happens on **your own computer**, not on your VPS. After install you get a screen like this, with a ready-made command for Claude Code. Copy that command and run it on your computer.
@@ -141,6 +174,9 @@ pae ssl:engine-cert:request --domain panel.example.com
 
 **I was told to use another installer option.**
 The installer has a handful more, for testing and for support to point you at. Some of them switch off the protections that keep projects separated from each other, so use one only when support gives you the exact line to run.
+
+**I used `--repo` and the deploy failed.**
+The engine itself is up. Read the message at the end of the install, or run `pae project:create --repo …` again with the same URL. For a private repository, include `--git-token`. If the deploy finished but the application does not look right, ask your assistant to read the deploy log, or see [Reading errors](reading-errors.md).
 
 **The installer warned that project disk limits will not be enforced.**
 The installer turns on disk quota for the disk that holds `/home`, so a project's disk and file-count limits actually stop it writing. It adds a quota option to that disk's line in `/etc/fstab`, and keeps a copy of the old file next to it. It only does this itself on ext4. On XFS the warning tells you the one setting to add and asks for a restart. On anything else, or inside a container, limits are recorded but not enforced. To leave quota off on purpose, install with `--no-quota`.
