@@ -11,10 +11,10 @@
         "php": "^8.4",
         "darkaonline/l5-swagger": "^11.0",
         "geoip2/geoip2": "^3.4",
-        "guzzlehttp/guzzle": "^7.2",
+        "guzzlehttp/guzzle": "^8.0",
         "hassankhan/config": "^3.1",
         "laravel/framework": "^13.0",
-        "laravel/mcp": "^0.9.4",
+        "laravel/mcp": "^0.9.6",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^3.0",
         "league/flysystem-aws-s3-v3": "^3.35",
@@ -23,7 +23,7 @@
         "rakutentech/laravel-request-docs": "^2.0",
         "rap2hpoutre/laravel-log-viewer": "^3.1",
         "skoerfgen/acmecert": "^3.7",
-        "symfony/yaml": "^7.4"
+        "symfony/yaml": "^8.1"
     },
     "require-dev": {
         "fakerphp/faker": "^1.9.1",
@@ -31,8 +31,8 @@
         "laravel/sail": "^1.0.1",
         "mockery/mockery": "^1.4.4",
         "nunomaduro/collision": "^8.0",
-        "phpunit/phpcov": "^11.0",
-        "phpunit/phpunit": "^12.0",
+        "phpunit/phpcov": "^13.1",
+        "phpunit/phpunit": "^13.3",
         "spatie/laravel-ignition": "^2.0"
     },
     "autoload": {
