@@ -4,6 +4,7 @@ namespace Tests\Unit\System\Project;
 
 use App\Models\User;
 use App\System\Project\SitePasswordProtection;
+use Tests\Support\RecordingRunner;
 use Tests\TestCase;
 
 class SitePasswordProtectionTest extends TestCase
@@ -68,5 +69,33 @@ class SitePasswordProtectionTest extends TestCase
 
         config(['env.SITE_PASSWORD_AUTH_MODE' => 'nope']);
         $this->assertSame('custom', SitePasswordProtection::authMode());
+    }
+
+    public function test_reclaim_framework_cache_as_root_chowns_www_data(): void
+    {
+        $cache = storage_path('framework/cache');
+        if (!is_dir($cache)) {
+            mkdir($cache, 0755, true);
+        }
+
+        $runner = new RecordingRunner();
+        $runner->exitCode = 0;
+
+        SitePasswordProtection::reclaimFrameworkCacheOwnership(0, $runner);
+
+        $this->assertCount(1, $runner->commands);
+        $this->assertSame(
+            ['sudo', 'chown', '-R', 'www-data:www-data', $cache],
+            $runner->commands[0]
+        );
+    }
+
+    public function test_reclaim_framework_cache_as_non_root_is_noop(): void
+    {
+        $runner = new RecordingRunner();
+
+        SitePasswordProtection::reclaimFrameworkCacheOwnership(33, $runner);
+
+        $this->assertSame([], $runner->commands);
     }
 }

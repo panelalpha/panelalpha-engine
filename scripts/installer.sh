@@ -30,25 +30,18 @@ random-string() {
 
 # Empty means "not passed": resolved from PANELALPHA_ENGINE_VERSION env or defaults.
 PANELALPHA_ENGINE_VERSION="${PANELALPHA_ENGINE_VERSION:-}"
-PACKAGE_HOST='connect.panelalpha.com'
+# Accepted from get.* for ABI compatibility; unused (engine installs from git only).
+PACKAGE_HOST=''
 MONITORING_HOST="${PANELALPHA_MONITORING_HOST:-monitoring.panelalpha.com}"
 STARTED_AT=$(date +%s || echo 0)
-# Installed when the version lookup fails (legacy Connect path only). Bump at release.
-FALLBACK_ENGINE_VERSION='2.0.1'
 # Git URL for the engine tree. Default is the public GitHub mirror. Credentials may
-# be embedded (https://user:token@host/...). Empty string forces the legacy Connect package path.
-# "unset" vs empty: get.sh always exports a default; clearing the var opts into Connect.
+# be embedded (https://user:token@host/...). Empty is invalid — use get.panelalpha.com/engine.
 if [ "${PANELALPHA_ENGINE_REPO+x}" = x ]; then
     ENGINE_REPO="${PANELALPHA_ENGINE_REPO}"
 else
     ENGINE_REPO='https://github.com/panelalpha/engine.git'
 fi
-# Legacy REPO_* kept only for older callers; unused when ENGINE_REPO is set.
-REPO_HOST="${PANELALPHA_REPO_HOST:-git.modulesgarden.tech}"
-REPO_PROJECT="${PANELALPHA_REPO_PROJECT:-panelalpha/engine}"
-REPO_REF="${PANELALPHA_REPO_REF:-development-2.0.0}"
-REPO_TOKEN="${PANELALPHA_REPO_TOKEN:-}"
-# A repository clone carries no vendor directory; a release package does.
+# A repository clone carries no vendor directory; composer install fills it.
 COMPOSER_IMAGE='ghcr.io/panelalpha/engine-composer:v2.0.1'
 
 # Tagged with the engine version, not a build date, so the tag moves whenever
@@ -79,6 +72,7 @@ resolve_composer_image() {
 }
 DEBUG_MODE=0
 NO_LOCAL_IP=0
+NO_DISK_SPACE_CHECK=0
 ENABLE_NAT=0
 # The name the engine is served on, and the name its certificate is issued for.
 # Falls back to --hostname when that is a DNS name. Empty means the engine is
@@ -123,12 +117,24 @@ DEPLOY_ONLY=0
 DEPLOY_PROJECT_NAME=''
 DEPLOY_PROJECT_URL=''
 DEPLOY_FAILED=0
+# Short reason from a failed project:create (stderr/stdout), for logs + outro.
+DEPLOY_ERROR=''
+# Site password for the --repo project. Empty + DEPLOY_NO_PASSWORD=0 → generate.
+DEPLOY_SITE_PASSWORD=''
+DEPLOY_NO_PASSWORD=0
+# 1 after project:set-password succeeded (outro shows the password).
+DEPLOY_PASSWORD_SET=0
+# 1 when --update-engine: with --repo on an existing host, update the engine
+# and deploy without asking.
+UPDATE_ENGINE=0
+# 1 when --deploy-only: with --repo on an existing host, skip the engine update.
+FORCE_DEPLOY_ONLY=0
 
 usage() {
     cat <<'USAGE'
 Usage: bash installer.sh [options]
 
-  -v, --version REF        git ref / release (default: main with ENGINE_REPO, else newest Connect release)
+  -v, --version REF        git ref (default: main)
   -host, --hostname HOST   hostname to install under
       --domain FQDN        serve the engine on your own name. Point an A
                            record at this host first; the certificate is
@@ -147,16 +153,25 @@ Usage: bash installer.sh [options]
                            means GitHub unless the engine's default_git_host
                            setting says otherwise. The project name and the
                            domain are generated. Where an engine is already
-                           installed, only the project is created -- the engine
-                           is left alone.
+                           installed, a newer product version prompts whether
+                           to update the engine and deploy, or only deploy;
+                           when already current, only the project is created.
       --branch REF         branch, tag or commit for --repo
       --git-token TOKEN    HTTPS access token for a private --repo
-  -p, --package-host HOST  package host (legacy Connect path only)
+      --password PASS      site password for the --repo project (default: generate
+                           an alphanumeric password and print it with the URL)
+      --no-password        do not set a site password on the --repo project
+      --update-engine      with --repo on an existing install, update the engine
+                           and deploy without prompting (non-interactive too)
+      --deploy-only        with --repo on an existing install, create the project
+                           only (skip the engine update; set by the TUI preflight)
+  -p, --package-host HOST  accepted for get.* compatibility; ignored
       --monitoring-host H  monitoring host for install status (default: monitoring.panelalpha.com)
   -d, --debug              set -x
       --no-local-ip        resolve the public IP when the default route is private
       --enable-nat         build the NAT mapping after migrating
       --configure          TUI preflight only (exit 0); used by the wrapper
+                           before the update-vs-deploy prompt (probes --repo)
       --run-dir DIR        write progress/step files for the TUI wrapper
 
 Environment:
@@ -174,6 +189,7 @@ Installing into a container (CI, dev):
       --no-upgrade         skip 'apt-get upgrade' and 'apt-get autoremove'
       --no-quota           leave filesystem quota off; project disk and inode
                            limits are then recorded but not enforced
+      --no-disk-space-check  skip the free-disk check (20G install, 15G update)
       --dind-runtime VALUE DIND_RUNTIME for .env-core: sysbox-runc or privileged
       --mtu VALUE          MTU for pash-default-network (default 1500)
 USAGE
@@ -270,6 +286,27 @@ while true; do
         DEPLOY_GIT_TOKEN="${1#*=}"
         shift
         ;;
+    --password)
+        DEPLOY_SITE_PASSWORD="$2"
+        shift
+        shift
+        ;;
+    --password=*)
+        DEPLOY_SITE_PASSWORD="${1#*=}"
+        shift
+        ;;
+    --no-password)
+        DEPLOY_NO_PASSWORD=1
+        shift
+        ;;
+    --update-engine)
+        UPDATE_ENGINE=1
+        shift
+        ;;
+    --deploy-only)
+        FORCE_DEPLOY_ONLY=1
+        shift
+        ;;
     --no-cert-request)
         NO_CERT_REQUEST=1
         shift
@@ -300,6 +337,10 @@ while true; do
         ;;
     --no-quota)
         QUOTA=0
+        shift
+        ;;
+    --no-disk-space-check)
+        NO_DISK_SPACE_CHECK=1
         shift
         ;;
     --dind-runtime)
@@ -359,6 +400,12 @@ while true; do
     esac
 done
 
+if [ "$DEPLOY_NO_PASSWORD" = 1 ] && [ -n "$DEPLOY_SITE_PASSWORD" ]; then
+    echo "Cannot use --password and --no-password together." >&2
+    trap - EXIT
+    exit 1
+fi
+
 # Sysbox needs host daemons and cannot nest, so accounts run privileged; nested
 # daemons need the lower MTU when ICMP is filtered. See docs/internal/engine-container.md.
 if [ "$IN_CONTAINER" = 1 ]; then
@@ -378,10 +425,14 @@ if [ "$DEBUG_MODE" = 1 ]; then
     set -x
 fi
 
+# Plain message for monitoring / failure email when echo_error exits.
+INSTALLER_ERROR=""
+
 echo_info() { echo -e ">>> $green_color$1$default_color"; }
 echo_warning() { echo -e ">>> $yellow_color$1$default_color"; }
 echo_error() {
     echo -e ">>> $red_color$1$default_color"
+    INSTALLER_ERROR="$1"
     exit 101
 }
 
@@ -420,10 +471,26 @@ persist_app_uid() {
     fi
 }
 
+# Human-readable failure for monitoring. Prefer echo_error text over DEBUG
+# last_command / apt stderr noise.
+installer_error_message() { # exit_code
+    local exit_code=${1:-1}
+    if [ -n "${INSTALLER_ERROR:-}" ]; then
+        printf '%s' "$INSTALLER_ERROR"
+        return 0
+    fi
+    local last_cmd="${last_command:-${current_command:-}}"
+    if [ -n "$last_cmd" ]; then
+        printf 'command failed (exit %s): %s' "$exit_code" "$last_cmd"
+        return 0
+    fi
+    printf 'installer failed with exit_code=%s' "$exit_code"
+}
+
 # Report install/update outcome to monitoring (Engine emails / probes).
 send_update_status() {
     local exit_code=${1:-0}
-    local finished_at started_at software_op email error_msg last_cmd event_type
+    local finished_at started_at software_op email error_msg event_type
     started_at=${STARTED_AT:-$(date +%s || echo 0)}
     finished_at=$(date +%s || echo 0)
     software_op="${ENGINE_OP:-install}"
@@ -431,22 +498,14 @@ send_update_status() {
         software_op="install"
     fi
     if [ "$software_op" = "update" ]; then
-        event_type="panel.update"
+        event_type="engine.update"
     else
-        event_type="panel.install"
+        event_type="engine.install"
     fi
     email="${INSTALL_EMAIL:-}"
     error_msg=""
     if [ "$exit_code" != "0" ]; then
-        last_cmd="${last_command:-${current_command:-}}"
-        if [ -n "$last_cmd" ]; then
-            error_msg="command failed (exit ${exit_code}): ${last_cmd}"
-        else
-            error_msg="installer failed with exit_code=${exit_code}"
-        fi
-        if [ -n "$RUN_DIR" ] && [ -f "$RUN_DIR/stderr" ]; then
-            error_msg="${error_msg}; $(tail -n 5 "$RUN_DIR/stderr" 2>/dev/null | tr '\n' ' ' | head -c 500)"
-        fi
+        error_msg=$(installer_error_message "$exit_code")
     fi
     {
         jq -n \
@@ -487,55 +546,61 @@ redact_repo_url() {
     printf '%s' "$1" | sed -E 's#(https?://)[^/@]+@#\1***@#'
 }
 
-update_progress() {
-    if [ -n "$RUN_DIR" ] && [ -d "$RUN_DIR" ]; then
-        echo "$1" >"$RUN_DIR/progress"
-        echo "$2" >"$RUN_DIR/step"
+# engine | deploy — TUI two-step chrome for --repo install/update.
+INSTALLER_PHASE=engine
+
+set_installer_phase() {
+    INSTALLER_PHASE="$1"
+    if [ -n "${RUN_DIR:-}" ] && [ -d "$RUN_DIR" ]; then
+        printf '%s\n' "$1" >"$RUN_DIR/phase"
     fi
 }
 
-# Resolve the git ref / release to install.
+update_progress() {
+    local raw="$1" msg="$2" pct="$1"
+    # With --repo on a full install/update, compress engine work into 0–50% and
+    # leave 50–100% for deploy so the bar matches the two-step TUI.
+    if [ -n "$DEPLOY_REPO" ] && [ "${DEPLOY_ONLY:-0}" != 1 ]; then
+        case "${INSTALLER_PHASE:-engine}" in
+        deploy)
+            if [ "$raw" -lt 50 ]; then
+                pct=$((50 + raw / 2))
+            else
+                pct="$raw"
+            fi
+            ;;
+        *)
+            pct=$((raw * 50 / 100))
+            if [ "$pct" -lt 1 ] && [ "$raw" -gt 0 ]; then
+                pct=1
+            fi
+            ;;
+        esac
+    fi
+    if [ -n "$RUN_DIR" ] && [ -d "$RUN_DIR" ]; then
+        echo "$pct" >"$RUN_DIR/progress"
+        echo "$msg" >"$RUN_DIR/step"
+    fi
+}
+
+# Resolve the git ref to install.
 resolve_engine_version() {
     if [ -n "$PANELALPHA_ENGINE_VERSION" ]; then
         return
     fi
 
-    if [ -n "$ENGINE_REPO" ]; then
-        PANELALPHA_ENGINE_VERSION=main
-        echo_info "Installing PanelAlpha Engine ${PANELALPHA_ENGINE_VERSION} from $(redact_repo_url "$ENGINE_REPO")"
-        return
+    if [ -z "$ENGINE_REPO" ]; then
+        echo_error "No engine source configured. Set PANELALPHA_ENGINE_REPO (or use: curl -fsSL https://get.panelalpha.com/engine | sh)"
     fi
 
-    # Legacy Connect path (ENGINE_REPO explicitly cleared).
-    if [ -n "$REPO_TOKEN" ]; then
-        PANELALPHA_ENGINE_VERSION="$REPO_REF"
-        echo_info "Installing PanelAlpha Engine ${PANELALPHA_ENGINE_VERSION} from ${REPO_PROJECT}"
-        return
-    fi
-
-    echo_info "Resolving the latest release"
-    PANELALPHA_ENGINE_VERSION=$(curl --http1.1 -fsSL --max-time 15 \
-        -H "X-Engine-App-UID: ${APP_UID}" "https://${PACKAGE_HOST}/engine-latest" 2>/dev/null | tr -d ' \t\r\n' || true)
-
-    case "$PANELALPHA_ENGINE_VERSION" in
-    '' | *[!0-9A-Za-z.-]*)
-        echo_warning "Could not resolve the latest release from https://${PACKAGE_HOST}/engine-latest"
-        PANELALPHA_ENGINE_VERSION="$FALLBACK_ENGINE_VERSION"
-        ;;
-    esac
-
-    echo_info "Installing PanelAlpha Engine ${PANELALPHA_ENGINE_VERSION}"
+    PANELALPHA_ENGINE_VERSION=main
+    echo_info "Installing PanelAlpha Engine ${PANELALPHA_ENGINE_VERSION} from $(redact_repo_url "$ENGINE_REPO")"
 }
 
 define_variables() {
     LOG_DIR="/opt/panelalpha/log"
     mkdir -p $LOG_DIR
-    DOWNLOAD_STATUS=''
-    TOKEN=''
-    ERROR=''
-    MSG=''
     PANELALPHA_DIR="/opt/panelalpha"
-    PACKAGE_URL="https://${PACKAGE_HOST}/api/engine/download/zip/"
     INSTALL_DIR='/opt/panelalpha/tmp/engine'
 }
 
@@ -566,18 +631,16 @@ check_root() {
     fi
 }
 
-# Installed product version (artisan → version file → config/system.php). Empty if unknown.
+# Installed product version (artisan → config/system.php). Empty if unknown.
+# The shared-hosting/version file holds a git commit hash, not a semver — do not
+# use it here (see detect_installed_engine_commit).
 detect_installed_engine_version() {
     local compose="${PANELALPHA_DIR}/shared-hosting/docker-compose.yml"
-    local ver_file="${PANELALPHA_DIR}/shared-hosting/version"
     local php_cfg="${PANELALPHA_DIR}/shared-hosting/core/config/system.php"
     local ver=""
 
     if [[ -f "$compose" ]]; then
         ver=$(docker compose -f "$compose" exec -T core php artisan system:version 2>/dev/null | tr -d '\r\n' || true)
-    fi
-    if [[ -z "$ver" || "$ver" == "unknown" ]] && [[ -f "$ver_file" ]]; then
-        ver=$(tr -d '\r\n' <"$ver_file" || true)
     fi
     if [[ -z "$ver" || "$ver" == "unknown" ]] && [[ -f "$php_cfg" ]]; then
         ver=$(sed -nE "s/.*'version'[[:space:]]*=>[[:space:]]*'([^']+)'.*/\1/p" "$php_cfg" | head -n1 || true)
@@ -586,6 +649,21 @@ detect_installed_engine_version() {
         ver=""
     fi
     printf '%s' "$ver"
+}
+
+# Short commit of the installed engine tree (first 8 chars of shared-hosting/version).
+# Empty when the file is missing — callers treat that as "unknown" / always newer.
+detect_installed_engine_commit() {
+    local ver_file="${PANELALPHA_DIR}/shared-hosting/version"
+    local raw=""
+    if [[ -f "$ver_file" ]]; then
+        raw=$(tr -d '\r\n' <"$ver_file" || true)
+    fi
+    if [[ -z "$raw" || "$raw" == "unknown" ]]; then
+        printf '%s' ""
+        return 0
+    fi
+    printf '%.8s' "$raw"
 }
 
 # Temporary: get.* / this installer must not in-place upgrade Engine 1.0.x → 2.x.
@@ -617,18 +695,49 @@ refuse_engine_v1_to_v2_upgrade() {
     echo_error "Refusing Engine 1.0 → 2.0 in-place upgrade"
 }
 
+ensure_packages() {
+    local pkg install_packages=()
+    for pkg in "$@"; do
+        if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+            install_packages+=("$pkg")
+        fi
+    done
+    if (( ${#install_packages[@]} )); then
+        apt-get -o DPkg::Lock::Timeout=300 install -y "${install_packages[@]}"
+    fi
+}
+
+check_disk_space() {
+    local required_gb=15
+    if [ "$ENGINE_OP" != update ]; then
+        required_gb=20
+    fi
+    local required_bytes=$((required_gb * 1024 * 1024 * 1024))
+    local available_bytes
+    available_bytes=$(df -B1 / 2>/dev/null | awk 'NR==2 {print $4}')
+    if [[ -z "$available_bytes" ]]; then
+        echo_warning "Unable to determine available disk space."
+        return 0
+    fi
+    if (( available_bytes < required_bytes )); then
+        echo_error "Not enough disk space. Required: ${required_gb}G, available: $((available_bytes / 1024 / 1024 / 1024))G"
+    fi
+    echo_info "Disk space check passed (${required_gb}G required)."
+}
+
 before_install() {
+    check_root
     echo_info "Updating repositories"
 
     apt-get -o DPkg::Lock::Timeout=300 update -y
-    if [ "$UPGRADE" = 1 ]; then
+    if [ "$ENGINE_OP" != update ] && [ "$UPGRADE" = 1 ]; then
         apt-get -o DPkg::Lock::Timeout=300 upgrade -y
         apt-get -o DPkg::Lock::Timeout=300 autoremove -y
-    else
+    elif [ "$UPGRADE" = 0 ]; then
         echo_warning "Skipping apt-get upgrade (--no-upgrade)"
     fi
     apt-get -o DPkg::Lock::Timeout=300 update --fix-missing -y
-    apt-get -o DPkg::Lock::Timeout=300 install jq unzip lsb-release apt-transport-https lsb-release ca-certificates curl ipcalc quota at -y
+    ensure_packages jq unzip lsb-release apt-transport-https ca-certificates curl ipcalc quota at
 
     detect_distro
 
@@ -661,8 +770,6 @@ before_install() {
     esac
 
     echo_info "Preparing Installation Script"
-
-    check_root
 }
 
 get_hostname() {
@@ -687,43 +794,32 @@ get_hostname() {
     fi
 }
 
-request_download_token() {
-    # Connect resolves the caller by IP and returns a short-lived download token.
-    CURL_RESULTS=$(curl --http1.1 -H "X-Engine-App-UID: ${APP_UID}" \
-        "https://${PACKAGE_HOST}/api/verify/request-download")
-
-    TOKEN=$(echo "$CURL_RESULTS" | jq -r '.["license"].download_token // empty')
-    DOWNLOAD_STATUS=$(echo "$CURL_RESULTS" | jq -r '.["license"].status // empty')
-    ERROR=$(echo "$CURL_RESULTS" | jq -r '.error // empty')
-    MSG=$(echo "$CURL_RESULTS" | jq -r '.msg // empty')
-
-    if [ "$ERROR" == true ]; then
-        echo_error "Could not obtain a download token. $MSG"
-    fi
-
-    if [ "$DOWNLOAD_STATUS" != "Reissued" ] && [ "$DOWNLOAD_STATUS" != "Created" ] && [ "$DOWNLOAD_STATUS" != "Active" ]; then
-        echo_error "Invalid download status: $DOWNLOAD_STATUS."
-    fi
-}
-
 install_docker_engine() {
-    # install docker engine
-    # https://docs.docker.com/engine/install/debian/#install-docker-engine
+    local pkg missing=0
+    for pkg in docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; do
+        if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+            missing=1
+            break
+        fi
+    done
+    if [ "$missing" = 0 ]; then
+        echo_info "Docker is already installed."
+        return 0
+    fi
     apt-get -o DPkg::Lock::Timeout=300 update -y
-    apt-get -o DPkg::Lock::Timeout=300 install ca-certificates curl gnupg -y
+    ensure_packages ca-certificates curl gnupg
     mkdir -m 0755 -p /etc/apt/keyrings
     curl --http1.1 -fsSL https://download.docker.com/linux/$SYSTEM/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
-    # chmod a+r /etc/apt/keyrings/docker.gpg
     echo \
         "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$SYSTEM \
     "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" |
         tee /etc/apt/sources.list.d/docker.list >/dev/null
     apt-get -o DPkg::Lock::Timeout=300 update -y
-    apt-get -o DPkg::Lock::Timeout=300 install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
+    ensure_packages docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 }
 
 # Git URL for the engine tree. Prefer PANELALPHA_ENGINE_REPO (credentials may be
-# embedded). Empty string forces the legacy Connect package path.
+# embedded).
 download_engine_from_repository() {
     local safe
     safe=$(redact_repo_url "$ENGINE_REPO")
@@ -738,11 +834,18 @@ download_engine_from_repository() {
         "$ENGINE_REPO" "$INSTALL_DIR/src" >/dev/null 2>&1; then
         echo_error "Could not clone ${safe} (ref ${PANELALPHA_ENGINE_VERSION})"
     fi
+    # Persist the tip commit for update comparisons (v1 zip packages shipped this
+    # file; git installs must recreate it before .git is removed).
+    local tip_sha
+    tip_sha=$(git -C "$INSTALL_DIR/src" rev-parse HEAD 2>/dev/null | tr -d '\r\n' || true)
     rm -rf "$INSTALL_DIR/src/.git"
+    if [ -n "$tip_sha" ]; then
+        printf '%s\n' "$tip_sha" >"$INSTALL_DIR/src/version"
+    fi
     echo_info "Success! Package has been downloaded"
 }
 
-# What the release package ships prebuilt and a repository archive does not.
+# What a release package used to ship prebuilt and a git clone does not.
 install_composer_dependencies() {
     resolve_composer_image "$PANELALPHA_DIR/shared-hosting/core" "$PANELALPHA_DIR/shared-hosting"
     docker run --rm -v "$PANELALPHA_DIR/shared-hosting/core:/app" -w /app \
@@ -750,93 +853,27 @@ install_composer_dependencies() {
 }
 
 download_panelalpha_engine() {
-    if [ -n "$ENGINE_REPO" ]; then
-        download_engine_from_repository
-        return
+    if [ -z "$ENGINE_REPO" ]; then
+        echo_error "No engine source configured. Set PANELALPHA_ENGINE_REPO (or use: curl -fsSL https://get.panelalpha.com/engine | sh)"
     fi
-
-    # Legacy: REPO_TOKEN + GitLab API archive (older callers).
-    if [ -n "$REPO_TOKEN" ]; then
-        echo_warning "Please wait, package is downloading..."
-        mkdir -p "$INSTALL_DIR"
-        rm -rf "$INSTALL_DIR/src"
-        local encoded=${REPO_PROJECT//\//%2F}
-        local url="https://${REPO_HOST}/api/v4/projects/${encoded}/repository/archive.zip?sha=${PANELALPHA_ENGINE_VERSION}"
-        local status
-        status=$(curl --http1.1 -sS -o "$INSTALL_DIR/app.zip" -w '%{http_code}' \
-            --header "PRIVATE-TOKEN: ${REPO_TOKEN}" "$url" || echo 000)
-        if [ "$status" -eq 200 ]; then
-            echo_info "Success! Package has been downloaded"
-            return
-        fi
-        rm -f "$INSTALL_DIR/app.zip"
-        echo_warning "Archive download failed (HTTP ${status}); cloning ${REPO_PROJECT} instead"
-        command -v git >/dev/null 2>&1 || apt-get -o DPkg::Lock::Timeout=300 install git -y
-        GIT_TERMINAL_PROMPT=0 \
-            GIT_CONFIG_COUNT=1 \
-            GIT_CONFIG_KEY_0="http.https://${REPO_HOST}/.extraheader" \
-            GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'oauth2:%s' "$REPO_TOKEN" | base64 | tr -d '\n')" \
-            git clone --depth 1 --branch "$PANELALPHA_ENGINE_VERSION" \
-            "https://${REPO_HOST}/${REPO_PROJECT}.git" "$INSTALL_DIR/src" ||
-            echo_error "Could not get ${REPO_PROJECT} at ${PANELALPHA_ENGINE_VERSION} from ${REPO_HOST}"
-        rm -rf "$INSTALL_DIR/src/.git"
-        echo_info "Success! Package has been downloaded"
-        return
-    fi
-
-    echo_warning "Please wait, package is downloading..."
-    mkdir -p $INSTALL_DIR
-    PACKAGE_URL+=$PANELALPHA_ENGINE_VERSION
-
-    while true; do
-        STATUS=$(cd ''$INSTALL_DIR'' && curl --http1.1 -o app.zip -w '%{http_code}' ''$PACKAGE_URL'' --header 'Download-Token:'$TOKEN'' --header "X-Engine-App-UID: ${APP_UID}")
-        if [ $STATUS -eq 200 ]; then
-            echo_info "Success! Package has been downloaded"
-            break
-        else
-            PACKAGE_PATH="$INSTALL_DIR"/app.zip
-            CURL_PACKAGE_RESULTS=$(cat "$PACKAGE_PATH")
-            echo $CURL_PACKAGE_RESULTS
-            STATUS=$(echo $CURL_PACKAGE_RESULTS | jq '.status' --raw-output)
-            MESSAGE=$(echo $CURL_PACKAGE_RESULTS | jq '.message' --raw-output)
-
-            if [ $STATUS == 'error' ]; then
-                echo_error "Error has been occurred. $MESSAGE"
-            fi
-        fi
-        sleep 5
-    done
-
-    if [ ! -f "$INSTALL_DIR"/app.zip ]; then
-        echo_error "Error has been occurred. Cannot find package. It should be in path: $INSTALL_DIR/app.zip"
-    fi
+    download_engine_from_repository
 }
 
 unzip_panelalpha_engine() {
-    # A clone from PANELALPHA_ENGINE_REPO (or REPO_TOKEN clone fallback).
     # --preserve=mode also repairs files an earlier run left with the wrong mode;
     # a plain cp keeps the existing file's mode.
-    if [ -d "$INSTALL_DIR/src" ]; then
-        cp -Rf --preserve=mode "$INSTALL_DIR/src/." "$PANELALPHA_DIR/shared-hosting/"
-        return
+    if [ ! -d "$INSTALL_DIR/src" ]; then
+        echo_error "Engine tree missing under ${INSTALL_DIR}/src (expected a git clone)"
     fi
-
-    if [ -n "$REPO_TOKEN" ] && [ -z "$ENGINE_REPO" ]; then
-        # A repository archive wraps the tree in one commit-named directory; the
-        # install expects the tree itself.
-        unzip -o -q "$INSTALL_DIR"/app.zip -d "$INSTALL_DIR/src"
-        local top
-        top=$(find "$INSTALL_DIR/src" -mindepth 1 -maxdepth 1 -type d | head -n 1)
-        [ -n "$top" ] || echo_error "The downloaded archive is empty"
-        cp -Rf --preserve=mode "$top/." "$PANELALPHA_DIR/shared-hosting/"
-        return
-    fi
-
-    unzip -o "$INSTALL_DIR"/app.zip -d "$PANELALPHA_DIR/shared-hosting" >/dev/null
+    cp -Rf --preserve=mode "$INSTALL_DIR/src/." "$PANELALPHA_DIR/shared-hosting/"
 }
 
 generate_ssl_cert() {
     mkdir -p /opt/panelalpha/shared-hosting/crt
+    if [[ -f /opt/panelalpha/shared-hosting/crt/server.cert && -f /opt/panelalpha/shared-hosting/crt/server.key ]]; then
+        echo "SSL certificate already exists."
+        return 0
+    fi
     CERT_IP=$(ip route get 8.8.8.8 | sed -n '/src/{s/.*src *\([^ ]*\).*/\1/p;q}')
     if ipcalc "$CERT_IP" | grep -q 'Private Internet' && [ "$NO_LOCAL_IP" = 1 ]; then
         CERT_IP=$(curl -s4 icanhazip.com)
@@ -1295,6 +1332,181 @@ repo_label() {
         awk -F/ '{ if (NF >= 2) printf "%s/%s", $(NF-1), $NF; else printf "%s", $0 }'
 }
 
+# Expand owner/repo / schemeless hosts like engine GitRepoInput.
+normalize_deploy_repo_url() {
+    local raw="$1"
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
+    case "$raw" in
+    '' | ssh://* | git@*)
+        printf '%s' "$raw"
+        return 0
+        ;;
+    esac
+    if [[ "$raw" =~ ^[a-zA-Z][a-zA-Z0-9+.-]*:// ]]; then
+        printf '%s' "$raw"
+        return 0
+    fi
+    if [[ "$raw" =~ ^[^/\ .]+/[^/\ ]+$ ]]; then
+        printf 'https://github.com/%s' "$raw"
+        return 0
+    fi
+    printf 'https://%s' "${raw#/}"
+}
+
+# Classify git ls-remote stderr (GitRemoteProbe signatures).
+classify_git_ls_remote_failure() { # stderr_text has_token(0|1)
+    local stderr="$1" has_token="${2:-0}"
+    local low
+    low=$(printf '%s' "$stderr" | tr '[:upper:]' '[:lower:]')
+
+    case "$low" in
+    *'could not resolve host'* | *'could not resolve proxy'* | *'failed to connect'* | \
+        *'connection refused'* | *'connection timed out'* | *'network is unreachable'* | \
+        *'ssl certificate problem'* | *'gnutls_handshake'* | *'empty reply from server'*)
+        printf '%s' 'unreachable'
+        return 0
+        ;;
+    esac
+
+    case "$low" in
+    *'could not read username'* | *'authentication failed'* | *'invalid username or password'* | \
+        *'terminal prompts disabled'* | *'http basic: access denied'* | *'403 forbidden'* | \
+        *'401 unauthorized'*)
+        if [ "$has_token" = 1 ]; then
+            printf '%s' 'rejected'
+        else
+            printf '%s' 'requires_token'
+        fi
+        return 0
+        ;;
+    esac
+
+    case "$low" in
+    *'repository not found'* | *'not found: did you run git update-server-info'* | \
+        *'the project you were looking for could not be found'* | \
+        *'does not appear to be a git repository'*)
+        if [ "$has_token" != 1 ]; then
+            printf '%s' 'requires_token'
+        else
+            printf '%s' 'not_found'
+        fi
+        return 0
+        ;;
+    esac
+
+    printf '%s' 'unreadable'
+}
+
+# Fail before install/update when --repo cannot be read (private without token).
+validate_deploy_repo_access() {
+    [ -n "$DEPLOY_REPO" ] || return 0
+
+    local url token has_token=0 err outcome host askpass="" workspace="" rc
+    url=$(normalize_deploy_repo_url "$DEPLOY_REPO")
+    token="$DEPLOY_GIT_TOKEN"
+
+    case "$url" in
+    ssh://* | git@*)
+        echo_error "SSH repository URLs are not supported. Use an HTTPS URL and pass --git-token for private repositories."
+        ;;
+    esac
+
+    if [[ "$url" =~ ^[a-zA-Z][a-zA-Z0-9+.-]*://[^/@]+@ ]]; then
+        has_token=1
+    fi
+    if [ -n "$token" ]; then
+        has_token=1
+    fi
+
+    if ! command -v git >/dev/null 2>&1; then
+        echo_warning "git is not installed; skipping early --repo reachability check."
+        return 0
+    fi
+
+    workspace=$(mktemp -d 2>/dev/null || true)
+    if [ -n "$token" ] && [ -n "$workspace" ]; then
+        askpass="$workspace/askpass.sh"
+        {
+            printf '#!/bin/sh\n'
+            printf "printf '%%s' '"
+            printf '%s' "$token" | sed "s/'/'\\\\''/g"
+            printf "'\n"
+        } >"$askpass"
+        chmod 700 "$askpass" || askpass=""
+    fi
+
+    set +e
+    if [ -n "$askpass" ]; then
+        if command -v timeout >/dev/null 2>&1; then
+            err=$(timeout 10 env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="$askpass" SSH_ASKPASS="$askpass" \
+                LC_ALL=C LANG=C git -c credential.helper= -c core.askpass= ls-remote --heads -- "$url" 2>&1 >/dev/null)
+        else
+            err=$(env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS="$askpass" SSH_ASKPASS="$askpass" \
+                LC_ALL=C LANG=C git -c credential.helper= -c core.askpass= ls-remote --heads -- "$url" 2>&1 >/dev/null)
+        fi
+    else
+        if command -v timeout >/dev/null 2>&1; then
+            err=$(timeout 10 env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false \
+                LC_ALL=C LANG=C git -c credential.helper= -c core.askpass= ls-remote --heads -- "$url" 2>&1 >/dev/null)
+        else
+            err=$(env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false \
+                LC_ALL=C LANG=C git -c credential.helper= -c core.askpass= ls-remote --heads -- "$url" 2>&1 >/dev/null)
+        fi
+    fi
+    rc=$?
+    set -e
+    [ -n "$workspace" ] && rm -rf "$workspace"
+
+    [ "$rc" -eq 0 ] && return 0
+
+    if [ "$rc" -eq 124 ]; then
+        host=$(printf '%s' "$url" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/@]+@)?([^/]+).*#\2#')
+        echo_error "${host:-The repository host} did not answer within 10s. Check the address and network, then retry."
+    fi
+
+    outcome=$(classify_git_ls_remote_failure "$err" "$has_token")
+    host=$(printf '%s' "$url" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/@]+@)?([^/]+).*#\2#')
+    : "${host:=the repository host}"
+
+    case "$outcome" in
+    requires_token)
+        echo_error "This repository is private, or does not exist. Pass a read token as --git-token, or check the address."
+        ;;
+    rejected)
+        echo_error "The token was refused by ${host}. Check it has not expired and that it grants read access to this repository."
+        ;;
+    not_found)
+        echo_error "No such repository on ${host}, or the token cannot see it."
+        ;;
+    unreachable)
+        echo_error "Could not reach ${host}. This host must be able to open an HTTPS connection to it."
+        ;;
+    *)
+        local first
+        first=$(printf '%s\n' "$err" | sed '/^[[:space:]]*$/d' | head -n1 | cut -c1-300)
+        echo_error "The repository could not be read: ${first:-no output from git}"
+        ;;
+    esac
+}
+
+# TUI --configure writes this so the background worker does not ls-remote again.
+mark_deploy_repo_access_ok() {
+    [ -n "${RUN_DIR:-}" ] && [ -d "$RUN_DIR" ] || return 0
+    : >"$RUN_DIR/repo_access_ok"
+}
+
+# Probe once: --configure for TUI, or main path when --no-tui / direct installer.
+ensure_deploy_repo_access() {
+    [ -n "$DEPLOY_REPO" ] || return 0
+    if [ -n "${RUN_DIR:-}" ] && [ -f "$RUN_DIR/repo_access_ok" ]; then
+        return 0
+    fi
+    validate_deploy_repo_access
+    mark_deploy_repo_access_ok
+}
+
+
 # One field out of `project:create --json`. jq where the host has it (the
 # installer installs it), a narrow sed where a deploy-only run on an older
 # host does not.
@@ -1304,6 +1516,28 @@ json_field() { # json_field <name> <json>
         return 0
     fi
     printf '%s' "$2" | sed -n "s/.*\"$1\":\"\\([^\"]*\\)\".*/\\1/p" | head -n1
+}
+
+# Prefer a concrete failure line from project:create output (HTTP 4xx/5xx or
+# "Deploy failed: …"); otherwise the last non-empty line.
+deploy_error_reason() {
+    local out="$1" line reason=""
+    while IFS= read -r line; do
+        case "$line" in
+        *'HTTP 4'* | *'HTTP 5'*)
+            reason=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+            ;;
+        *'Deploy failed:'*)
+            reason=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/.*Deploy failed:[[:space:]]*//; s/[[:space:]]+$//')
+            ;;
+        esac
+    done <<EOF
+$out
+EOF
+    if [ -z "$reason" ]; then
+        reason=$(printf '%s\n' "$out" | sed '/^[[:space:]]*$/d' | tail -n1 | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+    fi
+    printf '%s' "$reason"
 }
 
 # The repository the one-liner asked for, deployed into a project of its own.
@@ -1324,15 +1558,33 @@ deploy_repository() {
         args+=("--email=${INSTALL_EMAIL}")
     fi
 
-    # stdout only: `project:create --json` keeps the JSON there and puts the
-    # deploy log on stderr, so the operator watches the deploy happen while
-    # this still captures something parseable.
-    local result=''
-    if ! result=$(docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
-        php artisan "${args[@]}"); then
+    # --json: JSON on stdout, live deploy log on stderr. Stream stderr to the
+    # caller's stdout (TUI tails it) via fd 3 so it is not swallowed by >$out_file.
+    local out_file err_file result ec=0
+    out_file=$(mktemp)
+    err_file=$(mktemp)
+
+    exec 3>&1
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+        php artisan "${args[@]}" >"$out_file" 2> >(tee "$err_file" >&3) || ec=$?
+    exec 3>&-
+
+    result=$(
+        cat "$out_file" 2>/dev/null
+        printf '\n'
+        cat "$err_file" 2>/dev/null
+    )
+    rm -f "$out_file" "$err_file"
+
+    if [ "$ec" -ne 0 ]; then
         DEPLOY_FAILED=1
+        DEPLOY_ERROR=$(deploy_error_reason "$result")
         echo_warning "Could not deploy ${DEPLOY_REPO_LABEL}:"
-        printf '%s\n' "$result" >&2
+        if [ -n "$DEPLOY_ERROR" ]; then
+            echo_warning "  ${DEPLOY_ERROR}"
+        else
+            printf '%s\n' "$result" >&2
+        fi
         return 0
     fi
 
@@ -1343,11 +1595,57 @@ deploy_repository() {
     domain=$(json_field domain "$json")
     if [ -z "$DEPLOY_PROJECT_NAME" ] || [ -z "$domain" ]; then
         DEPLOY_FAILED=1
+        DEPLOY_ERROR=$(deploy_error_reason "$result")
+        [ -n "$DEPLOY_ERROR" ] || DEPLOY_ERROR='project:create returned no project JSON'
         echo_warning "Deployed ${DEPLOY_REPO_LABEL}, but could not read the project it was deployed into:"
-        printf '%s\n' "$result" >&2
+        echo_warning "  ${DEPLOY_ERROR}"
         return 0
     fi
     DEPLOY_PROJECT_URL="https://${domain}"
+    apply_deploy_site_password
+}
+
+# Alphanumeric only — safe to copy/paste from a terminal without escaping.
+generate_deploy_site_password() {
+    local pw=''
+    # Keep drawing until we have 16 chars (tr can yield short reads).
+    while [ "${#pw}" -lt 16 ]; do
+        pw=$(tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 16 || true)
+        [ -n "$pw" ] || pw=$(openssl rand -base64 24 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 16 || true)
+        [ "${#pw}" -ge 16 ] && break
+        sleep 0.05
+    done
+    printf '%.16s' "$pw"
+}
+
+# Default after --repo: generate + project:set-password. --no-password skips;
+# --password uses the given value. Failure warns; the project stays deployed.
+apply_deploy_site_password() {
+    DEPLOY_PASSWORD_SET=0
+    [ "$DEPLOY_NO_PASSWORD" = 1 ] && return 0
+    [ -n "$DEPLOY_PROJECT_NAME" ] || return 0
+
+    local password="$DEPLOY_SITE_PASSWORD"
+    if [ -z "$password" ]; then
+        password=$(generate_deploy_site_password)
+    fi
+    if [ -z "$password" ]; then
+        echo_warning "Could not generate a site password for ${DEPLOY_PROJECT_NAME}"
+        return 0
+    fi
+
+    if docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+        php artisan project:set-password \
+        "--project=${DEPLOY_PROJECT_NAME}" \
+        "--password=${password}" \
+        --force >/dev/null 2>&1; then
+        DEPLOY_SITE_PASSWORD="$password"
+        DEPLOY_PASSWORD_SET=1
+        echo_info "Site password set for ${DEPLOY_PROJECT_NAME}"
+    else
+        echo_warning "Could not set site password for ${DEPLOY_PROJECT_NAME} (try: pae project:set-password --project ${DEPLOY_PROJECT_NAME})"
+        DEPLOY_SITE_PASSWORD=''
+    fi
 }
 
 # Where the repository ended up — stdout for logs, and the same lines in the
@@ -1359,10 +1657,22 @@ report_deployed_project() {
     fi
 
     if [ "$DEPLOY_FAILED" = 1 ]; then
-        echo_warning "${DEPLOY_REPO_LABEL} was not deployed. Try again with:"
-        echo_warning "  pae project:create --repo ${DEPLOY_REPO_LABEL}"
-        outro_say 221 "${DEPLOY_REPO_LABEL} was not deployed. Try again with:"
-        outro_c 15 "  pae project:create --repo ${DEPLOY_REPO_LABEL}"
+        echo_warning "${DEPLOY_REPO_LABEL} was not deployed."
+        if [ -n "$DEPLOY_ERROR" ]; then
+            echo_warning "  ${DEPLOY_ERROR}"
+            outro_say 221 "${DEPLOY_REPO_LABEL} was not deployed:"
+            outro_say 196 "  ${DEPLOY_ERROR}"
+        else
+            echo_warning "Try again with:"
+            echo_warning "  pae project:create --repo ${DEPLOY_REPO_LABEL}"
+            outro_say 221 "${DEPLOY_REPO_LABEL} was not deployed. Try again with:"
+            outro_c 15 "  pae project:create --repo ${DEPLOY_REPO_LABEL}"
+            outro_nl
+        fi
+        echo_warning "Try again with: pae project:create --repo ${DEPLOY_REPO_LABEL}"
+        outro_nl
+        outro_c 247 'Try again: '
+        outro_c 15 "pae project:create --repo ${DEPLOY_REPO_LABEL}"
         outro_nl
         outro_nl
         return 0
@@ -1370,18 +1680,170 @@ report_deployed_project() {
 
     echo_info "${DEPLOY_REPO_LABEL} available at: ${DEPLOY_PROJECT_URL}"
     echo_info "Project: ${DEPLOY_PROJECT_NAME}    logs: pae project:deploy:log ${DEPLOY_PROJECT_NAME}"
+    if [ "$DEPLOY_PASSWORD_SET" = 1 ] && [ -n "$DEPLOY_SITE_PASSWORD" ]; then
+        echo_info "Password: ${DEPLOY_SITE_PASSWORD}"
+    fi
     echo_info ""
     outro_c 15 "${DEPLOY_REPO_LABEL}"
     outro_c 247 ' available at: '
     outro_c 39 "${DEPLOY_PROJECT_URL}"
     outro_nl
+    if [ "$DEPLOY_PASSWORD_SET" = 1 ] && [ -n "$DEPLOY_SITE_PASSWORD" ]; then
+        outro_c 247 'Password: '
+        outro_c 15 "${DEPLOY_SITE_PASSWORD}"
+        outro_nl
+    fi
     outro_nl
+}
+
+# Strip a leading v so 2.0.1 and v2.0.1 compare equal.
+normalize_version() {
+    printf '%s' "$1" | sed -E 's/^[vV]//'
+}
+
+# Label like "2.0.1 (b9f8c105)" for update messages.
+engine_identity_label() { # product_version short_sha
+    local ver="${1:-}" sha="${2:-}"
+    [ -n "$ver" ] || ver=unknown
+    [ -n "$sha" ] || sha=unknown
+    printf '%s (%s)' "$ver" "$sha"
+}
+
+# Exit 0 when installed tip is unknown or differs from target (ver or sha).
+engine_update_available() { # installed_ver installed_sha target_ver target_sha
+    local iv="$1" is="$2" tv="$3" ts="$4"
+    if [ -z "$is" ]; then
+        return 0
+    fi
+    if [ -n "$iv" ] && [ -n "$tv" ] && [ "$iv" != "$tv" ]; then
+        return 0
+    fi
+    if [ -n "$ts" ] && [ "$is" != "$ts" ]; then
+        return 0
+    fi
+    return 1
+}
+
+# Product version from a system.php blob (or empty).
+version_from_system_php() {
+    printf '%s' "$1" | sed -nE "s/.*'version'[[:space:]]*=>[[:space:]]*'([^']+)'.*/\1/p" | head -n1
+}
+
+# Fill PEEK_TARGET_VERSION + PEEK_TARGET_COMMIT for ENGINE_REPO @ PANELALPHA_ENGINE_VERSION.
+# Must not be called inside $() — the commit is a side effect for labels.
+PEEK_TARGET_VERSION=''
+PEEK_TARGET_COMMIT=''
+peek_target_engine_identity() {
+    local tmp php
+    PEEK_TARGET_VERSION=''
+    PEEK_TARGET_COMMIT=''
+    [ -n "$ENGINE_REPO" ] && [ -n "$PANELALPHA_ENGINE_VERSION" ] || return 0
+    command -v git >/dev/null 2>&1 || return 0
+
+    tmp=$(mktemp -d)
+    export GIT_TERMINAL_PROMPT=0
+    if git clone --depth 1 --filter=blob:none --sparse --branch "$PANELALPHA_ENGINE_VERSION" \
+        "$ENGINE_REPO" "$tmp/repo" >/dev/null 2>&1; then
+        git -C "$tmp/repo" sparse-checkout set core/config/system.php >/dev/null 2>&1 || true
+    elif ! git clone --depth 1 --branch "$PANELALPHA_ENGINE_VERSION" \
+        "$ENGINE_REPO" "$tmp/repo" >/dev/null 2>&1; then
+        rm -rf "$tmp"
+        return 0
+    fi
+
+    PEEK_TARGET_COMMIT=$(git -C "$tmp/repo" rev-parse --short HEAD 2>/dev/null | tr -d '\r\n' || true)
+    php="$tmp/repo/core/config/system.php"
+    if [ -f "$php" ]; then
+        PEEK_TARGET_VERSION=$(version_from_system_php "$(cat "$php")")
+    fi
+    rm -rf "$tmp"
+}
+
+# Compatibility wrapper for tests that only need the product version string.
+peek_target_engine_version() {
+    peek_target_engine_identity
+    printf '%s' "$PEEK_TARGET_VERSION"
+}
+
+peek_target_label() {
+    engine_identity_label \
+        "$(normalize_version "${PEEK_TARGET_VERSION:-}")" \
+        "${PEEK_TARGET_COMMIT:-}"
+}
+
+# When --repo hits a host that already has an engine: update+deploy, or deploy only.
+# Interactive choice lives in the TUI wrapper (logo screen); this only honors
+# --update-engine / --deploy-only, equal identity, or a no-TTY default.
+decide_repo_deploy_mode() {
+    DEPLOY_ONLY=0
+    [ -n "$DEPLOY_REPO" ] || return 0
+    [ -f "${PANELALPHA_DIR}/shared-hosting/docker-compose.yml" ] || return 0
+
+    # Choice already made in --configure (same --run-dir).
+    if [ -n "${RUN_DIR:-}" ] && [ -f "$RUN_DIR/repo_deploy_only" ]; then
+        DEPLOY_ONLY=$(tr -d '\r\n' <"$RUN_DIR/repo_deploy_only" || true)
+        if [ -f "$RUN_DIR/repo_engine_op" ]; then
+            ENGINE_OP=$(tr -d '\r\n' <"$RUN_DIR/repo_engine_op" || true)
+        fi
+        [ "$DEPLOY_ONLY" = 1 ] || DEPLOY_ONLY=0
+        return 0
+    fi
+
+    resolve_engine_version
+
+    if [ "${UPDATE_ENGINE:-0}" = 1 ]; then
+        ENGINE_OP=update
+        DEPLOY_ONLY=0
+        echo_info "Updating engine and deploying ${DEPLOY_REPO_LABEL}"
+        _persist_repo_deploy_choice
+        return 0
+    fi
+
+    if [ "${FORCE_DEPLOY_ONLY:-0}" = 1 ]; then
+        DEPLOY_ONLY=1
+        echo_info "Deploying ${DEPLOY_REPO_LABEL} only (--deploy-only)"
+        _persist_repo_deploy_choice
+        return 0
+    fi
+
+    local installed installed_sha target target_sha from_label to_label
+    installed=$(normalize_version "$(detect_installed_engine_version)")
+    installed_sha=$(detect_installed_engine_commit)
+    peek_target_engine_identity
+    target=$(normalize_version "$PEEK_TARGET_VERSION")
+    target_sha="${PEEK_TARGET_COMMIT:-}"
+    from_label=$(engine_identity_label "$installed" "$installed_sha")
+    to_label=$(engine_identity_label "$target" "$target_sha")
+
+    if ! engine_update_available "$installed" "$installed_sha" "$target" "$target_sha"; then
+        DEPLOY_ONLY=1
+        echo_info "Engine is already at ${from_label}; deploying ${DEPLOY_REPO_LABEL} only"
+        _persist_repo_deploy_choice
+        return 0
+    fi
+
+    # No interactive prompt here — the wrapper paints the logo screen. Without
+    # a prior flag, deploy the app only and tell the operator how to update.
+    DEPLOY_ONLY=1
+    echo_warning "Engine update available (${from_label} → ${to_label}); deploying ${DEPLOY_REPO_LABEL} only. Re-run with --update-engine to update the engine too."
+    _persist_repo_deploy_choice
+}
+
+_persist_repo_deploy_choice() {
+    [ -n "${RUN_DIR:-}" ] && [ -d "$RUN_DIR" ] || return 0
+    printf '%s\n' "$DEPLOY_ONLY" >"$RUN_DIR/repo_deploy_only"
+    printf '%s\n' "$ENGINE_OP" >"$RUN_DIR/repo_engine_op"
 }
 
 finish_installation() {
     # Stdout: verbose for --no-tui / logs / legacy sed fallback.
     # $RUN_DIR/outro: mockup-shaped ANSI body for the TUI ready screen only
     # (wrapper already draws logo, success line, and 100% bar).
+    # repo_deploy_failed: wrapper drops "and deployed" from the success banner
+    # when the engine is up but project:create failed (exit stays 0 on install).
+    if [ -n "${RUN_DIR:-}" ] && [ -d "$RUN_DIR" ]; then
+        printf '%s\n' "${DEPLOY_FAILED:-0}" >"$RUN_DIR/repo_deploy_failed"
+    fi
     local outro_tmp=""
     if [ -n "$RUN_DIR" ] && [ -d "$RUN_DIR" ]; then
         outro_tmp="$RUN_DIR/outro.tmp"
@@ -1497,8 +1959,30 @@ if [ -n "$RUN_DIR" ] && [ -d "$RUN_DIR" ]; then
     touch "$RUN_DIR/step" "$RUN_DIR/progress"
 fi
 
-# TUI wrapper preflight — nothing interactive required for engine today.
+# TUI preflight before the update-vs-deploy prompt: probe --repo, and disk space
+# when an engine install/update is certain (not a possible deploy-only choice).
 if [ "$CONFIGURE_MODE" = 1 ]; then
+    define_variables
+    case "$ENGINE_OP" in
+    install | update) ;;
+    *)
+        if [ -f /opt/panelalpha/shared-hosting/docker-compose.yml ]; then
+            ENGINE_OP=update
+        else
+            ENGINE_OP=install
+        fi
+        ;;
+    esac
+    if [ -n "$DEPLOY_REPO" ]; then
+        DEPLOY_REPO_LABEL=$(repo_label "$DEPLOY_REPO")
+        ensure_deploy_repo_access
+    fi
+    # Fresh install, or CLI --update-engine: fail before the TUI progress screen.
+    if [ "$NO_DISK_SPACE_CHECK" = 0 ]; then
+        if [ ! -f /opt/panelalpha/shared-hosting/docker-compose.yml ] || [ "$UPDATE_ENGINE" = 1 ]; then
+            check_disk_space
+        fi
+    fi
     trap - EXIT
     exit 0
 fi
@@ -1521,9 +2005,8 @@ refuse_engine_v1_to_v2_upgrade
 
 if [ -n "$DEPLOY_REPO" ]; then
     DEPLOY_REPO_LABEL=$(repo_label "$DEPLOY_REPO")
-    if [ -f /opt/panelalpha/shared-hosting/docker-compose.yml ]; then
-        DEPLOY_ONLY=1
-    fi
+    ensure_deploy_repo_access
+    decide_repo_deploy_mode
 fi
 
 # An engine is already here, so --repo is a project to create through the CLI,
@@ -1532,7 +2015,8 @@ if [ "$DEPLOY_ONLY" = 1 ]; then
     # before_install, which normally asks, is skipped on this path.
     check_root
     echo_info "PanelAlpha engine is already installed on this host"
-    update_progress 50 "Deploying ${DEPLOY_REPO_LABEL}"
+    set_installer_phase deploy
+    update_progress 50 "Building ${DEPLOY_REPO_LABEL}"
     echo_info "Deploying ${DEPLOY_REPO_LABEL}"
     deploy_repository
     update_progress 100 "Finishing"
@@ -1545,6 +2029,7 @@ fi
 
 resolve_engine_version
 
+set_installer_phase engine
 if [ "$ENGINE_OP" = update ]; then
     update_progress 5 "Preparing update"
     echo_info "Preparing update"
@@ -1552,15 +2037,18 @@ else
     update_progress 5 "Preparing installation"
     echo_info "Preparing directories"
 fi
+
+if [ "$NO_DISK_SPACE_CHECK" = 0 ]; then
+    check_disk_space
+fi
+
 before_install
 
 echo_info "Getting server hostname"
 get_hostname
 
-if [ -z "$ENGINE_REPO" ] && [ -z "$REPO_TOKEN" ]; then
-    update_progress 10 "Requesting the download token"
-    echo_info "Requesting the download token"
-    request_download_token
+if [ -z "$ENGINE_REPO" ]; then
+    echo_error "No engine source configured. Set PANELALPHA_ENGINE_REPO (or use: curl -fsSL https://get.panelalpha.com/engine | sh)"
 fi
 
 update_progress 15 "Installing docker engine"
@@ -1575,11 +2063,9 @@ update_progress 35 "Unzip PanelAlpha engine package"
 echo_info "Unzip PanelAlpha engine package"
 unzip_panelalpha_engine
 
-if [ -n "$ENGINE_REPO" ] || [ -n "$REPO_TOKEN" ]; then
-    update_progress 40 "Installing composer dependencies"
-    echo_info "Installing composer dependencies"
-    install_composer_dependencies
-fi
+update_progress 40 "Installing composer dependencies"
+echo_info "Installing composer dependencies"
+install_composer_dependencies
 
 if [ "$INSTALL_SYSBOX" = 1 ]; then
     update_progress 45 "Installing sysbox runtime"
@@ -1612,7 +2098,8 @@ echo_info "Applying additional configuration"
 post_install_config
 
 if [ -n "$DEPLOY_REPO" ]; then
-    update_progress 95 "Building ${DEPLOY_REPO_LABEL}"
+    set_installer_phase deploy
+    update_progress 55 "Building ${DEPLOY_REPO_LABEL}"
     echo_info "Deploying ${DEPLOY_REPO_LABEL}"
     deploy_repository
 fi

@@ -6,6 +6,7 @@ use App\Integrations\Tunnels\Cloudflare;
 use App\Models\Tunnel;
 use App\Models\User;
 use App\System;
+use App\System\ProcessRunner;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -87,6 +88,7 @@ class SitePasswordProtection
 
         self::applyWebserver($user);
         self::syncCloudflareOrigins($user);
+        self::reclaimFrameworkCacheOwnership();
     }
 
     public static function unset(User $user): void
@@ -108,6 +110,7 @@ class SitePasswordProtection
 
         self::applyWebserver($user);
         self::syncCloudflareOrigins($user);
+        self::reclaimFrameworkCacheOwnership();
     }
 
     public static function verifyPassword(User $user, string $password): bool
@@ -284,6 +287,36 @@ NGINX;
             Log::warning(
                 "Failed to sync Cloudflare tunnel origins after site password change for {$user->username}: "
                 . $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * Login is throttled via the file cache. Artisan through `docker compose exec`
+     * / `pae` often runs as root and leaves cache shards root-owned; php-fpm
+     * (www-data) then 500s on POST /_pa_site_password. Reclaim after enabling
+     * the gate — same ownership pattern as deploy telemetry spool.
+     *
+     * @param ?int $euid override for tests (null = posix_geteuid / treat as non-root)
+     * @param ?ProcessRunner $runner override for tests
+     */
+    public static function reclaimFrameworkCacheOwnership(?int $euid = null, ?ProcessRunner $runner = null): void
+    {
+        $euid ??= function_exists('posix_geteuid') ? posix_geteuid() : 1;
+        if ($euid !== 0) {
+            return;
+        }
+
+        $path = storage_path('framework/cache');
+        if ($path === '' || $path === '/' || !is_dir($path)) {
+            return;
+        }
+
+        try {
+            ($runner ?? new System())->runProcess(['sudo', 'chown', '-R', 'www-data:www-data', $path]);
+        } catch (\Throwable $e) {
+            Log::warning(
+                'Could not reclaim framework cache ownership for site-password gate: ' . $e->getMessage()
             );
         }
     }

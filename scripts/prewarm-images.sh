@@ -51,7 +51,8 @@ if [[ "$FOREGROUND" -eq 1 ]]; then
 fi
 
 nohup bash -c \
-    'docker compose -f "$1" exec -T core php artisan system:image:prewarm "${@:2}"' \
+    'exec 200>&- 2>/dev/null || true
+     docker compose -f "$1" exec -T core php artisan system:image:prewarm "${@:2}"' \
     _ "$COMPOSE_FILE" "${args[@]+"${args[@]}"}" >"$log_file" 2>&1 &
 
 echo "[INFO] Prewarming base images in the background, log: $LOG_DIR/latest"
