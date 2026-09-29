@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('mysql_user_list')]
 #[Description(<<<'MARKDOWN'
-    List MySQL users for a user
+    List MySQL users of a project
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

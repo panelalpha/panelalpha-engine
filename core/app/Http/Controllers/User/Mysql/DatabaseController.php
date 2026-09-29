@@ -18,7 +18,7 @@ class DatabaseController extends Controller
 {
     #[OA\Get(
         path: '/projects/{username}/mysql/databases',
-        summary: 'List MySQL databases for a user',
+        summary: 'List MySQL databases of a project',
         security: [['bearerAuth' => []]],
         tags: ['MySQL Databases'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

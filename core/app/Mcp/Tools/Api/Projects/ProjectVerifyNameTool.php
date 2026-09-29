@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('project_verify_name')]
 #[Description(<<<'MARKDOWN'
-    Verify a username is available
+    Check that a project name is available
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

@@ -58,7 +58,7 @@ class UserController extends Controller
 {
     #[OA\Get(
         path: '/projects',
-        summary: 'List users (paginated)',
+        summary: 'List projects (paginated)',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [
@@ -94,7 +94,7 @@ class UserController extends Controller
 
     #[OA\Get(
         path: '/projects/all',
-        summary: 'List all users (no pagination)',
+        summary: 'List all projects (no pagination)',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [
@@ -309,7 +309,7 @@ class UserController extends Controller
     #[OA\Post(
         path: '/users',
         description: "Legacy synchronous create. Same body as POST /projects, but runs the deploy "
-            . "inside the request and returns the user resource. Supports X-Deploy-Stream: ndjson. "
+            . "inside the request and returns the project resource. Supports X-Deploy-Stream: ndjson. "
             . "Unless the caller has a domain of its own, the name to give a project is a free "
             . "label under panelalpha.online: the zone is a wildcard in front of the PanelAlpha Online "
             . "proxy, so any label resolves worldwide, with a trusted certificate, and no DNS to "
@@ -322,7 +322,7 @@ class UserController extends Controller
             . "another. Where there is no license key or no public IPv4, fall back to "
             . "<name>.<cert_domain> from GET /system/info, which resolves to this host but is served "
             . "a self-signed certificate.",
-        summary: 'Create a new hosting user (synchronous)',
+        summary: 'Create a new hosting project (synchronous)',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             // Nothing is required: validation has never demanded an email, and
@@ -961,7 +961,14 @@ class UserController extends Controller
 
     #[OA\Post(
         path: '/projects/{username}/rebuild',
-        summary: 'Rebuild user environment',
+        summary: 'Redeploy a project',
+        description: 'Detects, builds and starts the application again from ~/project, after importing '
+            . '`zip_path` into it when given (refused on a project deployed from git). The request stays '
+            . 'open until the deploy ends; a client that times out has not stopped it, so follow '
+            . 'GET /projects/{username}/deploy-log rather than calling again.',
+        x: ['mcp-description' => 'Detects, builds and starts the app again from ~/project, importing '
+            . '`zip_path` first when given (refused on a git project). Answers when the deploy ends; if the '
+            . 'call times out the deploy carries on, so follow deploy_log_get instead of calling again.'],
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -980,7 +987,7 @@ class UserController extends Controller
                     property: 'zip_path',
                     type: 'string',
                     nullable: true,
-                    description: 'Optional archive under the user home to import into ~/project before detect/apply'
+                    description: 'Optional archive under the project home to import into ~/project before detect/apply'
                 ),
                 new OA\Property(
                     property: 'recipe',
@@ -1313,7 +1320,7 @@ class UserController extends Controller
 
     #[OA\Post(
         path: '/projects/{username}/clone',
-        summary: 'Clone an existing user account',
+        summary: 'Clone a project',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -1330,17 +1337,17 @@ class UserController extends Controller
         ],
     )]
     /**
-     * Clone an existing user account.
+     * Clone a project.
      *
-     * Creates a new user with the same resource limits and settings as the source
-     * user, derives a staging domain when none is provided, and copies the source
-     * user's home directory (including named Docker volumes) and project config
-     * files to the new user after provisioning completes.
+     * Creates a new project with the same resource limits and settings as the
+     * source, derives a staging domain when none is provided, and copies the
+     * source's home directory (including named Docker volumes) and project config
+     * files to the new project after provisioning completes.
      *
      * Subdomains, FTP/SFTP accounts, MySQL databases/users and dedicated IP
      * addresses are NOT cloned.
      *
-     * @param string $username  Source user's username.
+     * @param string $username  Source project's name.
      */
     public function clone(string $username, UserCloneRequest $request): UserResource
     {
@@ -1469,7 +1476,7 @@ class UserController extends Controller
 
     #[OA\Post(
         path: '/projects/verify-new-username',
-        summary: 'Verify a username is available',
+        summary: 'Check that a project name is available',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -1514,7 +1521,7 @@ class UserController extends Controller
 
     #[OA\Get(
         path: '/projects/{username}',
-        summary: 'Get a user by username',
+        summary: 'Get a project',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -1537,7 +1544,7 @@ class UserController extends Controller
 
     #[OA\Put(
         path: '/projects/{username}',
-        summary: 'Update a user',
+        summary: 'Update a project',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -1619,7 +1626,7 @@ class UserController extends Controller
 
     #[OA\Put(
         path: '/projects/{username}/suspend',
-        summary: 'Suspend a user',
+        summary: 'Suspend a project',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -1643,7 +1650,7 @@ class UserController extends Controller
 
     #[OA\Put(
         path: '/projects/{username}/unsuspend',
-        summary: 'Unsuspend a user',
+        summary: 'Unsuspend a project',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -1667,7 +1674,7 @@ class UserController extends Controller
 
     #[OA\Delete(
         path: '/projects/{username}',
-        summary: 'Delete a user and all associated resources',
+        summary: 'Delete a project and everything in it',
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

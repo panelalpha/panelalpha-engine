@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('cron_job_list')]
 #[Description(<<<'MARKDOWN'
-    List cron jobs for a user
+    List cron jobs of a project
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

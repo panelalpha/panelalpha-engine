@@ -14,7 +14,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
 #[Name('phpmyadmin_sso_token_create')]
 #[Description(<<<'MARKDOWN'
-    Create a phpMyAdmin SSO token for a user
+    Create a phpMyAdmin SSO token for a project
     MARKDOWN)]
 #[IsDestructive]
 class PhpmyadminSsoTokenCreateTool extends ApiTool

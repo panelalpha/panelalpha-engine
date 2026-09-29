@@ -17,7 +17,7 @@ class CronJobController extends Controller
 {
     #[OA\Get(
         path: '/projects/{username}/cron-jobs',
-        summary: 'List cron jobs for a user',
+        summary: 'List cron jobs of a project',
         security: [['bearerAuth' => []]],
         tags: ['Cron Jobs'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

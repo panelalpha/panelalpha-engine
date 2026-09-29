@@ -14,14 +14,14 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
 #[Name('project_clone')]
 #[Description(<<<'MARKDOWN'
-    Clone an existing user account
+    Clone a project
 
-    Clone an existing user account.
+    Clone a project.
 
-    Creates a new user with the same resource limits and settings as the source
-    user, derives a staging domain when none is provided, and copies the source
-    user's home directory (including named Docker volumes) and project config
-    files to the new user after provisioning completes.
+    Creates a new project with the same resource limits and settings as the
+    source, derives a staging domain when none is provided, and copies the
+    source's home directory (including named Docker volumes) and project config
+    files to the new project after provisioning completes.
 
     Subdomains, FTP/SFTP accounts, MySQL databases/users and dedicated IP
     addresses are NOT cloned.
@@ -77,7 +77,7 @@ class ProjectCloneTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Source user\'s username.')->required(),
+            'name' => $schema->string()->description('Source project\'s name.')->required(),
             'new_name' => $schema->string()->description('Sent to the API as `new_username`.'),
             'domain' => $schema->string(),
         ];

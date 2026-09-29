@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('container_list')]
 #[Description(<<<'MARKDOWN'
-    List Docker containers for a user
+    List Docker containers of a project
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

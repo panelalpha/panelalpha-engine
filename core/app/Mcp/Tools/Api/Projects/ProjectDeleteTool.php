@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 
 #[Name('project_delete')]
 #[Description(<<<'MARKDOWN'
-    Delete a user and all associated resources
+    Delete a project and everything in it
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

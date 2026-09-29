@@ -29,7 +29,7 @@ class ContainerController extends Controller
 
     #[OA\Get(
         path: '/projects/{username}/containers',
-        summary: 'List Docker containers for a user',
+        summary: 'List Docker containers of a project',
         security: [['bearerAuth' => []]],
         tags: ['Containers'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

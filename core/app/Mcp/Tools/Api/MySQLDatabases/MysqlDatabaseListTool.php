@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('mysql_database_list')]
 #[Description(<<<'MARKDOWN'
-    List MySQL databases for a user
+    List MySQL databases of a project
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

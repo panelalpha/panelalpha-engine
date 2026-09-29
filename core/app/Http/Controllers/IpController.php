@@ -272,7 +272,7 @@ class IpController extends Controller
 
     #[OA\Post(
         path: '/ip/assign',
-        summary: 'Assign an IP address to a user',
+        summary: 'Assign an IP address to a project',
         security: [['bearerAuth' => []]],
         tags: ['IP Management'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -367,7 +367,7 @@ class IpController extends Controller
 
     #[OA\Post(
         path: '/ip/unassign',
-        summary: 'Unassign an IP address from a user',
+        summary: 'Unassign an IP address from a project',
         security: [['bearerAuth' => []]],
         tags: ['IP Management'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(

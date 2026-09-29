@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('domain_list')]
 #[Description(<<<'MARKDOWN'
-    List domains for a user
+    List domains of a project
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

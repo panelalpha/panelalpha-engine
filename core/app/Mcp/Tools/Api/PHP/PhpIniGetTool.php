@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('php_ini_get')]
 #[Description(<<<'MARKDOWN'
-    Get custom PHP INI settings for a user
+    Get custom PHP INI settings of a project
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

@@ -16,7 +16,7 @@ class PhpController extends Controller
 {
     #[OA\Get(
         path: '/projects/{username}/php/custom-ini-settings',
-        summary: 'Get custom PHP INI settings for a user',
+        summary: 'Get custom PHP INI settings of a project',
         security: [['bearerAuth' => []]],
         tags: ['PHP'],
         parameters: [
@@ -49,7 +49,7 @@ class PhpController extends Controller
 
     #[OA\Put(
         path: '/projects/{username}/php/custom-ini-settings',
-        summary: 'Update custom PHP INI settings for a user',
+        summary: 'Update custom PHP INI settings of a project',
         security: [['bearerAuth' => []]],
         tags: ['PHP'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

@@ -25,7 +25,7 @@ class DomainController extends Controller
 {
     #[OA\Get(
         path: '/projects/{username}/domains',
-        summary: 'List domains for a user',
+        summary: 'List domains of a project',
         security: [['bearerAuth' => []]],
         tags: ['Domains'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -52,7 +52,7 @@ class DomainController extends Controller
 
     #[OA\Get(
         path: '/projects/{username}/domains/installed-ssl-certs',
-        summary: 'List all installed SSL certs for user domains',
+        summary: 'List installed SSL certificates for the domains of a project',
         security: [['bearerAuth' => []]],
         tags: ['SSL Certificates'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -158,7 +158,7 @@ class DomainController extends Controller
 
     #[OA\Post(
         path: '/projects/{username}/domains',
-        summary: 'Add a domain to a user',
+        summary: 'Add a domain to a project',
         security: [['bearerAuth' => []]],
         tags: ['Domains'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

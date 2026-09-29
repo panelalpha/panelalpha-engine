@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 
 #[Name('project_unsuspend')]
 #[Description(<<<'MARKDOWN'
-    Unsuspend a user
+    Unsuspend a project
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

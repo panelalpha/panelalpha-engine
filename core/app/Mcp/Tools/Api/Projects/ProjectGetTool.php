@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('project_get')]
 #[Description(<<<'MARKDOWN'
-    Get a user by username
+    Get a project
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

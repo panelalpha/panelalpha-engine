@@ -324,7 +324,7 @@ Your assistant is using a list it loaded earlier. Restart your assistant, then r
 
 This is every MCP tool the engine ships: **199** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
 
-A **project** is one hosting account. Some tool descriptions still say *user*; that is the project's name, which every other tool takes as `name`.
+A **project** is one hosting account. Every tool takes it as `name`; what the tools return still calls that value `username`, the REST API's name for it.
 
 A new install exposes all of them. Every group in the table below is on by default. The group name in the **Toolset** column is what you put in `MCP_TOOLSETS` if you want to narrow what the assistant can see. How to turn a group off, add one tool, or deny one: [Decide what the assistant may do](#decide-what-the-assistant-may-do). What this engine is actually offering:
 
@@ -385,33 +385,33 @@ pae mcp:tool:list
 
 | Tool | What it does |
 |---|---|
-| `project_clone` | Clone an existing user account |
+| `project_clone` | Clone a project |
 | `project_create` | Create a new hosting project (async) |
 | `project_create_sync` | Create a project and wait for the deploy in the same call. Same body as `project_create` |
-| `project_delete` | Delete a user and all associated resources |
+| `project_delete` | Delete a project and everything in it |
 | `project_deploy_archive` | Deploy an uploaded zip/tar into ~/project |
-| `project_get` | Get a user by username |
-| `project_list` | List users (paginated) |
-| `project_list_all` | List all users (no pagination) |
+| `project_get` | Get a project |
+| `project_list` | List projects (paginated) |
+| `project_list_all` | List all projects (no pagination) |
 | `project_password_set` | Set a password visitors must type before they see the site |
 | `project_password_unset` | Remove that password |
 | `project_push` | Push project state to a paired staging or live project |
-| `project_rebuild` | Rebuild user environment |
+| `project_rebuild` | Redeploy a project |
 | `project_staging` | Create a linked staging mirror of a live project |
-| `project_suspend` | Suspend a user |
-| `project_unsuspend` | Unsuspend a user |
-| `project_update` | Update a user |
-| `project_verify_name` | Verify a username is available |
+| `project_suspend` | Suspend a project |
+| `project_unsuspend` | Unsuspend a project |
+| `project_update` | Update a project |
+| `project_verify_name` | Check that a project name is available |
 
 ## Domains
 
 | Tool | What it does |
 |---|---|
-| `domain_create` | Add a domain to a user |
+| `domain_create` | Add a domain to a project |
 | `domain_delete` | Delete a domain |
 | `domain_find` | Get a domain by name (system-wide) |
 | `domain_get` | Get a domain |
-| `domain_list` | List domains for a user |
+| `domain_list` | List domains of a project |
 | `domain_update` | Update a domain |
 | `ssl_cert_request` | Request a Let's Encrypt certificate for a domain |
 
@@ -447,7 +447,7 @@ pae mcp:tool:list
 |---|---|
 | `ssl_cert_get` | Get installed SSL cert for a domain |
 | `ssl_cert_install` | Install a custom SSL certificate on a domain |
-| `ssl_cert_list` | List all installed SSL certs for user domains |
+| `ssl_cert_list` | List installed SSL certificates for the domains of a project |
 
 ## MySQL databases
 
@@ -456,7 +456,7 @@ pae mcp:tool:list
 | `mysql_database_create` | Create a MySQL database |
 | `mysql_database_delete` | Delete a MySQL database |
 | `mysql_database_get` | Get a MySQL database |
-| `mysql_database_list` | List MySQL databases for a user |
+| `mysql_database_list` | List MySQL databases of a project |
 
 ## MySQL users
 
@@ -466,7 +466,7 @@ pae mcp:tool:list
 | `mysql_user_create` | Create a MySQL user |
 | `mysql_user_delete` | Delete a MySQL user |
 | `mysql_user_get` | Get a MySQL user |
-| `mysql_user_list` | List MySQL users for a user |
+| `mysql_user_list` | List MySQL users of a project |
 | `mysql_user_rename` | Rename a MySQL user |
 
 ## MySQL privileges
@@ -483,7 +483,7 @@ pae mcp:tool:list
 |---|---|
 | `mysql_server_info` | Get MySQL server connection info |
 | `phpmyadmin_sso_login` | Consume a phpMyAdmin SSO token (internal use, no bearer auth) |
-| `phpmyadmin_sso_token_create` | Create a phpMyAdmin SSO token for a user |
+| `phpmyadmin_sso_token_create` | Create a phpMyAdmin SSO token for a project |
 
 ## FTP accounts
 
@@ -509,7 +509,7 @@ pae mcp:tool:list
 |---|---|
 | `cron_job_create` | Create a cron job |
 | `cron_job_delete` | Delete a cron job |
-| `cron_job_list` | List cron jobs for a user |
+| `cron_job_list` | List cron jobs of a project |
 | `cron_job_update` | Update a cron job |
 
 ## Files
@@ -535,8 +535,8 @@ pae mcp:tool:list
 
 | Tool | What it does |
 |---|---|
-| `php_ini_get` | Get custom PHP INI settings for a user |
-| `php_ini_set` | Update custom PHP INI settings for a user |
+| `php_ini_get` | Get custom PHP INI settings of a project |
+| `php_ini_set` | Update custom PHP INI settings of a project |
 | `php_version_list` | List available PHP versions on your VPS |
 
 ## Containers
@@ -544,7 +544,7 @@ pae mcp:tool:list
 | Tool | What it does |
 |---|---|
 | `app_health_check` | Check that the deployed application answers on its published ports |
-| `container_list` | List Docker containers for a user |
+| `container_list` | List Docker containers of a project |
 | `container_project_action` | Perform a project-level Docker Compose action |
 | `container_service_action` | Perform a service-level Docker action |
 | `container_service_logs` | Get logs from a Docker service |
@@ -642,12 +642,12 @@ pae mcp:tool:list
 
 | Tool | What it does |
 |---|---|
-| `ip_assign` | Assign an IP address to a user |
+| `ip_assign` | Assign an IP address to a project |
 | `ip_assigned_list` | List assigned IP addresses |
 | `ip_subnet_create` | Add an IP subnet |
 | `ip_subnet_delete` | Delete an IP subnet |
 | `ip_subnet_list` | List IP subnets |
-| `ip_unassign` | Unassign an IP address from a user |
+| `ip_unassign` | Unassign an IP address from a project |
 
 ## ModSecurity
 

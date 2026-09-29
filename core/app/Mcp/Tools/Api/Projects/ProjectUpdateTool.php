@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 
 #[Name('project_update')]
 #[Description(<<<'MARKDOWN'
-    Update a user
+    Update a project
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

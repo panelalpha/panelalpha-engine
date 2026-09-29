@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('ssl_cert_list')]
 #[Description(<<<'MARKDOWN'
-    List all installed SSL certs for user domains
+    List installed SSL certificates for the domains of a project
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

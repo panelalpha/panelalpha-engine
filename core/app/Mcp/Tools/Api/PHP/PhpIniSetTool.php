@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 
 #[Name('php_ini_set')]
 #[Description(<<<'MARKDOWN'
-    Update custom PHP INI settings for a user
+    Update custom PHP INI settings of a project
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

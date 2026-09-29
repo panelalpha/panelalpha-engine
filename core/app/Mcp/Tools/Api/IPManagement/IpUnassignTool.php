@@ -14,7 +14,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
 #[Name('ip_unassign')]
 #[Description(<<<'MARKDOWN'
-    Unassign an IP address from a user
+    Unassign an IP address from a project
     MARKDOWN)]
 #[IsDestructive]
 class IpUnassignTool extends ApiTool

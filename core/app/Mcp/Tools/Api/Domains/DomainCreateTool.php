@@ -14,7 +14,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
 #[Name('domain_create')]
 #[Description(<<<'MARKDOWN'
-    Add a domain to a user
+    Add a domain to a project
     MARKDOWN)]
 #[IsDestructive]
 class DomainCreateTool extends ApiTool

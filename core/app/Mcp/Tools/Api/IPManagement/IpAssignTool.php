@@ -14,7 +14,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
 #[Name('ip_assign')]
 #[Description(<<<'MARKDOWN'
-    Assign an IP address to a user
+    Assign an IP address to a project
     MARKDOWN)]
 #[IsDestructive]
 class IpAssignTool extends ApiTool

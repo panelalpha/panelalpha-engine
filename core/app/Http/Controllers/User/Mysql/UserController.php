@@ -19,7 +19,7 @@ class UserController extends Controller
 {
     #[OA\Get(
         path: '/projects/{username}/mysql/users',
-        summary: 'List MySQL users for a user',
+        summary: 'List MySQL users of a project',
         security: [['bearerAuth' => []]],
         tags: ['MySQL Users'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
