@@ -22,7 +22,7 @@
 // `php artisan mcp:tool:generate` reads this file and fails loudly on an
 // operation that is missing from it or on an entry that no longer matches a
 // route, so adding an endpoint is a deliberate naming decision rather than an
-// accident. See docs/mcp-catalogue.html.
+// accident.
 
 return [
     // Projects -- one hosting account with its container, domains, databases and

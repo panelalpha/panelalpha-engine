@@ -13,7 +13,7 @@ apt-get 11.9s, build 2.2s, inside a 53.1s critical path" is.
 | Topic | Baseline (operator) | This file |
 |---|---|---|
 | Install, tokens, TLS | [`docs/02-getting-started/`](docs/02-getting-started/install.md) | `--in-container` for tests; installer prints `pae-artisan` |
-| MCP | [`docs/04-connecting-your-ai/`](docs/04-connecting-your-ai/your-assistant.md) | CatalogueTest; do not invent client UIs |
+| MCP | [`docs/04-connecting-your-ai/`](docs/04-connecting-your-ai/your-assistant.md) | `tests/mcp/`; do not invent client UIs |
 | Detection / stacks | [`docs/07-supported-projects/`](docs/07-supported-projects/how-detection-works.md) | §6a Railpack measurements; §11 onboarding an app |
 | Deploy failures | [`docs/02-getting-started/what-happens.md`](docs/02-getting-started/what-happens.md) | Explainer rules vs DinD proof |
 | Telemetry | [`docs/02-getting-started/what-is-collected.md`](docs/02-getting-started/what-is-collected.md) | Field list when changing `DeployReport` |
