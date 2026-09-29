@@ -193,6 +193,7 @@ class CsfController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'CSF UI credentials', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object', properties: [
+                    new OA\Property(property: 'enabled', type: 'boolean', description: 'Whether the UI is running; it is off unless CSF_UI=1 is set in .env'),
                     new OA\Property(property: 'username', type: 'string'),
                     new OA\Property(property: 'password', type: 'string'),
                 ])],
@@ -203,6 +204,7 @@ class CsfController extends Controller
     {
         $system = new System();
         $data = [
+            'enabled' => $system->csf()->uiEnabled(),
             'username' => "panelalpha",
             'password' => $system->getEnv()['CSF_UI_PASSWORD'] ?? "",
         ];

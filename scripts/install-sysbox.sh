@@ -91,6 +91,31 @@ ensure_time_namespaces_disabled() {
     fi
 }
 
+# Docker, containerd and Sysbox are Go programs, which by default let their heap
+# reach twice what is live before collecting; GOGC=50 collects at 1.5x.
+# Written as systemd drop-ins, picked up at each daemon's next start: a fresh
+# install restarts them here; on an existing host the next reboot does.
+# Restarting Docker only for this would restart every account.
+PANELALPHA_GOGC="${PANELALPHA_GOGC:-50}"
+ensure_go_gc() {
+    local unit dir file changed=0
+    for unit in docker containerd sysbox-mgr sysbox-fs; do
+        dir="/etc/systemd/system/${unit}.service.d"
+        file="${dir}/panelalpha-gogc.conf"
+        if [ "$(cat "$file" 2>/dev/null)" != "$(printf '[Service]\nEnvironment=GOGC=%s' "$PANELALPHA_GOGC")" ]; then
+            mkdir -p "$dir"
+            printf '[Service]\nEnvironment=GOGC=%s\n' "$PANELALPHA_GOGC" > "$file"
+            changed=1
+        fi
+    done
+    if [ "$changed" -eq 1 ]; then
+        systemctl daemon-reload 2>/dev/null || true
+        log_info "Set GOGC=${PANELALPHA_GOGC} for Docker, containerd and Sysbox; it applies from their next start"
+    else
+        log_info "GOGC=${PANELALPHA_GOGC} already set for Docker, containerd and Sysbox"
+    fi
+}
+
 # Send the host daemon's Docker Hub pulls through registry-proxy, like every
 # account daemon's: prewarm, shared base builds and host compiles then pull under
 # the proxy's REGISTRY_PROXY_USERNAME login, not anonymously from the host IP.
@@ -247,6 +272,7 @@ install_sysbox() {
     ensure_fuse3
     ensure_fusermount_apparmor
     install_recovery_helpers
+    ensure_go_gc
 
     local current
     current="$(sysbox_installed_version)"

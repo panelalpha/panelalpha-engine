@@ -1,5 +1,12 @@
 #!/bin/sh
-# Laravel scheduler (was the core-cron container). Output went to /dev/null
-# under cron too; failures still reach storage/logs.
+# Laravel scheduler (was the core-cron container). A fresh `schedule:run` at
+# the top of each minute, as cron did: `schedule:work` did the same but kept a
+# booted PHP (~65 MB) asleep between minutes. Each run is detached so a long
+# task cannot delay the next minute. Output went to /dev/null under cron too;
+# failures still reach storage/logs.
 cd /var/www/html || exit 1
-exec env HOME=/var/www USER=www-data s6-setuidgid www-data php artisan schedule:work >/dev/null 2>&1
+exec env HOME=/var/www USER=www-data s6-setuidgid www-data sh -c '
+while :; do
+    (php artisan schedule:run >/dev/null 2>&1 &)
+    sleep $((60 - $(date +%S | sed "s/^0//")))
+done'

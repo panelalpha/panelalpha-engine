@@ -208,6 +208,12 @@ services:
     environment:
       - "MYSQL_ROOT_PASSWORD=${USERS_MYSQL_ROOT_PASSWORD}"
       - "MARIADB_AUTO_UPGRADE=1"
+    # MariaDB's stock caches are 128 MB each (InnoDB, MyISAM, Aria) and are held
+    # even when no site has a database; raise them for large hosting databases.
+    command:
+      - "--innodb-buffer-pool-size=${SITES_DB_INNODB_BUFFER_POOL_SIZE:-32M}"
+      - "--key-buffer-size=${SITES_DB_KEY_BUFFER_SIZE:-8M}"
+      - "--aria-pagecache-buffer-size=${SITES_DB_ARIA_PAGECACHE_BUFFER_SIZE:-8M}"
     mem_limit: ${MEM_LIMIT_SITES_DB:-${MEM_LIMIT_DATABASE_USERS:-3G}}
     memswap_limit: ${MEMSWAP_LIMIT_SITES_DB:-${MEMSWAP_LIMIT_DATABASE_USERS:-0}}
   sites-phpmyadmin:
@@ -252,6 +258,8 @@ services:
       # stock in-memory descriptor cache a re-push then skips them as "already exists"
       # and they serve 200 with 0 bytes until a restart. Uncached, a stat hits disk.
       REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR: none
+      # Collect at 1.5x the live heap instead of 2x; the registry idles most of the day.
+      GOGC: ${REGISTRY_GOGC:-50}
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
@@ -300,6 +308,8 @@ services:
       # The stock 3.x config logs at debug: a trace span every 10s from the
       # storage health check, forever, on an idle host.
       REGISTRY_LOG_LEVEL: ${REGISTRY_PROXY_LOG_LEVEL:-info}
+      # Collect at 1.5x the live heap instead of 2x; the proxy idles most of the day.
+      GOGC: ${REGISTRY_GOGC:-50}
     ports:
       - "127.0.0.1:5001:5000"
     volumes:

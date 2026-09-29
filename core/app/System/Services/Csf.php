@@ -39,6 +39,12 @@ class Csf
     ) {
     }
 
+    /** Whether csf.conf has the web UI on (`UI = "1"`); scripts/csf.sh leaves it off unless CSF_UI=1. */
+    public function uiEnabled(): bool
+    {
+        return preg_match('/^UI\s*=\s*"1"/m', $this->system->execOnHost(['cat', '/etc/csf/csf.conf'])) === 1;
+    }
+
     public function listRules(): array
     {
         $allow = $this->system->execOnHost([

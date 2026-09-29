@@ -70,7 +70,13 @@ install_csf() {
             echo "CSF_UI_PASSWORD=${CSF_UI_PASSWORD}" >>/opt/panelalpha/shared-hosting/.env
         fi
     fi
-    sed -i 's/^UI = ".*/UI = "1"/' /etc/csf/csf.conf
+    # The web UI runs as a second lfd process (~24 MB), so it is off unless
+    # CSF_UI=1 is in .env. Its login is kept either way, ready to switch on.
+    if [ "$(grep ^CSF_UI= /opt/panelalpha/shared-hosting/.env | cut -d '=' -f2-)" = "1" ]; then
+        sed -i 's/^UI = ".*/UI = "1"/' /etc/csf/csf.conf
+    else
+        sed -i 's/^UI = ".*/UI = "0"/' /etc/csf/csf.conf
+    fi
     sed -i 's/^UI_PORT = ".*/UI_PORT = "2012"/' /etc/csf/csf.conf
     sed -i 's/^UI_USER = ".*/UI_USER = "panelalpha"/' /etc/csf/csf.conf
     sed -i "s/^UI_PASS = \".*/UI_PASS = \"$CSF_UI_PASSWORD\"/" /etc/csf/csf.conf

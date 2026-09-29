@@ -18,12 +18,14 @@ Throughout this page, `{project}` means the project's name - the value shown as 
 
 | Command | What it does |
 |---|---|
-| `pae configure` | Opens the menu: address and certificate, assistant tokens, API tokens, the queue, the Docker Hub login, telemetry. Pick one, do it, come back for the next. |
+| `pae configure` | Opens the menu: address and certificate, assistant tokens, API tokens, the queue, the Docker Hub login, the site database caches, the firewall UI, telemetry. Pick one, do it, come back for the next. |
 | `pae configure address` | The address clients connect to, and the certificate on that name. |
 | `pae configure mcp-tokens` | Connect an assistant, or change what assistants may use. |
 | `pae configure api-tokens` | Mint a token for your own software, and limit it to part of the API. |
 | `pae configure queue` | How many deploys, backups, or staging jobs run at once. A number from 1 to 32. Left unset, it is 1 on a server with less than 4 GB of RAM and 2 otherwise. |
 | `pae configure docker-hub` | The Docker Hub account image downloads go out under. |
+| `pae configure sites-db` | How much memory the database for hosted PHP sites keeps for its caches. Defaults are 32M, 8M and 8M. Changing one restarts that database for a few seconds. |
+| `pae configure csf-ui` | Turns the firewall's web interface on port 2012 on or off. It is off by default. |
 | `pae configure telemetry` | Whether reports are sent, and how much they carry. |
 | `pae configure --dry-run` | Any of the above. Shows what it would write, and writes nothing. |
 

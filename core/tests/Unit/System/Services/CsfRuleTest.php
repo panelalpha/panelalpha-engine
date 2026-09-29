@@ -164,4 +164,11 @@ class CsfRuleTest extends TestCase
             $this->assertTrue(\Illuminate\Support\Facades\Validator::make($payload, $rules)->passes(), json_encode($payload));
         }
     }
+
+    public function test_the_ui_is_enabled_only_when_csf_conf_says_1(): void
+    {
+        $this->assertTrue((new Csf($this->system("TESTING = \"0\"\nUI = \"1\"\nUI_PORT = \"2012\"\n")))->uiEnabled());
+        $this->assertFalse((new Csf($this->system("UI = \"0\"\nUI_PORT = \"2012\"\n")))->uiEnabled());
+        $this->assertFalse((new Csf($this->system("# UI = \"1\"\nUI_PORT = \"1\"\n")))->uiEnabled());
+    }
 }
