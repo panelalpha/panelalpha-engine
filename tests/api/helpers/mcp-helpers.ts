@@ -129,6 +129,9 @@ export class McpSession {
 
   private listing?: Map<string, McpToolDescriptor>;
 
+  /** Every descriptor any `search_tools` call has returned in this session. */
+  private readonly searched = new Map<string, McpToolDescriptor>();
+
   /** `tools/list`, fetched once per session. */
   private async listed(): Promise<Map<string, McpToolDescriptor>> {
     this.listing ??= new Map((await this.listTools()).map((tool) => [tool.name, tool]));
@@ -145,13 +148,29 @@ export class McpSession {
     if (direct || !listed.has('search_tools')) {
       return direct;
     }
+    // One search per resource (`mysql`, `domain`, ...) covers its whole family,
+    // so a sweep over the catalogue costs a few dozen requests rather than one
+    // per tool -- which is what runs into the 60-a-minute MCP rate limit.
+    for (const query of [name.split('_')[0], name]) {
+      const known = this.searched.get(name);
+      if (known) {
+        return known;
+      }
+      await this.search(query);
+    }
+    return this.searched.get(name);
+  }
+
+  private async search(query: string): Promise<void> {
     const payload = await this.send('tools/call', {
       name: 'search_tools',
-      arguments: { query: name, limit: 5 },
+      arguments: { query, limit: 50 },
     });
     expectMcpToolOk(payload, 'search_tools');
     const found = JSON.parse(mcpResultText(payload)) as { tools?: McpToolDescriptor[] };
-    return (found.tools ?? []).find((tool) => tool.name === name);
+    for (const tool of found.tools ?? []) {
+      this.searched.set(tool.name, tool);
+    }
   }
 
   /**
@@ -194,7 +213,14 @@ export class McpSession {
 
   private async send(method: string, params: Record<string, unknown>): Promise<McpPayload> {
     const body: McpJsonRpcRequest = { jsonrpc: '2.0', id: this.nextId++, method, params };
-    const response = await this.client.send(body, this.token);
+    let response = await this.client.send(body, this.token);
+    // The MCP endpoint allows 60 requests a minute per token. A spec that sweeps
+    // the catalogue can outrun that; wait the limiter out rather than fail on it.
+    for (let attempt = 1; response.status() === 429 && attempt <= 5; attempt++) {
+      const wait = Number(response.headers()['retry-after'] ?? '') || 10;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(wait, 60) * 1000));
+      response = await this.client.send(body, this.token);
+    }
     expect(response.ok(), `${method} answered HTTP ${response.status()}`).toBe(true);
     const parsed = parseMcpJsonRpc(await response.text());
     expect(parsed, `${method} produced no JSON-RPC payload`).toBeTruthy();
