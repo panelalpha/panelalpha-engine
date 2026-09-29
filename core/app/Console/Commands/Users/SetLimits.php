@@ -58,9 +58,9 @@ class SetLimits extends Command
             return 1;
         }
 
-        // Memory is the one limit bounded by what the host still has free.
+        // Memory is the one limit bounded by the host's RAM.
         if ($selection->has('memory_limit')) {
-            $problem = ProjectMemory::changeProblem((int) $selection->all()['memory_limit']);
+            $problem = ProjectMemory::problem((int) $selection->all()['memory_limit']);
             if ($problem !== null) {
                 $this->error($problem['message']);
 

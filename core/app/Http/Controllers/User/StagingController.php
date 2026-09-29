@@ -113,8 +113,8 @@ class StagingController extends Controller
             ]);
         }
 
-        // A staging copy is a new project: it needs the source's memory free now.
-        ProjectMemory::assertCanCreate(ProjectMemory::resolve($source->getMemoryLimit()));
+        // A staging copy keeps the source's memory limit, which must still fit this host.
+        ProjectMemory::assertFits(ProjectMemory::resolve($source->getMemoryLimit()));
 
         $dest = $source->makePendingStaging($newUsername, $destDomain);
 

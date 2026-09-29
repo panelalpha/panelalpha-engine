@@ -35,7 +35,7 @@ class UserUpdateRequest extends FormRequest
             // reaches docker as an invalid mem_limit/cpus value.
             'disk_space_limit' => 'nullable|integer|min:-1',
             // Can be changed, never removed: every project has one.
-            'memory_limit' => ['sometimes', 'integer', 'min:1', new AccountMemoryLimit(false)],
+            'memory_limit' => ['sometimes', 'integer', 'min:1', new AccountMemoryLimit()],
             'cpu_limit' => 'nullable|numeric|min:0',
             'device_read_bps' => 'integer|nullable',
             'device_write_bps' => 'integer|nullable',

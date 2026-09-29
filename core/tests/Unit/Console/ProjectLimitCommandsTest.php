@@ -2,6 +2,8 @@
 
 namespace Tests\Unit\Console;
 
+use App\Lib\Host\HostMemory;
+use App\Lib\Host\HostMemoryProbe;
 use App\Lib\Limits\ResourceLimit;
 use App\Models\User;
 use Illuminate\Support\Facades\Artisan;
@@ -120,6 +122,21 @@ class ProjectLimitCommandsTest extends TestCase
             Artisan::output()
         );
         $this->assertSame(256, User::findByUsername('alice')->getMemoryLimit());
+    }
+
+    /** The ceiling is the host's RAM less the engine's share; what is free does not matter. */
+    public function test_memory_above_the_host_ceiling_is_refused(): void
+    {
+        HostMemoryProbe::fake(new HostMemory(3809));
+        $this->makeUser('alice', ['memory_limit' => 256]);
+
+        try {
+            $this->assertSame(1, Artisan::call('project:limit:set', ['--project' => 'alice', '--memory-limit' => '3298']));
+            $this->assertStringContainsString('greater than 3297 MB', Artisan::output());
+            $this->assertSame(256, User::findByUsername('alice')->getMemoryLimit());
+        } finally {
+            HostMemoryProbe::fake(null);
+        }
     }
 
     /** An unset memory limit reads back as the default the account runs with. */

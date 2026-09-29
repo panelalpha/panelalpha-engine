@@ -167,7 +167,7 @@ class UserController extends Controller
                 new OA\Property(property: 'domain_redirect_url', type: 'string', nullable: true),
                 new OA\Property(property: 'email', type: 'string', format: 'email', example: 'john@example.com'),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', example: 10240, description: 'MB, -1 for unlimited'),
-                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: 4096, the default. Refused when larger than memory_budget.max_project_mb, or when the server does not have it free now (memory_budget.free_for_projects_mb in GET /metrics/current)'),
+                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
                 new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true),
                 new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true),
                 new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true),
@@ -338,7 +338,7 @@ class UserController extends Controller
                 new OA\Property(property: 'domain_redirect_url', type: 'string', nullable: true),
                 new OA\Property(property: 'email', type: 'string', format: 'email', example: 'john@example.com'),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', example: 10240, description: 'MB, -1 for unlimited'),
-                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: 4096, the default. Refused when larger than memory_budget.max_project_mb, or when the server does not have it free now (memory_budget.free_for_projects_mb in GET /metrics/current)'),
+                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
                 new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true),
                 new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true),
                 new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true),
@@ -1365,8 +1365,8 @@ class UserController extends Controller
             ]);
         }
 
-        // A clone is a new project: it needs the source's memory free now.
-        ProjectMemory::assertCanCreate(ProjectMemory::resolve($srcUser->getMemoryLimit()));
+        // A clone keeps the source's memory limit, which must still fit this host.
+        ProjectMemory::assertFits(ProjectMemory::resolve($srcUser->getMemoryLimit()));
 
         // ── Copy resource limits, settings and frozen deploy snapshot ────────
         $newDetails = $srcUser->detailsForCopiedProject($newUsername);

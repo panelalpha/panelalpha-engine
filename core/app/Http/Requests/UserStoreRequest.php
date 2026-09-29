@@ -68,7 +68,7 @@ class UserStoreRequest extends FormRequest
             'email' => 'email',
             'disk_space_limit' => 'integer|nullable|min:-1',
             // prepareForValidation() fills in the default, so it is always there.
-            'memory_limit' => ['integer', 'min:1', new AccountMemoryLimit(true)],
+            'memory_limit' => ['integer', 'min:1', new AccountMemoryLimit()],
             'cpu_limit' => 'numeric|nullable|min:0',
             'device_read_bps' => 'integer|nullable',
             'device_write_bps' => 'integer|nullable',

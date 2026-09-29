@@ -48,6 +48,8 @@ class ServerMetricsController extends Controller
         $diskUsed = $diskTotal - $diskFree;
         $diskUsagePercent = ($diskUsed / $diskTotal) * 100;
 
+        $memory = HostMemoryProbe::current();
+
         return new JsonResponse(['data' => [
             'cpu_usage_percent' => $this->getCpuUsage(),
             'ram_total' => $ramTotal,
@@ -58,9 +60,9 @@ class ServerMetricsController extends Controller
             'disk_free' => $diskFree,
             'disk_used' => $diskUsed,
             'disk_usage_percent' => $diskUsagePercent,
-            // Where the RAM goes, and how much projects may have.
-            'memory_budget' => HostMemoryProbe::current()->toArray()
-                + ['default_project_mb' => ProjectMemory::defaultMb()],
+            // How much one project may have.
+            'memory_budget' => $memory->toArray()
+                + ['default_project_mb' => ProjectMemory::defaultMb($memory)],
         ]]);
     }
 

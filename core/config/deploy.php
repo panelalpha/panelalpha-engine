@@ -36,17 +36,16 @@ return [
     'build_memory' => env('DEPLOY_BUILD_MEMORY', ''),
 
     /*
-     * MB all projects together may use, e.g. 16384 on a 32 GB host that runs
-     * other things too. Empty: whatever the engine and the system leave free,
-     * measured, minus 256 MB of headroom. No project may be larger than this.
+     * MB of the host's RAM kept for the engine. No project may have a
+     * memory_limit above the host's RAM less this. Empty: 512.
      */
-    'projects_memory' => env('DEPLOY_PROJECTS_MEMORY', ''),
+    'engine_memory' => env('DEPLOY_ENGINE_MEMORY', ''),
 
     /*
      * The memory_limit a project is created with when none is given, in MB.
-     * Creation fails when the server does not have it free (#294).
+     * Empty: the most a project may have, the host's RAM less engine_memory.
      */
-    'project_memory_default' => env('DEPLOY_PROJECT_MEMORY_DEFAULT', 4096),
+    'project_memory_default' => env('DEPLOY_PROJECT_MEMORY_DEFAULT', ''),
 
     /*
      * Seconds a streamed deploy step may go without printing anything before

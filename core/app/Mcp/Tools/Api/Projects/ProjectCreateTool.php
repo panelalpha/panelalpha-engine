@@ -97,7 +97,7 @@ class ProjectCreateTool extends ApiTool
             'domain_redirect_url' => $schema->string(),
             'email' => $schema->string()->description('Example: john@example.com.'),
             'disk_space_limit' => $schema->integer()->description('MB, -1 for unlimited Example: 10240.'),
-            'memory_limit' => $schema->integer()->description('MB. Omitted: 4096, the default. Refused when larger than memory_budget.max_project_mb, or when the server does not have it free now (memory_budget.free_for_projects_mb in GET /metrics/current) Example: 2048.'),
+            'memory_limit' => $schema->integer()->description('MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current Example: 2048.'),
             'cpu_limit' => $schema->number()->description('Example: 1.'),
             'bandwidth_limit' => $schema->integer(),
             'mysql_databases_limit' => $schema->integer(),
