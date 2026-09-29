@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('csf_enable')]
 #[Description(<<<'MARKDOWN'
     Enable CSF firewall
-
-    Calls PUT /api/csf/enable. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

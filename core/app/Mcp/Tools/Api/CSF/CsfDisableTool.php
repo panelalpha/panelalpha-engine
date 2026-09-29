@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Disable CSF firewall
 
     csf -x does real iptables/lfd teardown and can run past a typical client timeout, so this returns as soon as the disable is queued rather than waiting for it to finish. Poll GET /csf/status for enabled:false to confirm.
-
-    Calls PUT /api/csf/disable. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

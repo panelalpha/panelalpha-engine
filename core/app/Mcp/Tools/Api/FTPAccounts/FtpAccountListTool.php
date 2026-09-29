@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('ftp_account_list')]
 #[Description(<<<'MARKDOWN'
     List FTP accounts for a user
-
-    Calls GET /api/projects/{username}/ftp-accounts.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -59,7 +57,7 @@ class FtpAccountListTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
         ];
     }
 }

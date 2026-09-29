@@ -17,8 +17,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
     Create a proxy rule
 
     Create a new proxy rule.
-
-    Calls POST /api/proxy-rules. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class ProxyRuleCreateTool extends ApiTool
@@ -70,15 +68,15 @@ class ProxyRuleCreateTool extends ApiTool
     {
         return [
             'owner_scope' => $schema->string()->description('Who owns the rule. Defaults to user. One of: system, user.'),
-            'name' => $schema->string()->description('Project the rule belongs to. Required when owner_scope is user. Sent to the API as `username`.'),
+            'name' => $schema->string()->description('Project the rule belongs to. Required when owner_scope is user.'),
             'transport' => $schema->string()->description('One of: http, tcp, udp.')->required(),
             'listen_ip' => $schema->string(),
-            'listen_port' => $schema->integer()->description('Example: 3000.')->required(),
+            'listen_port' => $schema->integer()->required(),
             'server_name' => $schema->string(),
             'upstream_host' => $schema->string()->description('Example: 127.0.0.1.')->required(),
-            'upstream_port' => $schema->integer()->description('Example: 3001.')->required(),
+            'upstream_port' => $schema->integer()->required(),
             'upstream_protocol' => $schema->string(),
-            'enabled' => $schema->boolean()->description('Example: 1.'),
+            'enabled' => $schema->boolean(),
             'metadata' => $schema->object(),
         ];
     }

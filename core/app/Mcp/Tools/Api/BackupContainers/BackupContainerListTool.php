@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('backup_container_list')]
 #[Description(<<<'MARKDOWN'
     List backup containers
-
-    Calls GET /api/backup-containers.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

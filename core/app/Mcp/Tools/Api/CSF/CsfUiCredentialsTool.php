@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('csf_ui_credentials')]
 #[Description(<<<'MARKDOWN'
     Get CSF UI credentials
-
-    Calls GET /api/csf/ui-credentials.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

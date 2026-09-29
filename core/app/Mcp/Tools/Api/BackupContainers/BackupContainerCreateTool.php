@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('backup_container_create')]
 #[Description(<<<'MARKDOWN'
     Create a backup container
-
-    Calls POST /api/backup-containers. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class BackupContainerCreateTool extends ApiTool

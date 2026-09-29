@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('container_service_action')]
 #[Description(<<<'MARKDOWN'
     Perform a service-level Docker action
-
-    Calls POST /api/projects/{username}/containers/{service}/action. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class ContainerServiceActionTool extends ApiTool
@@ -68,7 +66,7 @@ class ContainerServiceActionTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'service' => $schema->string()->description('Example: web.')->required(),
             'action' => $schema->string()->description('One of: start, stop, restart.')->required(),
         ];

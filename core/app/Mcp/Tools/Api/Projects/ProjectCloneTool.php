@@ -25,8 +25,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
     Subdomains, FTP/SFTP accounts, MySQL databases/users and dedicated IP
     addresses are NOT cloned.
-
-    Calls POST /api/projects/{username}/clone. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectCloneTool extends ApiTool
@@ -79,7 +77,7 @@ class ProjectCloneTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Source user\'s username. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->description('Source user\'s username.')->required(),
             'new_name' => $schema->string()->description('Sent to the API as `new_username`.'),
             'domain' => $schema->string(),
         ];

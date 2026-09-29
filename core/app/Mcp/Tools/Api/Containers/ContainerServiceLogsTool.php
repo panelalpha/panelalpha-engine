@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('container_service_logs')]
 #[Description(<<<'MARKDOWN'
     Get logs from a Docker service
-
-    Calls GET /api/projects/{username}/containers/{service}/logs.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -70,7 +68,7 @@ class ContainerServiceLogsTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'service' => $schema->string()->required(),
             'lines' => $schema->integer(),
         ];

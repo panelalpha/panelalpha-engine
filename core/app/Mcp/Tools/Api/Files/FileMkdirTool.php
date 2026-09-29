@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('file_mkdir')]
 #[Description(<<<'MARKDOWN'
     Create a directory
-
-    Calls POST /api/projects/{username}/files/mkdir. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class FileMkdirTool extends ApiTool
@@ -68,9 +66,9 @@ class FileMkdirTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Example: /public_html/newdir.')->required(),
-            'parents' => $schema->boolean()->description('Example: .'),
+            'parents' => $schema->boolean(),
         ];
     }
 }

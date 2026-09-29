@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     List git branches
 
     List git branches. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed.
-
-    Calls GET /api/projects/{username}/git/branches.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -71,7 +69,7 @@ class GitBranchesTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
         ];
     }

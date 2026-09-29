@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('phpmyadmin_sso_token_create')]
 #[Description(<<<'MARKDOWN'
     Create a phpMyAdmin SSO token for a user
-
-    Calls POST /api/projects/{username}/mysql/phpmyadmin-sso-token. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class PhpmyadminSsoTokenCreateTool extends ApiTool
@@ -57,7 +55,7 @@ class PhpmyadminSsoTokenCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
         ];
     }
 }

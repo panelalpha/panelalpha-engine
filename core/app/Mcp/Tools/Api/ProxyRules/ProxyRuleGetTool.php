@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     Get a proxy rule
 
     Show a single proxy rule.
-
-    Calls GET /api/proxy-rules/{id}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

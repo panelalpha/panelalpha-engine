@@ -17,8 +17,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
     Attach a public tunnel hostname to a domain
 
     Registers a public hostname that reaches this domain without any DNS record of your own. The `panelalpha` provider allocates a name under panelalpha.online through the licensing proxy -- the way to give an application a public address with a trusted certificate on an engine with no DNS of its own. Attach it to the project domain of the same name: the proxy forwards with `Host: <the domain the tunnel is attached to>`, so a panelalpha hostname on any other local domain leaves the application answering under a name nobody typed, and anything that canonicalises its own site URL redirects for ever. Labels are first come, first served across the fleet, so a name in use is refused; deleting the tunnel releases it again. `cloudflare` puts a CNAME in a zone the project's own API token controls, so it fits a custom domain; set the token first with PUT /projects/{username}/settings/cloudflare-api-token.
-
-    Calls POST /api/projects/{username}/domains/{domain}/tunnels. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class TunnelCreateTool extends ApiTool
@@ -71,7 +69,7 @@ class TunnelCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
             'hostname' => $schema->string()->description('The public hostname to attach. For the panelalpha provider it must be a single label under panelalpha.online, and must equal the domain it is attached to. Example: my-shop.panelalpha.online.')->required(),
             'provider' => $schema->string()->description('Defaults to panelalpha. One of: cloudflare, panelalpha. Example: panelalpha.'),

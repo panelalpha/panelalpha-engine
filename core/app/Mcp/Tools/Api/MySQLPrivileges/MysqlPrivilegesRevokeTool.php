@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('mysql_privileges_revoke')]
 #[Description(<<<'MARKDOWN'
     Revoke all MySQL privileges for a user on a database
-
-    Calls DELETE /api/projects/{username}/mysql/privileges/{dbuser}/{dbname}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -61,7 +59,7 @@ class MysqlPrivilegesRevokeTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'dbuser' => $schema->string()->required(),
             'dbname' => $schema->string()->required(),
         ];

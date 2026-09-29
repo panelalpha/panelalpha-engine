@@ -175,6 +175,9 @@ class SourceInspectionController extends Controller
             . 'project`, addressed by username: same report, same field names, and readable with a '
             . 'GET. The older spellings - the `/source-inspection` path and the `path` parameter - '
             . 'still work and are deprecated.',
+        x: ['mcp-description' => "What the project's files are - stack, ports, services, the commands a deploy "
+            . 'would run - next to what the last deploy recorded, and where the two differ. .env values '
+            . 'are never returned, only their names.'],
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [
@@ -187,7 +190,8 @@ class SourceInspectionController extends Controller
                     . '"public_html" or "project/apps/api". Absolute paths are accepted when they '
                     . 'are inside the home directory. Named as it is on POST /source/inspect; '
                     . '`path` is accepted as a deprecated alias.',
-                schema: new OA\Schema(type: 'string')
+                schema: new OA\Schema(type: 'string'),
+                x: ['mcp-description' => 'Directory under the account home. Default: project.']
             ),
         ],
         responses: [

@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('csf_rule_list')]
 #[Description(<<<'MARKDOWN'
     List CSF firewall rules
-
-    Calls GET /api/csf/rules.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

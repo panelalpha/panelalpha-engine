@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Clear one project setting
 
     Clearing a Cloudflare API token is refused while the project still has Cloudflare tunnels, unless `force` is true, which tears them down first.
-
-    Calls DELETE /api/projects/{username}/settings/{key}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -72,7 +70,7 @@ class ProjectSettingDeleteTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'key' => $schema->string()->required(),
             'force' => $schema->boolean()->description('Tear down Cloudflare tunnels that depend on this value.'),
         ];

@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('mysql_user_create')]
 #[Description(<<<'MARKDOWN'
     Create a MySQL user
-
-    Calls POST /api/projects/{username}/mysql/users. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class MysqlUserCreateTool extends ApiTool
@@ -69,7 +67,7 @@ class MysqlUserCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'dbuser' => $schema->string()->description('Example: dbuser1. Sent to the API as `name`.')->required(),
             'password' => $schema->string()->description('Example: SecureP@ss1.')->required(),
         ];

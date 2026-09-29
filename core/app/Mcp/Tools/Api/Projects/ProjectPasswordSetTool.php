@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Set site password protection for a project
 
     Protects all domains of the project (nginx-proxy). Username in Basic Auth is ignored; only the password matters. Host-wide UX is SITE_PASSWORD_AUTH_MODE=custom|basic.
-
-    Calls PUT /api/projects/{username}/password. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -71,7 +69,7 @@ class ProjectPasswordSetTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'password' => $schema->string()->min(1)->description('Site password.')->required(),
         ];
     }

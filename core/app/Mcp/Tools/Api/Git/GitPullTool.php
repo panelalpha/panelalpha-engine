@@ -17,8 +17,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
     Pull from the git remote
 
     Pull from the git remote. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Body `strategy` is `ff` (default), `force` (`reset --hard` origin/<branch> plus clean -fd), or `push_first`. `ff` fetches and fast-forwards, and git alone decides whether the checkout allows it: untracked files (uploads, caches) and edits to files the incoming commits leave alone do not block it. It returns 422 naming the paths when a local edit or untracked file sits where an incoming commit writes, or 422 when history has diverged (for example after a force-push); the checkout is left as it was. On a Deploy-managed checkout (`managed_by` is `deploy`) a successful pull rebuilds the app from the pulled files. Confirm with the operator before `force`.
-
-    Calls POST /api/projects/{username}/git/pull. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class GitPullTool extends ApiTool
@@ -70,7 +68,7 @@ class GitPullTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
             'strategy' => $schema->string()->description('One of: ff, force, push_first.'),
         ];

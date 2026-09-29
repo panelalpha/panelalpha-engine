@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Change the tracked git branch
 
     Change the tracked git branch. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Body `branch` is required. Returns 422 if the working tree is dirty, the remote branch does not exist, or managed_by is `deploy` — then use `project_rebuild`.
-
-    Calls PUT /api/projects/{username}/git/change-branch. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -72,7 +70,7 @@ class GitChangeBranchTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
             'branch' => $schema->string()->required(),
         ];

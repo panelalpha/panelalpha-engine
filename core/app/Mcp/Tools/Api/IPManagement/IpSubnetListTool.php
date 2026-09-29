@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('ip_subnet_list')]
 #[Description(<<<'MARKDOWN'
     List IP subnets
-
-    Calls GET /api/ip/subnets.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

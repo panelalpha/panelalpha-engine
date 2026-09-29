@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     Get one vault entry by its reference
 
     The status of one entry. `ref` is its `vault:<id>`, or the bare id. The secret is never included.
-
-    Calls GET /api/vault/secrets/{ref}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

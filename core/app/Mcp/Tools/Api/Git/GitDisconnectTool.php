@@ -16,9 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Disconnect git from a directory
 
-    Disconnect git from a directory. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Removes `origin` and site-git metadata; does not delete working-tree files. Returns 422 when managed_by is `deploy`.
-
-    Calls POST /api/projects/{username}/git/disconnect. This changes server state.
+    Disconnect git from a directory. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Removes `origin` and site-git metadata; does not delete working-tree files. Also removes the checkout's Deploy Hook, if it has one -- a disconnected checkout has nothing for a push to deploy. Returns 422 when managed_by is `deploy`.
     MARKDOWN)]
 #[IsDestructive]
 class GitDisconnectTool extends ApiTool
@@ -69,7 +67,7 @@ class GitDisconnectTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
         ];
     }

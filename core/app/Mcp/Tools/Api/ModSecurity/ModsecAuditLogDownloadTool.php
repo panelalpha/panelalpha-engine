@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('modsec_audit_log_download')]
 #[Description(<<<'MARKDOWN'
     Download a ModSecurity audit log file
-
-    Calls GET /api/modsec/audit-log/files/{filename}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('file_exists')]
 #[Description(<<<'MARKDOWN'
     Check if a file or directory exists
-
-    Calls GET /api/projects/{username}/files/exists.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -69,7 +67,7 @@ class FileExistsTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->required(),
         ];
     }

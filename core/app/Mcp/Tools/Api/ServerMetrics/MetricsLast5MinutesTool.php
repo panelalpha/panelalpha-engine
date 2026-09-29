@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('metrics_last_5_minutes')]
 #[Description(<<<'MARKDOWN'
     Get metrics for the last 5 minutes
-
-    Calls GET /api/metrics/last-5-minutes.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

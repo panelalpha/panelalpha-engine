@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('system_webserver_password_reset')]
 #[Description(<<<'MARKDOWN'
     Reset the webserver panel password
-
-    Calls PUT /api/system/reset-webserver-panel-password. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

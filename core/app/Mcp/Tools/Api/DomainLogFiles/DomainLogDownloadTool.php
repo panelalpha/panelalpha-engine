@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('domain_log_download')]
 #[Description(<<<'MARKDOWN'
     Download a domain log file
-
-    Calls GET /api/projects/{username}/domains/{domain}/log-files/{filename}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -66,7 +64,7 @@ class DomainLogDownloadTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
             'filename' => $schema->string()->required(),
             'offset' => $schema->integer()->description('Byte to start reading at. Default 0; pass the previous result\'s next_offset to continue.'),

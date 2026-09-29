@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('sftp_account_delete')]
 #[Description(<<<'MARKDOWN'
     Delete an SFTP account
-
-    Calls DELETE /api/projects/{username}/sftp-accounts/{sftpUser}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -60,7 +58,7 @@ class SftpAccountDeleteTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'sftpUser' => $schema->string()->required(),
         ];
     }

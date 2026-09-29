@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     List git commits
 
     List git commits. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Query `branch` filters the log; `limit` caps how many commits are returned.
-
-    Calls GET /api/projects/{username}/git/commits.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -73,7 +71,7 @@ class GitCommitsTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
             'branch' => $schema->string(),
             'limit' => $schema->integer(),

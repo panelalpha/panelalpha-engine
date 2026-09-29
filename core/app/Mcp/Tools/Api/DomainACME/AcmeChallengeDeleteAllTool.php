@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('acme_challenge_delete_all')]
 #[Description(<<<'MARKDOWN'
     Delete all HTTP-01 ACME challenges for a domain
-
-    Calls DELETE /api/domains/{domain}/http-acme-challenges. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

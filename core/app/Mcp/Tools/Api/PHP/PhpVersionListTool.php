@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('php_version_list')]
 #[Description(<<<'MARKDOWN'
     List available PHP versions on the server
-
-    Calls GET /api/php/available-versions.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

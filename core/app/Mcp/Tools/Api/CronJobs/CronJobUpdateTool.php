@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('cron_job_update')]
 #[Description(<<<'MARKDOWN'
     Update a cron job
-
-    Calls PUT /api/projects/{username}/cron-jobs/{hash}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -75,7 +73,7 @@ class CronJobUpdateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'hash' => $schema->string()->required(),
             'command' => $schema->string()->required(),
             'minute' => $schema->string()->required(),

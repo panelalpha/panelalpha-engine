@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Request the engine's own Let's Encrypt certificate
 
     Obtains the certificate :2011 serves, for `domain` or the cert_domain setting. **This briefly takes every hosted site offline**: certbot needs the host's :80 and sites-http holds it, so the webserver is stopped for the length of the challenge and brought back after — usually seconds. It is not the mechanism project certificates use. Blocks until the request finishes, up to 15 minutes. Use dry_run first: it runs the full challenge against staging and writes nothing.
-
-    Calls PUT /api/system/engine-certificate. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

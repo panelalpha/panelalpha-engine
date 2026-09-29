@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('system_webserver_config_set')]
 #[Description(<<<'MARKDOWN'
     Update webserver configuration
-
-    Calls PUT /api/system/webserver-config. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

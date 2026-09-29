@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     Page of task log lines after a timestamp and/or id cursor
 
     Pass `since` as unix seconds or an ISO datetime to keep only rows with created_at greater than that instant. Pass `after_id` to skip rows at or below that id (needed when many lines share the same second). Both filters AND together. Prefer this over the logs embedded in GET /tasks/{id} when polling by time.
-
-    Calls GET /api/tasks/{id}/logs.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

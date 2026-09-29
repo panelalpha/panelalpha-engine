@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('task_cancel')]
 #[Description(<<<'MARKDOWN'
     Cancel a queued or running task; kill the work subprocess if it still matches
-
-    Calls POST /api/tasks/{id}/cancel. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class TaskCancelTool extends ApiTool

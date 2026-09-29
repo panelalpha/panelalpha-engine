@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Delete a push-to-deploy hook
 
     Delete the Deploy Hook of a checkout and its delivery history. Its URL answers 404 from then on; remove the webhook in the git host too. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. 404 when the checkout has no hook.
-
-    Calls DELETE /api/projects/{username}/git/deploy-hook. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -71,7 +69,7 @@ class GitDeployHookDeleteTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
         ];
     }

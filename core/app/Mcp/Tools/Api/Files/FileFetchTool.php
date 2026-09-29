@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('file_fetch')]
 #[Description(<<<'MARKDOWN'
     Fetch an http or https URL into the project
-
-    Calls POST /api/projects/{username}/files/fetch. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class FileFetchTool extends ApiTool
@@ -69,7 +67,7 @@ class FileFetchTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'url' => $schema->string()->description('Example: https://example.com/plugin.zip.')->required(),
             'path' => $schema->string()->description('Example: /public_html.')->required(),
             'filename' => $schema->string()->description('Example: plugin.zip.'),

@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('sftp_account_update')]
 #[Description(<<<'MARKDOWN'
     Update an SFTP account
-
-    Calls PUT /api/projects/{username}/sftp-accounts/{sftpUser}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -72,7 +70,7 @@ class SftpAccountUpdateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'sftpUser' => $schema->string()->required(),
             'auth_method' => $schema->string()->description('One of: password, public_key. Example: password.')->required(),
             'password' => $schema->string(),

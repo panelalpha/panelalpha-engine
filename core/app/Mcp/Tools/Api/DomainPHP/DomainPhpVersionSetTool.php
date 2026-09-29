@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('domain_php_version_set')]
 #[Description(<<<'MARKDOWN'
     Set PHP version for a domain
-
-    Calls PUT /api/domains/{domain}/php-version. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

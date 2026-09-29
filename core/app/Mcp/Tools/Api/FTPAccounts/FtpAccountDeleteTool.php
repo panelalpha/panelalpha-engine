@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('ftp_account_delete')]
 #[Description(<<<'MARKDOWN'
     Delete an FTP account
-
-    Calls DELETE /api/projects/{username}/ftp-accounts/{ftpUser}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -60,7 +58,7 @@ class FtpAccountDeleteTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'ftpUser' => $schema->string()->description('Example: ftpuser1@example.com.')->required(),
         ];
     }

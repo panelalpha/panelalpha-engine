@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('app_user_reset_password')]
 #[Description(<<<'MARKDOWN'
     Reset an app user password
-
-    Calls PUT /api/projects/{username}/app/users/{userId}/password. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -70,7 +68,7 @@ class AppUserResetPasswordTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'userId' => $schema->string()->required(),
             'password' => $schema->string()->required(),
         ];

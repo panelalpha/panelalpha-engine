@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('sftp_account_create')]
 #[Description(<<<'MARKDOWN'
     Create an SFTP account
-
-    Calls POST /api/projects/{username}/sftp-accounts. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class SftpAccountCreateTool extends ApiTool
@@ -70,7 +68,7 @@ class SftpAccountCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'sftp_username' => $schema->string()->description('Name of the SFTP account. Must start with "<project username>_". Also accepted as `username`; documented under this name because `username` is already this route\'s path parameter. Example: johndoe_backup.')->required(),
             'auth_method' => $schema->string()->description('Comma-separated list of "password" and/or "public_key". Each method listed requires its credential below. Example: password.')->required(),
             'password' => $schema->string()->description('Required when auth_method includes "password". Minimum 8 characters.'),

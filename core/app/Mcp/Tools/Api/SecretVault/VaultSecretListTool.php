@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     List vault entries
 
     Entries, newest first. **The secret is never included** and cannot be read back by any endpoint -- this is the inventory, not the values. Each row carries `ref` (`vault:<id>`, what a request passes and what status or delete take), `type`, `scope`, `project` (the project a `project` entry belongs to, null until one claims it), `purpose`, `status` (pending, filled or abandoned) and the dates. `purpose` is what tells entries of the same type apart.
-
-    Calls GET /api/vault/secrets.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

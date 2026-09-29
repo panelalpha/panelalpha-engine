@@ -43,13 +43,13 @@ final class UploadArguments
     {
         return [
             ["{$param}_name", ['type' => 'string'], false,
-                "Name the file is stored under, no directories. Required with {$param}_contents; with {$param}_url it defaults to the URL's last segment. Example: app.zip."],
+                "File name, no directories. Required with {$param}_contents; defaults to the URL's last segment."],
             ["{$param}_contents", ['type' => 'string'], false,
-                "The file's bytes, base64-encoded unless {$param}_encoding is text. Fine for small files; for an archive of any size use {$param}_url instead."],
+                "The bytes, base64 unless {$param}_encoding is text. Small files only."],
             ["{$param}_encoding", ['type' => 'string', 'enum' => ['base64', 'text']], false,
-                "How {$param}_contents is encoded. Default base64."],
+                "Default base64."],
             ["{$param}_url", ['type' => 'string'], false,
-                "http(s) URL the engine downloads the file from instead of {$param}_contents - a release asset or a repository's archive/refs/heads/main.zip, for instance."],
+                "http(s) URL the engine downloads instead, e.g. a repository's archive/refs/heads/main.zip."],
         ];
     }
 

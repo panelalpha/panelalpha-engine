@@ -17,11 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Poll the deploy log (JSON-lines) from a byte-like line offset
 
-    Returns a page of lines from `offset`. While `more` is true there are lines after this page: ask again with `offset` set to `next_offset`. `max_bytes` bounds a page by size as well as by line count.
-
-    When the latest deploy failed and PanelAlpha monitoring knows how to fix that failure, `problem` carries the fix (title, body_why, body_fix, fixed_in_version, ...); otherwise it is null.
-
-    Calls GET /api/projects/{username}/deploy-log.
+    A page of the latest deploy log from `offset`. While `more` is true, call again with `next_offset`. `problem` carries the fix when a failed deploy is a known failure.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -84,9 +80,9 @@ class DeployLogGetTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'offset' => $schema->integer(),
-            'max_bytes' => $schema->integer()->description('Upper bound on the log text in one page, at least 1024. Omitted: up to 2000 lines, whatever their size. This tool sends 49152 when it is omitted.'),
+            'max_bytes' => $schema->integer()->description('Page size in bytes, at least 1024. This tool sends 49152 when it is omitted.'),
         ];
     }
 }

@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     Git repository status
 
     Call this first. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Query `fetch` updates remote-tracking refs before reporting. The payload includes `managed_by`: `deploy` (account provisioned with git_repo; mutating Git must go through `project_rebuild`) or `site_git` (these Git tools).
-
-    Calls GET /api/projects/{username}/git/status.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -72,7 +70,7 @@ class GitStatusTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
             'fetch' => $schema->boolean(),
         ];

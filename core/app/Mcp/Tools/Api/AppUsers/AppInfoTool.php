@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('app_info')]
 #[Description(<<<'MARKDOWN'
     Get app info and capabilities
-
-    Calls GET /api/projects/{username}/app/info.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -59,7 +57,7 @@ class AppInfoTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
         ];
     }
 }

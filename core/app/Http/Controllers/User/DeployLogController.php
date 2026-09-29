@@ -33,6 +33,8 @@ class DeployLogController extends Controller
             . "\n\n"
             . 'When the latest deploy failed and PanelAlpha monitoring knows how to fix that failure, '
             . '`problem` carries the fix (title, body_why, body_fix, fixed_in_version, ...); otherwise it is null.',
+        x: ['mcp-description' => 'A page of the latest deploy log from `offset`. While `more` is true, call again '
+            . 'with `next_offset`. `problem` carries the fix when a failed deploy is a known failure.'],
         security: [['bearerAuth' => []]],
         tags: ['Deploy'],
         parameters: [
@@ -44,7 +46,7 @@ class DeployLogController extends Controller
                 required: false,
                 description: 'Upper bound on the log text in one page, at least 1024. Omitted: up to 2000 lines, whatever their size.',
                 schema: new OA\Schema(type: 'integer', minimum: 1024),
-                x: ['mcp-default' => '49152'],
+                x: ['mcp-default' => '49152', 'mcp-description' => 'Page size in bytes, at least 1024.'],
             ),
         ],
         responses: [

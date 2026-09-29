@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('acme_challenge_create')]
 #[Description(<<<'MARKDOWN'
     Create an HTTP-01 ACME challenge
-
-    Calls POST /api/domains/{domain}/http-acme-challenges. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class AcmeChallengeCreateTool extends ApiTool

@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('lighthouse_report_create')]
 #[Description(<<<'MARKDOWN'
     Generate a Lighthouse performance report
-
-    Calls POST /api/lighthouse/generate-report. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class LighthouseReportCreateTool extends ApiTool

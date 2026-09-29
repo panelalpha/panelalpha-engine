@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('mysql_privileges_set')]
 #[Description(<<<'MARKDOWN'
     Update MySQL privileges for a user on a database
-
-    Calls PUT /api/projects/{username}/mysql/privileges/{dbuser}/{dbname}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -71,7 +69,7 @@ class MysqlPrivilegesSetTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'dbuser' => $schema->string()->required(),
             'dbname' => $schema->string()->required(),
             'privileges' => $schema->string()->description('Example: ALL PRIVILEGES.')->required(),

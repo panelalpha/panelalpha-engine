@@ -17,9 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Inspect a project's deployed application files
 
-    Reports what the project's files are - stack, ports, backing services, the commands a deploy would run - alongside the snapshot the last deploy froze onto the account, and lists where the two disagree. Reads /home/<username>/project by default (the main domain's document root for the classic PHP templates); `subdirectory` selects another directory under the account home. Values from .env files are never returned - only the variable names. This is POST /source/inspect with `type: project`, addressed by username: same report, same field names, and readable with a GET. The older spellings - the `/source-inspection` path and the `path` parameter - still work and are deprecated.
-
-    Calls GET /api/projects/{username}/inspect.
+    What the project's files are - stack, ports, services, the commands a deploy would run - next to what the last deploy recorded, and where the two differ. .env values are never returned, only their names.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -71,8 +69,8 @@ class ProjectInspectTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
-            'subdirectory' => $schema->string()->description('Directory under the account home to inspect, e.g. "project", "public_html" or "project/apps/api". Absolute paths are accepted when they are inside the home directory. Named as it is on POST /source/inspect; `path` is accepted as a deprecated alias.'),
+            'name' => $schema->string()->required(),
+            'subdirectory' => $schema->string()->description('Directory under the account home. Default: project.'),
         ];
     }
 }

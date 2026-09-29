@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('csf_rule_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a CSF firewall rule
-
-    Calls DELETE /api/csf/rules/{type}/{lineMd5}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

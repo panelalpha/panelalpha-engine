@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('ip_assigned_list')]
 #[Description(<<<'MARKDOWN'
     List assigned IP addresses
-
-    Calls GET /api/ip/assigned.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

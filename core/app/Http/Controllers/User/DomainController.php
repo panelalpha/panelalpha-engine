@@ -418,6 +418,8 @@ class DomainController extends Controller
             . "installs it, then re-renders the vhost so the site serves it. The challenge is served "
             . "by the running webserver, so nothing goes offline. The name must already resolve to "
             . "this host. Use install-ssl-cert instead when you already hold a certificate.",
+        x: ['mcp-description' => "Gets and installs a Let's Encrypt certificate over HTTP-01, without downtime. "
+            . 'The domain must already resolve to this host.'],
         security: [['bearerAuth' => []]],
         tags: ['Domains'],
         parameters: [
@@ -430,13 +432,15 @@ class DomainController extends Controller
                     property: 'staging',
                     type: 'boolean',
                     description: "Use Let's Encrypt's staging authority: the certificate is untrusted "
-                        . 'by browsers but spends no production rate limit. For rehearsing a request.'
+                        . 'by browsers but spends no production rate limit. For rehearsing a request.',
+                    x: ['mcp-description' => 'Untrusted test certificate; spends no rate limit.']
                 ),
                 new OA\Property(
                     property: 'dry_run',
                     type: 'boolean',
                     description: 'Report what would be requested and why it would or would not work, '
-                        . 'without contacting the authority.'
+                        . 'without contacting the authority.',
+                    x: ['mcp-description' => 'Only report whether a request would work.']
                 ),
             ],
         )),

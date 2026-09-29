@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     List a domain's public tunnel hostnames
 
     List the tunnels attached to one domain.
-
-    Calls GET /api/projects/{username}/domains/{domain}/tunnels.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -62,7 +60,7 @@ class TunnelListTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
         ];
     }

@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     Get resource usage for a project
 
     Includes this calendar month's transfer as bandwidth.usage (bytes) against bandwidth.maximum (the project bandwidth_limit in bytes, or null when unlimited).
-
-    Calls GET /api/projects/{username}/usage.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -61,7 +59,7 @@ class ProjectUsageTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
         ];
     }
 }

@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('cron_job_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a cron job
-
-    Calls DELETE /api/projects/{username}/cron-jobs/{hash}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -60,7 +58,7 @@ class CronJobDeleteTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'hash' => $schema->string()->required(),
         ];
     }

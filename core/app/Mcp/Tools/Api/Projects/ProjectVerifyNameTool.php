@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('project_verify_name')]
 #[Description(<<<'MARKDOWN'
     Verify a username is available
-
-    Calls POST /api/projects/verify-new-username.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -59,7 +57,7 @@ class ProjectVerifyNameTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Example: johndoe. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->description('Example: johndoe.')->required(),
         ];
     }
 }

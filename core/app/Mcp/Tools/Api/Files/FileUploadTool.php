@@ -16,9 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Upload a file
 
-    Stores one file in the account, under `path` (relative to the home directory, e.g. /project). Over HTTP the file is a multipart form part. Over MCP pass file_name plus file_contents (base64, or text with file_encoding: text) for a small file, or file_url for anything the engine should download itself, such as a release archive; then project_deploy_archive deploys an uploaded .zip or .tar.gz. Plain text files can also be written directly with file_write.
-
-    Calls POST /api/projects/{username}/files/upload. This changes server state.
+    Stores one file under `path` (e.g. /project). Small: file_name + file_contents. Anything larger: file_url, which the engine downloads.
     MARKDOWN)]
 #[IsDestructive]
 class FileUploadTool extends ApiTool
@@ -79,12 +77,12 @@ class FileUploadTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Example: /public_html.')->required(),
-            'file_name' => $schema->string()->description('Name the file is stored under, no directories. Required with file_contents; with file_url it defaults to the URL\'s last segment. Example: app.zip.'),
-            'file_contents' => $schema->string()->description('The file\'s bytes, base64-encoded unless file_encoding is text. Fine for small files; for an archive of any size use file_url instead.'),
-            'file_encoding' => $schema->string()->description('How file_contents is encoded. Default base64. One of: base64, text.'),
-            'file_url' => $schema->string()->description('http(s) URL the engine downloads the file from instead of file_contents - a release asset or a repository\'s archive/refs/heads/main.zip, for instance.'),
+            'file_name' => $schema->string()->description('File name, no directories. Required with file_contents; defaults to the URL\'s last segment.'),
+            'file_contents' => $schema->string()->description('The bytes, base64 unless file_encoding is text. Small files only.'),
+            'file_encoding' => $schema->string()->description('Default base64. One of: base64, text.'),
+            'file_url' => $schema->string()->description('http(s) URL the engine downloads instead, e.g. a repository\'s archive/refs/heads/main.zip.'),
         ];
     }
 }

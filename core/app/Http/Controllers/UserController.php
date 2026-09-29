@@ -140,6 +140,10 @@ class UserController extends Controller
             . "X-Deploy-Stream is not supported here — use POST /users for a synchronous create "
             . "with optional NDJSON streaming.",
         summary: 'Create a new hosting project (async)',
+        x: ['mcp-description' => 'Creates the account now and deploys it in the background: answers 202 with a task `id`. '
+            . 'Poll task_get until it is completed, failed or cancelled. Leave `domain` out: the engine picks '
+            . 'the best public name it can, a free panelalpha.online one when available, and project_get '
+            . 'says which (details.domain). Resource limits are set afterwards with project_update.'],
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             // Nothing is required: validation has never demanded an email, and
@@ -153,7 +157,8 @@ class UserController extends Controller
                     description: 'The project account name. Generated when omitted: from the repository '
                         . 'name, else the domain, else the recipe, else "app" -- with a random numeric '
                         . 'suffix when that name is taken. 3-15 lowercase letters and digits, starting '
-                        . 'with a letter.'
+                        . 'with a letter.',
+                    x: ['mcp-description' => '3-15 lowercase letters and digits, starting with a letter. Generated from the repository or domain when omitted.']
                 ),
                 new OA\Property(
                     property: 'domain',
@@ -162,22 +167,23 @@ class UserController extends Controller
                     nullable: true,
                     description: 'The main domain. Omitted, it becomes <username>.<sites_base_domain>, '
                         . 'which resolves nowhere while that setting is unset. Prefer a label under '
-                        . 'panelalpha.online and a matching tunnel -- see the description above.'
+                        . 'panelalpha.online and a matching tunnel -- see the description above.',
+                    x: ['mcp-description' => 'Only for a domain of the user\'s own, with tunnel: none. Omitted, the engine picks the best public name it can.']
                 ),
-                new OA\Property(property: 'domain_redirect_url', type: 'string', nullable: true),
+                new OA\Property(property: 'domain_redirect_url', type: 'string', nullable: true, x: ['mcp-hide' => true]),
                 new OA\Property(property: 'email', type: 'string', format: 'email', example: 'john@example.com'),
-                new OA\Property(property: 'disk_space_limit', type: 'integer', example: 10240, description: 'MB, -1 for unlimited'),
-                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
-                new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true),
-                new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'addon_domains_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'subdomains_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'inodes_limit', type: 'integer', nullable: true),
-                new OA\Property(property: 'dedicated_ipv4', type: 'boolean', example: false),
-                new OA\Property(property: 'dedicated_ipv6', type: 'boolean', example: false),
+                new OA\Property(property: 'disk_space_limit', type: 'integer', example: 10240, description: 'MB, -1 for unlimited', x: ['mcp-hide' => true]),
+                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current', x: ['mcp-description' => 'MB. Default: the server\'s RAM less the engine\'s share, which is also the most allowed.']),
+                new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true, x: ['mcp-hide' => true]),
+                new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true, x: ['mcp-hide' => true]),
+                new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true, x: ['mcp-hide' => true]),
+                new OA\Property(property: 'ftp_accounts_limit', type: 'integer', nullable: true, x: ['mcp-hide' => true]),
+                new OA\Property(property: 'sftp_accounts_limit', type: 'integer', nullable: true, x: ['mcp-hide' => true]),
+                new OA\Property(property: 'addon_domains_limit', type: 'integer', nullable: true, x: ['mcp-hide' => true]),
+                new OA\Property(property: 'subdomains_limit', type: 'integer', nullable: true, x: ['mcp-hide' => true]),
+                new OA\Property(property: 'inodes_limit', type: 'integer', nullable: true, x: ['mcp-hide' => true]),
+                new OA\Property(property: 'dedicated_ipv4', type: 'boolean', example: false, x: ['mcp-hide' => true]),
+                new OA\Property(property: 'dedicated_ipv6', type: 'boolean', example: false, x: ['mcp-hide' => true]),
                 new OA\Property(
                     property: 'template',
                     type: 'string',
@@ -185,7 +191,7 @@ class UserController extends Controller
                     description: 'dind runs an application in containers of its own, and is what a git_repo '
                         . 'deploys into. Omitted over the REST API, the project is classic shared hosting '
                         . '(default: Apache/PHP-FPM, for WordPress and plain PHP sites).',
-                    x: ['mcp-default' => 'dind']
+                    x: ['mcp-default' => 'dind', 'mcp-description' => 'dind runs the app in containers of its own; the other templates are classic shared hosting.']
                 ),
                 new OA\Property(
                     property: 'tunnel',
@@ -199,7 +205,8 @@ class UserController extends Controller
                         . '<name>.<cert_domain> and of a domain the caller pointed at this host. A '
                         . 'Cloudflare tunnel is not available here: it needs the project\'s API token, '
                         . 'which can only be set once the project exists -- create it, PUT '
-                        . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.'
+                        . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.',
+                    x: ['mcp-description' => 'panelalpha (default): a free panelalpha.online name with a trusted certificate, tunnel attached in this call. none: `domain` already points at this host.']
                 ),
                 new OA\Property(
                     property: 'git_repo',
@@ -209,7 +216,8 @@ class UserController extends Controller
                     description: 'HTTPS clone URL. SSH remotes (git@host:owner/repo.git, ssh://...) are '
                         . 'not supported: the engine clones anonymously or with `git_token` and holds no '
                         . 'SSH keys -- a 422 names the HTTPS spelling to use instead. A schemeless '
-                        . 'github.com/owner/repo is accepted and has the scheme filled in.'
+                        . 'github.com/owner/repo is accepted and has the scheme filled in.',
+                    x: ['mcp-description' => 'HTTPS clone URL; SSH remotes are refused. github.com/owner/repo also works.']
                 ),
                 new OA\Property(property: 'git_branch', type: 'string', nullable: true),
                 new OA\Property(
@@ -220,7 +228,8 @@ class UserController extends Controller
                         . 'A `vault:<id>` from vault_secret_create is accepted here in place of the literal token, '
                         . 'so the token itself never passes through the calling agent. A `project` entry becomes '
                         . 'this project\'s own and is refused to any other; a `global` one may be used by any '
-                        . 'project. Omitted, the repository is cloned anonymously.'
+                        . 'project. Omitted, the repository is cloned anonymously.',
+                    x: ['mcp-description' => 'Token for a private repository. Prefer a `vault:<id>` from vault_secret_create over the token itself.']
                 ),
                 new OA\Property(
                     property: 'env_vars',
@@ -229,7 +238,8 @@ class UserController extends Controller
                     additionalProperties: new OA\AdditionalProperties(type: 'string'),
                     description: 'Optional KEY=value overrides. Stored on the project and applied to its '
                         . '.env and its container environment on every deploy, outranking what the platform '
-                        . 'generates. An empty value is not an override and is not stored.'
+                        . 'generates. An empty value is not an override and is not stored.',
+                    x: ['mcp-description' => 'KEY=value applied to the app\'s .env and container on every deploy.']
                 ),
                 new OA\Property(
                     property: 'recipe',
@@ -240,7 +250,8 @@ class UserController extends Controller
                         . 'same id previews exactly what this deploys. An id this engine does not ship '
                         . 'fails the deploy rather than falling back to detection. Applies to this deploy '
                         . 'only - nothing is stored, so the next deploy without it detects again.',
-                    example: 'php'
+                    example: 'php',
+                    x: ['mcp-description' => 'Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only.']
                 ),
                 new OA\Property(
                     property: 'stages',
@@ -250,7 +261,8 @@ class UserController extends Controller
                         . 'upgrade, start). A stage named here replaces that stage entirely; a stage left '
                         . 'out keeps the platform defaults; a stage given as [] runs nothing. Each command '
                         . 'is {id, run, optional, serve, timeout, workdir, role}. Applies to this deploy '
-                        . 'only - nothing is stored, so the next deploy without it is back on defaults.'
+                        . 'only - nothing is stored, so the next deploy without it is back on defaults.',
+                    x: ['mcp-description' => 'Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.']
                 ),
             ],
         )),
@@ -324,7 +336,8 @@ class UserController extends Controller
                     description: 'The project account name. Generated when omitted: from the repository '
                         . 'name, else the domain, else the recipe, else "app" -- with a random numeric '
                         . 'suffix when that name is taken. 3-15 lowercase letters and digits, starting '
-                        . 'with a letter.'
+                        . 'with a letter.',
+                    x: ['mcp-description' => '3-15 lowercase letters and digits, starting with a letter. Generated from the repository or domain when omitted.']
                 ),
                 new OA\Property(
                     property: 'domain',
@@ -333,12 +346,13 @@ class UserController extends Controller
                     nullable: true,
                     description: 'The main domain. Omitted, it becomes <username>.<sites_base_domain>, '
                         . 'which resolves nowhere while that setting is unset. Prefer a label under '
-                        . 'panelalpha.online and a matching tunnel -- see the description above.'
+                        . 'panelalpha.online and a matching tunnel -- see the description above.',
+                    x: ['mcp-description' => 'Only for a domain of the user\'s own, with tunnel: none. Omitted, the engine picks the best public name it can.']
                 ),
                 new OA\Property(property: 'domain_redirect_url', type: 'string', nullable: true),
                 new OA\Property(property: 'email', type: 'string', format: 'email', example: 'john@example.com'),
                 new OA\Property(property: 'disk_space_limit', type: 'integer', example: 10240, description: 'MB, -1 for unlimited'),
-                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current'),
+                new OA\Property(property: 'memory_limit', type: 'integer', example: 2048, description: 'MB. Omitted: memory_budget.default_project_mb, the RAM of the server less what is kept for the engine. Refused when larger than memory_budget.max_project_mb in GET /metrics/current', x: ['mcp-description' => 'MB. Default: the server\'s RAM less the engine\'s share, which is also the most allowed.']),
                 new OA\Property(property: 'cpu_limit', type: 'number', format: 'float', example: 1.0, nullable: true),
                 new OA\Property(property: 'bandwidth_limit', type: 'integer', nullable: true),
                 new OA\Property(property: 'mysql_databases_limit', type: 'integer', nullable: true),
@@ -356,7 +370,7 @@ class UserController extends Controller
                     description: 'dind runs an application in containers of its own, and is what a git_repo '
                         . 'deploys into. Omitted over the REST API, the project is classic shared hosting '
                         . '(default: Apache/PHP-FPM, for WordPress and plain PHP sites).',
-                    x: ['mcp-default' => 'dind']
+                    x: ['mcp-default' => 'dind', 'mcp-description' => 'dind runs the app in containers of its own; the other templates are classic shared hosting.']
                 ),
                 new OA\Property(
                     property: 'tunnel',
@@ -370,7 +384,8 @@ class UserController extends Controller
                         . '<name>.<cert_domain> and of a domain the caller pointed at this host. A '
                         . 'Cloudflare tunnel is not available here: it needs the project\'s API token, '
                         . 'which can only be set once the project exists -- create it, PUT '
-                        . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.'
+                        . '/projects/{username}/settings/cloudflare-api-token, then POST the tunnel.',
+                    x: ['mcp-description' => 'panelalpha (default): a free panelalpha.online name with a trusted certificate, tunnel attached in this call. none: `domain` already points at this host.']
                 ),
                 new OA\Property(
                     property: 'git_repo',
@@ -380,7 +395,8 @@ class UserController extends Controller
                     description: 'HTTPS clone URL. SSH remotes (git@host:owner/repo.git, ssh://...) are '
                         . 'not supported: the engine clones anonymously or with `git_token` and holds no '
                         . 'SSH keys -- a 422 names the HTTPS spelling to use instead. A schemeless '
-                        . 'github.com/owner/repo is accepted and has the scheme filled in.'
+                        . 'github.com/owner/repo is accepted and has the scheme filled in.',
+                    x: ['mcp-description' => 'HTTPS clone URL; SSH remotes are refused. github.com/owner/repo also works.']
                 ),
                 new OA\Property(property: 'git_branch', type: 'string', nullable: true),
                 new OA\Property(
@@ -391,7 +407,8 @@ class UserController extends Controller
                         . 'A `vault:<id>` from vault_secret_create is accepted here in place of the literal token, '
                         . 'so the token itself never passes through the calling agent. A `project` entry becomes '
                         . 'this project\'s own and is refused to any other; a `global` one may be used by any '
-                        . 'project. Omitted, the repository is cloned anonymously.'
+                        . 'project. Omitted, the repository is cloned anonymously.',
+                    x: ['mcp-description' => 'Token for a private repository. Prefer a `vault:<id>` from vault_secret_create over the token itself.']
                 ),
                 new OA\Property(
                     property: 'env_vars',
@@ -400,7 +417,8 @@ class UserController extends Controller
                     additionalProperties: new OA\AdditionalProperties(type: 'string'),
                     description: 'Optional KEY=value overrides. Stored on the project and applied to its '
                         . '.env and its container environment on every deploy, outranking what the platform '
-                        . 'generates. An empty value is not an override and is not stored.'
+                        . 'generates. An empty value is not an override and is not stored.',
+                    x: ['mcp-description' => 'KEY=value applied to the app\'s .env and container on every deploy.']
                 ),
                 new OA\Property(
                     property: 'recipe',
@@ -411,7 +429,8 @@ class UserController extends Controller
                         . 'same id previews exactly what this deploys. An id this engine does not ship '
                         . 'fails the deploy rather than falling back to detection. Applies to this deploy '
                         . 'only - nothing is stored, so the next deploy without it detects again.',
-                    example: 'php'
+                    example: 'php',
+                    x: ['mcp-description' => 'Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only.']
                 ),
                 new OA\Property(
                     property: 'stages',
@@ -421,7 +440,8 @@ class UserController extends Controller
                         . 'upgrade, start). A stage named here replaces that stage entirely; a stage left '
                         . 'out keeps the platform defaults; a stage given as [] runs nothing. Each command '
                         . 'is {id, run, optional, serve, timeout, workdir, role}. Applies to this deploy '
-                        . 'only - nothing is stored, so the next deploy without it is back on defaults.'
+                        . 'only - nothing is stored, so the next deploy without it is back on defaults.',
+                    x: ['mcp-description' => 'Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.']
                 ),
             ],
         )),
@@ -953,7 +973,8 @@ class UserController extends Controller
                     nullable: true,
                     additionalProperties: new OA\AdditionalProperties(type: 'string'),
                     description: 'KEY=value overrides, merged onto the ones the project already carries — '
-                        . 'send only what changes. An empty value removes that key; null clears them all.'
+                        . 'send only what changes. An empty value removes that key; null clears them all.',
+                    x: ['mcp-description' => 'KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.']
                 ),
                 new OA\Property(
                     property: 'zip_path',
@@ -970,7 +991,8 @@ class UserController extends Controller
                         . 'same id previews exactly what this deploys. An id this engine does not ship '
                         . 'fails the deploy rather than falling back to detection. Applies to this deploy '
                         . 'only - nothing is stored, so the next deploy without it detects again.',
-                    example: 'php'
+                    example: 'php',
+                    x: ['mcp-description' => 'Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only.']
                 ),
                 new OA\Property(
                     property: 'stages',
@@ -978,7 +1000,8 @@ class UserController extends Controller
                     nullable: true,
                     description: 'Commands this deploy runs, per stage. A stage named here replaces that '
                         . 'stage entirely; a stage left out keeps the platform defaults; a stage given as '
-                        . '[] runs nothing. Applies to this deploy only - nothing is stored.'
+                        . '[] runs nothing. Applies to this deploy only - nothing is stored.',
+                    x: ['mcp-description' => 'Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.']
                 ),
             ],
         )),
@@ -1167,6 +1190,8 @@ class UserController extends Controller
         path: '/projects/{username}/deploy-archive',
         summary: 'Deploy an uploaded zip/tar into ~/project',
         description: 'Engine-only path: unwrap a single top-level directory, detect project type, apply strategy, docker compose up. Upload the archive first: POST /projects/{username}/files/upload (file_upload over MCP, with file_contents or file_url), or an FTP/SFTP account; zip_path is relative to the account home, e.g. /project/app.zip.',
+        x: ['mcp-description' => 'Deploys an archive already in the account (put there with file_upload or FTP), '
+            . 'e.g. zip_path /project/app.zip. A single top-level directory is unwrapped.'],
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -1180,7 +1205,8 @@ class UserController extends Controller
                     nullable: true,
                     additionalProperties: new OA\AdditionalProperties(type: 'string'),
                     description: 'KEY=value overrides, merged onto the ones the project already carries — '
-                        . 'send only what changes. An empty value removes that key; null clears them all.'
+                        . 'send only what changes. An empty value removes that key; null clears them all.',
+                    x: ['mcp-description' => 'KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.']
                 ),
                 new OA\Property(
                     property: 'recipe',
@@ -1191,7 +1217,8 @@ class UserController extends Controller
                         . 'same id previews exactly what this deploys. An id this engine does not ship '
                         . 'fails the deploy rather than falling back to detection. Applies to this deploy '
                         . 'only - nothing is stored, so the next deploy without it detects again.',
-                    example: 'php'
+                    example: 'php',
+                    x: ['mcp-description' => 'Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only.']
                 ),
                 new OA\Property(
                     property: 'stages',
@@ -1199,7 +1226,8 @@ class UserController extends Controller
                     nullable: true,
                     description: 'Commands this deploy runs, per stage. A stage named here replaces that '
                         . 'stage entirely; a stage left out keeps the platform defaults; a stage given as '
-                        . '[] runs nothing. Applies to this deploy only - nothing is stored.'
+                        . '[] runs nothing. Applies to this deploy only - nothing is stored.',
+                    x: ['mcp-description' => 'Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.']
                 ),
             ],
         )),

@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     Stream task log lines as NDJSON until the task finishes
 
     Chunked NDJSON without Content-Length. Each log line is one JSON object; a final `{"type":"finish","status":"..."}` frame closes the stream when the task is terminal and no further lines remain. Optional `since` / `after_id` skip the backlog. Long-lived: MCP clients should poll GET /tasks/{id}/logs instead.
-
-    Calls GET /api/tasks/{id}/logs/stream.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

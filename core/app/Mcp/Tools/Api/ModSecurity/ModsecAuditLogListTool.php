@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('modsec_audit_log_list')]
 #[Description(<<<'MARKDOWN'
     List ModSecurity audit log files
-
-    Calls GET /api/modsec/audit-log/files.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

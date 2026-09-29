@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('backup_container_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a backup container
-
-    Calls DELETE /api/backup-containers/{id}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

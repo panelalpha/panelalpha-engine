@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('file_move_contents')]
 #[Description(<<<'MARKDOWN'
     Move the immediate children of a directory
-
-    Calls POST /api/projects/{username}/files/move-contents. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class FileMoveContentsTool extends ApiTool
@@ -69,10 +67,10 @@ class FileMoveContentsTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'source_path' => $schema->string()->description('Example: /public_html/incoming.')->required(),
             'dest_path' => $schema->string()->description('Example: /public_html.')->required(),
-            'override' => $schema->boolean()->description('Example: .'),
+            'override' => $schema->boolean(),
         ];
     }
 }

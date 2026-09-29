@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('deploy_cancel')]
 #[Description(<<<'MARKDOWN'
     Cancel a running deploy: mark cancelled, kill the subprocess tree, clean up
-
-    Calls POST /api/projects/{username}/deploy-cancel. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class DeployCancelTool extends ApiTool
@@ -57,7 +55,7 @@ class DeployCancelTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
         ];
     }
 }

@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('domain_php_directives_set')]
 #[Description(<<<'MARKDOWN'
     Replace domain PHP directives
-
-    Calls PUT /api/domains/{domain}/php-directives. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('backup_container_update')]
 #[Description(<<<'MARKDOWN'
     Update a backup container
-
-    Calls PUT /api/backup-containers/{id}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

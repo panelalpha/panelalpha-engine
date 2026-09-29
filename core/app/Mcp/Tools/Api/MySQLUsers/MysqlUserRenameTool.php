@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('mysql_user_rename')]
 #[Description(<<<'MARKDOWN'
     Rename a MySQL user
-
-    Calls PUT /api/projects/{username}/mysql/users/{dbuser}/rename. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -71,7 +69,7 @@ class MysqlUserRenameTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'dbuser' => $schema->string()->required(),
             'new_dbuser' => $schema->string()->description('Example: newname. Sent to the API as `name`.')->required(),
         ];

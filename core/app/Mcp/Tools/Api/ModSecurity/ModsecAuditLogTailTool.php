@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('modsec_audit_log_tail')]
 #[Description(<<<'MARKDOWN'
     Tail a ModSecurity audit log file
-
-    Calls GET /api/modsec/audit-log/files/{filename}/tail.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

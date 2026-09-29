@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('app_user_create')]
 #[Description(<<<'MARKDOWN'
     Create an app user
-
-    Calls POST /api/projects/{username}/app/users. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class AppUserCreateTool extends ApiTool
@@ -70,7 +68,7 @@ class AppUserCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'login' => $schema->string()->description('Example: jdoe.')->required(),
             'email' => $schema->string()->description('Example: jdoe@example.com.')->required(),
             'password' => $schema->string()->description('Example: SecurePass123.')->required(),

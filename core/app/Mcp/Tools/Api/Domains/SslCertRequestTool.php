@@ -16,9 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Request a Let's Encrypt certificate for a domain
 
-    Obtains a certificate for the domain from an ACME authority over HTTP-01 and installs it, then re-renders the vhost so the site serves it. The challenge is served by the running webserver, so nothing goes offline. The name must already resolve to this host. Use install-ssl-cert instead when you already hold a certificate.
-
-    Calls POST /api/projects/{username}/domains/{domain}/request-ssl-cert. This changes server state.
+    Gets and installs a Let's Encrypt certificate over HTTP-01, without downtime. The domain must already resolve to this host.
     MARKDOWN)]
 #[IsDestructive]
 class SslCertRequestTool extends ApiTool
@@ -71,10 +69,10 @@ class SslCertRequestTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
-            'staging' => $schema->boolean()->description('Use Let\'s Encrypt\'s staging authority: the certificate is untrusted by browsers but spends no production rate limit. For rehearsing a request.'),
-            'dry_run' => $schema->boolean()->description('Report what would be requested and why it would or would not work, without contacting the authority.'),
+            'staging' => $schema->boolean()->description('Untrusted test certificate; spends no rate limit.'),
+            'dry_run' => $schema->boolean()->description('Only report whether a request would work.'),
         ];
     }
 }

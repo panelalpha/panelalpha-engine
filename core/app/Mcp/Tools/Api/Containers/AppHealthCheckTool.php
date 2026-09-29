@@ -17,9 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Check that the deployed application answers on its published ports
 
-    Probes each port the application publishes from inside the account container, over loopback. Does not go through the domain, DNS, TLS or the reverse proxy, so a failure here means the application itself is not answering. `healthy` is null when the application publishes no port to probe. `checks` answers a different question from `healthy`: not whether something answered, but whether what answered is the application - a project the engine could not recognise is served the engine's own placeholder page with a 200, and a static site that has lost its front page answers 404 on `/` while every other page works. Each check names a stable id, the group it came from, and where it can be said, what to do about it. `serving` is the one-word summary: `ok`, or what is being served instead.
-
-    Calls GET /api/projects/{username}/app/health.
+    Probes the app on its published ports from inside its container, bypassing domain, DNS, TLS and proxy. `healthy`: something answered (null: no port published). `serving`: whether it is the app - `ok`, or what answered instead; `checks` say why and what to do.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -72,7 +70,7 @@ class AppHealthCheckTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'timeout' => $schema->integer(),
             'attempts' => $schema->integer(),
         ];

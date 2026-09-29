@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('file_move')]
 #[Description(<<<'MARKDOWN'
     Move or rename a file or directory
-
-    Calls PUT /api/projects/{username}/files/mv. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -70,7 +68,7 @@ class FileMoveTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'source_path' => $schema->string()->description('Example: /public_html/old.txt.')->required(),
             'dest_path' => $schema->string()->description('Example: /public_html/new.txt.')->required(),
         ];

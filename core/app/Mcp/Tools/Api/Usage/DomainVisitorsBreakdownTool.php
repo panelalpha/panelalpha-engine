@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     Get a visitor breakdown for a domain
 
     Breakdown visits are the hits/visits from the AWStats section for every calendar month overlapping start/end; they are not clipped to the day range. Geo dimensions (countries, continents, regions) are empty until `geolocation:database update` has stored a local City MMDB. Device and device-brand are not implemented.
-
-    Calls GET /api/projects/{username}/domains/{domain}/visitors/{dimension}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -74,7 +72,7 @@ class DomainVisitorsBreakdownTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
             'dimension' => $schema->string()->description('One of: pages, countries, continents, regions, referrers, os, browsers.')->required(),
             'start' => $schema->string()->description('Example: 2026-09-01.')->required(),

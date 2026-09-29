@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('domain_php_directives_get')]
 #[Description(<<<'MARKDOWN'
     Get domain PHP directives
-
-    Calls GET /api/domains/{domain}/php-directives.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

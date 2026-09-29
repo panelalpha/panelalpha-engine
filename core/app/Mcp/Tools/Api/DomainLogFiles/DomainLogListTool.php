@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('domain_log_list')]
 #[Description(<<<'MARKDOWN'
     List log files for a domain
-
-    Calls GET /api/projects/{username}/domains/{domain}/log-files.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -70,7 +68,7 @@ class DomainLogListTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
             'all_webservers' => $schema->boolean(),
         ];

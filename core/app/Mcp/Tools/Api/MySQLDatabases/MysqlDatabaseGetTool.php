@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('mysql_database_get')]
 #[Description(<<<'MARKDOWN'
     Get a MySQL database
-
-    Calls GET /api/projects/{username}/mysql/databases/{dbname}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -60,7 +58,7 @@ class MysqlDatabaseGetTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'dbname' => $schema->string()->required(),
         ];
     }

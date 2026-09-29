@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('file_zip')]
 #[Description(<<<'MARKDOWN'
     Create a ZIP archive
-
-    Calls POST /api/projects/{username}/files/zip. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class FileZipTool extends ApiTool
@@ -71,12 +69,12 @@ class FileZipTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'zip_path' => $schema->string()->description('Example: /public_html/backup.zip.')->required(),
             'path' => $schema->string()->description('Example: /public_html/dir.')->required(),
-            'compression_level' => $schema->integer()->description('Example: 6.'),
+            'compression_level' => $schema->integer(),
             'from_date' => $schema->string()->description('Example: 2026-01-01.'),
-            'ignore_empty' => $schema->boolean()->description('Example: .'),
+            'ignore_empty' => $schema->boolean(),
         ];
     }
 }

@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('mysql_database_create')]
 #[Description(<<<'MARKDOWN'
     Create a MySQL database
-
-    Calls POST /api/projects/{username}/mysql/databases. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class MysqlDatabaseCreateTool extends ApiTool
@@ -68,7 +66,7 @@ class MysqlDatabaseCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'dbname' => $schema->string()->description('Example: wp. Sent to the API as `name`.')->required(),
         ];
     }

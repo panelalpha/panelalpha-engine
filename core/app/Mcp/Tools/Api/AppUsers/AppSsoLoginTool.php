@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('app_sso_login')]
 #[Description(<<<'MARKDOWN'
     Consume an SSO token and redirect into the app (no bearer auth)
-
-    Calls GET /api/projects/{username}/app/sso-token.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -69,7 +67,7 @@ class AppSsoLoginTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'token' => $schema->string()->required(),
         ];
     }

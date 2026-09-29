@@ -17,8 +17,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
     Push local git changes
 
     Push local git changes. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. If the working tree is dirty this tool will commit all changes itself, then push. Returns 422 `Pull first.` when behind the remote, or when managed_by is `deploy`.
-
-    Calls POST /api/projects/{username}/git/push. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class GitPushTool extends ApiTool
@@ -69,7 +67,7 @@ class GitPushTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
         ];
     }

@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('wp_cli_run')]
 #[Description(<<<'MARKDOWN'
     Run a WP-CLI command
-
-    Calls POST /api/projects/{username}/wp-cli/command. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class WpCliRunTool extends ApiTool
@@ -67,7 +65,7 @@ class WpCliRunTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'args' => $schema->array()->description('Example: ["plugin","list","--format=json"].')->required(),
         ];
     }

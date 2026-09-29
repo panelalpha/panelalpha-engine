@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('backup_get')]
 #[Description(<<<'MARKDOWN'
     Get a project backup
-
-    Calls GET /api/projects/{username}/backups/{id}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -60,7 +58,7 @@ class BackupGetTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'id' => $schema->integer()->required(),
         ];
     }

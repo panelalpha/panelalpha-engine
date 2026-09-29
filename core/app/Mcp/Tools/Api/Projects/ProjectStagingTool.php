@@ -17,8 +17,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
     Create a linked staging mirror of a live project
 
     Creates a pending staging project linked to the live source via `staging`, then copies files and volume data asynchronously. Source and destination must use the same project template (e.g. dind). Returns HTTP 202 with the destination project; poll `GET /projects/{dest}` until `async_status.staging` is `completed` or `failed`. CLI equivalent: `php artisan project:staging`.
-
-    Calls POST /api/projects/{username}/staging. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectStagingTool extends ApiTool
@@ -71,7 +69,7 @@ class ProjectStagingTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'new_name' => $schema->string()->description('Sent to the API as `new_username`.'),
             'domain' => $schema->string(),
         ];

@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('modsec_mode_set')]
 #[Description(<<<'MARKDOWN'
     Set ModSecurity mode
-
-    Calls PUT /api/modsec/mode. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

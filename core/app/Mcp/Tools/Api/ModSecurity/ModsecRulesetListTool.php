@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('modsec_ruleset_list')]
 #[Description(<<<'MARKDOWN'
     List ModSecurity rulesets
-
-    Calls GET /api/modsec/rulesets.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

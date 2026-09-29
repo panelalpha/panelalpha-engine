@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('ip_assign')]
 #[Description(<<<'MARKDOWN'
     Assign an IP address to a user
-
-    Calls POST /api/ip/assign. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class IpAssignTool extends ApiTool
@@ -61,7 +59,7 @@ class IpAssignTool extends ApiTool
     {
         return [
             'user_id' => $schema->integer(),
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.'),
+            'name' => $schema->string(),
             'ip_subnet_id' => $schema->integer()->required(),
             'ip_address' => $schema->string()->required(),
         ];

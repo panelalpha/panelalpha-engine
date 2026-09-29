@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('system_exim_config_set')]
 #[Description(<<<'MARKDOWN'
     Update Exim mail server configuration
-
-    Calls PUT /api/system/exim-config. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

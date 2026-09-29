@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Set how certificates for project sites are obtained
 
     Only the fields present are changed. `issuer` self_signed (the default) means the engine signs each project domain's certificate itself; acme means it obtains one from an authority over HTTP-01 as each domain is created, which needs the domain to resolve to this host. `sites_base_domain` is what a project without a domain of its own is named under: <project>.<that>.
-
-    Calls PUT /api/system/ssl-config. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

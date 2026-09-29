@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('acme_challenge_list')]
 #[Description(<<<'MARKDOWN'
     List HTTP-01 ACME challenges for a domain
-
-    Calls GET /api/domains/{domain}/http-acme-challenges.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

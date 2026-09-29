@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('domain_create')]
 #[Description(<<<'MARKDOWN'
     Add a domain to a user
-
-    Calls POST /api/projects/{username}/domains. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class DomainCreateTool extends ApiTool
@@ -71,11 +69,11 @@ class DomainCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'domain' => $schema->string()->description('Example: extra.example.com.')->required(),
             'type' => $schema->string()->description('One of: addon, subdomain. Example: addon.')->required(),
             'parent_domain' => $schema->string(),
-            'no_ssl' => $schema->boolean()->description('Example: .'),
+            'no_ssl' => $schema->boolean(),
             'aliases' => $schema->array(),
         ];
     }

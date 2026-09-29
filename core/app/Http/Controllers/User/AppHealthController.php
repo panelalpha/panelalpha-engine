@@ -45,6 +45,9 @@ class AppHealthController extends Controller
             . 'placeholder page with a 200, and a static site that has lost its front page answers 404 on `/` while '
             . 'every other page works. Each check names a stable id, the group it came from, and where it can be said, '
             . 'what to do about it. `serving` is the one-word summary: `ok`, or what is being served instead.',
+        x: ['mcp-description' => 'Probes the app on its published ports from inside its container, bypassing domain, '
+            . 'DNS, TLS and proxy. `healthy`: something answered (null: no port published). `serving`: whether it '
+            . 'is the app - `ok`, or what answered instead; `checks` say why and what to do.'],
         security: [['bearerAuth' => []]],
         tags: ['Containers'],
         parameters: [

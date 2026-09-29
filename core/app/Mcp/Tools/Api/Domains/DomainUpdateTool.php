@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('domain_update')]
 #[Description(<<<'MARKDOWN'
     Update a domain
-
-    Calls PUT /api/projects/{username}/domains/{domain}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -74,7 +72,7 @@ class DomainUpdateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
             'document_root' => $schema->string(),
             'redirect_enabled' => $schema->boolean(),

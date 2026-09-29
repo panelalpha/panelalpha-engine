@@ -17,8 +17,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
     Run a shell command inside the project container
 
     Runs one command as the project user inside its container, the way an SSH session would — the command line reaches bash intact, so pipes, redirection and globs work. A non-zero exit is reported in the response, not as an HTTP error. Dind projects only.
-
-    Calls POST /api/projects/{username}/ssh/command. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class SshRunTool extends ApiTool
@@ -71,10 +69,10 @@ class SshRunTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'command' => $schema->string()->description('Example: ls -la && cat composer.json.')->required(),
             'cwd' => $schema->string()->description('Directory to run in; defaults to the account home directory. Example: /home/demo/project.'),
-            'timeout' => $schema->integer()->description('Seconds before the command is killed (1-900, default 300). Example: 300.'),
+            'timeout' => $schema->integer()->description('Seconds before the command is killed (1-900, default 300).'),
         ];
     }
 }

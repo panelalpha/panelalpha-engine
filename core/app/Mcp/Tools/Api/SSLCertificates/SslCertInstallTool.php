@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('ssl_cert_install')]
 #[Description(<<<'MARKDOWN'
     Install a custom SSL certificate on a domain
-
-    Calls PUT /api/projects/{username}/domains/{domain}/install-ssl-cert. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -72,7 +70,7 @@ class SslCertInstallTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
             'cert' => $schema->string()->description('PEM-encoded certificate')->required(),
             'key' => $schema->string()->description('PEM-encoded private key')->required(),

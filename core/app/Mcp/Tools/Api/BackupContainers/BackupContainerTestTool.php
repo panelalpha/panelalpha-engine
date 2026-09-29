@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('backup_container_test')]
 #[Description(<<<'MARKDOWN'
     Test backup container connectivity
-
-    Calls POST /api/backup-containers/{id}/test. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class BackupContainerTestTool extends ApiTool

@@ -555,6 +555,8 @@ class FileController extends Controller
         path: '/projects/{username}/files/upload',
         summary: 'Upload a file',
         description: 'Stores one file in the account, under `path` (relative to the home directory, e.g. /project). Over HTTP the file is a multipart form part. Over MCP pass file_name plus file_contents (base64, or text with file_encoding: text) for a small file, or file_url for anything the engine should download itself, such as a release archive; then project_deploy_archive deploys an uploaded .zip or .tar.gz. Plain text files can also be written directly with file_write.',
+        x: ['mcp-description' => 'Stores one file under `path` (e.g. /project). Small: file_name + file_contents. '
+            . 'Anything larger: file_url, which the engine downloads.'],
         security: [['bearerAuth' => []]],
         tags: ['Files'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

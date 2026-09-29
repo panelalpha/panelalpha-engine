@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     Get visitor overview for a domain
 
     Unique visitors, total hits, visits by day, and session length. start/end clip DAY-backed fields (total hits, visits.records, visits.total). unique, visits_length, and all visitor breakdowns are the overlapping calendar months, not unique-in-range. Missing AWStats data is zeros, not an error. Period aliases such as last-week stay in the client.
-
-    Calls GET /api/projects/{username}/domains/{domain}/visitors.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -73,7 +71,7 @@ class DomainVisitorsTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
             'start' => $schema->string()->description('Example: 2026-09-01.')->required(),
             'end' => $schema->string()->description('Example: 2026-09-30.')->required(),

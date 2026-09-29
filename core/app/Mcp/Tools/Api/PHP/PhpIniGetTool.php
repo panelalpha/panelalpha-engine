@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('php_ini_get')]
 #[Description(<<<'MARKDOWN'
     Get custom PHP INI settings for a user
-
-    Calls GET /api/projects/{username}/php/custom-ini-settings.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -69,7 +67,7 @@ class PhpIniGetTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'php_version' => $schema->string()->description('Example: 8.2.')->required(),
         ];
     }

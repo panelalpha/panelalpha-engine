@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('csf_restart')]
 #[Description(<<<'MARKDOWN'
     Restart CSF firewall
-
-    Calls PUT /api/csf/restart. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

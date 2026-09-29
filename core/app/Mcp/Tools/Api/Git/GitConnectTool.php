@@ -17,8 +17,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
     Connect a directory to a git remote
 
     Connect a directory to a git remote. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Body `repo_url` and `branch` are required. Optional `token` is a PAT (never logged). Set `repair` to re-adopt a missing .git. On a `deploy` account without repair this only keeps origin in sync and persists metadata — it does not clone from scratch.
-
-    Calls POST /api/projects/{username}/git/connect. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class GitConnectTool extends ApiTool
@@ -74,7 +72,7 @@ class GitConnectTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
             'repo_url' => $schema->string()->required(),
             'branch' => $schema->string()->required(),

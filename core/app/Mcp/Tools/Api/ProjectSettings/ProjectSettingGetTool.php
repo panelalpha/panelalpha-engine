@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     Get one project setting
 
     A secret comes back redacted, never in full.
-
-    Calls GET /api/projects/{username}/settings/{key}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -62,7 +60,7 @@ class ProjectSettingGetTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'key' => $schema->string()->required(),
         ];
     }

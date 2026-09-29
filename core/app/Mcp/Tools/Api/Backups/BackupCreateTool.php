@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('backup_create')]
 #[Description(<<<'MARKDOWN'
     Create a project backup
-
-    Calls POST /api/projects/{username}/backups. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class BackupCreateTool extends ApiTool
@@ -67,7 +65,7 @@ class BackupCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'container' => $schema->string()->description('Backup container id or name')->required(),
         ];
     }

@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('ftp_account_create')]
 #[Description(<<<'MARKDOWN'
     Create an FTP account
-
-    Calls POST /api/projects/{username}/ftp-accounts. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class FtpAccountCreateTool extends ApiTool
@@ -72,13 +70,13 @@ class FtpAccountCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'user' => $schema->string()->description('Example: ftpuser1.')->required(),
             'domain' => $schema->string()->description('Example: example.com.')->required(),
             'password' => $schema->string()->required(),
             'directory' => $schema->string()->description('Example: /public_html.'),
-            'unlimited_quota' => $schema->boolean()->description('Example: 1.'),
-            'quota' => $schema->integer()->description('Quota in MB Example: 1024.'),
+            'unlimited_quota' => $schema->boolean(),
+            'quota' => $schema->integer()->description('Quota in MB'),
         ];
     }
 }

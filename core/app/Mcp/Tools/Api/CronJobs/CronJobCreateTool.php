@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('cron_job_create')]
 #[Description(<<<'MARKDOWN'
     Create a cron job
-
-    Calls POST /api/projects/{username}/cron-jobs. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class CronJobCreateTool extends ApiTool
@@ -72,7 +70,7 @@ class CronJobCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'command' => $schema->string()->description('Example: /usr/bin/php /home/johndoe/script.php.')->required(),
             'minute' => $schema->string()->description('Example: 0.')->required(),
             'hour' => $schema->string()->description('Example: *.')->required(),

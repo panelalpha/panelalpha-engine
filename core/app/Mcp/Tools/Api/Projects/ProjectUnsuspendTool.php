@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('project_unsuspend')]
 #[Description(<<<'MARKDOWN'
     Unsuspend a user
-
-    Calls PUT /api/projects/{username}/unsuspend. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -59,7 +57,7 @@ class ProjectUnsuspendTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
         ];
     }
 }

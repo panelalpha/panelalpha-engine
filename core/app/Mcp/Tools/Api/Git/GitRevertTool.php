@@ -17,8 +17,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
     Revert local git changes
 
     Revert local git changes. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Runs `reset --hard` and `clean -fd` to `ref` (default HEAD). Discards local changes. Confirm with the operator.
-
-    Calls POST /api/projects/{username}/git/revert. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class GitRevertTool extends ApiTool
@@ -70,7 +68,7 @@ class GitRevertTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
             'ref' => $schema->string(),
         ];

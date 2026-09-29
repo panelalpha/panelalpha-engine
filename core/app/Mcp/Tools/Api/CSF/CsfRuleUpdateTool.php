@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Edit a CSF firewall rule
 
     A field not sent keeps its current value; send null to clear it.
-
-    Calls PUT /api/csf/rules/{type}/{lineMd5}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

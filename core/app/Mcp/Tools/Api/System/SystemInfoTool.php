@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('system_info')]
 #[Description(<<<'MARKDOWN'
     Get system information
-
-    Calls GET /api/system/info.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

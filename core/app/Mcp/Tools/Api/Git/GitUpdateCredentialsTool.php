@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Update git credentials for a directory
 
     Update git credentials for a directory. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Sending `token` (including empty) updates stored credentials. Omitting `token` is a no-op that returns status.
-
-    Calls PUT /api/projects/{username}/git/update-credentials. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -72,7 +70,7 @@ class GitUpdateCredentialsTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
             'token' => $schema->string(),
         ];

@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('csf_rule_create')]
 #[Description(<<<'MARKDOWN'
     Add a CSF firewall rule
-
-    Calls POST /api/csf/rules/{type}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class CsfRuleCreateTool extends ApiTool

@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     List a project's settings
 
     Secret values are redacted; `set` says whether a value is present.
-
-    Calls GET /api/projects/{username}/settings.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -61,7 +59,7 @@ class ProjectSettingListTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
         ];
     }
 }

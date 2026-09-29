@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('modsec_mode_get')]
 #[Description(<<<'MARKDOWN'
     Get ModSecurity mode
-
-    Calls GET /api/modsec/mode.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

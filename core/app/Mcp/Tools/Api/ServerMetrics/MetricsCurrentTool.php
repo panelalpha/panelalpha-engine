@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('metrics_current')]
 #[Description(<<<'MARKDOWN'
     Get current server metrics
-
-    Calls GET /api/metrics/current.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

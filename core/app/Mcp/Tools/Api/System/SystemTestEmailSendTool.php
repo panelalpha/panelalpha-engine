@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('system_test_email_send')]
 #[Description(<<<'MARKDOWN'
     Send a test email via Exim
-
-    Calls POST /api/system/exim-send-test-email. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class SystemTestEmailSendTool extends ApiTool

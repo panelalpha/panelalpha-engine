@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('system_webserver_change')]
 #[Description(<<<'MARKDOWN'
     Change the active webserver
-
-    Calls PUT /api/system/change-webserver. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

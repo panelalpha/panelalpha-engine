@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('mysql_user_get')]
 #[Description(<<<'MARKDOWN'
     Get a MySQL user
-
-    Calls GET /api/projects/{username}/mysql/users/{dbuser}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -60,7 +58,7 @@ class MysqlUserGetTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'dbuser' => $schema->string()->required(),
         ];
     }

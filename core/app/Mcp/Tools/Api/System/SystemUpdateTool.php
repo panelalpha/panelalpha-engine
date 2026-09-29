@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('system_update')]
 #[Description(<<<'MARKDOWN'
     Trigger a system update
-
-    Calls PUT /api/system/update. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

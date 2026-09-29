@@ -17,8 +17,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
     Push project state to a paired staging or live project
 
     Copies application state from the source to a paired live or staging project (the pair is linked by `staging`), then swaps it in asynchronously. Source and destination must use the same project template. Returns HTTP 202 with the target project; poll `GET /projects/{target}` until `async_status.push` is `completed` or `failed`. CLI equivalent: `php artisan project:push`.
-
-    Calls POST /api/projects/{username}/push. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectPushTool extends ApiTool
@@ -69,7 +67,7 @@ class ProjectPushTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'target' => $schema->string()->required(),
         ];
     }

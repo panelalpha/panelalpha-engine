@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Remove a public tunnel hostname
 
     Cloudflare tunnels lose their DNS record and ingress rule. A PanelAlpha Online hostname is released here and at the proxy, so the label can be taken again. A remote delete that fails is logged rather than raised: the local row goes either way, and the registration then expires on its own.
-
-    Calls DELETE /api/projects/{username}/domains/{domain}/tunnels/{hostname}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -63,7 +61,7 @@ class TunnelDeleteTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
             'hostname' => $schema->string()->required(),
         ];

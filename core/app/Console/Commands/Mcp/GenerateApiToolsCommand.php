@@ -28,9 +28,6 @@ class GenerateApiToolsCommand extends Command
 
     protected $description = 'Generate one MCP tool per documented engine API operation';
 
-    /** Verbs that change server state. */
-    private const WRITE_VERBS = ['POST', 'PUT', 'PATCH', 'DELETE'];
-
     /**
      * Operations whose verb is a write but whose effect is not.
      *
@@ -92,7 +89,6 @@ class GenerateApiToolsCommand extends Command
     ];
 
     /** What a renamed project parameter says about itself when the API said nothing. */
-    private const PROJECT_NAME_DESCRIPTION = 'Name of the project.';
 
     public function handle(): int
     {
@@ -189,6 +185,7 @@ class GenerateApiToolsCommand extends Command
                     'parameters' => $op['parameters'] ?? [],
                     'requestBody' => $op['requestBody'] ?? null,
                     'responses' => $op['responses'] ?? [],
+                    'x-mcp-description' => $op['x-mcp-description'] ?? null,
                 ];
             }
         }
@@ -495,10 +492,11 @@ class GenerateApiToolsCommand extends Command
         if ($argument !== $apiName) {
             $argumentNames[$argument] = $apiName;
 
-            if (trim((string)$description) === '' && $apiName === 'username') {
-                $description = self::PROJECT_NAME_DESCRIPTION;
+            // name -> username is on every tool and the server instructions
+            // explain it once; repeating it cost ~200 schemas a sentence each.
+            if ($apiName !== 'username') {
+                $suffix = "Sent to the API as `{$apiName}`.";
             }
-            $suffix = "Sent to the API as `{$apiName}`.";
         }
 
         return $this->schemaLine($argument, $definition, $required, $description, $suffix);
@@ -534,10 +532,13 @@ class GenerateApiToolsCommand extends Command
 
             $seen[$name] = true;
             $definition = (array)($p['schema'] ?? []);
-            // On a parameter the extension sits on the parameter, not its schema.
+            // On a parameter the extensions sit on the parameter, not its schema.
             if (is_scalar($p['x-mcp-default'] ?? null)) {
                 $definition['x-mcp-default'] = $p['x-mcp-default'];
                 $defaults[$name] = (string)$p['x-mcp-default'];
+            }
+            if (is_string($p['x-mcp-description'] ?? null)) {
+                $definition['x-mcp-description'] = $p['x-mcp-description'];
             }
             $schema[] = $this->argumentLine(
                 $op,
@@ -553,6 +554,12 @@ class GenerateApiToolsCommand extends Command
         $required = (array)($bodySchema['required'] ?? []);
 
         foreach ((array)($bodySchema['properties'] ?? []) as $name => $prop) {
+            // x-mcp-hide: a field the API keeps that the tool does not offer,
+            // because another tool covers it and every listed field costs every
+            // client on every connect.
+            if (is_array($prop) && ($prop['x-mcp-hide'] ?? false) === true) {
+                continue;
+            }
             if (isset($seen[$name])) {
                 // A body field shadowing a path parameter would be ambiguous in
                 // the flat tool schema; the path wins, the body copy is dropped.
@@ -656,6 +663,11 @@ class GenerateApiToolsCommand extends Command
             default => '$schema->string()',
         };
 
+        // The tool's own wording, where the API docs need more than a model does.
+        if (is_string($definition['x-mcp-description'] ?? null)) {
+            $description = $definition['x-mcp-description'];
+        }
+
         $notes = [];
         if (is_string($description) && trim($description) !== '') {
             $notes[] = trim($description);
@@ -666,8 +678,13 @@ class GenerateApiToolsCommand extends Command
         if (is_scalar($definition['x-mcp-default'] ?? null)) {
             $notes[] = 'This tool sends ' . $definition['x-mcp-default'] . ' when it is omitted.';
         }
-        if (isset($definition['example'])) {
-            $notes[] = 'Example: ' . (is_scalar($definition['example']) ? (string)$definition['example'] : json_encode($definition['example'])) . '.';
+        // A number or a flag is its type; an example only helps a string.
+        if (isset($definition['example']) && !in_array($type, ['boolean', 'integer', 'number'], true)) {
+            $example = $definition['example'];
+            $notes[] = 'Example: ' . match (true) {
+                is_scalar($example) => (string)$example,
+                default => json_encode($example),
+            } . '.';
         }
         if ($suffix !== null) {
             $notes[] = $suffix;
@@ -715,7 +732,9 @@ class GenerateApiToolsCommand extends Command
     private function description(array $op): string
     {
         $summary = trim((string)$op['summary']);
-        $extra = trim((string)$op['description']);
+        // x-mcp-description replaces the long form for the tool, which is read
+        // on every connect; the API docs keep theirs.
+        $extra = trim((string)($op['x-mcp-description'] ?? $op['description']));
 
         $text = $summary !== '' ? $summary : "{$op['method']} {$op['path']}";
 
@@ -723,13 +742,9 @@ class GenerateApiToolsCommand extends Command
             $text .= "\n\n" . $extra;
         }
 
-        $text .= "\n\nCalls {$op['method']} /api" . $op['path'] . '.';
-
-        if (in_array($op['method'], self::WRITE_VERBS, true)
-            && !self::readsOnly((string)$op['method'], (string)$op['path'])
-        ) {
-            $text .= ' This changes server state.';
-        }
+        // No "Calls <VERB> /api/..." footer: every client reads every listed
+        // description on connect, and the annotations already say what a
+        // tool changes. The endpoint is in the class, for a human who needs it.
 
         $indented = implode("\n", array_map(
             fn (string $line): string => $line === '' ? '' : '    ' . $line,

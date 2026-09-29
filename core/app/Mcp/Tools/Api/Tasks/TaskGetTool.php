@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('task_get')]
 #[Description(<<<'MARKDOWN'
     Poll a task status and new log lines after a cursor
-
-    Calls GET /api/tasks/{id}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

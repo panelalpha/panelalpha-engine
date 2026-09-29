@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools\Api;
 
+use App\Mcp\Tools\Concerns\OmitsTitle;
 use Illuminate\Http\Request as HttpRequest;
 use Illuminate\Routing\Router;
 use InvalidArgumentException;
@@ -32,6 +33,8 @@ use Throwable;
  */
 abstract class ApiTool extends Tool
 {
+    use OmitsTitle;
+
     /**
      * Marks a sub-request as having come from an MCP tool.
      *

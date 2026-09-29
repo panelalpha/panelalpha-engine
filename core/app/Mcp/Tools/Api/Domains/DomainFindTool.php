@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('domain_find')]
 #[Description(<<<'MARKDOWN'
     Get a domain by name (system-wide)
-
-    Calls GET /api/domains/{domain}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

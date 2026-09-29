@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('acme_challenge_get')]
 #[Description(<<<'MARKDOWN'
     Get a single HTTP-01 ACME challenge
-
-    Calls GET /api/domains/{domain}/http-acme-challenges/{token}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

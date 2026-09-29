@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('mysql_user_delete')]
 #[Description(<<<'MARKDOWN'
     Delete a MySQL user
-
-    Calls DELETE /api/projects/{username}/mysql/users/{dbuser}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -60,7 +58,7 @@ class MysqlUserDeleteTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'dbuser' => $schema->string()->required(),
         ];
     }

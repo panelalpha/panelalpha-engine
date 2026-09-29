@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('phpmyadmin_sso_login')]
 #[Description(<<<'MARKDOWN'
     Consume a phpMyAdmin SSO token (internal use, no bearer auth)
-
-    Calls PUT /api/mysql/phpmyadmin-sso-token. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

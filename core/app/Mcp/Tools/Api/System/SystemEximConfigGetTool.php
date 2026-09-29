@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('system_exim_config_get')]
 #[Description(<<<'MARKDOWN'
     Get Exim mail server configuration
-
-    Calls GET /api/system/exim-config.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

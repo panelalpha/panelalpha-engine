@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('project_rebuild')]
 #[Description(<<<'MARKDOWN'
     Rebuild user environment
-
-    Calls POST /api/projects/{username}/rebuild. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectRebuildTool extends ApiTool
@@ -70,11 +68,11 @@ class ProjectRebuildTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
-            'env_vars' => $schema->object()->description('KEY=value overrides, merged onto the ones the project already carries — send only what changes. An empty value removes that key; null clears them all.'),
+            'name' => $schema->string()->required(),
+            'env_vars' => $schema->object()->description('KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.'),
             'zip_path' => $schema->string()->description('Optional archive under the user home to import into ~/project before detect/apply'),
-            'recipe' => $schema->string()->description('Deploy with this recipe instead of the one detection picks. Takes an id from `application.candidates` on POST /source/inspect, and inspecting with the same id previews exactly what this deploys. An id this engine does not ship fails the deploy rather than falling back to detection. Applies to this deploy only - nothing is stored, so the next deploy without it detects again. Example: php.'),
-            'stages' => $schema->object()->description('Commands this deploy runs, per stage. A stage named here replaces that stage entirely; a stage left out keeps the platform defaults; a stage given as [] runs nothing. Applies to this deploy only - nothing is stored.'),
+            'recipe' => $schema->string()->description('Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only. Example: php.'),
+            'stages' => $schema->object()->description('Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.'),
         ];
     }
 }

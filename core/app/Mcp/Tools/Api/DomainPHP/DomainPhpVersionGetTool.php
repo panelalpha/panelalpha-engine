@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('domain_php_version_get')]
 #[Description(<<<'MARKDOWN'
     Get PHP version for a domain
-
-    Calls GET /api/domains/{domain}/php-version.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

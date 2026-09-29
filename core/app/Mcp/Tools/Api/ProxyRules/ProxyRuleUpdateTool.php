@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Update a proxy rule
 
     Update a proxy rule.
-
-    Calls PUT /api/proxy-rules/{id}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

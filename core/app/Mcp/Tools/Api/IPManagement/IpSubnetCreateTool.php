@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('ip_subnet_create')]
 #[Description(<<<'MARKDOWN'
     Add an IP subnet
-
-    Calls POST /api/ip/subnets. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class IpSubnetCreateTool extends ApiTool
@@ -50,7 +48,7 @@ class IpSubnetCreateTool extends ApiTool
     {
         return [
             'ip' => $schema->string()->description('Example: 192.168.1.0.')->required(),
-            'mask' => $schema->integer()->description('Example: 24.')->required(),
+            'mask' => $schema->integer()->required(),
             'is_shared' => $schema->boolean(),
         ];
     }

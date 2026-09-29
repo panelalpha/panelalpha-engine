@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('system_ssl_config_get')]
 #[Description(<<<'MARKDOWN'
     How certificates for project sites are obtained
-
-    Calls GET /api/system/ssl-config.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

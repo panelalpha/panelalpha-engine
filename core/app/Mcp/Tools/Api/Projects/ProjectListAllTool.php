@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('project_list_all')]
 #[Description(<<<'MARKDOWN'
     List all users (no pagination)
-
-    Calls GET /api/projects/all.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

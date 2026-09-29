@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     Which global secrets are stored
 
     Lists the global entries that have a secret pasted, as `globals` (ref, type, purpose). Any project may use one by passing its `vault:<id>`; nothing uses one unasked.
-
-    Calls GET /api/vault/config.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

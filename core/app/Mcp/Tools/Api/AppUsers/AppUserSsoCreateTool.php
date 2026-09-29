@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('app_user_sso_create')]
 #[Description(<<<'MARKDOWN'
     Create an SSO token for an app user
-
-    Calls POST /api/projects/{username}/app/users/{userId}/sso. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class AppUserSsoCreateTool extends ApiTool
@@ -58,7 +56,7 @@ class AppUserSsoCreateTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'userId' => $schema->string()->required(),
         ];
     }

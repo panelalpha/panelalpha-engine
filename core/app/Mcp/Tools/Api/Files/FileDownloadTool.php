@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('file_download')]
 #[Description(<<<'MARKDOWN'
     Download a file
-
-    Calls GET /api/projects/{username}/files/download.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -74,7 +72,7 @@ class FileDownloadTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'path' => $schema->string()->required(),
             'offset' => $schema->integer()->description('Byte to start reading at. Default 0; pass the previous result\'s next_offset to continue.'),
             'length' => $schema->integer()->description('Bytes to read, at most 49152 (the default). The result says whether there is `more`.'),

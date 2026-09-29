@@ -15,53 +15,30 @@ use Laravel\Mcp\Server\Attributes\Version;
 #[Name('PanelAlpha Engine')]
 #[Version('1.0.0')]
 #[Instructions(<<<'MARKDOWN'
-    Management access to this PanelAlpha engine: the hosting projects it serves,
-    their domains, databases, files and containers, and the server itself.
+    Manages this PanelAlpha engine: its hosting projects and the server.
 
-    A **project** is one hosting account — its own container, domains, MySQL
-    databases, FTP/SFTP accounts, cron jobs and files. Earlier versions of this
-    API called a project a "user", and the REST API still answers on the old
-    `/users` paths, but every tool here is named for the project.
+    A **project** is one hosting account: its own container, domains, MySQL
+    databases, FTP/SFTP accounts, cron jobs and files. Every tool takes it as
+    `name` (`name: "shop"`). Results and older descriptions call the same value
+    `username` or "user"; pass it back as `name`. A project record's own `name`
+    field is an unused label. `mysql_user_*` (MySQL accounts) and `app_user_*`
+    (accounts inside the deployed app) are not projects.
 
-    Two other things are also called "users" and are **not** projects:
-    `mysql_user_*` are MySQL accounts inside a project's database server, and
-    `app_user_*` are accounts inside the application deployed into a project
-    (WordPress and similar).
+    Tool names are `<resource>_<action>`, never carrying parameters.
 
-    Tool names read `<resource>_<action>` — `project_suspend`, `domain_create`,
-    `mysql_database_list`. Actions are `list`, `get`, `create`, `update` and
-    `delete`, plus the operation's own verb where there is one (`clone`,
-    `rebuild`, `rename`, `install`). Names never contain their parameters, so
-    identify a project by passing `name`, not by picking a different tool.
+    Many tools change server state and some destroy data: deleting a project
+    removes its container, files and databases; suspending takes its sites
+    offline. Follow the annotations, and confirm destructive calls with the
+    operator on a production server.
 
-    **A project is `name` on every tool** — `project_get`, `domain_create`,
-    `file_write`, `ssh_run` all take `name: "shop"`. The REST API still calls
-    that value `username`, so it appears as `username` in what the tools
-    return; pass it back as `name`. A project record's own `name` field is an
-    unused display label, usually null — not the project name. A MySQL
-    database is `dbname` and a MySQL user `dbuser` wherever they appear.
+    Git on a project starts with `git_status`: `managed_by: deploy` means
+    redeploy with `project_rebuild`, `site_git` means the git tools. `git_push`
+    commits a dirty tree itself; confirm first.
 
-    **Most of these tools change server state, and some are destructive.**
-    Deleting a project removes its container, files and databases; suspending
-    one takes live sites offline. Read the annotations: read-only tools are
-    marked as such, and everything else is marked destructive. Confirm with the
-    operator before calling a destructive tool on a production server.
-
-    Git on a project is `git_status` first. The payload's `managed_by` is
-    `deploy` (the repo came in at provision; mutating Git is `project_rebuild`)
-    or `site_git` (these Git tools). `git_push` commits a dirty tree itself —
-    confirm with the operator first.
-
-    Which tools exist here is controlled by the operator, so this list may be
-    narrower than the full API — see MCP_TOOLSETS and MCP_PERMISSION_MODE.
-
-    **Most tools are not listed directly.** When `search_tools` is present,
-    only the everyday tools are listed; everything else — MySQL, FTP, cron,
-    backups, CSF, ModSecurity, system settings and more — is found with
-    `search_tools` (search by resource or action, e.g. `mysql user`) and run
-    with `execute_tools`, using the exact name and arguments it returned.
-    Search results carry each tool's annotations, so read them there. A tool
-    that search cannot find is not available on this server.
+    Only the everyday tools are listed. Find any other (MySQL, FTP, cron,
+    backups, firewall, system settings, ...) with `search_tools`, e.g.
+    `mysql user`, and run it with `execute_tools` using the exact name and
+    arguments returned. Not found means the operator has not enabled it.
     MARKDOWN)]
 class EngineServer extends Server
 {

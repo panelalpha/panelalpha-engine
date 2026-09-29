@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('mysql_privileges_get')]
 #[Description(<<<'MARKDOWN'
     Get MySQL privileges for a user on a database
-
-    Calls GET /api/projects/{username}/mysql/privileges/{dbuser}/{dbname}.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -61,7 +59,7 @@ class MysqlPrivilegesGetTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'dbuser' => $schema->string()->required(),
             'dbname' => $schema->string()->required(),
         ];

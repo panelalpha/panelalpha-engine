@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Set one project setting
 
     A Cloudflare API token is verified against Cloudflare before it is stored, and the account it belongs to comes back in the response.
-
-    Calls PUT /api/projects/{username}/settings/{key}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -72,7 +70,7 @@ class ProjectSettingSetTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'key' => $schema->string()->required(),
             'value' => $schema->string()->description('The value to store.')->required(),
         ];

@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('php_ini_set')]
 #[Description(<<<'MARKDOWN'
     Update custom PHP INI settings for a user
-
-    Calls PUT /api/projects/{username}/php/custom-ini-settings. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -70,7 +68,7 @@ class PhpIniSetTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'php_version' => $schema->string()->description('Example: 8.2.')->required(),
             'settings' => $schema->object()->description('Example: {"memory_limit":"256M"}.')->required(),
         ];

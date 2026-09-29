@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
     Get bandwidth time series for a domain
 
     Values are bytes. Transfer is every response, robots included, so it exceeds the viewed traffic AWStats reports. Missing AWStats data is an empty object, not an error.
-
-    Calls GET /api/projects/{username}/domains/{domain}/bandwidth.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -74,7 +72,7 @@ class DomainBandwidthTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
             'start' => $schema->string()->description('Example: 2026-09-01.')->required(),
             'end' => $schema->string()->description('Example: 2026-09-30.')->required(),

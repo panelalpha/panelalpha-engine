@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('ip_unassign')]
 #[Description(<<<'MARKDOWN'
     Unassign an IP address from a user
-
-    Calls POST /api/ip/unassign. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class IpUnassignTool extends ApiTool
@@ -60,10 +58,10 @@ class IpUnassignTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'ip_subnet_id' => $schema->integer()->description('Example: 1.')->required(),
+            'ip_subnet_id' => $schema->integer()->required(),
             'ip_address' => $schema->string()->description('Example: 192.168.1.10.')->required(),
             'user_id' => $schema->integer()->description('Identify the project by id; one of user_id or username is required.'),
-            'name' => $schema->string()->description('Identify the project by name; one of user_id or username is required. Sent to the API as `username`.'),
+            'name' => $schema->string()->description('Identify the project by name; one of user_id or username is required.'),
         ];
     }
 }

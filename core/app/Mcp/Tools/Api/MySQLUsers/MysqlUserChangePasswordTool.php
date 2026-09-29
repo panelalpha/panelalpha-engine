@@ -16,8 +16,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('mysql_user_change_password')]
 #[Description(<<<'MARKDOWN'
     Change a MySQL user password
-
-    Calls PUT /api/projects/{username}/mysql/users/{dbuser}/change-password. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -70,7 +68,7 @@ class MysqlUserChangePasswordTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'dbuser' => $schema->string()->required(),
             'password' => $schema->string()->description('Example: NewSecureP@ss1.')->required(),
         ];

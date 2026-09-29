@@ -15,8 +15,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('file_unzip')]
 #[Description(<<<'MARKDOWN'
     Extract a ZIP archive
-
-    Calls POST /api/projects/{username}/files/unzip. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 class FileUnzipTool extends ApiTool
@@ -68,7 +66,7 @@ class FileUnzipTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'name' => $schema->string()->description('Name of the project. Sent to the API as `username`.')->required(),
+            'name' => $schema->string()->required(),
             'zip_path' => $schema->string()->description('Example: /public_html/backup.zip.')->required(),
             'path' => $schema->string()->description('Example: /public_html.')->required(),
         ];

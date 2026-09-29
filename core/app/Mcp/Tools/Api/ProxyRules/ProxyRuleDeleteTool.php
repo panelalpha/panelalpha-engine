@@ -18,8 +18,6 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
     Delete a proxy rule
 
     Delete a proxy rule.
-
-    Calls DELETE /api/proxy-rules/{id}. This changes server state.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
