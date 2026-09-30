@@ -152,15 +152,10 @@ class Project
 
     public function reloadCron(): void
     {
+        // A dind account has no `php` service and never reads this crontab.
         if ($this->runtime instanceof PhpHosting) {
             $this->runtime->reloadCron();
-
-            return;
         }
-
-        $this->system->exec(
-            "sudo docker compose -f {$this->composeFilePath()} exec -T php service cron restart"
-        );
     }
 
     /**

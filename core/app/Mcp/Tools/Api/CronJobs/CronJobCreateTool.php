@@ -15,6 +15,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('cron_job_create')]
 #[Description(<<<'MARKDOWN'
     Create a cron job
+
+    PHP hosting projects only: a dind account does not run the project crontab, and a dind project answers 422.
     MARKDOWN)]
 #[IsDestructive]
 class CronJobCreateTool extends ApiTool

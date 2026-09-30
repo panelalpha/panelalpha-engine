@@ -47,7 +47,6 @@ const NOT_SMOKE_CALLABLE: Record<string, string> = {
   file_download: 'returns file contents; needs a path fixture and can be large',
   csf_ui_credentials: 'returns live firewall UI credentials',
   modsec_audit_log_download: 'streams a whole audit log file',
-  task_log_stream: 'a streaming response, not a single JSON-RPC answer',
 };
 
 /**

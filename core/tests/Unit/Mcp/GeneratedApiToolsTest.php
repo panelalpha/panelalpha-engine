@@ -240,6 +240,21 @@ class GeneratedApiToolsTest extends TestCase
         );
     }
 
+    /**
+     * Even without images a full report is 100k+ characters, past what an MCP
+     * client takes, so the tool asks for the scores unless told otherwise.
+     */
+    public function test_lighthouse_report_create_asks_for_the_summary_when_omitted(): void
+    {
+        $tool = new \App\Mcp\Tools\Api\Lighthouse\LighthouseReportCreateTool();
+
+        $this->assertSame('1', $this->invoke($tool, 'apiInput', ['url' => 'https://example.com'])['summary'] ?? null);
+        $this->assertSame(
+            '0',
+            $this->invoke($tool, 'apiInput', ['url' => 'https://example.com', 'summary' => '0'])['summary'] ?? null
+        );
+    }
+
     public function test_every_per_operation_rename_refers_to_an_operation_that_exists(): void
     {
         $operations = [];

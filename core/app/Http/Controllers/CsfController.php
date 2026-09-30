@@ -48,7 +48,7 @@ class CsfController extends Controller
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['target'],
             properties: [
-                new OA\Property(property: 'target', type: 'string', example: '192.168.1.100'),
+                new OA\Property(property: 'target', type: 'string', example: '192.168.1.100', description: 'An IPv4 or IPv6 address or CIDR range, or a numeric uid when target_prefix is u=.'),
                 new OA\Property(property: 'comment', type: 'string', nullable: true),
                 new OA\Property(property: 'protocol', type: 'string', enum: ['tcp', 'udp'], nullable: true, description: self::PORT_RULE),
                 new OA\Property(property: 'direction', type: 'string', enum: ['in', 'out'], nullable: true),
@@ -110,7 +110,7 @@ class CsfController extends Controller
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['target'],
             properties: [
-                new OA\Property(property: 'target', type: 'string'),
+                new OA\Property(property: 'target', type: 'string', description: 'An IPv4 or IPv6 address or CIDR range, or a numeric uid when target_prefix is u=.'),
                 new OA\Property(property: 'comment', type: 'string', nullable: true),
                 new OA\Property(property: 'protocol', type: 'string', enum: ['tcp', 'udp'], nullable: true, description: self::PORT_RULE),
                 new OA\Property(property: 'direction', type: 'string', enum: ['in', 'out'], nullable: true),

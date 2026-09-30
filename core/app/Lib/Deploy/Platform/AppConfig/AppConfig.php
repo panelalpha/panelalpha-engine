@@ -273,6 +273,16 @@ final class AppConfig
         return $this->composeMode;
     }
 
+    /**
+     * The compose file a deploy writes into the checkout, where detection
+     * reads it ahead of the repository's own. Null in override mode, which
+     * is layered over the run file outside the checkout.
+     */
+    public function replacingCompose(): ?string
+    {
+        return $this->composeMode === self::COMPOSE_OVERRIDE ? null : $this->compose;
+    }
+
     /** The user-management script, if this project has one. */
     public function appScript(): ?string
     {

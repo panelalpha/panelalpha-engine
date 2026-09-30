@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Name('php_ini_get')]
 #[Description(<<<'MARKDOWN'
     Get custom PHP INI settings of a project
+
+    PHP hosting projects only: a dind app reads php.ini from its own image, and a dind project answers 422.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

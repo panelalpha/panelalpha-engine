@@ -66,7 +66,7 @@ final class AppInspector
             // directory, this is which application it holds, and the two are independent.
             'metadata' => MetadataRegistry::describe($context, self::runtimeOf($decision)),
             'ports' => PortsReport::of($projectDir, $decision),
-            'services' => ServicesReport::of($projectDir),
+            'services' => ServicesReport::of($projectDir, self::composePathOf($decision)),
             'environment' => EnvironmentReport::of($projectDir, $decision),
             'files' => MarkerFiles::presentIn($projectDir),
         ];
@@ -87,6 +87,16 @@ final class AppInspector
         } catch (InvalidArgumentException | ManifestException $e) {
             return [ApplicationReport::undeployable(), $e->getMessage()];
         }
+    }
+
+    /**
+     * @param array<string, mixed> $decision
+     */
+    private static function composePathOf(array $decision): ?string
+    {
+        $path = $decision['compose_path'] ?? null;
+
+        return is_string($path) ? $path : null;
     }
 
     /**

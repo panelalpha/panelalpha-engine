@@ -48,6 +48,7 @@ class FileDeleteTool extends ApiTool
     {
         return [
             'path',
+            'recursive',
         ];
     }
 
@@ -69,6 +70,7 @@ class FileDeleteTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'path' => $schema->string()->required(),
+            'recursive' => $schema->boolean()->description('Required to delete a directory; deletes everything in it.'),
         ];
     }
 }

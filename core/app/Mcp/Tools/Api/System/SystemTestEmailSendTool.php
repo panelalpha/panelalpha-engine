@@ -15,6 +15,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Name('system_test_email_send')]
 #[Description(<<<'MARKDOWN'
     Send a test email via Exim
+
+    exit_code 0 only means Exim accepted the message. status says what happened to it: delivered, deferred (still queued; Exim retries it), failed (bounced), not_sent (Exim did not take it) or unknown; reason is the Exim log line for a deferral or a bounce.
     MARKDOWN)]
 #[IsDestructive]
 class SystemTestEmailSendTool extends ApiTool

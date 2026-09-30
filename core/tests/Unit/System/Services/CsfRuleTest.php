@@ -149,6 +149,13 @@ class CsfRuleTest extends TestCase
             ['target' => '1.2.3.4 # x'],
             ['target' => '1.2.3.4', 'port' => "22\n3306"],
             ['target' => '1.2.3.4', 'comment' => "ok\ntcp|in|d=3306|s=0.0.0.0/0"],
+            // csf drops a hostname from csf.allow; it belongs in csf.dyndns.
+            ['target' => 'not-an-ip'],
+            ['target' => 'backup.example.com'],
+            ['target' => '10.0.0.0/33'],
+            ['target' => '2001:db8::/129'],
+            ['target' => '1.2.3.4/x'],
+            ['target' => '999.1.1.1'],
         ];
         foreach ($bad as $payload) {
             $this->assertTrue(\Illuminate\Support\Facades\Validator::make($payload, $rules)->fails(), json_encode($payload));
@@ -157,12 +164,43 @@ class CsfRuleTest extends TestCase
             ['target' => '1.2.3.4'],
             ['target' => '10.0.0.0/8', 'comment' => 'office'],
             ['target' => '2001:db8::/32'],
-            ['target' => 'backup.example.com'],
+            ['target' => '0.0.0.0/0'],
             ['target' => '1000', 'target_prefix' => 'u=', 'protocol' => 'tcp', 'direction' => 'out', 'port_prefix' => 'd=', 'port' => '80,443,2000_3000'],
         ];
         foreach ($good as $payload) {
             $this->assertTrue(\Illuminate\Support\Facades\Validator::make($payload, $rules)->passes(), json_encode($payload));
         }
+    }
+
+    public function test_a_target_csf_would_ignore_is_refused_before_anything_is_written(): void
+    {
+        $system = $this->system(self::RULE);
+        $bare = ['protocol' => null, 'direction' => null, 'port_prefix' => null, 'port' => null, 'target_prefix' => null, 'comment' => null];
+        $port = ['protocol' => 'tcp', 'direction' => 'out', 'port_prefix' => 'd=', 'port' => '80', 'comment' => null];
+
+        foreach ([
+            [...$bare, 'target' => 'not-an-ip'],
+            [...$port, 'target_prefix' => 's=', 'target' => '1000'],
+            [...$port, 'target_prefix' => 'u=', 'target' => '1.2.3.4'],
+        ] as $params) {
+            try {
+                (new Csf($system))->addRule('allow', $params);
+                $this->fail(json_encode($params) . ' was accepted');
+            } catch (ValidationException $e) {
+                $this->assertArrayHasKey('target', $e->errors());
+            }
+        }
+        $this->assertNull($system->written);
+
+        // An edit keeps the stored target_prefix, so the target is checked against it.
+        try {
+            (new Csf($system))->editRule('allow', md5(self::RULE), ['target' => '1000']);
+            $this->fail('a uid was accepted as the s= address');
+        } catch (ValidationException) {
+        }
+        $this->assertNull($system->written);
+
+        $this->assertSame('tcp|out|d=80|u=1000', (new Csf($system))->unparseRule([...$port, 'target_prefix' => 'u=', 'target' => '1000']));
     }
 
     public function test_the_ui_is_enabled_only_when_csf_conf_says_1(): void

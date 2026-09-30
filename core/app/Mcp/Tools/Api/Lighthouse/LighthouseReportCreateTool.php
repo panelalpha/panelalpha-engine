@@ -39,6 +39,7 @@ class LighthouseReportCreateTool extends ApiTool
             'desktop_preset',
             'no_local_resolve',
             'strip_screenshot',
+            'summary',
         ];
     }
 
@@ -49,6 +50,7 @@ class LighthouseReportCreateTool extends ApiTool
     {
         return [
             'strip_screenshot' => '1',
+            'summary' => '1',
         ];
     }
 
@@ -61,7 +63,8 @@ class LighthouseReportCreateTool extends ApiTool
             'url' => $schema->string()->description('Example: https://example.com.')->required(),
             'desktop_preset' => $schema->boolean(),
             'no_local_resolve' => $schema->boolean(),
-            'strip_screenshot' => $schema->boolean()->description('Drop the final-screenshot audit\'s embedded base64 PNG (details.data), which otherwise dwarfs the score/metric data in the report and cannot be rendered inline anyway. This tool sends 1 when it is omitted.'),
+            'strip_screenshot' => $schema->boolean()->description('Drop every embedded data: URI -- the final screenshot, the filmstrip thumbnails, the full-page screenshot -- leaving null and a <key>StrippedBytes count. They dwarf the score/metric data and cannot be rendered inline anyway. This tool sends 1 when it is omitted.'),
+            'summary' => $schema->boolean()->description('Return only the scores: the URLs, the category scores and, per audit, its title, score and displayed value. No audit details. This tool sends 1 when it is omitted.'),
         ];
     }
 }

@@ -90,6 +90,9 @@ class MysqlController extends Controller
         path: '/mysql/phpmyadmin-sso-token',
         summary: 'Consume a phpMyAdmin SSO token (internal use, no bearer auth)',
         tags: ['MySQL Server'],
+        // phpMyAdmin's signon.php redeems this; PmaSso refuses anyone else,
+        // an in-process tool call included. The browser URL is the login.
+        x: ['mcp-hide' => true],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['token'],
             properties: [new OA\Property(property: 'token', type: 'string')],

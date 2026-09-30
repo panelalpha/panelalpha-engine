@@ -163,8 +163,8 @@ class ModsecController extends Controller
         parameters: [new OA\Parameter(name: 'name', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
             properties: [
-                new OA\Property(property: 'enable', type: 'array', items: new OA\Items(type: 'string')),
-                new OA\Property(property: 'disable', type: 'array', items: new OA\Items(type: 'string')),
+                new OA\Property(property: 'enable', type: 'array', items: new OA\Items(type: 'string'), description: 'File names as config_files lists them; the .disabled suffix is optional.'),
+                new OA\Property(property: 'disable', type: 'array', items: new OA\Items(type: 'string'), description: 'File names as config_files lists them; the .disabled suffix is optional.'),
             ],
         )),
         responses: [

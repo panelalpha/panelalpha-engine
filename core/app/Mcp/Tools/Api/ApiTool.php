@@ -300,6 +300,12 @@ abstract class ApiTool extends Tool
                 $body === [] ? null : json_encode($body)
             );
 
+        // A real JSON request gets its body in the `request` bag too
+        // (Request::createFromBase()); without it `$request->get()` reads null.
+        if ($files === [] && $body !== []) {
+            $sub->request->replace($body);
+        }
+
         // Same credentials the MCP caller presented; the API re-authorises.
         $bearer = request()?->bearerToken();
         if (is_string($bearer) && $bearer !== '') {

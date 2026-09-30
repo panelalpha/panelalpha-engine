@@ -25,8 +25,19 @@ class Php
     public function getCustomIniSettings(string $phpVersion): array
     {
         $iniFile = $this->customIniFilePath($phpVersion);
+        // A version the project template did not ship has no file yet.
+        if (!is_file($iniFile)) {
+            return [];
+        }
 
-        return parse_ini_file($iniFile);
+        $parsed = @parse_ini_file($iniFile);
+        if ($parsed === false) {
+            throw ValidationException::withMessages([
+                'settings' => 'The custom PHP INI file is not valid INI.',
+            ]);
+        }
+
+        return $parsed;
     }
 
     /**

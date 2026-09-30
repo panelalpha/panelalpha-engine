@@ -9,6 +9,7 @@ use App\Http\Resources\CronJobCollection;
 use App\Http\Resources\CronJobResource;
 use App\Lib\Helpers\CronSchedule;
 use App\Models\User;
+use App\System\Project\Dind;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
@@ -53,6 +54,7 @@ class CronJobController extends Controller
     #[OA\Post(
         path: '/projects/{username}/cron-jobs',
         summary: 'Create a cron job',
+        description: 'PHP hosting projects only: a dind account does not run the project crontab, and a dind project answers 422.',
         security: [['bearerAuth' => []]],
         tags: ['Cron Jobs'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -80,6 +82,7 @@ class CronJobController extends Controller
     public function store($username, CronJobStoreRequest $request)
     {
         $user = $this->projectOr404($username, 'Not found');
+        $this->rejectDind($user);
 
         /**
          * @var array{
@@ -107,6 +110,7 @@ class CronJobController extends Controller
     #[OA\Put(
         path: '/projects/{username}/cron-jobs/{hash}',
         summary: 'Update a cron job',
+        description: 'PHP hosting projects only: a dind account does not run the project crontab, and a dind project answers 422.',
         security: [['bearerAuth' => []]],
         tags: ['Cron Jobs'],
         parameters: [
@@ -138,6 +142,7 @@ class CronJobController extends Controller
     public function update($username, $hash, CronJobUpdateRequest $request)
     {
         $user = $this->projectOr404($username, 'Not found');
+        $this->rejectDind($user);
 
         /**
          * @var array{
@@ -200,5 +205,19 @@ class CronJobController extends Controller
         $user->project()->reloadCron();
 
         return new CronJobResource($job);
+    }
+
+    /**
+     * The account container runs cron but never mounts the project crontab,
+     * and has no `php` service to reload: a job saved there would never run.
+     */
+    private function rejectDind(User $user): void
+    {
+        if ($user->project()->runtime() instanceof Dind) {
+            throw ValidationException::withMessages([
+                'command' => 'Cron jobs are not supported for dind projects. '
+                    . 'Schedule the work inside the app, for example as a service in its compose file.',
+            ]);
+        }
     }
 }

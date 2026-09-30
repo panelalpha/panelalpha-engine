@@ -109,7 +109,9 @@ final class AppDatabase
      * Generated once. A redeploy that rotated it would leave the app holding
      * the old one in its own config file -- Matomo's config.ini.php,
      * WordPress's wp-config.php -- and the site would come back up unable to
-     * reach a database that was working a minute earlier.
+     * reach a database that was working a minute earlier. For the same reason
+     * a stored password that cannot be decrypted is an error, never a reason
+     * to generate a new one.
      */
     private static function password(User $user): string
     {
@@ -117,6 +119,13 @@ final class AppDatabase
         $stored = $details[self::PASSWORD_DETAIL] ?? null;
         if (is_string($stored) && $stored !== '') {
             return $stored;
+        }
+        if ($user->hasUnreadableSecret(self::PASSWORD_DETAIL)) {
+            throw new \RuntimeException(
+                "The application database password stored for '{$user->username}' cannot be decrypted "
+                    . '(APP_KEY changed?). Restore the previous APP_KEY; a new password would lock the '
+                    . 'application out of its own database.'
+            );
         }
 
         $password = Str::random(self::PASSWORD_BYTES);

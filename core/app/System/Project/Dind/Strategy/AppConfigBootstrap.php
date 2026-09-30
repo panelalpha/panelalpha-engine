@@ -120,7 +120,8 @@ class AppConfigBootstrap
             return;
         }
 
-        $fs->filePutContents($appConfigCompose, $content, $chown, '644');
+        // The same answer inspect's RecipeFileOverlay lays over a clone.
+        $fs->filePutContents($appConfigCompose, (string) $appConfig->replacingCompose(), $chown, '644');
         $this->removeIfExists($engineOverride, $system, $fs);
     }
 

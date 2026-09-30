@@ -141,6 +141,8 @@ List the cron jobs on this project.
 Create one that runs /usr/bin/php /home/<user>/script.php every hour, on the hour.
 ```
 
+Cron jobs run on traditional PHP hosting. A project deployed into its own container (from a repository, an archive, or WordPress set up by the engine) does not run them, and creating one there is refused; schedule the work inside the application instead, for example as a service in its Docker Compose file.
+
 Describe the schedule in plain words and the assistant will work out the timing for you. If the assistant cannot manage cron jobs, see [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 **This is not a backup schedule.** The engine has no built-in backup schedule; backups run when you ask for them. See [Backups](backups.md).

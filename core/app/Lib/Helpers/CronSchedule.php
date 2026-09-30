@@ -78,14 +78,20 @@ final class CronSchedule
             return ["{$field}: empty value"];
         }
 
+        // Written into the crontab as is, where whitespace ends the field:
+        // `9 , 17` would be read as three fields, not a list.
+        if (preg_match('/\s/', $value) === 1) {
+            return ["{$field}: whitespace is not allowed inside a field"];
+        }
+
         $errors = [];
         foreach (explode(',', $value) as $part) {
-            if (trim($part) === '') {
+            if ($part === '') {
                 // `1,,5` is a typo, not an empty schedule — say which.
                 $errors[] = "{$field}: empty list element";
                 continue;
             }
-            $error = self::tokenError(strtolower(trim($part)), $field);
+            $error = self::tokenError(strtolower($part), $field);
             if ($error !== null) {
                 $errors[] = $error;
             }
@@ -141,7 +147,7 @@ final class CronSchedule
     private static function rangeError(string $token, string $field): ?string
     {
         $rules = self::FIELDS[$field];
-        [$from, $to] = array_map('trim', array_pad(explode('-', $token, 2), 2, ''));
+        [$from, $to] = array_pad(explode('-', $token, 2), 2, '');
 
         if ($from === '' || $to === '') {
             return "{$field}: invalid range '{$token}'";

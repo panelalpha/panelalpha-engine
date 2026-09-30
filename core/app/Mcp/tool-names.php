@@ -138,7 +138,6 @@ return [
     'DELETE /projects/{username}/mysql/privileges/{dbuser}/{dbname}' => 'mysql_privileges_revoke',
     'GET /projects/{username}/mysql/server-info' => 'mysql_server_info',
     'POST /projects/{username}/mysql/phpmyadmin-sso-token' => 'phpmyadmin_sso_token_create',
-    'PUT /mysql/phpmyadmin-sso-token' => 'phpmyadmin_sso_login',
 
     // Cron jobs
     'GET /projects/{username}/cron-jobs' => 'cron_job_list',
@@ -299,7 +298,6 @@ return [
     // Tasks
     'GET /tasks/{id}' => 'task_get',
     'GET /tasks/{id}/logs' => 'task_log_list',
-    'GET /tasks/{id}/logs/stream' => 'task_log_stream',
     'POST /tasks/{id}/cancel' => 'task_cancel',
 
     // Backup containers

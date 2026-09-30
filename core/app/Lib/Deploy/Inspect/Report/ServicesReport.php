@@ -20,7 +20,11 @@ final class ServicesReport
 {
     private readonly string $projectDir;
 
-    public function __construct(string $projectDir)
+    /**
+     * @param ?string $composePath the compose file detection chose, which may
+     *        be a recipe's app-config compose rather than one the repository ships
+     */
+    public function __construct(string $projectDir, private readonly ?string $composePath = null)
     {
         $this->projectDir = rtrim($projectDir, '/');
     }
@@ -28,9 +32,9 @@ final class ServicesReport
     /**
      * @return list<array<string, mixed>>
      */
-    public static function of(string $projectDir): array
+    public static function of(string $projectDir, ?string $composePath = null): array
     {
-        return (new self($projectDir))->build();
+        return (new self($projectDir, $composePath))->build();
     }
 
     /**
@@ -92,7 +96,9 @@ final class ServicesReport
      */
     private function composeServices(): array
     {
-        $path = ComposeFileInspector::firstIn($this->projectDir);
+        $path = $this->composePath !== null && is_file($this->composePath)
+            ? $this->composePath
+            : ComposeFileInspector::firstIn($this->projectDir);
         if ($path === null) {
             return [];
         }

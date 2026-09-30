@@ -68,7 +68,7 @@ class CsfRuleUpdateTool extends ApiTool
         return [
             'type' => $schema->string()->description('One of: allow, deny.')->required(),
             'lineMd5' => $schema->string()->required(),
-            'target' => $schema->string()->required(),
+            'target' => $schema->string()->description('An IPv4 or IPv6 address or CIDR range, or a numeric uid when target_prefix is u=.')->required(),
             'comment' => $schema->string(),
             'protocol' => $schema->string()->description('A port rule, e.g. tcp|in|d=22|s=1.2.3.4, takes protocol, direction, port_prefix, port and target_prefix together, and a partial set is refused. Leave all five out for a rule on the bare target. One of: tcp, udp.'),
             'direction' => $schema->string()->description('One of: in, out.'),

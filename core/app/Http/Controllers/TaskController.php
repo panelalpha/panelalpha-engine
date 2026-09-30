@@ -101,6 +101,8 @@ class TaskController extends Controller
             . 'is terminal and no further lines remain. Optional `since` / `after_id` skip the '
             . 'backlog. Long-lived: MCP clients should poll GET /tasks/{id}/logs instead.',
         summary: 'Stream task log lines as NDJSON until the task finishes',
+        // A tool answers once; this never does. task_log_list is the MCP way.
+        x: ['mcp-hide' => true],
         security: [['bearerAuth' => []]],
         tags: ['Tasks'],
         parameters: [

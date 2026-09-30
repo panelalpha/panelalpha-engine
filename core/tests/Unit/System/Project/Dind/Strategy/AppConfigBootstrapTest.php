@@ -3,6 +3,8 @@
 namespace Tests\Unit\System\Project\Dind\Strategy;
 
 use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\Lib\Deploy\Inspect\RecipeFileOverlay;
+use App\Lib\Deploy\Inspect\Report\AppConfigOrigin;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Models\User as ModelsUser;
 use App\System\Project as ProjectAggregate;
@@ -175,6 +177,27 @@ class AppConfigBootstrapTest extends TestCase
         $this->assertStringContainsString(
             'exec php-fpm',
             (string) file_get_contents($this->projectDir.'/'.EntrypointWriter::PROJECT_OVERRIDE)
+        );
+    }
+
+    /**
+     * Inspect lays the same compose file over its clone, or it detects a tree
+     * the deploy never sees (WordPress: `php` in inspect, compose in deploy).
+     */
+    public function test_inspect_overlay_writes_the_compose_file_the_deploy_writes(): void
+    {
+        $url = 'https://github.com/WordPress/WordPress';
+        [$appConfig] = AppConfigOrigin::find($this->projectDir, $url);
+        $this->assertNotNull($appConfig);
+        $this->writeCompose($appConfig);
+
+        $clone = $this->tmpRoot.'/clone';
+        mkdir($clone);
+        RecipeFileOverlay::apply($clone, $url);
+
+        $this->assertFileEquals(
+            $this->projectDir.'/'.EngineArtifacts::APP_CONFIG_COMPOSE,
+            $clone.'/'.EngineArtifacts::APP_CONFIG_COMPOSE
         );
     }
 

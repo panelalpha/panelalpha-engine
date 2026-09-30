@@ -361,6 +361,14 @@ class Dind implements DeployableDindProject, Runtime
         return $this->paths()->composeCommand($rest);
     }
 
+    /**
+     * @return array{COMPOSE_FILE: string, COMPOSE_PATH_SEPARATOR: string}
+     */
+    public function userAppComposeEnv(): array
+    {
+        return $this->paths()->composeEnv();
+    }
+
     public function publicAppUrl(): ?string
     {
         return $this->networking()->publicAppUrl();

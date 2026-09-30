@@ -28,9 +28,17 @@ class LighthouseController extends Controller
                     property: 'strip_screenshot',
                     type: 'boolean',
                     nullable: true,
-                    description: 'Drop the final-screenshot audit\'s embedded base64 PNG (details.data), '
-                        . 'which otherwise dwarfs the score/metric data in the report and cannot be '
-                        . 'rendered inline anyway.',
+                    description: 'Drop every embedded data: URI -- the final screenshot, the filmstrip '
+                        . 'thumbnails, the full-page screenshot -- leaving null and a <key>StrippedBytes '
+                        . 'count. They dwarf the score/metric data and cannot be rendered inline anyway.',
+                    x: ['mcp-default' => '1']
+                ),
+                new OA\Property(
+                    property: 'summary',
+                    type: 'boolean',
+                    nullable: true,
+                    description: 'Return only the scores: the URLs, the category scores and, per audit, its '
+                        . 'title, score and displayed value. No audit details.',
                     x: ['mcp-default' => '1']
                 ),
             ],
@@ -55,6 +63,7 @@ class LighthouseController extends Controller
          *   desktop_preset?: ?bool,
          *   no_local_resolve?: ?bool,
          *   strip_screenshot?: ?bool,
+         *   summary?: ?bool,
          * } $params
          */
         $params = $request->validate([
@@ -62,6 +71,7 @@ class LighthouseController extends Controller
             'desktop_preset' => 'boolean|nullable',
             'no_local_resolve' => 'boolean|nullable',
             'strip_screenshot' => 'boolean|nullable',
+            'summary' => 'boolean|nullable',
         ]);
 
         // if (empty($params['url'])) {
@@ -158,6 +168,10 @@ class LighthouseController extends Controller
             ], 422);
         }
 
+        if ($request->boolean('summary')) {
+            return new JsonResponse(['data' => $this->summary($result)]);
+        }
+
         if ($request->boolean('strip_screenshot')) {
             $this->stripScreenshotData($result);
         }
@@ -166,21 +180,67 @@ class LighthouseController extends Controller
     }
 
     /**
-     * The final-screenshot audit embeds a full base64 PNG as details.data,
-     * which dwarfs the report's actual score/metric data and cannot be
-     * rendered inline over a text-only transport like MCP.
+     * Screenshots come as base64 data: URIs in several places (final-screenshot,
+     * the screenshot-thumbnails filmstrip, top-level fullPageScreenshot), and
+     * any of them dwarfs the scores. Each becomes null plus <key>StrippedBytes.
      *
-     * @param array<string, mixed> $result
+     * @param array<array-key, mixed> $node
      */
-    private function stripScreenshotData(array &$result): void
+    private function stripScreenshotData(array &$node): void
     {
-        foreach ((array)($result['audits'] ?? []) as $auditId => $audit) {
-            $data = $audit['details']['data'] ?? null;
-            if (is_string($data) && $data !== '') {
-                $result['audits'][$auditId]['details']['data'] = null;
-                $result['audits'][$auditId]['details']['dataStrippedBytes'] = strlen($data);
+        $sizes = [];
+        foreach ($node as $key => $value) {
+            if (is_array($value)) {
+                $this->stripScreenshotData($node[$key]);
+            } elseif (is_string($value) && str_starts_with($value, 'data:')) {
+                $node[$key] = null;
+                if (is_string($key)) {
+                    $sizes[$key . 'StrippedBytes'] = strlen($value);
+                }
             }
         }
+        $node += $sizes;
+    }
+
+    /**
+     * The scores without the evidence. A full report runs to 100k+ characters
+     * of request tables and traces even with the images gone; this is a few
+     * hundred bytes per audit, bounded by how many audits Lighthouse ran.
+     *
+     * @param array<string, mixed> $result
+     * @return array<string, mixed>
+     */
+    private function summary(array $result): array
+    {
+        $categories = [];
+        foreach ((array)($result['categories'] ?? []) as $id => $category) {
+            $categories[$id] = [
+                'title' => $category['title'] ?? null,
+                'score' => $category['score'] ?? null,
+            ];
+        }
+
+        $audits = [];
+        foreach ((array)($result['audits'] ?? []) as $id => $audit) {
+            $audits[$id] = array_filter(
+                array_intersect_key((array)$audit, array_flip([
+                    'title', 'score', 'scoreDisplayMode', 'displayValue', 'numericValue', 'numericUnit', 'errorMessage',
+                ])),
+                fn (mixed $v): bool => $v !== null
+            );
+        }
+
+        return array_filter([
+            'requestedUrl' => $result['requestedUrl'] ?? null,
+            'finalDisplayedUrl' => $result['finalDisplayedUrl'] ?? $result['finalUrl'] ?? null,
+            'fetchTime' => $result['fetchTime'] ?? null,
+            'lighthouseVersion' => $result['lighthouseVersion'] ?? null,
+            'formFactor' => $result['configSettings']['formFactor'] ?? null,
+            'runtimeError' => $result['runtimeError'] ?? null,
+            'runWarnings' => $result['runWarnings'] ?? null,
+            'categories' => $categories,
+            'audits' => $audits,
+        ], fn (mixed $v): bool => $v !== null);
     }
 
     private function engineIp(): ?string

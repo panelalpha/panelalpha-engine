@@ -157,10 +157,49 @@ class Exim
             "echo " . escapeshellarg($message) . " | exim4 -v -odf $to"
         ]);
 
+        $stdout = $process->getOutput();
+        $stderr = $process->getErrorOutput();
+        $exitCode = $process->getExitCode();
+
         return [
-            'stdout' => $process->getOutput(),
-            'stderr' => $process->getErrorOutput(),
-            'exit_code' => $process->getExitCode(),
+            ...self::deliveryOutcome($stdout . "\n" . $stderr, $exitCode),
+            'stdout' => $stdout,
+            'stderr' => $stderr,
+            'exit_code' => $exitCode,
+        ];
+    }
+
+    /**
+     * What happened to the message, read from the log lines `exim -v` prints.
+     * Exit code 0 only says exim accepted it: a deferral (`==`) leaves it on
+     * the queue for a retry, and a bounce (`**`) exits 0 as well.
+     *
+     * @return array{status: string, delivered: bool, reason: ?string}
+     */
+    public static function deliveryOutcome(string $output, ?int $exitCode): array
+    {
+        preg_match_all(
+            '/^\s*(?:\d{4}-\d\d-\d\d [\d:.]+ (?:\[\d+\] )?(?:[\w-]+ )?)?(=>|->|==|\*\*) \S+ ?(.*)$/m',
+            $output,
+            $lines,
+            PREG_SET_ORDER
+        );
+        $first = [];
+        foreach ($lines as [, $flag, $rest]) {
+            $first[$flag] ??= trim($rest);
+        }
+
+        [$status, $reason] = match (true) {
+            isset($first['**']) => ['failed', $first['**']],
+            isset($first['==']) => ['deferred', $first['==']],
+            isset($first['=>']) || isset($first['->']) => ['delivered', null],
+            default => [$exitCode === 0 ? 'unknown' : 'not_sent', null],
+        };
+
+        return [
+            'status' => $status,
+            'delivered' => $status === 'delivered',
+            'reason' => $reason,
         ];
     }
 

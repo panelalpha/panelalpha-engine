@@ -42,39 +42,50 @@ def connect_to_db_mysql(config):
         logging.error(f"Database connection error: {e}")
     return None
 
+# Per-device deltas: psutil's totals sum every NIC, so an account's veth going
+# away drops its lifetime traffic out of the total and the rate goes negative.
+DISK_FIELDS = ("read_bytes", "write_bytes", "read_count", "write_count")
+NET_FIELDS = ("bytes_recv", "bytes_sent", "packets_recv", "packets_sent")
+
+def disk_snapshot():
+    # perdisk=True also lists partitions; keep whole disks only, as the
+    # perdisk=False total does, so sda1 is not counted again inside sda.
+    disks = psutil.disk_io_counters(perdisk=True) or {}
+    return {
+        name: {f: getattr(c, f) for f in DISK_FIELDS}
+        for name, c in disks.items()
+        if os.path.exists("/sys/block/" + name.replace("/", "!"))
+    }
+
+def net_snapshot():
+    nics = psutil.net_io_counters(pernic=True) or {}
+    return {name: {f: getattr(c, f) for f in NET_FIELDS} for name, c in nics.items()}
+
+def counter_rate(prev, cur, field, elapsed):
+    # Devices that came or went between samples are skipped, and a counter
+    # that went backwards (reset) counts as no traffic.
+    total = 0
+    for name, counters in cur.items():
+        if name in prev:
+            total += max(0, counters[field] - prev[name][field])
+    return total / elapsed
+
 def collect_metrics(prev_metrics):
     try:
         now = time.time()
         elapsed = now - prev_metrics.get("timestamp", now)
-        if elapsed == 0:
+        if elapsed <= 0:
             elapsed = 1  # avoid division by zero
 
         cpu = psutil.cpu_percent(interval=None)
         load_avg = psutil.getloadavg()
 
-        disk_io = psutil.disk_io_counters()
-        disk_read_Bps = (disk_io.read_bytes - prev_metrics.get("disk_read_bytes", 0)) / elapsed
-        disk_write_Bps = (disk_io.write_bytes - prev_metrics.get("disk_write_bytes", 0)) / elapsed
-        disk_read_iops = (disk_io.read_count - prev_metrics.get("disk_read_count", 0)) / elapsed
-        disk_write_iops = (disk_io.write_count - prev_metrics.get("disk_write_count", 0)) / elapsed
+        disk = disk_snapshot()
+        net = net_snapshot()
+        prev_disk = prev_metrics.get("disk", {})
+        prev_net = prev_metrics.get("net", {})
 
-        net_io = psutil.net_io_counters()
-        net_in_Bps = (net_io.bytes_recv - prev_metrics.get("net_in_bytes", 0)) / elapsed
-        net_out_Bps = (net_io.bytes_sent - prev_metrics.get("net_out_bytes", 0)) / elapsed
-        net_in_pps = (net_io.packets_recv - prev_metrics.get("net_in_pkts", 0)) / elapsed
-        net_out_pps = (net_io.packets_sent - prev_metrics.get("net_out_pkts", 0)) / elapsed
-
-        prev_metrics.update({
-            "timestamp": now,
-            "disk_read_bytes": disk_io.read_bytes,
-            "disk_write_bytes": disk_io.write_bytes,
-            "disk_read_count": disk_io.read_count,
-            "disk_write_count": disk_io.write_count,
-            "net_in_bytes": net_io.bytes_recv,
-            "net_out_bytes": net_io.bytes_sent,
-            "net_in_pkts": net_io.packets_recv,
-            "net_out_pkts": net_io.packets_sent,
-        })
+        prev_metrics.update({"timestamp": now, "disk": disk, "net": net})
 
         return {
             "timestamp": datetime.fromtimestamp(now).strftime("%Y-%m-%d %H:%M:%S"),
@@ -84,14 +95,14 @@ def collect_metrics(prev_metrics):
             "cpu_load_avg_15": load_avg[2],
             "ram_percent": psutil.virtual_memory().percent,
             "swap_percent": psutil.swap_memory().percent,
-            "disk_read_bps": disk_read_Bps,
-            "disk_write_bps": disk_write_Bps,
-            "disk_read_iops": disk_read_iops,
-            "disk_write_iops": disk_write_iops,
-            "net_in_bps": net_in_Bps,
-            "net_out_bps": net_out_Bps,
-            "net_in_pps": net_in_pps,
-            "net_out_pps": net_out_pps,
+            "disk_read_bps": counter_rate(prev_disk, disk, "read_bytes", elapsed),
+            "disk_write_bps": counter_rate(prev_disk, disk, "write_bytes", elapsed),
+            "disk_read_iops": counter_rate(prev_disk, disk, "read_count", elapsed),
+            "disk_write_iops": counter_rate(prev_disk, disk, "write_count", elapsed),
+            "net_in_bps": counter_rate(prev_net, net, "bytes_recv", elapsed),
+            "net_out_bps": counter_rate(prev_net, net, "bytes_sent", elapsed),
+            "net_in_pps": counter_rate(prev_net, net, "packets_recv", elapsed),
+            "net_out_pps": counter_rate(prev_net, net, "packets_sent", elapsed),
         }
 
     except Exception as e:
@@ -154,18 +165,10 @@ def main():
 
     cursor = connection.cursor()
 
-    disk_io = psutil.disk_io_counters()
-    net_io = psutil.net_io_counters()
     prev_metrics = {
         "timestamp": time.time(),
-        "disk_read_bytes": disk_io.read_bytes,
-        "disk_write_bytes": disk_io.write_bytes,
-        "disk_read_count": disk_io.read_count,
-        "disk_write_count": disk_io.write_count,
-        "net_in_bytes": net_io.bytes_recv,
-        "net_out_bytes": net_io.bytes_sent,
-        "net_in_pkts": net_io.packets_recv,
-        "net_out_pkts": net_io.packets_sent,
+        "disk": disk_snapshot(),
+        "net": net_snapshot(),
     }
 
     interval = get_interval()

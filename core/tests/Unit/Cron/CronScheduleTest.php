@@ -46,7 +46,6 @@ class CronScheduleTest extends TestCase
             'sunday as seven' => [['day_of_week' => '7']],
             'sunday as zero' => [['day_of_week' => '0']],
             'upper case names' => [['month' => 'JAN']],
-            'surrounding space' => [['hour' => ' 9 , 17 ']],
             'bounds' => [['minute' => '59', 'hour' => '23', 'day_of_month' => '31', 'month' => '12']],
         ];
     }
@@ -80,6 +79,11 @@ class CronScheduleTest extends TestCase
             'empty field' => [['hour' => ''], 'hour: empty value'],
             'empty list element' => [['hour' => '1,,2'], 'hour: empty list element'],
             'unsupported nickname' => [['minute' => '@daily'], "minute: invalid token '@daily'"],
+            // Whitespace ends a crontab field, so `9 , 17` would be three fields.
+            'space around a comma' => [['hour' => '9 , 17'], 'hour: whitespace is not allowed'],
+            'surrounding space' => [['hour' => ' 9 '], 'hour: whitespace is not allowed'],
+            'space inside a range' => [['minute' => '1 - 5'], 'minute: whitespace is not allowed'],
+            'tab in a list' => [['day_of_week' => "1,\t2"], 'day_of_week: whitespace is not allowed'],
         ];
     }
 

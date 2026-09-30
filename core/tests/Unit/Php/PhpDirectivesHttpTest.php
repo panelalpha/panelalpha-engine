@@ -272,14 +272,40 @@ class PhpDirectivesHttpTest extends TestCase
         $this->assertSame(0, $this->restartCount('8.2'));
     }
 
-    private function account(): User
+    public function test_account_ini_with_no_file_for_that_version_reads_as_empty(): void
+    {
+        $this->account();
+
+        $this->getJson('/api/projects/alice/php/custom-ini-settings?php_version=8.2')
+            ->assertOk()
+            ->assertExactJson(['data' => []]);
+    }
+
+    public function test_account_ini_on_a_dind_project_is_a_422_and_writes_nothing(): void
+    {
+        $this->account('dind');
+        $this->writeAccountIni('8.2', "memory_limit=256M\n");
+
+        $this->getJson('/api/projects/alice/php/custom-ini-settings?php_version=8.2')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('project');
+        $this->putJson('/api/projects/alice/php/custom-ini-settings', [
+            'php_version' => '8.2',
+            'settings' => ['memory_limit' => '64M'],
+        ])->assertStatus(422)->assertJsonValidationErrors('project');
+
+        $this->assertSame("memory_limit=256M\n", file_get_contents($this->accountIni('8.2')));
+        $this->assertSame(0, $this->restartCount('8.2'));
+    }
+
+    private function account(string $template = 'default'): User
     {
         $user = new User();
         $user->username = 'alice';
         $user->domain = 'alice.test';
         $user->password = 'secret';
         $user->setDetails([
-            'template' => 'default',
+            'template' => $template,
             'UID' => 1001,
             'GID' => 1001,
         ]);

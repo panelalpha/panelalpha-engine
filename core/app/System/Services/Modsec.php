@@ -15,8 +15,8 @@ use Illuminate\Support\Str;
  */
 class Modsec
 {
-    /** A rule file name as toggleConfigFiles() accepts it. */
-    public const CONFIG_FILE_NAME = '/\A[A-Za-z0-9_][A-Za-z0-9._-]*\.conf\z/';
+    /** A rule file name as toggleConfigFiles() accepts it: as listed, with or without `.disabled`. */
+    public const CONFIG_FILE_NAME = '/\A[A-Za-z0-9_][A-Za-z0-9._-]*\.conf(?:\.disabled)?\z/';
 
     public function __construct(
         private EngineSystem $system,
@@ -178,6 +178,11 @@ class Modsec
         if (!is_dir($dir)) {
             return;
         }
+
+        // getRulesets() lists a disabled file as `X.conf.disabled`; both names mean X.conf.
+        $canonical = fn (string $name): string => preg_replace('/\.disabled\z/', '', $name);
+        $enable = array_map($canonical, $enable);
+        $disable = array_map($canonical, $disable);
 
         $shouldRestart = false;
         foreach ($enable as $filename) {

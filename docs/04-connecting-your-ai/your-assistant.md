@@ -322,7 +322,7 @@ Your assistant is using a list it loaded earlier. Restart your assistant, then r
 
 ## Every tool
 
-This is every MCP tool the engine ships: **199** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
+This is every MCP tool the engine ships: **197** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
 
 A **project** is one hosting account. Every tool takes it as `name`; what the tools return still calls that value `username`, the REST API's name for it.
 
@@ -346,7 +346,7 @@ pae mcp:tool:list
 | [MySQL databases](#mysql-databases) | `mysqldatabases` | On | 4 |
 | [MySQL users](#mysql-users) | `mysqlusers` | On | 6 |
 | [MySQL privileges](#mysql-privileges) | `mysqlprivileges` | On | 3 |
-| [MySQL server](#mysql-server) | `mysqlserver` | On | 3 |
+| [MySQL server](#mysql-server) | `mysqlserver` | On | 2 |
 | [FTP accounts](#ftp-accounts) | `ftpaccounts` | On | 4 |
 | [SFTP accounts](#sftp-accounts) | `sftpaccounts` | On | 4 |
 | [Cron jobs](#cron-jobs) | `cronjobs` | On | 4 |
@@ -371,7 +371,7 @@ pae mcp:tool:list
 | [Git](#git) | `git` | On | 14 |
 | [Project settings](#project-settings) | `projectsettings` | On | 4 |
 | [SSH](#ssh) | `ssh` | On | 1 |
-| [Tasks](#tasks) | `tasks` | On | 4 |
+| [Tasks](#tasks) | `tasks` | On | 3 |
 | [Secret vault](#secret-vault) | `secretvault` | On | 6 |
 
 ## Engine summaries
@@ -482,7 +482,6 @@ pae mcp:tool:list
 | Tool | What it does |
 |---|---|
 | `mysql_server_info` | Get MySQL server connection info |
-| `phpmyadmin_sso_login` | Consume a phpMyAdmin SSO token (internal use, no bearer auth) |
 | `phpmyadmin_sso_token_create` | Create a phpMyAdmin SSO token for a project |
 
 ## FTP accounts
@@ -745,7 +744,6 @@ pae mcp:tool:list
 | `task_cancel` | Cancel a queued or running task; kill the work subprocess if it still matches |
 | `task_get` | Poll a task status and new log lines after a cursor |
 | `task_log_list` | Page of task log lines after a timestamp and/or id cursor |
-| `task_log_stream` | Stream task log lines as NDJSON until the task finishes |
 
 ## Secret vault
 

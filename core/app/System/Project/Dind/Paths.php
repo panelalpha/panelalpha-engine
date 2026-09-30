@@ -206,6 +206,21 @@ final class Paths
     }
 
     /**
+     * {@see composeCommand()} as environment, for scripts that call a bare
+     * `docker compose`: with the first file in appDir(), compose derives the
+     * same project directory and name the deploy used.
+     *
+     * @return array{COMPOSE_FILE: string, COMPOSE_PATH_SEPARATOR: string}
+     */
+    public function composeEnv(): array
+    {
+        return [
+            'COMPOSE_FILE' => implode(':', $this->composeFiles()),
+            'COMPOSE_PATH_SEPARATOR' => ':',
+        ];
+    }
+
+    /**
      * @return list<string>
      */
     public function composeCommandForDirectory(string $appDir): array

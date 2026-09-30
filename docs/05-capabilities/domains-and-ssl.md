@@ -62,7 +62,7 @@ that are already there.
 
 Saving replaces the whole set for that domain. If you name only `memory_limit`, the other settings on that domain are removed. Asking to clear them removes the set.
 
-This is not the project's own PHP memory setting. That one belongs to the project, and WordPress in its own container uses it: [Change the PHP version](wordpress-and-apps.md#change-the-php-version).
+This is not the project's own PHP settings. Those belong to the project and, like these, apply only to traditional PHP hosting: [Change the PHP version](wordpress-and-apps.md#change-the-php-version).
 
 ## Extra routes
 

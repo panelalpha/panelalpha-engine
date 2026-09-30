@@ -4,6 +4,8 @@ namespace Tests\Unit;
 
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use App\System\Project\Dind\AppDatabase;
+use Illuminate\Support\Facades\Facade;
 use Tests\TestCase;
 
 class UserSecretDetailsTest extends TestCase
@@ -58,6 +60,62 @@ class UserSecretDetailsTest extends TestCase
         $this->assertSame('legacy-token', $user->getGitToken());
     }
 
+    public function test_app_db_password_is_encrypted_at_rest_and_read_back_in_plaintext(): void
+    {
+        $user = new User();
+        $user->details = [AppDatabase::PASSWORD_DETAIL => 'db-secret', 'deploy_strategy' => 'php'];
+
+        $stored = json_decode((string) $user->getAttributes()['details'], true);
+        $this->assertStringStartsWith('laravel-encrypted:v1:', $stored[AppDatabase::PASSWORD_DETAIL]);
+        $this->assertStringNotContainsString('db-secret', (string) $user->getAttributes()['details']);
+        $this->assertSame('db-secret', $user->getDetails()[AppDatabase::PASSWORD_DETAIL]);
+
+        // A merge through setDetails() must not double-encrypt it.
+        $user->setDetails(['deployment_status' => 'success']);
+        $this->assertSame('db-secret', $user->getDetails()[AppDatabase::PASSWORD_DETAIL]);
+    }
+
+    public function test_legacy_plaintext_app_db_password_is_readable_and_encrypted_on_next_write(): void
+    {
+        $user = new User();
+        $user->setRawAttributes(['details' => json_encode([AppDatabase::PASSWORD_DETAIL => 'legacy-db'])]);
+
+        $this->assertSame('legacy-db', $user->getDetails()[AppDatabase::PASSWORD_DETAIL]);
+        $this->assertFalse($user->hasUnreadableSecret(AppDatabase::PASSWORD_DETAIL));
+
+        $user->setDetails(['deployment_status' => 'success']);
+        $this->assertStringNotContainsString('legacy-db', (string) $user->getAttributes()['details']);
+        $this->assertSame('legacy-db', $user->getDetails()[AppDatabase::PASSWORD_DETAIL]);
+    }
+
+    public function test_unreadable_app_db_password_survives_a_write_and_recovers_with_the_old_key(): void
+    {
+        $user = new User();
+        $user->details = [AppDatabase::PASSWORD_DETAIL => 'db-secret'];
+        $ciphertext = json_decode((string) $user->getAttributes()['details'], true)[AppDatabase::PASSWORD_DETAIL];
+
+        $this->useAppKey(str_repeat('x', 32));
+        $this->assertNull($user->getDetails()[AppDatabase::PASSWORD_DETAIL]);
+        $this->assertTrue($user->hasUnreadableSecret(AppDatabase::PASSWORD_DETAIL));
+
+        // Both write paths hand the null read back; neither may erase the ciphertext.
+        $user->setDetails(['deployment_status' => 'success']);
+        $details = $user->getDetails();
+        $user->details = $details;
+        $stored = json_decode((string) $user->getAttributes()['details'], true);
+        $this->assertSame($ciphertext, $stored[AppDatabase::PASSWORD_DETAIL]);
+
+        $this->useAppKey(str_repeat('k', 32));
+        $this->assertSame('db-secret', $user->getDetails()[AppDatabase::PASSWORD_DETAIL]);
+    }
+
+    private function useAppKey(string $key): void
+    {
+        config(['app.key' => 'base64:' . base64_encode($key)]);
+        $this->app->forgetInstance('encrypter');
+        Facade::clearResolvedInstances();
+    }
+
     public function test_user_resource_never_returns_secret_detail_fields(): void
     {
         $user = new User();
@@ -67,6 +125,7 @@ class UserSecretDetailsTest extends TestCase
             'cloudflare_tunnel_token' => 'cf-tunnel-secret',
             'cloudflare_tunnel_id' => 'tunnel-id-public',
             'env_vars' => ['API_TOKEN' => 'env-secret'],
+            'app_db_password' => 'db-secret',
             'deploy_strategy' => 'static',
         ];
 
@@ -79,6 +138,7 @@ class UserSecretDetailsTest extends TestCase
         $this->assertArrayNotHasKey('env_vars', $details);
         $this->assertArrayNotHasKey('cloudflare_api_token', $details);
         $this->assertArrayNotHasKey('cloudflare_tunnel_token', $details);
+        $this->assertArrayNotHasKey('app_db_password', $details);
         $this->assertSame('tunnel-id-public', $details['cloudflare_tunnel_id']);
         $this->assertSame('static', $details['deploy_strategy']);
     }

@@ -175,6 +175,11 @@ class GenerateApiToolsCommand extends Command
                 if (!in_array(strtoupper($verb), ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)) {
                     continue;
                 }
+                // x-mcp-hide: an operation the API keeps that no tool can
+                // call usefully (a stream, an internal exchange). No tool, no name.
+                if (($op['x-mcp-hide'] ?? false) === true) {
+                    continue;
+                }
 
                 $out[] = [
                     'method' => strtoupper($verb),

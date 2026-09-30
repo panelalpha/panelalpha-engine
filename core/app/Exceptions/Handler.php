@@ -2,12 +2,14 @@
 
 namespace App\Exceptions;
 
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class Handler extends ExceptionHandler
 {
@@ -47,6 +49,15 @@ class Handler extends ExceptionHandler
      */
     public function register()
     {
+        // Laravel's own message names the model class (`No query results for
+        // model [App\Models\BackupContainer] 5`); say what was missing instead.
+        $this->map(ModelNotFoundException::class, function (ModelNotFoundException $e) {
+            $model = $e->getModel();
+            $what = $model === null ? '' : ucfirst(Str::snake(class_basename($model), ' ')) . ' ';
+
+            return new NotFoundHttpException($what === '' ? 'Not found' : $what . 'not found', $e);
+        });
+
         // A deploy lock conflict is a domain condition, not a server fault:
         // DeployLogger raises it from HTTP, queue and CLI alike, and only the
         // HTTP boundary knows it should read as 409.

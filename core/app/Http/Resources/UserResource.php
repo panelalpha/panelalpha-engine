@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Models\User;
+use App\System\Project\Dind\AppDatabase;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class UserResource extends JsonResource
@@ -63,6 +64,7 @@ class UserResource extends JsonResource
             $details['site_git'],
             $details['cloudflare_api_token'],
             $details['cloudflare_tunnel_token'],
+            $details[AppDatabase::PASSWORD_DETAIL],
             $details['site_password_hash'],
             $details['site_password_enabled'],
             $details['site_password_version'],

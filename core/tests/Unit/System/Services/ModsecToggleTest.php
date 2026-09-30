@@ -81,11 +81,33 @@ class ModsecToggleTest extends TestCase
         $this->assertStringEndsWith('/rules/REQUEST-901.conf.disabled', $system->ran[0][3] ?? '');
     }
 
+    public function test_the_name_the_list_shows_for_a_disabled_file_enables_it(): void
+    {
+        $rules = $this->root . '/config/modsecurity/rulesets/owasp/rules';
+        rename($rules . '/REQUEST-901.conf', $rules . '/REQUEST-901.conf.disabled');
+        $system = $this->system();
+        $modsec = new class ($system) extends Modsec {
+            public function restartWebserver(): void
+            {
+            }
+        };
+
+        $this->assertSame(['REQUEST-901.conf.disabled'], $modsec->getRulesets()[0]['config_files']);
+
+        $modsec->toggleConfigFiles('owasp', ['REQUEST-901.conf.disabled']);
+        $modsec->toggleConfigFiles('owasp', ['REQUEST-901.conf']);
+
+        $expected = ['sudo', 'mv', $rules . '/REQUEST-901.conf.disabled', $rules . '/REQUEST-901.conf'];
+        $this->assertSame([$expected, $expected], $system->ran);
+    }
+
     public function test_the_request_pattern(): void
     {
         $this->assertSame(1, preg_match(Modsec::CONFIG_FILE_NAME, 'REQUEST-901-INITIALIZATION.conf'));
         $this->assertSame(0, preg_match(Modsec::CONFIG_FILE_NAME, '../x.conf'));
         $this->assertSame(0, preg_match(Modsec::CONFIG_FILE_NAME, '.hidden.conf'));
-        $this->assertSame(0, preg_match(Modsec::CONFIG_FILE_NAME, 'x.conf.disabled'));
+        $this->assertSame(1, preg_match(Modsec::CONFIG_FILE_NAME, 'x.conf.disabled'));
+        $this->assertSame(0, preg_match(Modsec::CONFIG_FILE_NAME, 'x.conf.disabled.disabled'));
+        $this->assertSame(0, preg_match(Modsec::CONFIG_FILE_NAME, 'x.disabled'));
     }
 }

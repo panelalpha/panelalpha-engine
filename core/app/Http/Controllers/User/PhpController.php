@@ -7,6 +7,7 @@ use App\Http\Requests\UserPhpListCustomIniSettingsRequest;
 use App\Http\Requests\UserPhpUpdateCustomIniSettingsRequest;
 use App\Models\User;
 use App\System as EngineSystem;
+use App\System\Project\PhpHosting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
 use Illuminate\Validation\ValidationException;
@@ -17,6 +18,7 @@ class PhpController extends Controller
     #[OA\Get(
         path: '/projects/{username}/php/custom-ini-settings',
         summary: 'Get custom PHP INI settings of a project',
+        description: 'PHP hosting projects only: a dind app reads php.ini from its own image, and a dind project answers 422.',
         security: [['bearerAuth' => []]],
         tags: ['PHP'],
         parameters: [
@@ -25,11 +27,13 @@ class PhpController extends Controller
         ],
         responses: [
             new OA\Response(response: 200, description: 'Custom INI settings', content: new OA\JsonContent(ref: '#/components/schemas/PhpIniSettings')),
+            new OA\Response(response: 422, description: 'Not a PHP hosting project, or an unknown PHP version', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function listCustomIniSettings(string $username, UserPhpListCustomIniSettingsRequest $request, EngineSystem $system): JsonResponse
     {
         $user = $this->projectOrNotFound($username);
+        $this->requirePhpHosting($user, $system);
 
         /** @var array{php_version: string} */
         $params = $request->validated();
@@ -40,7 +44,7 @@ class PhpController extends Controller
             ]);
         }
 
-        $data = $user->project()->php()->getCustomIniSettings($params['php_version']);
+        $data = $user->project($system)->php()->getCustomIniSettings($params['php_version']);
 
         return new JsonResponse([
             'data' => $data,
@@ -50,6 +54,7 @@ class PhpController extends Controller
     #[OA\Put(
         path: '/projects/{username}/php/custom-ini-settings',
         summary: 'Update custom PHP INI settings of a project',
+        description: 'PHP hosting projects only: a dind app reads php.ini from its own image, and a dind project answers 422.',
         security: [['bearerAuth' => []]],
         tags: ['PHP'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -62,11 +67,13 @@ class PhpController extends Controller
         )),
         responses: [
             new OA\Response(response: 200, description: 'INI settings updated', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
+            new OA\Response(response: 422, description: 'Not a PHP hosting project, or invalid settings', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function updateCustomIniSettings(string $username, UserPhpUpdateCustomIniSettingsRequest $request, EngineSystem $system): JsonResponse
     {
         $user = $this->projectOrNotFound($username);
+        $this->requirePhpHosting($user, $system);
 
         /** @var array{php_version: string, settings: array<string,string>} */
         $params = $request->validated();
@@ -88,5 +95,19 @@ class PhpController extends Controller
         }
 
         return new JsonResponse(null, Response::HTTP_NO_CONTENT);
+    }
+
+    /**
+     * The file is mounted into the project's own PHP containers. A dind app
+     * runs PHP from its own image, which never reads it.
+     */
+    private function requirePhpHosting(User $user, EngineSystem $system): void
+    {
+        if (!$user->project($system)->runtime() instanceof PhpHosting) {
+            throw ValidationException::withMessages([
+                'project' => 'Custom PHP INI settings apply only to PHP hosting projects. '
+                    . 'A dind project runs PHP from its own image; set php.ini there.',
+            ]);
+        }
     }
 }

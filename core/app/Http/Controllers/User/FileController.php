@@ -23,6 +23,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\UploadedFile;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
 class FileController extends Controller
@@ -75,13 +76,15 @@ class FileController extends Controller
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'path', in: 'query', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'recursive', in: 'query', required: false, schema: new OA\Schema(type: 'boolean'), description: 'Required to delete a directory; deletes everything in it.'),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Deleted', content: new OA\JsonContent(ref: '#/components/schemas/SuccessResponse')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'A directory without recursive', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function remove(string $username, FileRemoveRequest $request): JsonResponse
+    public function remove(string $username, FileRemoveRequest $request, EngineSystem $system): JsonResponse
     {
         $user = $this->projectOr404($username);
 
@@ -92,14 +95,21 @@ class FileController extends Controller
          * }
          */
         $params = $request->validated();
-        $path = $user->project()->resolvePath($params['path']);
+        $path = $user->project($system)->resolvePath($params['path']);
         if (!file_exists($path)) {
             return new JsonResponse([
                 'message' => 'Invalid path',
             ], 404);
         }
 
-        $fileMan = $user->project()->fileManager();
+        // Otherwise rm answers a bare "Is a directory" with a 400.
+        if (empty($params['recursive']) && is_dir($path) && !is_link(rtrim($path, '/'))) {
+            throw ValidationException::withMessages([
+                'recursive' => 'The path is a directory. Set recursive to true to delete it and everything in it.',
+            ]);
+        }
+
+        $fileMan = $user->project($system)->fileManager();
 
         try {
             $fileMan->remove($path, !empty($params['recursive']));

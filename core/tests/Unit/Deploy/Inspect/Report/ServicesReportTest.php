@@ -102,6 +102,30 @@ class ServicesReportTest extends ReportTestCase
         $this->assertSame('postgres:15-alpine', $keyed['db']['image']);
     }
 
+    /**
+     * A recipe's compose file is the one the deploy runs, under a name
+     * the repository never uses: its datastores are the ones to report.
+     */
+    public function test_the_compose_file_detection_chose_is_the_one_read(): void
+    {
+        $this->write('docker-compose.panelalpha.app-config.yml', <<<YAML
+        services:
+          db:
+            image: mysql:8.0
+          wordpress:
+            image: wordpress:latest
+        YAML);
+
+        $this->assertSame([], ServicesReport::of($this->tmpDir));
+
+        $services = $this->byName(
+            ServicesReport::of($this->tmpDir, $this->tmpDir . '/docker-compose.panelalpha.app-config.yml')
+        );
+
+        $this->assertSame('mysql', $services['db']['engine']);
+        $this->assertSame('application', $services['wordpress']['role']);
+    }
+
     public function test_a_project_declaring_nothing_reports_nothing(): void
     {
         $this->assertSame([], ServicesReport::of($this->tmpDir));

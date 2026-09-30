@@ -5,7 +5,6 @@ namespace App\System\Project;
 use App\Exceptions\DockerErrorException;
 use App\System\Project as UserProject;
 use Dsc\Cron\Crontab;
-use Dsc\Cron\FileHandler;
 use Dsc\Cron\Job;
 use Exception;
 
@@ -179,13 +178,42 @@ class Cron
     private function loadCrontab(): Crontab
     {
         $crontab = new Crontab();
-        $fileHandler = new FileHandler();
         $contents = $this->project->system()->filesystem()->fileGetContents($this->crontabPath());
-        foreach ($fileHandler->parseString($contents) as $job) {
-            $crontab->addJob($job);
+        foreach (explode("\n", $contents) as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+            $crontab->addJob(self::parseLine($line));
         }
 
         return $crontab;
+    }
+
+    /**
+     * Five schedule fields, then the command exactly as written. Job::parse()
+     * cuts `>>`, `2>>` and `#` out of the command, so a job read back was not
+     * the job created: shorter command, different hash, and `2>&1` appended
+     * again on every write.
+     */
+    private static function parseLine(string $line): Job
+    {
+        $parts = preg_split('/\s+/', trim($line), 6);
+        // `@daily` and the like: never written by the API, left to the library.
+        if ($parts === false || count($parts) < 6 || str_starts_with($parts[0], '@')) {
+            return Job::parse($line);
+        }
+
+        $job = new Job();
+        $job->setMinute($parts[0]);
+        $job->setHour($parts[1]);
+        $job->setDayOfMonth($parts[2]);
+        $job->setMonth($parts[3]);
+        $job->setDayOfWeek($parts[4]);
+        $job->setCommand($parts[5]);
+        $job->setActive();
+
+        return $job;
     }
 
     private function persistCrontab(Crontab $crontab): void

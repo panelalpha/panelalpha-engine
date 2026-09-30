@@ -56,7 +56,11 @@ class ToolNamesTest extends TestCase
 
         $operations = [];
         foreach ($spec['paths'] as $path => $item) {
-            foreach ((array)$item as $verb => $_) {
+            foreach ((array)$item as $verb => $op) {
+                // Hidden from MCP on purpose: no tool, so no name.
+                if (($op['x-mcp-hide'] ?? false) === true) {
+                    continue;
+                }
                 if (in_array(strtoupper($verb), ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)) {
                     $operations[] = strtoupper($verb) . ' ' . $path;
                 }

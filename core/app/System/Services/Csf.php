@@ -39,6 +39,31 @@ class Csf
     ) {
     }
 
+    /**
+     * What csf.allow/csf.deny take as the target: an IPv4/IPv6 address or
+     * CIDR. csf drops anything else (a hostname belongs in csf.dyndns).
+     */
+    public static function isAddress(string $target): bool
+    {
+        [$ip, $prefix] = array_pad(explode('/', $target, 2), 2, null);
+        $bits = match (true) {
+            filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false => 32,
+            filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false => 128,
+            default => 0,
+        };
+        if ($bits === 0) {
+            return false;
+        }
+
+        return $prefix === null || (preg_match('/\A[0-9]{1,3}\z/', $prefix) === 1 && (int) $prefix <= $bits);
+    }
+
+    /** The target of a `u=` rule: a numeric uid, as csf documents it. */
+    public static function isUid(string $target): bool
+    {
+        return preg_match('/\A[0-9]{1,10}\z/', $target) === 1;
+    }
+
     /** Whether csf.conf has the web UI on (`UI = "1"`); scripts/csf.sh leaves it off unless CSF_UI=1. */
     public function uiEnabled(): bool
     {
@@ -165,6 +190,15 @@ class Csf
         $suffix = "";
         if ($params['comment'] !== null) {
             $suffix = " # " . $params['comment'];
+        }
+
+        $isUid = $params['target_prefix'] === 'u=';
+        if (!($isUid ? self::isUid($params['target']) : self::isAddress($params['target']))) {
+            throw ValidationException::withMessages([
+                'target' => $isUid
+                    ? 'A u= rule takes a numeric uid.'
+                    : 'Must be an IPv4 or IPv6 address, or a CIDR range.',
+            ]);
         }
 
         $portFields = ['protocol', 'direction', 'port_prefix', 'port', 'target_prefix'];

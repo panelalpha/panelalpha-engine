@@ -593,6 +593,7 @@ class SystemController extends Controller
     #[OA\Post(
         path: '/system/exim-send-test-email',
         summary: 'Send a test email via Exim',
+        description: 'exit_code 0 only means Exim accepted the message. status says what happened to it: delivered, deferred (still queued; Exim retries it), failed (bounced), not_sent (Exim did not take it) or unknown; reason is the Exim log line for a deferral or a bounce.',
         security: [['bearerAuth' => []]],
         tags: ['System'],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(

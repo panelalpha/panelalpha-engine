@@ -59,8 +59,8 @@ class ModsecRulesetConfigsSetTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'enable' => $schema->array(),
-            'disable' => $schema->array(),
+            'enable' => $schema->array()->description('File names as config_files lists them; the .disabled suffix is optional.'),
+            'disable' => $schema->array()->description('File names as config_files lists them; the .disabled suffix is optional.'),
         ];
     }
 }

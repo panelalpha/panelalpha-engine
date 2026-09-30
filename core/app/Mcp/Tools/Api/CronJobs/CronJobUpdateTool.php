@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('cron_job_update')]
 #[Description(<<<'MARKDOWN'
     Update a cron job
+
+    PHP hosting projects only: a dind account does not run the project crontab, and a dind project answers 422.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

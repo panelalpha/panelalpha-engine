@@ -16,6 +16,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Name('php_ini_set')]
 #[Description(<<<'MARKDOWN'
     Update custom PHP INI settings of a project
+
+    PHP hosting projects only: a dind app reads php.ini from its own image, and a dind project answers 422.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

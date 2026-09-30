@@ -8,6 +8,7 @@ use App\Lib\Project\NewProjectDetails;
 use App\Lib\Project\ProjectIpAddresses;
 use App\Lib\Project\RuntimeSettings;
 use App\System\Project as AppSystemProject;
+use App\System\Project\Dind\AppDatabase;
 use App\System\Services\Webserver\AbstractWebserver;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -274,6 +275,9 @@ class User extends Authenticatable
         if (isset($details['site_password_hash']) && is_string($details['site_password_hash'])) {
             $details['site_password_hash'] = $this->decryptSecretString($details['site_password_hash']);
         }
+        if (isset($details[AppDatabase::PASSWORD_DETAIL]) && is_string($details[AppDatabase::PASSWORD_DETAIL])) {
+            $details[AppDatabase::PASSWORD_DETAIL] = $this->decryptSecretString($details[AppDatabase::PASSWORD_DETAIL]);
+        }
         if (isset($details['site_git']) && is_array($details['site_git'])) {
             foreach ($details['site_git'] as $key => $entry) {
                 if (!is_array($entry)) {
@@ -316,6 +320,17 @@ class User extends Authenticatable
         }
         if (isset($details['site_password_hash']) && is_string($details['site_password_hash']) && $details['site_password_hash'] !== '') {
             $details['site_password_hash'] = $this->encryptSecretString($details['site_password_hash']);
+        }
+        $dbPassword = $details[AppDatabase::PASSWORD_DETAIL] ?? null;
+        if ($dbPassword === null && array_key_exists(AppDatabase::PASSWORD_DETAIL, $details)
+            && $this->hasUnreadableSecret(AppDatabase::PASSWORD_DETAIL)) {
+            // Null here is an undecryptable read written back; keep the ciphertext,
+            // the app's own config still holds that password.
+            $dbPassword = $this->storedEncryptedDetail(AppDatabase::PASSWORD_DETAIL);
+            $details[AppDatabase::PASSWORD_DETAIL] = $dbPassword;
+        }
+        if (is_string($dbPassword) && $dbPassword !== '') {
+            $details[AppDatabase::PASSWORD_DETAIL] = $this->encryptSecretString($dbPassword);
         }
         if (isset($details['site_git']) && is_array($details['site_git'])) {
             foreach ($details['site_git'] as $key => $entry) {
@@ -361,6 +376,27 @@ class User extends Authenticatable
         }
 
         return self::ENCRYPTED_SECRET_PREFIX . Crypt::encryptString($value);
+    }
+
+    /**
+     * True when the detail is stored encrypted but cannot be decrypted, as
+     * opposed to never having been stored at all.
+     */
+    public function hasUnreadableSecret(string $key): bool
+    {
+        $stored = $this->storedEncryptedDetail($key);
+
+        return $stored !== null && $this->decryptSecretString($stored) === null;
+    }
+
+    /** The raw, still-encrypted value of a top-level detail, if it is one. */
+    private function storedEncryptedDetail(string $key): ?string
+    {
+        $raw = $this->attributes['details'] ?? null;
+        $stored = is_string($raw) ? json_decode($raw, true) : null;
+        $value = is_array($stored) ? ($stored[$key] ?? null) : null;
+
+        return is_string($value) && str_starts_with($value, self::ENCRYPTED_SECRET_PREFIX) ? $value : null;
     }
 
     /**
