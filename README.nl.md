@@ -38,7 +38,7 @@ Open source. Self-hosted. Makkelijk voor iedereen, niet alleen voor sysadmins.
 <p>
 <a href="#stap-1-installeer-engine-op-je-vps"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Installatie met één commando"></a>
 <a href="#stap-1-installeer-engine-op-je-vps"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Ondersteunde systemen"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-196_tools-6f42c1" alt="196 MCP-tools"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-197_tools-6f42c1" alt="197 MCP-tools"></a>
 <a href="#licentie"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Kom op Discord"></a>
 </p>
@@ -85,7 +85,17 @@ AI heeft software maken uit zijn oude grenzen gehaald. Meer mensen kunnen een id
 
 ### Stap 1: Installeer Engine op je VPS
 
-Je hebt een **verse** server nodig met Debian 12/13 of Ubuntu 22.04/24.04/26.04, minimaal 2 GB RAM en 1 CPU, en je logt in als `root` via SSH:
+Je hebt een **verse** server nodig met Debian 12/13 of Ubuntu 22.04/24.04/26.04, minimaal 2 GB RAM en 1 CPU, en je logt in als `root` via SSH.
+
+**One-line app deployment command.** Wil je meteen een applicatie online hebben? Voeg `--repo` toe, dan zet de installer Engine op en deployt daarna die repository als project:
+
+```bash
+curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+```
+
+Aan het einde toont hij het adres van je nieuwe site en, als je `--no-password` niet meegeeft, het wachtwoord waarmee je die opent. Privérepository's, een eigen wachtwoord en een server waar Engine al op staat: [One-line app deployment command](docs/02-getting-started/install.md#one-line-app-deployment-command).
+
+Liever de twee stappen los? Installeer alleen Engine en deploy je applicatie later via je assistent (zie stap 3):
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh
@@ -158,7 +168,7 @@ Geen commando's om te leren, en ook geen toverformules. Dit zijn voorbeelden van
 | `Zet een Cloudflare-tunnel op voor n8n.mydomain.com.` | DNS en tunnel geregeld, en zo serveer je ook vanaf een server achter NAT. |
 | `Hoeveel verkeer kregen we vorige week?` | Verbruik, logs en limieten voor dat project, en voor de hele server. |
 
-Meer uitgewerkte voorbeelden: [waar je om kunt vragen](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). De volledige lijst van wat je assistent kan bereiken: [196 tools](docs/04-connecting-your-ai/your-assistant.md).
+Meer uitgewerkte voorbeelden: [waar je om kunt vragen](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). De volledige lijst van wat je assistent kan bereiken: [197 tools](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

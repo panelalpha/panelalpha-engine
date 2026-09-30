@@ -60,7 +60,7 @@ These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit t
 
 | Value | What the assistant can do |
 |---|---|
-| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`csf_ui_credentials`, `system_exim_config_get`, `app_sso_login`) are not offered. |
+| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`csf_ui_credentials`, `system_exim_config_get`, `app_sso_login`, `app_credentials_get`) are not offered. |
 | `modify` | Create and change things, but not delete them. |
 | `full` | Everything, including deletion. **This is the default.** |
 
@@ -106,7 +106,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is about 200 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
+The full list is 197 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
@@ -322,7 +322,7 @@ Your assistant is using a list it loaded earlier. Restart your assistant, then r
 
 ## Every tool
 
-This is every MCP tool the engine ships: **196** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
+This is every MCP tool the engine ships: **197** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
 
 A **project** is one hosting account. Every tool takes it as `name`; what the tools return still calls that value `username`, the REST API's name for it.
 
@@ -337,7 +337,7 @@ pae mcp:tool:list
 | Group | Toolset | Default | Tools |
 |---|---|---|---|
 | [Engine summaries](#engine-summaries) | `engine` | On | 2 |
-| [Projects](#projects) | `projects` | On | 17 |
+| [Projects](#projects) | `projects` | On | 18 |
 | [Domains](#domains) | `domains` | On | 7 |
 | [Domain PHP](#domain-php) | `domainphp` | On | 4 |
 | [Domain ACME](#domain-acme) | `domainacme` | On | 5 |
@@ -385,6 +385,7 @@ pae mcp:tool:list
 
 | Tool | What it does |
 |---|---|
+| `app_credentials_get` | Get the admin login the engine generated for the deployed application |
 | `project_clone` | Clone a project |
 | `project_create` | Create a new hosting project (async) |
 | `project_create_sync` | Create a project and wait for the deploy in the same call. Same body as `project_create` |

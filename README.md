@@ -38,7 +38,7 @@ Open source. Self-hosted. Easy for anyone, not just sysadmins.
 <p>
 <a href="#step-1-install-engine-on-your-vps"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="One-line install"></a>
 <a href="#step-1-install-engine-on-your-vps"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Supported OS"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-196_tools-6f42c1" alt="196 MCP tools"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-197_tools-6f42c1" alt="197 MCP tools"></a>
 <a href="#license"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Join Discord"></a>
 </p>
@@ -85,7 +85,17 @@ AI has broken software creation out of its old limits. More people can turn idea
 
 ### Step 1: Install Engine on your VPS
 
-You need a **fresh** server running Debian 12/13 or Ubuntu 22.04/24.04/26.04, with at least 2 GB RAM and 1 CPU, and you log in as `root` over SSH:
+You need a **fresh** server running Debian 12/13 or Ubuntu 22.04/24.04/26.04, with at least 2 GB RAM and 1 CPU, and you log in as `root` over SSH.
+
+**One-line app deployment command.** Install the engine and put an application online in one go. Add `--repo` and the installer sets up the engine, then deploys that repository as a project:
+
+```bash
+curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+```
+
+When it finishes, it prints the address of your new site and, unless you pass `--no-password`, the password that opens it. Private repositories, a password of your own, and running it on a server that already has the engine: [One-line app deployment command](docs/02-getting-started/install.md#one-line-app-deployment-command).
+
+Prefer to do the two steps separately? Install only the engine, and deploy your application later from your assistant (see Step 3):
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh
@@ -158,7 +168,7 @@ No commands to learn, and no magic phrases either. These are examples of the lev
 | `Set up a Cloudflare tunnel for n8n.mydomain.com.` | DNS and the tunnel configured, which is also how you serve a site from a server behind NAT. |
 | `How much traffic did we get last week?` | Usage, logs and limits for that project, and the server as a whole. |
 
-More worked examples: [what to ask](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). The complete list of what your assistant can reach: [196 tools](docs/04-connecting-your-ai/your-assistant.md).
+More worked examples: [what to ask](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). The complete list of what your assistant can reach: [197 tools](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

@@ -25,6 +25,16 @@ since the last deploy.
 
 **That last part is the interesting one.** If the files on disk no longer match what the last deploy recorded, somebody uploaded over FTP or edited a file directly. When a site is behaving unexpectedly and nobody deployed recently, that is the first thing to check.
 
+## The application's login
+
+Many ready-made applications start with an administrator account. The engine makes up the username and a strong password, sets the application up with them, and keeps them, so a rebuild does not change them.
+
+```text
+What is the admin login for this project?
+```
+
+The assistant answers with the sign-in address, the username and the password. If the application has no generated login, it says so. The password is the one the application started with. If you changed it inside the application later, the engine does not know the new one. The password is never written to the deploy log. An assistant set to `readonly` cannot read it: [How far it may go](../04-connecting-your-ai/your-assistant.md#how-far-it-may-go).
+
 ## Rebuilding
 
 A rebuild replays the exact plan from the last successful deploy against the current files.
@@ -34,6 +44,8 @@ Rebuild this project.
 ```
 
 Use it after you change files directly, after you change an environment variable, or when a site has degraded and you want it put back the way it shipped.
+
+A rebuild does not wipe what the application keeps. For applications with a ready-made recipe, the passwords and keys the engine generated and the files people uploaded stay as they were. A project you set up yourself keeps only the storage you declared for it.
 
 A rebuild judges itself on what the site is actually serving afterwards, not merely on whether the process started. So a rebuild that "succeeded" but left a broken page will be marked `partial` and tell you why. See [What the engine checks](monitoring-and-logs.md#what-the-engine-checks).
 

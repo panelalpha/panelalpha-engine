@@ -38,7 +38,7 @@ Open Source. Self-hosted. Einfach für alle, nicht nur für Sysadmins.
 <p>
 <a href="#schritt-1-engine-auf-deinem-vps-installieren"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Installation mit einem Befehl"></a>
 <a href="#schritt-1-engine-auf-deinem-vps-installieren"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Unterstützte Systeme"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-196_tools-6f42c1" alt="196 MCP-Werkzeuge"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-197_tools-6f42c1" alt="197 MCP-Werkzeuge"></a>
 <a href="#lizenz"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord beitreten"></a>
 </p>
@@ -85,7 +85,17 @@ KI hat die Softwareerstellung aus ihren alten Grenzen geholt. Mehr Menschen kön
 
 ### Schritt 1: Engine auf deinem VPS installieren
 
-Du brauchst einen **frischen** Server mit Debian 12/13 oder Ubuntu 22.04/24.04/26.04, mindestens 2 GB RAM und 1 CPU, und du meldest dich als `root` per SSH an:
+Du brauchst einen **frischen** Server mit Debian 12/13 oder Ubuntu 22.04/24.04/26.04, mindestens 2 GB RAM und 1 CPU, und du meldest dich als `root` per SSH an.
+
+**One-line app deployment command.** Du willst gleich eine Anwendung online haben? Ergänze `--repo`, dann richtet der Installer Engine ein und stellt danach dieses Repository als Projekt bereit:
+
+```bash
+curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+```
+
+Am Ende zeigt er die Adresse deiner neuen Seite und, wenn du nicht `--no-password` angibst, das Passwort, das sie öffnet. Private Repositories, ein eigenes Passwort und ein Server, auf dem Engine schon läuft: [One-line app deployment command](docs/02-getting-started/install.md#one-line-app-deployment-command).
+
+Lieber die zwei Schritte getrennt? Installiere nur Engine und stelle deine Anwendung später über deinen Assistenten bereit (siehe Schritt 3):
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh
@@ -158,7 +168,7 @@ Keine Befehle zu lernen, und auch keine Zauberformeln. Das hier zeigt nur, wie d
 | `Richte einen Cloudflare-Tunnel für n8n.mydomain.com ein.` | DNS und Tunnel konfiguriert, und genau so lieferst du auch von einem Server hinter NAT aus. |
 | `Wie viel Traffic hatten wir letzte Woche?` | Verbrauch, Logs und Limits für dieses Projekt und für den ganzen Server. |
 
-Mehr ausgearbeitete Beispiele: [worum du bitten kannst](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Die vollständige Liste dessen, was dein Assistent erreichen kann: [196 Werkzeuge](docs/04-connecting-your-ai/your-assistant.md).
+Mehr ausgearbeitete Beispiele: [worum du bitten kannst](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Die vollständige Liste dessen, was dein Assistent erreichen kann: [197 Werkzeuge](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

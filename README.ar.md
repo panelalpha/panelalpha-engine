@@ -38,7 +38,7 @@
 <p>
 <a href="#الخطوة-1-ثبّت-engine-على-خادمك-vps"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="تثبيت بسطر واحد"></a>
 <a href="#الخطوة-1-ثبّت-engine-على-خادمك-vps"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="أنظمة التشغيل المدعومة"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-196_tools-6f42c1" alt="196 أداة MCP"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-197_tools-6f42c1" alt="197 أداة MCP"></a>
 <a href="#الترخيص"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="انضم إلى Discord"></a>
 </p>
@@ -87,7 +87,17 @@ PanelAlpha Engine برنامج تثبّته على خادم VPS لاستضافة
 
 ### الخطوة 1: ثبّت Engine على خادمك VPS
 
-تحتاج خادماً **نظيفاً** يعمل بـ Debian 12/13 أو Ubuntu 22.04/24.04/26.04، بذاكرة 2 غيغابايت ومعالج واحد على الأقل، وتدخل إليه بحساب `root` عبر SSH:
+تحتاج خادماً **نظيفاً** يعمل بـ Debian 12/13 أو Ubuntu 22.04/24.04/26.04، بذاكرة 2 غيغابايت ومعالج واحد على الأقل، وتدخل إليه بحساب `root` عبر SSH.
+
+**One-line app deployment command.** تريد تشغيل تطبيق فوراً؟ أضف `--repo` فيثبّت المُثبّت Engine ثم ينشر ذلك المستودع كمشروع:
+
+```bash
+curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+```
+
+في النهاية يعرض عنوان موقعك الجديد، وإذا لم تمرّر `--no-password` فيعرض أيضاً كلمة المرور التي تفتحه. المستودعات الخاصة، وكلمة مرور من اختيارك، وخادم عليه Engine أصلاً: [One-line app deployment command](docs/02-getting-started/install.md#one-line-app-deployment-command).
+
+تفضّل تنفيذ الخطوتين منفصلتين؟ ثبّت Engine فقط، وانشر تطبيقك لاحقاً من خلال مساعدك (انظر الخطوة 3):
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh
@@ -160,7 +170,7 @@ pae connect
 | `أعدّ نفق Cloudflare لـ n8n.mydomain.com.` | إعداد DNS والنفق، وهي أيضاً طريقة التقديم من خادم خلف NAT. |
 | `كم كان الزيارات الأسبوع الماضي؟` | الاستهلاك والسجلات والحدود لذلك المشروع، وللخادم كله. |
 
-أمثلة أوفى: [ماذا تطلب](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). القائمة الكاملة لما يصل إليه مساعدك: [196 أداة](docs/04-connecting-your-ai/your-assistant.md).
+أمثلة أوفى: [ماذا تطلب](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). القائمة الكاملة لما يصل إليه مساعدك: [197 أداة](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

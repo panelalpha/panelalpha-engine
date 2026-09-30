@@ -38,7 +38,7 @@ Open source. Self-hosted. Łatwy dla każdego, nie tylko dla sysadminów.
 <p>
 <a href="#krok-1-zainstaluj-engine-na-swoim-vps-ie"><img src="https://img.shields.io/badge/install-one--liner-2f8f46" alt="Instalacja jedną komendą"></a>
 <a href="#krok-1-zainstaluj-engine-na-swoim-vps-ie"><img src="https://img.shields.io/badge/Debian_12%2F13-Ubuntu_22.04%2F24.04%2F26.04-a80030" alt="Wspierane systemy"></a>
-<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-196_tools-6f42c1" alt="196 narzędzi MCP"></a>
+<a href="docs/04-connecting-your-ai/your-assistant.md"><img src="https://img.shields.io/badge/MCP-197_tools-6f42c1" alt="197 narzędzi MCP"></a>
 <a href="#licencja"><img src="https://img.shields.io/badge/license-Apache_2.0-0b7285" alt="Apache 2.0"></a>
 <a href="https://discord.gg/9twHWR7xGX"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Dołącz do Discorda"></a>
 </p>
@@ -85,7 +85,17 @@ AI wyłamało tworzenie oprogramowania ze starych ograniczeń. Więcej ludzi pot
 
 ### Krok 1: Zainstaluj Engine na swoim VPS-ie
 
-Potrzebujesz **świeżego** serwera z Debianem 12/13 albo Ubuntu 22.04/24.04/26.04, z minimum 2 GB RAM i 1 CPU, i logujesz się jako `root` przez SSH:
+Potrzebujesz **świeżego** serwera z Debianem 12/13 albo Ubuntu 22.04/24.04/26.04, z minimum 2 GB RAM i 1 CPU, i logujesz się jako `root` przez SSH.
+
+**One-line app deployment command.** Chcesz od razu uruchomić aplikację? Dodaj `--repo`, a instalator skonfiguruje Engine, a potem wdroży to repozytorium jako projekt:
+
+```bash
+curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+```
+
+Na końcu wypisuje adres nowej strony i, jeśli nie podasz `--no-password`, hasło, które ją otwiera. Repozytoria prywatne, własne hasło i serwer, na którym Engine już jest: [One-line app deployment command](docs/02-getting-started/install.md#one-line-app-deployment-command).
+
+Wolisz zrobić te dwa kroki osobno? Zainstaluj tylko Engine, a aplikację wdroż później z poziomu asystenta (zobacz krok 3):
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh
@@ -158,7 +168,7 @@ Nie ma komend do nauczenia się i nie ma magicznych formułek. To przykłady poz
 | `Zrób tunel Cloudflare dla n8n.mydomain.com.` | DNS i tunel, czyli też sposób, żeby serwować stronę z serwera za NAT-em. |
 | `Ile ruchu mieliśmy w zeszłym tygodniu?` | Użycie, logi i limity tego projektu, i serwera jako całości. |
 
-Więcej przykładów: [o co poprosić](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Pełna lista tego, do czego asystent ma dostęp: [196 narzędzi](docs/04-connecting-your-ai/your-assistant.md).
+Więcej przykładów: [o co poprosić](docs/04-connecting-your-ai/your-assistant.md#what-to-ask). Pełna lista tego, do czego asystent ma dostęp: [197 narzędzi](docs/04-connecting-your-ai/your-assistant.md).
 
 ---
 

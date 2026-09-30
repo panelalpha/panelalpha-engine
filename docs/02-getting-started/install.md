@@ -32,9 +32,9 @@ curl -fsSL https://get.panelalpha.com/engine | sh
 
 A few minutes later the engine is running. It prints its addresses and a command to connect your assistant. Want a name of your own, or a VPS the internet cannot reach by IP? Read [Troubleshooting](#troubleshooting) before you install.
 
-## Install and deploy a repository
+## One-line app deployment command
 
-You can install the engine and put an application from a public git repository online in one command. The installer finishes setting up the engine, then creates a new **project** from that repository. It picks the project name and the site's address for you.
+You can install the engine and put an application from a git repository online in one command. Use the web address of the repository, the one you would open in a browser. The installer finishes setting up the engine, then creates a new **project** from that repository. It picks the project name and the site's address for you.
 
 Pass flags after `sh -s --` so they reach the installer:
 
@@ -43,15 +43,15 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- \
   --repo https://github.com/n8n-io/n8n
 ```
 
-When it finishes, it prints the project's web address (HTTPS). Unless you passed `--no-password`, it also prints a site password you can use to open that address. It then prints the same assistant connection information as a normal install. Continue with [Connect your AI assistant](#2-connect-your-ai-assistant) on your own computer.
+When it finishes, it prints the web address of your new site (it starts with `https://`). Unless you passed `--no-password`, it also prints the password that opens the site: the one you gave with `--password`, or one the installer made up. Copy it from the screen. If the installer could not set the password, it says so and prints the command to try again. Below that comes the same information for connecting your AI assistant as after a normal install. Continue with [Connect your AI assistant](#2-connect-your-ai-assistant) on your own computer.
 
 `--repo` is the application you want hosted. It is not where the engine software comes from. You do not pass a licence key.
 
 | Flag | What it does |
 |---|---|
-| `--repo URL` | Git repository to deploy. A full clone URL, or `owner/repo` on GitHub unless your engine uses another default. |
+| `--repo URL` | Git repository to deploy. Its `https://` address, or just `owner/repo` for a repository on GitHub. Addresses that start with `git@` do not work. |
 | `--branch REF` | Branch, tag, or commit to deploy. Omit to use the repository default. |
-| `--git-token TOKEN` | Read access for a private repository. Without it, a private or missing repository is refused before install starts. |
+| `--git-token TOKEN` | Access token that lets the installer read a private repository. Without it, a private or missing repository is refused before the install starts. |
 | `--password PASS` | Site password for the new project. |
 | `--no-password` | Do not set a site password on the project. |
 
