@@ -35,7 +35,7 @@ Choosing assistant tokens, then **Global scope**, opens:
 
 ```text
  Groups      37 of 37 groups on
- Commands    199 of 199 commands on
+ Commands    196 of 196 commands on
  Ceiling     full — they may do anything, including delete
  Review and save
  Back
@@ -51,7 +51,7 @@ Choosing assistant tokens, then **Global scope**, opens:
 
 Tick what the assistant may use and untick what it may not. You never have to think about which settings file line carries which decision. The wizard works that out when it saves.
 
-**Tokens**, on that same assistant menu, asks the same thing one token at a time: pick an assistant's token, tick what that one may use. It can only narrow. An assistant cannot be given a command the engine is not offering. Ticking everything means "no limit", so that token keeps following the engine. `pae mcp:token:list` shows the result in its **Commands** column, as `all` or `40 of 199`.
+**Tokens**, on that same assistant menu, asks the same thing one token at a time: pick an assistant's token, tick what that one may use. It can only narrow. An assistant cannot be given a command the engine is not offering. Ticking everything means "no limit", so that token keeps following the engine. `pae mcp:token:list` shows the result in its **Commands** column, as `all` or `40 of 196`.
 
 **Ceiling** is the one thing that is not a tick, and it is worth setting first. It is a ceiling on what a ticked command may *do*: at `readonly` the assistant can look and change nothing, whatever you have ticked. Nothing below it can raise it.
 
@@ -126,7 +126,7 @@ For projects deployed from git, these act on the checkout the engine owns. A pul
 | `pae git:status {project}` | Shows the checkout's branch and whether it has local changes. |
 | `pae git:pull {project}` | Pulls the latest commit, then rebuilds the application from it. |
 | `pae git:branches {project}` | Lists the branches on the remote. |
-| `pae git:change-branch {project} {branch}` | Switches the checkout to another branch, then rebuilds. |
+| `pae git:change-branch {project} --branch={branch}` | Switches the checkout to another branch, then rebuilds. |
 | `pae git:commits {project}` | Lists recent commits. |
 | `pae git:revert {project}` | Returns the checkout to the last deployed commit, then rebuilds. |
 | `pae git:update-credentials {project}` | Replaces the stored git access token. |
@@ -161,12 +161,12 @@ A remote store needs its own connection details. `pae backup:container:create --
 | `pae domain:create {domain} --project={project}` | Adds a domain to a project. |
 | `pae domain:delete {domain}` | Removes a hostname. |
 | `pae ssl:project-cert:request {domain}` | Requests a Let's Encrypt certificate for a site. |
-| `pae ssl:project-cert:renew {domain}` | Renews a site's certificate now. |
+| `pae ssl:project-cert:renew --domain={domain} --force` | Renews a site's certificate now. |
 | `pae ssl:engine-cert:request --domain={domain}` | Requests a certificate for the engine itself. |
 | `pae domain:tunnel:create {hostname} --project={project} --domain={domain}` | Attaches a public hostname through a tunnel. |
 | `pae domain:tunnel:delete {hostname}` | Removes a tunnel hostname. |
 | `pae project:settings:set cloudflare-api-token <token> --project={project}` | Saves a Cloudflare API token on the project. Cloudflare checks it before it is stored. |
-| `pae domain:set-proxy {domain}` / `pae domain:unset-proxy {domain}` | Turns a proxy layer in front of a domain on or off. |
+| `pae domain:set-proxy --domain={domain} --proxy-to={port}` / `pae domain:unset-proxy --domain={domain}` | Turns a proxy layer in front of a domain on or off. |
 | `pae sites:base-domain {domain}` | Shows or sets the name new projects are given a site under. |
 | `pae domain:php-directives {domain}` | Shows the PHP settings for that hostname, on traditional PHP hosting. |
 | `pae domain:php-directives:set {domain} --settings='{"memory_limit":"256M"}'` | Replaces the whole set of PHP settings for that hostname. `--clear` removes them. Naming one setting drops the others. |

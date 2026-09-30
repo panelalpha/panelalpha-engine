@@ -57,8 +57,8 @@ An update is already in progress; only one can run at a time. Wait for it to fin
 **The version number did not change.**
 The update failed or you already had the newest version. The log is in `/opt/panelalpha/log/engine-updates/`.
 
-**The update stopped while asking PanelAlpha for the download.**
-You will see `Could not obtain a download token.` or `Invalid download status:`. The engine on this VPS was not replaced. Contact PanelAlpha at [manage.panelalpha.com/contact](https://manage.panelalpha.com/contact).
+**The update stopped while downloading the new version.**
+You will see `Could not clone`, followed by the address it tried. The engine on this VPS was not replaced. Run the update again. If it stops at the same point, contact PanelAlpha at [manage.panelalpha.com/contact](https://manage.panelalpha.com/contact).
 
 **My AI assistant lost its connection.**
 Expected while the engine restarts. Most reconnect on their own within a minute; if yours does not, restart it. Your token still works and does not need recreating.
