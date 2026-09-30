@@ -62,7 +62,7 @@ Ready-made PHP apps are covered under [WordPress and ready-made apps](#wordpress
 
 Django needs a `manage.py` file (it may sit in a subfolder). Other Python projects need one of `requirements.txt`, `pyproject.toml`, `Pipfile`, or `setup.py` at the top, and no `manage.py`.
 
-Django starts the way Django usually starts. Other Python projects start from `main.py` or `app.py`, or from a common Python web server if one is already in the project.
+Django starts the way Django usually starts. Other Python projects start from `main.py` or `app.py`, or from a common Python web server if one is already in the project. Failing those, the engine runs the one command the project declares under `[project.scripts]` in `pyproject.toml`, or the one top-level `.py` file that ends in an `if __name__ == "__main__":` block. When there are several of either, name the entry point in a `panelalpha.yaml`.
 
 ### Ruby
 

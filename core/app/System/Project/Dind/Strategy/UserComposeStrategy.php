@@ -14,7 +14,6 @@ use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\NestedCompose;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\System\Project\Dind\Paths;
-use Symfony\Component\Yaml\Yaml;
 
 /**
  * The project's own compose file, made fit to host.
@@ -193,7 +192,7 @@ class UserComposeStrategy
         if ($system->filesystem()->fileExists($projectDir . '/' . EngineArtifacts::ENV_OVERRIDES)) {
             [$parsed, ] = ComposeEnvFiles::attach($parsed, EngineArtifacts::ENV_OVERRIDES);
         }
-        $system->filesystem()->filePutContents($runPath, Yaml::dump($parsed, 6, 2), $chown, '644');
+        $system->filesystem()->filePutContents($runPath, ComposeYaml::dump($parsed, $raw, 6, 2), $chown, '644');
         $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
         $logger?->info('Hardened compose for hosting (resource limits, restart policy, isolation)');
     }

@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\DetectAppPort;
 use App\Lib\Deploy\Port\PublishedPort;
 use App\Lib\Deploy\Telemetry\Telemetry;
@@ -67,7 +68,7 @@ final class AppPortAlignment
             $parsed['services']['app']['ports'][0] = $mapping->forwardingTo($actual);
             $filesystem->filePutContents(
                 $composePath,
-                Yaml::dump($parsed, 6, 2),
+                ComposeYaml::dump($parsed, $raw, 6, 2),
                 $this->project->userModel()->getChownString(),
                 '644'
             );

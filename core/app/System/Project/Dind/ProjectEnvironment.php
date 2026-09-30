@@ -13,7 +13,6 @@ use App\Lib\Deploy\Compose\PublicUrlEnvironment;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\Strategies;
-use Symfony\Component\Yaml\Yaml;
 
 /**
  * The .env files the application is deployed with.
@@ -280,7 +279,7 @@ class ProjectEnvironment
         if ($updated !== $compose) {
             $fs->filePutContents(
                 $runPath,
-                Yaml::dump($updated, 6, 2),
+                ComposeYaml::dump($updated, $raw, 6, 2),
                 $this->dind->userModel()->getChownString(),
                 '644'
             );

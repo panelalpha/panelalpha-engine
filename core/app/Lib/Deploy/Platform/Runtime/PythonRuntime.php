@@ -207,10 +207,14 @@ final class PythonRuntime implements Runtime
         // `dependencies` — bitcart keeps fastapi and uvicorn in a `web` group
         // reachable only through the `dev` umbrella, so `--no-dev` installs two
         // packages and the app cannot start.
+        //
+        // A project with a `[build-system]` is a package and is installed too,
+        // as its own `uv sync` would: Codex's `bin/manage.py` imports `codex`,
+        // and Quasarr's `quasarr` script exists only once the project is.
         if (isset($files['uv.lock'])) {
             return $venv . $pip . 'uv'
                 . ' && VIRTUAL_ENV="$PWD/' . self::VENV . '" ' . self::VENV
-                . '/bin/uv sync --frozen --no-install-project';
+                . '/bin/uv sync --frozen' . (self::isUvPackage($pyproject) ? '' : ' --no-install-project');
         }
 
         // A pyproject declaring neither `[project]` (PEP 621) nor a Poetry
@@ -227,8 +231,35 @@ final class PythonRuntime implements Runtime
         // package mode, PEP 621, a bare setup.py. `pip install .` is the only
         // way to install their dependencies, and also where a console entry
         // point and an importable root package come from (mopidy's `mopidy`
-        // script) — so building the project is kept here, and only here.
+        // script) — so building the project is kept here.
         return $venv . $pip . '.';
+    }
+
+    /** uv builds and installs a project only when it names a build backend. */
+    private static function isUvPackage(?string $pyproject): bool
+    {
+        return $pyproject !== null
+            && self::hasTable($pyproject, 'project')
+            && self::hasTable($pyproject, 'build-system');
+    }
+
+    /**
+     * Whether {@see installCommand()} installs the project itself, which is
+     * where its console scripts come from.
+     *
+     * @param array<string, true> $files
+     */
+    private static function installsProject(array $files, ?string $pyproject): bool
+    {
+        if (isset($files['requirements.txt']) || isset($files['pipfile'])
+            || self::isNonPackagePoetry($pyproject)) {
+            return false;
+        }
+        if (isset($files['uv.lock'])) {
+            return self::isUvPackage($pyproject);
+        }
+
+        return !self::declaresNothingToInstall($files, $pyproject);
     }
 
     /**
@@ -389,7 +420,86 @@ final class PythonRuntime implements Runtime
             }
         }
 
+        // 4. The console script the project declares (Music Assistant's `mass`).
+        $script = self::consoleScript($projectDir);
+        if ($script !== null) {
+            return self::VENV . '/bin/' . $script;
+        }
+
+        // 5. The one root script with a `__main__` guard (SABnzbd.py).
+        $main = self::soleMainScript($projectDir);
+        if ($main !== null) {
+            return self::python() . ' '
+                . (preg_match('#^[A-Za-z0-9._-]+$#', $main) === 1 ? $main : escapeshellarg($main));
+        }
+
         return self::lastResortServer();
+    }
+
+    /**
+     * The `[project.scripts]` entry to start, when the install puts it in the
+     * venv: the only one, or the one named after the project. Several with
+     * none of them the project's own is a guess, and null.
+     */
+    private static function consoleScript(string $projectDir): ?string
+    {
+        $pyproject = @file_get_contents($projectDir . '/pyproject.toml');
+        if (!is_string($pyproject)
+            || !self::installsProject(ProjectContext::listRootFiles($projectDir), $pyproject)
+        ) {
+            return null;
+        }
+        $table = self::tableBody($pyproject, 'project.scripts') ?? '';
+        preg_match_all('/^[ \t]*["\']?([A-Za-z0-9._-]+)["\']?[ \t]*=/m', $table, $matches);
+        $scripts = array_values(array_unique($matches[1]));
+        if (count($scripts) <= 1) {
+            return $scripts[0] ?? null;
+        }
+
+        // PEP 503 normalisation: `music_assistant` and `music-assistant` are one name.
+        $normalise = static fn (string $name): string => strtolower((string) preg_replace('/[-_.]+/', '-', $name));
+        $project = self::tableBody($pyproject, 'project') ?? '';
+        if (preg_match('/^[ \t]*name[ \t]*=[ \t]*["\']([^"\']+)["\']/m', $project, $name) !== 1) {
+            return null;
+        }
+        $own = array_filter(
+            $scripts,
+            static fn (string $script): bool => $normalise($script) === $normalise($name[1])
+        );
+
+        return count($own) === 1 ? reset($own) : null;
+    }
+
+    /** The lines of one TOML table, up to the next table header. */
+    private static function tableBody(string $toml, string $table): ?string
+    {
+        $header = '/^[ \t]*\[' . preg_quote($table, '/') . '\][ \t]*(?:#.*)?\r?$(.*?)(?=^[ \t]*\[|\z)/ms';
+
+        return preg_match($header, $toml, $matches) === 1 ? $matches[1] : null;
+    }
+
+    /**
+     * The single root-level `*.py` that runs as a program. Tooling and tests
+     * are not candidates, and two programs are a guess, so null.
+     */
+    private static function soleMainScript(string $projectDir): ?string
+    {
+        $found = null;
+        foreach (scandir($projectDir) ?: [] as $entry) {
+            if (!str_ends_with($entry, '.py') || !is_file($projectDir . '/' . $entry)
+                || in_array(strtolower($entry), ['setup.py', 'conftest.py', 'manage.py', 'noxfile.py'], true)
+                || preg_match('/^test_|_test\.py$/i', $entry) === 1
+                || !self::hasMainGuard($projectDir . '/' . $entry)
+            ) {
+                continue;
+            }
+            if ($found !== null) {
+                return null;
+            }
+            $found = $entry;
+        }
+
+        return $found;
     }
 
     /**
@@ -450,7 +560,7 @@ final class PythonRuntime implements Runtime
         $page = '<!doctype html><title>' . PlaceholderPage::NOT_CONFIGURED_TITLE . '</title>'
             . '<h1>This application did not start</h1>'
             . '<p>PanelAlpha found no Python entry point in this repository, so nothing is running. '
-            . 'Name the entry point in a panelalpha.yaml, or add one of: '
+            . 'Name the entry point in a panelalpha.yaml, declare one [project.scripts] entry, or add one of: '
             . implode(', ', self::ENTRYPOINTS) . '.</p>';
 
         return 'mkdir -p ' . $dir

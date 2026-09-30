@@ -195,6 +195,55 @@ class UserComposeStrategyTest extends TestCase
         $this->assertSame(['volumes' => ['./x:/x']], Yaml::parse($this->copiedTo[$copyPath])['services']['app']);
     }
 
+    /**
+     * Domain Watchdog disables its worker's inherited healthcheck with
+     * `test: []`; written back as `test: {}` Compose refused the whole project
+     * ("healthcheck.test must be a string"). Empty maps must stay maps.
+     */
+    public function test_refresh_run_file_keeps_empty_sequences_and_empty_maps_apart(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $clientYaml = <<<'YAML'
+        x-worker: &worker
+          image: acme/app:latest
+          entrypoint: []
+        services:
+          app:
+            image: acme/app:latest
+            ports:
+              - "8080:80"
+            labels: {}
+            networks: {}
+          php-worker:
+            <<: *worker
+            command: php bin/console messenger:consume
+            healthcheck:
+              test: [ ]
+              disable: true
+        volumes:
+          data: {}
+        x-notes: {}
+        YAML;
+
+        $system = $this->stubbedSystem([$clientPath => $clientYaml]);
+        $dind = $this->stubbedDind($system, $clientPath);
+
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $runPath = self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE;
+        $this->assertArrayHasKey($runPath, $this->copiedTo, 'the hardened run file was never written');
+        // Maps as objects, so an empty map and an empty sequence differ.
+        $run = Yaml::parse($this->copiedTo[$runPath], Yaml::PARSE_OBJECT_FOR_MAP);
+        $worker = $run->services->{'php-worker'};
+
+        $this->assertSame([], $worker->healthcheck->test, 'healthcheck.test: [] must stay a sequence');
+        $this->assertSame([], $worker->entrypoint, 'a merged-in entrypoint: [] must stay a sequence');
+        $this->assertEquals(new \stdClass(), $run->services->app->labels, 'labels: {} must stay a map');
+        $this->assertEquals(new \stdClass(), $run->services->app->networks, 'service networks: {} must stay a map');
+        $this->assertEquals(new \stdClass(), $run->volumes->data, 'a named volume {} must stay a map');
+        $this->assertEquals(new \stdClass(), $run->{'x-notes'}, 'a top-level {} must stay a map');
+    }
+
     public function test_refresh_run_file_is_a_noop_when_the_project_ships_no_compose_file(): void
     {
         $system = $this->stubbedSystem([]);

@@ -79,6 +79,89 @@ final class ComposeYaml
     }
 
     /**
+     * Write a parsed compose document back out, keeping `[]` and `{}` apart.
+     *
+     * Both parse to a PHP `[]`, and Symfony dumps that as `{}` -- so the
+     * documented `healthcheck: { test: [] }` came back as `test: {}`, which
+     * Compose rejects. An empty array is written as a sequence where $source
+     * had one, and as a map everywhere else, as before.
+     *
+     * @param array<mixed> $compose
+     */
+    public static function dump(array $compose, string $source, int $inline, int $indent): string
+    {
+        return Yaml::dump(
+            self::emptiesMarked($compose, '', self::emptySequences($source)),
+            $inline,
+            $indent,
+            Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE | Yaml::DUMP_OBJECT_AS_MAP
+        );
+    }
+
+    /**
+     * Paths of every empty sequence in $raw, read with maps as objects so the
+     * two kinds of empty stay distinguishable.
+     *
+     * @return array<string, true>
+     */
+    private static function emptySequences(string $raw): array
+    {
+        foreach ([$raw, self::anchorsOntoTheirKeys($raw)] as $candidate) {
+            try {
+                $found = [];
+                self::collectEmptySequences(Yaml::parse($candidate, Yaml::PARSE_OBJECT_FOR_MAP), '', $found);
+
+                return $found;
+            } catch (ParseException) {
+                continue;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * @param array<string, true> $found
+     */
+    private static function collectEmptySequences(mixed $node, string $path, array &$found): void
+    {
+        if ($node === []) {
+            $found[$path] = true;
+
+            return;
+        }
+        if (!is_array($node) && !$node instanceof \stdClass) {
+            return;
+        }
+        foreach ((array) $node as $key => $value) {
+            self::collectEmptySequences($value, $path . "\0" . $key, $found);
+        }
+    }
+
+    /**
+     * An empty map becomes an empty object, which DUMP_OBJECT_AS_MAP writes as
+     * `{}`; an empty sequence stays `[]`, which DUMP_EMPTY_ARRAY_AS_SEQUENCE
+     * writes as `[]`.
+     *
+     * @param array<mixed> $node
+     * @param array<string, true> $sequences
+     * @return array<mixed>|\stdClass
+     */
+    private static function emptiesMarked(array $node, string $path, array $sequences): array|\stdClass
+    {
+        if ($node === []) {
+            return isset($sequences[$path]) ? [] : new \stdClass();
+        }
+        foreach ($node as $key => $value) {
+            if (is_array($value)) {
+                $node[$key] = self::emptiesMarked($value, $path . "\0" . $key, $sequences);
+            }
+        }
+
+        return $node;
+    }
+
+    /**
      * Move an anchor that sits alone on its line up onto the key it belongs
      * to, turning `key:\n  &a\n  x: 1` into `key: &a\n  x: 1`.
      *

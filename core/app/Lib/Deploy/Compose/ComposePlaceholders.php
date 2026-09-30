@@ -96,10 +96,16 @@ class ComposePlaceholders
      * secret. Nothing supplies a value here, so `docker compose up` refuses to
      * interpolate and the deploy dies before a container exists.
      *
-     * Only the whole value: a variable embedded in a URL is a different
-     * problem and is left alone.
+     * Only the whole value, for {@see requiredSecret()}; {@see fill()} finds
+     * every reference itself with REFERENCE_PATTERN.
      */
     private const REQUIRED_VAR_PATTERN = '/^\$\{([A-Za-z_][A-Za-z0-9_]*):\?[^}]*\}$/';
+
+    /**
+     * Any `${VAR}` / `${VAR<op>word}` reference, or Compose's `$$` escape so a
+     * literal `$${VAR}` is skipped. A nested `${A:-${B}}` is not matched.
+     */
+    private const REFERENCE_PATTERN = '/\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)(:?[-?+][^}$]*)?\}/';
 
     /**
      * The account's address, given to every service that is not a datastore
@@ -136,13 +142,21 @@ class ComposePlaceholders
             return ['compose' => $compose, 'secrets' => [], 'urls' => [], 'published' => []];
         }
 
+        // Settled across the whole file first: Compose interpolates every
+        // string in it, `x-` fragments and DSNs included, so one miss aborts.
+        [$required, $generated] = self::requiredVariables($compose, $seed, $accountEnv);
+        if ($required !== []) {
+            $compose = self::withRequiredVariables($compose, $required);
+            $services = $compose['services'];
+        }
+
         $tokens = self::collectPlaceholders($services);
         $replacements = [];
         foreach (array_keys($tokens) as $token) {
             $replacements[(string) $token] = self::generatedSecret((string) $token, $seed);
         }
 
-        $touchedSecrets = [];
+        $touchedSecrets = array_fill_keys($generated, true);
         $touchedUrls = [];
         $touchedPublished = [];
         $publicUrl = self::normalisedPublicUrl($publicUrl);
@@ -159,21 +173,19 @@ class ComposePlaceholders
                     $filled = $published && strcasecmp($key, 'APP_KEY') === 0
                         ? $value
                         : self::applyReplacements($key, $value, $replacements);
+                    $own = (string) ($accountEnv[$key] ?? '');
                     if ($filled !== $value) {
+                        // Inline beats env_file, so the account's value has to be written here to win.
+                        if ($own !== '') {
+                            return self::composeLiteral($own);
+                        }
                         $touchedSecrets[$key] = true;
 
                         return $filled;
                     }
-                    $required = self::requiredSecret($key, $value, $seed);
-                    if ($required !== null) {
-                        $touchedSecrets[$key] = true;
-
-                        return $required;
-                    }
                     if ($published) {
-                        $own = (string) ($accountEnv[$key] ?? '');
                         if ($own !== '') {
-                            return $own;
+                            return self::composeLiteral($own);
                         }
                         $touchedPublished[$key] = true;
 
@@ -389,6 +401,107 @@ class ComposePlaceholders
     }
 
     /**
+     * Every required (`:?` / `?`) variable naming a credential, with the one
+     * value it gets everywhere: the account's own, else one from the seed.
+     * A credential key vouches for its variable only as the key's whole value.
+     *
+     * @param array<string, mixed> $compose
+     * @param array<string, string> $accountEnv
+     * @return array{0: array<string, string>, 1: list<string>} name => value, and the names generated
+     */
+    private static function requiredVariables(array $compose, string $seed, array $accountEnv): array
+    {
+        $names = [];
+        self::walkStrings($compose, static function (string $key, string $value) use (&$names): string {
+            preg_match_all(self::REFERENCE_PATTERN, $value, $refs, PREG_SET_ORDER);
+            foreach ($refs as $ref) {
+                $name = $ref[1] ?? '';
+                if ($name === '' || preg_match('/^:?\?/', $ref[2] ?? '') !== 1) {
+                    continue;
+                }
+                if (self::isSecretKey($name) || (self::isSecretKey($key) && trim($value) === $ref[0])) {
+                    $names[$name] = true;
+                }
+            }
+
+            return $value;
+        });
+
+        $values = [];
+        $generated = [];
+        foreach (array_keys($names) as $name) {
+            $name = (string) $name;
+            $own = (string) ($accountEnv[$name] ?? '');
+            if ($own !== '') {
+                $values[$name] = self::composeLiteral($own);
+                continue;
+            }
+            $values[$name] = self::generatedSecret($name, $seed);
+            $generated[] = $name;
+        }
+
+        return [$values, $generated];
+    }
+
+    /**
+     * Resolve every reference to the given variables as Compose would with
+     * them set: `${VAR:+alt}` answers alt, every other form answers the value.
+     *
+     * @param array<string, mixed> $compose
+     * @param array<string, string> $values
+     * @return array<string, mixed>
+     */
+    private static function withRequiredVariables(array $compose, array $values): array
+    {
+        return self::walkStrings($compose, static fn (string $key, string $value): string => (string) preg_replace_callback(
+            self::REFERENCE_PATTERN,
+            static function (array $m) use ($values): string {
+                $name = $m[1] ?? '';
+                if ($name === '' || !isset($values[$name])) {
+                    return $m[0];
+                }
+                $modifier = $m[2] ?? '';
+
+                return preg_match('/^:?\+/', $modifier) === 1
+                    ? substr($modifier, strpos($modifier, '+') + 1)
+                    : $values[$name];
+            },
+            $value
+        ));
+    }
+
+    /**
+     * Every string scalar in a compose document, with the key it sits under
+     * (a list entry `KEY=value` counts as KEY); map keys are never touched.
+     *
+     * @param callable(string, string): string $rewrite
+     */
+    private static function walkStrings(mixed $node, callable $rewrite, string $key = ''): mixed
+    {
+        if (is_string($node)) {
+            if (preg_match('/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/s', $node, $m) === 1) {
+                return $m[1] . '=' . $rewrite($m[1], $m[2]);
+            }
+
+            return $rewrite($key, $node);
+        }
+        if (!is_array($node)) {
+            return $node;
+        }
+        foreach ($node as $k => $child) {
+            $node[$k] = self::walkStrings($child, $rewrite, is_string($k) ? $k : $key);
+        }
+
+        return $node;
+    }
+
+    /** A literal value written into the compose file, where `$` would be interpolated. */
+    private static function composeLiteral(string $value): string
+    {
+        return str_replace('$', '$$', $value);
+    }
+
+    /**
      * @param array<string, mixed> $services
      * @return array<string, true> placeholder text => seen
      */
@@ -425,6 +538,17 @@ class ComposePlaceholders
         return $tokens;
     }
 
+    /** The password slot of scheme://user:password@host, rewritten. */
+    private static function withEmbeddedPassword(string $value, string $password): string
+    {
+        return (string) preg_replace_callback(
+            '#^(\s*[a-z][a-z0-9+.-]*://[^/@\s:]+:)[^/@\s]+@#i',
+            static fn (array $m): string => $m[1] . $password . '@',
+            $value,
+            1
+        );
+    }
+
     /**
      * The password out of scheme://user:password@host, or null.
      */
@@ -451,6 +575,11 @@ class ComposePlaceholders
             $token = (string) $token;
             if ($trimmed === $token && self::isSecretKey($key)) {
                 return $secret;
+            }
+            // The password slot is exact, so even `changeme` is safe to replace there.
+            if (self::embeddedPassword($value) === $token) {
+                $value = self::withEmbeddedPassword($value, $secret);
+                $trimmed = trim($value);
             }
             if (self::isDistinctiveToken($token) && str_contains($value, $token)) {
                 $value = str_replace($token, $secret, $value);

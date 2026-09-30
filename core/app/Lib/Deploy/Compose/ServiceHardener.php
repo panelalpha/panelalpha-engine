@@ -24,6 +24,7 @@ final class ServiceHardener
      * `privileged` means little while the capabilities it implies can be asked
      * for one at a time. This is still a denylist, so a compose key nobody has
      * thought about yet passes -- an allowlist is the real answer.
+     * `cap_add` is not here: it is allowlisted by {@see withSafeCapabilities()}.
      *
      * @var list<string>
      */
@@ -33,7 +34,6 @@ final class ServiceHardener
         'ipc',
         'uts',
         'devices',
-        'cap_add',
         'security_opt',
         'userns_mode',
         'cgroup_parent',
@@ -41,6 +41,17 @@ final class ServiceHardener
         'group_add',
         'sysctls',
         'device_cgroup_rules',
+    ];
+
+    /**
+     * Docker's default capability set. Re-adding one after `cap_drop: [ALL]`
+     * never exceeds a default container, so these are all `cap_add` may keep.
+     *
+     * @var list<string>
+     */
+    private const DEFAULT_CAPABILITIES = [
+        'CHOWN', 'DAC_OVERRIDE', 'FSETID', 'FOWNER', 'MKNOD', 'NET_RAW', 'SETGID',
+        'SETUID', 'SETFCAP', 'SETPCAP', 'NET_BIND_SERVICE', 'SYS_CHROOT', 'KILL', 'AUDIT_WRITE',
     ];
 
     /** @var list<string> */
@@ -245,6 +256,7 @@ final class ServiceHardener
         foreach (self::FORBIDDEN_KEYS as $key) {
             unset($service[$key]);
         }
+        $service = self::withSafeCapabilities($service);
         if (($service['network_mode'] ?? null) === 'host') {
             unset($service['network_mode']);
         }
@@ -261,6 +273,42 @@ final class ServiceHardener
             } else {
                 $service['volumes'] = $kept;
             }
+        }
+
+        return $service;
+    }
+
+    /**
+     * Keeps the `cap_add` entries that are in Docker's default set, so a service
+     * that drops everything and adds back CHOWN/SETUID/SETGID can still drop to
+     * its own user. ALL, SYS_ADMIN and the rest are removed as before.
+     *
+     * @param array<string, mixed> $service
+     * @return array<string, mixed>
+     */
+    private static function withSafeCapabilities(array $service): array
+    {
+        if (!array_key_exists('cap_add', $service)) {
+            return $service;
+        }
+
+        $requested = is_string($service['cap_add']) ? [$service['cap_add']] : (array) $service['cap_add'];
+        $kept = [];
+        foreach ($requested as $capability) {
+            if (!is_string($capability)) {
+                continue;
+            }
+            $bare = preg_replace('/^CAP_/', '', strtoupper(trim($capability)));
+            if (in_array($bare, self::DEFAULT_CAPABILITIES, true)) {
+                $kept[] = trim($capability);
+            }
+        }
+
+        // An empty list would dump as `cap_add: {  }`, a map Compose refuses.
+        if ($kept === []) {
+            unset($service['cap_add']);
+        } else {
+            $service['cap_add'] = $kept;
         }
 
         return $service;

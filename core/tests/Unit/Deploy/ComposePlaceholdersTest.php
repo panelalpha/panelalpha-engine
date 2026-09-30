@@ -420,15 +420,179 @@ YAML);
         $this->assertSame('${API_KEY}', $filled['services']['app']['environment']['API_KEY']);
     }
 
-    /** A variable inside a URL is a different problem; do not half-rewrite it. */
-    public function test_a_variable_embedded_in_a_larger_value_is_left_alone(): void
+    /**
+     * Pad (#2156): the password is required as the database's whole value and
+     * again inside the app's DSN. Filling only the first left Compose to abort
+     * on the second, behind a log saying it had been generated.
+     */
+    private function padCompose(): array
     {
-        $url = 'postgresql://app:${DB_PASSWORD:?set it}@db/app';
-        $compose = ['services' => ['app' => ['environment' => ['DATABASE_URL' => $url]]]];
+        return Yaml::parse(<<<'YAML'
+services:
+  pad:
+    image: ghcr.io/perpetualsoftware/pad:latest
+    environment:
+      PAD_DB_DRIVER: "postgres"
+      PAD_DATABASE_URL: "host=postgres port=5432 user=pad password=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — see .env.example} dbname=pad sslmode=disable"
+      PAD_ENCRYPTION_KEY: "${PAD_ENCRYPTION_KEY:?PAD_ENCRYPTION_KEY is required — see .env.example}"
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pad
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — see .env.example}"
+      POSTGRES_DB: pad
+YAML);
+    }
+
+    public function test_a_required_secret_embedded_in_a_larger_value_is_filled_with_the_same_value(): void
+    {
+        $result = ComposePlaceholders::fill($this->padCompose(), 'seed');
+        $services = $result['compose']['services'];
+        $password = $services['postgres']['environment']['POSTGRES_PASSWORD'];
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{48}$/', $password);
+        $this->assertSame(
+            'host=postgres port=5432 user=pad password=' . $password . ' dbname=pad sslmode=disable',
+            $services['pad']['environment']['PAD_DATABASE_URL']
+        );
+        $this->assertStringNotContainsString('${', Yaml::dump($result['compose'], 6, 2));
+        $this->assertEqualsCanonicalizing(['POSTGRES_PASSWORD', 'PAD_ENCRYPTION_KEY'], $result['secrets']);
+    }
+
+    public function test_every_reference_to_a_required_secret_resolves_to_one_value(): void
+    {
+        $compose = ['services' => [
+            'app' => ['environment' => [
+                'DATABASE_URL=postgresql://app:${DB_PASSWORD:?set it}@db/app',
+                'DB_PASSWORD_AGAIN=${DB_PASSWORD}',
+                'DB_PASSWORD_DEFAULTED=${DB_PASSWORD:-devpass}',
+                'HAS_PASSWORD=${DB_PASSWORD:+yes}',
+                'LITERAL=$${DB_PASSWORD}',
+            ]],
+            'db' => [
+                'environment' => ['MARIADB_PASSWORD' => '${DB_PASSWORD?set it}'],
+                'healthcheck' => ['test' => ['CMD', 'mysqladmin', 'ping', '-p${DB_PASSWORD:?set it}']],
+            ],
+        ]];
+
+        $services = ComposePlaceholders::fill($compose, 'seed')['compose']['services'];
+        $password = ComposePlaceholders::generatedSecret('DB_PASSWORD', 'seed');
+
+        $this->assertSame([
+            'DATABASE_URL=postgresql://app:' . $password . '@db/app',
+            'DB_PASSWORD_AGAIN=' . $password,
+            'DB_PASSWORD_DEFAULTED=' . $password,
+            'HAS_PASSWORD=yes',
+            'LITERAL=$${DB_PASSWORD}',
+        ], $services['app']['environment']);
+        $this->assertSame($password, $services['db']['environment']['MARIADB_PASSWORD']);
+        $this->assertSame('-p' . $password, $services['db']['healthcheck']['test'][3]);
+    }
+
+    /**
+     * oc8 (#2197) keeps its required secrets in an `x-` fragment merged into
+     * each service. Compose interpolates the fragment too, so filling only the
+     * merged copies still aborted on the original.
+     */
+    public function test_a_required_secret_in_an_extension_fragment_is_filled(): void
+    {
+        $compose = Yaml::parse(<<<'YAML'
+x-backend-env: &backend-env
+  OC8_JWT_SECRET: ${OC8_JWT_SECRET:?set OC8_JWT_SECRET in .env}
+  OC8_DB_HOST: postgres
+services:
+  api:
+    image: oc8/backend
+    environment: *backend-env
+  worker:
+    image: oc8/backend
+    environment:
+      <<: *backend-env
+      ROLE: worker
+YAML);
 
         $filled = ComposePlaceholders::fill($compose, 'seed')['compose'];
+        $secret = ComposePlaceholders::generatedSecret('OC8_JWT_SECRET', 'seed');
 
-        $this->assertSame($url, $filled['services']['app']['environment']['DATABASE_URL']);
+        $this->assertSame($secret, $filled['x-backend-env']['OC8_JWT_SECRET']);
+        $this->assertSame($secret, $filled['services']['api']['environment']['OC8_JWT_SECRET']);
+        $this->assertSame($secret, $filled['services']['worker']['environment']['OC8_JWT_SECRET']);
+    }
+
+    public function test_an_embedded_required_variable_that_is_not_a_credential_is_left_alone(): void
+    {
+        $url = 'https://${PUBLIC_HOST:?set the host}/api';
+        $compose = ['services' => ['app' => ['environment' => ['API_URL' => $url]]]];
+
+        $this->assertSame($url, ComposePlaceholders::fill($compose, 'seed')['compose']['services']['app']['environment']['API_URL']);
+    }
+
+    /**
+     * EcomGen (#2220): the account set ECOMGEN_MASTER_KEY and the generated
+     * value was baked over it. The account's own value is used everywhere
+     * the variable appears, written so Compose does not interpolate its `$`.
+     */
+    public function test_the_accounts_value_for_a_required_secret_wins_everywhere(): void
+    {
+        $expr = '${ECOMGEN_MASTER_KEY:?Set a base64-encoded 32-byte key in .env}';
+        $compose = ['services' => [
+            'api' => ['environment' => ['ECOMGEN_MASTER_KEY' => $expr]],
+            'worker' => ['environment' => ['ECOMGEN_MASTER_KEY' => $expr, 'KEY_COPY' => 'k=' . $expr]],
+        ]];
+
+        $result = ComposePlaceholders::fill($compose, 'seed', null, ['ECOMGEN_MASTER_KEY' => 'a$b+c/d=']);
+        $services = $result['compose']['services'];
+
+        $this->assertSame('a$$b+c/d=', $services['api']['environment']['ECOMGEN_MASTER_KEY']);
+        $this->assertSame('a$$b+c/d=', $services['worker']['environment']['ECOMGEN_MASTER_KEY']);
+        $this->assertSame('k=a$$b+c/d=', $services['worker']['environment']['KEY_COPY']);
+        $this->assertSame([], $result['secrets']);
+    }
+
+    /**
+     * Scrob (#2009) ships `changeme` as the database password and again in
+     * the app's DATABASE_URL. Too common a word to search for, but the
+     * password slot of a URL is exact, so both sides get the same value.
+     */
+    private function scrobCompose(): array
+    {
+        return ['services' => [
+            'scrob-db' => ['image' => 'postgres:16-alpine', 'environment' => [
+                'POSTGRES_USER' => 'scrob',
+                'POSTGRES_PASSWORD' => 'changeme',
+                'POSTGRES_DB' => 'scrob',
+            ]],
+            'scrob' => ['image' => 'bellamy/scrob:latest', 'environment' => [
+                'DATABASE_URL' => 'postgresql+asyncpg://scrob:changeme@scrob-db:5432/scrob',
+                'TZ' => 'UTC',
+            ]],
+        ]];
+    }
+
+    public function test_a_short_placeholder_in_a_connection_string_password_matches_the_database(): void
+    {
+        $services = ComposePlaceholders::fill($this->scrobCompose(), self::SEED)['compose']['services'];
+        $password = $services['scrob-db']['environment']['POSTGRES_PASSWORD'];
+
+        $this->assertNotSame('changeme', $password);
+        $this->assertSame(
+            'postgresql+asyncpg://scrob:' . $password . '@scrob-db:5432/scrob',
+            $services['scrob']['environment']['DATABASE_URL']
+        );
+    }
+
+    public function test_the_accounts_values_win_over_generated_placeholder_fills(): void
+    {
+        $url = 'postgresql+asyncpg://scrob:mine@scrob-db:5432/scrob';
+        $services = ComposePlaceholders::fill(
+            $this->scrobCompose(),
+            self::SEED,
+            null,
+            ['POSTGRES_PASSWORD' => 'mine', 'DATABASE_URL' => $url]
+        )['compose']['services'];
+
+        $this->assertSame('mine', $services['scrob-db']['environment']['POSTGRES_PASSWORD']);
+        $this->assertSame($url, $services['scrob']['environment']['DATABASE_URL']);
     }
 
     public function test_a_filled_required_secret_is_reported(): void

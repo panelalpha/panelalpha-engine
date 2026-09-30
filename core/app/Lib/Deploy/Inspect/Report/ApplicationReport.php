@@ -141,7 +141,8 @@ final class ApplicationReport
         if (is_string($start) && str_contains($start, PythonRuntime::PLACEHOLDER_DIR)) {
             return 'No start command could be worked out. A wsgi.py or asgi.py needs a server '
                 . 'to run it -- declare gunicorn or uvicorn. Otherwise name the entry point in a '
-                . 'panelalpha.yaml, or add app.py, main.py or server.py.';
+                . 'panelalpha.yaml, declare one [project.scripts] entry, or add app.py, main.py '
+                . 'or server.py (or a single script with an `if __name__ == "__main__":` guard).';
         }
 
         return null;

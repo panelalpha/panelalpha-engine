@@ -36,6 +36,47 @@ class ServiceHardenerTest extends TestCase
         }
     }
 
+    public function test_a_capability_beyond_the_default_set_is_stripped(): void
+    {
+        foreach ([['ALL'], ['SYS_ADMIN', 'NET_ADMIN', 'SYS_PTRACE', 'SYS_MODULE'], 'ALL', []] as $caps) {
+            $service = ServiceHardener::harden('app', ['image' => 'acme/app', 'cap_add' => $caps]);
+
+            $this->assertArrayNotHasKey('cap_add', $service, json_encode($caps));
+        }
+    }
+
+    public function test_a_careful_privilege_drop_keeps_the_capabilities_it_adds_back(): void
+    {
+        // Drop everything, add back just enough to chown a data dir and switch
+        // to a non-root user. Stripping cap_add left the entrypoint with none.
+        $caps = ['CHOWN', 'SETUID', 'SETGID', 'DAC_OVERRIDE', 'FOWNER'];
+        $service = ServiceHardener::harden('app', [
+            'image' => 'acme/app',
+            'cap_drop' => ['ALL'],
+            'cap_add' => $caps,
+        ]);
+
+        $this->assertSame(['ALL'], $service['cap_drop']);
+        $this->assertSame($caps, $service['cap_add']);
+    }
+
+    public function test_a_mixed_capability_list_keeps_only_the_default_ones(): void
+    {
+        $service = ServiceHardener::harden('app', [
+            'image' => 'acme/app',
+            'cap_add' => ['ALL', 'CAP_CHOWN', 'sys_admin', 'setuid', ' NET_BIND_SERVICE ', 'cap_net_admin', 42],
+        ]);
+
+        $this->assertSame(['CAP_CHOWN', 'setuid', 'NET_BIND_SERVICE'], $service['cap_add']);
+    }
+
+    public function test_a_single_capability_written_as_a_string_is_kept_as_a_list(): void
+    {
+        $service = ServiceHardener::harden('app', ['image' => 'acme/app', 'cap_add' => 'NET_BIND_SERVICE']);
+
+        $this->assertSame(['NET_BIND_SERVICE'], $service['cap_add']);
+    }
+
     public function test_host_networking_is_stripped(): void
     {
         $service = ServiceHardener::harden('app', ['image' => 'acme/app', 'network_mode' => 'host']);

@@ -406,6 +406,63 @@ final class DockerfileContextSourceTest extends TestCase
         ));
     }
 
+    // ---- Docker cleans the source path before it looks it up -------------
+
+    /**
+     * github.com/se1exin/cleanarr: `COPY ./backend/requirements.txt/ /app`
+     * builds, but `file_exists()` on a file with a trailing slash is false.
+     */
+    public function testCleanarrCopiesAFileWithATrailingSlash(): void
+    {
+        mkdir($this->dir . '/backend');
+        touch($this->dir . '/backend/requirements.txt');
+        file_put_contents($this->dir . '/Dockerfile', "FROM tiangolo/uwsgi-nginx-flask:python3.10\n"
+            . "COPY ./backend/requirements.txt/ /app\nCOPY ./backend /app\n");
+
+        $this->assertSame('Dockerfile', DockerfileFinder::find($this->dir, ['dockerfile' => true]));
+    }
+
+    #[DataProvider('uncleanPaths')]
+    public function testAnUncleanPathToAPresentFileIsAccepted(string $source): void
+    {
+        mkdir($this->dir . '/backend');
+        touch($this->dir . '/backend/requirements.txt');
+
+        $this->assertNull(DockerfileFinder::missingContextSource("FROM alpine\nCOPY {$source} /app\n", $this->dir));
+    }
+
+    #[DataProvider('uncleanPaths')]
+    public function testAnUncleanPathToAMissingFileIsStillReported(string $source): void
+    {
+        mkdir($this->dir . '/backend');
+
+        $this->assertSame(
+            $source,
+            DockerfileFinder::missingContextSource("FROM alpine\nCOPY {$source} /app\n", $this->dir)
+        );
+    }
+
+    /** @return array<string, list<string>> */
+    public static function uncleanPaths(): array
+    {
+        return [
+            'trailing slash' => ['backend/requirements.txt/'],
+            'dot prefix and trailing slash' => ['./backend/requirements.txt/'],
+            'trailing dot segment' => ['backend/requirements.txt/.'],
+            'repeated slashes' => ['.//backend//requirements.txt//'],
+            'inner dot segment' => ['backend/./requirements.txt'],
+        ];
+    }
+
+    /** The GoReleaser case survives the cleaning: a gitignored `dist/` is absent. */
+    public function testAMissingDirectoryWithATrailingSlashIsStillReported(): void
+    {
+        $this->assertSame('./dist//app/', DockerfileFinder::missingContextSource(
+            "FROM alpine\nCOPY ./dist//app/ /usr/bin/app\n",
+            $this->dir
+        ));
+    }
+
     /** `.` and `./` are the whole context, which exists by definition. */
     public function testTheContextRootItselfIsAccepted(): void
     {

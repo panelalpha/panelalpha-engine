@@ -422,15 +422,16 @@ final class DockerfileFinder
     /**
      * The part of a source path that is certain, or null when none of it is:
      * `build/app-${TARGETOS}` as far as `build/`, `${DIR}/app` not at all.
-     * Drop only a leading `./` -- `ltrim($source, './')` takes a character
+     * Drop only whole `.` segments -- `ltrim($source, './')` takes a character
      * class, and rejects a valid Dockerfile over `.env.template`.
      */
     private static function literalPrefix(string $source): ?string
     {
-        // `.`, `./` and absolute `/app` all mean the context root: the
-        // context is the whole build tree.
-        $source = (string) preg_replace('#^(?:\./|/)+#', '', $source);
-        if ($source === '' || $source === '.') {
+        // Docker cleans the path: `./`, a leading `/`, `//`, `/./` and a
+        // trailing `/` are all dropped, even after a file (`requirements.txt/`).
+        $segments = array_filter(explode('/', $source), static fn (string $s): bool => $s !== '' && $s !== '.');
+        $source = implode('/', $segments);
+        if ($source === '') {
             return null;
         }
 

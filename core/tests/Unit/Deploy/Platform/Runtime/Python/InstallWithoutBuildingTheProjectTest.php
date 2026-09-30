@@ -19,9 +19,9 @@ use PHPUnit\Framework\TestCase;
  *
  * The rule: read the resolution the project committed (uv.lock, poetry.lock)
  * or the requirement list (requirements.txt) and install that, and build the
- * project itself only when a project is actually declared and no lock states
- * its dependencies -- which is also the only case where a console entry point
- * can exist.
+ * project itself only when a project is actually declared and either no lock
+ * states its dependencies or its uv lock sits beside a build backend -- the
+ * cases where a console entry point can exist.
  */
 class InstallWithoutBuildingTheProjectTest extends TestCase
 {
@@ -42,6 +42,23 @@ class InstallWithoutBuildingTheProjectTest extends TestCase
         // umbrella, so a no-dev sync installs two packages and the app cannot
         // start. uv's default is the project's own groups.
         $this->assertStringNotContainsString('--no-dev', $command);
+    }
+
+    /**
+     * ajslater/codex names `uv_build` as its backend, and its `bin/manage.py`
+     * imports the `codex` package: without the project installed every deploy
+     * died with `ModuleNotFoundError: No module named 'codex'` (issue #2076).
+     */
+    public function test_a_uv_project_with_a_build_backend_installs_itself(): void
+    {
+        $command = PythonRuntime::installCommand(
+            ['pyproject.toml' => true, 'uv.lock' => true],
+            "[project]\nname = \"codex\"\nversion = \"1.8.0\"\n\n"
+                . "[project.scripts]\ncodex = \"codex.run:main\"\n\n"
+                . "[build-system]\nrequires = [\"uv_build~=0.12.0\"]\nbuild-backend = \"uv_build\"\n"
+        );
+
+        $this->assertStringEndsWith('uv sync --frozen', $command);
     }
 
     /**
