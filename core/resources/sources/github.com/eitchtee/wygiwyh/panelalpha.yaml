@@ -45,8 +45,15 @@ description: >-
   CSRF control is the origin check, which is pinned to the account's https URL.
   DEBUG is forced false.
 
-  SECRETS + ADMIN STORE. The Django SECRET_KEY (rotating it logs everyone out),
-  the Postgres password (baked into the data volume) and a generated admin
-  password are written once into ~/.panelalpha/wygiwyh/ (0600 in 0700) -- the
-  only writable place a redeploy does not delete -- and reused on every
-  rebuild. Onboarding notes, including the admin login, go in credentials.txt.
+  SECRETS + ADMIN STORE. The Django SECRET_KEY (rotating it logs everyone out)
+  and the Postgres password (baked into the data volume) are written once into
+  ~/.panelalpha/wygiwyh/ (0600 in 0700) -- the only writable place a redeploy
+  does not delete -- and reused on every rebuild. The admin login is generated
+  by the engine (`credentials:` below) and returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get).
+credentials:
+  login_path: /login/
+  adopt_from: .panelalpha/wygiwyh/app.env
+  fields:
+    ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    ADMIN_PASSWORD: {kind: password}

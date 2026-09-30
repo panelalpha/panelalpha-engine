@@ -17,12 +17,20 @@ description: >-
   instance. A one-shot `seed` service runs before the app on every boot: the
   image's own `prisma migrate deploy`, then, only while the user table is
   empty, a loopback-only `next start` with registration open and a call to
-  Linkwarden's own POST /api/v1/users that creates `admin`. The published app
+  Linkwarden's own POST /api/v1/users that creates `admin` with the password
+  the engine generates (`credentials:` below); GET
+  /projects/{name}/app-credentials (MCP app_credentials_get) returns it. The published app
   starts after the seed and runs with NEXT_PUBLIC_DISABLE_REGISTRATION=true
   (a .env default the panel may override).
 
-  SECRETS. hooks/prepare.sh writes NEXTAUTH_SECRET, the Postgres password, the
-  Meilisearch master key and the admin password once to
-  ~/.panelalpha/linkwarden/ (0600 in 0700) with a credentials.txt note.
+  SECRETS. hooks/prepare.sh writes NEXTAUTH_SECRET, the Postgres password and
+  the Meilisearch master key once to ~/.panelalpha/linkwarden/ (0600 in
+  0700).
   NEXTAUTH_URL is ${PA_PUBLIC_URL}/api/v1/auth. The app container gets 1.5 GB
   so V8 and Chromium are not starved while archiving.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/linkwarden/admin.env
+  fields:
+    LINKWARDEN_ADMIN_USER: {kind: username, value: admin}
+    LINKWARDEN_ADMIN_PASSWORD: {kind: password}

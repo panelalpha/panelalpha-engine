@@ -401,21 +401,13 @@ if ($mode !== 'seed') {
     cb_fail("unknown mode '{$mode}' (config|check|schema|seed|version)");
 }
 
-$credentials = '/data/admin-credentials';
-if (!is_file($credentials)) {
-    cb_fail("{$credentials} is missing; hooks/prepare.sh generates it");
+// The engine's login (`credentials:` in panelalpha.yaml), from
+// ~/.panelalpha/app-credentials.env via the container's env_file.
+$username = trim((string) getenv('CLIPBUCKET_ADMIN_USERNAME'));
+$password = trim((string) getenv('CLIPBUCKET_ADMIN_PASSWORD'));
+if ($username === '' || $password === '') {
+    cb_fail('CLIPBUCKET_ADMIN_USERNAME / CLIPBUCKET_ADMIN_PASSWORD are not in the environment');
 }
-$values = array();
-foreach (file($credentials) as $line) {
-    if (preg_match('/^CLIPBUCKET_ADMIN_(USERNAME|PASSWORD)=(.*)$/', trim($line), $m)) {
-        $values[strtolower($m[1])] = $m[2];
-    }
-}
-if (empty($values['username']) || empty($values['password'])) {
-    cb_fail("{$credentials} does not carry CLIPBUCKET_ADMIN_USERNAME and _PASSWORD");
-}
-$username = $values['username'];
-$password = $values['password'];
 $email    = cb_env('CLIPBUCKET_ADMIN_EMAIL', 'admin@' . $host);
 
 /* 1. The external tools, as config rows.

@@ -225,9 +225,13 @@ services:
     depends_on:
       piler:
         condition: service_healthy
-    # MYSQL_*, PILER_ADMIN_USERNAME and PILER_ADMIN_PASSWORD.
+    # MYSQL_*, then PILER_ADMIN_USERNAME and PILER_ADMIN_PASSWORD, which the
+    # engine generated and keeps. Piler ships admin@local / 'pilerrocks' and
+    # auditor@local / 'auditor' (util/db-mysql.sql, checked by a plain crypt()
+    # in auth.php::checkFallbackLogin()); this replaces them.
     env_file:
       - ../.panelalpha/piler.env
+      - ../.panelalpha/app-credentials.env
     environment:
       MYSQL_HOSTNAME: db
       # The service name over the compose network, on the port the vhost serves.

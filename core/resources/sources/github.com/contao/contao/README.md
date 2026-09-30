@@ -95,17 +95,15 @@ there.
 
 ### The account's own administrator
 
-Contao has no sign-up page, so one is created:
-`~/project/.panelalpha-admin-password` (0600) holds `admin`, a generated
-20-character password and `admin@example.com`, and the setup script creates the
-user with `contao:user:create --admin` — only when that username does not
-already exist, so a redeploy never resets a password the customer has changed.
-
-The password is generated **once**, into `~/.panelalpha/contao.env`, and reused
-from there. `~/project` is cleared before every clone while the account's MySQL
-database is not, so a regenerated password would be one the database never
-learns. (`$HOME` itself is root-owned 0755 and an account cannot create files
-directly in it, hence the subdirectory.)
+Contao has no sign-up page, so one is created: the engine generates the login
+(`credentials:` in `panelalpha.yaml`: `admin`, `admin@example.com` and a
+password), returns it from `GET /projects/{name}/app-credentials` (MCP
+`app_credentials_get`) and passes it to the container from
+`~/.panelalpha/app-credentials.env`; the setup script creates the user with
+`contao:user:create --admin` — only when that username does not already exist,
+so a redeploy never resets a password the customer has changed. An account
+deployed before this keeps the password from `~/.panelalpha/contao.env`
+(`adopt_from`).
 
 ### What is not web-readable
 

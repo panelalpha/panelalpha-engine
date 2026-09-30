@@ -17,6 +17,11 @@
 # host neither a container nor a volume.
 services:
   app:
+    # CONTAO_ADMIN_*, generated and kept by the engine; the install stage
+    # creates the administrator from them when it does not exist yet.
+    env_file:
+      - .env
+      - ../.panelalpha/app-credentials.env
     environment:
       # The only way to give this container a php.ini: the base image loads
       # none, and its conf.d is inside the image where the account uid cannot

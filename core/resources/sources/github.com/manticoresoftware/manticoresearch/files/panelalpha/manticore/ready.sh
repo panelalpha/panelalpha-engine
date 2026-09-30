@@ -78,10 +78,10 @@ if [ "${authed}" != "200" ]; then
     cat >&2 <<EOF
 [manticore] FAILED: the account's own credentials were answered with
 [manticore] '${authed:-no answer}', not 200. The daemon is refusing everyone, including
-[manticore] its owner. If the password in ~/.panelalpha/manticore/manticore.env was
-[manticore] edited by hand, it no longer matches the hash in auth.json inside the
-[manticore] manticore_data volume -- put the real one back, or change it through
-[manticore] the daemon. See ~/.panelalpha/manticore/credentials.txt.
+[manticore] its owner. If the password was changed through the daemon, the engine's
+[manticore] stored one no longer matches the hash in auth.json inside the
+[manticore] manticore_data volume -- set MANTICORE_ADMIN_PASSWORD in the project's
+[manticore] env vars to the real one, which the engine then delivers instead.
 EOF
     exit 1
 fi

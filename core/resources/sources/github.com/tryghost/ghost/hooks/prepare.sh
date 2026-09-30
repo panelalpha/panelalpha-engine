@@ -7,8 +7,6 @@ cd ~/project
 # here that must outlive a deploy lives there.
 DATA_HOME="${HOME}/.panelalpha/ghost"
 DB_ENV="${DATA_HOME}/database.env"
-OWNER_ENV="${DATA_HOME}/owner.env"
-NOTE="${DATA_HOME}/credentials.txt"
 
 say() { echo "[panelalpha] ghost: $*" >&2; }
 
@@ -52,38 +50,11 @@ EOF
     )
 fi
 
-# The owner account. Read only by the one-shot `init` service, and used only
-# when the site has no owner yet; a site already set up keeps its own.
-if [ ! -f "${OWNER_ENV}" ]; then
-    OWNER_EMAIL=owner@example.com
-    OWNER_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
-    (
-        umask 077
-        cat > "${OWNER_ENV}" <<EOF
-PA_OWNER_NAME=Owner
-PA_OWNER_EMAIL=${OWNER_EMAIL}
-PA_OWNER_PASSWORD=${OWNER_PASSWORD}
-EOF
-        cat > "${NOTE}" <<EOF
-Ghost owner for this account
-============================
-
-  sign in at  https://<your domain>/ghost/
-  email       ${OWNER_EMAIL}
-  password    ${OWNER_PASSWORD}
-
-PanelAlpha completed Ghost's owner setup with these credentials before the
-site was reachable, so nobody else could claim it. Change the email to your
-own and the password under Settings -> Staff. Nothing here is updated
-afterwards; the values in Ghost win.
-
-If this site already had an owner when this file was written, that owner was
-left alone and these credentials were never used.
-EOF
-    )
-    say "owner credentials written to ${NOTE}"
-fi
-chmod 600 "${DB_ENV}" "${OWNER_ENV}" "${NOTE}" 2>/dev/null || true
+# The owner account is the engine's (`credentials:` in panelalpha.yaml):
+# PA_OWNER_EMAIL / PA_OWNER_PASSWORD in ~/.panelalpha/app-credentials.env, read
+# only by the one-shot `init` service and used only when the site has no owner
+# yet; a site already set up keeps its own.
+chmod 600 "${DB_ENV}" 2>/dev/null || true
 
 # ~/project/.env is what compose interpolates the stack from. Only this
 # recipe's own keys are replaced, so anything else in it is left alone.

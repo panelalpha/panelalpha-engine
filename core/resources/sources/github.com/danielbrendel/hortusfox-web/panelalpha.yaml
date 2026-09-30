@@ -28,5 +28,5 @@ credentials:
   login_path: /auth
   adopt_from: .panelalpha/hortusfox/app.env
   fields:
-    APP_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    APP_ADMIN_EMAIL: {kind: email, value: "admin@{host}"}
     APP_ADMIN_PASSWORD: {kind: password}

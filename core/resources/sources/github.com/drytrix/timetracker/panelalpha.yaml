@@ -16,9 +16,17 @@ description: >-
   with no password and lets the first login set one, and its /setup wizard
   (which can turn self-registration on) is unauthenticated until finished.
   A one-shot `seed` service runs upstream's own start.py steps (migrations,
-  default rows) before the app is published, gives the admin the generated
-  password and completes the wizard with self-registration off.
+  default rows) before the app is published, gives the admin the password the
+  engine generates (`credentials:` below) and completes the wizard with
+  self-registration off. GET /projects/{name}/app-credentials (MCP
+  app_credentials_get) returns the login.
 
   SECRETS. hooks/prepare.sh writes SECRET_KEY, a Fernet
-  SETTINGS_ENCRYPTION_KEY, the Postgres password and the admin password once
-  to ~/.panelalpha/timetracker/ (0600 in 0700) with a credentials.txt note.
+  SETTINGS_ENCRYPTION_KEY and the Postgres password once to
+  ~/.panelalpha/timetracker/ (0600 in 0700).
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/timetracker/admin.env
+  fields:
+    TT_ADMIN_USER: {kind: username, value: admin}
+    TT_ADMIN_PASSWORD: {kind: password}

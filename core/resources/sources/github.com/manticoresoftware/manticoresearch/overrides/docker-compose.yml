@@ -33,8 +33,9 @@ services:
     ports:
       - "9308:9308"
 
-    # MANTICORE_ADMIN_USER, MANTICORE_ADMIN_PASSWORD, searchd_auth and
-    # searchd_listen, written by hooks/prepare.sh.
+    # searchd_auth and searchd_listen, written by hooks/prepare.sh, then
+    # MANTICORE_ADMIN_USER / MANTICORE_ADMIN_PASSWORD, generated and kept by the
+    # engine.
     #
     # In a file rather than in `environment:` for two reasons. engine#173: the
     # engine republishes ~/project/.env as .env.default at 644, and the path
@@ -45,6 +46,7 @@ services:
     # ends in PASSWORD is not rewritten under us.
     env_file:
       - ../.panelalpha/manticore/manticore.env
+      - ../.panelalpha/app-credentials.env
 
     volumes:
       # data_dir. Tables, the binlog, and auth.json -- the hashed admin
@@ -108,6 +110,7 @@ services:
     restart: "no"
     env_file:
       - ../.panelalpha/manticore/manticore.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha/manticore:/pa:ro
     depends_on:

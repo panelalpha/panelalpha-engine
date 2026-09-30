@@ -29,67 +29,13 @@ mkdir -p "${DATA_HOME}/images" "${DATA_HOME}/cache" "${DATA_HOME}/php"
 chmod 700 "${DATA_HOME}"
 
 # ---------------------------------------------------------------------------
-# 1. The first bureaucrat's password.
-#
-#    MediaWiki creates no user of its own, and `mw-config/` will create one for
-#    anybody who asks: mw-config/index.php defines MW_CONFIG_CALLBACK before
-#    WebStart so LocalSettings.php is never loaded, and WebInstaller's page
-#    sequence runs Language, ExistingWiki, Welcome, DBConnect... with
-#    WebInstallerExistingWiki::execute() -- the only gate -- returning 'skip'
-#    the moment Installer::getExistingLocalSettings() finds nothing. So the
-#    installer is run at deploy time instead, and it needs a password that
-#    exists before it does.
-#
-#    Outside ~/project, because a redeploy deletes that directory while the
-#    user row in the account's MySQL database survives: a password kept beside
-#    the code would stop matching the account it was created for. 0600 inside
-#    the 0700 directory above.
-#
-#    Written once and never rewritten. The setup script is a no-op on an
-#    account that already has a wiki, so a second password here would be a
-#    password for nothing.
-CREDENTIALS="${DATA_HOME}/admin-credentials"
-if [ ! -f "${CREDENTIALS}" ]; then
-    # The umask is inside a subshell on purpose: it has to cover the
-    # redirection that creates the file, and it must not leak into the rest of
-    # this script, where a 077 default would leave directories the engine
-    # (www-data) cannot scan when it walks the tree for the document root.
-    #
-    # The alphabet is deliberately alphanumeric. MediaWiki's own
-    # UserPasswordPolicy runs against this value in CliInstaller
-    # (includes/Installer/CliInstaller.php:107) and rejects a weak one before
-    # it touches the database; 32 characters of [A-Za-z0-9] passes every check
-    # in the bureaucrat/sysop/interface-admin policy and survives being
-    # retyped, which base64 padding does not.
-    ( umask 077; cat > "${CREDENTIALS}" <<EOF
-# Written by PanelAlpha on the first deploy. This is the wiki's first
-# bureaucrat -- sign in at https://<your-domain>/index.php/Special:UserLogin .
-#
-# MediaWiki's web installer at /mw-config/ is first-visitor-wins: it creates
-# the wiki and its administrator and asks nobody who they are. It was run from
-# the deploy instead, with these values, and /mw-config/ is now denied by the
-# web server (files/mw-config/.htaccess), which is what upstream's INSTALL file
-# tells an administrator to do by hand once they are finished.
-#
-# Change the password under Special:ChangePassword and this file stops being
-# interesting.
-MEDIAWIKI_ADMIN_USERNAME=Admin
-MEDIAWIKI_ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
-EOF
-    )
-    chmod 600 "${CREDENTIALS}"
-    echo "[mediawiki] generated the first bureaucrat's password in ${CREDENTIALS}"
-fi
-
-# It is *not* handed to the container as an environment variable, and that is
-# a decision rather than an omission. A second `env_file:` is the usual way to
-# get a secret past a redeploy without putting it in ~/project, but this
-# recipe already bind-mounts ~/.panelalpha/mediawiki at /data for the settings
-# file and the uploads, so the setup script can read the password out of a
-# 0600 file it can already see. An environment variable would additionally put
-# it in `printenv`, in `docker inspect`, and in the process environment of
-# every PHP request the wiki serves, for a value that is used exactly once on
-# the first deploy.
+# 1. The first bureaucrat's login is the engine's (`credentials:` in
+#    panelalpha.yaml): MediaWiki creates no user of its own and `mw-config/`
+#    would create one for anybody who asks, so the installer is run at deploy
+#    time with it. It is not handed to the container as an environment
+#    variable (that would put it in `printenv`, `docker inspect` and every PHP
+#    request); the override mounts ~/.panelalpha/app-credentials.env read-only
+#    and the setup script reads it once.
 
 # ---------------------------------------------------------------------------
 # 2. Uploads, out of the directory the next deploy deletes.

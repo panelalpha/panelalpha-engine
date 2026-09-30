@@ -47,7 +47,7 @@ web installer, which is first-visitor-wins.
 | | |
 |---|---|
 | `panelalpha.yaml` | `extends: php` — a source recipe is consulted before detection (`PlatformSelector::forContext()` is `fromSource() ?? fromWalk()`, `app/Lib/Deploy/Platform/PlatformSelector.php:47`), so the repository's `docker-compose.yml` is never read and PhpStrategy's generated one is written over it by name. `database: mysql` for a database on the account's own MySQL server. One `install`/`upgrade` command. |
-| `hooks/prepare.sh` | Creates `~/.panelalpha/mediawiki` (0700), generates the first bureaucrat's password once (0600), replaces `images/` with a symlink onto the mount, writes a php.ini. |
+| `hooks/prepare.sh` | Creates `~/.panelalpha/mediawiki` (0700), (the first bureaucrat's login is the engine's, `credentials:`, mounted read-only at `/pa/app-credentials.env`), replaces `images/` with a symlink onto the mount, writes a php.ini. |
 | `overrides/docker-compose.override.yml` | The `/data` mount, `PA_DOCROOT`, `MW_CONFIG_FILE`, `PHP_INI_SCAN_DIR`, `mem_limit`, a two-request healthcheck and an `alpine:3` `ready` gate. |
 | `files/panelalpha-setup.sh` | `maintenance/run.php install` on the first deploy, `maintenance/run.php update` on every one after; writes the per-deploy settings file and upstream's `vendor/.htaccess`. |
 | `files/.htaccess` | Denies `vendor/`, `docker-compose.*`, any stray `LocalSettings*`, and `*.log|sql|sqlite|bak|orig|rej|swp|save`. |

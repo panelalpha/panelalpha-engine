@@ -51,7 +51,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/linkwarden/app.env
-      - ../.panelalpha/linkwarden/admin.env
+      # LINKWARDEN_ADMIN_USER / LINKWARDEN_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       NEXTAUTH_URL: ${PA_PUBLIC_URL}/api/v1/auth
     volumes:

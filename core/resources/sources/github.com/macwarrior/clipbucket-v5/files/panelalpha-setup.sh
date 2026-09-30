@@ -140,4 +140,4 @@ if [ "${installed}" != "1" ]; then
     exit 1
 fi
 
-log "installed; the administrator's password is in ~/.panelalpha/clipbucket/admin-credentials"
+log "installed; the administrator's login is returned by GET /projects/{name}/app-credentials"

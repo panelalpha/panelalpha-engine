@@ -30,11 +30,11 @@ description: >-
   JWT key) into /app/var/data/keys on first boot and reuses them thereafter.
   Because /app/var/data is on a named volume, those secrets -- and the admin user
   row in the SQLite DB beside them -- are stable across redeploy with no seeding
-  on the recipe's side. The only credential the recipe manages is the admin
-  password: hooks/prepare.sh generates it once into ~/.panelalpha/slink/ (0600 in
-  0700, the only writable place a redeploy does not delete) and the app reads it
-  only on the very first boot to seed the admin (AdminUserStep). Onboarding notes,
-  including the admin email to log in with, go in credentials.txt.
+  on the recipe's side. The admin login is the engine's (`credentials:` below):
+  generated once, written to ~/.panelalpha/app-credentials.env and returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get); the app reads
+  it only on the very first boot to seed the admin (AdminUserStep). Log in with
+  the email.
 
   ONE ORIGIN. The browser only ever talks to :3000 (the SvelteKit server, the one
   published port, so the port scan takes it as primary, engine#234); the client
@@ -53,3 +53,9 @@ description: >-
   operator who wants a fully closed instance can also set
   USER_ALLOW_UNAUTHENTICATED_ACCESS=false; this recipe leaves the public Explore
   feed reachable, matching the app's default model.
+credentials:
+  adopt_from: .panelalpha/slink/admin.env
+  fields:
+    ADMIN_EMAIL: {kind: email, value: admin@slink.local}
+    ADMIN_USERNAME: {kind: username, value: admin}
+    ADMIN_PASSWORD: {kind: password}

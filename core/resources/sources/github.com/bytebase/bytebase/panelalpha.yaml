@@ -46,9 +46,9 @@ description: >-
   than leave that window open, a `bootstrap` sidecar claims the owner over
   Bytebase's own API (AuthService/Signup, allow-without-credential and
   first-caller-wins) the instant the server is healthy -- on the internal
-  network, before the public proxy is even wired -- using a password
-  hooks/prepare.sh generates once into ~/.panelalpha/bytebase/admin.env (0600 in
-  0700) and records in credentials.txt (email admin@bytebase.local). It is
+  network, before the public proxy is even wired -- using the login the engine
+  generates (`credentials:` below, email admin@bytebase.local), returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get). It is
   idempotent: on a redeploy the admin already exists in the persisted volume, so
   it logs in with the stored password, confirms, and exits without touching
   anything. The `ready` gate waits on the bootstrap, so the deploy reports
@@ -61,8 +61,8 @@ description: >-
   user gets NO workspace role -- they cannot list, read or create any project,
   database instance or migration, and cannot self-elevate; they can only see the
   list of user emails. All schemas, connections and migration data stay behind
-  the owner's RBAC. credentials.txt tells the operator to upgrade and disable
-  signup in Settings if they want it fully closed.
+  the owner's RBAC. An operator who wants it fully closed has to upgrade and
+  disable signup in Settings.
 
   PERSISTENCE. /var/opt/bytebase (the embedded Postgres cluster with the whole
   workspace: admin user, RBAC, projects, database instances and migration
@@ -76,3 +76,8 @@ description: >-
   /healthz (unauthenticated) and a `ready` gate waits on it, so `docker compose
   up` returns -- and the deploy reports finished -- only once Bytebase actually
   answers, not the moment the container starts (engine#204).
+credentials:
+  adopt_from: .panelalpha/bytebase/admin.env
+  fields:
+    BB_ADMIN_EMAIL: {kind: email, value: admin@bytebase.local}
+    BB_ADMIN_PASSWORD: {kind: password}

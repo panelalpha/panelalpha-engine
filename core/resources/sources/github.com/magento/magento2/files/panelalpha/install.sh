@@ -80,9 +80,9 @@ magento setup:install \
   --backend-frontname="${MAGENTO_ADMIN_URI:-admin}" \
   --admin-firstname=Store \
   --admin-lastname=Owner \
-  --admin-email="${MAGENTO_ADMIN_EMAIL:?written by the prepare hook}" \
-  --admin-user="${MAGENTO_ADMIN_USER:?written by the prepare hook}" \
-  --admin-password="${MAGENTO_ADMIN_PASSWORD:?written by the prepare hook}" \
+  --admin-email="${MAGENTO_ADMIN_EMAIL:?delivered by the engine}" \
+  --admin-user="${MAGENTO_ADMIN_USER:?delivered by the engine}" \
+  --admin-password="${MAGENTO_ADMIN_PASSWORD:?delivered by the engine}" \
   --language=en_US \
   --currency=USD \
   --timezone=UTC \

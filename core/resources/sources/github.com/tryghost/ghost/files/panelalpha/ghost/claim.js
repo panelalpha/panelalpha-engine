@@ -1,4 +1,4 @@
-// Completes Ghost's owner setup with the credentials the recipe generated, so
+// Completes Ghost's owner setup with the login the engine generated, so
 // /ghost/ never offers it to whoever opens the site first.
 //
 //   node claim.js check   exit 0 if the owner is already set up (read-only)

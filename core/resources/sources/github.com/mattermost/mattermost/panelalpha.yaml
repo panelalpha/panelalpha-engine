@@ -32,8 +32,9 @@ description: >-
 
   PostgreSQL is not optional and not substitutable: MySQL support was removed
   in v10, there is no embedded database, and with no MM_SQLSETTINGS_DATASOURCE
-  the server exits on boot. The sidecar is postgres:16-alpine with credentials
-  generated into .env by the prepare hook — 16 rather than the 18-alpine
+  the server exits on boot. The sidecar is postgres:16-alpine with a password
+  generated once by the prepare hook into ~/.panelalpha/mattermost/db.env (not
+  ~/project/.env, which every deploy empties) — 16 rather than the 18-alpine
   upstream moved to, because 18 relocated PGDATA and the conventional
   /var/lib/postgresql/data mount stops being the data directory.
 
@@ -44,8 +45,9 @@ description: >-
   environment variables. With zero rows in Users, POST /api/v4/users takes no
   token and the account it creates is made system_admin — so on a public HTTPS
   name the instance belongs to whoever opens it first. The recipe makes that
-  request itself, with a password generated per account into
-  ~/project/.panelalpha-admin-password (0600), never a default. Doing so also
+  request itself, with the login the engine generates (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials, MCP app_credentials_get),
+  never a default. Doing so also
   closes the door: from the second account on, the endpoint is refused, because
   TeamSettings.EnableOpenServer is false by default.
 
@@ -74,3 +76,9 @@ description: >-
   invitations, password resets and notification emails need an SMTP server the
   engine does not provide; set MM_EMAILSETTINGS_SMTPSERVER and its companions
   through the account's env vars, or from the System Console.
+credentials:
+  login_path: /login
+  fields:
+    MM_ADMIN_USERNAME: {kind: username, value: admin}
+    MM_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    MM_ADMIN_PASSWORD: {kind: password}

@@ -11,7 +11,7 @@ config :pleroma, :instance,
   limit: 5000,
   # PanelAlpha: closed by default (no first-visitor window, no SMTP required).
   # Set INSTANCE_REGISTRATIONS_OPEN=true in the project environment to open
-  # public sign-up -- which also needs operator SMTP, see credentials.txt.
+  # public sign-up -- which also needs operator SMTP (see panelalpha.yaml).
   registrations_open: System.get_env("INSTANCE_REGISTRATIONS_OPEN", "false") == "true",
   healthcheck: true
 

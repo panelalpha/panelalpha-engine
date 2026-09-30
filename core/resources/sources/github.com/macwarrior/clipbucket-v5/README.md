@@ -192,9 +192,11 @@ text, which is the schema and the whole English translation table.
 
 **So: can a visitor claim the first admin? No.** The installer is gone before
 Apache binds and denied even if it came back, and the administrator is created
-by `files/panelalpha-install.php` with a password generated per account into
-`~/.panelalpha/clipbucket/admin-credentials` (0600 in a 0700 directory, because
-account homes are root-owned 0755). `add_admin.sql` seeds `userid = 1` with an
+by `files/panelalpha-install.php` with the login the engine generates
+(`credentials:` in `panelalpha.yaml`, returned by
+`GET /projects/{name}/app-credentials`, MCP `app_credentials_get`; an account
+deployed before this keeps the password from
+`~/.panelalpha/clipbucket/admin-credentials` through `adopt_from`). `add_admin.sql` seeds `userid = 1` with an
 *empty* password and the seed phase fills it in, which is also why the install
 check requires `password <> ''` — a half-finished install must not look
 finished.
@@ -460,7 +462,7 @@ application fault.
 | Path | Why |
 | --- | --- |
 | `panelalpha.yaml` | `docroot: upload`, `database: mysql`, the setup command |
-| `hooks/prepare.sh` | deletes the shipped `install.me`; generates the admin password; fetches ffmpeg/ffprobe/mediainfo; seeds and protects the media mount; denies developer files |
+| `hooks/prepare.sh` | deletes the shipped `install.me`; fetches ffmpeg/ffprobe/mediainfo; seeds and protects the media mount; denies developer files |
 | `files/panelalpha-setup.sh` | install/upgrade stage driver (repository root, outside the docroot) |
 | `files/panelalpha-install.php` | CLI install through upstream's own SQL, `pass_code()` and `Migration::updateConfig()` |
 | `files/panelalpha-migrate.php` | runs ClipBucket's own migration tool on the upgrade stage |

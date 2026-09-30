@@ -70,37 +70,10 @@ log "removed upload/files/temp/install.me (shipped unlocked by upstream)"
 
 # ------------------------------------------------------ 2. admin password --
 #
-# Every deploy re-clones over ~/project while the account's MySQL database --
-# and the password hash in cb_users -- stays where it is, so a password
-# generated beside the code would be a new password on every redeploy, matching
-# nothing.
-#
-# ClipBucket's own wizard defaults this field to the literal string `admin`
-# (cb_install/modes/adminsettings.php:31). Nothing here ever uses a default.
-CREDENTIALS="${DATA_HOME}/admin-credentials"
-if [ ! -f "${CREDENTIALS}" ]; then
-    umask 077
-    cat > "${CREDENTIALS}" <<EOF
-# Written by PanelAlpha on the first deploy. This is the ClipBucket
-# administrator for this account -- sign in at
-# https://<your-domain>/signin and then open /admin_area/ .
-#
-# ClipBucket's web installer creates this account, and on a public address that
-# is whoever loads /cb_install/ first -- so it was run from the deploy instead,
-# with these values, and the installer is shut. Change the password from the
-# admin area and this file stops being interesting.
-CLIPBUCKET_ADMIN_USERNAME=admin
-CLIPBUCKET_ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
-EOF
-    chmod 600 "${CREDENTIALS}"
-fi
-
-# The container cannot see ~/.panelalpha/clipbucket/admin-credentials as a
-# file it can parse before /data is mounted, and /data *is* mounted -- but the
-# install script reads it from /data, so nothing is copied into the checkout.
-# Stated here because every other PHP recipe on this engine copies a dotfile
-# into ~/project and this one deliberately does not: with a /data mount there is
-# no reason to put the password inside the tree engine#173 clones over.
+# The administrator login is the engine's (`credentials:` in panelalpha.yaml),
+# delivered to the app container from ~/.panelalpha/app-credentials.env by the
+# compose override. Nothing here ever uses ClipBucket's default `admin`
+# password (cb_install/modes/adminsettings.php:31).
 
 # ----------------------------------------------------------- 3. the tools --
 #

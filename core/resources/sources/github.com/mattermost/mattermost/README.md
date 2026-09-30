@@ -54,8 +54,11 @@ on boot. The sidecar is `postgres:16-alpine` — 16 rather than the `18-alpine`
 upstream's docker repo moved to, because 18 relocated `PGDATA` under
 `/var/lib/postgresql/<ver>/docker` and the conventional
 `/var/lib/postgresql/data` mount quietly stops being the data directory.
-`POSTGRES_PASSWORD` is generated into `.env` by the prepare hook, which writes
-the file only when there is none: the data volume outlives the checkout.
+`POSTGRES_PASSWORD` is generated once by the prepare hook into
+`~/.panelalpha/mattermost/db.env` (0600), which both services read by
+`env_file:`: the data volume outlives the checkout, and `~/project/.env` is
+emptied with it on every deploy. An account whose `.env` still holds the old
+password has it carried over.
 
 ## The two things the engine cannot infer
 
@@ -67,8 +70,9 @@ variables. With zero rows in `Users`, `POST /api/v4/users` needs no token
 (`api4/user.go` permits it when `IsFirstUserAccount()`) and `app/user.go` gives
 that account `system_admin`. On a public HTTPS name, that means the instance
 belongs to the first stranger who opens it. The recipe makes that request
-itself, with a 20-character password generated per account into
-`~/project/.panelalpha-admin-password` (0600) — never a default. Doing so also
+itself, with the login the engine generates (`credentials:` in
+`panelalpha.yaml`, returned by `GET /projects/{name}/app-credentials`, MCP
+`app_credentials_get`) — never a default. Doing so also
 closes the door: from the second account on the endpoint answers 403
 `api.user.create_user.no_open_server`, because `TeamSettings.EnableOpenServer`
 is false by default. Verified by asking for a second account from outside.

@@ -50,9 +50,9 @@ description: >-
   same way. Restored unchanged onto a public domain that is the back end handed
   to whoever reads the demo's documentation. panelalpha/contao-setup.sh gives
   every account the dump created a random password and disables it, before
-  anything is served, and creates the account's own administrator from a
-  password generated per account into ~/project/.panelalpha-admin-password
-  (0600). Disabled and not deleted: the demo's pages and articles carry those
+  anything is served, and creates the account's own administrator from the
+  login the engine generates (`credentials:` below), returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get). Disabled and not deleted: the demo's pages and articles carry those
   ids in their author and permission columns.
 
   **The install cannot happen on the host.** The php manifest installs with
@@ -118,3 +118,10 @@ commands:
       seeded accounts, the account's own administrator, and a prod cache warmup.
       Idempotent: the upgrade stage replays it on every redeploy.
     run: 'sh panelalpha/contao-setup.sh'
+credentials:
+  login_path: /contao
+  adopt_from: .panelalpha/contao.env
+  fields:
+    CONTAO_ADMIN_USERNAME: {kind: username, value: admin}
+    CONTAO_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    CONTAO_ADMIN_PASSWORD: {kind: password}

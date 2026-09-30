@@ -13,9 +13,10 @@ description: >-
 
   ADMIN. The image's seeds create admin@claper.co with the fixed password
   "claper" when the users table is empty. start.sh runs the image's own
-  migrate + seeds, then replaces that password with a generated one (only while
-  the default still verifies) before the server listens. The login is in
-  ~/.panelalpha/claper/credentials.txt.
+  migrate + seeds, then replaces that password with the one the engine
+  generates (`credentials:` below; only while the default still verifies)
+  before the server listens. GET /projects/{name}/app-credentials (MCP
+  app_credentials_get) returns the login.
 
   ACCESS. Presenter self-registration is closed (ENABLE_ACCOUNT_CREATION=false);
   the admin creates presenters from /admin/users. Attendees join an event by its
@@ -26,3 +27,9 @@ description: >-
   long-poll fallback. The engine vhost upgrades it (101); the shared
   *.panelalpha.online test edge strips Upgrade (engine#170), so on a test name
   pages render but do not react. Use a domain that points at the host.
+credentials:
+  login_path: /users/log_in
+  adopt_from: .panelalpha/claper/app.env
+  fields:
+    CLAPER_ADMIN_EMAIL: {kind: email, value: admin@claper.co}
+    CLAPER_ADMIN_PASSWORD: {kind: password}

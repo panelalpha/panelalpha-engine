@@ -4,9 +4,9 @@
 # On the first boot of an empty data volume, SCM-Manager prints a one-time
 # startup token to its log and waits for someone to create the first admin with
 # it (POST /api/v2/initialization/adminAccount). This wrapper reads that token
-# from the boot log and creates the admin non-interactively, with the password
-# the prepare hook generated once into ~/.panelalpha/scm-manager/ and mounted
-# here read-only, then completes the plugin wizard installing nothing so the
+# from the boot log and creates the admin non-interactively, with the login the
+# engine generated (SCM_ADMIN_USER / SCM_ADMIN_PASSWORD, from
+# ~/.panelalpha/app-credentials.env), then completes the plugin wizard installing nothing so the
 # site opens in normal state. The SCM-Manager server itself is upstream's and is
 # started unmodified. The seeding is idempotent: on a redeploy where the admin
 # already exists the server reports it is initialized and nothing is seeded.
@@ -15,7 +15,6 @@ set -u
 API="http://127.0.0.1:8080/api/v2"
 BOOT_LOG="/tmp/scm-boot.log"
 PIPE="/tmp/scm-boot.pipe"
-PW_FILE="/run/scm/admin_password"
 ADMIN_USER="${SCM_ADMIN_USER:-pa-admin}"
 
 # A syntactically-valid contact email for the admin. SCM-Manager validates the
@@ -57,10 +56,10 @@ seed() {
   if [ "$STATE" != "adminAccount" ]; then
     echo "[panelalpha] scm: already initialized (state=${STATE:-none}); no seeding needed" >&2; return
   fi
-  if [ ! -s "$PW_FILE" ]; then
-    echo "[panelalpha] scm: admin password file $PW_FILE missing; cannot seed admin" >&2; return
+  PW="${SCM_ADMIN_PASSWORD:-}"
+  if [ -z "$PW" ]; then
+    echo "[panelalpha] scm: SCM_ADMIN_PASSWORD is not set; cannot seed admin" >&2; return
   fi
-  PW=$(cat "$PW_FILE")
 
   # The startup token is printed once, framed in a banner: "==   <token>   ==".
   TOKEN=""

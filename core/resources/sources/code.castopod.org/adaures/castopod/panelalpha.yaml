@@ -99,13 +99,14 @@ description: >-
   the address -- the hole found in Koillection, Outline, NocoDB, Mattermost,
   Shopware and XBackBone. The install stage closes it before Apache binds by
   running Castopod's own `install:init-database` and `install:create-superadmin`
-  with a password generated per account into ~/.panelalpha/castopod/
-  admin-credentials (0600); the same controller then throws
+  with the login the engine generates per account (`credentials:` below; GET
+  /projects/{name}/app-credentials, MCP app_credentials_get, returns it); the
+  same controller then throws
   PageNotFoundException and /cp-install answers 404. Self-registration needed
   nothing: Modules\Auth\Config\Auth sets `allowRegistration = false`.
 
-  The address that owner is created with is the account's own hostname, and
-  that is not cosmetic. Shield validates it with CodeIgniter's `valid_email`,
+  The address that owner is created with (admin@<the account's domain>) is
+  not cosmetic. Shield validates it with CodeIgniter's `valid_email`,
   which is filter_var(FILTER_VALIDATE_EMAIL) and wants a dot in the domain, so
   `admin@localhost` -- the obvious placeholder, and the one XBackBone's recipe
   uses -- is rejected and the command aborts with `Super admin creation
@@ -138,8 +139,8 @@ description: >-
   which the compose override bind-mounts from ~/.panelalpha/castopod; a symlink
   rather than `media.storage` because the URL a podcast client fetches has to
   keep resolving under the document root, and public/.htaccess already sets
-  `Options +FollowSymlinks`. The analytics salt and the generated administrator
-  password live beside it, for the same reason and because .env.default is a
+  `Options +FollowSymlinks`. The analytics salt lives beside it, for the same
+  reason and because .env.default is a
   world-readable copy of whatever the clone ends with (engine#173) -- which is
   why the real .env is written by the install stage, inside the container, after
   that copy has been taken.
@@ -181,3 +182,10 @@ commands:
       the user alone, which is what the upgrade stage replays on every redeploy.
       On the build stage it would not run at all (engine#171).
     run: 'sh panelalpha/castopod-setup.sh'
+credentials:
+  login_path: /cp-auth/login
+  adopt_from: .panelalpha/castopod/admin-credentials
+  fields:
+    CASTOPOD_ADMIN_USERNAME: {kind: username, value: admin}
+    CASTOPOD_ADMIN_EMAIL: {kind: email, value: "admin@{host}"}
+    CASTOPOD_ADMIN_PASSWORD: {kind: password}

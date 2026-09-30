@@ -23,12 +23,15 @@ not one.
 
 **An install that needs credentials.** `bin/magento setup:install` wants an
 admin username, password and email, and there is nowhere for a customer to
-type them. `hooks/prepare.sh` generates them once into
-`~/.panelalpha/magento/admin.env` and copies them into `.env` on every deploy;
-the generated compose loads `.env`, so the install command inside the
-container reads the same values. It generates the admin
-path too: left alone Magento invents one (`Magento Admin URI: /admin_inabui6`)
-and prints it once, into a build log nobody keeps.
+type them. The engine generates them (`credentials:` in `panelalpha.yaml`),
+keeps them and returns them from `GET /projects/{name}/app-credentials` (MCP
+`app_credentials_get`); the compose override hands
+`~/.panelalpha/app-credentials.env` to the app container, so the install
+command reads them from its environment. The admin path is one of them
+(`MAGENTO_ADMIN_URI`, declared as a secret so the engine generates it): left
+alone Magento invents one (`Magento Admin URI: /admin_inabui6`) and prints it
+once, into a build log nobody keeps. An account deployed before this keeps all
+four from `~/.panelalpha/magento/admin.env` (`adopt_from`).
 
 They are never regenerated. The store already holds these credentials in its
 database, and a new set would only be a record of credentials that do not work.

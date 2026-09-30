@@ -26,8 +26,10 @@ rather than GHCR because of engine#229).
 Papra's defaults are `AUTH_IS_REGISTRATION_ENABLED=true` and
 `AUTH_FIRST_USER_AS_ADMIN=true`, so the first visitor to sign up becomes the
 platform admin. The published app never runs with registration enabled. The
-owner is `admin@<account domain>`, and its generated password is in
-`~/.panelalpha/papra/credentials.txt`. Email verification is off by default
+owner's login is declared under `credentials:` in `panelalpha.yaml`; the
+engine generates it into `~/.panelalpha/app-credentials.env`, and
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) returns it;
+the owner is `admin@<account domain>`. Email verification is off by default
 (`AUTH_IS_EMAIL_VERIFICATION_REQUIRED=false`), so login works without SMTP.
 To let more people in, invite them from an organization or set
 `AUTH_IS_REGISTRATION_ENABLED=true` in the project env.
@@ -37,8 +39,7 @@ To let more people in, invite them from an organization or set
 | Path | What |
 |---|---|
 | `~/.panelalpha/papra/app.env` | `AUTH_SECRET` (signs sessions; without it Papra uses a built-in default), read by `seed` and `app` |
-| `~/.panelalpha/papra/admin.env` | `PAPRA_ADMIN_PASSWORD`, read only by `seed` |
-| `~/.panelalpha/papra/credentials.txt` | owner login for the account holder |
+| `~/.panelalpha/app-credentials.env` | `PAPRA_ADMIN_EMAIL`, `PAPRA_ADMIN_PASSWORD` (the engine's), read only by `seed` |
 | `papra-data` volume | `db/db.sqlite` and `documents/` |
 
 ## Verified on mariusz.panelalpha.tools (engine 705f250a), 2026-09-28
@@ -50,7 +51,7 @@ To let more people in, invite them from an organization or set
 - The owner logged in and holds the admin permissions (`bo:access`,
   `users:view`, ...). It created an organization and uploaded a text document,
   then downloaded it byte-identical.
-- After a rebuild (`success`, 37s) the three `~/.panelalpha/papra` files kept
+- After a rebuild (`success`, 37s) the `~/.panelalpha/papra` files kept
   the same sha256, `seed` logged `owner already seeded`, and the owner logged
   in and downloaded the same document.
 - `/.env`, `/.git/config`, `/db.sqlite`, `/app-data/db/db.sqlite`,

@@ -36,8 +36,8 @@ description: >-
 
   SECRETS, PERSISTED ONCE. hooks/prepare.sh generates and stores the database
   password, MOBILIZON_INSTANCE_SECRET_KEY_BASE (endpoint/session signing),
-  MOBILIZON_INSTANCE_SECRET_KEY (Guardian auth/JWT signing) and the seeded
-  admin password under ~/.panelalpha/mobilizon/ (0600 in 0700), the only
+  MOBILIZON_INSTANCE_SECRET_KEY (Guardian auth/JWT signing) under
+  ~/.panelalpha/mobilizon/ (0600 in 0700), the only
   writable place a deploy does not delete (engine#173: ProjectTree::clearContents
   empties ~/project on every rebuild). A rebuild reuses them: a new
   SECRET_KEY_BASE/SECRET_KEY logs everyone out and invalidates outstanding
@@ -68,9 +68,9 @@ description: >-
   mobilizon_ctl users.new <admin-email> --admin, which registers the user with
   confirmed_at set to now and no confirmation token (Mix.Tasks.Mobilizon.Users.New:
   create_database_user), i.e. an immediately usable administrator with a seeded
-  profile -- no mail is sent or required. The password is generated once into
-  ~/.panelalpha/mobilizon/ (0600) and surfaced only in that store's
-  credentials.txt. Seeding is idempotent and domain-change-safe: init gates on
+  profile -- no mail is sent or required. The login is the engine's
+  (`credentials:` below): generated once, given to init only, and returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get). Seeding is idempotent and domain-change-safe: init gates on
   `SELECT count(*) FROM users WHERE role='administrator'` (role is the Postgres
   user_role enum) and creates nobody if an admin already exists. mobilizon_ctl's
   default RPC-into-a-running-node path is disabled (MOBILIZON_CTL_RPC_DISABLED)
@@ -85,7 +85,7 @@ description: >-
   cannot log in until they confirm their address, and with no SMTP the
   confirmation link is only written to the app log. Client-side SENDING (SMTP
   out) is all that is involved; Mobilizon receives no inbound mail, which is out
-  of scope. This is stated in credentials.txt, the cannery/passit precedent.
+  of scope.
 
   VERIFIED end to end on this engine over the real public HTTPS domain: deploy
   from the bare tracker URL fails (no compose, changethis secrets, no PostGIS);
@@ -102,3 +102,9 @@ description: >-
   upload and live subscriptions are verified against the account's own address.
   On an account with its own domain pointed straight at the engine the whole UI
   works. Report as engine/tunnel limitation, not a recipe or app failure.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/mobilizon/admin.env
+  fields:
+    MOBILIZON_ADMIN_EMAIL: {kind: email, value: "admin@{host}"}
+    MOBILIZON_ADMIN_PASSWORD: {kind: password}

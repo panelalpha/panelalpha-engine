@@ -12,7 +12,7 @@ try {
     if (password_verify('admin', $stored) || hash_equals($stored, sha512('admin'))) {
         $user->setPassword($pw);
         $user->save();
-        echo "[panelalpha] jeedom: admin password replaced with the generated one\n";
+        echo "[panelalpha] jeedom: admin password replaced with the engine's one\n";
     }
     $user = user::byLogin('admin');
     if (password_verify('admin', $user->getPassword())) exit(5);

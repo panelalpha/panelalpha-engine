@@ -66,9 +66,10 @@ description: >-
      migrations and creates this account's administrator in a one-shot `init`
      service, and `app` declares `init: service_completed_successfully`, so the
      web container is never started until a user exists. Measured: the moment a
-     user exists, /onboarding 303s to /login and the form is gone. The password
-     is generated per account into ~/.panelalpha/readeck/, never upstream's
-     (there is no upstream default), and the user is created only when the
+     user exists, /onboarding 303s to /login and the form is gone. The login
+     is generated per account by the engine (`credentials:` below; GET
+     /projects/{name}/app-credentials, MCP app_credentials_get, returns it),
+     never upstream's (there is no upstream default), and the user is created only when the
      admin username is absent, so a redeploy neither resets it nor touches a
      password the owner changed in the app.
 
@@ -120,9 +121,9 @@ description: >-
   expected (init exited 0, app healthy, ready exited 0), HTTP 200 over the
   public https domain. Control (recipe parked, same repo, 3 GB account): the
   `go` strategy, failed at 42s on the embed error above. Redeploy via POST
-  /projects/<user>/rebuild: success; config.toml and credentials.txt
-  byte-identical (md5 unchanged, so the secret_key and the administrator
-  password survived), the saved bookmark still present, and the browser session
+  /projects/<user>/rebuild: success; config.toml byte-identical (md5
+  unchanged, so the secret_key survived) and the administrator password
+  unchanged, the saved bookmark still present, and the browser session
   still valid -- a stable secret_key means the redeploy did not log the owner
   out. The app container used 57 MiB of its 1 GiB cap; the account 110 MiB.
 
@@ -134,7 +135,14 @@ description: >-
   role, not a free-form label). An anonymous request to /, to the saved
   bookmark and to /admin/users all 303 to /login; /api/bookmarks is 401;
   /onboarding 303s to /login once the admin exists. Fetching the SQLite
-  database, config.toml, readeck.env, credentials.txt and .git/config over the
+  database, config.toml and .git/config over the
   public domain returns a 303 to /login with an empty body -- no file content
   and no SQLite header -- because every path is served by the app container,
   not from a document root.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/readeck/readeck.env
+  fields:
+    READECK_ADMIN_USER: {kind: username, value: admin}
+    READECK_ADMIN_EMAIL: {kind: email, value: admin@localhost}
+    READECK_ADMIN_PASSWORD: {kind: password}

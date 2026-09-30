@@ -20,15 +20,11 @@ export COMPOSER_HOME="${PROJECT_DIR}/var/composer"
 export COMPOSER_MEMORY_LIMIT=-1
 mkdir -p "${COMPOSER_HOME}"
 
-# The credentials hooks/prepare.sh generated. Exported rather than merely
-# sourced: the PHP one-liners below read them with getenv().
-CONTAO_ADMIN_USERNAME=admin
-CONTAO_ADMIN_EMAIL=admin@example.com
-CONTAO_ADMIN_PASSWORD=
-if [ -f .panelalpha-admin-password ]; then
-    # shellcheck disable=SC1091
-    . ./.panelalpha-admin-password
-fi
+# The login the engine generated, from ~/.panelalpha/app-credentials.env via
+# the container's env_file. Exported: the PHP one-liners below read getenv().
+CONTAO_ADMIN_USERNAME="${CONTAO_ADMIN_USERNAME:-admin}"
+CONTAO_ADMIN_EMAIL="${CONTAO_ADMIN_EMAIL:-admin@example.com}"
+CONTAO_ADMIN_PASSWORD="${CONTAO_ADMIN_PASSWORD:-}"
 export CONTAO_ADMIN_USERNAME CONTAO_ADMIN_EMAIL CONTAO_ADMIN_PASSWORD
 
 # ---------------------------------------------------------------------------

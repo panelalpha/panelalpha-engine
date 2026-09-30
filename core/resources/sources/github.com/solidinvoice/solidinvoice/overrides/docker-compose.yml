@@ -162,6 +162,9 @@ services:
         fi
         echo "[panelalpha] Install did not finish: SOLIDINVOICE_INSTALLED was never written." >&2
         exit 1
+    # ADMIN_EMAIL / ADMIN_PASSWORD, generated and kept by the engine.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     environment:
       # The one variable the whole stack turns on, and it is set here rather
       # than left to the installer because on 3.0.1 the installer cannot set
@@ -179,8 +182,6 @@ services:
       # either way, so this line is correct on both and depends on neither.
       SOLIDINVOICE_DATABASE_URL: mysql://solidinvoice:${DB_PASSWORD}@db:3306/solidinvoice
       DB_PASSWORD: ${DB_PASSWORD}
-      ADMIN_EMAIL: ${ADMIN_EMAIL}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       # Rewritten by the engine. ComposePlaceholders replaces a bare
       # http://localhost under a key ending in _URL with the account's own
       # https address, which is the only way this file can learn the domain:

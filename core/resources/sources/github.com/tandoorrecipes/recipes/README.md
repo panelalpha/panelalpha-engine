@@ -61,8 +61,10 @@ deploy only hides it behind the 400.
 - Derives `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` from `PA_PUBLIC_URL` at
   container start (`files/panelalpha/tandoor/entrypoint.sh`), which then execs
   the image's own `tini`/`boot.sh` unchanged.
-- Generates `SECRET_KEY`, the PostgreSQL password and an administrator into
-  `~/.panelalpha/tandoor/`, once, and never again.
+- Generates `SECRET_KEY` and the PostgreSQL password into
+  `~/.panelalpha/tandoor/`, once, and never again. The administrator's login is
+  the engine's (`credentials:` in `panelalpha.yaml`), returned by
+  `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`).
 - Creates that administrator in a one-shot `init` service that runs to
   completion **before** the web container is allowed to start, which closes
   `/setup/` before anything is listening.

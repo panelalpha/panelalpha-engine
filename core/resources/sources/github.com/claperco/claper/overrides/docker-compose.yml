@@ -23,6 +23,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/claper/app.env
+      # CLAPER_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       BASE_URL: ${PA_PUBLIC_URL}
       SECURE_COOKIE: "true"

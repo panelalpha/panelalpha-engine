@@ -68,40 +68,10 @@ if [ ! -f "${DATA_HOME}/analytics.salt" ]; then
     chmod 600 "${DATA_HOME}/analytics.salt"
 fi
 
-#    The superadmin. Castopod's install wizard is first-visitor-wins: with a
-#    complete .env and a reachable database, Modules\Install\Controllers\
-#    InstallController::index() migrates, seeds and then renders the
-#    create-superadmin form to whoever asked for /cp-install, and
-#    createSuperAdminAction() makes that visitor the instance owner
-#    (`is_owner => true`) with no authentication of any kind in front of it.
-#    On an account that has just been given a public HTTPS name, that window is
-#    open to anyone who knows the address. panelalpha/castopod-setup.sh closes
-#    it on the install stage, from these credentials, before Apache binds:
-#    once an is_owner user exists the same controller throws
-#    PageNotFoundException and /cp-install is a 404.
-#
-#    Written once and never rewritten: the setup script is a no-op on an
-#    account that already has an owner, so a regenerated password would stop
-#    matching the user in a database that survived the redeploy.
-CREDENTIALS="${DATA_HOME}/admin-credentials"
-if [ ! -f "${CREDENTIALS}" ]; then
-    umask 077
-    cat > "${CREDENTIALS}" <<EOF
-# Written by PanelAlpha on first deploy. This is the Castopod instance owner
-# for this account -- sign in at https://<your-domain>/cp-auth/login .
-#
-# Castopod's install wizard creates the first superadmin, and on a public
-# address that is whoever loads /cp-install first. It was run at deploy time
-# instead, with these values, and /cp-install now answers 404. Change the
-# password under your profile and this file stops being interesting.
-# The email is not here because this hook does not know the account's public
-# name yet; panelalpha/castopod-setup.sh works it out from APP_URL, uses it to
-# create the owner and writes it back into this file.
-CASTOPOD_ADMIN_USERNAME=admin
-CASTOPOD_ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
-EOF
-    chmod 600 "${CREDENTIALS}"
-fi
+#    The superadmin's login is the engine's (`credentials:` in panelalpha.yaml),
+#    written to ~/.panelalpha/app-credentials.env before this hook runs and
+#    given to the container as an env_file; panelalpha/castopod-setup.sh
+#    creates the owner from it on the install stage, before Apache binds.
 
 # 4. A .env with nothing secret in it.
 #

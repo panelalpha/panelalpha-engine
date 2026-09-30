@@ -12,11 +12,12 @@ say() { echo "[wygiwyh] $*" >&2; }
 # (engine#173). A secret written under ~/project would be regenerated on every
 # rebuild -- a new SECRET_KEY logs everyone out, and a new DB password locks the
 # app out of the pgdata volume that still holds the old one. db.env holds only
-# what the postgres container needs; app.env holds what the app needs.
+# what the postgres container needs; app.env holds what the app needs. The admin
+# login is the engine's (`credentials:` in panelalpha.yaml), in
+# ~/.panelalpha/app-credentials.env.
 STORE_DIR="${HOME}/.panelalpha/wygiwyh"
 DB_ENV="${STORE_DIR}/db.env"
 APP_ENV="${STORE_DIR}/app.env"
-NOTE="${STORE_DIR}/credentials.txt"
 
 mkdir -p "${STORE_DIR}"
 chmod 700 "${HOME}/.panelalpha" "${STORE_DIR}"
@@ -24,7 +25,6 @@ chmod 700 "${HOME}/.panelalpha" "${STORE_DIR}"
 if [ ! -f "${APP_ENV}" ] || [ ! -f "${DB_ENV}" ]; then
     # No '/', '+' or '=': read back cleanly from an unquoted env file.
     PG_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
-    ADMIN_PASSWORD="$(openssl rand -base64 18 | tr -d '\n=/+')"
     SECRET_KEY="$(openssl rand -hex 32)"
     (
         umask 077
@@ -42,39 +42,9 @@ EOF
 # Django signing key; required with DEBUG off.
 SECRET_KEY=${SECRET_KEY}
 SQL_PASSWORD=${PG_PASSWORD}
-
-# Admin seeded once by the image's setup_users command when missing. Login and
-# every finance view are behind this account.
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=${ADMIN_PASSWORD}
-EOF
-        cat > "${NOTE}" <<EOF
-WYGIWYH on this account
-=======================
-
-WYGIWYH is a personal finance tracker. Login and every finance view are behind
-an account; there is no public self-registration.
-
-ADMIN LOGIN (seeded once, on the first deploy)
-  URL:      <this account's URL>/login/
-  Email:    admin@example.com
-  Password: ${ADMIN_PASSWORD}
-
-  Django admin is also at <account URL>/admin/. Change the password from the app
-  after first login if you like; a redeploy will not reset it (the admin is only
-  seeded when missing). Create further users from inside the app.
-
-SECRETS
-  SECRET_KEY, the database password and the admin password live in ${STORE_DIR}
-  (0600) and are reused on every redeploy, which is what keeps logins and the
-  database working across rebuilds. Do not delete this directory.
-
-OPTIONAL
-  OIDC login and personal API tokens are supported by the app but off by
-  default here. Email is not configured, so notification mails are not sent.
 EOF
     )
-    say "secrets written to ${STORE_DIR}; onboarding notes in ${NOTE}"
+    say "secrets written to ${STORE_DIR}"
 else
     say "reusing the secrets in ${STORE_DIR}"
 fi

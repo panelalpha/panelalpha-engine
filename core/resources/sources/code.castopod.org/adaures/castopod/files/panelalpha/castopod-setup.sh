@@ -267,22 +267,19 @@ $PHP spark install:init-database
 # asks for the password twice on a hidden prompt, so the generated one goes in
 # on stdin. It refuses outright when an owner already exists, which is what
 # makes replaying this on the upgrade stage a no-op.
-if [ ! -f "${DATA}/admin-credentials" ]; then
-    echo "[castopod] ${DATA}/admin-credentials is missing; refusing to serve an open /cp-install" >&2
+# The login is the engine's, from ~/.panelalpha/app-credentials.env (env_file).
+if [ -z "${CASTOPOD_ADMIN_PASSWORD:-}" ]; then
+    echo "[castopod] CASTOPOD_ADMIN_PASSWORD is not set; refusing to serve an open /cp-install" >&2
     exit 1
 fi
-# shellcheck disable=SC1090
-. "${DATA}/admin-credentials"
 admin_user="${CASTOPOD_ADMIN_USERNAME:-admin}"
 
 # The address has to be one CodeIgniter's `valid_email` accepts, and that rule
 # is filter_var(FILTER_VALIDATE_EMAIL), which wants a dot in the domain --
 # `admin@localhost` is rejected and the command aborts with `Super admin
 # creation aborted`, leaving /cp-install open on a public address. Measured on
-# the deploy before this line existed. So the account's own hostname is used,
-# which is a real name that resolves, and it is written back into the
-# credentials file once the user exists so that a later redeploy onto a
-# different domain still reports the address the owner actually signs in with.
+# the deploy before this line existed. The engine's value is admin@<the
+# account's domain>, which has one; this derivation is only the fallback.
 admin_email="${CASTOPOD_ADMIN_EMAIL:-}"
 if [ -z "${admin_email}" ]; then
     admin_host=$(printf '%s' "${base_url}" | sed -e 's|^[a-z][a-z0-9+.-]*://||' -e 's|[:/].*$||')
@@ -292,7 +289,7 @@ fi
 # Captured rather than discarded: the two outcomes that are fine are "created"
 # and "already created", and everything else is a hole in the account's front
 # door. `install:create-superadmin` asks for the password twice on a prompt
-# that reads stdin, so the generated one goes in on a pipe.
+# that reads stdin, so the engine's one goes in on a pipe.
 creation=$(printf '%s\n%s\n' "${CASTOPOD_ADMIN_PASSWORD:-}" "${CASTOPOD_ADMIN_PASSWORD:-}" \
     | $PHP spark install:create-superadmin -n "${admin_user}" -e "${admin_email}" 2>&1 || true)
 
@@ -305,9 +302,6 @@ case "${creation}" in
         echo "[castopod] the instance owner already exists; leaving it alone"
         ;;
     *'created'*)
-        if ! grep -q '^CASTOPOD_ADMIN_EMAIL=' "${DATA}/admin-credentials"; then
-            printf 'CASTOPOD_ADMIN_EMAIL=%s\n' "${admin_email}" >> "${DATA}/admin-credentials"
-        fi
         echo "[castopod] created the instance owner '${admin_user}' <${admin_email}>"
         ;;
     *)

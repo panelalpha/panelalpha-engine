@@ -34,8 +34,8 @@ done
 say "running migrations"
 /bin/mobilizon_ctl migrate
 
-# Derive the admin email from the account's public host (admin@<host>). It is
-# only a login identifier -- the account is created already-confirmed and never
+# The admin email is the engine's (MOBILIZON_ADMIN_EMAIL); admin@<public host>
+# is only the fallback. It is only a login identifier -- the account is created already-confirmed and never
 # receives mail -- so a bare host with no dot is fine (Mobilizon's email regex
 # accepts admin@localhost).
 url="${PA_PUBLIC_URL:-http://localhost}"
@@ -45,7 +45,7 @@ host="${host%%/*}"
 ADMIN_EMAIL="${MOBILIZON_ADMIN_EMAIL:-admin@${host}}"
 
 if [ -z "${MOBILIZON_ADMIN_PASSWORD:-}" ]; then
-    say "no MOBILIZON_ADMIN_PASSWORD in the store; refusing to seed a blank-password admin"
+    say "no MOBILIZON_ADMIN_PASSWORD (~/.panelalpha/app-credentials.env); refusing to seed a blank-password admin"
     exit 1
 fi
 

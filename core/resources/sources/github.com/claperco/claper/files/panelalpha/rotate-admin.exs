@@ -1,5 +1,5 @@
 # Replaces the seeds' fixed admin password (admin@claper.co / claper) with the
-# per-account one. A no-op once the default no longer verifies.
+# engine's one (~/.panelalpha/app-credentials.env). A no-op once the default no longer verifies.
 Application.load(:claper)
 Application.ensure_all_started(:ssl)
 

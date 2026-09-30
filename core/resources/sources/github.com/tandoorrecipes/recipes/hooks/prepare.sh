@@ -38,16 +38,13 @@ fi
 # compose appends to the first.
 STORE_DIR="${HOME}/.panelalpha/tandoor"
 ENV_STORE="${STORE_DIR}/tandoor.env"
-NOTE="${STORE_DIR}/credentials.txt"
 
 mkdir -p "${STORE_DIR}"
 chmod 700 "${HOME}/.panelalpha" "${STORE_DIR}"
 
 if [ ! -f "${ENV_STORE}" ]; then
-    ADMIN_USER=admin
-    # No '/', '+' or '=' -- this value is read back by a POSIX shell, written
-    # into an env file with no quoting, and typed into a login form.
-    ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
+    # No '/', '+' or '=' -- this value is read back by a POSIX shell and
+    # written into an env file with no quoting.
     PG_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
     SECRET_KEY="$(openssl rand -hex 32)"
     (
@@ -65,33 +62,9 @@ SECRET_KEY=${SECRET_KEY}
 # Read by postgres on its first boot to create the role, and by Tandoor on
 # every boot to connect as it.
 POSTGRES_PASSWORD=${PG_PASSWORD}
-
-# The account created by panelalpha/tandoor/init.sh before the web container
-# starts, which is what closes the anonymous /setup/ superuser form.
-TANDOOR_ADMIN_USER=${ADMIN_USER}
-TANDOOR_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-TANDOOR_ADMIN_EMAIL=admin@localhost
 EOF
     )
-    (
-        umask 077
-        cat > "${NOTE}" <<EOF
-Tandoor administrator for this account
-======================================
-
-  username: ${ADMIN_USER}
-  password: ${ADMIN_PASSWORD}
-
-Created on the first deploy and never changed by PanelAlpha afterwards. If you
-change the password inside Tandoor, this file is out of date and the one in the
-application wins -- nothing here overwrites it.
-
-Tandoor has no sign-up page by default (ENABLE_SIGNUP defaults to false in
-recipes/settings.py:281). Invite further users from the application's own
-space settings.
-EOF
-    )
-    say "administrator credentials written to ${NOTE}"
+    say "secrets written to ${ENV_STORE}"
 else
     say "reusing the secrets in ${ENV_STORE}"
 fi

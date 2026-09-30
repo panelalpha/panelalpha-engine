@@ -66,17 +66,14 @@ root with no `DirectoryIndex` match and `-Indexes` is 403.
 
 ## Administrator
 
-`hooks/prepare.sh` generates a ~30-character password once, into
-`~/.panelalpha/silverstripe/admin.env` (0600 inside a 0700 directory). It is
-*not* in `~/project`: `ProjectTree::clearContents()` empties that on every
-redeploy (engine#173). `overrides/docker-compose.override.yml` hands it to the
-container as a second `env_file`, resolved relative to the compose project
-directory, so `../.panelalpha/...` reaches the account's home.
-
-The login is `admin@<the site's main domain>`. The prepare hook cannot know
-that — nothing in the account names the domain when the hook runs — so
-`.panelalpha/pa-admin.php` derives it from `SERVERNAME` inside the container
-and prints it into the deploy log.
+The engine generates the login (`credentials:` in `panelalpha.yaml`:
+`PA_SS_ADMIN_EMAIL`, `admin@<the site's main domain>`, and `PA_SS_ADMIN_PASSWORD`),
+keeps it on the project and returns it from `GET /projects/{name}/app-credentials`
+(MCP `app_credentials_get`). `overrides/docker-compose.override.yml` hands
+`~/.panelalpha/app-credentials.env` to the container as a second `env_file`,
+resolved relative to the compose project directory, so `../.panelalpha/...`
+reaches the account's home. Accounts installed before this keep their password
+through `adopt_from`, and their address was the same `admin@<domain>`.
 
 `SS_DEFAULT_ADMIN_USERNAME` / `SS_DEFAULT_ADMIN_PASSWORD` are deliberately not
 used. They are checked on every login attempt for as long as they are set, so

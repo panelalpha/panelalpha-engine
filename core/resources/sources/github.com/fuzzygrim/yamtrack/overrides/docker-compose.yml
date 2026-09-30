@@ -3,7 +3,8 @@
 # runs the same stack made durable and self-configuring:
 #   - the official image ghcr.io/fuzzygrim/yamtrack pinned to release 0.26.3
 #   - SQLite (Yamtrack's default) on a named volume, Redis for cache + Celery
-#   - SECRET and the admin password seeded once from ~/.panelalpha/yamtrack
+#   - SECRET seeded once from ~/.panelalpha/yamtrack, the admin login from
+#     ~/.panelalpha/app-credentials.env (the engine's)
 #   - registration closed, admin created by a one-shot after the app is healthy
 services:
   yamtrack:
@@ -63,7 +64,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/yamtrack/app.env
-      - ../.panelalpha/yamtrack/admin.env
+      # YAMTRACK_ADMIN_USER / YAMTRACK_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       REDIS_URL: "redis://redis:6379"
     volumes:

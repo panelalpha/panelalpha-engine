@@ -65,7 +65,7 @@ class OwnerSetupSourceRecipesTest extends TestCase
         $this->assertArrayNotHasKey('ports', $init, 'the one-shot that runs the setup must publish nothing');
         $this->assertSame(['/bin/sh', '/pa/init.sh'], $init['entrypoint']);
         $this->assertContains('./panelalpha/ghost:/pa:ro', $init['volumes']);
-        $this->assertSame(['../.panelalpha/ghost/owner.env'], $init['env_file']);
+        $this->assertSame(['../.panelalpha/app-credentials.env'], $init['env_file']);
         $this->assertArrayNotHasKey('env_file', $services['ghost'], 'only init reads the owner credentials');
 
         // The same Ghost, against the same database and content, at the same url.
@@ -103,9 +103,10 @@ class OwnerSetupSourceRecipesTest extends TestCase
         $prepare = (string) $this->config('tryghost/ghost')->setupCommands();
 
         $this->assertStringContainsString('DATA_HOME="${HOME}/.panelalpha/ghost"', $prepare);
-        $this->assertStringContainsString('OWNER_ENV="${DATA_HOME}/owner.env"', $prepare);
         $this->assertStringContainsString('DB_ENV="${DATA_HOME}/database.env"', $prepare);
-        $this->assertStringContainsString('NOTE="${DATA_HOME}/credentials.txt"', $prepare);
+        // The owner login is the engine's now, adopted from the file the hook used to write.
+        $this->assertStringNotContainsString('credentials.txt', $prepare);
+        $this->assertSame('.panelalpha/ghost/owner.env', $this->config('tryghost/ghost')->credentials()?->adoptFrom);
         // ~/project/.env is rebuilt from the persisted file, never generated into.
         $this->assertStringNotContainsString('if [ ! -f .env ]', $prepare);
     }

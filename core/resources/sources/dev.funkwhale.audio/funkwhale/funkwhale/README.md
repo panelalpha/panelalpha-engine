@@ -20,7 +20,9 @@ the account a full yarn+poetry compile on every redeploy.
 - **Secrets** (`hooks/prepare.sh` → `~/.panelalpha/funkwhale/funkwhale.env`,
   0600): `DJANGO_SECRET_KEY` and the PostgreSQL password, generated once and
   reused — a new secret key logs everyone out, a new DB password locks the app
-  out of its volume (engine#173).
+  out of its volume (engine#173). The administrator login is the engine's
+  (`credentials:` in `panelalpha.yaml`), returned by
+  `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`).
 - **Public name**: `PA_PUBLIC_URL=http://localhost` in the compose is rewritten
   to the account's public https URL by `ComposePlaceholders`; `env.sh` splits it
   into `FUNKWHALE_HOSTNAME`/`FUNKWHALE_PROTOCOL` and sets `DJANGO_ALLOWED_HOSTS`.
@@ -41,7 +43,7 @@ the account a full yarn+poetry compile on every redeploy.
 | File | Purpose |
 |---|---|
 | `panelalpha.yaml` | Manifest (description only; compose auto-detected) |
-| `hooks/prepare.sh` | Generates/stores secrets and the credentials note |
+| `hooks/prepare.sh` | Generates/stores secrets |
 | `overrides/docker-compose.yml` | The replacement stack |
 | `files/panelalpha/funkwhale/env.sh` | Derives hostname/protocol/allowed-hosts |
 | `files/panelalpha/funkwhale/init.sh` | Migrate, collectstatic, seed superuser |

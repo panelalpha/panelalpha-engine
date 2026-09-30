@@ -89,8 +89,10 @@ description: >-
      surface is only reachable once one exists. A one-shot `init` service runs
      the admin create/confirm/promote (idempotent: only when the account is
      absent), and `app` declares `init: service_completed_successfully`, so the
-     server never listens until the admin exists. The password is generated per
-     account into ~/.panelalpha/gotosocial/, never a shipped default.
+     server never listens until the admin exists. The login is generated per
+     account by the engine (`credentials:` below; GET
+     /projects/{name}/app-credentials, MCP app_credentials_get, returns it),
+     never a shipped default.
 
   3. Where the data lives. The image declares VOLUME /gotosocial/storage and
      keeps the SQLite database (sqlite.db) and the whole media store under it,
@@ -151,15 +153,21 @@ description: >-
   /nodeinfo/2.0 shows openRegistrations:false and 1 user, /api/v1/instance uri =
   the public domain. Anonymous /api/v1/accounts/verify_credentials and
   /api/v1/timelines/home both 401. Fetching storage/sqlite.db, sqlite.db,
-  .git/config, gotosocial.env, credentials.txt, docker-compose.yml, .env,
+  .git/config, docker-compose.yml, .env,
   config.yaml and a fileserver/.. traversal over the public domain all return
   GoToSocial's 21-byte JSON 404 -- no SQLite header, no PEM, no file bytes.
 
   Redeploy via POST /projects/<user>/rebuild: success. The instance keypair md5
   (389ef6166e5ef8073dbe8148d2692056) and the admin keypair md5
   (1ce69bd83453183ad8c6039d83568a7b) were byte-identical before and after, the
-  credentials file md5 unchanged, the status still present, the admin still
+  admin password unchanged, the status still present, the admin still
   admin+confirmed, and the site and post still served -- the federation identity
   survived the redeploy, which is the acceptance test. init was idempotent on the
   rebuild (found the admin, created nothing). The app container used 171 MiB of
   its 1 GiB cap; the account DinD ~130 MiB.
+credentials:
+  adopt_from: .panelalpha/gotosocial/gotosocial.env
+  fields:
+    PA_ADMIN_USER: {kind: username, value: admin}
+    PA_ADMIN_EMAIL: {kind: email, value: admin@localhost}
+    PA_ADMIN_PASSWORD: {kind: password}

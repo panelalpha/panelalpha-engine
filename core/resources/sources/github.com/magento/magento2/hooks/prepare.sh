@@ -6,7 +6,6 @@ cd ~/project
 # everything Magento must keep lives in ~/.panelalpha/magento instead, which
 # the compose override mounts at /pa-data:
 #
-#   admin.env    the admin credentials below, generated once
 #   etc/         app/etc/env.php (crypt key, DB, install date) and config.php,
 #                reached through symlinks written here on every deploy
 #   media/       pub/media, bind-mounted over the checkout's copy
@@ -18,28 +17,13 @@ mkdir -p "${STORE}/etc" "${STORE}/media"
 chmod 700 "${HOME}/.panelalpha" "${STORE}"
 
 # Magento's installer wants an admin username, password and email, and there
-# is nowhere for a customer to type them. The admin path is generated too: left
-# alone Magento invents one and prints it once, into a build log nobody keeps.
-# Generated once and copied into .env (which the generated compose file loads)
-# on every deploy; the store already holds them, so a new set would only be
-# a record of credentials that do not work.
-if [ ! -s "${STORE}/admin.env" ]; then
-    (
-        umask 077
-        # An older deploy's values, when this checkout was not wiped.
-        if grep -q '^MAGENTO_ADMIN_PASSWORD=.' .env 2>/dev/null; then
-            grep '^MAGENTO_ADMIN_' .env > "${STORE}/admin.env"
-        else
-            # Magento requires a password with both letters and digits, at least 7 long.
-            printf 'MAGENTO_ADMIN_USER=admin\nMAGENTO_ADMIN_EMAIL=admin@example.com\nMAGENTO_ADMIN_PASSWORD=%s\nMAGENTO_ADMIN_URI=%s\n' \
-                "$(openssl rand -hex 12)Aa1" "admin_$(openssl rand -hex 4)" > "${STORE}/admin.env"
-        fi
-    )
-fi
-chmod 600 "${STORE}/admin.env"
+# is nowhere for a customer to type them; the admin path is needed too, since
+# left alone Magento invents one and prints it once, into a build log nobody
+# keeps. All four are the engine's (`credentials:` in panelalpha.yaml), in
+# ~/.panelalpha/app-credentials.env, which the compose override hands to the
+# app container. .env is not used for them: the engine republishes it at 644.
 touch .env
 sed -i '/^MAGENTO_ADMIN_/d' .env
-cat "${STORE}/admin.env" >> .env
 
 # An install from before the store existed, on a rebuild that did not wipe.
 for f in env.php config.php; do

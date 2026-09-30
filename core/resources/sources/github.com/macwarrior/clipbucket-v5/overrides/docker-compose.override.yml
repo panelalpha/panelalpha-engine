@@ -20,6 +20,11 @@
 # healthcheck, is not one this recipe can spring.)
 services:
   app:
+    # CLIPBUCKET_ADMIN_USERNAME / CLIPBUCKET_ADMIN_PASSWORD, generated and kept
+    # by the engine; the install stage creates the administrator from them.
+    env_file:
+      - .env
+      - ../.panelalpha/app-credentials.env
     volumes:
       # ~/.panelalpha/clipbucket. Everything this account accumulates lives
       # here, because a redeploy clears and re-clones ~/project (engine#173):
@@ -30,7 +35,6 @@ services:
       #                           hooks/prepare.sh fetches them once per account
       #                           and the install writes their paths into
       #                           ClipBucket's own config rows.
-      #   /data/admin-credentials the generated administrator, 0600.
       #   /data/files/            mounted again below, over the application's
       #                           own upload/files.
       - ../.panelalpha/clipbucket:/data

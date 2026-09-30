@@ -11,10 +11,10 @@ services:
     restart: "no"
     env_file:
       - ../.panelalpha/papra/app.env
-      - ../.panelalpha/papra/admin.env
+      # PAPRA_ADMIN_EMAIL / PAPRA_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       APP_BASE_URL: ${PA_PUBLIC_URL}
-      PAPRA_ADMIN_EMAIL: admin@${PA_PUBLIC_HOST}
     volumes:
       - papra-data:/app/app-data
       - ./panelalpha/papra:/pa:ro

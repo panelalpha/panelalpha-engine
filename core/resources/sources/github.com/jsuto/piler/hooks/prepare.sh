@@ -48,16 +48,16 @@ say "using sutoj/piler:${PILER_TAG}"
 #
 # engine#173: every deploy empties ~/project before the clone, so a guard on a
 # file in there never fires on a redeploy -- the database password would be
-# regenerated while db_data still held the old one, and the admin password would
-# be regenerated as one nobody was ever told while the user row kept the old
-# hash. And ProjectEnvironment::apply() copies ~/project/.env to .env.default at
+# regenerated while db_data still held the old one. And ProjectEnvironment::apply() copies ~/project/.env to .env.default at
 # mode 644 inside a home that is root-owned 0755, which makes anything written
 # there readable by every other account's uid on this host.
 #
 # So everything generated here lives in ~/.panelalpha/ at 0600 in a 0700
 # directory, and that file is also the stack's second env_file -- compose reads
 # it at ../.panelalpha/piler.env, relative to the --project-directory the engine
-# passes. No secret is ever written into ~/project.
+# passes. No secret is ever written into ~/project. The web UI administrator's
+# login is the engine's (`credentials:` in panelalpha.yaml), in
+# ~/.panelalpha/app-credentials.env.
 STORE_DIR="${HOME}/.panelalpha"
 STORE="${STORE_DIR}/piler.env"
 mkdir -p "${STORE_DIR}"
@@ -67,8 +67,7 @@ if [ ! -f "${STORE}" ]; then
     # Alphanumeric, no punctuation: MYSQL_PASSWORD is sed'd into piler.conf and
     # into config-site.php as a single-quoted PHP literal by the image's
     # start.sh (`s/verystrongpassword/${MYSQL_PASSWORD}/g`), where a '/' would
-    # end the sed expression and a quote would end the literal. The admin
-    # password is additionally typed by a human.
+    # end the sed expression and a quote would end the literal.
     umask 077
     cat > "${STORE}" <<EOF
 # Written by PanelAlpha on the first deploy of this account, and reused by every
@@ -83,20 +82,9 @@ if [ ! -f "${STORE}" ]; then
 MYSQL_DATABASE=piler
 MYSQL_USER=piler
 MYSQL_PASSWORD=$(openssl rand -hex 24)
-# The administrator of the web UI.
-#
-# Piler ships a fixed one: util/db-mysql.sql inserts admin@local with the
-# md5-crypt hash of 'pilerrocks' and auditor@local with the hash of 'auditor',
-# both constants in a public repository, and
-# webui/model/user/auth.php::checkFallbackLogin() authenticates against them
-# with a plain crypt() comparison. There is no sign-up page and no first-run
-# wizard, so the shipped rows are replaced by files/panelalpha-setup.sh with
-# this password rather than left open.
-PILER_ADMIN_USERNAME=admin@local
-PILER_ADMIN_PASSWORD=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-20)
 EOF
     chmod 600 "${STORE}"
-    say "generated this account's database and administrator credentials in ~/.panelalpha/piler.env"
+    say "generated this account's database credentials in ~/.panelalpha/piler.env"
 else
     say "reusing the credentials already in ~/.panelalpha/piler.env"
 fi
@@ -118,100 +106,3 @@ PILER_MANTICORE_IMAGE=manticoresearch/manticore:25.0.0
 PILER_MEMCACHED_IMAGE=memcached:1.6-alpine
 EOF
 chmod 600 .env
-
-# ---------------------------------------------------------------------------
-# 4. Where a human is pointed. Beside the credentials it describes, not in
-# ~/project, which the next deploy deletes.
-cat > "${STORE_DIR}/piler-credentials.txt" <<'EOF'
-Piler (jsuto/piler), deployed by PanelAlpha.
-
-Piler is an email archive. Sign in at your account's domain with:
-
-  Username   admin@local          (this is a Piler login name, not a mailbox)
-  Password   see PILER_ADMIN_PASSWORD in ~/.panelalpha/piler.env
-
-Change it under Settings once you are in; this file and piler.env are not
-updated when you do, and nothing here will overwrite your new password.
-
-FIRST THING TO KNOW: the administrator can SEARCH but cannot OPEN messages.
-
-That is Piler's design, not a fault of this installation. Read access is granted
-by email address or by the auditor role, and admin@local is the address of
-nothing, so message bodies come back "no permission". To read the archive:
-
-  Domains -> add the domain whose mail you are archiving.
-  Users   -> add a user whose email addresses are the archived mailbox's.
-             That user sees and opens their own mail.
-  Users   -> or add a user with the Auditor role, who can read everything in
-             the domains they are granted. (The built-in auditor@local was
-             locked on the first deploy -- Piler ships it with the password
-             'auditor', published in the source.)
-
-HOW MAIL GETS IN
-
-Piler's headline feature is a built-in SMTP receiver on port 25, and this
-deployment deliberately does not publish it: on shared hosting a tenant
-application does not own inbound SMTP for the account's domain. Piler's pull
-paths are used instead, and they are first-class -- src/import_imap.c,
-src/import_pop3.c and util/imapfetch.py are upstream's own code, driven from
-the web UI.
-
-  Web UI, IMAP/POP3 pull:
-      Import -> add a job with the mailbox server, username and password, and
-      use "test connection" to check it. util/import.sh runs imapfetch.py from
-      cron every five minutes and archives what it finds. Office 365 and Gmail
-      OAuth helpers are in contrib/o365 and util/get-token.py.
-
-      A mailbox server with a self-signed certificate fails with "SSL peer
-      certificate ... was not OK" until verifyssl=0 is set in
-      /etc/piler/piler.conf. Prefer fixing the certificate.
-
-      Note that the mailbox password you type there is stored in Piler's own
-      database in the clear. Give Piler a restricted account on the mailbox
-      server rather than the user's own password.
-
-  Bulk import of existing mail, from the account shell:
-      cd ~/project
-      docker compose cp /path/to/message.eml piler:/tmp/message.eml
-      docker compose exec --workdir /var/piler/tmp piler \
-          pilerimport -e /tmp/message.eml
-
-      --workdir matters: pilerimport writes temporary files into the current
-      directory and exits "cannot write current directory!" without it.
-
-      pilerimport also takes -m <mbox>, -d <directory of .eml> and
-      -K <pop3 server>; `docker compose exec piler pilerimport -h` lists
-      everything. Its -i <imap server> mode does not work in 1.4.9 -- it
-      downloads and then stores nothing -- so use the Import page for IMAP.
-
-  Relaying from your own MTA:
-      Port 25 is open inside the stack, on the `piler` service. An MTA you run
-      elsewhere can be pointed at it if you publish the port yourself, and
-      etc/smtp.acl.example shows how Piler restricts who may deliver. Read
-      docs/ first; opening 25 to the internet makes this an open relay target.
-
-WHAT IS NOT SET UP
-
-  Outbound mail. Daily reports, automated searches and "restore to mailbox"
-  need an SMTP server; set SMTP_FROMADDR and its companions in
-  /etc/piler/config-site.php inside the piler container.
-
-  TLS between Piler and your mailbox server is Piler's own; TLS for the web UI
-  is terminated by the hosting proxy on your account's certificate.
-
-RETENTION AND DISK
-
-  Archives grow and do not shrink by themselves. Policies -> Retention sets how
-  long messages are kept, and util/purge.sh runs nightly from cron to apply it.
-  With no policy, nothing is ever deleted.
-
-THE SHIPPED ACCOUNTS
-
-  Piler's schema seeds admin@local / pilerrocks and auditor@local / auditor,
-  both published in the source. Both were replaced on the first deploy: the
-  admin with the password above, the auditor with a random one that is not kept
-  anywhere. If you want an auditor, set a password for it under Users.
-EOF
-chmod 600 "${STORE_DIR}/piler-credentials.txt"
-
-say "credentials and notes in ~/.panelalpha/piler-credentials.txt"

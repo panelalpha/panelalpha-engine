@@ -101,16 +101,16 @@ no-op gated on `app: service_healthy`, because `docker compose up -d` runs witho
   = the public domain. Anonymous `verify_credentials` and `/timelines/home` ->
   401.
 - **Exposure (bodies, not codes):** `storage/sqlite.db`, `sqlite.db`,
-  `.git/config`, `.git/HEAD`, `gotosocial.env`, `credentials.txt`,
+  `.git/config`, `.git/HEAD`,
   `docker-compose.yml[.override]`, `.env`, `config.yaml`, and a `fileserver/..`
   traversal all return GoToSocial's 21-byte JSON 404 -- no SQLite header, no PEM,
   no file bytes (the app serves every route; there is no document root). On disk
-  `gotosocial.env` and `credentials.txt` are 0600 account-owned; the instance
+  the login is the engine's `~/.panelalpha/app-credentials.env` (0600); the instance
   private key lives only in the DB, never web-served, and the ActivityPub actor
   exposes only the public key.
 - **Redeploy** via `POST /projects/gts1367/rebuild`: success, strategy compose.
   Instance keypair md5 **unchanged** (`389ef6166e5ef8073dbe8148d2692056`), admin
-  keypair md5 unchanged (`1ce69bd83453183ad8c6039d83568a7b`), credentials md5
+  keypair md5 unchanged (`1ce69bd83453183ad8c6039d83568a7b`), admin password
   unchanged, the status still present, admin still admin+confirmed; site and post
   still serve, registrations still closed. Federation identity survived.
 - **Memory:** app container **171 MiB / 1 GiB** cap; account DinD ~130 MiB.

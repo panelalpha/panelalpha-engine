@@ -31,15 +31,23 @@ description: >-
 
   Security: LazyLibrarian, like the *arr apps, ships with web auth OFF
   (HTTP_USER/HTTP_PASS empty by default) — a public deploy with no auth is
-  world-controllable. hooks/prepare.sh seeds config.ini with BASIC auth and a
-  password generated ONCE into ~/.panelalpha/lazylibrarian/ (0600) and reused
-  on every redeploy, never regenerated and never written into ~/project. It
-  also enables the JSON API behind a generated 32-char key. After boot an
-  anonymous request to `/` is refused with 401; the credentials are recorded in
-  ~/.panelalpha/lazylibrarian/panelalpha-credentials.txt for the owner.
+  world-controllable. hooks/prepare.sh seeds config.ini in
+  ~/.panelalpha/lazylibrarian/ (0600) once with BASIC auth and the login the
+  engine generates (`credentials:` below, written to
+  ~/.panelalpha/app-credentials.env), never regenerated and never written into
+  ~/project. It also enables the JSON API behind a generated 32-char key.
+  After boot an anonymous request to `/` is refused with 401; the login is
+  returned by GET /projects/{name}/app-credentials. An account an older recipe
+  seeded kept the login in panelalpha-credentials.txt; while config.ini still
+  holds that password, the hook moves it once to the engine's and removes the
+  file.
 
   The recipe states dockerfile/port_hint because a source recipe is applied
   before the probes run and neither would otherwise be known.
+credentials:
+  fields:
+    LAZYLIBRARIAN_ADMIN_USER: {kind: username, value: admin}
+    LAZYLIBRARIAN_ADMIN_PASSWORD: {kind: password}
 extends: dockerfile
 extra:
   # A source recipe is applied without running the probes

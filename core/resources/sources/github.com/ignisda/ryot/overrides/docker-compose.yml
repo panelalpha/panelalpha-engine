@@ -87,6 +87,8 @@ services:
         condition: service_healthy
     env_file:
       - ../.panelalpha/ryot/ryot.env
+      # RYOT_OWNER_USERNAME / RYOT_OWNER_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha/ryot:/pa:ro
     entrypoint: ["/bin/sh", "/pa/init.sh"]

@@ -2,7 +2,7 @@
 # Create the admin once; a redeploy (user exists) leaves it and its password alone.
 set -e
 cd /yamtrack
-: "${YAMTRACK_ADMIN_USER:?admin.env missing; prepare.sh did not run}"
+: "${YAMTRACK_ADMIN_USER:?~/.panelalpha/app-credentials.env missing}"
 python manage.py shell -c '
 import os
 from django.contrib.auth import get_user_model

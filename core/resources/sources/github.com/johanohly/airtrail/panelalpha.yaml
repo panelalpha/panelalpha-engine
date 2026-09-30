@@ -20,8 +20,8 @@ description: >-
   value to the account's real https origin before the stack starts.
 
   Second, persistence and secrets. ~/project is re-cloned and wiped on every
-  redeploy (engine#173), so the generated PostgreSQL password and the owner
-  password are written once by hooks/prepare.sh into ~/.panelalpha/airtrail
+  redeploy (engine#173), so the generated PostgreSQL password is written once
+  by hooks/prepare.sh into ~/.panelalpha/airtrail
   (0600 in a 0700 dir) -- the one account-owned, rebuild-surviving place -- and
   fed to the containers through env_file, never through the world-readable 0644
   compose file. They are generated only on the first deploy and reused
@@ -35,8 +35,9 @@ description: >-
   (src/routes/api/users/setup/+server.ts). A stock deploy on a public HTTPS name
   is therefore first-visitor-wins. A wrapped entrypoint (files/panelalpha) runs
   the migration runner, then an idempotent seed that inserts the owner --
-  username admin, a generated password, argon2id with AirTrail's own hashing
-  parameters -- directly into the user table before `node build` binds, so the
+  username admin and the password the engine generates (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials, MCP app_credentials_get),
+  argon2id with AirTrail's own hashing parameters -- directly into the user table before `node build` binds, so the
   setup window is already closed on the very first request the public can make.
   The seed is a no-op once an owner exists, so a redeploy never creates a second
   account. There is no separate auth secret to persist: Lucia keeps sessions in
@@ -50,3 +51,9 @@ description: >-
   OAuth and SMTP are left unconfigured; both are optional and set from the admin
   UI, and neither opens a registration path on their own (OAuth auto-register is
   inert until an OAuth provider is configured).
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/airtrail/app.env
+  fields:
+    AIRTRAIL_OWNER_USERNAME: {kind: username, value: admin}
+    AIRTRAIL_OWNER_PASSWORD: {kind: password}

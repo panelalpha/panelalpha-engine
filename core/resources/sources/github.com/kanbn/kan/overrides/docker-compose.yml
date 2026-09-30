@@ -79,9 +79,11 @@ services:
         condition: service_completed_successfully
     env_file:
       - ../.panelalpha/kan/app.env
-      - ../.panelalpha/kan/owner.env
+      # KAN_OWNER_EMAIL / KAN_OWNER_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       NODE_PATH: /db/node_modules
+      KAN_OWNER_NAME: Owner
     volumes:
       - ./pa:/pa:ro
     entrypoint: ["/usr/local/bin/node", "/pa/seed.cjs"]

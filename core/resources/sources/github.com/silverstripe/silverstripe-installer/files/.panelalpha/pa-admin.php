@@ -24,13 +24,12 @@ use SilverStripe\Security\DefaultAdminService;
 $password = getenv('PA_SS_ADMIN_PASSWORD');
 if (!is_string($password) || $password === '') {
     fwrite(STDERR, "[panelalpha] pa-admin: PA_SS_ADMIN_PASSWORD is not in the environment; the "
-        . "compose override that carries ~/.panelalpha/silverstripe/admin.env is missing\n");
+        . "compose override that carries ~/.panelalpha/app-credentials.env is missing\n");
     exit(1);
 }
 
-// The prepare hook cannot know the account's domain -- nothing in the account
-// names it that early -- so the login is settled here, where the engine has
-// already put it in the environment.
+// The engine's login (`credentials:`) names the address; the account's domain
+// is the fallback when it is missing.
 $email = getenv('PA_SS_ADMIN_EMAIL');
 if (!is_string($email) || $email === '') {
     $host = getenv('SERVERNAME');
@@ -48,5 +47,5 @@ if (!$result->isValid()) {
     exit(1);
 }
 
-fwrite(STDERR, "[panelalpha] pa-admin: administrator {$email} is ready; its password is in "
-    . "~/.panelalpha/silverstripe/admin.env\n");
+fwrite(STDERR, "[panelalpha] pa-admin: administrator {$email} is ready; its login is returned by "
+    . "GET /projects/{name}/app-credentials\n");

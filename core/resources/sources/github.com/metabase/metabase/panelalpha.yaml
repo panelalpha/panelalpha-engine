@@ -33,9 +33,8 @@ description: >-
   further users are invited by the admin.
 credentials:
   login_path: /auth/login
-  # Accounts deployed before this keep their password; their admin email was
-  # admin@<domain>, which the old file did not record.
+  # admin@<domain>, as the recipe used before; the password is adopted.
   adopt_from: .panelalpha/metabase/admin.env
   fields:
-    MB_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    MB_ADMIN_EMAIL: {kind: email, value: "admin@{host}"}
     MB_ADMIN_PASSWORD: {kind: password}

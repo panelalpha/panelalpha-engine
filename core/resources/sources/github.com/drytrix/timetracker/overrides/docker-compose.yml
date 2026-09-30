@@ -23,7 +23,8 @@ services:
     mem_limit: 384m
 
   # One-shot, every boot, before the app is reachable: upstream's migrations,
-  # then the admin's password and the first-run wizard (files/.../seed.py).
+  # then the admin's password (only while it has none) and the first-run
+  # wizard (files/.../seed.py).
   seed:
     image: ghcr.io/drytrix/timetracker:5.17.2
     restart: "no"
@@ -33,7 +34,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/timetracker/app.env
-      - ../.panelalpha/timetracker/admin.env
+      # TT_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       ADMIN_USERNAMES: admin
       ALLOW_SELF_REGISTER: "false"

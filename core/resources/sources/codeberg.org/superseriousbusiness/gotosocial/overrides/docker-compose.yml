@@ -13,8 +13,8 @@
 # written).
 #
 # Files that reach the containers from outside this file:
-#   * ~/.panelalpha/gotosocial/gotosocial.env -- the generated administrator
-#     credentials, read only by the one-shot init service.
+#   * ~/.panelalpha/app-credentials.env -- the administrator login the engine
+#     generates, read only by the one-shot init service.
 #   * ~/.panelalpha/gotosocial/storage/ -- the SQLite database, the media store
 #     and the instance keypair (inside the DB), bind-mounted over the image's
 #     VOLUME /gotosocial/storage.
@@ -31,9 +31,9 @@ services:
     restart: "no"
     working_dir: /gotosocial
     env_file:
-      # PA_ADMIN_USER / _PASSWORD / _EMAIL, written once by prepare.sh and never
-      # regenerated. Only init reads them; the running server does not.
-      - ../.panelalpha/gotosocial/gotosocial.env
+      # PA_ADMIN_USER / _PASSWORD / _EMAIL, generated and kept by the engine.
+      # Only init reads them; the running server does not.
+      - ../.panelalpha/app-credentials.env
     environment:
       GTS_DB_TYPE: sqlite
       GTS_DB_ADDRESS: /gotosocial/storage/sqlite.db

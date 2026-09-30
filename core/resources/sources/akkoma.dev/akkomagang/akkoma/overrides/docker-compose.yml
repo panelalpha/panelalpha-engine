@@ -51,12 +51,13 @@ services:
       db:
         condition: service_healthy
     # .env: account-overridable defaults (INSTANCE_NAME, registration, release
-    # URL). app.env: persisted DB password. admin.env: the seeded admin password
-    # -- delivered only here, never to the long-running app.
+    # URL). app.env: persisted DB password. app-credentials.env: the engine's
+    # admin login -- delivered only here, never to the long-running app.
     env_file:
       - .env
       - ../.panelalpha/akkoma/app.env
-      - ../.panelalpha/akkoma/admin.env
+      # ADMIN_PASSWORD, generated and kept by the engine; never given to the app.
+      - ../.panelalpha/app-credentials.env
     environment:
       DB_HOST: db
       DB_PORT: "5432"

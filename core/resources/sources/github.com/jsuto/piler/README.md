@@ -224,7 +224,13 @@ UI, and an archive with a hundred thousand messages in it was not tested here.
 
 ## Credentials
 
-Everything generated lives in `~/.panelalpha/piler.env` (0600, in a 0700
+The web UI administrator (`admin@local`) gets the login the engine generates:
+`credentials:` in `panelalpha.yaml`, returned by
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) and delivered
+to the `setup` service in `~/.panelalpha/app-credentials.env`. An account
+deployed before this keeps its password from `piler.env` (`adopt_from`).
+
+Everything else generated lives in `~/.panelalpha/piler.env` (0600, in a 0700
 directory `hooks/prepare.sh` creates — an account's home is root-owned 0755) and
 nowhere else. That file is also the stack's `env_file`; compose reads it at
 `../.panelalpha/piler.env`, relative to the `--project-directory` the engine
@@ -239,9 +245,6 @@ Two engine behaviours make that the shape rather than a preference:
   inside a world-traversable home, which makes anything written there readable
   by every other account's uid on the host.
 
-`~/.panelalpha/piler-credentials.txt` is where a human is pointed: the login, how
-to get mail in by all three routes, what is not configured, and the retention
-warning.
 
 ## What must survive together
 
@@ -385,7 +388,6 @@ Four things worth knowing that came out of doing it:
   address of nothing. This is Piler's design — admins administer, auditors read
   — but a customer will hit it in the first five minutes. The route is to
   create a user whose addresses are the archived mailbox's, or an auditor.
-  `~/.panelalpha/piler-credentials.txt` says so.
 
 ## What is not set up
 

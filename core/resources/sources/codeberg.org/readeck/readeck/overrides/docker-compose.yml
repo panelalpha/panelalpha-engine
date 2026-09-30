@@ -26,9 +26,9 @@ services:
     restart: "no"
     working_dir: /readeck
     env_file:
-      # READECK_ADMIN_USER / _PASSWORD / _EMAIL, written once by prepare.sh and
-      # never regenerated. Only init reads them; the running server does not.
-      - ../.panelalpha/readeck/readeck.env
+      # READECK_ADMIN_USER / _PASSWORD / _EMAIL, generated and kept by the
+      # engine. Only init reads them; the running server does not.
+      - ../.panelalpha/app-credentials.env
     volumes:
       # The account's persistent data directory, replacing the image's
       # VOLUME /readeck by-target. Holds config.toml and data/.

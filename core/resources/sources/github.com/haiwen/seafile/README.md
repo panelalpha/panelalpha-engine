@@ -107,8 +107,7 @@ headroom on the seafile service where uploads and thumbnailing need it.
 ## Credentials
 
 `hooks/prepare.sh` writes `.env` **once** — the volumes outlive the checkout,
-so a regenerated DB password would lock `seaf-server` out of its own schemas
-and a regenerated admin password would be one the database never learns.
+so a regenerated DB password would lock `seaf-server` out of its own schemas.
 
 - `SEAFILE_MYSQL_DB_PASSWORD`, `INIT_SEAFILE_MYSQL_ROOT_PASSWORD` — the root
   one is needed because `setup-seafile-mysql.py` creates the three schemas and
@@ -117,10 +116,12 @@ and a regenerated admin password would be one the database never learns.
   starts without it and then fails every upload and download.
 - `INIT_SEAFILE_ADMIN_EMAIL` / `INIT_SEAFILE_ADMIN_PASSWORD` — Seafile has no
   sign-up page and no installer, and upstream's default is
-  `me@example.com` / `asecret`. `start.py` writes these to `conf/admin.txt` on
-  first boot, `seahub.sh` consumes it creating the superuser, and `start.py`
-  deletes the file. Also written to `~/project/.panelalpha-admin-password`
-  (0600), which is where a human is pointed.
+  `me@example.com` / `asecret`. The engine generates them (`credentials:` in
+  `panelalpha.yaml`), returns them from `GET /projects/{name}/app-credentials`
+  (MCP `app_credentials_get`) and delivers them in
+  `~/.panelalpha/app-credentials.env`, the `seafile` service's `env_file`.
+  `start.py` writes them to `conf/admin.txt` on first boot, `seahub.sh` consumes
+  it creating the superuser, and `start.py` deletes the file.
 
 Written with plain `${VAR}` references, never compose's `${VAR:?…}` form:
 `ComposePlaceholders::requiredSecret()` would replace `JWT_PRIVATE_KEY` with a

@@ -39,7 +39,6 @@ services:
       #   /data/cache/                  $wgCacheDirectory: the localisation
       #                                 cache, which is a minute of CPU to
       #                                 rebuild.
-      #   /data/admin-credentials       the first bureaucrat, 0600.
       #   /data/php/zz-mediawiki.ini    the php.ini the base image does not
       #                                 load.
       #
@@ -55,6 +54,9 @@ services:
       # Relative, because compose runs with `--project-directory ~/project`:
       # `..` is the account home on both sides of the mount.
       - ../.panelalpha/mediawiki:/data
+      # The first bureaucrat's login, generated and kept by the engine; read
+      # once by panelalpha-setup.sh on the first install.
+      - ../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro
 
     environment:
       # Said out loud, because the manifest cannot say it: MediaWiki serves

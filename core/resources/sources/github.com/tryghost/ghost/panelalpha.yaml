@@ -60,13 +60,20 @@ description: >-
   submitted: whoever submits it first owns the site. A one-shot `init`
   service closes it before `ghost` starts (ghost depends on it completing):
   it boots the same Ghost image on loopback, in a container with no ports,
-  and completes the setup through Ghost's own setup endpoint with an owner
-  generated once into ~/.panelalpha/ghost/ (credentials.txt for the account
-  owner). A site that already has an owner costs one SELECT and is left
-  alone. The MySQL credentials live there too, because ~/project is emptied
+  and completes the setup through Ghost's own setup endpoint with the owner
+  login the engine generates (`credentials:` below; returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get). A site that
+  already has an owner costs one SELECT and is left alone. The MySQL
+  credentials live in ~/.panelalpha/ghost/, because ~/project is emptied
   on every deploy and the data volume is not.
 
   Mail is left unconfigured, so Ghost's staff device verification (a code
   mailed on every sign-in from a new browser) is off: with it on, the owner
   could never sign in. Staff invites and member emails need an SMTP service
   the engine does not provide.
+credentials:
+  login_path: /ghost/
+  adopt_from: .panelalpha/ghost/owner.env
+  fields:
+    PA_OWNER_EMAIL: {kind: email, value: owner@example.com}
+    PA_OWNER_PASSWORD: {kind: password}

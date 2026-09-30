@@ -34,9 +34,9 @@ description: >-
   (it is only in the container log), so the window is not anonymously
   exploitable - but the recipe still closes it: the entrypoint wrapper reads the
   token from the boot log on a fresh volume and creates the admin
-  non-interactively with a strong password the prepare hook generated once into
-  ~/.panelalpha/scm-manager/ (0600, reused across redeploys, surfaced only into
-  the owner's store), then completes the plugin wizard installing nothing so the
+  non-interactively with the login the engine generates (`credentials:` below;
+  returned by GET /projects/{name}/app-credentials, MCP app_credentials_get),
+  then completes the plugin wizard installing nothing so the
   site opens in normal state. Verified past the probe: the admin logs in over the
   public HTTPS domain and creates a Git repository that then lists; anonymous
   cannot create a repository or administer (401); the legacy scmadmin/scmadmin is
@@ -46,7 +46,7 @@ description: >-
   redeploy (engine#173), so it is bind-mounted to ~/.panelalpha/scm-manager/data,
   which the wipe never touches, and the container runs as the account uid in
   group 0 (${CONTAINER_UID}:0) so both that mount and the image's group-writable
-  work volume are writable and the 0600 admin-password file is readable. A
+  work volume are writable. A
   redeploy rebuilds the image and reuses the data dir: the admin still logs in
   and a created repository persists.
 
@@ -64,3 +64,7 @@ extra:
   # and the port the image EXPOSEs (8080).
   dockerfile: Dockerfile
   port_hint: 8080
+credentials:
+  fields:
+    SCM_ADMIN_USER: {kind: username, value: pa-admin}
+    SCM_ADMIN_PASSWORD: {kind: password}

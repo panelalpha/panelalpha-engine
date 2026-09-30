@@ -113,9 +113,10 @@ services:
     depends_on:
       tracim:
         condition: service_healthy
+    # TRACIM_ADMIN_LOGIN / TRACIM_ADMIN_PASSWORD, generated and kept by the engine.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     environment:
-      TRACIM_ADMIN_LOGIN: ${TRACIM_ADMIN_LOGIN:-admin@admin.admin}
-      TRACIM_ADMIN_PASSWORD: ${TRACIM_ADMIN_PASSWORD}
       TRACIM_SHIPPED_PASSWORD: ${TRACIM_SHIPPED_PASSWORD:-admin@admin.admin}
     volumes:
       - ./panelalpha-setup.sh:/panelalpha-setup.sh:ro

@@ -113,6 +113,9 @@ services:
     depends_on: *fw-depends
     env_file:
       - ../.panelalpha/funkwhale/funkwhale.env
+      # FUNKWHALE_ADMIN_USERNAME / _EMAIL and FUNKWHALE_CLI_USER_PASSWORD (the
+      # `fw users create` password option's envvar), generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment: *fw-env
     volumes:
       - media:/data/media

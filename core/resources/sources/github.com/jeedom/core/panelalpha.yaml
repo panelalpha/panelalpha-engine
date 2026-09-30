@@ -19,14 +19,13 @@ description: >-
 
   == How admin/admin never reaches the public ==
 
-  1. hooks/prepare.sh generates a 24-character password once into
-     ~/.panelalpha/jeedom/admin.env (plus credentials.txt; 0600 in 0700,
-     never regenerated).
+  1. The engine generates the admin login (`credentials:` below), keeps it
+     and writes it to ~/.panelalpha/app-credentials.env on every deploy.
   2. The jeedom service's entrypoint is files/panelalpha/jeedom/start.sh.
      It starts a background loop, then execs the image's unchanged
      /root/init.sh. As www-data, the loop runs seed.php through Jeedom's own
      user class: once `admin` exists and still accepts "admin", it sets the
-     generated password. A password that already differs is left alone, so a
+     engine's password. A password that already differs is left alone, so a
      password changed in the UI is kept. When done, it writes
      /run/panelalpha-seeded.
   3. The jeedom service publishes no port. Its healthcheck needs that marker,
@@ -63,4 +62,10 @@ description: >-
   a real domain is not affected. Memory: jeedom 96 MiB, proxy 13 MiB; the
   image is 4.8 GB.
 
-  Credentials: ~/.panelalpha/jeedom/credentials.txt.
+  The login is returned by GET /projects/{name}/app-credentials (MCP
+  app_credentials_get).
+credentials:
+  adopt_from: .panelalpha/jeedom/admin.env
+  fields:
+    JEEDOM_ADMIN_USER: {kind: username, value: admin}
+    JEEDOM_ADMIN_PASSWORD: {kind: password}

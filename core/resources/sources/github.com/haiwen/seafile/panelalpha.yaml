@@ -34,6 +34,11 @@ description: >-
   containers and roughly a gigabyte of images for features a file server does
   not need to come up.
 
+  Seafile has no sign-up page and no installer, so the first administrator is
+  created on first boot from the login the engine generates (`credentials:`
+  below, returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get) instead of upstream's me@example.com / asecret.
+
   The one value the recipe cannot generate is the account's public address, and
   Seafile wants it as a hostname plus a scheme rather than a URL:
   SEAFILE_SERVER_HOSTNAME and SEAFILE_SERVER_PROTOCOL, neither of which matches
@@ -51,3 +56,8 @@ description: >-
   been started rather than when Seafile answers; `ready` waits on the seafile
   healthcheck and nothing else, which makes `up -d` block until the site is
   really up.
+credentials:
+  login_path: /accounts/login/
+  fields:
+    INIT_SEAFILE_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    INIT_SEAFILE_ADMIN_PASSWORD: {kind: password}

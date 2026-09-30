@@ -58,4 +58,13 @@ description: >-
   a new SECRET_KEY logs everyone out and a new POSTGRES_PASSWORD locks the app
   out of its own database. ProjectEnvironment::apply() also republishes
   ~/project/.env as .env.default at mode 644, which is not where a database
-  password belongs.
+  password belongs. The administrator init creates has the login the engine
+  generates (`credentials:` below; returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get).
+credentials:
+  login_path: /accounts/login/
+  adopt_from: .panelalpha/tandoor/tandoor.env
+  fields:
+    TANDOOR_ADMIN_USER: {kind: username, value: admin}
+    TANDOOR_ADMIN_EMAIL: {kind: email, value: admin@localhost}
+    TANDOOR_ADMIN_PASSWORD: {kind: password}

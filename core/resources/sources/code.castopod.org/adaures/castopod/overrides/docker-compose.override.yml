@@ -27,7 +27,6 @@ services:
       #   /data/analytics.salt    the salt listener IPs are hashed with. It has
       #                           to be the same on the next deploy or every
       #                           returning listener counts as a new one.
-      #   /data/admin-credentials the generated instance owner, 0600.
       #
       # A redeploy clears and re-clones ~/project (engine#173), so a podcast
       # host that kept its episodes under the document root would lose every
@@ -39,6 +38,11 @@ services:
       # creates it before this mount is made, so Docker never gets to create it
       # as root.
       - ../.panelalpha/castopod:/data
+
+    # CASTOPOD_ADMIN_USERNAME / _EMAIL / _PASSWORD: the instance owner the
+    # install stage creates, generated and kept by the engine.
+    env_file:
+      - ../.panelalpha/app-credentials.env
 
     environment:
       # The one way to give this container a php.ini. The base image loads none

@@ -58,6 +58,9 @@ services:
     env_file:
       - .env
       - ../.panelalpha/tandoor/tandoor.env
+      # TANDOOR_ADMIN_USER / TANDOOR_ADMIN_PASSWORD / TANDOOR_ADMIN_EMAIL,
+      # generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       DB_ENGINE: django.db.backends.postgresql
       POSTGRES_HOST: db

@@ -8,8 +8,9 @@ services:
     restart: unless-stopped
     entrypoint: ["bash", "/panelalpha/start.sh"]
     env_file:
-      # JEEDOM_ADMIN_PASSWORD, read only by /panelalpha/seed.php.
-      - ../.panelalpha/jeedom/admin.env
+      # JEEDOM_ADMIN_PASSWORD, generated and kept by the engine; read only by
+      # /panelalpha/seed.php.
+      - ../.panelalpha/app-credentials.env
     environment:
       TZ: Etc/UTC
     volumes:

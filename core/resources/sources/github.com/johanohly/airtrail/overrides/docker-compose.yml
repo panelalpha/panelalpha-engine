@@ -25,11 +25,14 @@ services:
   airtrail:
     image: johly/airtrail:latest
     restart: unless-stopped
-    # DB_URL, BODY_SIZE_LIMIT, UPLOAD_LOCATION and the AIRTRAIL_OWNER_* values
-    # the seed step reads. All 0600, out of the compose file.
+    # DB_URL, BODY_SIZE_LIMIT, UPLOAD_LOCATION, then the AIRTRAIL_OWNER_* login
+    # the engine generated and keeps, which the seed step reads. All 0600, out
+    # of the compose file.
     env_file:
       - ../.panelalpha/airtrail/app.env
+      - ../.panelalpha/app-credentials.env
     environment:
+      AIRTRAIL_OWNER_DISPLAY_NAME: Administrator
       # Not a real address and not meant to survive. ComposePlaceholders rewrites
       # an ORIGIN-shaped key with a bare-localhost value to the account's public
       # https origin before the stack starts (PUBLIC_URL_KEY_PATTERN /

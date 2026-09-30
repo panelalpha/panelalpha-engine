@@ -35,12 +35,12 @@ services:
     image: anirdev/slink:v1.13.1
     restart: unless-stopped
     # .env is the platform-merged account env (touched by the prepare hook so
-    # `up` never aborts on a missing file); admin.env carries the admin
-    # username/email/password the hook generated once and keeps stable across
+    # `up` never aborts on a missing file); app-credentials.env carries the admin
+    # username/email/password the engine generated once and keeps stable across
     # redeploys. Paths are relative to ~/project, where the engine runs compose.
     env_file:
       - .env
-      - ../.panelalpha/slink/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       # Rewritten to the account's public https URL by the engine; drives the
       # SvelteKit origin check and every absolute/share link. Only public value.

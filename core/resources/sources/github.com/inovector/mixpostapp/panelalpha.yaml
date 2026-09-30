@@ -16,11 +16,11 @@ description: >-
   exposed. The hook therefore generates every secret once into
   `~/.panelalpha/mixpost/` (0600, the only writable dir that survives a rebuild)
   and reuses it on every later deploy, and a one-shot `init` service migrates
-  the schema and seeds `admin@example.com` with a generated password *before*
-  the app container starts. By the time `start.sh` runs its check the e-mail
-  already exists, so the insecure default is never created; the strong password
-  is what an operator logs in with and is recorded in
-  `~/.panelalpha/mixpost/admin.txt`.
+  the schema and seeds `admin@example.com` with the password the engine
+  generates (`credentials:` below) *before* the app container starts. By the
+  time `start.sh` runs its check the e-mail already exists, so the insecure
+  default is never created; the login is returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get).
 
   `APP_URL` is left as `http://localhost` in the compose environment on purpose:
   the platform rewrites it to the project's public https URL before the stack
@@ -29,3 +29,9 @@ description: >-
   it. Social-account providers (X/Twitter, Mastodon, Facebook, …) need operator
   API keys and are configured from the running dashboard; they are left
   unconfigured here and are an operator step, out of scope for the deploy.
+credentials:
+  login_path: /mixpost/login
+  adopt_from: .panelalpha/mixpost/secrets.env
+  fields:
+    ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    ADMIN_PASSWORD: {kind: password}

@@ -44,12 +44,12 @@ services:
       db:
         condition: service_healthy
     # .env carries account-overridable defaults; app.env carries the persisted
-    # DB password + signing secrets; admin.env carries the seeded admin password
-    # and never reaches the long-running app container.
+    # DB password + signing secrets; app-credentials.env carries the engine's
+    # admin login and never reaches the long-running app container.
     env_file:
       - .env
       - ../.panelalpha/mobilizon/app.env
-      - ../.panelalpha/mobilizon/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       MOBILIZON_DATABASE_HOST: db
       MOBILIZON_DATABASE_PORT: "5432"

@@ -5,9 +5,10 @@
 # (HTTP_USER/HTTP_PASS empty) — a public deploy with no auth is world-
 # controllable. This hook writes config.ini with BASIC auth turned on, into the
 # account's persistent ~/.panelalpha (the only rebuild-surviving writable dir;
-# ~/project is wiped every redeploy, engine#173). The password and API key are
-# generated ONCE and reused on every redeploy — never regenerated, never placed
-# in ~/project.
+# ~/project is wiped every redeploy, engine#173). The login is the engine's
+# (`credentials:` in panelalpha.yaml, ~/.panelalpha/app-credentials.env, written
+# before this hook runs); the API key is generated ONCE here. Neither is ever
+# placed in ~/project.
 set -e
 
 DATA_DIR="${HOME}/.panelalpha/lazylibrarian"
@@ -18,13 +19,27 @@ CONFIG="${DATA_DIR}/config.ini"
 touch "${HOME}/project/.env" 2>/dev/null || true
 
 if [ -f "${CONFIG}" ]; then
+    # Once, for an account the older recipe seeded: while config.ini still holds
+    # the password its record names, move it to the engine's. The record goes.
+    OLD="${DATA_DIR}/panelalpha-credentials.txt"
+    if [ -f "${OLD}" ]; then
+        old_pw="$(sed -n 's/^  password: //p' "${OLD}")"
+        # LazyLibrarian rewrites the file with lower-case keys (http_pass).
+        if [ -n "${old_pw}" ] && grep -qiE "^http_pass *= *${old_pw}\$" "${CONFIG}"; then
+            set -a; . "${HOME}/.panelalpha/app-credentials.env"; set +a
+            sed -i -E "s/^(http_pass) *=.*/\1 = ${LAZYLIBRARIAN_ADMIN_PASSWORD}/I" "${CONFIG}"
+            echo "LazyLibrarian: moved the seeded login to the engine's credentials."
+        fi
+        rm -f "${OLD}"
+    fi
     # Redeploy: reuse the existing credentials and state untouched.
     echo "LazyLibrarian: existing config.ini found, reusing credentials."
     exit 0
 fi
 
-HTTP_USER="admin"
-HTTP_PASS="$(openssl rand -hex 16)"
+set -a; . "${HOME}/.panelalpha/app-credentials.env"; set +a
+HTTP_USER="${LAZYLIBRARIAN_ADMIN_USER}"
+HTTP_PASS="${LAZYLIBRARIAN_ADMIN_PASSWORD}"
 API_KEY="$(openssl rand -hex 16)"   # 32 hex chars — LazyLibrarian requires len==32
 
 umask 077
@@ -46,15 +61,5 @@ HTTP_ROOT =
 HTTP_PROXY = 0
 EOF
 chmod 600 "${CONFIG}"
-
-# Owner-recoverable credential record — 0600, inside the persistent datadir,
-# never in ~/project.
-cat > "${DATA_DIR}/panelalpha-credentials.txt" <<EOF
-LazyLibrarian web login (BASIC auth)
-  username: ${HTTP_USER}
-  password: ${HTTP_PASS}
-  api_key:  ${API_KEY}
-EOF
-chmod 600 "${DATA_DIR}/panelalpha-credentials.txt"
 
 echo "LazyLibrarian: seeded config.ini with BASIC auth (user '${HTTP_USER}')."

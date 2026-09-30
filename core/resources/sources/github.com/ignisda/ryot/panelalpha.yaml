@@ -34,9 +34,10 @@ description: >-
   from boot, which disables the sign-up page and refuses registerUser for any
   caller whose adminAccessToken does not match SERVER_ADMIN_ACCESS_TOKEN. An
   init sidecar -- on the internal network, holding that token -- then registers
-  the owner over the GraphQL API with a password hooks/prepare.sh generates once
-  into ~/.panelalpha/ryot/ryot.env (0600 in 0700) and records in
-  credentials.txt (username admin). It is idempotent: on a redeploy the owner
+  the owner over the GraphQL API with the login the engine generates
+  (`credentials:` below, username admin), returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get). It is
+  idempotent: on a redeploy the owner
   already exists in the persisted database, so it logs in with the stored
   password, confirms, and exits. The ready gate waits on the init, so the deploy
   reports finished only after the owner is claimed. There is never a window in
@@ -63,3 +64,8 @@ description: >-
   serves before it registers the owner; the ready gate waits on the init, so
   `docker compose up` returns only once Ryot actually answers and its owner
   exists (engine#204).
+credentials:
+  adopt_from: .panelalpha/ryot/ryot.env
+  fields:
+    RYOT_OWNER_USERNAME: {kind: username, value: admin}
+    RYOT_OWNER_PASSWORD: {kind: password}

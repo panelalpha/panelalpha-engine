@@ -4,8 +4,10 @@
 # ~/project/docker-compose.yml, before detection and before `up`.
 #
 # Four jobs:
-#   1. The secret_key and the administrator password -- generated once into
-#      ~/.panelalpha/readeck/, the one directory a redeploy cannot reach.
+#   1. The secret_key -- generated once into ~/.panelalpha/readeck/, the one
+#      directory a redeploy cannot reach. The administrator login is the
+#      engine's (`credentials:` in panelalpha.yaml), written to
+#      ~/.panelalpha/app-credentials.env before this hook runs.
 #   2. config.toml -- Readeck's config file, pinned so the secret_key is stable.
 #   3. The image tag, from the one field of the checkout the recipe reads.
 #   4. docker-compose.override.yml -- the account's uid/gid and the image, which
@@ -15,8 +17,6 @@ cd ~/project
 
 DATA_HOME="${HOME}/.panelalpha/readeck"
 CONFIG="${DATA_HOME}/config.toml"
-ENV_STORE="${DATA_HOME}/readeck.env"
-NOTE="${DATA_HOME}/credentials.txt"
 FALLBACK_IMAGE="codeberg.org/readeck/readeck:latest"
 
 say() { echo "[panelalpha] readeck: $*" >&2; }
@@ -80,46 +80,6 @@ else
     say "reusing config.toml in ${DATA_HOME}"
 fi
 chmod 600 "${CONFIG}"
-
-if [ ! -f "${ENV_STORE}" ]; then
-    ADMIN_USER=admin
-    # No '/', '+' or '=': read back by a POSIX shell, written into an env file
-    # with no quoting, and typed into a login form.
-    ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
-    (
-        umask 077
-        cat > "${ENV_STORE}" <<EOF
-# Read only by the one-shot init container, only to create the administrator
-# when the instance has none. Never read by the running server.
-READECK_ADMIN_USER=${ADMIN_USER}
-READECK_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-READECK_ADMIN_EMAIL=admin@localhost
-EOF
-    )
-    (
-        umask 077
-        cat > "${NOTE}" <<EOF
-Readeck administrator for this account
-======================================
-
-  username: ${ADMIN_USER}
-  password: ${ADMIN_PASSWORD}
-
-Created on the first deploy and never changed by PanelAlpha afterwards. If you
-change the password inside Readeck, this file is out of date and the one in the
-application wins -- nothing here overwrites it.
-
-Readeck has no public sign-up. Create further users from the application's
-admin area (your avatar -> Admin -> Users) or with the CLI
-(readeck user ...). The anonymous first-run form at /onboarding is closed the
-moment this administrator exists, which is before the site is ever reachable.
-EOF
-    )
-    say "administrator credentials written to ${NOTE}"
-else
-    say "reusing the administrator credentials in ${ENV_STORE}"
-fi
-chmod 600 "${ENV_STORE}" "${NOTE}" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # 3. Which image.
@@ -187,7 +147,7 @@ cat > "${DATA_HOME}/README.panelalpha.md" <<'MDEOF'
     https://<your domain>/login
 
 username  `admin`
-password  in the file `credentials.txt` beside this one
+password  returned by GET /projects/{name}/app-credentials (MCP app_credentials_get)
 
 Change it under your avatar -> Profile. Create more users under your avatar ->
 Admin -> Users. Readeck has no public sign-up, so nobody can create an account
@@ -204,9 +164,7 @@ you deliberately create a public share link for one (a bookmark's Share menu).
 
     ~/.panelalpha/readeck/
       README.panelalpha.md   this file
-      credentials.txt        the generated administrator password, 0600
       config.toml            the secret_key that signs your sessions; keep it
-      readeck.env            the credentials init uses on a fresh instance
       data/db.sqlite3        the database: bookmarks, users, labels, sessions
       data/                  extracted articles, images and content-scripts
 
@@ -226,4 +184,4 @@ belongs in it. Backing up means copying `~/.panelalpha/readeck/`.
 MDEOF
 chmod 600 "${DATA_HOME}/README.panelalpha.md" 2>/dev/null || true
 
-say "prepared; credentials in ${NOTE}"
+say "prepared"

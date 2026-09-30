@@ -141,9 +141,13 @@ domain.
 
 **The credential is outside `~/project`.** Every deploy empties the checkout
 (engine#173), and `ProjectEnvironment::apply()` republishes `~/project/.env` as
-a world-readable `.env.default`, so the password lives in
-`~/.panelalpha/manticore/manticore.env` at 0600 inside a 0700 directory, reached
-by a second `env_file:` entry. `~/project/.env` carries only the image tag.
+a world-readable `.env.default`, so the login lives in the engine
+(`credentials:` in `panelalpha.yaml`, returned by
+`GET /projects/{name}/app-credentials`, MCP `app_credentials_get`) and reaches
+the containers from `~/.panelalpha/app-credentials.env` at 0600, beside the
+search settings in `~/.panelalpha/manticore/manticore.env`, both by `env_file:`.
+An account deployed before this keeps its password from `manticore.env`
+(`adopt_from`). `~/project/.env` carries only the image tag.
 `auth.json` -- the hash the daemon actually honours -- is in `data_dir`, i.e.
 the `manticore_data` volume, which is also what makes the login survive a
 rebuild.

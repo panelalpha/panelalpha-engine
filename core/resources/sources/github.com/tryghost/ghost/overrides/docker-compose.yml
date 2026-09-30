@@ -63,8 +63,8 @@ services:
 
   # One-shot, and `ghost` does not start until it has exited 0. Ghost's owner
   # setup is an unauthenticated page at /ghost/: whoever submits it first owns
-  # the site. So the setup is completed here, with the credentials prepare.sh
-  # generated into ~/.panelalpha/ghost/, before anything publishes a port. It
+  # the site. So the setup is completed here, with the login the engine
+  # generated and keeps, before anything publishes a port. It
   # boots Ghost on loopback in this container (no ports), goes through Ghost's
   # own setup endpoint and stops it. A site that already has an owner is left
   # alone, and costs one SELECT.
@@ -73,8 +73,9 @@ services:
     restart: "no"
     environment: *ghost-environment
     env_file:
-      # PA_OWNER_NAME / _EMAIL / _PASSWORD. Only this service reads them.
-      - ../.panelalpha/ghost/owner.env
+      # PA_OWNER_EMAIL / PA_OWNER_PASSWORD, generated and kept by the engine.
+      # Only this service reads them.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ghost_content:/var/lib/ghost/content
       - ./panelalpha/ghost:/pa:ro

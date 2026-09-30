@@ -36,16 +36,23 @@ description: >-
   baseURL and trusted origin, so login and CSRF match the real host over HTTPS.
 
   OWNER AND REGISTRATION. Kan has no admin CLI and no "first user is admin"
-  concept -- each user owns the workspaces they create -- so hooks/prepare.sh
-  generates an owner password once and pa/seed.cjs writes the owner straight
+  concept -- each user owns the workspaces they create -- so the engine
+  generates the owner login (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get) and
+  pa/seed.cjs writes the owner straight
   into the user/account tables exactly as Better Auth's email sign-up would
   (credential account, scrypt salt:hash), idempotently. Public sign-up is then
   closed with NEXT_PUBLIC_DISABLE_SIGN_UP=true (the user.create.before hook
   rejects anyone without a pending invitation), so only the owner, and people
   the owner invites, can register.
 
-  SECRETS. BETTER_AUTH_SECRET, the database password and the owner password are
-  written once into ~/.panelalpha/kan/ (0600 in 0700) -- the only writable place
-  a deploy does not delete -- and reused across redeploys, so a rebuild does not
-  log everyone out, lock the app out of the pgdata volume, or reset the owner.
-  Onboarding notes go in credentials.txt.
+  SECRETS. BETTER_AUTH_SECRET and the database password are written once into
+  ~/.panelalpha/kan/ (0600 in 0700) -- the only writable place a deploy does
+  not delete -- and reused across redeploys, so a rebuild does not log everyone
+  out or lock the app out of the pgdata volume.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/kan/owner.env
+  fields:
+    KAN_OWNER_EMAIL: {kind: email, value: owner@kan.local}
+    KAN_OWNER_PASSWORD: {kind: password}

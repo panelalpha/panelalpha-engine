@@ -49,8 +49,9 @@ description: >-
   which is in every copy of create.sql on the internet, and there is no
   installer, no first-run wizard and no environment variable that changes it.
   A stock deployment on a public HTTPS name belongs to whoever opens it first.
-  Here, hooks/prepare.sh generates a password per account and bcrypt-hashes it
-  with the account's own PHP; a one-shot `credentials` service applies it
+  Here, the engine generates the login (`credentials:` below; returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get),
+  hooks/prepare.sh bcrypt-hashes the password with the account's own PHP; a one-shot `credentials` service applies it
   directly to the users table and then *verifies* that no row is left on the
   shipped hash, exiting non-zero if one is; and zabbix-web -- the only service
   with a published port -- has `depends_on: credentials:
@@ -107,3 +108,8 @@ description: >-
   published port the engine's proxy has no way to express. No SMTP is
   configured either, so triggers fire and show in the UI but email nothing
   until a media type is filled in.
+credentials:
+  adopt_from: .panelalpha/zabbix/credentials
+  fields:
+    ZABBIX_ADMIN_USER: {kind: username, value: Admin}
+    ZABBIX_ADMIN_PASSWORD: {kind: password}

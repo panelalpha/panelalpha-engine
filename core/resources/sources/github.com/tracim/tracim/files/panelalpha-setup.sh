@@ -37,7 +37,7 @@ fi
 
 # JSON string escaping for the two values that reach a request body. The
 # generated password is alphanumeric by construction and the login is an email
-# address, so this only has to survive what a hand-edited .env could put there.
+# address, so this only has to survive what a project env var could put there.
 json_escape() {
     printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
@@ -52,7 +52,7 @@ login_status() {
 }
 
 # Already done — the usual case on a redeploy, when the SQLite volume survived
-# and .env carries the password that was set against it the first time.
+# and the engine delivers the password that was set against it the first time.
 if [ "$(login_status "${WANTED}")" = "200" ]; then
     say "the admin password is already the recorded one; nothing to do"
     exit 0
@@ -64,7 +64,7 @@ fi
 if [ "$(login_status "${SHIPPED}")" != "200" ]; then
     say "the admin password is neither the recorded one nor the one Tracim ships;"
     say "somebody has changed it from inside Tracim. Leaving it alone."
-    say "~/project/.panelalpha-admin-password is therefore out of date."
+    say "the login GET /projects/{name}/app-credentials returns is therefore out of date."
     exit 0
 fi
 
@@ -100,5 +100,5 @@ if [ "$(login_status "${WANTED}")" != "200" ]; then
     exit 1
 fi
 
-say "admin ${LOGIN} now uses the password in ~/project/.panelalpha-admin-password"
+say "admin ${LOGIN} now uses the password the engine generated"
 exit 0

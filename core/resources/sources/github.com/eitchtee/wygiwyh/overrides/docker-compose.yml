@@ -63,6 +63,8 @@ services:
       # they are not clobbered by an empty default.
       - .env
       - ../.panelalpha/wygiwyh/app.env
+      # ADMIN_EMAIL / ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       DEBUG: "false"
       HTTPS_ENABLED: "true"

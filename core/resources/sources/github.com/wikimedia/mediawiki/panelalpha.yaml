@@ -70,7 +70,9 @@ description: >-
   been handed a public HTTPS name that is a form on the open internet that
   creates a wiki and its bureaucrat. The install is run from the install stage
   instead -- MediaWiki's own `maintenance/run.php install`, not a
-  reimplementation of it -- and files/mw-config/.htaccess denies the directory
+  reimplementation of it, with the bureaucrat login the engine generates
+  (`credentials:` below; returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get) -- and files/mw-config/.htaccess denies the directory
   outright, which is what upstream's INSTALL file tells an administrator to do
   by hand once they are finished.
 
@@ -157,3 +159,9 @@ commands:
       /data/LocalSettings.php is there. On the build stage it would not run at
       all (engine#171).
     run: 'sh panelalpha-setup.sh'
+credentials:
+  login_path: /index.php/Special:UserLogin
+  adopt_from: .panelalpha/mediawiki/admin-credentials
+  fields:
+    MEDIAWIKI_ADMIN_USERNAME: {kind: username, value: Admin}
+    MEDIAWIKI_ADMIN_PASSWORD: {kind: password}

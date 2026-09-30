@@ -50,8 +50,9 @@ Secrets, generated once by `hooks/prepare.sh` into `~/.panelalpha/ghost/` —
   Earlier versions of this recipe wrote them only to `~/project/.env`, which a
   redeploy deletes; on an account deployed that way the hook adopts them from
   the running MySQL container's environment instead of generating new ones.
-- `owner.env` — the owner's email and password, read only by `init`.
-- `credentials.txt` — the same, for the account owner to read.
+
+The owner's email and password are the engine's (`credentials:` in
+`panelalpha.yaml`), in `~/.panelalpha/app-credentials.env`, read only by `init`.
 
 ## `url`
 
@@ -127,9 +128,9 @@ exited 0. `files/panelalpha/ghost/init.sh`:
 4. Stops Ghost. A setup that fails exits non-zero, `ghost` never starts, and
    the deploy fails rather than serving an unclaimed site.
 
-The owner signs in at `/ghost/` with the email and password in
-`~/.panelalpha/ghost/credentials.txt` (`owner@example.com`, to be changed to a
-real address under Settings -> Staff).
+The owner signs in at `/ghost/` with the email and password
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) returns
+(`owner@example.com`, to be changed to a real address under Settings -> Staff).
 
 **Staff device verification is off.** Ghost 6 mails a code to every staff
 sign-in from a new browser (`security.staffDeviceVerification`, on in its

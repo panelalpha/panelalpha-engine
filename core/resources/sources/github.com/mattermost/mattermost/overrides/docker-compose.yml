@@ -28,9 +28,11 @@ services:
       - shared_buffers=64MB
       - -c
       - max_connections=50
+    # POSTGRES_PASSWORD, generated once by hooks/prepare.sh.
+    env_file:
+      - ../.panelalpha/mattermost/db.env
     environment:
       POSTGRES_USER: mmuser
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: mattermost
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -48,12 +50,15 @@ services:
     restart: unless-stopped
     ports:
       - "8065:8065"
+    # MM_SQLSETTINGS_DATASOURCE, with the password hooks/prepare.sh generated.
+    env_file:
+      - ../.panelalpha/mattermost/db.env
     environment:
       TZ: UTC
-      # The two values the server cannot start without. There is no sqlite or
-      # embedded fallback: with no datasource the server exits on boot.
+      # The two values the server cannot start without (the datasource comes
+      # from db.env). There is no sqlite or embedded fallback: with no
+      # datasource the server exits on boot.
       MM_SQLSETTINGS_DRIVERNAME: postgres
-      MM_SQLSETTINGS_DATASOURCE: postgres://mmuser:${POSTGRES_PASSWORD}@postgres:5432/mattermost?sslmode=disable&connect_timeout=10
       # Console logging so a failed boot is visible in `docker logs`; the
       # server also writes to /mattermost/logs, which nobody here reads.
       MM_LOGSETTINGS_ENABLECONSOLE: "true"
@@ -104,9 +109,10 @@ services:
       # account's own address reaches a server whose config key the engine
       # cannot recognise.
       PA_PUBLIC_URL: http://localhost
-      MM_ADMIN_EMAIL: ${MM_ADMIN_EMAIL}
-      MM_ADMIN_USERNAME: ${MM_ADMIN_USERNAME}
-      MM_ADMIN_PASSWORD: ${MM_ADMIN_PASSWORD}
+    # MM_ADMIN_EMAIL / MM_ADMIN_USERNAME / MM_ADMIN_PASSWORD, generated and kept
+    # by the engine.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha-setup.sh:/panelalpha-setup.sh:ro
     entrypoint: ["/bin/sh", "/panelalpha-setup.sh"]

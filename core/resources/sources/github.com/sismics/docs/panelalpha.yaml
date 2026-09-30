@@ -12,9 +12,11 @@ description: >-
   it with the current release image docker.io/sismics/docs:v1.11 on
   postgres:16-alpine (pgdata volume); /data is the teedy-data volume.
 
-  NO DEFAULT LOGIN. Teedy seeds admin/admin. hooks/prepare.sh generates the
-  admin and database passwords once into ~/.panelalpha/teedy/ (0600 in 0700,
-  credentials.txt holds the login) and passes the admin's bcrypt hash as
+  NO DEFAULT LOGIN. Teedy seeds admin/admin. The engine generates the admin
+  login (`credentials:` below; returned by GET /projects/{name}/app-credentials,
+  MCP app_credentials_get); hooks/prepare.sh generates the database password
+  once into ~/.panelalpha/teedy/ (0600 in 0700) and passes the admin's bcrypt
+  hash as
   DOCS_ADMIN_PASSWORD_INIT, upstream's own switch: AppContext replaces the
   password while the webapp starts, before Jetty opens the port, and only
   while it is still the upstream default, so a password changed in the UI
@@ -32,3 +34,7 @@ description: >-
   /.env, /.git/config, /docker-compose.yml, /docs.mv.db, /WEB-INF/web.xml all
   404; anonymous /api/document/list and PUT /api/user 403. App ~470-600 MiB,
   db ~40-75 MiB.
+credentials:
+  fields:
+    TEEDY_ADMIN_USER: {kind: username, value: admin}
+    TEEDY_ADMIN_PASSWORD: {kind: password}

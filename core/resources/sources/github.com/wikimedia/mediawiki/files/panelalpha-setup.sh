@@ -20,7 +20,8 @@ die() { log "$*"; exit 1; }
 DATA=/data
 LS="${DATA}/LocalSettings.php"
 PA_SETTINGS="${DATA}/PanelAlphaSettings.php"
-CREDENTIALS="${DATA}/admin-credentials"
+# The first bureaucrat's login, generated and kept by the engine (NAME='value').
+CREDENTIALS=/pa/app-credentials.env
 
 # ---------------------------------------------------------------------------
 # 0. What the container was handed.
@@ -161,10 +162,10 @@ else
     # it: the same CliInstaller that `maintenance/run.php install` is, with
     # the same environment checks, the same ~50 tables, the same Main Page and
     # the same LocalSettingsGenerator.
-    [ -f "${CREDENTIALS}" ] || die "${CREDENTIALS} is missing; hooks/prepare.sh did not run"
+    [ -f "${CREDENTIALS}" ] || die "${CREDENTIALS} is missing; is the compose override still in overrides/?"
 
     # shellcheck disable=SC1090
-    MW_ADMIN_USER=$(sed -n 's/^MEDIAWIKI_ADMIN_USERNAME=//p' "${CREDENTIALS}" | head -n 1)
+    MW_ADMIN_USER=$(sed -n "s/^MEDIAWIKI_ADMIN_USERNAME='\{0,1\}\([^']*\)'\{0,1\}$/\1/p" "${CREDENTIALS}" | head -n 1)
     [ -n "${MW_ADMIN_USER}" ] || MW_ADMIN_USER=Admin
 
     # The password goes in through --passfile rather than --pass. An argument
@@ -178,7 +179,7 @@ else
     chmod 600 "${PASSFILE}" "${DBPASSFILE}"
     # shellcheck disable=SC2064
     trap "rm -f '${PASSFILE}' '${DBPASSFILE}'" EXIT INT TERM
-    sed -n 's/^MEDIAWIKI_ADMIN_PASSWORD=//p' "${CREDENTIALS}" | head -n 1 \
+    sed -n "s/^MEDIAWIKI_ADMIN_PASSWORD='\{0,1\}\([^']*\)'\{0,1\}$/\1/p" "${CREDENTIALS}" | head -n 1 \
         | tr -d '\n' > "${PASSFILE}"
     printf '%s' "${DB_PASSWORD:-}" > "${DBPASSFILE}"
     [ -s "${PASSFILE}" ] || die "no MEDIAWIKI_ADMIN_PASSWORD in ${CREDENTIALS}"
@@ -215,7 +216,7 @@ else
     rm -f "${PASSFILE}" "${DBPASSFILE}"
     trap - EXIT INT TERM
     chmod 600 "${LS}"
-    log "installed; the bureaucrat's password is in ~/.panelalpha/mediawiki/admin-credentials"
+    log "installed; GET /projects/{name}/app-credentials returns the bureaucrat's login"
 fi
 
 # ---------------------------------------------------------------------------

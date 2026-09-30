@@ -31,8 +31,10 @@ services:
         condition: service_healthy
     env_file:
       - ../.panelalpha/evershop/app.env
-      - ../.panelalpha/evershop/admin.env
+      # ADMIN_EMAIL / ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
+      ADMIN_NAME: Administrator
       DB_HOST: database
       DB_PORT: "5432"
       DB_USER: evershop

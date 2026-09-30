@@ -1,6 +1,7 @@
 #!/bin/bash
-# Generate the secrets and the admin password once, where a redeploy will not
-# wipe them (~/project is emptied on every deploy, engine#173), and seed .env.
+# Generate the secrets once, where a redeploy will not wipe them (~/project is
+# emptied on every deploy, engine#173), and seed .env. The admin login is the
+# engine's (`credentials:` in panelalpha.yaml), in ~/.panelalpha/app-credentials.env.
 set -e
 cd ~/project
 
@@ -12,9 +13,8 @@ chmod 700 "${HOME}/.panelalpha" "${STORE}"
 
 rnd() { openssl rand -base64 "$1" | tr -d '\n=/+'; }
 
-if [ ! -f "${STORE}/db.env" ] || [ ! -f "${STORE}/app.env" ] || [ ! -f "${STORE}/admin.env" ]; then
+if [ ! -f "${STORE}/db.env" ] || [ ! -f "${STORE}/app.env" ]; then
     PG_PASSWORD="$(rnd 24)"
-    ADMIN_PASSWORD="$(rnd 18)"
     (
         umask 077
         printf 'POSTGRES_PASSWORD=%s\n' "${PG_PASSWORD}" > "${STORE}/db.env"
@@ -26,26 +26,8 @@ SECRET_KEY=$(openssl rand -hex 32)
 SETTINGS_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr '+/' '-_')
 DATABASE_URL=postgresql+psycopg2://timetracker:${PG_PASSWORD}@db:5432/timetracker
 ENV_EOF
-        printf 'TT_ADMIN_PASSWORD=%s\n' "${ADMIN_PASSWORD}" > "${STORE}/admin.env"
-        cat > "${STORE}/credentials.txt" <<NOTE_EOF
-TimeTracker on this account
-===========================
-
-The administrator was given this password on the first deploy, before the
-site was reachable. Self-registration is off and the first-run wizard was
-completed with its defaults (Admin > Settings changes them).
-
-ADMIN LOGIN
-  URL:      <this account's URL>/login
-  Username: admin
-  Password: ${ADMIN_PASSWORD}
-
-Change the password under your profile. The admin adds users from
-Admin > Users. A redeploy resets nothing: data lives on the db_data,
-app_data and app_uploads volumes.
-NOTE_EOF
     )
-    say "secrets and admin credentials written to ${STORE}"
+    say "secrets written to ${STORE}"
 else
     say "reusing the secrets in ${STORE}"
 fi

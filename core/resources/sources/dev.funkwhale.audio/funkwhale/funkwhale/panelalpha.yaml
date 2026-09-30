@@ -62,7 +62,10 @@ description: >-
   4. The superuser. Funkwhale ships no default account and its API is unusable
   until one exists. The init one-shot creates it non-interactively with
   `funkwhale-manage fw users create --superuser` before the api serves,
-  idempotent on a re-run, password generated once into ~/.panelalpha/funkwhale/.
+  idempotent on a re-run, with the login the engine generates (`credentials:`
+  below; GET /projects/{name}/app-credentials, MCP app_credentials_get,
+  returns it). Funkwhale blocklists reserved usernames such as `admin`, so the
+  owner is `administrator`.
 
   Persistence lives in named volumes only, never ~/project (emptied before every
   clone, engine#173): pgdata for PostgreSQL, redisdata for the broker, media for
@@ -83,3 +86,10 @@ description: >-
   inbound mail is out of scope. Object storage (S3/minio) and in-place music
   import are supported by the images but left off -- local disk on the media
   volume is the default here.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/funkwhale/funkwhale.env
+  fields:
+    FUNKWHALE_ADMIN_USERNAME: {kind: username, value: administrator}
+    FUNKWHALE_ADMIN_EMAIL: {kind: email, value: admin@localhost}
+    FUNKWHALE_CLI_USER_PASSWORD: {kind: password}

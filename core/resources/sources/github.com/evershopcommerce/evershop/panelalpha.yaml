@@ -15,10 +15,17 @@ description: >-
   A one-shot `seed` service runs before the store on every boot: a private
   loopback `evershop start` applies the release's migrations, then, only while
   admin_user is empty, EverShop's own `user:create` adds the administrator
-  with a generated password. The published store starts after the seed.
+  with the login the engine generates (`credentials:` below); GET
+  /projects/{name}/app-credentials (MCP app_credentials_get) returns it. The published store starts after the seed.
 
   SECRETS. hooks/prepare.sh writes the Postgres password, the session cookie
   secret (otherwise the built-in "keyboard cat"), the admin/customer JWT
-  secrets, the order-tracking token secret and the admin password once to
-  ~/.panelalpha/evershop/ (0600 in 0700) with a credentials.txt note.
+  secrets and the order-tracking token secret once to ~/.panelalpha/evershop/
+  (0600 in 0700).
   TRUST_PROXY_HOPS=1 so rate limiting reads the proxy-appended client address.
+credentials:
+  login_path: /admin/login
+  adopt_from: .panelalpha/evershop/admin.env
+  fields:
+    ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    ADMIN_PASSWORD: {kind: password}

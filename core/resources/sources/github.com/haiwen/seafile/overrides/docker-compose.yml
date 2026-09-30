@@ -73,6 +73,12 @@ services:
     # the account's public hostname arrives as a URL and Seafile wants it split
     # into host and scheme, and seahub's gunicorn defaults to five workers.
     entrypoint: ["/bin/bash", "/panelalpha-seafile-init.sh"]
+    # INIT_SEAFILE_ADMIN_EMAIL / INIT_SEAFILE_ADMIN_PASSWORD, generated and kept
+    # by the engine. There is no sign-up page and no installer: start.py writes
+    # them to conf/admin.txt on first boot, seahub.sh consumes it creating the
+    # superuser, and start.py deletes the file again.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha-seafile-init.sh:/panelalpha-seafile-init.sh:ro
       # Everything the server keeps: conf/, ccnet/, seafile-data/ (the block
@@ -99,11 +105,6 @@ services:
       # Signs the tokens seahub hands the file server and seadoc. Seahub starts
       # without it and then fails every upload and download.
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
-      # There is no sign-up page and no installer. start.py writes these to
-      # conf/admin.txt on first boot, seahub.sh consumes it creating the
-      # superuser, and start.py deletes the file again.
-      INIT_SEAFILE_ADMIN_EMAIL: ${INIT_SEAFILE_ADMIN_EMAIL}
-      INIT_SEAFILE_ADMIN_PASSWORD: ${INIT_SEAFILE_ADMIN_PASSWORD}
       SITE_ROOT: /
       NON_ROOT: "false"
       SEAFILE_LOG_TO_STDOUT: "true"

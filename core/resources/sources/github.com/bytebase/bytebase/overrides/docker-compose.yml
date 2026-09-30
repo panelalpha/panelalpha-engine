@@ -61,7 +61,7 @@ services:
   # server is healthy. Bytebase's setup makes the FIRST caller the workspace
   # owner and Community Edition has no env/flag to pre-seed it, so this closes
   # that window: it runs on the internal network before the public proxy is even
-  # wired, using the password hooks/prepare.sh generated. Idempotent -- on a
+  # wired, using the login the engine generated. Idempotent -- on a
   # redeploy the admin already exists in the persisted volume, a login with the
   # stored password succeeds, and it exits without touching anything.
   bootstrap:
@@ -70,8 +70,9 @@ services:
     depends_on:
       app:
         condition: service_healthy
+    # BB_ADMIN_EMAIL / BB_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/bytebase/admin.env
+      - ../.panelalpha/app-credentials.env
     entrypoint:
       - /bin/sh
       - -c

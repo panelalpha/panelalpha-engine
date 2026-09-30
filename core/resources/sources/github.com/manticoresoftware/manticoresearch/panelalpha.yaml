@@ -16,8 +16,15 @@ description: >-
   manticoresearch/manticore image instead. Authentication is the whole of why
   this recipe exists: `auth = 1` is in the config from the first boot, so the
   daemon answers 401 to every request, including `/`, before any user exists,
-  and an admin login generated per account is bootstrapped into it by
-  `searchd --auth-non-interactive` from inside the container. A `ready` gate
+  and the admin login the engine generates (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get) is
+  bootstrapped into it by `searchd --auth-non-interactive` from inside the
+  container. A `ready` gate
   refuses the deploy unless an anonymous request is still refused and the
   generated credential still works, so an instance that failed to lock itself
   never reaches a customer's domain.
+credentials:
+  adopt_from: .panelalpha/manticore/manticore.env
+  fields:
+    MANTICORE_ADMIN_USER: {kind: username, value: pa_admin}
+    MANTICORE_ADMIN_PASSWORD: {kind: password, symbol: true}

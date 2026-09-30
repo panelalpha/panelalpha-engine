@@ -16,14 +16,21 @@ description: >-
   and AUTH_FIRST_USER_AS_ADMIN both default true) -- first visitor wins. The
   published app runs with registration disabled. A one-shot `seed` service
   runs only on the first boot: it migrates, starts Papra on loopback inside
-  its own container with registration enabled, creates the owner
-  (admin@<domain>, generated password) through Papra's own sign-up API, and
-  exits; a marker on the data volume makes later boots a no-op. Email
+  its own container with registration enabled, creates the owner with the
+  login the engine generates (`credentials:` below; GET
+  /projects/{name}/app-credentials, MCP app_credentials_get, returns it)
+  through Papra's own sign-up API, and exits; a marker on the data volume makes later boots a no-op. Email
   verification is off by default, so the owner can log in without SMTP.
 
   SECRETS AND PERSISTENCE. hooks/prepare.sh generates AUTH_SECRET (which
-  signs sessions; left unset Papra falls back to a built-in default) and the
-  owner password once into ~/.panelalpha/papra/ (0600 in 0700). The SQLite
+  signs sessions; left unset Papra falls back to a built-in default) once into
+  ~/.panelalpha/papra/ (0600 in 0700). The SQLite
   database and uploaded documents live on the papra-data named volume, so both
   survive a redeploy. APP_BASE_URL is the account's public URL, which Papra
   also trusts as the auth origin.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/papra/admin.env
+  fields:
+    PAPRA_ADMIN_EMAIL: {kind: email, value: "admin@{host}"}
+    PAPRA_ADMIN_PASSWORD: {kind: password}

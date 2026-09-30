@@ -22,8 +22,10 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       QUEUE_CONNECTION: redis
       MIXPOST_DISK: public
-      ADMIN_EMAIL: ${ADMIN_EMAIL}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    # ADMIN_EMAIL / ADMIN_PASSWORD, generated and kept by the engine. The e-mail
+    # is the image's default admin address, so start.sh never creates its own.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     entrypoint: ["/bin/sh"]
     command: ["/panelalpha/seed.sh"]
     volumes:

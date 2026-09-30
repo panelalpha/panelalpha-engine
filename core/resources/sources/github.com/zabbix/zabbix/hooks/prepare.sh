@@ -27,8 +27,9 @@ if [ ! -f "${STATE}/secrets" ]; then
     # would be a different bug in each place.
     DB_ROOT_PASSWORD=$(openssl rand -hex 24)
     DB_PASSWORD=$(openssl rand -hex 24)
-    # The one a human types. Alphanumeric for the same reason, 20 characters.
-    ADMIN_PASSWORD=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | cut -c1-20)
+    # The one a human types is the engine's (`credentials:` in panelalpha.yaml):
+    # ZABBIX_ADMIN_USER / ZABBIX_ADMIN_PASSWORD, 24 letters and digits.
+    set -a; . "${HOME}/.panelalpha/app-credentials.env"; set +a
     # Never disclosed. guest is disabled by group membership in the shipped
     # data, but its hash is published like Admin's, and a customer who enables
     # the Guests group later should not thereby open an account whose password
@@ -39,7 +40,7 @@ if [ ! -f "${STATE}/secrets" ]; then
     # before 6.0 it was MD5). The account's own PHP does it -- there is no
     # bcrypt in coreutils, and `openssl passwd` on OpenSSL 3 offers -1/-5/-6
     # and no -2. PASSWORD_BCRYPT is cost 10, matching the shipped rows.
-    ADMIN_HASH=$(P="${ADMIN_PASSWORD}" php -r 'echo password_hash(getenv("P"), PASSWORD_BCRYPT);')
+    ADMIN_HASH=$(P="${ZABBIX_ADMIN_PASSWORD}" php -r 'echo password_hash(getenv("P"), PASSWORD_BCRYPT);')
     GUEST_HASH=$(P="${GUEST_PASSWORD}" php -r 'echo password_hash(getenv("P"), PASSWORD_BCRYPT);')
 
     umask 077
@@ -54,17 +55,6 @@ EOF
 ADMIN_HASH='${ADMIN_HASH}'
 GUEST_HASH='${GUEST_HASH}'
 EOF
-    # What the customer is handed. Zabbix has no sign-up page and no installer:
-    # without this, the site comes up on a login form whose only account is
-    # Admin/zabbix, and that pair is in every copy of create.sql on the
-    # internet.
-    cat > "${STATE}/credentials" <<EOF
-# Written by PanelAlpha on the first deploy of this account.
-# Zabbix ships Admin/zabbix in its database schema; these replace it.
-ZABBIX_URL=/
-ZABBIX_ADMIN_USER=Admin
-ZABBIX_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-EOF
 fi
 
 # Copied into the checkout on every deploy, never generated there.
@@ -72,7 +62,6 @@ fi
 # '$2y$10$...' in a .env is interpolated by Compose before anything reads it.
 umask 077
 cp "${STATE}/secrets" .env
-cp "${STATE}/credentials" .panelalpha-admin-password
 # 0644 and not 0600: this one is bind-mounted read-only into the credentials
 # container, which runs as the image's uid 1997 and cannot be given ownership
 # of a file the account created. It holds bcrypt hashes, not passwords, and

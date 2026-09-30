@@ -36,8 +36,8 @@ services:
   # One-shot: provision the account's managed API key into the key DB before the
   # app starts. Uses the same image but overrides the entrypoint to just insert
   # the key via the app's own Database class (creates db/api_keys.db + table if
-  # absent; idempotent -- add() does remove-then-insert). The key value comes from
-  # ~/.panelalpha/libretranslate/api-key.env, generated once by hooks/prepare.sh.
+  # absent; idempotent -- add() does remove-then-insert). The key value is the
+  # engine's (LT_MANAGED_API_KEY in ~/.panelalpha/app-credentials.env).
   keyinit:
     image: libretranslate/libretranslate:v1.9.6
     restart: "no"
@@ -45,7 +45,7 @@ services:
       redis:
         condition: service_healthy
     env_file:
-      - ../.panelalpha/libretranslate/api-key.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - lt-db:/app/db
     entrypoint:

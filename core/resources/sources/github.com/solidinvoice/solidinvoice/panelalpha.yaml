@@ -30,8 +30,9 @@ description: >-
   that stops at "the wizard renders" has published a form on which the first
   stranger to arrive becomes the only administrator -- so the recipe runs
   upstream's non-interactive installer from a one-shot service that must exit
-  0 before the web server is started at all, with a password generated per
-  account into ~/project/.panelalpha-admin-password (0600). After that,
+  0 before the web server is started at all, with the login the engine
+  generates (`credentials:` below; returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get). After that,
   /install answers 302 to / and /register answers 404.
 
   Getting that installer to work against the published image took three
@@ -84,3 +85,9 @@ description: >-
   Not configured: mail (SOLIDINVOICE_MAILER_DSN stays null://null, so password
   resets and invoice e-mails are accepted and discarded), Meilisearch, Sentry,
   and the Google OAuth client. Registration is left closed.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/solidinvoice.env
+  fields:
+    ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    ADMIN_PASSWORD: {kind: password}

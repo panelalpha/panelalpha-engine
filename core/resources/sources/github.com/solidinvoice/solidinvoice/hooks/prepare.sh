@@ -2,14 +2,17 @@
 set -e
 cd ~/project
 
-# Four generated values for a compose file that cannot generate any of them,
-# written where `docker compose` reads variables from: the project's .env.
+# Generated values for a compose file that cannot generate any of them, written
+# where `docker compose` reads variables from: the project's .env. The admin
+# login (ADMIN_EMAIL / ADMIN_PASSWORD) is the engine's (`credentials:` in
+# panelalpha.yaml), read by the install service from
+# ~/.panelalpha/app-credentials.env.
 #
 # The secrets live outside the checkout, in $HOME. ~/project does not survive a
 # deploy -- the clone empties it first -- while the MySQL volume and the
 # /etc/solidinvoice volume (which holds SolidInvoice's own secret vault) do. A
 # database password regenerated on redeploy would be one the database no longer
-# accepts, and a regenerated admin password would be one nobody was ever told.
+# accepts.
 # Generated once, reused for the life of the account.
 STORE="${HOME}/.panelalpha/solidinvoice.env"
 
@@ -27,18 +30,9 @@ if [ ! -f "${STORE}" ]; then
 # production.
 DB_ROOT_PASSWORD=$(openssl rand -hex 16)
 DB_PASSWORD=$(openssl rand -hex 16)
-# SolidInvoice has no seeded user and no default password: whoever reaches
-# /install first becomes the only administrator. The install runs from the CLI
-# instead, with this password, before the web server is ever reachable.
-ADMIN_PASSWORD=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-24)
 EOF
     chmod 600 "${STORE}"
 fi
-
-# Not derived from the account: hooks get no domain and no account address, so
-# an address that is stable and obviously a placeholder beats one that looks
-# real. The password, not the address, is the secret.
-ADMIN_EMAIL=admin@example.com
 
 # :latest, deliberately. SolidInvoice publishes one tag per release plus
 # :latest, and nothing in the checkout names a published tag: composer.json
@@ -47,20 +41,7 @@ ADMIN_EMAIL=admin@example.com
 # that dies at `up -d`.
 cat > .env <<EOF
 SOLIDINVOICE_IMAGE=solidinvoice/solidinvoice:latest
-ADMIN_EMAIL=${ADMIN_EMAIL}
 EOF
-cat "${STORE}" >> .env
+# Older stores also hold ADMIN_PASSWORD; it stays out of .env.
+grep -v '^ADMIN_' "${STORE}" >> .env || true
 chmod 600 .env
-
-# Where a human is pointed at, as opposed to .env, which is what compose
-# interpolates.
-ADMIN_PASSWORD=$(sed -n 's/^ADMIN_PASSWORD=//p' "${STORE}" | head -1)
-cat > .panelalpha-admin-password <<EOF
-# Written by PanelAlpha on the first deploy. SolidInvoice ships no default
-# account: its installer creates the first one, and the recipe runs that
-# installer from the CLI before the site is reachable so that the form at
-# /install is never open to whoever finds the address first.
-SOLIDINVOICE_ADMIN_EMAIL=${ADMIN_EMAIL}
-SOLIDINVOICE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-EOF
-chmod 600 .panelalpha-admin-password

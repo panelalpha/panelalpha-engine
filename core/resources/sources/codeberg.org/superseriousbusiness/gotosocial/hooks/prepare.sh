@@ -7,8 +7,9 @@
 # account's keypair is a row in it), so unlike Readeck there is no external
 # secret to pin -- the one job that matters is that the database directory
 # survives a redeploy. Four things:
-#   1. The administrator credentials -- generated once into ~/.panelalpha/, the
-#      one directory a redeploy cannot reach.
+#   1. The administrator login is the engine's (`credentials:` in
+#      panelalpha.yaml), written to ~/.panelalpha/app-credentials.env before
+#      this hook runs; nothing to generate here.
 #   2. The persistent storage directory (SQLite DB + media + instance keypair).
 #   3. The image tag, from the checkout's git ref.
 #   4. docker-compose.override.yml -- the account's uid/gid and the image.
@@ -17,8 +18,6 @@ cd ~/project
 
 DATA_HOME="${HOME}/.panelalpha/gotosocial"
 STORAGE="${DATA_HOME}/storage"
-ENV_STORE="${DATA_HOME}/gotosocial.env"
-NOTE="${DATA_HOME}/credentials.txt"
 FALLBACK_IMAGE="docker.io/superseriousbusiness/gotosocial:latest"
 
 say() { echo "[panelalpha] gotosocial: $*" >&2; }
@@ -32,7 +31,7 @@ if ! grep -q 'gotosocial' go.mod 2>/dev/null; then
 fi
 
 # ---------------------------------------------------------------------------
-# 1 + 2. Persistent data and the administrator credentials.
+# 2. Persistent data.
 #
 # ~/project is emptied and re-cloned on every deploy (engine#173) and ~ is
 # chowned root on every rebuild (Project.php); ~/.panelalpha is the only
@@ -42,49 +41,6 @@ fi
 # identity for good.
 mkdir -p "${STORAGE}"
 chmod 700 "${HOME}/.panelalpha" "${DATA_HOME}"
-
-if [ ! -f "${ENV_STORE}" ]; then
-    ADMIN_USER=admin
-    # No '/', '+' or '=': read back by a POSIX shell env_file and passed to
-    # GoToSocial as GTS_PASSWORD. ~30 chars of base64 alphabet is far past
-    # GoToSocial's 60-bit entropy floor (internal/validate password check).
-    ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
-    (
-        umask 077
-        cat > "${ENV_STORE}" <<EOF
-# Read only by the one-shot init container, only to create the administrator
-# when the instance has none. Never read by the running server.
-PA_ADMIN_USER=${ADMIN_USER}
-PA_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-PA_ADMIN_EMAIL=admin@localhost
-EOF
-    )
-    (
-        umask 077
-        cat > "${NOTE}" <<EOF
-GoToSocial administrator for this account
-=========================================
-
-  username: ${ADMIN_USER}
-  password: ${ADMIN_PASSWORD}
-
-Created on the first deploy and never changed by PanelAlpha afterwards. If you
-change the password inside GoToSocial, this file is out of date and the value in
-the application wins -- nothing here overwrites it.
-
-GoToSocial is invite-only (accounts-registration-open=false), so nobody can
-create an account on your instance without an invite. Create further users from
-Settings -> Administration, or with the CLI
-(gotosocial admin account create ...). Sign in at:
-
-    https://<your domain>/
-EOF
-    )
-    say "administrator credentials written to ${NOTE}"
-else
-    say "reusing the administrator credentials in ${ENV_STORE}"
-fi
-chmod 600 "${ENV_STORE}" "${NOTE}" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # 3. Which image. Default latest; a checkout parked on a release tag gets that
@@ -138,8 +94,8 @@ cat > "${DATA_HOME}/README.panelalpha.md" <<'MDEOF'
 
     https://<your domain>/
 
-username  `admin`
-password  in the file `credentials.txt` beside this one
+email     `admin@localhost` (username `admin`)
+password  returned by GET /projects/{name}/app-credentials (MCP app_credentials_get)
 
 Change it and manage the instance under Settings -> Administration.
 
@@ -153,8 +109,6 @@ data. Signup is invite-only, so nobody can create an account without an invite.
 
     ~/.panelalpha/gotosocial/
       README.panelalpha.md   this file
-      credentials.txt        the generated administrator password, 0600
-      gotosocial.env         the credentials init uses on a fresh instance
       storage/sqlite.db      the database: accounts, statuses, and the INSTANCE
                              KEYPAIR that is your server's federation identity
       storage/               the media store (avatars, attachments) and cache
@@ -178,4 +132,4 @@ under the same name.
 MDEOF
 chmod 600 "${DATA_HOME}/README.panelalpha.md" 2>/dev/null || true
 
-say "prepared; credentials in ${NOTE}"
+say "prepared"

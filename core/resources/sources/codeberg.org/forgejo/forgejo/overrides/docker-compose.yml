@@ -9,8 +9,8 @@ services:
     env_file:
       # SECRET_KEY, INTERNAL_TOKEN and both JWT secrets, generated once.
       - ../.panelalpha/forgejo/secrets.env
-      # Admin login, read only by init.
-      - ../.panelalpha/forgejo/admin.env
+      # Admin login, generated and kept by the engine; read only by init.
+      - ../.panelalpha/app-credentials.env
     # Applied to app.ini by the image's environment-to-ini on every start.
     environment: &forgejo-env
       FORGEJO__server__ROOT_URL: ${PA_PUBLIC_URL}/

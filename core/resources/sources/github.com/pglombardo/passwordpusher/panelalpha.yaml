@@ -10,13 +10,21 @@ description: >-
 
   With no users the upstream app redirects every page to a first-run form
   gated by a boot code printed in the container log. hooks/prepare.sh
-  generates SECRET_KEY_BASE, the push encryption key (PWPUSH_MASTER_KEY,
-  replacing the public default in the source) and an admin password once into
-  ~/.panelalpha/pwpush/ (0600 in 0700); a one-shot init service migrates and
-  seeds admin@example.com with that password before the app serves, so the
+  generates SECRET_KEY_BASE and the push encryption key (PWPUSH_MASTER_KEY,
+  replacing the public default in the source) once into ~/.panelalpha/pwpush/
+  (0600 in 0700); the engine generates the admin login (`credentials:` below;
+  GET /projects/{name}/app-credentials, MCP app_credentials_get, returns it),
+  and a one-shot init service migrates and seeds admin@example.com with that
+  password before the app serves, so the
   first-run form never appears. The admin is only seeded while the user table
   is empty. Anonymous push creation stays on, which is the app's purpose: each
   push is readable only through its secret URL. Open signup is disabled, so
   accounts (needed for file pushes and the /admin dashboard) exist only for the
   seeded admin. Secret URLs are built from the public address and session
   cookies are marked Secure.
+credentials:
+  login_path: /users/sign_in
+  adopt_from: .panelalpha/pwpush/app.env
+  fields:
+    PA_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    PA_ADMIN_PASSWORD: {kind: password}

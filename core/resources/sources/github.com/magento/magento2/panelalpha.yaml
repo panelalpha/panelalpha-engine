@@ -4,8 +4,11 @@ description: >-
   gets the document root and the database right; what it cannot do alone is
   give Magento a search engine or run an installer that wants credentials.
   This directory adds both: an OpenSearch service in a compose override, and
-  an install script that generates the admin account on first deploy and
-  prints where to find it.
+  an install script that creates the admin account on first deploy from the
+  login the engine generates (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get). The admin
+  path is part of it: MAGENTO_ADMIN_URI, declared as a secret so it is
+  generated, is the backend front name the admin logs in at.
 extends: magento
 env:
   # Magento's own pub/.user.ini raises the web request limit to 756M, and
@@ -29,3 +32,10 @@ commands:
     stage: [upgrade]
     description: 'setup:upgrade and di:compile against the store that is already there. Does nothing until an install has happened.'
     run: 'bash /app/panelalpha/install.sh upgrade'
+credentials:
+  adopt_from: .panelalpha/magento/admin.env
+  fields:
+    MAGENTO_ADMIN_USER: {kind: username, value: admin}
+    MAGENTO_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    MAGENTO_ADMIN_PASSWORD: {kind: password}
+    MAGENTO_ADMIN_URI: {kind: password}

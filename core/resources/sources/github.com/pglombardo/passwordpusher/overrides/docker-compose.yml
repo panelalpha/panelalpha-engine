@@ -2,7 +2,7 @@
 # fetch its own Let's Encrypt certificate, which the engine's proxy already
 # does. This runs the official image of the current release on plain HTTP:
 #   - SQLite and file uploads in /opt/PasswordPusher/storage, a named volume
-#   - `init` migrates and seeds the admin from ~/.panelalpha/pwpush/app.env
+#   - `init` migrates and seeds the admin from ~/.panelalpha/app-credentials.env
 #     before the app serves, so the boot-code first-run page never appears
 #   - anonymous pushes stay on (public by design); open signup is off
 services:
@@ -12,6 +12,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/pwpush/app.env
+      # PA_ADMIN_EMAIL / PA_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - storage:/opt/PasswordPusher/storage
       - ./panelalpha/pwpush:/pa:ro

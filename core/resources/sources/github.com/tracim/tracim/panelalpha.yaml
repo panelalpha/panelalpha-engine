@@ -54,13 +54,12 @@ description: >-
   admin@admin.admin with the password admin@admin.admin, hard-coded — which on
   a public HTTPS name is an open door with the key printed in the repository.
   files/panelalpha-setup.sh, run by a one-shot service once the API answers,
-  replaces it over Tracim's REST API with a password generated per account, and
+  replaces it over Tracim's REST API with the password the engine generates
+  (`credentials:` below; returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get), and
   then signs in with the new password to prove it worked. It leaves alone a
   password an operator has since changed from inside Tracim, and it fails the
-  deploy rather than leave the shipped one in place. The generated value lives
-  in ~/.panelalpha/tracim.env rather than only in ~/project, because
-  ProjectTree::clearContents() empties ~/project before every clone while the
-  volume holding the database does not go with it.
+  deploy rather than leave the shipped one in place.
 
   One more thing the image does not size for a hosting account: four uwsgi
   workers, each holding its own copy of the Python backend, came to 1.16 GiB of
@@ -78,3 +77,9 @@ description: >-
   need an SMTP server the engine does not provide; set
   TRACIM_EMAIL__NOTIFICATION__SMTP__SERVER and its companions through the
   account's env vars.
+credentials:
+  login_path: /ui/login
+  adopt_from: .panelalpha/tracim.env
+  fields:
+    TRACIM_ADMIN_LOGIN: {kind: email, value: admin@admin.admin}
+    TRACIM_ADMIN_PASSWORD: {kind: password}

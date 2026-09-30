@@ -16,8 +16,9 @@ description: >-
   JWT secrets generated once by hooks/prepare.sh into
   ~/.panelalpha/forgejo/secrets.env (0600 in 0700), applied by the image's
   environment-to-ini on every start. A one-shot `init` service runs
-  `forgejo migrate` and `forgejo admin user create --admin` with a generated
-  password (~/.panelalpha/forgejo/credentials.txt, user `forgeadmin`), and
+  `forgejo migrate` and `forgejo admin user create --admin` with the login the
+  engine generates (`credentials:` below; user `forgeadmin`, returned by GET
+  /projects/{name}/app-credentials, MCP app_credentials_get), and
   `app` (the only service with a published port) starts only after it exits 0.
   A redeploy reuses the secrets and never resets the admin.
 
@@ -30,3 +31,10 @@ description: >-
   trusts X-Forwarded-For only from loopback (REVERSE_PROXY_TRUSTED_PROXIES
   default), which is left as is (engine#319), and reverse-proxy header login
   stays disabled.
+credentials:
+  login_path: /user/login
+  adopt_from: .panelalpha/forgejo/admin.env
+  fields:
+    FORGEJO_ADMIN_USER: {kind: username, value: forgeadmin}
+    FORGEJO_ADMIN_EMAIL: {kind: email, value: admin@localhost.localdomain}
+    FORGEJO_ADMIN_PASSWORD: {kind: password}

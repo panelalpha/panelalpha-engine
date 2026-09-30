@@ -1,16 +1,19 @@
 # REPLACE compose: the official image of the current stable release (0.14.1, also
-# ghcr :latest) on a named volume, admin seeded from generated credentials.
+# ghcr :latest) on a named volume, admin seeded from the engine's login.
 services:
   app:
     image: ghcr.io/hoshinosuzumi/chronoframe:0.14.1
     restart: unless-stopped
     ports:
       - "3000:3000"
-    # Admin email/password + session and og-image secrets, generated once by
-    # hooks/prepare.sh. Without them the seed creates admin@chronoframe.com / CF1234@!.
+    # Session and og-image secrets, generated once by hooks/prepare.sh, and the
+    # admin email/password, generated and kept by the engine. Without them the
+    # seed creates admin@chronoframe.com / CF1234@!.
     env_file:
       - ../.panelalpha/chronoframe/chronoframe.env
+      - ../.panelalpha/app-credentials.env
     environment:
+      CFRAME_ADMIN_NAME: admin
       # Local storage defaults to ./data/storage, inside the volume below. (0.14.1
       # reads NUXT_PROVIDER_LOCAL_LOCAL_PATH, not the documented NUXT_PROVIDER_LOCAL_PATH.)
       NUXT_STORAGE_PROVIDER: local
