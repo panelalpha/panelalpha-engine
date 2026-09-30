@@ -153,6 +153,20 @@ Under the framework strategies (`laravel`, `php`, the Node/Python/Ruby recipes, 
 
 ---
 
+### The PHP frontend build (`frontend_build`)
+
+A PHP application gets a host Node pass after Composer: the engine installs `package.json`'s dependencies (lockfile, cache, a git-capable image when a dependency is a repository) and runs its `build` script. With no `build` script there is no pass. `frontend_build` changes that, `runtime: php` only:
+
+| Value | Effect |
+|---|---|
+| absent | the rule above |
+| `false` | no Node pass at all — the repository commits its compiled assets (Crater's `public/build`) and its lockfiles no longer install |
+| `"<command>"` | the install as usual, then this command instead of the `build` script, even when `package.json` has no scripts. It runs on every deploy, including a `node_modules` cache hit that skipped the install — grocy's `yarn install` fills `public/packages` again after a re-clone. A yarn 1 command wants `--ignore-engines`, as the engine's own install has it |
+
+Do not edit `package.json` from `hooks/prepare.sh` to get either effect.
+
+---
+
 ### Secrets derived from the install path
 
 Every account's checkout is mounted at `/app`, so any value an application

@@ -212,24 +212,45 @@ class HostCompile
      * checkout root's package.json is used, as before: the Group Office
      * recipe drives upstream's build from one there.
      *
+     * `$frontendBuild` is the manifest's `frontend_build`: false skips the
+     * pass, a command replaces the `build` script and runs even when
+     * package.json declares none, null keeps the rule above.
+     *
      * @param array<string, true> $files
      */
-    public function runForPhp(string $projectDir, array $files, string $appRoot = ''): bool
-    {
+    public function runForPhp(
+        string $projectDir,
+        array $files,
+        string $appRoot = '',
+        string|false|null $frontendBuild = null
+    ): bool {
         $appRoot = AppRoot::relative(['app_root' => $appRoot]);
         $prefix = $appRoot === '' ? '' : $appRoot . '/';
         $appDir = $appRoot === '' ? $projectDir : rtrim($projectDir, '/') . '/' . $appRoot;
+        $logger = $this->project->shell()->logger();
+        if ($frontendBuild === false) {
+            $logger?->info('Frontend build turned off by the recipe (frontend_build: false)');
+
+            return false;
+        }
+        $declared = is_string($frontendBuild) && trim($frontendBuild) !== '' ? trim($frontendBuild) : null;
 
         $package = null;
         $buildRoot = '';
         foreach (array_unique([$appRoot, '']) as $candidate) {
-            $package = $this->packageWithBuild($projectDir, $candidate);
+            $package = $declared === null
+                ? $this->packageWithBuild($projectDir, $candidate)
+                : $this->packageJson($projectDir, $candidate);
             if ($package !== null) {
                 $buildRoot = $candidate;
                 break;
             }
         }
         if ($package === null) {
+            if ($declared !== null) {
+                throw new \Exception('The recipe sets frontend_build, but the project has no package.json to run it against');
+            }
+
             return false;
         }
         $buildDir = $buildRoot === '' ? $projectDir : $appDir;
@@ -237,7 +258,6 @@ class HostCompile
             $files = ProjectContext::listRootFiles($buildDir);
         }
 
-        $logger = $this->project->shell()->logger();
         $logger?->info('Compiling frontend assets on host');
         $system = $this->project->system();
         $cached = $this->prepareCache();
@@ -272,7 +292,9 @@ class HostCompile
 
         $pm = JsPackageManager::detectPackageManager($files, $package);
         $install = JsPackageManager::installCommand($pm, $files, $package, $buildDir);
-        $build = JsPackageManager::scriptCommand($pm, 'build');
+        // The install stays the engine's (cache, lockfile, git image); only
+        // the build step is the recipe's. It runs on a cache hit too.
+        $build = $declared ?? JsPackageManager::scriptCommand($pm, 'build');
         $nodeImage = Images::nodeImage($buildDir, $package);
         $image = HostNodeBuild::compilerImage($install, $nodeImage, $pm);
         $installCmd = $install;
@@ -727,14 +749,27 @@ class HostCompile
      */
     private function packageWithBuild(string $projectDir, string $root): ?array
     {
-        $raw = $this->project->projectTree()->readIn($projectDir, ($root === '' ? '' : $root . '/') . 'package.json');
-        $package = $raw === null ? null : json_decode($raw, true);
-        if (!is_array($package)) {
+        $package = $this->packageJson($projectDir, $root);
+        if ($package === null) {
             return null;
         }
         $build = is_array($package['scripts'] ?? null) ? ($package['scripts']['build'] ?? null) : null;
 
         return is_string($build) && $build !== '' ? $package : null;
+    }
+
+    /**
+     * The package.json in `$root` (relative to the checkout), decoded; null
+     * when there is none or it is not a JSON object.
+     *
+     * @return ?array<string, mixed>
+     */
+    private function packageJson(string $projectDir, string $root): ?array
+    {
+        $raw = $this->project->projectTree()->readIn($projectDir, ($root === '' ? '' : $root . '/') . 'package.json');
+        $package = $raw === null ? null : json_decode($raw, true);
+
+        return is_array($package) ? $package : null;
     }
 
     /** Composer's `config.vendor-dir`, or `vendor` for anything that could leave the project. */

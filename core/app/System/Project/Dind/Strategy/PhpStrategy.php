@@ -122,7 +122,13 @@ class PhpStrategy
             $build->appRoot,
             $build->composerJson !== null
         );
-        $this->dind->hostCompile()->runForPhp($projectDir, $files, $build->appRoot);
+        $frontendBuild = $decision['frontend_build'] ?? null;
+        $this->dind->hostCompile()->runForPhp(
+            $projectDir,
+            $files,
+            $build->appRoot,
+            $frontendBuild === false || is_string($frontendBuild) ? $frontendBuild : null
+        );
         // No Dockerfile. The shared base image is the runtime -- Apache, the
         // extension set, composer and the entrypoint shim are all baked into
         // it -- and what makes it this project is the bind mount the compose

@@ -45,6 +45,7 @@ final class PlatformManifest
         'check_skip',
         'build_args',
         'system_packages',
+        'frontend_build',
     ];
 
     /** Databases a manifest can ask the engine to provision. */
@@ -98,6 +99,12 @@ final class PlatformManifest
          * @var list<string>
          */
         public readonly array $systemPackages,
+        /**
+         * The PHP host frontend pass: null runs package.json's `build` script when it
+         * has one, false never runs the pass, a command replaces that script and runs
+         * even when package.json declares none. `runtime: php` only.
+         */
+        public readonly string|false|null $frontendBuild,
         public readonly array $detect,
         /**
          * Health checks this manifest adds to the ones its runtime brings, as `<group>`
@@ -177,6 +184,7 @@ final class PlatformManifest
             self::readDocroot($reader),
             self::readBuildArgs($reader),
             self::readSystemPackages($reader),
+            self::readFrontendBuild($reader),
             $reader->object('detect', 'must be a non-empty condition object', $requireDetect),
             $checks = self::readChecks($reader, $recipeChecks),
             self::readCheckSkips($reader, $runtime, $checks, $recipeChecks),
@@ -498,6 +506,28 @@ final class PlatformManifest
     }
 
     /**
+     * `frontend_build`: false, or the command that replaces the `build` script.
+     * `true` is refused: the pass already runs whenever there is a build script.
+     *
+     * @throws ManifestException
+     */
+    private static function readFrontendBuild(ManifestReader $reader): string|false|null
+    {
+        $raw = $reader->raw('frontend_build');
+        if ($raw === null) {
+            return null;
+        }
+        if ($raw !== false && (!is_string($raw) || trim($raw) === '')) {
+            throw $reader->fail('frontend_build must be false or a non-empty command');
+        }
+        if (($reader->raw('runtime') ?? self::RUNTIME_COMMAND) !== self::RUNTIME_PHP) {
+            throw $reader->fail("frontend_build is only supported for runtime 'php'");
+        }
+
+        return $raw === false ? false : trim($raw);
+    }
+
+    /**
      * Some commands are derived rather than declared: the Rust start command is the
      * binary name out of Cargo.toml, the Python one is whichever of app.py, main.py or
      * wsgi.py the project has. `commands_from` maps a command id to the resolver.
@@ -678,6 +708,7 @@ final class PlatformManifest
             'docroot' => $this->docroot,
             'build_args' => $this->buildArgs,
             'system_packages' => $this->systemPackages,
+            'frontend_build' => $this->frontendBuild,
         ];
     }
 

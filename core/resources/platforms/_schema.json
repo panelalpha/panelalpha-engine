@@ -83,6 +83,19 @@
       },
       "uniqueItems": true
     },
+    "frontend_build": {
+      "description": "The host frontend pass of a PHP application (HostCompile::runForPhp). Omit it and the engine runs package.json's `build` script when there is one, and nothing when there is not. `false` never runs the pass: for a repository that commits its compiled assets (Crater's public/build) and whose lockfiles no longer install. A command runs in place of the `build` script, after the engine's usual install, even when package.json declares no scripts; it runs on every deploy, including a node_modules cache hit. `yarn install` for grocy, whose CSS and JS are its yarn dependencies. `runtime: php` only.",
+      "anyOf": [
+        {
+          "const": false
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        }
+      ]
+    },
     "image": {
       "type": "string",
       "minLength": 1,
