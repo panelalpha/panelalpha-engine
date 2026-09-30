@@ -87,13 +87,13 @@ La IA ha sacado la creación de software de sus límites de siempre. Más gente 
 
 Necesitas un servidor **nuevo** con Debian 12/13 o Ubuntu 22.04/24.04/26.04, con al menos 2 GB de RAM y 1 CPU, y entras como `root` por SSH.
 
-**One-line app deployment command** es la forma más rápida de empezar: instala Engine y pone una aplicación en línea de una vez. Solo tienes que añadir después de `--repo` el repositorio Git que quieras usar, y el instalador se ocupa de las dos partes: instala Engine y empieza enseguida a preparar el proyecto con el repositorio que le diste. Por ejemplo, si quieres instalar Engine y desplegar n8n a la vez, esto es todo lo que necesitas:
+**One-line installation command** es la forma más rápida de empezar: instala Engine y pone una aplicación en línea de una vez. Solo tienes que añadir después de `--repo` el repositorio Git que quieras usar, y el instalador se ocupa de las dos partes: instala Engine y empieza enseguida a preparar el proyecto con el repositorio que le diste. Por ejemplo, si quieres instalar Engine y desplegar n8n a la vez, esto es todo lo que necesitas:
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
-Al terminar, muestra la dirección de tu nuevo sitio y, si no pasas `--no-password`, la contraseña que lo abre. Repositorios privados, una contraseña propia y un servidor que ya tiene Engine: [One-line app deployment command](docs/02-getting-started/install.md#one-line-app-deployment-command).
+Al terminar, muestra la dirección de tu nuevo sitio y, si no pasas `--no-password`, la contraseña que lo abre. Repositorios privados, una contraseña propia y un servidor que ya tiene Engine: [One-line installation command](docs/02-getting-started/install.md#one-line-installation-command).
 
 ¿Prefieres hacer los dos pasos por separado? Usa el comando de abajo para instalar solo Engine y despliega tu aplicación más tarde desde tu asistente (mira el paso 2):
 

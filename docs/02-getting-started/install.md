@@ -32,7 +32,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh
 
 A few minutes later the engine is running. It prints its addresses and a command to connect your assistant. Want a name of your own, or a VPS the internet cannot reach by IP? Read [Troubleshooting](#troubleshooting) before you install.
 
-## One-line app deployment command
+## One-line installation command
 
 You can install the engine and put an application from a git repository online in one command. Use the web address of the repository, the one you would open in a browser. The installer finishes setting up the engine, then creates a new **project** from that repository. It picks the project name and the site's address for you.
 
