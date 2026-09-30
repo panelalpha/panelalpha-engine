@@ -118,8 +118,8 @@ when there is none. There is no third mode, so the build is not optional.
 Two things about that build were learned the expensive way.
 
 **Upstream's `webpack/prod.mjs` is OOM-killed in the engine's build container.**
-Measured on this 15.6 GB host, where `DindEngine::resolveBuildMemory()` gives a
-build container MemTotal/3 = 5202 MB: the webpack process reached 5.0 GB
+Measured on this 15.6 GB host, when the build container got MemTotal/3 =
+5202 MB (the rule before engine#295; it now gets 8 GB, or half of MemTotal when that is less): the webpack process reached 5.0 GB
 resident and the cgroup OOM killer took it after 2m38s, leaving `Killed` and
 nothing else in the log
 (`Memory cgroup out of memory: Killed process (webpack) total-vm:35615720kB,
@@ -384,7 +384,7 @@ PHP requests at `memory_limit = 512M`.
 | | |
 |---|---|
 | host | 15.6 GB MemTotal, 8 cores |
-| build container limit | 5202 MB (`MemTotal/3`, `ServiceLimits::hostBuildMemoryMb`) |
+| build container limit | 5202 MB (`MemTotal/3`, the rule before engine#295) |
 | `NODE_OPTIONS` heap the engine sets | `--max-old-space-size=3641` |
 | upstream `webpack/prod.mjs` | **OOM-killed** at 5.0 GB anon-rss after 2m38s |
 | this recipe's `webpack/panelalpha.mjs` | peaks ~2.5 GB, 1m45s |

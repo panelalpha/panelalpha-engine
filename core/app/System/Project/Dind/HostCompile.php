@@ -33,6 +33,7 @@ use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Dind\HostBuildSlot;
+use App\Lib\Deploy\Dind\DindEngine;
 use App\Lib\Deploy\Engine\BuildMemory;
 use Symfony\Component\Process\Process;
 
@@ -65,9 +66,9 @@ class HostCompile
         $this->project = $project;
     }
 
-    private function hostBuilder(?int $projectMemoryMb = null): HostBuilder
+    private function hostBuilder(): HostBuilder
     {
-        $builder = $this->project->engine()->hostBuilder($projectMemoryMb);
+        $builder = $this->project->engine()->hostBuilder();
 
         return $this->buildNetworkUnavailable && $builder instanceof DindHostBuilder
             ? $builder->withoutNetwork()
@@ -908,8 +909,8 @@ class HostCompile
 
     /**
      * Run one host build container while holding the engine's build slot.
-     * Each is sized for the server (a third of its RAM by default, or the
-     * project's larger limit), so two at once can exhaust it; {@see HostBuildSlot}.
+     * Each may take up to 8 GB, half the server's RAM, so two at once can
+     * exhaust it; {@see HostBuildSlot}.
      *
      * @param callable(HostBuilder): list<string> $argvFor
      */
@@ -919,15 +920,8 @@ class HostCompile
         $logger = $shell->logger();
 
         return HostBuildSlot::run(
-            function (bool $alone) use ($logger, $shell, $argvFor, $timeout): Process {
-                // The project's limit may raise the build only while it runs
-                // alone; a build that failed open sharing the host gets the server share.
-                $projectMemoryMb = $this->projectMemoryLimitMb();
-                $builder = $this->hostBuilder($alone ? $projectMemoryMb : null);
-                if (!$alone && $this->hostBuilder($projectMemoryMb)->memoryLimitMb() > $builder->memoryLimitMb()) {
-                    $logger?->warn('Building without the host build slot, so at the server default'
-                        . ' rather than the project\'s memory limit');
-                }
+            function () use ($logger, $shell, $argvFor, $timeout): Process {
+                $builder = $this->hostBuilder();
                 $this->announceBuildMemory($logger, $builder);
                 $argv = $argvFor($builder);
 
@@ -944,16 +938,9 @@ class HostCompile
         );
     }
 
-    /** The account's memory limit in MB. */
-    private function projectMemoryLimitMb(): int
-    {
-        return $this->project->userModel()->effectiveMemoryLimit();
-    }
-
     /**
      * Say what the build container gets and who sets it, once per deploy and
-     * again only if the figure changes: the project's memory limit is the
-     * first thing anyone raises when a build OOMs.
+     * again only if the figure changes.
      */
     private function announceBuildMemory(?DeployLogger $logger, HostBuilder $builder): void
     {
@@ -972,16 +959,19 @@ class HostCompile
     {
         $line = 'Host build container memory: ' . $memoryMb . ' MB, ';
 
-        return $line . match ($origin?->source ?? BuildMemory::SETTING) {
-            BuildMemory::SERVER => 'the server default (a third of its RAM, 2048-8192 MB).'
-                . ' A project memory limit above it raises it, up to half the server\'s RAM;'
-                . ' DEPLOY_BUILD_MEMORY replaces both',
-            BuildMemory::PROJECT => 'raised to the project\'s memory limit from the server default of '
-                . $origin->serverShareMb . ' MB; DEPLOY_BUILD_MEMORY replaces both',
-            BuildMemory::PROJECT_CAPPED => 'the project\'s memory limit of ' . $origin->projectLimitMb
-                . ' MB held to half the server\'s RAM (server default ' . $origin->serverShareMb . ' MB);'
-                . ' DEPLOY_BUILD_MEMORY replaces both',
-            default => 'set for the server by DEPLOY_BUILD_MEMORY; the project\'s memory limit does not apply to it',
-        };
+        $host = $origin?->host !== null && $origin->host->totalMb > 0 ? $origin->host : null;
+        $ceiling = $host === null ? '' : 'at most half the server\'s ' . $host->totalMb . ' MB and never more than its RAM less '
+            . $host->engineMb . ' MB for the engine (DEPLOY_ENGINE_MEMORY)';
+        if ($origin?->source === BuildMemory::HOST) {
+            return $line . ($host === null
+                ? 'the default, since the server\'s RAM could not be read; DEPLOY_BUILD_MEMORY replaces it'
+                : DindEngine::MAX_BUILD_MEMORY_MB . ' MB by default, ' . $ceiling
+                    . '; DEPLOY_BUILD_MEMORY replaces the default, up to ' . DindEngine::buildCeilingMb($host) . ' MB');
+        }
+        if ($origin?->source === BuildMemory::SETTING_CAPPED) {
+            return $line . 'DEPLOY_BUILD_MEMORY held to ' . $ceiling;
+        }
+
+        return $line . 'set for the server by DEPLOY_BUILD_MEMORY; the project\'s memory limit does not apply to it';
     }
 }

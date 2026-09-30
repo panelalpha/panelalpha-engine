@@ -9,6 +9,8 @@ use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineFactory;
 use App\Lib\Deploy\Engine\HostBuilder;
 use App\Lib\Deploy\Engine\ImageStore;
+use App\Lib\Host\HostMemory;
+use App\Lib\Host\HostMemoryProbe;
 
 /**
  * Docker-in-Docker on sysbox: every account's own daemon inside its own
@@ -23,7 +25,7 @@ final class DindEngine implements ContainerEngine
     public const SERVICE = 'dind';
 
     private ?DindImageStore $images = null;
-    /** @var array<string, DindHostBuilder> */
+    /** @var array<string, DindHostBuilder> keyed by memory limit */
     private array $hostBuilders = [];
     private ?DindAccountStorage $storage = null;
 
@@ -37,18 +39,12 @@ final class DindEngine implements ContainerEngine
         return $this->images ??= new DindImageStore();
     }
 
-    public function hostBuilder(?int $projectMemoryMb = null): HostBuilder
+    public function hostBuilder(): HostBuilder
     {
-        // The one place the ceiling is read from config; DindHostBuilder stays
-        // Laravel-free. One builder per figure, since projects differ.
-        $memory = self::buildMemory(
-            (string) config('deploy.build_memory', ''),
-            self::hostMeminfo(),
-            $projectMemoryMb
-        );
-        $key = implode('|', [$memory->limit, $memory->source, $memory->serverShareMb, $memory->projectLimitMb]);
+        // The one place the ceiling is read from config; DindHostBuilder stays Laravel-free.
+        $memory = self::buildMemory((string) config('deploy.build_memory', ''), HostMemoryProbe::current());
 
-        return $this->hostBuilders[$key] ??= new DindHostBuilder(
+        return $this->hostBuilders[$memory->limit] ??= new DindHostBuilder(
             $memory->limit,
             null,
             (string) config('deploy.build_network', BuildNetwork::DEFAULT_NAME),
@@ -56,59 +52,42 @@ final class DindEngine implements ContainerEngine
         );
     }
 
-    public static function builderFor(string $configured, string $procMeminfo, ?int $projectMemoryMb = null): DindHostBuilder
+    public static function builderFor(string $configured, HostMemory $host): DindHostBuilder
     {
-        $memory = self::buildMemory($configured, $procMeminfo, $projectMemoryMb);
+        $memory = self::buildMemory($configured, $host);
 
         return new DindHostBuilder($memory->limit, null, null, $memory);
     }
 
-    /**
-     * The ceiling a build container gets: the operator's number if there is
-     * one, otherwise one derived from this host.
-     */
-    public static function resolveBuildMemory(string $configured, string $procMeminfo, ?int $projectMemoryMb = null): string
-    {
-        return self::buildMemory($configured, $procMeminfo, $projectMemoryMb)->limit;
-    }
+    /** The most a build gets unless DEPLOY_BUILD_MEMORY asks for more. */
+    public const MAX_BUILD_MEMORY_MB = 8192;
 
     /**
-     * `DEPLOY_BUILD_MEMORY` wins outright: it is the operator's decision for
-     * the server, and a plan must not undo a cap set on purpose. Unset, the
-     * build gets the server share, raised (never lowered) to the project's
-     * memory limit, up to {@see ServiceLimits::projectBuildMemoryCapMb()}.
+     * 8 GB, or `DEPLOY_BUILD_MEMORY` when it parses; never more than
+     * {@see buildCeilingMb()} (engine#295).
      */
-    public static function buildMemory(string $configured, string $procMeminfo, ?int $projectMemoryMb = null): BuildMemory
+    public static function buildMemory(string $configured, HostMemory $host): BuildMemory
     {
-        $configured = trim($configured);
-        if ($configured !== '') {
-            return new BuildMemory($configured, BuildMemory::SETTING);
+        $maxMb = self::buildCeilingMb($host);
+        $configuredMb = ServiceLimits::toMegabytes(trim($configured)) ?? 0;
+        if ($configuredMb > 0) {
+            return $maxMb > 0 && $configuredMb > $maxMb
+                ? new BuildMemory($maxMb . 'm', BuildMemory::SETTING_CAPPED, $host)
+                : new BuildMemory(trim($configured), BuildMemory::SETTING, $host);
         }
 
-        $share = ServiceLimits::hostBuildMemoryMb($procMeminfo);
-        $cap = ServiceLimits::projectBuildMemoryCapMb($procMeminfo);
-        if ($projectMemoryMb === null || $projectMemoryMb <= $share || $cap === null || $cap <= $share) {
-            return new BuildMemory($share . 'm', BuildMemory::SERVER, $share, $projectMemoryMb);
-        }
-
-        $mb = min($projectMemoryMb, $cap);
-
+        // An unreadable host leaves the builder's default.
         return new BuildMemory(
-            $mb . 'm',
-            $mb < $projectMemoryMb ? BuildMemory::PROJECT_CAPPED : BuildMemory::PROJECT,
-            $share,
-            $projectMemoryMb
+            $maxMb > 0 ? min(self::MAX_BUILD_MEMORY_MB, $maxMb) . 'm' : '',
+            BuildMemory::HOST,
+            $host
         );
     }
 
-    /**
-     * What this host has, for sizing a build container. `/proc/meminfo` is not
-     * namespaced, so inside the engine container it reports host RAM rather
-     * than the core container's 3g mem_limit. Unreadable yields ''.
-     */
-    private static function hostMeminfo(): string
+    /** Half the server's RAM, and never more than its RAM less DEPLOY_ENGINE_MEMORY. 0 when unreadable. */
+    public static function buildCeilingMb(HostMemory $host): int
     {
-        return @file_get_contents('/proc/meminfo') ?: '';
+        return min($host->maxProjectMb(), intdiv($host->totalMb, 2));
     }
 
     public function storage(): AccountStorage

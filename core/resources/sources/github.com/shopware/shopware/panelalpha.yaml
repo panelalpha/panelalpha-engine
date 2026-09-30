@@ -75,11 +75,9 @@ description: >-
   "Ineffective mark-compacts near heap limit"; 2400MB -> exit 137; 2800MB ->
   success in 52s with RSS peaking near 2.5GB. The cgroup in question is *not*
   the account's `--memory-limit`: DindHostBuilder takes it from
-  DindEngine::resolveBuildMemory(), i.e. DEPLOY_BUILD_MEMORY or
-  ServiceLimits::hostBuildMemoryMb() = max(2048, min(8192, hostRAM/3)). On the
-  15GB host this was proven on that is 5202MB and the build runs; on an engine
-  under ~8GB it is at or near the 2048MB floor and it cannot, whatever the
-  account is sized at. build-assets.sh reads the cgroup and skips the
+  DindEngine::buildMemory(), i.e. DEPLOY_BUILD_MEMORY or 8192MB, never more than
+  half the host's RAM (engine#295). On an engine with less than ~5.3GB of RAM
+  that is under 2700MB and it cannot, whatever the account is sized at. build-assets.sh reads the cgroup and skips the
   administration below 2700MB deliberately, saying so in the deploy log, rather
   than spending 51s and 1.2GB of node_modules to arrive at a kill that
   runContainer() would turn into a failed deploy -- taking a storefront that

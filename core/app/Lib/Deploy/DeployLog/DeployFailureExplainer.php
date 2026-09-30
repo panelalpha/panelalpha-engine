@@ -342,8 +342,7 @@ class DeployFailureExplainer
             // `out of memory` stays bare — the kernel writes it that way in `Memory cgroup out
             // of memory: Killed process ...`.
             //
-            // A host build is not in the account's cgroup, so the plan is not what ran out:
-            // Graylog's tsgo died at the 5202 MB host build cap on a 2500 MB plan.
+            // A host build is not in the account's cgroup, so the plan is not what ran out.
             'out-of-memory' => [
                 '/(exit code: 137|signal:\s*killed|OOMKilled'
                     // BuildKit's form when the step's cgroup refused an allocation (engine#161).
@@ -354,7 +353,7 @@ class DeployFailureExplainer
                     . '|oom-kill)/im',
                 static fn (array $m): string => preg_match('/^\s*(?:\[ERROR\]\s+)?Killed\s*$/', $m[1]) === 1
                     ? 'The build ran out of memory in the engine\'s build container, which is sized for '
-                        . 'the server (DEPLOY_BUILD_MEMORY, a third of its RAM by default), not by the plan. '
+                        . 'the server (DEPLOY_BUILD_MEMORY, 8 GB or half its RAM by default), not by the plan. '
                         . 'Raising the project\'s memory limit does not change it. The full build output is '
                         . 'in the deploy log.'
                     : 'The build ran out of memory. This project needs more RAM than the plan allows.',

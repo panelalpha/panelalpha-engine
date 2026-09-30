@@ -18,12 +18,6 @@ class HostBuildSlotTest extends TestCase
         $this->assertSame('built', HostBuildSlot::run(static fn (): string => 'built'));
     }
 
-    /** engine#184: a build sized for the whole host must know it holds the slot. */
-    public function test_the_build_is_told_it_holds_the_slot(): void
-    {
-        $this->assertTrue(HostBuildSlot::run(static fn (bool $alone): bool => $alone));
-    }
-
     public function test_the_slot_is_released_when_the_build_throws(): void
     {
         try {

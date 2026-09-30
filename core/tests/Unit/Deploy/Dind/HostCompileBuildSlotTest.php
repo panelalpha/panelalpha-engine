@@ -9,6 +9,8 @@ use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\BuildMemory;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
+use App\Lib\Host\HostMemory;
+use App\Lib\Host\HostMemoryProbe;
 use App\System;
 use App\System\Filesystem as SystemFilesystem;
 use App\System\Project\Dind;
@@ -19,10 +21,9 @@ use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /**
- * engine#184: every host build container is sized for the server, raised
- * (never lowered) by a larger project limit, so the builds run one at a time
- * and the deploy log says what the container got and why. The slot was dropped when HostCompile moved to System and
- * nothing called it, so QUEUE_WORKERS builds could each take a third of RAM.
+ * engine#184/#295: every host build container may take the server's RAM less
+ * the engine's share, so the builds run one at a time and the deploy log says
+ * what the container got and why.
  */
 class HostCompileBuildSlotTest extends TestCase
 {
@@ -30,9 +31,6 @@ class HostCompileBuildSlotTest extends TestCase
 
     /** @var list<?string> */
     private array $memoryFlags = [];
-
-    /** A 15.6 GB host, the test host's own MemTotal: server share 5202 MB, half 7804 MB. */
-    private const MEMINFO_16G = "MemTotal:       15983292 kB\n";
 
     protected function setUp(): void
     {
@@ -48,7 +46,7 @@ class HostCompileBuildSlotTest extends TestCase
      *
      * @return list<bool> one entry per build container: true when the slot was free
      */
-    private function build(string $memory, int $times = 1, ?int $projectMemoryMb = null, ?callable $builderFor = null): array
+    private function build(string $memory, int $times = 1, ?DindHostBuilder $builder = null): array
     {
         $system = new class extends System {
             /** @var list<bool> */
@@ -127,15 +125,11 @@ class HostCompileBuildSlotTest extends TestCase
 
         $model = new \App\Models\User();
         $model->username = $this->username;
-        $model->details = ['UID' => 1001, 'GID' => 1001, 'memory_limit' => $projectMemoryMb];
+        $model->details = ['UID' => 1001, 'GID' => 1001];
         $home = '/home/' . $this->username;
 
         $engine = $this->createStub(ContainerEngine::class);
-        if ($builderFor === null) {
-            $engine->method('hostBuilder')->willReturn(new DindHostBuilder($memory, ''));
-        } else {
-            $engine->method('hostBuilder')->willReturnCallback($builderFor);
-        }
+        $engine->method('hostBuilder')->willReturn($builder ?? new DindHostBuilder($memory, ''));
 
         $dind = $this->createStub(Dind::class);
         $dind->method('username')->willReturn($this->username);
@@ -204,85 +198,66 @@ class HostCompileBuildSlotTest extends TestCase
         $logger = DeployLogger::start($this->username);
         $logger->stage(DeployLogger::STAGE_RUNNING);
 
-        // Below the builder's floor: the container gets 2048, so the log must too.
-        $this->build('1g');
+        // Unit-less is megabytes to us and bytes to Docker; the log must say what Docker got.
+        $this->build('1024');
 
-        $this->assertContains(HostCompile::buildMemoryLine(2048), $this->logLines($logger));
+        $this->assertSame(['1024m'], $this->memoryFlags);
+        $this->assertContains(HostCompile::buildMemoryLine(1024), $this->logLines($logger));
     }
 
-    /**
-     * Option B of engine#184: a project given more memory than the server
-     * share gets a build that can use it, and the log says where it came from.
-     */
-    public function test_a_larger_project_limit_raises_the_build_container(): void
-    {
-        $logger = DeployLogger::start($this->username);
-        $logger->stage(DeployLogger::STAGE_RUNNING);
-        $asked = [];
-
-        $this->build('', 1, 7000, function (?int $projectMemoryMb) use (&$asked): DindHostBuilder {
-            $asked[] = $projectMemoryMb;
-
-            return DindEngine::builderFor('', self::MEMINFO_16G, $projectMemoryMb);
-        });
-
-        $this->assertContains(7000, $asked, 'the project\'s memory limit must reach the engine');
-        $this->assertSame(['7000m'], $this->memoryFlags);
-        $line = HostCompile::buildMemoryLine(7000, DindEngine::buildMemory('', self::MEMINFO_16G, 7000));
-        $this->assertContains($line, $this->logLines($logger));
-        $this->assertStringContainsString('raised to the project\'s memory limit from the server default of 5202 MB', $line);
-    }
-
-    public function test_a_smaller_project_limit_does_not_lower_it(): void
+    /** engine#295: unset, a build gets 8 GB once the host has 16 GB. */
+    public function test_a_large_host_gives_the_build_8_gb(): void
     {
         $logger = DeployLogger::start($this->username);
         $logger->stage(DeployLogger::STAGE_RUNNING);
 
-        $this->build('', 1, 2000, static fn (?int $mb): DindHostBuilder => DindEngine::builderFor('', self::MEMINFO_16G, $mb));
+        $this->build('', 1, DindEngine::builderFor('', new HostMemory(32768)));
 
-        $this->assertSame(['5202m'], $this->memoryFlags);
-        $line = HostCompile::buildMemoryLine(5202, DindEngine::buildMemory('', self::MEMINFO_16G, 2000));
-        $this->assertContains($line, $this->logLines($logger));
-        $this->assertStringContainsString('the server default', $line);
-    }
-
-    public function test_the_project_cannot_take_more_than_half_the_server(): void
-    {
-        $logger = DeployLogger::start($this->username);
-        $logger->stage(DeployLogger::STAGE_RUNNING);
-
-        $this->build('', 1, 12000, static fn (?int $mb): DindHostBuilder => DindEngine::builderFor('', self::MEMINFO_16G, $mb));
-
-        $this->assertSame(['7804m'], $this->memoryFlags);
+        $this->assertSame(['8192m'], $this->memoryFlags);
         $this->assertContains(
-            'Host build container memory: 7804 MB, the project\'s memory limit of 12000 MB held to half the server\'s RAM'
-                . ' (server default 5202 MB); DEPLOY_BUILD_MEMORY replaces both',
+            'Host build container memory: 8192 MB, 8192 MB by default, at most half the server\'s 32768 MB and never more'
+                . ' than its RAM less 512 MB for the engine (DEPLOY_ENGINE_MEMORY); DEPLOY_BUILD_MEMORY replaces the default,'
+                . ' up to 16384 MB',
             $this->logLines($logger)
         );
     }
 
-    /** The operator's number is a decision for the server; a plan does not undo it. */
-    public function test_deploy_build_memory_wins_over_the_project_on_the_real_engine(): void
+    /** engine#295: and never more than half the host. */
+    public function test_a_small_host_holds_the_build_to_half_its_ram(): void
+    {
+        $logger = DeployLogger::start($this->username);
+        $logger->stage(DeployLogger::STAGE_RUNNING);
+
+        $this->build('', 1, DindEngine::builderFor('', new HostMemory(3790)));
+
+        $this->assertSame(['1895m'], $this->memoryFlags);
+        $this->assertContains(
+            'Host build container memory: 1895 MB, 8192 MB by default, at most half the server\'s 3790 MB and never more'
+                . ' than its RAM less 512 MB for the engine (DEPLOY_ENGINE_MEMORY); DEPLOY_BUILD_MEMORY replaces the default,'
+                . ' up to 1895 MB',
+            $this->logLines($logger)
+        );
+    }
+
+    public function test_deploy_build_memory_wins_on_the_real_engine(): void
     {
         config(['deploy.build_memory' => '3g']);
-        $builder = (new DindEngine())->hostBuilder(12000);
+        $builder = (new DindEngine())->hostBuilder();
 
         $this->assertSame(3072, $builder->memoryLimitMb());
         $this->assertSame(BuildMemory::SETTING, $builder->memoryOrigin()->source);
     }
 
-    /** The real engine, reading this machine: a project can only ever raise the build, and never past half. */
-    public function test_the_real_engine_reads_the_project_limit_when_nothing_is_set(): void
+    /** The real engine, reading this machine. */
+    public function test_the_real_engine_reads_the_host_when_nothing_is_set(): void
     {
         config(['deploy.build_memory' => '']);
-        $engine = new DindEngine();
-        $server = $engine->hostBuilder(null)->memoryLimitMb();
-        preg_match('/^MemTotal:\s+(\d+)/m', (string) file_get_contents('/proc/meminfo'), $m);
-        $halfMb = intdiv(intdiv((int) $m[1], 1024), 2);
+        $builder = (new DindEngine())->hostBuilder();
 
-        $this->assertSame($server, $engine->hostBuilder(1)->memoryLimitMb());
-        $huge = $engine->hostBuilder(PHP_INT_MAX);
-        $this->assertSame(max($server, $halfMb), $huge->memoryLimitMb());
-        $this->assertNotSame(BuildMemory::SETTING, $huge->memoryOrigin()->source);
+        $this->assertSame(
+            min(DindEngine::MAX_BUILD_MEMORY_MB, DindEngine::buildCeilingMb(HostMemoryProbe::current())),
+            $builder->memoryLimitMb()
+        );
+        $this->assertSame(BuildMemory::HOST, $builder->memoryOrigin()->source);
     }
 }

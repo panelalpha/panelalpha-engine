@@ -3,10 +3,9 @@
 # invoked as `npm run build` at the root of the checkout by
 # HostCompile::runForPhp(). The checkout is bind-mounted at /app and the
 # account's uid owns it, but the cgroup is the *engine's* build budget and not
-# the account's limit: DindEngine::resolveBuildMemory() takes
-# DEPLOY_BUILD_MEMORY when an operator set one, and otherwise
-# ServiceLimits::hostBuildMemoryMb(), which is max(2048, min(8192, hostRAM/3))
-# MB. NODE_OPTIONS already carries --max-old-space-size=70% of that.
+# the account's limit: DindEngine::buildMemory() takes DEPLOY_BUILD_MEMORY when
+# an operator set one, and otherwise 8192MB, never more than half the host's RAM
+# (engine#295). NODE_OPTIONS already carries --max-old-space-size=70% of that.
 #
 # Shopware's monorepo ships no compiled frontend. src/Storefront/Resources/
 # .gitignore excludes `app/storefront/dist/*` (all but the static `assets`
@@ -115,9 +114,9 @@ cd "$ROOT"
 # that cgroup, so those are the pairs a real deploy would see.)
 #
 # There is no flag that makes it smaller: the peak is Rollup's module graph,
-# not minification. And 2048MB is exactly ServiceLimits::MIN_BUILD_MEMORY_MB,
-# the floor an engine host under ~6GB of RAM lands on -- so on a small engine
-# this build cannot run at all, whatever the account is sized at.
+# not minification. An engine host with less than ~5.3GB of RAM gives the build
+# container less than that, so on a small engine this build cannot run at all,
+# whatever the account is sized at.
 #
 # Attempting it anyway spends 51s and 1.2GB of node_modules to arrive at a
 # kill, and a failure here fails the whole deploy (runContainer() throws),

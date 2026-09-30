@@ -8,16 +8,14 @@ use Illuminate\Support\Facades\Log;
  * One host build at a time, whatever the queue is doing.
  *
  * A host build is the one part of a deploy that competes for the *host's* RAM.
- * {@see \App\Lib\Deploy\Compose\ServiceLimits::hostBuildMemoryMb()} gives each
- * one a third of MemTotal and hands the runtime a heap cap at 70% of that --
- * numbers chosen so a single build can be big enough for the ones that need it
- * (Chamilo 2.x's Encore pass wants ~3.5 GB of heap and OOMs below it).
+ * {@see DindEngine::buildMemory()} gives each one up to 8 GB, half the server's
+ * RAM, and hands the runtime a heap cap at 70% of that.
  *
  * That sizing assumed one build at a time, which is what a single
  * queue worker used to guarantee. It is QUEUE_WORKERS now -- 2 by default and
  * up to 32 -- and `DeployLock` does not help: it is explicitly one deploy per
- * *account*, so that many accounts build together by design. Even three builds
- * each entitled to a third of the host exhaust it, and the heap cap is not a
+ * *account*, so that many accounts build together by design. Two builds each
+ * entitled to half the host exhaust it, and the heap cap is not a
  * ceiling that shrinks demand, it is an instruction to grow, so they will try.
  * What the kernel does then is pick a victim by badness, which can be another
  * tenant's container or the engine's own.
@@ -48,11 +46,9 @@ final class HostBuildSlot
 
     /**
      * Run `$build` with the host's build slot held, releasing it either way.
-     * `$build` is told whether it holds the slot: a build that is not alone
-     * must not size itself as if it were.
      *
      * @template T
-     * @param callable(bool): T $build
+     * @param callable(): T $build
      * @param ?callable(): void $onWait called once when the slot is busy
      * @return T
      */
@@ -61,7 +57,7 @@ final class HostBuildSlot
         $handle = self::acquire($onWait);
 
         try {
-            return $build($handle !== null);
+            return $build();
         } finally {
             if (is_resource($handle)) {
                 flock($handle, LOCK_UN);

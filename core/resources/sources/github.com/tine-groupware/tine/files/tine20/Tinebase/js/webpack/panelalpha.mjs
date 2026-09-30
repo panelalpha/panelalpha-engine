@@ -3,9 +3,8 @@
  *
  * Not webpack/prod.mjs, and not because prod.mjs is wrong -- it is what
  * upstream's release pipeline runs, on a CI runner. Run in the engine's host
- * build container it is killed: measured on a 15.6 GB host, where
- * DindEngine::resolveBuildMemory() gives the build container MemTotal/3 =
- * 5202 MB, the webpack process reached 5.0 GB anon-rss and the cgroup OOM
+ * build container it is killed: measured on a 15.6 GB host, when the build
+ * container got MemTotal/3 = 5202 MB (before engine#295), the webpack process reached 5.0 GB anon-rss and the cgroup OOM
  * killer took it ("Memory cgroup out of memory: Killed process (webpack)
  * total-vm:35615720kB, anon-rss:5130116kB"), after 2m38s, with nothing but
  * `Killed` in the log. Raising the limit is not available to a recipe: it is

@@ -54,20 +54,15 @@ administration. Measured three times at the same commit, each at the heap
 | 2400 MB | 1800 MB | exit 137, cgroup OOM kill |
 | 2800 MB | 2200 MB | success in 52 s, RSS peaked ≈2.5 GB |
 
-That cgroup is **not** the account's `--memory-limit`, though a larger limit
-can raise it.
+That cgroup is **not** the account's `--memory-limit`.
 `DindHostBuilder::sandboxPrefix()` passes `--memory $this->memoryLimit()`, and
-that value comes from `DindEngine::resolveBuildMemory()`: `DEPLOY_BUILD_MEMORY`
-if an operator set one, otherwise
-`ServiceLimits::hostBuildMemoryMb()` = `max(2048, min(8192, hostRAM/3))`. So it
-is a property of the **engine host**:
+that value comes from `DindEngine::buildMemory()`: `DEPLOY_BUILD_MEMORY` if an
+operator set one, otherwise 8192 MB, and never more than half the host's RAM
+(engine#295). So it is a property of the **engine host**:
 
-* 15 GB host → 5202 MB → the administration builds (proven here).
-* under ~8 GB → at or near the `MIN_BUILD_MEMORY_MB` floor of 2048 MB → it
-  cannot, unless the account's memory limit is at least 2800 MB and half the
-  host's RAM is too (engine#184: a larger project limit raises the build, up
-  to half of MemTotal, when `DEPLOY_BUILD_MEMORY` is empty), or the operator
-  raises `DEPLOY_BUILD_MEMORY`.
+* 15 GB host → 8192 MB → the administration builds.
+* a host with less than ~5.3 GB of RAM → under 2700 MB → it is skipped,
+  unless the operator raises `DEPLOY_BUILD_MEMORY`.
 
 `build-assets.sh` reads its own cgroup and **skips** the administration below
 2700 MB, saying so in the deploy log, rather than spending 51 s and 1.2 GB of

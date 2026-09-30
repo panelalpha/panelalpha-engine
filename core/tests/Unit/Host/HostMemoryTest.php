@@ -7,7 +7,6 @@ use App\Http\Controllers\ServerMetricsController;
 use App\Http\Requests\UserStoreRequest;
 use App\Lib\Deploy\Compose\ServiceLimits;
 use App\Lib\Deploy\Dind\DindEngine;
-use App\Lib\Deploy\Engine\BuildMemory;
 use App\Lib\Host\HostMemory;
 use App\Lib\Host\HostMemoryProbe;
 use App\Lib\Host\ProjectMemory;
@@ -80,12 +79,11 @@ class HostMemoryTest extends TestCase
     {
         HostMemoryProbe::fake(new HostMemory(4608));
         $mb = ProjectMemory::resolve(null);
-        $host15g = "MemTotal:       15983292 kB\n";
 
         $this->assertSame(4096, $mb);
         $this->assertSame('3584m', ServiceLimits::memoryFor('app', [], $mb));
         $this->assertSame(2867, ServiceLimits::nodeHeapMbForAccount($mb));
-        $this->assertSame(BuildMemory::SERVER, DindEngine::buildMemory('', $host15g, $mb)->source);
+        $this->assertSame('2304m', DindEngine::buildMemory('', new HostMemory(4608))->limit);
     }
 
     public function test_no_project_may_exceed_the_maximum(): void

@@ -33,16 +33,8 @@ use App\Lib\Deploy\Platform\Runtime\Php\PhpHostBuild;
  */
 final class DindHostBuilder implements HostBuilder
 {
-    /**
-     * Floor under a build container's memory.
-     *
-     * Node has to be told about it: left to its own heuristic it takes roughly
-     * half, and a large frontend build then dies on `Ineffective mark-compacts
-     * near heap limit` with most of the container's memory still free. The
-     * constructor raises to it instead of lowering to what it was handed, which
-     * makes the builder safe to construct directly, as its unit tests do.
-     */
-    private const MIN_MEMORY_LIMIT = '2g';
+    /** Used only when no usable limit is handed in: an unreadable host, or direct construction in tests. */
+    private const DEFAULT_MEMORY_LIMIT = '2g';
 
     private string $memoryLimit;
 
@@ -80,18 +72,9 @@ final class DindHostBuilder implements HostBuilder
     private BuildMemory $memoryOrigin;
 
     /**
-     * A build is a host resource, so the ceiling is the operator's, not a
-     * hosting plan's. The account's `memory_limit` may raise it but never
-     * lower it: a 512 MB plan would otherwise get a 512 MB build, and
-     * Chamilo 2.x's Encore build needs ~4.3 GB of heap.
-     *
-     * Passed in, not read from config here, because this class has no
-     * Laravel dependencies. The one caller with a container reads
-     * `deploy.build_memory`, or derives it from the host and the project, and
-     * hands the value over; see {@see \App\Lib\Deploy\Dind\DindEngine}.
-     *
-     * A value Docker would reject, or one that parses below the floor, falls
-     * back to the floor instead of failing every deploy on the host.
+     * A build is a host resource: up to 8 GB, held to half the server's RAM
+     * and its RAM less DEPLOY_ENGINE_MEMORY (engine#295). Passed in, not read from config,
+     * because this class has no Laravel dependencies; see {@see DindEngine}.
      */
     public function __construct(
         ?string $memoryLimit = null,
@@ -120,24 +103,16 @@ final class DindHostBuilder implements HostBuilder
     }
 
     /**
-     * The limit this builder will actually use, always spelled in megabytes.
-     *
-     * An unusable value (empty, a typo, something Docker would reject), or one
-     * that parses below the floor, falls back to the floor instead of failing
-     * every deploy. Above the floor the operator's number stands.
-     *
-     * Re-emitted, not passed through, because the two readers of a unit-less
-     * number disagree: `DEPLOY_BUILD_MEMORY=4096` is 4096 *megabytes* to
-     * {@see ServiceLimits::toMegabytes()} and 4096 *bytes* to `docker run
-     * --memory`, which then refuses the container ("Minimum memory limit
-     * allowed is 6MB") and fails every host build on the engine.
+     * The limit this builder will actually use, always spelled in megabytes:
+     * `DEPLOY_BUILD_MEMORY=4096` is 4096 MB to us but 4096 bytes to `docker run
+     * --memory`, which then refuses every host build. Unusable values get the default.
      */
     private static function saneMemoryLimit(?string $memoryLimit): string
     {
         $memoryLimit = trim((string) $memoryLimit);
         $configured = ServiceLimits::toMegabytes($memoryLimit);
-        if ($configured === null || $configured < (int) ServiceLimits::toMegabytes(self::MIN_MEMORY_LIMIT)) {
-            return self::MIN_MEMORY_LIMIT;
+        if ($configured === null || $configured <= 0) {
+            return self::DEFAULT_MEMORY_LIMIT;
         }
 
         return $configured . 'm';
@@ -540,6 +515,12 @@ final class DindHostBuilder implements HostBuilder
             'ALL',
             '--memory',
             $this->memoryLimit(),
+            // Equal to --memory: no swap on top of it, so the limit is what the build can use.
+            '--memory-swap',
+            $this->memoryLimit(),
+            // If the host runs out anyway, the kernel kills the build, not core or an app (engine#295).
+            '--oom-score-adj',
+            '1000',
             '--pids-limit',
             '512',
             // Internet only: not the engine API, the host, its LAN or the

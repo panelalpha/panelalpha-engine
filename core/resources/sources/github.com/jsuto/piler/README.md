@@ -53,7 +53,7 @@ Upstream publishes `sutoj/piler` on Docker Hub instead: 13 tags, `1.4.9` pushed
 2026-06-17, matching this `VERSION`. `hooks/prepare.sh` reads `VERSION`,
 confirms the tag exists on Docker Hub and falls back to `:latest` when a clone
 of master sits between releases. Nothing is compiled during a deploy, so
-engine#184 (the host build container taking hostRAM/3) does not apply.
+the host build container's size (engine#184, engine#295) does not apply.
 
 ## Port 25: the reason this was nearly Rejected, and the reason it is not
 

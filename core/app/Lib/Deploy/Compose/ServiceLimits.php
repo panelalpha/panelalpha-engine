@@ -39,28 +39,6 @@ final class ServiceLimits
 
     private const MIN_HEAP_MB = 128;
 
-    /**
-     * A third of the host's RAM for one build container: Chamilo 2.x's Encore
-     * build OOMs at 2 GB/1433 MB heap and builds at ~6g/4300 MB. Safe because
-     * `HostBuildSlot` holds builds to one, while `maxProcesses: 8` and
-     * `DeployLock` being per account would otherwise let eight run together.
-     */
-    private const BUILD_MEMORY_DIVISOR = 3;
-
-    /** Never below the number every engine has run with, whatever the host says. */
-    private const MIN_BUILD_MEMORY_MB = 2048;
-
-    /** Above this the operator has to say so with `DEPLOY_BUILD_MEMORY`. */
-    private const MAX_BUILD_MEMORY_MB = 8192;
-
-    /**
-     * A project's memory limit may raise its build up to half of MemTotal,
-     * never lower it (engine#184). Safe only because builds run one at a time.
-     */
-    private const PROJECT_BUILD_MEMORY_DIVISOR = 2;
-
-    private const PROC_MEMTOTAL_PATTERN = '/^MemTotal:\s+(\d+)\s*kB/mi';
-
     private const HEAP_SHARE = 0.70;
 
     private const HEAP_HEADROOM_MB = 64;
@@ -118,54 +96,6 @@ final class ServiceLimits
     }
 
     /**
-     * The memory a host build container gets when the operator has not said: a
-     * third of MemTotal, floored at 2g and capped at 8g. `MemTotal:` is not
-     * namespaced, so inside a container it reports the host's RAM, which is the
-     * number that matters for a host build. Unreadable falls back to the floor.
-     *
-     * Measured on the 15 GB host: 2g/1433 MB heap OOMs Chamilo 2.x's Encore
-     * build, ~6g/4300 MB builds it. nextcloud/server's webpack pass is the same
-     * shape -- TerserPlugin forks one minifier per CPU and their heaps sum.
-     */
-    public static function hostBuildMemoryMb(string $procMeminfo): int
-    {
-        $totalMb = self::memTotalMb($procMeminfo);
-        if ($totalMb === null) {
-            return self::MIN_BUILD_MEMORY_MB;
-        }
-
-        // intdiv, not a float share: a floor, without the floating-point boundary.
-        $share = intdiv($totalMb, self::BUILD_MEMORY_DIVISOR);
-
-        return max(self::MIN_BUILD_MEMORY_MB, min(self::MAX_BUILD_MEMORY_MB, $share));
-    }
-
-    /**
-     * The most a project's memory limit may raise its host build to: half of
-     * MemTotal, and never below the server share. Null when the host cannot be
-     * read, so an unknown machine never gets a build sized by a plan.
-     */
-    public static function projectBuildMemoryCapMb(string $procMeminfo): ?int
-    {
-        $totalMb = self::memTotalMb($procMeminfo);
-        if ($totalMb === null) {
-            return null;
-        }
-
-        return max(self::hostBuildMemoryMb($procMeminfo), intdiv($totalMb, self::PROJECT_BUILD_MEMORY_DIVISOR));
-    }
-
-    private static function memTotalMb(string $procMeminfo): ?int
-    {
-        if (preg_match(self::PROC_MEMTOTAL_PATTERN, $procMeminfo, $m) !== 1) {
-            return null;
-        }
-        $totalMb = (int) floor((int) $m[1] / 1024);
-
-        return $totalMb > 0 ? $totalMb : null;
-    }
-
-    /**
      * The V8 heap for a container of this size. Without a cap Node sizes its
      * heap from the host and is OOM-killed before a collection happens.
      *
@@ -204,7 +134,7 @@ final class ServiceLimits
      */
     public static function cargoJobsFor($memoryLimit, ?int $cpus = null): int
     {
-        $limitMb = self::toMegabytes($memoryLimit) ?? self::MIN_BUILD_MEMORY_MB;
+        $limitMb = self::toMegabytes($memoryLimit) ?? self::CARGO_JOB_MEMORY_MB;
         $jobs = max(1, intdiv($limitMb, self::CARGO_JOB_MEMORY_MB));
 
         return $cpus !== null && $cpus > 0 ? min($cpus, $jobs) : $jobs;

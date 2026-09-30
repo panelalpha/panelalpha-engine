@@ -158,7 +158,7 @@ final class FakeEngine implements ContainerEngine
         };
     }
 
-    public function hostBuilder(?int $projectMemoryMb = null): HostBuilder
+    public function hostBuilder(): HostBuilder
     {
         return new class implements HostBuilder {
             public function nodeBuildArgv(
