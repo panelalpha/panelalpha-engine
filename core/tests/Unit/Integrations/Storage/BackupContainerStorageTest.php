@@ -11,6 +11,7 @@ use InvalidArgumentException;
 use League\Flysystem\Filesystem;
 use League\Flysystem\FilesystemOperator;
 use League\Flysystem\Local\LocalFilesystemAdapter;
+use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use Tests\TestCase;
 
 class BackupContainerStorageTest extends TestCase
@@ -62,6 +63,8 @@ class BackupContainerStorageTest extends TestCase
         $this->assertInstanceOf(S3::class, $storage);
     }
 
+    // The FTP adapter reads ext-ftp constants; the core image has it, a bare PHP may not.
+    #[RequiresPhpExtension('ftp')]
     public function test_storage_returns_ftp_for_ftp_ftps_and_sftp_drivers(): void
     {
         $credentials = [

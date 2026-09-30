@@ -116,16 +116,25 @@ class DindApplicationOperationsTest extends TestCase
             /** @var list<array<string, mixed>> */
             public array $savedDetails = [];
 
+            public ?DomainModel $mainDomain = null;
+
             public function save(array $options = []): bool
             {
                 $this->savedDetails[] = $this->getDetails();
 
                 return true;
             }
+
+            // getMainDomain() queries the database; hand the fixture back instead.
+            public function getMainDomain(): ?DomainModel
+            {
+                return $this->mainDomain;
+            }
         };
         $model->username = 'alice';
         $model->setDetails(['template' => 'dind', 'deploy_strategy' => 'static']);
         $model->setRelation('domains', collect([$domain]));
+        $model->mainDomain = $domain;
 
         $runtime = $this->dind($model);
         $runtime->appCertificate()->remember();
@@ -225,6 +234,10 @@ class DindApplicationOperationsTest extends TestCase
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process
             {
                 $this->executed[] = $cmd;
+                // Answer `test -e` from the fixture tree, so an absent certificate reads as absent.
+                if (is_array($cmd) && ($cmd[0] ?? null) === 'test' && ($cmd[1] ?? null) === '-e') {
+                    return file_exists((string) ($cmd[2] ?? '')) ? FakeProcess::ok() : FakeProcess::failed();
+                }
 
                 return FakeProcess::forCommand($cmd);
             }

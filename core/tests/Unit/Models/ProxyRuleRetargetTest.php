@@ -172,14 +172,26 @@ class ProxyRuleRetargetTest extends TestCase
 
     public function test_project_update_retargets_proxy_rules_before_creating_the_new_vhost(): void
     {
-        $source = file_get_contents(app_path('Http/Controllers/UserController.php'));
-        $this->assertIsString($source);
-
-        $updatePos = strpos($source, 'function update($username, UserUpdateRequest $request)');
+        $controller = file_get_contents(app_path('Http/Controllers/UserController.php'));
+        $this->assertIsString($controller);
+        $updatePos = strpos($controller, 'function update($username, UserUpdateRequest $request)');
         $this->assertNotFalse($updatePos);
-        $suspendPos = strpos($source, 'function suspend(string $username)', $updatePos);
+        $suspendPos = strpos($controller, 'function suspend(string $username)', $updatePos);
         $this->assertNotFalse($suspendPos);
-        $updateBlock = substr($source, $updatePos, $suspendPos - $updatePos);
+        $this->assertStringContainsString(
+            'MainDomainRename::apply(',
+            substr($controller, $updatePos, $suspendPos - $updatePos),
+            'project_update must rename the main domain through MainDomainRename'
+        );
+
+        // The rename itself lives in MainDomainRename::apply().
+        $source = file_get_contents(app_path('Lib/Domains/MainDomainRename.php'));
+        $this->assertIsString($source);
+        $applyPos = strpos($source, 'public static function apply(User $user, string $newFqdn)');
+        $this->assertNotFalse($applyPos);
+        $nextPos = strpos($source, 'public static function replacement(', $applyPos);
+        $this->assertNotFalse($nextPos);
+        $updateBlock = substr($source, $applyPos, $nextPos - $applyPos);
 
         $retargetPos = strpos($updateBlock, 'ProxyRule::retargetServerName');
         $createPos = strpos($updateBlock, 'projectDomain()->create()');
