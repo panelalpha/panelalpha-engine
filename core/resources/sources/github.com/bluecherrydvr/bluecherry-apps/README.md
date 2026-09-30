@@ -178,12 +178,16 @@ that without patching `www/`.
 
 ## Where the credential lives
 
-`~/.panelalpha/bluecherry.env`, mode 0600, directory 0700 — **not** in the
-project:
+The administrator login is the engine's: `credentials:` in `panelalpha.yaml`,
+returned by `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`)
+and delivered to the `setup` service from `~/.panelalpha/app-credentials.env`.
+An account deployed before this keeps the password it had in
+`~/.panelalpha/bluecherry.env` (`adopt_from`).
+
+Every other secret is in `~/.panelalpha/bluecherry.env`, mode 0600, directory
+0700 — **not** in the project:
 
 ```
-BLUECHERRY_ADMIN_USERNAME=Admin
-BLUECHERRY_ADMIN_PASSWORD=…
 BLUECHERRY_ADMIN_SALT=…
 BLUECHERRY_DB_PASSWORD=…
 MARIADB_ROOT_PASSWORD=…
@@ -201,7 +205,7 @@ Two reasons, both engine behaviour rather than preference.
 **The guard.** The engine wipes and re-clones `~/project` on every deploy
 (engine#173), so the `if [ -f .env ]` guard every other recipe uses never fires
 on a redeploy — it would regenerate the database password while `db_data` still
-held the old one, and regenerate an admin password nobody was ever told.
+held the old one.
 `~/.panelalpha` survives the clone. The account's home is root-owned `0755`, so
 `hooks/prepare.sh` creates the directory rather than assuming it.
 

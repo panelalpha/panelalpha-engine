@@ -70,9 +70,9 @@ description: >-
   files/panelalpha-install.php bootstraps exactly what install/install.php
   bootstraps, fills the same Omeka_Form_Install that
   IndexController::indexAction() validates, and hands it to the same
-  Installer_Default -- the same four tasks, nothing reimplemented -- with a
-  password generated per account into ~/.panelalpha/omeka/admin-credentials
-  (0600 in a 0700 directory). Afterwards /install answers "Omeka is installed."
+  Installer_Default -- the same four tasks, nothing reimplemented -- with the
+  login the engine generates (`credentials:` below; returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get). Afterwards /install answers "Omeka is installed."
   and creates nothing.
 
   Running that installer outside a request needed two lines the browser
@@ -203,3 +203,9 @@ commands:
       upgrade stage replays it on every redeploy. On the build stage it would
       not run at all (engine#171).
     run: 'sh panelalpha-setup.sh'
+credentials:
+  login_path: /admin/users/login
+  adopt_from: .panelalpha/omeka/admin-credentials
+  fields:
+    OMEKA_ADMIN_USERNAME: {kind: username, value: admin}
+    OMEKA_ADMIN_PASSWORD: {kind: password}

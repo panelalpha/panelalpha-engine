@@ -41,11 +41,20 @@ description: >-
   over the proxy would be a 403.
 
   SECRETS AND ADMIN. SECRET_KEY, the Fernet FIELD_ENCRYPTION_KEY (a rotation
-  would strand every encrypted field), the database password and a generated
-  admin password are written once into ~/.panelalpha/bitpoll/ (0600 in 0700) --
+  would strand every encrypted field) and the database password are written
+  once into ~/.panelalpha/bitpoll/ (0600 in 0700) --
   the only writable place a deploy does not delete -- and reused across
   redeploys, so a rebuild does not log everyone out, lock the app out of the
   pgdata volume, or reset the owner account. The admin (a standard AbstractUser:
-  username/email/password) is seeded non-interactively by `init` only when it
+  username/email/password) uses the login the engine generates (`credentials:`
+  below, returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get) and is seeded non-interactively by `init` only when it
   does not already exist, so anonymous cannot reach /admin and the default
-  credentials never apply. Onboarding notes go in credentials.txt.
+  credentials never apply.
+credentials:
+  login_path: /login/
+  adopt_from: .panelalpha/bitpoll/app.env
+  fields:
+    DJANGO_SUPERUSER_USERNAME: {kind: username, value: admin}
+    DJANGO_SUPERUSER_EMAIL: {kind: email, value: admin@example.com}
+    DJANGO_SUPERUSER_PASSWORD: {kind: password}

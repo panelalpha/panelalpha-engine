@@ -14,6 +14,20 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'status', type: 'string', example: 'active', enum: ['active', 'suspended']),
         new OA\Property(property: 'config', type: 'object', nullable: true),
         new OA\Property(property: 'details', type: 'object', nullable: true),
+        new OA\Property(
+            property: 'app_credentials',
+            description: 'Whether the engine generated a login for the deployed application, and where to read it. Never a value: GET `endpoint` returns them.',
+            properties: [
+                new OA\Property(property: 'available', type: 'boolean'),
+                new OA\Property(property: 'fields', type: 'array', items: new OA\Items(properties: [
+                    new OA\Property(property: 'name', type: 'string'),
+                    new OA\Property(property: 'kind', type: 'string', enum: ['username', 'email', 'password']),
+                ], type: 'object')),
+                new OA\Property(property: 'login_url', type: 'string', nullable: true),
+                new OA\Property(property: 'endpoint', type: 'string', example: '/api/projects/johndoe/app-credentials'),
+            ],
+            type: 'object',
+        ),
         new OA\Property(property: 'created_at', type: 'string', format: 'date-time'),
         new OA\Property(property: 'updated_at', type: 'string', format: 'date-time'),
     ],

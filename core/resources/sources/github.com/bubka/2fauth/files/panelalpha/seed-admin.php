@@ -2,8 +2,9 @@
 // Seed the owner administrator and close open registration, using 2FAuth's own
 // models and services -- no upstream source is patched. Runs inside the init
 // service before the app ever serves, so the first-registered-user-becomes-admin
-// window is never open. Idempotent: on a redeploy the admin already exists and
-// this leaves it (and the owner's own later changes) untouched.
+// window is never open. Once: when an administrator already exists (a redeploy)
+// nothing is touched -- not the owner's login, not a registration setting the
+// owner re-opened.
 
 require '/srv/vendor/autoload.php';
 
@@ -23,6 +24,11 @@ if (! $email || ! $pass) {
     exit(1);
 }
 
+if (User::where('is_admin', true)->exists()) {
+    fwrite(STDOUT, "seed-admin: an administrator already exists, left unchanged\n");
+    exit(0);
+}
+
 if (! User::where('email', $email)->exists()) {
     $user = new User();
     $user->name              = $name;
@@ -38,6 +44,6 @@ if (! User::where('email', $email)->exists()) {
 
 // Default is open registration (config/2fauth.php settings.disableRegistration
 // = false, no env override exists). Persist the closed state to the options
-// table on the volume; the owner can re-open it from the admin settings later.
+// table on the volume, once; the owner can re-open it from the admin settings.
 Settings::set('disableRegistration', true);
 fwrite(STDOUT, "seed-admin: disableRegistration = true persisted\n");

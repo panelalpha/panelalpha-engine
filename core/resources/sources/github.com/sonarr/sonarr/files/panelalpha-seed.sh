@@ -1,6 +1,6 @@
 #!/bin/sh
 # Creates Sonarr's Forms-login user once, via PUT /api/v3/config/host.
-# Env: SONARR_ADMIN_USER, SONARR_ADMIN_PASSWORD (~/.panelalpha/sonarr/admin.env).
+# Env: SONARR_ADMIN_USER, SONARR_ADMIN_PASSWORD (~/.panelalpha/app-credentials.env).
 set -eu
 API=http://app:8989/api/v3
 

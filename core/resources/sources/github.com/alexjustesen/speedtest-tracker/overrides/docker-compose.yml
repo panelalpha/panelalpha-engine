@@ -5,12 +5,14 @@ services:
   app:
     image: lscr.io/linuxserver/speedtest-tracker:v1.15.0-ls173
     restart: unless-stopped
-    # .env holds panel-overridable defaults; app.env the persisted secrets and
-    # the admin that the first migration seeds.
+    # .env holds panel-overridable defaults; app.env the persisted APP_KEY;
+    # app-credentials.env the engine's admin login, which the first migration seeds.
     env_file:
       - .env
       - ../.panelalpha/speedtest/app.env
+      - ../.panelalpha/app-credentials.env
     environment:
+      ADMIN_NAME: Admin
       PUID: "1000"
       PGID: "1000"
       DB_CONNECTION: sqlite

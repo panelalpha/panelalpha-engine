@@ -4,8 +4,9 @@
 # redeploy will not delete them, then writes the env_files the compose reads.
 # Rotating any of these breaks the running instance: a new DB password locks the
 # app out of the mysql volume, a new CB_ENCRYPTION_KEY makes every stored
-# datasource credential undecryptable, a new owner password silently changes the
-# login.
+# datasource credential undecryptable. The owner login and the BullMQ dashboard
+# login are the engine's (`credentials:` in panelalpha.yaml), in
+# ~/.panelalpha/app-credentials.env.
 set -e
 
 say() { echo "[chartbrew] $*" >&2; }
@@ -32,8 +33,6 @@ REDIS_PASSWORD=$(gen_or_read "${STORE}/redis_password" openssl rand -hex 16)
 ENCRYPTION_KEY=$(gen_or_read "${STORE}/encryption_key" openssl rand -hex 32)
 # CB_SECRET signs legacy share tokens; kept stable so shares survive a redeploy.
 CB_SECRET=$(gen_or_read "${STORE}/cb_secret" openssl rand -hex 32)
-BULLMQ_PASSWORD=$(gen_or_read "${STORE}/bullmq_password" openssl rand -hex 16)
-OWNER_PASSWORD=$(gen_or_read "${STORE}/owner_password" openssl rand -hex 16)
 OWNER_EMAIL="owner@chartbrew.local"
 
 umask 077
@@ -67,51 +66,10 @@ CB_REDIS_PORT=6379
 CB_REDIS_PASSWORD=${REDIS_PASSWORD}
 CB_ENCRYPTION_KEY=${ENCRYPTION_KEY}
 CB_SECRET=${CB_SECRET}
-CB_BULLMQ_USERNAME=chartbrew
-CB_BULLMQ_PASSWORD=${BULLMQ_PASSWORD}
 CB_ADMIN_MAIL=${OWNER_EMAIL}
 EOF
 
-# --- owner seeding, read by the init one-shot (files/.../init.sh) ---
-cat > "${STORE}/owner.env" <<EOF
-OWNER_NAME=Owner
-OWNER_EMAIL=${OWNER_EMAIL}
-OWNER_PASSWORD=${OWNER_PASSWORD}
-EOF
-
 chmod 600 "${STORE}"/*.env
-
-cat > "${STORE}/credentials.txt" <<EOF
-Chartbrew on this account
-=========================
-
-OWNER LOGIN (seeded once, on the first deploy)
-  URL:      this account's URL (log in from the front page)
-  Email:    ${OWNER_EMAIL}
-  Password: ${OWNER_PASSWORD}
-
-  Change it from Settings > Profile after first login; a redeploy will not
-  reset it (the owner is seeded only when no user exists yet).
-
-REGISTRATION
-  Public signup is disabled (CB_RESTRICT_SIGNUP=1): once the owner exists,
-  POST /user is refused. Invite teammates from Settings > Members (needs SMTP).
-
-BULLMQ QUEUE DASHBOARD (/api/apps/queues, HTTP basic auth)
-  Username: chartbrew
-  Password: ${BULLMQ_PASSWORD}
-
-SECRETS
-  The DB password, Redis password, CB_ENCRYPTION_KEY (encrypts stored
-  datasource credentials) and CB_SECRET live in ${STORE} (0600), generated
-  once and reused on every redeploy. Do NOT delete this directory: a new
-  encryption key makes every saved connection unreadable.
-
-EMAIL (optional)
-  Team invites and password-reset emails need SMTP. Set CB_MAIL_* in
-  ${STORE}/app.env and redeploy.
-EOF
-chmod 600 "${STORE}/credentials.txt"
 
 # docker compose reads ./.env in the project dir for interpolation; keep it
 # present (empty) so `docker compose up` never warns/aborts on a missing file.
@@ -125,4 +83,4 @@ docker pull redis:7-alpine || true
 docker pull nginx:1.27-alpine || true
 docker pull curlimages/curl:8.11.1 || true
 
-say "prepare complete; secrets in ${STORE}"
+say "prepare complete"

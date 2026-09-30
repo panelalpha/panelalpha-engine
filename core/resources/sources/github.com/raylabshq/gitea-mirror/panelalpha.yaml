@@ -14,8 +14,9 @@ description: >-
   has no env or CLI to create one. A one-shot `init` service on the same
   volume starts the app bound to 127.0.0.1 inside its own container (no
   published port), signs the admin up through the app's own endpoint
-  POST /api/auth/sign-up/email with a login generated once into
-  ~/.panelalpha/giteamirror (credentials.txt there), then stops it. It does
+  POST /api/auth/sign-up/email with the login the engine generates
+  (`credentials:` below; returned by GET /projects/{name}/app-credentials,
+  MCP app_credentials_get), then stops it. It does
   nothing once the database has a user, so a changed password survives a
   redeploy. The app service depends on `init` completing, and
   AUTH_ALLOW_SIGNUP=false makes the sign-up endpoint answer 403 once an
@@ -27,3 +28,8 @@ description: >-
   .env.example value is a public placeholder the entrypoint does not catch).
   GitHub and Gitea URLs and tokens are the user's runtime configuration,
   entered in the app after login.
+credentials:
+  adopt_from: .panelalpha/giteamirror/admin.env
+  fields:
+    GM_ADMIN_EMAIL: {kind: email, value: admin@gitea-mirror.local}
+    GM_ADMIN_PASSWORD: {kind: password}

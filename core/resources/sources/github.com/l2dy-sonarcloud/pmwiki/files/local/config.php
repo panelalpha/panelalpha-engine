@@ -20,8 +20,8 @@ if ($pa_url !== '') {
   $UploadUrlFmt = "$pa_url/uploads";
 }
 
-##  Admin password. The bcrypt hash is generated once by pmwiki-setup.sh into
-##  ~/.panelalpha/pmwiki/admin.hash (0600) and read here. Setting ['edit'] to
+##  Admin password. The bcrypt hash of the engine's password is written by
+##  pmwiki-setup.sh into ~/.panelalpha/pmwiki/admin.hash (0600) and read here. Setting ['edit'] to
 ##  the same hash closes anonymous editing: reading stays public, editing and
 ##  uploading require the admin login. If the hash file is missing we leave the
 ##  distribution default (locked attr passwords), never an open wiki.

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Walks Prismarr's own setup wizard (admin account, then "finish") from
-# ~/.panelalpha/prismarr/admin.env. Runs as the CMD under the image's s6 /init
+# ~/.panelalpha/app-credentials.env. Runs as the CMD under the image's s6 /init
 # in a container with no published port, so nobody else can reach /setup.
 set -eu
 : "${PRISMARR_ADMIN_EMAIL:?missing}" "${PRISMARR_ADMIN_PASSWORD:?missing}"

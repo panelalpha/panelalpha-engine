@@ -2,8 +2,8 @@
 # images are built from deployment/docker/ with a frontend step the go recipe
 # cannot run. This runs the official image of the current release:
 #   - SQLite database and the generated config.json on named volumes
-#   - admin, password and encryption/cookie keys from ~/.panelalpha/semaphore,
-#     generated once by hooks/prepare.sh
+#   - admin login from ~/.panelalpha/app-credentials.env (the engine's);
+#     encryption/cookie keys from ~/.panelalpha/semaphore, generated once by hooks/prepare.sh
 #   - no self-registration exists; only the admin creates users
 services:
   app:
@@ -11,8 +11,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-      # Missing file aborts `up` rather than starting without an admin.
       - ../.panelalpha/semaphore/secrets.env
+      # Missing file aborts `up` rather than starting without an admin.
+      - ../.panelalpha/app-credentials.env
     environment:
       SEMAPHORE_DB_DIALECT: sqlite
       SEMAPHORE_WEB_ROOT: ${PA_PUBLIC_URL}

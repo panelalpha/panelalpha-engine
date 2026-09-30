@@ -39,8 +39,9 @@ services:
     image: linuxserver/radarr:6.4.4
     restart: "no"
     entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    # RADARR_ADMIN_USER / RADARR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/radarr/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - radarr-config:/config:ro
       - radarr-movies:/movies

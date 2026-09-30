@@ -108,7 +108,7 @@ if ($paInstalled) {
     $paUrl = rtrim((string) (getenv('URL') ?: 'https://' . $paDomain), '/') . '/';
     $paAdminPw = getenv('B1GMAIL_ADMIN_PASSWORD');
     if (!$paAdminPw) {
-        pa_fail('B1GMAIL_ADMIN_PASSWORD is not set - the prepare hook writes it into ~/.panelalpha/b1gmail/b1gmail.env and the compose override passes that in as a second env_file.');
+        pa_fail('B1GMAIL_ADMIN_PASSWORD is not set - the engine writes it into ~/.panelalpha/app-credentials.env and the compose override passes that in as an env_file.');
     }
 
     @unlink(PA_APP . '/setup/lock');
@@ -173,7 +173,7 @@ if ($paInstalled) {
         pa_fail('setup ran but wrote no prefs row; b1gMail is not installed');
     }
     mysqli_free_result($paRes);
-    pa_say('installed - admin user "admin" at ' . $paUrl . 'admin/, password in ~/.panelalpha/b1gmail/b1gmail.env');
+    pa_say('installed - admin user "admin" at ' . $paUrl . 'admin/, password from GET /projects/{name}/app-credentials');
 }
 
 // Put the environment-reading config back over whatever the wizard wrote.

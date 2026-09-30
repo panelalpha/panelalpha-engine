@@ -14,10 +14,11 @@ description: >-
   with an empty password.
 
   overrides/docker-compose.yml builds the repository's Dockerfile unchanged
-  and hooks/prepare.sh generates, once, into ~/.panelalpha/shinobi/ (0600 in
-  0700): credentials.txt (Superuser e-mail and a random password), super.json
-  (sha256 of that password, the hash conf.sample.json's passwordType selects)
-  and db.env (DB_PASSWORD). super.json is bind-mounted over
+  and the engine generates the Superuser login (`credentials:` below; returned
+  by GET /projects/{name}/app-credentials, MCP app_credentials_get).
+  hooks/prepare.sh writes, once, into ~/.panelalpha/shinobi/ (0600 in 0700):
+  super.json (sha256 of that password, the hash conf.sample.json's
+  passwordType selects) and db.env (DB_PASSWORD). super.json is bind-mounted over
   /home/Shinobi/super.json, so init.sh keeps it and a password changed in
   /super is written back to it. The service command runs after init.sh: it
   refuses to start if super.json is missing or holds the default hash, sets
@@ -43,3 +44,10 @@ description: >-
   233s: default still refused, generated login, the Admin account and all four
   monitors intact. /.env, /.git/config, /super.json, /conf.json, /sql/user.sql
   -> 404. App ~286 MiB.
+credentials:
+  login_path: /super
+  # The old recipe's credentials.txt used these names (email=, password=).
+  adopt_from: .panelalpha/shinobi/credentials.txt
+  fields:
+    email: {kind: email, value: admin@shinobi.video}
+    password: {kind: password}

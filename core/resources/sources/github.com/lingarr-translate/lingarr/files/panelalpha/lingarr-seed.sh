@@ -17,7 +17,7 @@ post() {
 }
 
 if [ "$any" = "false" ]; then
-    # The generated password is [A-Za-z0-9] only, so it needs no JSON escaping.
+    # The engine's generated password is [A-Za-z0-9] only, so it needs no JSON escaping.
     post signup "{\"username\":\"$LINGARR_ADMIN_USER\",\"password\":\"$LINGARR_ADMIN_PASSWORD\"}"
     echo "[lingarr] admin '$LINGARR_ADMIN_USER' created"
 else

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Creates Radarr's Forms-login user once, via PUT /api/v3/config/host.
-# Env: RADARR_ADMIN_USER, RADARR_ADMIN_PASSWORD (~/.panelalpha/radarr/admin.env).
+# Env: RADARR_ADMIN_USER, RADARR_ADMIN_PASSWORD (~/.panelalpha/app-credentials.env).
 set -eu
 API=http://app:7878/api/v3
 

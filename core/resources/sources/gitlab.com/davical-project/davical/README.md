@@ -134,8 +134,9 @@ plaintext password (`session_validate_password`, `awl/inc/AWLUtilities.php:268`)
 domain and a CalDAV endpoint that accepts HTTP Basic. `create-database.sh`
 overwrites it with a `pwgen` value and prints it to a terminal nobody is
 watching here. `panelalpha-davical-setup.php` replaces it on the install stage,
-before Apache binds, with a password generated per account into
-`~/.panelalpha/davical-app.env` (0600 in a 0700 directory), stored as AWL's
+before Apache binds, with the password the engine generates (`credentials:` in
+`panelalpha.yaml`; returned by `GET /projects/{name}/app-credentials`, MCP
+`app_credentials_get`), stored as AWL's
 salted-SHA1 `*<salt>*{SSHA}<hash>` form rather than as plaintext — the
 strongest of the three formats the application can verify. Verified in the
 database after a deploy: `usr.password` for `admin` is `*TbRvA0aQ9*{SS…`, 57

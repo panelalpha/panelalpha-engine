@@ -2,8 +2,10 @@
 
 namespace App\Http\Resources;
 
+use App\Lib\Deploy\Credentials\AppCredentials;
 use App\Models\User;
 use App\System\Project\Dind\AppDatabase;
+use App\System\Project\Dind\Networking;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class UserResource extends JsonResource
@@ -35,6 +37,7 @@ class UserResource extends JsonResource
                 ? ($user->stagingUser?->username)
                 : null,
             'details' => $this->publicDetails($user),
+            'app_credentials' => $this->appCredentials($user),
             'config' => $user->getConfig(),
             'email_verified_at' => $user->email_verified_at,
             'created_at' => $user->created_at,
@@ -46,6 +49,22 @@ class UserResource extends JsonResource
         }
 
         return $resource;
+    }
+
+    /**
+     * That the app has a login the engine generated, and where to read it. Never a value.
+     *
+     * @return array<string, mixed>
+     */
+    private function appCredentials(User $user): array
+    {
+        $stored = $user->getAppCredentials();
+
+        return AppCredentials::pointer(
+            $stored,
+            $stored === null ? null : Networking::publicUrlOf($user),
+            (string) $user->username
+        );
     }
 
     /**
@@ -61,6 +80,7 @@ class UserResource extends JsonResource
         unset(
             $details['git_token'],
             $details['env_vars'],
+            $details['app_credentials'],
             $details['site_git'],
             $details['cloudflare_api_token'],
             $details['cloudflare_tunnel_token'],

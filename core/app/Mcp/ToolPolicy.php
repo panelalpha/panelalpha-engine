@@ -41,6 +41,7 @@ class ToolPolicy
         'csf_ui_credentials',      // CSF_UI_PASSWORD
         'system_exim_config_get',  // smarthost SMTP/SES/Mailchannels passwords, SendGrid token
         'app_sso_login',           // redeems an SSO token into the app's admin session cookie
+        'app_credentials_get',     // the admin login the engine generated for the deployed app
     ];
 
     /**

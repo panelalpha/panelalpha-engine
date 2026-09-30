@@ -29,13 +29,16 @@ services:
       #                             includes/common.php:101 reads the directory
       #                             from $_SERVER['CHYRP_STORAGE_DIR'], which
       #                             the .htaccess sets.
-      #   /data/admin-credentials   the generated administrator, 0600.
       #
       # ~ itself is root-owned 0755 and nothing can be created in it;
       # ~/.panelalpha is created with the account. hooks/prepare.sh creates the
       # subdirectory before this mount is made, so Docker never gets to create
       # it as root.
       - ../.panelalpha/chyrp-lite:/data
+
+      # The administrator's login, generated and kept by the engine; read by
+      # panelalpha-install.php on the first install.
+      - ../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro
 
       # The uploads directory, mounted *over* the one in the checkout rather
       # than symlinked out of it. Chyrp hard-codes uploads_path relative to

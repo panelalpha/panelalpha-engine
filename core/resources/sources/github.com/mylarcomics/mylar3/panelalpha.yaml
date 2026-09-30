@@ -10,9 +10,19 @@ description: >-
   survive redeploys.
 
   Mylar ships with no login and the API disabled, so the first visitor would
-  own the instance. hooks/prepare.sh generates a login password and a
+  own the instance. The engine generates the login (`credentials:` below,
+  written to ~/.panelalpha/app-credentials.env) and hooks/prepare.sh a
   32-character API key once into ~/.panelalpha/mylar; a thin entrypoint in
   front of the image's /init writes them into config.ini (form login,
-  authentication = 2; API enabled) only when the volume has no config.ini
-  yet, so settings changed in the UI later are never overwritten. `ready`
-  makes `compose up -d` return only once the login page answers.
+  authentication = 2; API enabled) only when the volume has no config.ini yet,
+  so settings changed in the UI later are never overwritten. `ready` makes
+  `compose up -d` return only once the login page answers. The login is
+  returned by GET /projects/{name}/app-credentials; accounts deployed before
+  this kept it in ~/.panelalpha/mylar/app.env, which `adopt_from` carries
+  over.
+credentials:
+  login_path: /auth/login
+  adopt_from: .panelalpha/mylar/app.env
+  fields:
+    MYLAR_USER: {kind: username, value: admin}
+    MYLAR_PASSWORD: {kind: password}

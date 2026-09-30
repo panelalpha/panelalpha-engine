@@ -11,9 +11,17 @@ description: >-
 
   This recipe runs the official dullage/flatnotes image of the current release,
   v5.5.5, with /data on a named volume that survives redeploys.
-  hooks/prepare.sh generates the password and the JWT signing key once into
-  ~/.panelalpha/flatnotes/auth.env (0600 in 0700), fed to the container as an
-  env_file, so the single login is `admin` with that generated password and
-  every note and attachment route needs a token. The key stays stable across
-  redeploys, so sessions survive a rebuild. The password is read from the env
-  on every start; to change it, edit auth.env and redeploy.
+  The engine generates the login (`credentials:` below) into
+  ~/.panelalpha/app-credentials.env and hooks/prepare.sh the JWT signing key
+  once into ~/.panelalpha/flatnotes/auth.env (0600 in 0700), both fed to the
+  container as env_files, so the single login is `admin` with the generated
+  password and every note and attachment route needs a token. GET
+  /projects/{name}/app-credentials (MCP app_credentials_get) returns it. The
+  key stays stable across redeploys, so sessions survive a rebuild. The
+  password is read from the env on every start, so it cannot be changed in the
+  app.
+credentials:
+  adopt_from: .panelalpha/flatnotes/auth.env
+  fields:
+    FLATNOTES_USERNAME: {kind: username, value: admin}
+    FLATNOTES_PASSWORD: {kind: password}

@@ -2,7 +2,7 @@
 # Runs Ombi privately on 127.0.0.1 inside this one-shot container, completes the
 # first-run wizard with the generated admin, then stops it. The public app
 # service starts only after this exits 0, so the wizard is never reachable.
-# Env: OMBI_ADMIN_USER, OMBI_ADMIN_PASSWORD (~/.panelalpha/ombi/admin.env), PA_PUBLIC_URL.
+# Env: OMBI_ADMIN_USER, OMBI_ADMIN_PASSWORD (~/.panelalpha/app-credentials.env), PA_PUBLIC_URL.
 set -eu
 API=http://127.0.0.1:3579/api
 LOG=/run/ombi-temp/seed.log

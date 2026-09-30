@@ -267,8 +267,8 @@ function applyPatches(PDO $pdo, array $from): array
  * "admin" backwards -- on an account with a public HTTPS domain and a CalDAV
  * endpoint that accepts Basic auth. create-database.sh overwrites it with a
  * pwgen'd value and prints it to a terminal nobody is watching here; this
- * replaces it with the password hooks/prepare.sh generated into
- * ~/.panelalpha/davical-app.env (0600, in a 0700 directory, outside the
+ * replaces it with the password the engine generated (`credentials:`), from
+ * ~/.panelalpha/app-credentials.env (0600, in a 0700 directory, outside the
  * checkout that a redeploy wipes).
  *
  * Stored as a salted SHA-1 in AWL's '*<salt>*{SSHA}<hash>' form rather than as
@@ -304,7 +304,7 @@ function rotateAdminPassword(PDO $pdo, string $plaintext): void
     $update = $pdo->prepare('UPDATE usr SET password = ?, updated = current_date WHERE user_no = 1');
     $update->execute([$hash]);
 
-    say('built-in admin password rotated (see ~/.panelalpha/davical-admin-credentials.txt)');
+    say('built-in admin password rotated (GET /projects/{name}/app-credentials returns it)');
 }
 
 // ---------------------------------------------------------------------------

@@ -7,10 +7,10 @@ the dashboard on `/` and the Superuser console on `/super`, port 8080.
 
 - `overrides/docker-compose.yml` builds the repository's own Dockerfile
   unchanged (it bundles Node 22, ffmpeg and MariaDB).
-- `hooks/prepare.sh` generates once, into `~/.panelalpha/shinobi/` (0600 files
+- The engine generates the Superuser login (`credentials:` in
+  `panelalpha.yaml`: `admin@shinobi.video` and a random password).
+- `hooks/prepare.sh` writes once, into `~/.panelalpha/shinobi/` (0600 files
   in a 0700 dir), and never rewrites:
-  - `credentials.txt` - the Superuser e-mail (`admin@shinobi.video`) and a
-    random password;
   - `super.json` - that password as sha256, bind-mounted over
     `/home/Shinobi/super.json` (upstream would copy `super.sample.json`,
     password `admin`);
@@ -22,7 +22,8 @@ the dashboard on `/` and the Superuser console on `/super`, port 8080.
 
 ## Using it
 
-1. Open `https://<domain>/super` and log in with `credentials.txt`.
+1. Open `https://<domain>/super` and log in with the login
+   `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) returns.
 2. Accounts > add an Admin account. That account logs in on `/` and owns the
    cameras (Monitors).
 3. Change the Superuser password in /super if you like; it is saved back into

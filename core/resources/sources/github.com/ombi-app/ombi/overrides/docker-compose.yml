@@ -33,8 +33,9 @@ services:
     image: lscr.io/linuxserver/ombi:development-v4.60.16-ls476
     restart: "no"
     entrypoint: ["/bin/sh", "/panelalpha/ombi-seed.sh"]
+    # OMBI_ADMIN_USER / OMBI_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/ombi/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       PA_PUBLIC_URL: ${PA_PUBLIC_URL}
     volumes:

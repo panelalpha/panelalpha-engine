@@ -4,7 +4,7 @@ $CONFIG = '{"lang":"en","error_reporting":false,"show_hidden":false,"hide_Cols":
 // PanelAlpha overrides for tinyfilemanager.php, mounted read-only as config.php
 // next to it (the first three lines keep the layout FM_Config::save() expects).
 
-// One admin, bcrypt hash generated per account by hooks/prepare.sh.
+// One admin, bcrypt hash of the engine's password written by hooks/prepare.sh.
 // Fail closed: an empty $auth_users would switch authentication off.
 $pa_hash = @file_get_contents('/etc/tinyfm/admin.hash');
 $pa_hash = is_string($pa_hash) ? trim($pa_hash) : '';

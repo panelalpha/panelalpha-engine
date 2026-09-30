@@ -79,4 +79,11 @@ description: >-
   re-clones and ProjectTree::clearContents (GitRepository.php:89) empties
   ~/project first (engine#173), so SECRET_KEY or the RSA key written there
   would be regenerated on every rebuild and invalidate every token in
-  circulation.
+  circulation. The superuser `init` creates has the login the engine generates
+  (`credentials:` below; returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get).
+credentials:
+  adopt_from: .panelalpha/saleor/saleor.env
+  fields:
+    SALEOR_ADMIN_EMAIL: {kind: email, value: admin@localhost}
+    SALEOR_ADMIN_PASSWORD: {kind: password}

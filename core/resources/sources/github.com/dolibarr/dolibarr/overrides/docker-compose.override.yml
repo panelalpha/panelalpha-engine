@@ -32,15 +32,15 @@ services:
       # among them, which is the only database driver this application has.
       PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/panelalpha/php
 
-    # The administrator login, by a path that climbs out of the checkout.
-    # ~/.panelalpha survives the clone; ~/project does not (engine #173), and
-    # hooks/prepare.sh writes this file before compose runs. `env_file` rather
+    # The administrator login (DOLI_ADMIN_LOGIN / DOLI_ADMIN_PASS), generated
+    # and kept by the engine, by a path that climbs out of the checkout.
+    # ~/.panelalpha survives the clone; ~/project does not (engine #173). `env_file` rather
     # than `environment:` because compose then lets the generated file's own
     # `env_file: .env` and this one sit side by side, and because .env is
     # copied to .env.default at mode 644 (engine #173) — which is no place for
     # the password to an ERP.
     env_file:
-      - ../.panelalpha/dolibarr-app.env
+      - ../.panelalpha/app-credentials.env
 
     # The account's data, outside the checkout: conf.php, documents/ (which is
     # DOL_DATA_ROOT, so every attachment, every generated PDF and

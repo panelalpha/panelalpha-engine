@@ -150,27 +150,27 @@ It also means `createsuperuser` is the wrong tool: for that address it exits 1
 with `Error: That Email is already taken`, and for any other address it would
 leave the default one in place beside the new account.
 
-So `hooks/prepare.sh` generates a password into
-`~/.panelalpha/pretix/admin.env` — once, because the data volume outlives the
-checkout and `~/project` is emptied before every deploy — copies it into
-`~/project/.env` each time, and the start command runs
+So the engine generates a password (`credentials:` in `panelalpha.yaml`),
+keeps it on the project and writes it to `~/.panelalpha/app-credentials.env`,
+which the override adds to the app service's `env_file:`, and the start
+command runs
 `files/panelalpha-admin-password.py` through `pretix shell` between the
 migration and gunicorn. Django's `shell` execs stdin when stdin is not a tty,
 so the script is a readable file rather than a `-c` one-liner, mounted at
 `/pretix/panelalpha-admin-password.py`. It reads `PRETIX_ADMIN_EMAIL` and
-`PRETIX_ADMIN_PASSWORD`, which the generated service already has from `.env`
-through `env_file:`.
+`PRETIX_ADMIN_PASSWORD` from the environment.
 
 The script is **guarded on the password still being the shipped default**
 rather than on a first-boot marker:
 
     if u is not None and u.check_password("admin"):
 
-Re-applying the `.env` password every boot would be harmless — it never
+Re-applying the engine's password every boot would be harmless — it never
 changes — but an operator who has since set their own password in the web
 interface would find it reset under them by the next redeploy. Checking for
 the default is the narrower statement: rotate what upstream published, never
-what somebody chose. Credentials are in `~/.panelalpha/pretix/admin.env`.
+what somebody chose. The login is returned by
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`).
 
 `|| true` on the step, so that a site which would otherwise serve is never held
 back by it.

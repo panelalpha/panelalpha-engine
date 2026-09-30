@@ -42,8 +42,9 @@ description: >-
   NC_ADMIN_EMAIL/NC_ADMIN_PASSWORD, because NocoDB has no installer: the first
   account to sign up gets `org-level-creator,super` (users.service.ts), which
   on a public HTTPS name means the first stranger to find it. initAdminFromEnv.ts
-  creates the super admin from those two instead; the password is generated per
-  account into ~/project/.panelalpha-admin-password (0600), never a default.
+  creates the super admin from those two instead; the engine generates them
+  (`credentials:` below) and GET /projects/{name}/app-credentials (MCP
+  app_credentials_get) returns them.
 
   Creating the admin does not close the door behind it.
   DEFAULT_APP_SETTINGS.invite_only_signup is false, so a fresh instance still
@@ -67,3 +68,8 @@ description: >-
   built without it, but invitations, password resets and notification webhooks
   by email need an SMTP server the engine does not provide; set NC_SMTP_HOST
   and its companions through the account's env vars.
+credentials:
+  login_path: /dashboard/#/signin
+  fields:
+    NC_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    NC_ADMIN_PASSWORD: {kind: password}

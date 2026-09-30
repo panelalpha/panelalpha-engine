@@ -26,10 +26,11 @@ description: >-
   SECURITY: NO TOKEN == WORLD-WRITABLE UPLOADS. config.rs: "If neither AUTH_TOKEN
   ... nor [server].auth_tokens are set, the server will not require any
   authentication" -- meaning anyone on the internet could POST files and fill the
-  account's disk. hooks/prepare.sh generates a strong AUTH_TOKEN (and a
-  DELETE_TOKEN for the delete endpoint, which is 404 until a delete token exists)
-  once into ~/.panelalpha/rustypaste/ (0600 in 0700, the only writable place a
-  redeploy does not wipe) and feeds them via env_file; config.rs merges the
+  account's disk. The engine generates a strong AUTH_TOKEN (and a DELETE_TOKEN
+  for the delete endpoint, which is 404 until a delete token exists) once
+  (`credentials:` below), keeps them on the project and returns them from
+  GET /projects/{name}/app-credentials (MCP app_credentials_get); the server
+  reads them via env_file from ~/.panelalpha/app-credentials.env; config.rs merges the
   AUTH_TOKEN/DELETE_TOKEN env vars into the server token set. So every upload
   needs the Authorization header while GET of a paste URL stays public. The
   config sets expose_version=false and expose_list=false so neither the running
@@ -52,3 +53,8 @@ description: >-
   as 8000:8000, the only service that publishes a port (engine#234). A curl
   health sidecar plus a `ready` gate make `docker compose up` block until
   rustypaste actually answers (engine#204).
+credentials:
+  adopt_from: .panelalpha/rustypaste/app.env
+  fields:
+    AUTH_TOKEN: {kind: password}
+    DELETE_TOKEN: {kind: password}

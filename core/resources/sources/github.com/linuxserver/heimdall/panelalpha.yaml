@@ -58,8 +58,9 @@ description: >-
   credentials, full administration. That is the right default for the LAN
   dashboard Heimdall was written to be and the wrong one for an account that
   has just been given a public HTTPS name, so
-  files/panelalpha/set-admin-password.php generates one, writes it to
-  ~/project/.panelalpha-admin-password (0600) and sets it -- only while the
+  files/panelalpha/set-admin-password.php sets the one the engine generates
+  (`credentials:` below, returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get) -- only while the
   password is still null, so a password an operator later chooses in the web
   interface is never reset under them by a redeploy. The dashboard is then
   behind a login; the *Public front* switch in Settings is how to open it again.
@@ -85,10 +86,14 @@ commands:
     description: >-
       Gives the seeded `admin` account a password while it still has none.
       UsersSeeder creates it with `password = null`, and CheckAllowed serves
-      every route to anyone when that is so. The script writes the password it
-      generates to ~/project/.panelalpha-admin-password before it sets it, and
-      does nothing at all once the account has one.
+      every route to anyone when that is so. The script sets the password the
+      engine generated, and does nothing at all once the account has one.
     run: 'php panelalpha/set-admin-password.php'
     # A site that would otherwise serve is never held back by this step; the
     # script already exits 0 on every unexpected state, and this is the belt.
     optional: true
+credentials:
+  login_path: /login
+  fields:
+    HEIMDALL_ADMIN_USER: {kind: username, value: admin}
+    HEIMDALL_ADMIN_PASSWORD: {kind: password}

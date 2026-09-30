@@ -11,8 +11,8 @@
 # tty), once per boot, from the override's start command.
 #
 # Guarded on the password still being the shipped default, rather than on a
-# first-boot marker. The generated password in .env is written once and never
-# rolled, so re-applying it every boot would be harmless -- but an operator who
+# first-boot marker. The engine's password (app-credentials.env) is generated
+# once and never rolled, so re-applying it every boot would be harmless -- but an operator who
 # has since changed the password in the web interface would find it reset under
 # them on the next redeploy. Checking the default is the narrower statement:
 # rotate what upstream published, never what somebody chose.

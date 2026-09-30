@@ -1,6 +1,6 @@
 #!/bin/bash
-# Sets Houndarr's one admin account from ~/.panelalpha/houndarr/admin.env, only
-# when none exists. The app listens on loopback in a container with no
+# Sets Houndarr's one admin account from ~/.panelalpha/app-credentials.env,
+# only when none exists. The app listens on loopback in a container with no
 # published port, so nobody else can reach /setup meanwhile.
 set -euo pipefail
 : "${HOUNDARR_ADMIN_USER:?missing}" "${HOUNDARR_ADMIN_PASSWORD:?missing}"

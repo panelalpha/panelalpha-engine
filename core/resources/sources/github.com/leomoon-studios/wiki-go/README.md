@@ -18,8 +18,9 @@ writes `data/config.yaml` with the built-in `admin` / `admin`.
 | `app` | `leomoonstudios/wiki-go:1.9.2`, the current release, on port 8080 |
 | `ready` | no-op gated on the app's healthcheck |
 
-`hooks/prepare.sh` generates, once, `~/.panelalpha/wikigo/admin.env` (0600 in
-0700) with `WIKIGO_ADMIN_USER=admin` and `WIKIGO_ADMIN_PASSWORD`.
+The login (`WIKIGO_ADMIN_USER=admin`, `WIKIGO_ADMIN_PASSWORD`) is declared under
+`credentials:` in `panelalpha.yaml`; the engine generates it and writes
+`~/.panelalpha/app-credentials.env`.
 `files/panelalpha/wikigo-init.sh` hashes it (bcrypt, cost 12) into a minimal
 `config.yaml`; Wiki-Go adds every other setting with its defaults on start.
 Once `config.yaml` exists, `init` does nothing, so a password changed in the
@@ -27,8 +28,8 @@ UI is kept.
 
 ## Login
 
-User `admin`, password `WIKIGO_ADMIN_PASSWORD` in
-`~/.panelalpha/wikigo/admin.env`.
+User `admin`; `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`)
+returns the password.
 
 ## Seeded settings
 

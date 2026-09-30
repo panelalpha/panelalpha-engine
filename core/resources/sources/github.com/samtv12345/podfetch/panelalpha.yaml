@@ -17,10 +17,11 @@ description: >-
 
   == What the recipe supplies ==
 
-  1. hooks/prepare.sh writes, once, ~/.panelalpha/podfetch/auth.env
-     (BASIC_AUTH=true, USERNAME=admin, PASSWORD=<generated>; 0600 in 0700)
-     and credentials.txt. PodFetch's built-in auth creates and checks the
-     admin from these on every start; nothing is reachable without it, and
+  1. BASIC_AUTH=true, and the engine generates USERNAME=admin and PASSWORD
+     (`credentials:` below) into ~/.panelalpha/app-credentials.env, the
+     container's env_file; GET /projects/{name}/app-credentials (MCP
+     app_credentials_get) returns them. PodFetch's built-in auth creates and
+     checks the admin from these on every start; nothing is reachable without it, and
      further users can only be onboarded through an admin-created invite.
   2. The server URL is derived per request from X-Forwarded-Host/-Proto, so
      no SERVER_URL is needed (the variable no longer exists upstream);
@@ -35,7 +36,7 @@ description: >-
   Anonymous /api/v1/podcasts, /api/v1/users, /api/v1/sys/info, /rss 403;
   login with a wrong password 403, generated one 200; /users/me admin/admin.
   POST /api/v1/podcasts/feed with the NPR Planet Money RSS feed added the
-  podcast; listed and its 75 episodes returned. Rebuild 32s: auth.env
+  podcast; listed and its 75 episodes returned. Rebuild 32s: login
   unchanged, same admin id, podcast and episodes still there. /.env,
   /.git/config, /db/podcast.db and /podcasts/../db/podcast.db 404. App
   ~12-22 MiB.
@@ -46,5 +47,10 @@ description: >-
   without auth by upstream design (external players, Chromecast); they are
   copies of public feeds, and there is no directory listing.
 
-  Credentials: ~/.panelalpha/podfetch/credentials.txt. To change the admin
-  password edit auth.env and redeploy.
+  The password cannot be changed in the app; setting PASSWORD in the
+  project's env and redeploying replaces it.
+credentials:
+  adopt_from: .panelalpha/podfetch/auth.env
+  fields:
+    USERNAME: {kind: username, value: admin}
+    PASSWORD: {kind: password}

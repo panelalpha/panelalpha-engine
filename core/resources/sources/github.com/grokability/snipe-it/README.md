@@ -23,14 +23,16 @@ The replacement runs the same two services plus two one-shots:
 
 - `db.env`: MariaDB user and root passwords
 - `app.env`: `APP_KEY` (`base64:<32 bytes>`) and `DB_PASSWORD`
-- `admin.env`: `SNIPEIT_ADMIN_USER=admin` and its password
 
 They are kept because the database and storage volumes outlive `~/project`.
+The admin login (`SNIPEIT_ADMIN_USER=admin` and its password) is declared under
+`credentials:` in `panelalpha.yaml`; the engine generates it and writes
+`~/.panelalpha/app-credentials.env`.
 
 ## Login
 
-User `admin`, password `SNIPEIT_ADMIN_PASSWORD` in
-`~/.panelalpha/snipeit/admin.env`. Its e-mail is `admin@<domain>`. You can
+User `admin`; `GET /projects/{name}/app-credentials` (MCP
+`app_credentials_get`) returns the password. Its e-mail is `admin@<domain>`. You can
 change both in the UI; redeploys do not reset them.
 
 ## Closing the setup wizard

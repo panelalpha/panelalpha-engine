@@ -32,10 +32,12 @@ description: >-
   ADMIN GATE, NO OPEN DEFAULT. main.go log.Fatal's if neither PS_SHARED_SECRET
   nor PS_SHARED_SECRET_FILE is set, so the passphrase is mandatory -- there is
   no "empty secret / open admin" state the container will boot into.
-  hooks/prepare.sh generates a strong PS_SHARED_SECRET once into
-  ~/.panelalpha/picoshare/ (0600 in 0700, the only writable place a redeploy
-  does not wipe, since ~/project is emptied every deploy, engine#173) and feeds
-  it via env_file. POST /api/auth exchanges that passphrase for a `sharedSecret`
+  The engine generates PS_SHARED_SECRET (`credentials:` below), keeps it on
+  the project and writes it to ~/.panelalpha/app-credentials.env, which the app
+  reads via env_file; GET /projects/{name}/app-credentials (MCP
+  app_credentials_get) returns it. Accounts deployed before this kept it in
+  ~/.panelalpha/picoshare/app.env, which `adopt_from` carries over.
+  POST /api/auth exchanges that passphrase for a `sharedSecret`
   session cookie; every write route (/api/entry/*, /files, /guest-links,
   /settings) requires it, so an anonymous upload or admin request is rejected.
   GET of a share link (/-{id}) stays public by design.
@@ -49,3 +51,8 @@ description: >-
   PORT. The app listens on 4001 (PORT, default 4001); only the app publishes a
   port (4001:4001) so the port scan takes it as the primary (engine#234). The
   curl and ready helpers publish nothing.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/picoshare/app.env
+  fields:
+    PS_SHARED_SECRET: {kind: password}

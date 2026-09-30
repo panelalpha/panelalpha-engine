@@ -22,8 +22,9 @@ description: >-
      that lets whoever reaches it first create the super-admin. The setup script
      drives Dotclear's own CLI installer (admin/install/index.php) before Apache
      binds, seeding inc/config.php (DB DSN + a per-account DC_MASTER_KEY that
-     `md5(uniqid())` generates) and the super-admin, with a password generated
-     per account and written to ~/.panelalpha/dotclear/admin-credentials.txt.
+     `md5(uniqid())` generates) and the super-admin, with the login the engine
+     generates (`credentials:` below), returned by
+     GET /projects/{name}/app-credentials (MCP app_credentials_get).
      After that inc/config.php exists, so the wizard reports "already installed"
      and creates nobody. Note: the installer's own `-n` non-interactive mode is
      broken at HEAD (Install\Utility::init() forces argv[1] as DC_RC_PATH, and
@@ -67,3 +68,8 @@ commands:
     timeout: 300
     description: Persist config and media under ~/.panelalpha and, on first boot, seed inc/config.php and the super-admin over the CLI installer so the web wizard never opens to a visitor.
     run: 'sh panelalpha/dotclear-setup.sh'
+credentials:
+  login_path: /admin/
+  fields:
+    DOTCLEAR_ADMIN_USER: {kind: username, value: admin}
+    DOTCLEAR_ADMIN_PASSWORD: {kind: password}

@@ -97,8 +97,9 @@ description: >-
   and a CalDAV endpoint that accepts HTTP Basic. `create-database.sh` overwrites
   it with a `pwgen` value and prints it to a terminal nobody is watching here.
   panelalpha-davical-setup.php replaces it on the install stage, before Apache
-  binds, with a password generated per account into
-  `~/.panelalpha/davical-app.env` (0600 in a 0700 directory), stored as AWL's
+  binds, with the password the engine generates
+  (`credentials:` below; returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get), stored as AWL's
   salted-SHA1 form rather than as plaintext, and only while the seeded value is
   still in place -- so a redeploy leaves a password the owner has changed alone.
 
@@ -158,3 +159,8 @@ commands:
       and functions, which is what makes newer code and older stored procedures
       agree.
     run: 'php panelalpha-davical-setup.php'
+credentials:
+  adopt_from: .panelalpha/davical-app.env
+  fields:
+    DAVICAL_ADMIN_USER: {kind: username, value: admin}
+    DAVICAL_ADMIN_PASS: {kind: password}

@@ -15,10 +15,12 @@ description: >-
   is read from /etc/tinyfm/admin.hash, and answers 503 without authenticating
   anyone if that hash is missing (an empty $auth_users would switch
   authentication off). $readonly_users is empty and the `user` account is gone.
-  hooks/prepare.sh generates the password once into
-  ~/.panelalpha/tinyfm/admin.env (0600 in 0700) and hashes it on every deploy
-  into ~/project/panelalpha/tinyfm/admin.hash, the only file the container
-  sees; to change the password, edit admin.env and redeploy.
+  The engine generates the login (`credentials:` below) into
+  ~/.panelalpha/app-credentials.env, and GET /projects/{name}/app-credentials
+  (MCP app_credentials_get) returns it; hooks/prepare.sh hashes the password
+  on every deploy into ~/project/panelalpha/tinyfm/admin.hash, the only file
+  the container sees. The password cannot be changed in the app; setting
+  TFM_ADMIN_PASSWORD in the project's env and redeploying replaces it.
 
   $root_path is /srv/files, the `files` named volume, which is outside the
   Apache document root: nothing there has a URL, so an uploaded .php is never
@@ -38,3 +40,8 @@ description: >-
   rebuild the same password logged in and the files were intact. Uploads
   must be tested against the engine host: the *.panelalpha.online test edge
   stalls multipart POSTs (panelalpha/engine#170).
+credentials:
+  adopt_from: .panelalpha/tinyfm/admin.env
+  fields:
+    TFM_ADMIN_USER: {kind: username, value: admin}
+    TFM_ADMIN_PASSWORD: {kind: password}

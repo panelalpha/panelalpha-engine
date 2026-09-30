@@ -1,18 +1,20 @@
 # Replaces the repo's build-from-source compose with the official Docker Hub
-# image. Secrets come from ~/project/.env (written by hooks/prepare.sh from the
-# persisted ~/.panelalpha/shipshipship/secrets.env). The :- defaults are
-# non-empty so a missing .env can never leave the admin creds blank, which is
+# image. The JWT secret comes from ~/project/.env (written by hooks/prepare.sh
+# from the persisted ~/.panelalpha/shipshipship/secrets.env); its :- default is
+# non-empty. The admin login comes from the engine's app-credentials.env, and a
+# missing file aborts `up` rather than leave the admin creds blank, which is
 # what would put the app into anonymous-write "demo mode".
 services:
   shipshipship:
     image: nelkinsky/shipshipship:latest
     restart: unless-stopped
+    # ADMIN_USERNAME / ADMIN_PASSWORD, generated and kept by the engine.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     environment:
       GIN_MODE: release
       PORT: "8080"
       DB_PATH: /app/data/changelog.db
-      ADMIN_USERNAME: ${SSS_ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${SSS_ADMIN_PASSWORD:-shipshipship-locked}
       JWT_SECRET: ${SSS_JWT_SECRET:-shipshipship-locked}
       # Rewritten to the real public origin by the engine; used only for
       # newsletter unsubscribe links.

@@ -63,9 +63,11 @@ description: >-
   HTTPS domain the window is however long it takes the owner to open a browser.
   files/panelalpha-esmira-setup.php closes it on the install stage, before
   Apache binds, by calling the wizard's own `ESMiraInitializerFS` and
-  `FileSystemBasics::writeServerConfigs()` rather than reimplementing them; the
-  compose override's healthcheck then asserts on every probe that it stayed
-  closed.
+  `FileSystemBasics::writeServerConfigs()` rather than reimplementing them,
+  with the administrator login the engine generates (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials, MCP app_credentials_get);
+  the compose override's healthcheck then asserts on every probe that it
+  stayed closed.
 
   **The data is files, and by default those files live inside the document
   root.** ESMira's setup wizard offers `DIR_BASE` as the data location and
@@ -145,3 +147,9 @@ commands:
       (engine #171).
     run: 'php /app/panelalpha-esmira-setup.php'
     timeout: 300
+credentials:
+  login_path: /?admin
+  adopt_from: .panelalpha/esmira-app.env
+  fields:
+    ESMIRA_ADMIN_USER: {kind: username, value: admin}
+    ESMIRA_ADMIN_PASS: {kind: password}

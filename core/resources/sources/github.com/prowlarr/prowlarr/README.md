@@ -16,8 +16,11 @@ prefix, API version and no library volume.
   authentication" modal never appears and auth cannot be relaxed to
   "disabled for local addresses" (every client is local behind the proxy).
   Port, bind address and URL base are pinned the same way.
-- `hooks/prepare.sh` writes `~/.panelalpha/prowlarr/admin.env` once
-  (`PROWLARR_ADMIN_USER=admin`, random hex password).
+- The login is declared in `panelalpha.yaml` (`credentials:`): the engine
+  generates `PROWLARR_ADMIN_USER=admin` and a random password once, keeps them
+  on the project and writes `~/.panelalpha/app-credentials.env` before the
+  prepare hook on every deploy. `adopt_from` takes the password an account
+  deployed before this already has from `~/.panelalpha/prowlarr/admin.env`.
 - `files/panelalpha-seed.sh` runs as the `seed` service after `/ping` is
   healthy: reads the API key from `/config/config.xml` and, if
   `GET /api/v1/config/host` has no `username`, sends the whole resource back
@@ -26,5 +29,7 @@ prefix, API version and no library volume.
 
 ## Login
 
-`admin` / the password in `~/.panelalpha/prowlarr/admin.env`. The API key is
-in Settings > General. Indexers and applications are runtime configuration.
+`GET /projects/{name}/app-credentials` returns the username and password (the
+MCP tool `app_credentials_get`). They are what the seed created: a password
+changed later in the UI is not reflected there. The API key is in
+Settings > General. Indexers and applications are runtime configuration.

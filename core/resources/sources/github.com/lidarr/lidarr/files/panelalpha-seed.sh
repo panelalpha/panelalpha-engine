@@ -1,6 +1,6 @@
 #!/bin/sh
 # Creates Lidarr's Forms-login user once, via PUT /api/v1/config/host.
-# Env: LIDARR_ADMIN_USER, LIDARR_ADMIN_PASSWORD (~/.panelalpha/lidarr/admin.env).
+# Env: LIDARR_ADMIN_USER, LIDARR_ADMIN_PASSWORD (~/.panelalpha/app-credentials.env).
 set -eu
 API=http://app:8686/api/v1
 

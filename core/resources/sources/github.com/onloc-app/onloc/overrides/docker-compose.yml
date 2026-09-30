@@ -56,9 +56,9 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    environment:
-      - ONLOC_ADMIN_USER=${ONLOC_ADMIN_USER}
-      - ONLOC_ADMIN_PASSWORD=${ONLOC_ADMIN_PASSWORD}
+    # ONLOC_ADMIN_USER / ONLOC_ADMIN_PASSWORD, generated and kept by the engine.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     entrypoint:
       - sh
       - -euc

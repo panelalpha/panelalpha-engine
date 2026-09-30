@@ -17,9 +17,10 @@ description: >-
   account an open npm mirror spending its disk and bandwidth (change access
   to $all to allow that). The audit middleware stays on, so npm audit works;
   it forwards anonymous audit requests to npmjs and holds no data.
-  hooks/prepare.sh generates the admin password once into
-  ~/.panelalpha/verdaccio/admin.env (0600 in 0700). The htpasswd-seed
-  service, the only one given that file, adds `admin` (bcrypt) to
+  The engine generates the admin login (`credentials:` below) into
+  ~/.panelalpha/app-credentials.env; GET /projects/{name}/app-credentials (MCP
+  app_credentials_get) returns it. The htpasswd-seed service, the only one
+  given that file, adds `admin` (bcrypt) to
   /verdaccio/storage/htpasswd when it is not there, so a later change of
   password or added users are never overwritten. Packages, htpasswd and
   .verdaccio-db.json (the token signing secret) live on the `storage` named
@@ -35,3 +36,8 @@ description: >-
   of it plus lodash through the uplink, web UI login; after rebuild 1.0.0
   was still there, 1.0.1 published, and a token minted before the rebuild
   still authenticated.
+credentials:
+  adopt_from: .panelalpha/verdaccio/admin.env
+  fields:
+    VERDACCIO_ADMIN_USER: {kind: username, value: admin}
+    VERDACCIO_ADMIN_PASSWORD: {kind: password}

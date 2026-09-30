@@ -10,10 +10,9 @@
 # Hub).
 #
 # SECURITY: PS_SHARED_SECRET is the admin passphrase. main.go log.Fatal's if it
-# is unset, so the container never boots into an open-admin state. It is
-# generated once by hooks/prepare.sh and kept in ~/.panelalpha (0600), fed here
-# via env_file so it never appears in the recipe and is never rewritten across
-# redeploys. Every write route (/api/entry/*, /files, /guest-links, /settings)
+# is unset, so the container never boots into an open-admin state. The engine
+# generates it once and keeps it (`credentials:`), and it is fed here from
+# ~/.panelalpha/app-credentials.env so it never appears in the recipe. Every write route (/api/entry/*, /files, /guest-links, /settings)
 # needs the resulting session cookie; downloading a share link (/-{id}) stays
 # public by design.
 services:
@@ -23,12 +22,12 @@ services:
     image: mtlynch/picoshare:v1.5.4
     restart: unless-stopped
     # .env is the platform-merged account env (touched by the prepare hook so
-    # `up` never aborts on a missing file); app.env carries the admin passphrase
-    # the hook generated once and keeps stable across redeploys. Paths are
-    # relative to ~/project, where the engine writes and runs this file.
+    # `up` never aborts on a missing file); app-credentials.env carries the admin
+    # passphrase the engine generated and keeps. Paths are relative to
+    # ~/project, where the engine writes and runs this file.
     env_file:
       - .env
-      - ../.panelalpha/picoshare/app.env
+      - ../.panelalpha/app-credentials.env
     environment:
       # Default is 4001 anyway; set explicitly. Only this service publishes it.
       PORT: "4001"

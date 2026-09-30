@@ -33,9 +33,9 @@ description: >-
   own built-in automatic configuration: the server reads CB_SERVER_NAME,
   CB_ADMIN_NAME and CB_ADMIN_PASSWORD from the environment on first boot, creates
   the admin, marks itself configured and writes its runtime config into the
-  workspace (workspace/.data/.cloudbeaver.runtime.conf). hooks/prepare.sh
-  generates the admin password once into ~/.panelalpha/cloudbeaver/admin.env
-  (0600 in 0700, login cbadmin) and records it in credentials.txt. It is
+  workspace (workspace/.data/.cloudbeaver.runtime.conf). The engine generates
+  the admin login (`credentials:` below, login cbadmin) and returns it from
+  GET /projects/{name}/app-credentials (MCP app_credentials_get). It is
   idempotent: on a redeploy the workspace volume already has a server name, so
   the server is no longer in configuration mode, the CB_* variables are ignored
   and the existing admin and workspace are kept untouched.
@@ -51,8 +51,8 @@ description: >-
   with the admin user, teams, saved connections and settings, plus the runtime
   config that marks the server configured) is a named volume, so it survives
   project_rebuild and storage reclaim; ~/project is wiped every deploy
-  (engine#173). The generated admin password is kept in ~/.panelalpha, which
-  also survives a redeploy, and never written into ~/project.
+  (engine#173). The admin login is kept by the engine and delivered to
+  ~/.panelalpha on every deploy, never written into ~/project.
 
   PORT + READINESS. The server listens on 8978 and only the app publishes a port
   (8978:8978), so the engine's port scan takes it as the primary (engine#231/
@@ -63,3 +63,8 @@ description: >-
   and the deploy reports finished -- only once CloudBeaver answers AND its admin
   is claimed and the wizard is closed, not the moment the container starts
   (engine#204). JVM boot is slow, hence the long start_period.
+credentials:
+  adopt_from: .panelalpha/cloudbeaver/admin.env
+  fields:
+    CB_ADMIN_NAME: {kind: username, value: cbadmin}
+    CB_ADMIN_PASSWORD: {kind: password}

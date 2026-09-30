@@ -14,19 +14,26 @@ description: >-
   upstream README's own compose example does. The image entrypoint runs the
   migrations and then serves on 8085; only the app publishes a port.
 
-  SECRETS. hooks/prepare.sh generates the metadata-DB password, the encryption
-  key and the admin password once into ~/.panelalpha/pgbackweb/ (0600 files in a
-  0700 dir, delivered with env_file) and never rewrites them: a new encryption
+  SECRETS. hooks/prepare.sh generates the metadata-DB password and the
+  encryption key once into ~/.panelalpha/pgbackweb/ (0600 files in a 0700 dir,
+  delivered with env_file) and never rewrites them: a new encryption
   key would make every stored connection string unreadable, and ~/project is
   wiped on every deploy.
 
   FIRST USER IS SEEDED. With no users the app serves "Create first user" to
   whoever visits first. A `bootstrap` one-shot posts that form on the internal
-  network with the generated password (admin@pgbackweb.local) as soon as the app
-  is healthy, then proves a login; the `ready` gate makes `compose up` wait for
+  network with the login the engine generates (`credentials:` below;
+  admin@pgbackweb.local, returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get) as soon as the app is healthy, then proves a login; the `ready` gate makes `compose up` wait for
   it. It is idempotent: on a redeploy the login succeeds and nothing changes.
   0.5.2 enforces a single user at the database level, so no second account can
   be created through the form afterwards.
 
   PERSISTENCE. The metadata database and /backups (the "local" destination) are
   named volumes and survive rebuilds.
+credentials:
+  login_path: /auth/login
+  adopt_from: .panelalpha/pgbackweb/admin.env
+  fields:
+    PBW_ADMIN_EMAIL: {kind: email, value: admin@pgbackweb.local}
+    PBW_ADMIN_PASSWORD: {kind: password}

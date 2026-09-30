@@ -61,58 +61,22 @@ function appUrl(): string
 }
 
 /**
- * The administrator, generated once per account and kept out of the checkout.
+ * The administrator's login, generated and kept by the engine (`credentials:`)
+ * and mounted read-only by the compose override.
  *
  * install.php creates the first administrator from whatever it is posted and
  * has no gate but the config file it writes at the end, so on a public address
  * whoever loads it first becomes that administrator. It is run from here
  * instead, before Apache binds, with these credentials.
  *
- * Written once and never rewritten: the install is a no-op once the config
- * file is there, so a regenerated password would stop matching the account in
- * a database that survived the redeploy.
- *
  * @return array{login: string, password: string, email: string}
  */
 function credentials(): array
 {
-    $path = STORAGE . '/admin-credentials';
-    $host = parse_url(appUrl(), PHP_URL_HOST);
+    $path = '/pa/app-credentials.env';
 
-    if (!is_file($path)) {
-        // sanitize_db_string() and the login form are happy with the whole
-        // alphabet; this avoids the characters that are ambiguous when the
-        // password is read off a terminal and retyped.
-        $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-        $password = '';
-
-        for ($i = 0; $i < 24; $i++) {
-            $password .= $alphabet[random_int(0, strlen($alphabet) - 1)];
-        }
-
-        $old = umask(0o077);
-        $written = file_put_contents($path, <<<EOF
-        # Written by PanelAlpha on first deploy. This is the Chyrp Lite
-        # administrator for this account -- sign in at
-        # {$host}/?action=login .
-        #
-        # Chyrp Lite's install.php creates the first administrator, and on a
-        # public address that is whoever loads it first. It was run at deploy
-        # time instead, with these values, and install.php has been removed.
-        # Change the password under Controls -> Account and this file stops
-        # being interesting.
-        CHYRP_ADMIN_LOGIN=admin
-        CHYRP_ADMIN_PASSWORD={$password}
-        CHYRP_ADMIN_EMAIL=admin@{$host}
-
-        EOF);
-        umask($old);
-
-        if ($written === false) {
-            fail('could not write ' . $path . '; is ~/.panelalpha/chyrp-lite writable?');
-        }
-
-        @chmod($path, 0o600);
+    if (!is_readable($path)) {
+        fail($path . ' is missing; is the compose override still in overrides/?');
     }
 
     $values = [];
@@ -123,7 +87,8 @@ function credentials(): array
         }
 
         [$key, $value] = explode('=', $line, 2);
-        $values[trim($key)] = trim($value);
+        // The engine writes NAME='value'.
+        $values[trim($key)] = trim(trim($value), "'");
     }
 
     foreach (['CHYRP_ADMIN_LOGIN', 'CHYRP_ADMIN_PASSWORD', 'CHYRP_ADMIN_EMAIL'] as $key) {
@@ -274,7 +239,7 @@ if (!installed()) {
         fail(childComplaints());
     }
 
-    say('installed; the administrator password is in ~/.panelalpha/chyrp-lite/admin-credentials');
+    say('installed; GET /projects/{name}/app-credentials returns the administrator login');
 } elseif (is_file(APP_DIR . '/upgrade.php')) {
     // Every deploy, not only a version bump. upgrade.php is idempotent -- each
     // migration tests for its own change first -- and it is also what puts the

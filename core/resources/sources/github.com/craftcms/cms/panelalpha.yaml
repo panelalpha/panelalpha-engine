@@ -38,7 +38,9 @@ description: >-
   **The install is a race if nobody wins it.** An uninstalled Craft answers
   /index.php?p=admin/install with its own installer, and whoever gets there
   first becomes the administrator. `php craft install` runs from the install
-  stage instead, before Apache binds, with a password generated per account.
+  stage instead, before Apache binds, with the login the engine generates
+  (`credentials:` below), returned by GET /projects/{name}/app-credentials (MCP
+  app_credentials_get).
 
   **And the security key must outlive the checkout.** Craft encrypts and hashes
   with CRAFT_SECURITY_KEY, `setup/keys` generates one per deploy and writes it
@@ -97,8 +99,15 @@ commands:
       - install
       - upgrade
     description: >-
-      Waits for the database, installs Craft with a generated administrator on
+      Waits for the database, installs Craft with the engine's administrator on
       a first deploy, and brings migrations and project config up to the
       checkout on every one after. Idempotent.
     run: 'sh panelalpha/craft-setup.sh'
     timeout: 900
+credentials:
+  login_path: /admin
+  adopt_from: .panelalpha/craft.env
+  fields:
+    PA_CRAFT_ADMIN_USERNAME: {kind: username, value: admin}
+    PA_CRAFT_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    PA_CRAFT_ADMIN_PASSWORD: {kind: password}

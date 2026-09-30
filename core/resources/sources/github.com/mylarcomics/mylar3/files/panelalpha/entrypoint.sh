@@ -4,8 +4,8 @@
 set -e
 
 INI=/config/mylar/config.ini
-: "${MYLAR_USER:?MYLAR_USER is not set; prepare.sh did not run}"
-: "${MYLAR_PASSWORD:?MYLAR_PASSWORD is not set; prepare.sh did not run}"
+: "${MYLAR_USER:?MYLAR_USER is not set; app-credentials.env is missing}"
+: "${MYLAR_PASSWORD:?MYLAR_PASSWORD is not set; app-credentials.env is missing}"
 : "${MYLAR_API_KEY:?MYLAR_API_KEY is not set; prepare.sh did not run}"
 
 if [ ! -s "${INI}" ]; then

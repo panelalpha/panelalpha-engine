@@ -26,8 +26,9 @@ The recipe fixes three things, none of them a code change to upstream:
 2. **The installer is first-visitor-wins.** `files/panelalpha/dotclear-setup.sh`
    drives Dotclear's own CLI installer (`admin/install/index.php`) before Apache
    binds, seeding `config.php` (DB DSN + a per-account `DC_MASTER_KEY` that
-   `md5(uniqid())` generates) and the super-admin, password generated per
-   account into `~/.panelalpha/dotclear/admin-credentials.txt`. Afterwards the
+   `md5(uniqid())` generates) and the super-admin, with the login the engine
+   generates (`credentials:` in `panelalpha.yaml`), returned by
+   `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`). Afterwards the
    wizard reports "already installed" and creates nobody.
 
    The installer's own `-n` non-interactive mode is broken at HEAD:

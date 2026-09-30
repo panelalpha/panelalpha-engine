@@ -75,11 +75,10 @@ Mattermost, Shopware, XBackBone, CouchCMS and Atheos.
 `files/panelalpha-install.php` runs **upstream's own installer** from the
 install stage, in a CLI process, before Apache binds: it sets `$_SERVER` and
 `$_POST` and includes `install.php`, so the schema, the password hashing and
-every future change upstream makes to it are upstream's. The password is 24
-characters generated per account into
-`~/.panelalpha/chyrp-lite/admin-credentials` (0600, in a 0700 directory —
-account homes are root-owned 0755, so the directory has to be created before
-Docker mounts it).
+every future change upstream makes to it are upstream's. The login is generated
+by the engine (`credentials:` in `panelalpha.yaml`), mounted read-only from
+`~/.panelalpha/app-credentials.env`, and returned by
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`).
 
 `upgrade.php` is the one that is easy to miss. It has **no authentication at
 all**: an anonymous `POST upgrade=yes` runs the migrations, rewrites the config

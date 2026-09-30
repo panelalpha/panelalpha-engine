@@ -10,12 +10,20 @@ description: >-
   /etc/semaphore, both on named volumes that survive redeploys.
 
   The image's server-wrapper runs `semaphore setup` on first start and seeds
-  the admin from SEMAPHORE_ADMIN / SEMAPHORE_ADMIN_PASSWORD. hooks/prepare.sh
-  generates that password, the access-key encryption key and the two cookie
-  keys once into ~/.panelalpha/semaphore/secrets.env (0600 in 0700), fed to
-  the container as an env_file; environment values outrank config.json, so
+  the admin from SEMAPHORE_ADMIN / SEMAPHORE_ADMIN_PASSWORD, which the engine
+  generates (`credentials:` below) into ~/.panelalpha/app-credentials.env; GET
+  /projects/{name}/app-credentials (MCP app_credentials_get) returns them.
+  hooks/prepare.sh generates the access-key encryption key and the two cookie
+  keys once into ~/.panelalpha/semaphore/secrets.env (0600 in 0700); both
+  files are the container's env_files; environment values outrank config.json, so
   the keys stay fixed across redeploys. Semaphore has no self-registration:
   only an admin creates users. SEMAPHORE_WEB_ROOT is the public URL.
 
   Playbooks and tasks run inside the Semaphore container itself (ansible,
   terraform and tofu ship in the image); no docker.sock is mounted or needed.
+credentials:
+  login_path: /auth/login
+  adopt_from: .panelalpha/semaphore/secrets.env
+  fields:
+    SEMAPHORE_ADMIN: {kind: username, value: admin}
+    SEMAPHORE_ADMIN_PASSWORD: {kind: password}

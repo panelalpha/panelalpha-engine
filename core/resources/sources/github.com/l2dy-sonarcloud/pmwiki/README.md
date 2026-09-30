@@ -33,9 +33,9 @@ failure — no repair, only configuration.
 - **`files/panelalpha/pmwiki-setup.sh`** (start stage, `before: true`) — moves
   `wiki.d/` (pages) and `uploads/` (attachments) onto `~/.panelalpha/pmwiki/`
   and symlinks them back so they survive the redeploy that empties `~/project`
-  (engine#173); on first boot generates a bcrypt admin password into
-  `~/.panelalpha/pmwiki/admin.hash` (0600) with the plaintext in
-  `admin-credentials.txt` (0600); drops a PHP-disabling `.htaccess` in uploads;
+  (engine#173); writes the bcrypt hash of the admin password the engine
+  generates (`credentials:` in `panelalpha.yaml`) into
+  `~/.panelalpha/pmwiki/admin.hash` (0600) whenever it does not match; drops a PHP-disabling `.htaccess` in uploads;
   removes the clone's `.git`.
 - **`overrides/docker-compose.override.yml`** — bind-mounts `~/.panelalpha` to
   `/pa-data`. No `database:` — PmWiki needs none, so no sidecar; it fits the
@@ -49,4 +49,4 @@ failure — no repair, only configuration.
 ## Using it
 
 Open `/`, then `?action=login` — leave the username blank and enter the password
-from `~/.panelalpha/pmwiki/admin-credentials.txt`. Edit any page with `?n=Group.Page&action=edit`.
+returned by `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`). Edit any page with `?n=Group.Page&action=edit`.

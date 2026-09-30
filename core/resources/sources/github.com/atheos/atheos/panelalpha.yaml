@@ -63,9 +63,11 @@ description: >-
   its stored string through system() with no sanitisation at all
   (Common::raw_execute, common.php:269). Whoever completes that installer owns
   the container. panelalpha/atheos-install.php closes it on the install stage,
-  before Apache binds, by calling upstream's own process.php with a password
-  generated once per account into ~/.panelalpha/atheos/admin-credentials (0600,
-  outside the checkout and outside the document root).
+  before Apache binds, by calling upstream's own process.php with the login the
+  engine generates (`credentials:` below), returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get). Accounts
+  deployed before this kept it in ~/.panelalpha/atheos/admin-credentials, which
+  `adopt_from` carries over.
 
   That is the only unauthenticated hole. Everything a signed-in administrator
   can then do -- write PHP into the document root, run shell commands, git
@@ -122,7 +124,7 @@ commands:
     description: >-
       Writes config.php -- which a redeploy deletes with the rest of the
       checkout (engine#173) -- and, on the first deploy only, runs Atheos's own
-      components/install/process.php with a password generated per account.
+      components/install/process.php with the login the engine generated.
       Without it the account serves an unauthenticated installer to whoever
       reaches it first, and that visitor gets "configure" rights on a web IDE:
       shell commands through the Macro component and write access to the
@@ -131,3 +133,8 @@ commands:
       not run at all (engine#171).
     run: 'php /app/panelalpha/atheos-install.php'
     timeout: 120
+credentials:
+  adopt_from: .panelalpha/atheos/admin-credentials
+  fields:
+    ATHEOS_ADMIN_USERNAME: {kind: username, value: admin}
+    ATHEOS_ADMIN_PASSWORD: {kind: password}

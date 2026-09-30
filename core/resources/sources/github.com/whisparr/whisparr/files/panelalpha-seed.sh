@@ -1,6 +1,6 @@
 #!/bin/sh
 # Creates Whisparr's Forms-login user once, via PUT /api/v3/config/host.
-# Env: WHISPARR_ADMIN_USER, WHISPARR_ADMIN_PASSWORD (~/.panelalpha/whisparr/admin.env).
+# Env: WHISPARR_ADMIN_USER, WHISPARR_ADMIN_PASSWORD (~/.panelalpha/app-credentials.env).
 set -eu
 API=http://app:6969/api/v3
 

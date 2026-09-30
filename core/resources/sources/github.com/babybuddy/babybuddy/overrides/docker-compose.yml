@@ -5,8 +5,8 @@
 #   - the official image linuxserver/babybuddy, pinned to release v2.11.0
 #   - SQLite (Baby Buddy's default) under /config on a named volume, so the
 #     whole datastore (users, children, entries) survives a redeploy
-#   - SECRET_KEY and the admin password seeded from ~/.panelalpha/babybuddy
-#     (../.panelalpha from ~/project), reused on every rebuild
+#   - SECRET_KEY seeded from ~/.panelalpha/babybuddy (../.panelalpha from
+#     ~/project), reused on every rebuild; the admin login from the engine
 #   - CSRF_TRUSTED_ORIGINS derived from the account's public URL at boot
 #   - only the web service publishes a port
 # The image is a single container: s6 runs the app's overridden `migrate`
@@ -22,8 +22,7 @@ services:
     entrypoint: ["/bin/bash", "/panelalpha/entrypoint.sh"]
     env_file:
       # Platform-merged account env first, then this account's seeded secrets
-      # (PUID/PGID, SECRET_KEY, BB_ADMIN_PASSWORD) so an empty default cannot
-      # clobber them.
+      # (PUID/PGID, SECRET_KEY) so an empty default cannot clobber them.
       - .env
       - ../.panelalpha/babybuddy/app.env
     environment:
@@ -68,7 +67,8 @@ services:
 
   # One-shot: closes the shipped admin/admin default. Runs after the web service
   # is healthy (so `migrate` has created the superuser) and sets admin's
-  # password to the per-account secret. Idempotent -- a no-op once rotated.
+  # password to the login the engine generated, only while it is still the
+  # default admin/admin.
   rotate-admin:
     image: linuxserver/babybuddy:v2.11.0-ls251
     restart: "no"
@@ -76,6 +76,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/babybuddy/app.env
+      # BB_ADMIN_USER / BB_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       DB_NAME: /config/data/db.sqlite3
     depends_on:

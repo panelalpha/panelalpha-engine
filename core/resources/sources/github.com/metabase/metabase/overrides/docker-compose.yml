@@ -34,7 +34,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/metabase/app.env
-      - ../.panelalpha/metabase/admin.env
+      # MB_ADMIN_EMAIL / MB_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       MB_DB_TYPE: postgres
       MB_DB_HOST: db

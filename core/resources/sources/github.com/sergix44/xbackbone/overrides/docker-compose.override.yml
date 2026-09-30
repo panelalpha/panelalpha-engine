@@ -21,7 +21,6 @@ services:
       #   /data/uploads/           every uploaded file (storage/app is a
       #                            symlink to it, written by the prepare hook)
       #   /data/app.key            the account's APP_KEY
-      #   /data/admin-credentials  the generated administrator, 0600
       #
       # A redeploy re-clones ~/project and clears it first, so an upload host
       # that kept its files under the document root would lose every one of
@@ -31,3 +30,6 @@ services:
       # of that one. The prepare hook creates it before this mount is made, so
       # Docker never gets to create it as root.
       - ../.panelalpha/xbackbone:/data
+      # The administrator's login, generated and kept by the engine; read by
+      # panelalpha/xbb-install.php on the first install.
+      - ../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro

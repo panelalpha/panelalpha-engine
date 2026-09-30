@@ -64,9 +64,10 @@ description: >-
   stage migrates before Apache ever binds, so by the time anything can reach it
   the table is there and it answers 401. And `UsersSeeder` creates
   admin@example.org with the password `12345678`, which is printed in the
-  repository's README, so the prepare hook generates one per account into
-  ~/.panelalpha/plainpad-admin (0600) and `panelalpha/install.php` puts it on
-  the account -- only while the stored hash still verifies `12345678`, so a
+  repository's README, so the engine generates one per account
+  (`credentials:` below; GET /projects/{name}/app-credentials, MCP
+  app_credentials_get, returns it), the prepare hook hashes it and
+  `panelalpha/install.php` puts the hash on the account -- only while the stored hash still verifies `12345678`, so a
   password the operator later chooses is never reset under them. ~/.panelalpha
   rather than the checkout because the checkout does not survive a redeploy and
   the MySQL account in it does.
@@ -131,8 +132,13 @@ commands:
       Seeds the admin account and the settings rows on an empty database --
       `migrate` alone leaves Plainpad with no account to sign in with, because
       upstream seeds only from its unauthenticated install endpoint. And
-      replaces the published `12345678` admin password with the one the prepare
-      hook generated for this account. All three are guarded, so a redeploy
+      replaces the published `12345678` admin password with the one the engine
+      generated for this account. All three are guarded, so a redeploy
       over an existing database changes nothing.
     run: 'php panelalpha/install.php'
     timeout: 300
+credentials:
+  adopt_from: .panelalpha/plainpad-admin
+  fields:
+    PLAINPAD_ADMIN_EMAIL: {kind: email, value: admin@example.org}
+    PLAINPAD_ADMIN_PASSWORD: {kind: password}

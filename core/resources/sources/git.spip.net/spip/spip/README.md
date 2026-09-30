@@ -60,8 +60,8 @@ The recipe fixes it, none of it a change to upstream source:
    answered from `mes_options.php`'s `_INSTALL_*` constants (seeded from the
    account MySQL env), the schema is created, the bundled plugins are activated,
    and the super-admin is created with SPIP's server-side hashing at the
-   `etape_3b` POST. The admin password is generated **once** into
-   `~/.panelalpha/spip/admin-credentials.txt` (0600) and reused. `adresse_site`
+   `etape_3b` POST, with the login the engine generates (`credentials:` in
+   `panelalpha.yaml`), read from `~/.panelalpha/app-credentials.env`. `adresse_site`
    is corrected to `APP_URL` afterwards (the walk ran over loopback).
    Idempotent: a redeploy finds a webmestre and skips the whole thing.
 
@@ -78,9 +78,9 @@ The install runs in the start hook, which is `before: true`, so it completes
 **before Apache binds**: the site is never publicly reachable with an open
 installer. The first anonymous visitor gets the finished site (`/` → 200), the
 installer already refused (`?exec=install` → 403) and the admin login gate
-(`ecrire/` → 302). The owner's credentials are in
-`~/.panelalpha/spip/admin-credentials.txt` (0600) — surfaced only into their
-store, never into `~/project` or over HTTP. Zero manual steps.
+(`ecrire/` → 302). The owner's login is returned by
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) — never
+written into `~/project` or served over HTTP. Zero manual steps.
 
 The `php -S` server binds `127.0.0.1` only and is killed as soon as the walk
 finishes, so nothing but the script ever reaches the wizard. `PHP_CLI_SERVER_WORKERS`

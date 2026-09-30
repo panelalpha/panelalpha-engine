@@ -1,6 +1,7 @@
 // Node-RED settings for a hosted instance, mounted read-only as /data/settings.js.
 // Differs from the image default: the editor and admin API need a login, and
-// credentials are encrypted with a fixed secret from ~/.panelalpha/nodered.
+// credentials are encrypted with a fixed secret from ~/.panelalpha/nodered. The
+// login comes from the engine (~/.panelalpha/app-credentials.env).
 const bcrypt = require('bcryptjs');
 
 const user = process.env.NODE_RED_ADMIN_USER;

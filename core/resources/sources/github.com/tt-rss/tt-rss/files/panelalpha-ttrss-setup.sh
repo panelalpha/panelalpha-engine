@@ -88,8 +88,9 @@ php update.php --update-schema=force-yes
 # longer matches and this leaves their password alone. Belt and braces for the
 # first deploy, where the check does match and the generated password is set.
 #
-# The password reaches this script as an environment variable from
-# ~/.panelalpha/tt-rss-app.env (mode 600, outside the document root) and is
+# The password is the engine's (`credentials:`); it reaches this script as an
+# environment variable from ~/.panelalpha/app-credentials.env (mode 600,
+# outside the document root) and is
 # passed to update.php on its argv, which is the only interface it offers --
 # the same thing upstream's startup.sh does. Visible in `ps` to this account
 # inside its own container, and nowhere else.
@@ -100,7 +101,7 @@ fi
 
 if php update.php --user-check-password "admin:password" >/dev/null 2>&1; then
     php update.php --user-set-password "admin:${TTRSS_ADMIN_PASS}" >/dev/null
-    say "built-in admin password rotated (see ~/.panelalpha/tt-rss-admin-credentials.txt)"
+    say "built-in admin password rotated (GET /projects/{name}/app-credentials returns it)"
 else
     say "built-in admin password is not the seeded default; left untouched"
 fi

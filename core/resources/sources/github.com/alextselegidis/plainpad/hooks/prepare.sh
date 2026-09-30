@@ -43,44 +43,20 @@ fi
 # database/seeders/UsersSeeder.php creates admin@example.org with the password
 # `12345678`, printed in the repository's own README and in the seeder's own
 # output. A deploy that stops there is a public HTTPS note-taking application
-# whose credentials are on GitHub. So one is generated per account here.
-#
-# Here, and not in the container: ~/project is wiped and re-cloned by every
-# deploy, so a credentials file written into the checkout is destroyed by the
-# next redeploy while the account it belongs to lives on in MySQL. ~/.panelalpha
-# survives, and the account already owns it.
-creds=~/.panelalpha/plainpad-admin
+# whose credentials are on GitHub. The engine generates one per account
+# (`credentials:` in panelalpha.yaml) and writes ~/.panelalpha/app-credentials.env
+# before this hook runs.
+creds=~/.panelalpha/app-credentials.env
 hash_file=server/.panelalpha-admin.hash
 key_store=~/.panelalpha/plainpad-app-key
 key_file=server/.panelalpha-app-key
-
-if [ ! -f "$creds" ]; then
-    # No characters that need quoting in a shell, a URL or a form.
-    password=$(LC_ALL=C tr -dc 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789' < /dev/urandom | head -c 20)
-    if [ ${#password} -ne 20 ]; then
-        say "could not generate a password; leaving the seeded default in place" >&2
-        exit 0
-    fi
-    umask 077
-    cat > "$creds" <<EOF
-# Written by PanelAlpha on the first deploy. Plainpad seeds its admin account
-# with the password 12345678, which is published in its own README; this is the
-# one that was set instead. Sign in at the account's HTTPS address.
-PLAINPAD_ADMIN_EMAIL=admin@example.org
-PLAINPAD_ADMIN_PASSWORD=$password
-EOF
-    chmod 600 "$creds"
-    say "generated an admin password; it is in ~/.panelalpha/plainpad-admin"
-fi
-
-chmod 600 "$creds" 2>/dev/null || true
 
 # The install stage runs inside the container, where only ~/project/server is
 # mounted -- it cannot read ~/.panelalpha. So the *hash*, never the password,
 # is handed across in a file the install script consumes and deletes. bcrypt
 # cost 10 is config/hashing.php's own default, which is what Illuminate's
 # BcryptHasher::check() will verify with password_verify().
-password=$(sed -n 's/^PLAINPAD_ADMIN_PASSWORD=//p' "$creds")
+password=$(set -a; . "$creds"; printf '%s' "${PLAINPAD_ADMIN_PASSWORD:-}")
 if [ -n "$password" ]; then
     umask 077
     PA_PLAINPAD_PASSWORD="$password" php -r \
@@ -88,7 +64,7 @@ if [ -n "$password" ]; then
         > "$hash_file"
     chmod 600 "$hash_file"
 else
-    say "no password in ~/.panelalpha/plainpad-admin; the install stage will leave the account alone" >&2
+    say "no password in ~/.panelalpha/app-credentials.env; the install stage will leave the account alone" >&2
 fi
 
 # ---------------------------------------------------------------------------

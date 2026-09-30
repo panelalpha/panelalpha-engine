@@ -36,11 +36,17 @@ description: >-
   default credentials admin/admin, and local sign-up is disabled by default
   (EnableLocalSignUp is false, so /api/signUp returns 404 — there is no public
   registration to close). The one-shot init service logs in as admin/admin while
-  the site is still private and resets the admin password to a value generated
-  once into ~/.panelalpha/receipt-wrangler/receipt-wrangler.env (0600); the nginx
+  the site is still private and resets the admin password to the one the engine
+  generates (`credentials:` below; returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get); the nginx
   front waits for init to complete before it publishes the port, so the site is
   never publicly reachable with the default password live. It is idempotent: on a
   redeploy the admin/admin login fails (already rotated) and init exits clean.
   Every API route past the unauthenticated /api/featureConfig and /api/login
   enforces a JWT or API key, so receipts and groups are never anonymously
   readable.
+credentials:
+  adopt_from: .panelalpha/receipt-wrangler/receipt-wrangler.env
+  fields:
+    RW_ADMIN_USER: {kind: username, value: admin}
+    RW_ADMIN_PASSWORD: {kind: password}

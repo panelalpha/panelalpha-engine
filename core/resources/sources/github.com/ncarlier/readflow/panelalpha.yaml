@@ -47,4 +47,12 @@ description: >-
   rebuild. hooks/prepare.sh materialises them and the container env each deploy
   (~/project is wiped every deploy). The database schema is created and migrated
   automatically by readflow on start (embedded SQL migrations), so no init
-  one-shot is needed. Onboarding notes and the password go in credentials.txt.
+  one-shot is needed. The login (BASIC_USER / BASIC_PASSWORD) is generated
+  by the engine (`credentials:` below) and returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get); the htpasswd
+  is written from it on every deploy.
+credentials:
+  adopt_from: .panelalpha/readflow/secrets.env
+  fields:
+    BASIC_USER: {kind: username, value: admin}
+    BASIC_PASSWORD: {kind: password}

@@ -74,32 +74,22 @@ fi
 
 # Rocket.Chat has no installer, and its setup wizard hands admin to whoever
 # completes it. insertAdminUserFromEnv() in apps/meteor/server/startup/
-# initialData.ts creates the account from these instead, on a boot where no
-# user holds the admin role.
-RC_ADMIN_USERNAME=${RC_ADMIN_USERNAME:-admin}
-RC_ADMIN_EMAIL=${RC_ADMIN_EMAIL:-admin@example.com}
-
-# Built to satisfy Rocket.Chat's own default password policy, which is on:
-# Accounts_Password_Policy_Enabled is true, MinLength is 14, and the character
-# classes are all required. The suffix guarantees an uppercase, a lowercase, a
-# digit and a symbol whatever the random part turns out to be; '-' is the
-# symbol because this value is interpolated by compose, embedded in a JSON body
-# by the setup script and typed by a human.
-if [ -z "${RC_ADMIN_PASSWORD:-}" ]; then
-    RC_ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-16)Aa1-"
-fi
+# initialData.ts creates the account from ADMIN_* instead, on a boot where no
+# user holds the admin role. RC_ADMIN_USERNAME / RC_ADMIN_EMAIL /
+# RC_ADMIN_PASSWORD are the engine's; read after state.env, which held them on
+# older accounts. The password carries a symbol (`symbol: true`) for Rocket.Chat's
+# default policy: MinLength 14 and every character class required.
+set -a; . "${HOME}/.panelalpha/app-credentials.env"; set +a
 
 if [ ! -f "${STATE}" ]; then
     umask 077
     cat > "${STATE}" <<EOF
 MONGO_IMAGE=${MONGO_IMAGE}
-RC_ADMIN_USERNAME=${RC_ADMIN_USERNAME}
-RC_ADMIN_EMAIL=${RC_ADMIN_EMAIL}
-RC_ADMIN_PASSWORD=${RC_ADMIN_PASSWORD}
 EOF
     chmod 600 "${STATE}"
 fi
 
+# Compose interpolates the admin values in the override from here.
 cat > .env <<EOF
 ROCKETCHAT_IMAGE=rocketchat/rocket.chat:${ROCKETCHAT_TAG}
 MONGO_IMAGE=${MONGO_IMAGE}
@@ -108,15 +98,3 @@ RC_ADMIN_EMAIL=${RC_ADMIN_EMAIL}
 RC_ADMIN_PASSWORD=${RC_ADMIN_PASSWORD}
 EOF
 chmod 600 .env
-
-# Where the engine and the customer look for a generated credential. .env is
-# the file compose interpolates; this is the one a human is pointed at.
-cat > .panelalpha-admin-password <<EOF
-# Written by PanelAlpha on the first deploy. Rocket.Chat's setup wizard gives
-# the admin role to whoever completes it, so PanelAlpha creates the account
-# itself rather than leaving it to whoever opens the site first.
-ROCKETCHAT_ADMIN_USERNAME=${RC_ADMIN_USERNAME}
-ROCKETCHAT_ADMIN_EMAIL=${RC_ADMIN_EMAIL}
-ROCKETCHAT_ADMIN_PASSWORD=${RC_ADMIN_PASSWORD}
-EOF
-chmod 600 .panelalpha-admin-password

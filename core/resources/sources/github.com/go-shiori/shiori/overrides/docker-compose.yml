@@ -11,8 +11,9 @@ services:
         SHIORI_IMAGE: ghcr.io/go-shiori/shiori:alpine-v1.8.0
     image: panelalpha/shiori-init:local
     restart: "no"
+    # SHIORI_ADMIN_USER / SHIORI_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/shiori/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       SHIORI_DIR: /shiori
     volumes:

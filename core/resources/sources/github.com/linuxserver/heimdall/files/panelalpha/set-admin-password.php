@@ -12,7 +12,9 @@
  * — every route, /settings and /users included, served to anyone who asks. That
  * is the right default for the LAN dashboard Heimdall was written to be and the
  * wrong one for an account the engine has just given a public HTTPS address, so
- * the password is set here and written to a file the operator can read.
+ * the password is set here: the one the engine generated (`credentials:` in
+ * panelalpha.yaml), which the container gets from ~/.panelalpha/app-credentials.env
+ * and GET /projects/{name}/app-credentials returns.
  *
  * Guarded on the password still being null rather than on a first-boot marker:
  * re-running this must never reset a password somebody has since chosen in the
@@ -29,8 +31,6 @@
  * Never fatal: every unexpected state exits 0 with a line saying which, because
  * a site that would otherwise serve must not be held back by this step.
  */
-
-const CREDENTIALS_FILE = '.panelalpha-admin-password';
 
 function say(string $message): void
 {
@@ -83,33 +83,17 @@ try {
         exit(0);
     }
 
-    // No characters that need quoting when pasted into a shell or a form.
-    $alphabet = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    $password = '';
-    for ($i = 0; $i < 20; $i++) {
-        $password .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+    $password = (string) getenv('HEIMDALL_ADMIN_PASSWORD');
+    if ($password === '') {
+        say('HEIMDALL_ADMIN_PASSWORD is not in the environment; leaving the admin account alone');
+        exit(0);
     }
 
-    // Written before the update, so there is never a password in the database
-    // that nothing recorded. BCRYPT_ROUNDS is Heimdall's own .env.example value
+    // BCRYPT_ROUNDS is Heimdall's own .env.example value
     // and what Illuminate's bcrypt driver is configured with here; a cost
     // mismatch would only make Laravel rehash on the first login anyway.
     $rounds = (int) (getenv('BCRYPT_ROUNDS') ?: 12);
     $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => max(4, min(31, $rounds))]);
-
-    $credentials = $projectDir . '/' . CREDENTIALS_FILE;
-    $written = @file_put_contents(
-        $credentials,
-        "# Written by PanelAlpha on the first deploy. Heimdall's seeded admin\n"
-        . "# account had no password, which left every page open to the internet.\n"
-        . 'HEIMDALL_ADMIN_USER=' . (string) $row['username'] . "\n"
-        . 'HEIMDALL_ADMIN_PASSWORD=' . $password . "\n"
-    );
-    if ($written === false) {
-        say('could not write ' . CREDENTIALS_FILE . '; leaving the admin account alone');
-        exit(0);
-    }
-    @chmod($credentials, 0600);
 
     // `password IS NULL` again in the statement itself: between the read above
     // and here is the only window in which somebody else could have set one.
@@ -117,12 +101,11 @@ try {
     $update->execute([$hash]);
 
     if ($update->rowCount() === 0) {
-        @unlink($credentials);
         say('the admin account gained a password while this ran; left alone');
         exit(0);
     }
 
-    say('the admin account had no password, so every page was public. Set one; it is in ~/project/' . CREDENTIALS_FILE);
+    say('the admin account had no password, so every page was public. Set the engine\'s one');
 } catch (Throwable $e) {
     say('could not set the admin password (' . $e->getMessage() . '); leaving the account as it is');
     exit(0);

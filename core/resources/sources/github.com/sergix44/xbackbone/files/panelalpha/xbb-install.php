@@ -80,40 +80,30 @@ if (InstallationState::isInstalled()) {
     exit(0);
 }
 
-$credentialsPath = $dataDir . '/admin-credentials';
+// The login the engine generates (`credentials:`), NAME='value' lines under a
+// `#` comment, mounted read-only by the compose override.
+$credentialsPath = '/pa/app-credentials.env';
 
-if (!is_file($credentialsPath)) {
+if (!is_readable($credentialsPath)) {
     fwrite(STDERR, "[panelalpha] no credentials file at {$credentialsPath}; leaving the installer open\n");
     exit(1);
 }
 
-$credentials = parse_ini_file($credentialsPath, false, INI_SCANNER_RAW) ?: [];
+$credentials = [];
+foreach (file($credentialsPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+    if (preg_match("/^([A-Z_]+)='?([^']*)'?$/", $line, $m)) {
+        $credentials[$m[1]] = $m[2];
+    }
+}
 $email = trim((string) ($credentials['XBACKBONE_ADMIN_EMAIL'] ?? ''));
 $password = (string) ($credentials['XBACKBONE_ADMIN_PASSWORD'] ?? '');
 
-if ($password === '') {
-    fwrite(STDERR, "[panelalpha] credentials file carries no password; leaving the installer open\n");
+if ($email === '' || $password === '') {
+    fwrite(STDERR, "[panelalpha] credentials file carries no login; leaving the installer open\n");
     exit(1);
 }
 
 $appUrl = rtrim((string) (getenv('APP_URL') ?: config('app.url')), '/');
-$host = parse_url($appUrl, PHP_URL_HOST) ?: '';
-
-// The prepare hook cannot know the account's address -- the engine puts it in
-// the container environment, which is here. The resolved address is written
-// back so the credentials file names the account the customer will sign in to.
-if ($host !== '' && ($email === '' || $email === 'admin@localhost')) {
-    $email = 'admin@' . $host;
-    file_put_contents(
-        $credentialsPath,
-        preg_replace(
-            '/^XBACKBONE_ADMIN_EMAIL=.*$/m',
-            'XBACKBONE_ADMIN_EMAIL=' . $email,
-            (string) file_get_contents($credentialsPath),
-            1
-        )
-    );
-}
 
 $payload = [
     'appUrl' => $appUrl !== '' ? $appUrl : 'http://localhost',

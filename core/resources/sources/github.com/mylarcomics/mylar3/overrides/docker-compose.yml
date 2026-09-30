@@ -13,9 +13,11 @@ services:
     # Seeds config.ini when the volume has none, then execs the image's /init.
     entrypoint: ["/bin/bash", "/panelalpha/entrypoint.sh"]
     env_file:
-      # Account env first, then the seeded secrets (PUID/PGID, login, API key).
+      # Account env first, then the seeded secrets (PUID/PGID, API key), then
+      # MYLAR_USER / MYLAR_PASSWORD, generated and kept by the engine.
       - .env
       - ../.panelalpha/mylar/app.env
+      - ../.panelalpha/app-credentials.env
     environment:
       TZ: "UTC"
     volumes:

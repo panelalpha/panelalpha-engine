@@ -12,7 +12,7 @@ if [ -f "${MARK}" ]; then
 fi
 
 : "${MB_ADMIN_PASSWORD:?MB_ADMIN_PASSWORD is not set}"
-EMAIL="${MB_ADMIN_EMAIL:-admin@${PA_PUBLIC_HOST:?PA_PUBLIC_HOST is not set}}"
+EMAIL="${MB_ADMIN_EMAIL:?MB_ADMIN_EMAIL is not set}"
 BASE=http://127.0.0.1:3000
 
 # Nothing outside this container can reach it while the wizard is open.

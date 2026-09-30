@@ -31,8 +31,10 @@ description: >-
   ADMIN BOOTSTRAP, NO LIVE DEFAULT CREDENTIALS. On first boot, when no users
   exist, Traggo creates one admin from TRAGGO_DEFAULT_USER_NAME /
   TRAGGO_DEFAULT_USER_PASS (both default to `admin`, which would leave a live
-  admin/admin). hooks/prepare.sh generates a strong password once and passes it
-  as TRAGGO_DEFAULT_USER_PASS, so the default admin/admin is never valid. Once
+  admin/admin). The engine generates a strong password once (`credentials:`
+  below; returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get) and it is passed as TRAGGO_DEFAULT_USER_PASS, so the
+  default admin/admin is never valid. Once
   the admin row exists, that env is ignored on every later boot -- the user
   lives in the SQLite file on the named volume, so the seed only ever runs when
   the volume is empty, and the same generated password is reused. There is no
@@ -41,10 +43,7 @@ description: >-
   PERSISTENCE. TRAGGO_DATABASE_CONNECTION points the SQLite file at
   /opt/traggo/data/traggo.db and a named volume is mounted at
   /opt/traggo/data, so the admin user and every time span / tag / dashboard
-  survives project_rebuild and storage reclaim. The generated admin password is
-  written once into ~/.panelalpha/traggo/ (0600 in 0700), the only writable,
-  rebuild-surviving place, since ~/project is wiped on every deploy
-  (engine#173), and reused on every redeploy.
+  survives project_rebuild and storage reclaim.
 
   COOKIES / HTTPS. Traggo's session cookie is set with only name/value/max-age
   (auth/middleware.go) -- no Secure or SameSite flag and no config knob for it
@@ -54,3 +53,8 @@ description: >-
   PORT. The binary EXPOSEs and listens on 3030; only the app publishes a port
   (3030:3030) so the engine's port scan takes it as the primary (engine#234).
   The curl and ready helpers publish nothing.
+credentials:
+  adopt_from: .panelalpha/traggo/traggo.env
+  fields:
+    TRAGGO_DEFAULT_USER_NAME: {kind: username, value: admin}
+    TRAGGO_DEFAULT_USER_PASS: {kind: password}

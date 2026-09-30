@@ -48,6 +48,8 @@ services:
     # the setup script fails loudly rather than inventing a password.
     env_file:
       - ../.panelalpha/esmira-app.env
+      # ESMIRA_ADMIN_USER / ESMIRA_ADMIN_PASS, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
 
     volumes:
       # The studies, the collected responses, the participant messages, the

@@ -36,22 +36,19 @@ fi
 #
 # ~/.panelalpha/shynet/ survives the clone and is the only place in the
 # account that does. Two files, not one: the database container has no
-# business holding the administrator password or the key that signs sessions,
-# and compose delivers each as its own env_file.
+# business holding the key that signs sessions, and compose delivers each as
+# its own env_file. The administrator login is the engine's (`credentials:`),
+# in ~/.panelalpha/app-credentials.env.
 STORE_DIR="${HOME}/.panelalpha/shynet"
 DB_ENV="${STORE_DIR}/db.env"
 APP_ENV="${STORE_DIR}/app.env"
-NOTE="${STORE_DIR}/credentials.txt"
 
 mkdir -p "${STORE_DIR}"
 chmod 700 "${HOME}/.panelalpha" "${STORE_DIR}"
 
 if [ ! -f "${APP_ENV}" ] || [ ! -f "${DB_ENV}" ]; then
-    ADMIN_EMAIL="admin@localhost"
     # No '/', '+' or '=': these values are read back by a POSIX shell from an
-    # unquoted env file, handed to psycopg2 in a DSN, and typed into a login
-    # form.
-    ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
+    # unquoted env file and handed to psycopg2 in a DSN.
     PG_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
     # secrets.token_urlsafe() is what TEMPLATE.env tells the operator to use;
     # hex is the same entropy with nothing an env file can misread.
@@ -77,42 +74,9 @@ DJANGO_SECRET_KEY=${SECRET_KEY}
 # The same value as POSTGRES_PASSWORD in db.env; settings.py:124 reads it
 # under this name.
 DB_PASSWORD=${PG_PASSWORD}
-
-# The superuser panelalpha/shynet/init.sh creates before the web container is
-# allowed to start. Shynet has no sign-up page unless ACCOUNT_SIGNUPS_ENABLED
-# is turned on, so without this the account has no way in.
-SHYNET_ADMIN_EMAIL=${ADMIN_EMAIL}
-SHYNET_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-EOF
-        cat > "${NOTE}" <<EOF
-Shynet administrator for this account
-=====================================
-
-  email:    ${ADMIN_EMAIL}
-  password: ${ADMIN_PASSWORD}
-
-Shynet logs in by email address, not by username
-(shynet/settings.py:253). Created on the first deploy and never changed by
-PanelAlpha afterwards -- if you change the password inside Shynet, the one in
-the application wins and nothing here overwrites it.
-
-Sign-ups are off (ACCOUNT_SIGNUPS_ENABLED=False in ~/project/.env, read at
-shynet/settings.py:261 and enforced by dashboard/apps.py:9, which replaces
-allauth's is_open_for_signup with one that always refuses). Turn it on only if
-you want strangers able to register on this instance -- Shynet has no
-invitation flow, and a registered user can see every other registered user.
-
-"Forgot password" is not usable until you configure SMTP. shynet/settings.py:297
-falls back to Django's console mail backend whenever EMAIL_HOST is unset, so the
-reset mail -- including a working reset link for this account -- is printed to
-the application container's log instead of being sent. Anyone who can read that
-log can take the administrator account over. Set EMAIL_HOST, EMAIL_PORT,
-EMAIL_HOST_USER, EMAIL_HOST_PASSWORD and SERVER_EMAIL in the project's
-environment variables before relying on password reset, and treat the container
-log as sensitive until you have.
 EOF
     )
-    say "administrator credentials written to ${NOTE}"
+    say "secrets written to ${STORE_DIR}"
 else
     say "reusing the secrets in ${STORE_DIR}"
 fi

@@ -24,8 +24,8 @@ description: >-
      the account table is empty (internal/cmd/root.go). A one-shot `init`
      (files/panelalpha/shiori: the same image plus curl and jq, nothing
      built or patched) starts a private server on 127.0.0.1:18080, logs in
-     as shiori/gopher, creates `admin` as owner with the password from
-     ~/.panelalpha/shiori/admin.env, deletes shiori through the API and
+     as shiori/gopher, creates `admin` as owner with the password the engine
+     generates (`credentials:` below), deletes shiori through the API and
      checks the default login is refused. `app` waits on
      `init: service_completed_successfully`, so the public port never opens
      with shiori/gopher in place. On later deploys init sees the default
@@ -49,5 +49,10 @@ description: >-
   /.env, /.git/config, /shiori.db serve only the SPA shell. App ~3.4 MiB,
   account ~105 MiB.
 
-  Credentials: ~/.panelalpha/shiori/credentials.txt. More users: web UI,
-  Settings > Accounts.
+  The login is returned by GET /projects/{name}/app-credentials (MCP
+  app_credentials_get). More users: web UI, Settings > Accounts.
+credentials:
+  adopt_from: .panelalpha/shiori/admin.env
+  fields:
+    SHIORI_ADMIN_USER: {kind: username, value: admin}
+    SHIORI_ADMIN_PASSWORD: {kind: password}

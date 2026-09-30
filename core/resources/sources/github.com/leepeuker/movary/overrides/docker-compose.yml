@@ -13,10 +13,12 @@ services:
     image: leepeuker/movary:0.72.1
     restart: "no"
     command: ["sh", "/panelalpha/init.sh"]
+    # MOVARY_ADMIN_EMAIL / MOVARY_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/movary/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       <<: *movary-env
+      MOVARY_ADMIN_NAME: admin
     volumes:
       - ./panelalpha:/panelalpha:ro
       - storage:/app/storage

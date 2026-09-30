@@ -189,9 +189,10 @@ after it never runs: `RewriteRule ^res/.*\.html$ - [F]` written there returned
 ## Security
 
 **The admin password is generated per account and the wizard is closed before
-the site is reachable.** `hooks/prepare.sh` mints 20 characters of
-`[A-Za-z0-9]` into `~/.panelalpha/baikal-app.env` (0600 in a 0700 directory)
-and writes a readable copy to `~/.panelalpha/baikal-admin-credentials.txt`; the
+the site is reachable.** The engine generates it (`credentials:` in
+`panelalpha.yaml`; 24 characters of `[A-Za-z0-9]`), delivers it in
+`~/.panelalpha/app-credentials.env` and returns it from
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`); the
 install-stage script stores it as `sha256('admin:' + auth_realm + ':' +
 password)`, which is upstream's own `hashAdminPassword()`, and creates
 `Specific/INSTALL_DISABLED`. It only does so while no password is set, so a
@@ -201,7 +202,7 @@ untouched"* and left the hash byte-identical.
 
 The password never goes through `.env`. `ProjectEnvironment::apply()` copies
 `.env` to `.env.default` at mode 644 (engine #173), and this is a login
-credential for a public endpoint; `env_file: ../.panelalpha/baikal-app.env`
+credential for a public endpoint; `env_file: ../.panelalpha/app-credentials.env`
 keeps it out. Measured on the deployed account: `.env` is 0 bytes and
 `.env.default` does not exist. There is no second secret — SQLite means no
 database password, and the `encryption_key` field is generated into

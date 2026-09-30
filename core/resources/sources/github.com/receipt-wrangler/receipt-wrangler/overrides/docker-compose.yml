@@ -54,7 +54,7 @@ services:
     mem_limit: 1024m
 
   # One-shot: while the site is still private, rotate the bootstrap admin's public
-  # default password (admin/admin) to the generated one. Idempotent — on a
+  # default password (admin/admin) to the engine's one. Idempotent — on a
   # redeploy the admin/admin login fails (already rotated) and this exits clean.
   init:
     image: alpine:3
@@ -62,8 +62,9 @@ services:
     depends_on:
       app:
         condition: service_healthy
-    environment:
-      RW_ADMIN_PASSWORD: "${RW_ADMIN_PASSWORD}"
+    # RW_ADMIN_USER / RW_ADMIN_PASSWORD, generated and kept by the engine.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     entrypoint:
       - sh
       - -euc

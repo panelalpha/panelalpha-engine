@@ -2,7 +2,7 @@
 # all:dist` needs the frontend built first, so the `go` strategy fails. This
 # runs the official hub image of the current release:
 #   - /beszel_data (PocketBase SQLite, hub key pair) on a named volume
-#   - the first user and superuser are seeded from ~/.panelalpha/beszel/admin.env
+#   - the first user and superuser are seeded from ~/.panelalpha/app-credentials.env
 #     by the initial migration, so the anonymous "create account" form never opens
 #   - `ready` promotes that user to the admin role the UI first-run would give
 services:
@@ -12,7 +12,7 @@ services:
     env_file:
       - .env
       # Missing file aborts `up` rather than leaving the first-run form open.
-      - ../.panelalpha/beszel/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       APP_URL: ${PA_PUBLIC_URL}
     volumes:
@@ -34,7 +34,7 @@ services:
     image: curlimages/curl:8.22.0
     restart: "no"
     env_file:
-      - ../.panelalpha/beszel/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha/beszel:/pa:ro
     entrypoint: ["/bin/sh", "/pa/promote.sh"]

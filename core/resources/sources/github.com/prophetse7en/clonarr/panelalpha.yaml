@@ -10,10 +10,13 @@ description: >-
   owns the instance, and by default it skips the login for private addresses,
   which is where the engine's proxy connects from. A one-shot `seed` service
   starts Clonarr privately against the same volume, creates the admin through
-  /setup from ~/.panelalpha/clonarr/admin.env (generated once by
-  hooks/prepare.sh) and sets Authentication Required to Enabled; only then
-  does the app service publish its port. TRUSTED_NETWORKS is locked to
-  loopback. Radarr/Sonarr instances are added at runtime from Settings.
+  /setup with the login the engine generates (`credentials:` below, written to
+  ~/.panelalpha/app-credentials.env) and sets Authentication Required to
+  Enabled; only then does the app service publish its port. TRUSTED_NETWORKS
+  is locked to loopback. Radarr/Sonarr instances are added at runtime from
+  Settings. The login is returned by GET /projects/{name}/app-credentials;
+  accounts deployed before this kept it in ~/.panelalpha/clonarr/admin.env,
+  which `adopt_from` carries over.
 
   Login attempts are rate limited per visitor: TRUSTED_PROXIES covers the
   account's Docker bridges, so Clonarr keys on the last X-Forwarded-For hop,
@@ -27,3 +30,9 @@ description: >-
   127.0.0.1), POST /setup -> 409 "Setup already completed". The generated
   admin logs in (<title>Clonarr</title>, 826 kB), a Radarr instance created
   through POST /api/instances reads back, and both survive a rebuild.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/clonarr/admin.env
+  fields:
+    CLONARR_ADMIN_USER: {kind: username, value: admin}
+    CLONARR_ADMIN_PASSWORD: {kind: password}

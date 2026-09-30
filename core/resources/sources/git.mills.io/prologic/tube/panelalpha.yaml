@@ -41,12 +41,13 @@ description: >-
   SECURITY — upload gate. This is the load-bearing decision for a public video
   host. tube gates POST /upload behind HTTP basic auth (username "uploader")
   ONLY when auth_password is set; unset, upload is fully anonymous — anyone can
-  fill the owner's disk. The prepare hook generates a 32-char password ONCE into
-  ~/.panelalpha/tube/secrets.env (0600, never in ~/project) and the boot wrapper
+  fill the owner's disk. The engine generates the password (`credentials:`
+  below; returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get), mounted read-only from ~/.panelalpha/app-credentials.env,
+  and the boot wrapper
   exports it (as both auth_password and AUTH_PASSWORD, robust across image
   builds) before tube starts, so /upload is gated out of the box — verified:
-  anonymous upload is refused 401, uploader:<pw> is 200. The owner password is
-  written to ~/.panelalpha/tube/panelalpha-credentials.txt (0600).
+  anonymous upload is refused 401, uploader:<pw> is 200.
 
   RESIDUAL RISK — /import is NOT gated. tube's other write route, POST /import
   (import a YouTube/Vimeo video by URL), has no auth wrapper in upstream source
@@ -71,3 +72,9 @@ extra:
   # the FROM-image Dockerfile this recipe ships, and the port tube listens on.
   dockerfile: Dockerfile
   port_hint: 8000
+credentials:
+  # The old recipe's secrets.env named the password auth_password.
+  adopt_from: .panelalpha/tube/secrets.env
+  fields:
+    TUBE_UPLOAD_USER: {kind: username, value: uploader}
+    auth_password: {kind: password}

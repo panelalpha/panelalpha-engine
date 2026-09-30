@@ -9,9 +9,11 @@ them empty, so a fresh install serves "This is a fresh install. Pick a username
 and password for the Super Admin account." at `/admin/login` to whoever opens it
 first (#263).
 
-- `hooks/prepare.sh` generates the credentials once into
-  `~/.panelalpha/listmonk/admin.env`, and writes `credentials.txt` beside it for
-  the owner. `~/project` is emptied on every deploy; `~/.panelalpha` is not.
+- The engine generates the login (`credentials:` in `panelalpha.yaml`), keeps it
+  and returns it from `GET /projects/{name}/app-credentials` (MCP
+  `app_credentials_get`); every deploy writes it to
+  `~/.panelalpha/app-credentials.env`. An account deployed before this keeps its
+  password from `~/.panelalpha/listmonk/admin.env` (`adopt_from`).
 - `overrides/docker-compose.override.yml` hands that file to the `app` service
   as `PA_ADMIN_*` (upstream's `environment:` sets the `LISTMONK_*` names to
   empty, and `environment:` beats `env_file:`) and runs
@@ -22,7 +24,7 @@ first (#263).
   user), it submits it there, where nothing outside the container can reach it.
   Only then does it `exec` the real server on `:9000`. If listmonk does not
   answer, or the form is still there afterwards, it exits instead of serving.
-- A database that already has a user is not touched, and `credentials.txt` then
+- A database that already has a user is not touched, and the returned login then
   describes an account that was never created.
 
 App management queries go directly to the PostgreSQL container using the

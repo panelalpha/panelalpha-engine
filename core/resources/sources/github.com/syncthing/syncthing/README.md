@@ -8,8 +8,9 @@ Continuous peer-to-peer file sync. One Go binary: web GUI + REST API on
 - `overrides/docker-compose.yml` replaces the source-build Dockerfile deploy
   with `syncthing/syncthing:2.1.5`. `/var/syncthing` (device keys, config.xml,
   database, the default `Sync` folder) is a named volume.
-- **GUI is never open:** `hooks/prepare.sh` writes
-  `~/.panelalpha/syncthing/admin.env` once (`admin`, random hex password).
+- **GUI is never open:** the engine generates the login (`credentials:` in
+  `panelalpha.yaml`: `admin`, a random password) and writes it to
+  `~/.panelalpha/app-credentials.env`.
   `files/panelalpha-seed.sh` runs as the `seed` service before the app starts:
   if config.xml has no password it runs `syncthing generate --gui-user
   --gui-password -` (bcrypt), then fails unless a user and bcrypt hash are
@@ -31,6 +32,8 @@ speed.
 
 ## Login
 
-`admin` / the password in `~/.panelalpha/syncthing/admin.env`. To reset it,
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) returns the
+login the seed set; a password changed later in the GUI is not reflected there.
+To reset it,
 delete `<password>` from config.xml in the volume and redeploy, or run
 `syncthing generate --gui-password=...` inside the app container and restart.

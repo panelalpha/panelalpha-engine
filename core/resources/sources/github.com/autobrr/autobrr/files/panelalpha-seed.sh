@@ -1,5 +1,5 @@
 #!/bin/sh
-# Creates autobrr's login user from ~/.panelalpha/autobrr/admin.env, only while
+# Creates autobrr's login user from ~/.panelalpha/app-credentials.env, only while
 # onboarding is open. autobrr runs here on loopback with no published port.
 set -eu
 : "${AUTOBRR_ADMIN_USER:?missing}" "${AUTOBRR_ADMIN_PASSWORD:?missing}"

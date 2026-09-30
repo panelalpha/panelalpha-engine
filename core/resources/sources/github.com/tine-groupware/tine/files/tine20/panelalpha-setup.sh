@@ -38,7 +38,7 @@ die() { echo "[tine] $*" >&2; exit 1; }
 # so if this is empty the file did not exist when the container was made and a
 # restart -- not another write -- is what fixes it.
 [ -n "${TINE_SETUP_PASSWORD:-}" ] || die "no TINE_SETUP_PASSWORD; ~/.panelalpha/tine/app.env is missing or was written after the container was created"
-[ -n "${TINE_ADMIN_PASSWORD:-}" ] || die "no TINE_ADMIN_PASSWORD; see ~/.panelalpha/tine/app.env"
+[ -n "${TINE_ADMIN_PASSWORD:-}" ] || die "no TINE_ADMIN_PASSWORD; see ~/.panelalpha/app-credentials.env"
 [ -n "${TINE_CREDENTIAL_CACHE_KEY:-}" ] || die "no TINE_CREDENTIAL_CACHE_KEY; see ~/.panelalpha/tine/app.env"
 
 # The bind mount from the compose override. Every upload, every Filemanager
@@ -78,7 +78,8 @@ cat > /app/config.inc.php <<'PHP'
  * Every secret is a getenv() call. DB_* come from the database the engine
  * provisioned on the account's own MySQL server (`database: mysql`);
  * TINE_* come from ~/.panelalpha/tine/app.env, which hooks/prepare.sh
- * generated once and the compose override delivers as a second env_file.
+ * generated once, and the engine's app-credentials.env; the compose override
+ * delivers both as env_files.
  */
 return [
     // AUTODETECT rather than a literal: Tinebase_Core::detectBuildType()
@@ -204,7 +205,7 @@ else
 
     php setup.php --is_installed >/dev/null 2>&1 \
         || die "the installer reported success but Tinebase is not installed"
-    log "installed; the administrator password is in ~/.panelalpha/tine/app.env"
+    log "installed; the administrator login is returned by GET /projects/{name}/app-credentials"
 fi
 
 # The cache is on the bind mount and outlives the checkout, so after a version

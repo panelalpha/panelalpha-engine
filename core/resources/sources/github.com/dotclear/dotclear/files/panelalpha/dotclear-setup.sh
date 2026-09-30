@@ -22,7 +22,6 @@ DB_PASSWORD="${DB_PASSWORD:-}"
 
 PA_DATA="/pa-data/dotclear"
 CONF="${PA_DATA}/config.php"
-CREDS="${PA_DATA}/admin-credentials.txt"
 
 if [ ! -d /pa-data ]; then
     echo "panelalpha/dotclear: /pa-data is not mounted; the compose override did not apply" >&2
@@ -55,7 +54,11 @@ if [ ! -f "${CONF}" ]; then
         echo "panelalpha/dotclear: neither mysqli nor pdo_mysql is in the image" >&2; exit 1
     fi
 
-    ADMPW="$(php -r 'echo bin2hex(random_bytes(12));')"
+    # The super-admin login is the engine's (`credentials:` in panelalpha.yaml),
+    # in ~/.panelalpha/app-credentials.env, which is /pa-data here.
+    set -a; . /pa-data/app-credentials.env; set +a
+    ADMLOGIN="${DOTCLEAR_ADMIN_USER:-admin}"
+    ADMPW="${DOTCLEAR_ADMIN_PASSWORD:?DOTCLEAR_ADMIN_PASSWORD is not in /pa-data/app-credentials.env}"
 
     # Steer Dotclear's config path to the persistent file. DC_RC_PATH is read
     # from $_SERVER when Config is constructed (early), so it must be a real
@@ -87,15 +90,13 @@ if [ ! -f "${CONF}" ]; then
         "" \
         "Administrator" \
         "admin@${MAILDOM}" \
-        "admin" \
+        "${ADMLOGIN}" \
         "${ADMPW}" \
         "${ADMPW}" \
         "${BASEURL}" \
         | php /app/admin/install/index.php "${CONF}"
 
-    umask 077
-    printf 'url:      %s/admin\nlogin:    admin\npassword: %s\n' "${BASEURL}" "${ADMPW}" > "${CREDS}"
-    echo "panelalpha/dotclear: installed with driver ${DRIVER}; admin credentials at ~/.panelalpha/dotclear/admin-credentials.txt" >&2
+    echo "panelalpha/dotclear: installed with driver ${DRIVER}" >&2
 fi
 
 # config.php lives outside ~/project; point Dotclear's default lookup at it.

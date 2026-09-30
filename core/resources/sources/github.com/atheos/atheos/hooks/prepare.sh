@@ -20,8 +20,10 @@ cd ~/project
 #    ["configure","read","write"] and userACL "full". On an account that has
 #    just been given a public HTTPS name that is first-visitor-wins -- and the
 #    prize is an editor that can write PHP into its own document root. The
-#    password is generated here, once per account; panelalpha/atheos-install.php
-#    spends it on the install stage, before Apache binds.
+#    login is the engine's (`credentials:` in panelalpha.yaml, delivered to the
+#    app container from ~/.panelalpha/app-credentials.env);
+#    panelalpha/atheos-install.php spends it on the install stage, before
+#    Apache binds.
 #
 # files/data/users.json.php is already in place by the time this runs
 # (AppConfigBootstrap::installFileSnippets() precedes runScripts()); see the
@@ -38,29 +40,6 @@ chmod 700 "${DATA_HOME}"
 if [ ! -f index.php ] || [ ! -f common.php ] || [ ! -d components/install ]; then
     echo "[atheos] no index.php/common.php/components/install -- this is not an Atheos checkout" >&2
     exit 1
-fi
-
-# ---------------------------------------------------------- the administrator
-
-# Written once per account and never rewritten. The user file lives in /data
-# and survives the re-clone, so a regenerated password would stop matching the
-# account already in it.
-CREDENTIALS="${DATA_HOME}/admin-credentials"
-if [ ! -f "${CREDENTIALS}" ]; then
-    umask 077
-    cat > "${CREDENTIALS}" <<EOF
-# Written by PanelAlpha on first deploy. This is the Atheos administrator for
-# this account -- sign in at https://<your-domain>/ .
-#
-# Atheos creates its first user from an unauthenticated POST endpoint and gives
-# that user configure rights, which in a web IDE means shell commands through
-# the Macro component and write access to the application own document root. It
-# was run at deploy time instead, with these values, and is now closed. Change
-# the password under the user menu and this file stops being interesting.
-ATHEOS_ADMIN_USERNAME=admin
-ATHEOS_ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
-EOF
-    chmod 600 "${CREDENTIALS}"
 fi
 
 # ------------------------------------------------------------- the .htaccess

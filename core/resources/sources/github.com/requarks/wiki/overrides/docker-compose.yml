@@ -54,10 +54,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # DB_PASS (the same value as the database's POSTGRES_PASSWORD) and the
-    # WIKI_ADMIN_* pair, written once by hooks/prepare.sh.
+    # DB_PASS (the same value as the database's POSTGRES_PASSWORD), written once
+    # by hooks/prepare.sh, and the WIKI_ADMIN_* pair the engine generated and keeps.
     env_file:
       - ../.panelalpha/wiki/wiki.env
+      - ../.panelalpha/app-credentials.env
     environment:
       # The image's config.yml is a template of $(VAR) placeholders
       # (dev/build/config.yml); these are the names it substitutes. Wiki.js

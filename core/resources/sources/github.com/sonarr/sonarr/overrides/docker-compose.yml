@@ -39,8 +39,9 @@ services:
     image: linuxserver/sonarr:4.0.20
     restart: "no"
     entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    # SONARR_ADMIN_USER / SONARR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/sonarr/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - sonarr-config:/config:ro
       - sonarr-tv:/tv

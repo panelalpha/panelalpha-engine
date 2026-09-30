@@ -1,6 +1,8 @@
 #!/bin/bash
-# Generates Tdarr's secrets and the admin password once, in ~/.panelalpha
-# (survives redeploys; ~/project does not).
+# Generates Tdarr's secrets once, in ~/.panelalpha (survives redeploys;
+# ~/project does not). The admin login is the engine's (`credentials:` in
+# panelalpha.yaml), written to ~/.panelalpha/app-credentials.env before this
+# hook runs.
 set -e
 cd ~/project
 
@@ -16,10 +18,6 @@ if [ ! -f "${STORE}/tdarr.env" ]; then
         "$(openssl rand -hex 32)" "${key}" "${key}" > "${STORE}/tdarr.env")
 fi
 
-# Read only by the seed service; Tdarr keeps its own hash.
-if [ ! -f "${STORE}/admin.env" ]; then
-    (umask 077; printf 'TDARR_ADMIN_USER=admin\nTDARR_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 16)" > "${STORE}/admin.env")
-fi
-chmod 600 "${STORE}/tdarr.env" "${STORE}/admin.env"
+chmod 600 "${STORE}/tdarr.env"
 
 chmod +r panelalpha-seed.sh

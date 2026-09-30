@@ -12,8 +12,9 @@ services:
     image: ghcr.io/av1155/houndarr:v1.13.3
     restart: "no"
     entrypoint: ["/bin/bash", "/panelalpha-seed.sh"]
+    # HOUNDARR_ADMIN_USER / HOUNDARR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/houndarr/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       PUID: "1000"
       PGID: "1000"

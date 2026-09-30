@@ -126,14 +126,14 @@ administration. That is the correct default for the LAN dashboard Heimdall was
 written to be, and the wrong one for an account the engine has just given a
 public HTTPS name and a certificate.
 
-So `files/panelalpha/set-admin-password.php` generates a 20-character password,
-writes it to `~/project/.panelalpha-admin-password` (mode 0600) and sets it on
-user 1 — **only while the password is still null**. Re-running it on an account
+So `files/panelalpha/set-admin-password.php` sets the password the engine
+generates (`credentials:` in `panelalpha.yaml`, returned by
+`GET /projects/{name}/app-credentials`, MCP `app_credentials_get`) on user 1 —
+**only while the password is still null**. Re-running it on an account
 whose operator has since chosen their own password in the web interface does
-nothing: rotate what upstream shipped, never what somebody chose. The file is
-written before the update, so there is never a password in the database that
-nothing recorded, and the `UPDATE` repeats `AND password IS NULL` to close the
-window between the two.
+nothing: rotate what upstream shipped, never what somebody chose. The `UPDATE`
+repeats `AND password IS NULL` to close the window between the read and the
+write.
 
 It speaks plain PDO rather than booting the framework. Booting Laravel here
 would run `AppServiceProvider::boot()` a fourth time in one deploy and make a
@@ -168,8 +168,8 @@ stack trace in the container log on every start.
 ## Not configured
 
 **Mail.** `.env.example` points `MAIL_HOST` at `smtp.mailtrap.io` with no
-credentials. Heimdall only needs mail for password resets, and the recipe puts
-the one password there is in a file instead, so nothing here depends on it. Set
+credentials. Heimdall only needs mail for password resets, and the engine keeps
+the one password there is, so nothing here depends on it. Set
 `MAIL_*` through the account's env vars to add a server.
 
 **`ALLOW_INTERNAL_REQUESTS`** stays at its default `false`. Heimdall refuses

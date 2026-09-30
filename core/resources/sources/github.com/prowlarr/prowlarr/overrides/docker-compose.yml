@@ -37,8 +37,9 @@ services:
     image: linuxserver/prowlarr:2.6.5
     restart: "no"
     entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    # PROWLARR_ADMIN_USER / PROWLARR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/prowlarr/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - prowlarr-config:/config:ro
       - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro

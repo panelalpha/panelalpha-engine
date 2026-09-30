@@ -10,7 +10,9 @@ description: >-
   with /data on a named volume that survives redeploys.
 
   A one-shot `seed` service starts the server privately (no published port),
-  replaces `changeme` with the password in ~/.panelalpha/meshmonitor/admin.env
+  replaces `changeme` with the password the engine generates (`credentials:`
+  below; returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get)
   through the app's own login and change-password API, and fails the deploy
   unless `changeme` is refused, all before the web app publishes its port. A
   password changed later in the UI is detected read-only and left alone. Only
@@ -18,3 +20,8 @@ description: >-
   in the UI and the app works (showing "disconnected") without one. Anonymous
   visitors keep the app's default read-only dashboard/nodes view, which the
   admin controls in the UI; there is no self-registration.
+credentials:
+  adopt_from: .panelalpha/meshmonitor/admin.env
+  fields:
+    ADMIN_USERNAME: {kind: username, value: admin}
+    MESHMONITOR_ADMIN_PASSWORD: {kind: password}

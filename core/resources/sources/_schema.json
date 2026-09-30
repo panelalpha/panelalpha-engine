@@ -186,6 +186,17 @@
         }
       ]
     },
+    "credentials": {
+      "description": "The login the application is seeded with (an admin username and password). The engine generates the values once, keeps them on the project (encrypted), writes them to ~/.panelalpha/app-credentials.env (0600) before the recipe's prepare hook on every deploy, and returns them from GET /projects/{name}/app-credentials. A compose service reads them with `env_file: ../.panelalpha/app-credentials.env`; a hook with `. ~/.panelalpha/app-credentials.env`. Stored values are kept across deploys, a newly declared field is generated once, a field the project's own env_vars set takes that value, and a field no longer declared is dropped. Passwords are masked in the deploy log.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/credentials"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "image": {
       "description": "Literal base image. Omit and use `requires` when the version comes from the project.",
       "anyOf": [
@@ -529,6 +540,81 @@
     }
   },
   "definitions": {
+    "credentials": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fields"
+      ],
+      "properties": {
+        "login_path": {
+          "description": "Where the application's login form is; the API answers the public URL plus this path as `login_url`.",
+          "type": "string",
+          "pattern": "^/\\S*$"
+        },
+        "adopt_from": {
+          "description": "A dotenv file relative to the account home, read when a field is first generated: a value it sets for that field's name is adopted instead, so an account a recipe seeded before the engine owned its login keeps the password it already has. e.g. `.panelalpha/sonarr/admin.env`.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$"
+        },
+        "fields": {
+          "description": "Environment variable name => what the engine puts there.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "description": "`username` (default value `admin`), `email` (default `admin@example.com`) or `password` (24 random letters and digits with at least one upper, one lower and one digit).",
+                "enum": [
+                  "username",
+                  "email",
+                  "password"
+                ]
+              },
+              "value": {
+                "description": "The username or email to use instead of the default; {random} (8 hex characters), {host} (the account's domain) and {email} (the project's email, or admin-{random}@{host} without one) are filled once, when the value is first stored. Not allowed for a password, which is always generated.",
+                "type": "string",
+                "pattern": "^([A-Za-z0-9@._+\\-]|\\{random\\}|\\{host\\}|\\{email\\})+$"
+              },
+              "symbol": {
+                "description": "Password only: add one of -_! for applications whose password policy demands a symbol.",
+                "type": "boolean"
+              }
+            },
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "password"
+                }
+              }
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "value"
+                ]
+              }
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "symbol"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "condition": {
       "type": "object",
       "minProperties": 1,

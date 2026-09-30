@@ -43,8 +43,8 @@ transport map, or makes the account the destination MTA for its domain.
 | `files/src/.htaccess` | `display_errors off`, `log_errors on` |
 | `files/src/plugins/.htaccess` | Denies `*.php` under `plugins/`, which are includes, not entry points |
 | `files/src/clientlib/ckeditor/samples/.htaccess` | Denies CKEditor's bundled demo pages |
-| `hooks/prepare.sh` | Creates `~/.panelalpha/b1gmail/`, generates the signing key and admin password, creates the mail-store directory, copies `version.default.inc.php` into place |
-| `overrides/docker-compose.override.yml` | Second `env_file` for the secrets, bind mount for the mail store |
+| `hooks/prepare.sh` | Creates `~/.panelalpha/b1gmail/`, generates the signing key, creates the mail-store directory, copies `version.default.inc.php` into place |
+| `overrides/docker-compose.override.yml` | `env_file`s for the signing key and the engine's admin login, bind mount for the mail store |
 
 ### The setup wizard is never reachable
 
@@ -63,17 +63,18 @@ Two departures from the wizard's own defaults:
 
 - `setup_mode=private`, not `public`. Public leaves open self-registration on a
   webmail server nobody has configured yet.
-- The admin password is generated per account into
-  `~/.panelalpha/b1gmail/b1gmail.env`, mode 0600 in a 0700 directory, rather
-  than shown on a page anyone could have loaded.
+- The admin password is generated per account by the engine (`credentials:`
+  in `panelalpha.yaml`, returned by `GET /projects/{name}/app-credentials`),
+  rather than shown on a page anyone could have loaded.
 
 ### Secrets and state live outside `~/project`
 
 `ProjectTree::clearContents()` empties `~/project` before every git re-clone, so
 nothing there survives a redeploy. Two things must:
 
-- **The signing key and the admin password** — `~/.panelalpha/b1gmail/b1gmail.env`,
-  reaching the container as a second `env_file:`. `env_file` is read when the
+- **The signing key** — `~/.panelalpha/b1gmail/b1gmail.env`, reaching the
+  container as a second `env_file:` (the admin login is the engine's,
+  `~/.panelalpha/app-credentials.env`). `env_file` is read when the
   container is *created*, and the prepare hook runs before `compose up`.
 - **The mail store** — every message body, attachment and webdisk file is a
   file under `prefs.datafolder` (`serverlib/init.inc.php:393` →

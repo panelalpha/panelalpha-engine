@@ -1,7 +1,7 @@
 #!/bin/sh
 # Registers Tdarr's first (admin) user as soon as the server answers, so the
 # "create your account" screen is never offered to a visitor.
-# Env: TDARR_ADMIN_USER, TDARR_ADMIN_PASSWORD (~/.panelalpha/tdarr/admin.env).
+# Env: TDARR_ADMIN_USER, TDARR_ADMIN_PASSWORD (~/.panelalpha/app-credentials.env).
 set -eu
 UI=http://app:8265
 # The media volume is created root-owned; Tdarr and its node run as PUID 1000.

@@ -9,7 +9,8 @@ services:
     entrypoint: ["/bin/sh", "/pa/init.sh"]
     env_file:
       - ../.panelalpha/navidrome/secret.env
-      - ../.panelalpha/navidrome/admin.env
+      # NAVIDROME_ADMIN_USER / NAVIDROME_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha/navidrome:/pa:ro
       - navidrome-data:/data

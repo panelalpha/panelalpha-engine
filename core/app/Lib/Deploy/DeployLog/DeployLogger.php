@@ -78,6 +78,18 @@ class DeployLogger
      */
     private ?string $rawFailureOutput = null;
 
+    /**
+     * Values this deploy must never write, by deploy id: a password the engine
+     * delivered can come back in whatever the app prints. Static so a second
+     * logger opened on the same deploy masks them too.
+     *
+     * @var array<string, array<string, true>>
+     */
+    private static array $masked = [];
+
+    /** Shorter values would mask ordinary words. */
+    private const MIN_MASKED_LENGTH = 4;
+
     private function __construct(private readonly string $username, private readonly string $deployId)
     {
         $this->paths = new DeployLogPaths($username);
@@ -428,6 +440,33 @@ class DeployLogger
         }
     }
 
+    /**
+     * Mask these values in every line this deploy writes from now on, in its
+     * error and in what telemetry is handed.
+     *
+     * @param list<string> $values
+     */
+    public function mask(array $values): void
+    {
+        foreach ($values as $value) {
+            if (is_string($value) && strlen($value) >= self::MIN_MASKED_LENGTH) {
+                self::$masked[$this->deployId][$value] = true;
+            }
+        }
+    }
+
+    public function redact(string $text): string
+    {
+        $values = array_keys(self::$masked[$this->deployId] ?? []);
+        if ($values === []) {
+            return $text;
+        }
+        // Longest first, so a value containing another is masked whole.
+        usort($values, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+
+        return str_replace($values, '***', $text);
+    }
+
     public function finish(string $status, ?string $error = null): void
     {
         $this->flushBuffers();
@@ -435,7 +474,8 @@ class DeployLogger
         $latest = $this->readLatest() ?? [];
         [$status, $error] = $this->settleStatus($latest, $status, $error);
         [$stages] = DeployStatus::closeOpenStage($latest['stages'] ?? [], $now = time());
-        $error = $error === null ? null : LogLine::sanitize($error);
+        $error = $error === null ? null : LogLine::sanitize($this->redact($error));
+        $rawFailure = $this->rawFailureOutput === null ? null : $this->redact($this->rawFailureOutput);
 
         $final = array_merge($latest, [
             'status' => $status,
@@ -457,13 +497,14 @@ class DeployLogger
         // build actually printed, not the sentence it already turned that into.
         // It runs before the status is published so a failure's fix from
         // monitoring is in the same answer as the failure.
-        $problem = Telemetry::captureDeploy($this, $this->username, $status, $this->rawFailureOutput ?? $error, $final);
+        $problem = Telemetry::captureDeploy($this, $this->username, $status, $rawFailure ?? $error, $final);
         if ($problem !== null) {
             $this->writeProblem($problem, $latest['stage'] ?? null);
         }
 
         $this->status->write(array_merge($final, ['problem' => $problem]));
         $this->lock->release();
+        unset(self::$masked[$this->deployId]);
 
         // Same reasoning, same choke point: a push that coalesced while this
         // deploy ran -- of any kind, for any reason -- is followed up from
@@ -578,7 +619,7 @@ class DeployLogger
 
     private function writeLine(string $level, string $message, ?string $stage = null): void
     {
-        $message = LogLine::sanitize($message);
+        $message = LogLine::sanitize($this->redact($message));
         if ($this->deployId === '' || $message === '') {
             return;
         }

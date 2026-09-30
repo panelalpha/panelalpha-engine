@@ -7,8 +7,9 @@ services:
     image: petersem/posterr:v1.21.18
     restart: "no"
     entrypoint: ["node", "/panelalpha/init.js"]
+    # POSTERR_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/posterr/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - posterr-config:/usr/src/app/config
       - ./panelalpha/posterr/init.js:/panelalpha/init.js:ro

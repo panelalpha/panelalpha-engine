@@ -12,8 +12,9 @@ services:
     image: ghcr.io/autobrr/autobrr:v1.87.0
     restart: "no"
     entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    # AUTOBRR_ADMIN_USER / AUTOBRR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/autobrr/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       AUTOBRR__HOST: 127.0.0.1
       AUTOBRR__PORT: "7474"

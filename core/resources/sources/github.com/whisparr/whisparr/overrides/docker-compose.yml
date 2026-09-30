@@ -48,8 +48,9 @@ services:
     image: ghcr.io/hotio/whisparr:v2-2.2.0-release.231
     restart: "no"
     entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    # WHISPARR_ADMIN_USER / WHISPARR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/whisparr/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - whisparr-config:/config:ro
       - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro

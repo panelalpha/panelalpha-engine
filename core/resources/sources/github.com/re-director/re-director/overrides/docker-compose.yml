@@ -52,9 +52,9 @@ services:
       app:
         condition: service_healthy
     env_file:
-      # RD_ADMIN_USERNAME / RD_ADMIN_PASSWORD, generated once by hooks/prepare.sh
-      # and kept in ~/.panelalpha/re-director/ (~/project is ~, so .. is ~).
-      - ../.panelalpha/re-director/admin.env
+      # RD_ADMIN_USERNAME / RD_ADMIN_PASSWORD, generated and kept by the engine
+      # (~/project is ~, so .. is ~).
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha/re-director/seed.sh:/seed.sh:ro
     entrypoint: ["/bin/sh", "/seed.sh"]

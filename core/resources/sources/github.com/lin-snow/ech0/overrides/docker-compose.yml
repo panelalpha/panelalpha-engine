@@ -9,9 +9,8 @@ services:
     image: sn0wl1n/ech0:v5.7.0
     restart: unless-stopped
     # .env is the platform-merged account env (touched by the prepare hook so
-    # `up` never aborts on a missing file); ech0.env carries the JWT secret and
-    # the generated Owner creds the hook wrote once and keeps stable across
-    # redeploys. Paths are relative to ~/project, where the engine runs this.
+    # `up` never aborts on a missing file); ech0.env carries the JWT secret the
+    # hook wrote once and keeps stable across redeploys. Paths are relative to ~/project, where the engine runs this.
     env_file:
       - .env
       - ../.panelalpha/ech0/ech0.env
@@ -47,7 +46,7 @@ services:
     mem_limit: 512m
 
   # One-shot Owner seeder. Waits for the app to be healthy, then claims the
-  # single-shot public POST /api/init/owner with the generated creds so no
+  # single-shot public POST /api/init/owner with the engine's login so no
   # random first visitor can seize the instance. Uses curl (not the app image's
   # busybox wget: wget --post-data forces Content-Type form-urlencoded, which
   # huma rejects with 400 -- the endpoint only accepts application/json).
@@ -60,10 +59,12 @@ services:
     depends_on:
       app:
         condition: service_healthy
+    # ECH0_OWNER_USERNAME / ECH0_OWNER_PASSWORD / ECH0_OWNER_EMAIL, generated and
+    # kept by the engine.
     env_file:
-      - ../.panelalpha/ech0/ech0.env
+      - ../.panelalpha/app-credentials.env
     # $$ escapes so compose passes a literal $ to the container shell (the vars
-    # come from ech0.env at runtime, not from compose interpolation).
+    # come from app-credentials.env at runtime, not from compose interpolation).
     entrypoint:
       - /bin/sh
       - -c

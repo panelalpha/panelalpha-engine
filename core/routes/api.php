@@ -28,6 +28,7 @@ use App\Http\Controllers\User\MysqlController;
 use App\Http\Controllers\User\StagingController;
 use App\Http\Controllers\User\PhpController as UserPhpController;
 use App\Http\Controllers\User\BackupController;
+use App\Http\Controllers\User\AppCredentialsController;
 use App\Http\Controllers\User\AppHealthController;
 use App\Http\Controllers\User\AppUserController;
 use App\Http\Controllers\User\ContainerController;
@@ -276,6 +277,8 @@ $projectRoutes = function (): void {
         ->withoutMiddleware('auth:api')
         ->middleware('throttle:60,1');
     Route::get('/{username}/app/health', [AppHealthController::class, 'show']);
+    // The login the engine generated for the app from its recipe's `credentials:`.
+    Route::get('/{username}/app-credentials', [AppCredentialsController::class, 'show']);
     Route::get('/{username}/app/info', [AppUserController::class, 'info']);
     Route::get('/{username}/app/roles', [AppUserController::class, 'roles']);
     Route::post('/{username}/app/install', [AppUserController::class, 'install']);

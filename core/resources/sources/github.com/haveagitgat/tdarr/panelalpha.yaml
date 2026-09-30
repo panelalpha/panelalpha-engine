@@ -9,8 +9,17 @@ description: >-
   internal node on CPU, data and media on named volumes.
 
   With auth=true and no user, Tdarr's web UI asks the first visitor to create
-  an account. hooks/prepare.sh generates the JWT secret, a seeded API key
-  (shared by the server and its internal node) and the admin password once
-  into ~/.panelalpha/tdarr/; a one-shot `seed` service registers the admin
-  as soon as the server answers and fails the deploy if a user it cannot log
-  in as already exists. `ready` makes `compose up -d` return only after that.
+  an account. hooks/prepare.sh generates the JWT secret and a seeded API key
+  (shared by the server and its internal node) once into ~/.panelalpha/tdarr/;
+  the engine generates the admin login (`credentials:` below, written to
+  ~/.panelalpha/app-credentials.env), and a one-shot `seed` service registers
+  the admin as soon as the server answers and fails the deploy if a user it
+  cannot log in as already exists. `ready` makes `compose up -d` return only
+  after that. The login is returned by GET /projects/{name}/app-credentials;
+  accounts deployed before this kept it in ~/.panelalpha/tdarr/admin.env,
+  which `adopt_from` carries over.
+credentials:
+  adopt_from: .panelalpha/tdarr/admin.env
+  fields:
+    TDARR_ADMIN_USER: {kind: username, value: admin}
+    TDARR_ADMIN_PASSWORD: {kind: password}

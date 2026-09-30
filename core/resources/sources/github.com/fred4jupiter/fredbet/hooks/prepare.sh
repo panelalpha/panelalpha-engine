@@ -1,6 +1,7 @@
 #!/bin/bash
-# Generates the database and admin passwords once, in ~/.panelalpha (survives
-# redeploys; ~/project does not).
+# Generates the database password once, in ~/.panelalpha (survives redeploys;
+# ~/project does not). The admin login is the engine's (`credentials:` in
+# panelalpha.yaml), written to ~/.panelalpha/app-credentials.env before this hook.
 set -e
 cd ~/project
 
@@ -15,11 +16,11 @@ if [ ! -f "${STORE}/db.env" ] || [ ! -f "${STORE}/app.env" ]; then
     (
         umask 077
         printf 'POSTGRES_PASSWORD=%s\n' "${PG_PASSWORD}" > "${STORE}/db.env"
-        # FREDBET_ADMIN_PASSWORD is used only when the admin user is first created.
-        printf 'SPRING_DATASOURCE_PASSWORD=%s\nFREDBET_ADMIN_USERNAME=admin\nFREDBET_ADMIN_PASSWORD=%s\n' \
-            "${PG_PASSWORD}" "$(rnd 18)" > "${STORE}/app.env"
+        printf 'SPRING_DATASOURCE_PASSWORD=%s\n' "${PG_PASSWORD}" > "${STORE}/app.env"
     )
 fi
+# An older deploy kept the login here too; the engine adopted it.
+sed -i '/^FREDBET_ADMIN_\(USERNAME\|PASSWORD\)=/d' "${STORE}/app.env"
 chmod 600 "${STORE}/db.env" "${STORE}/app.env"
 
 touch .env

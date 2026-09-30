@@ -38,8 +38,9 @@ description: >-
   the PUBLIC, single-shot endpoint POST /api/init/owner (internal/router/init.go
   registers it with public(); InitOwner refuses once the site is initialized).
   If left unclaimed, the first visitor to POST that endpoint becomes Owner with
-  full admin. This recipe claims it at deploy time: hooks/prepare.sh generates a
-  random owner username + 48-hex password once into the same store file, and a
+  full admin. This recipe claims it at deploy time with the login the engine
+  generates (`credentials:` below: username `owner`, or the random one an
+  account deployed before this already has, taken over by `adopt_from`), and a
   one-shot `init-owner` service (curlimages/curl -- the app's busybox wget
   cannot POST application/json, it forces form-urlencoded and huma 400s) waits
   for the app to be healthy, checks /api/init/status, and if no Owner exists
@@ -47,8 +48,8 @@ description: >-
   idempotent: on redeploy the Owner already exists (state is on the volume) and
   the seeder is a no-op. A failed seed exits non-zero and, via the `ready` gate
   (depends_on service_completed_successfully), fails the whole deploy rather than
-  leaving an unclaimed instance. The generated owner login is written only to
-  ~/.panelalpha/ech0/credentials.txt (0600), never surfaced elsewhere.
+  leaving an unclaimed instance. The login is returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get).
 
   REGISTRATION POSTURE. ECH0_SETTING_ALLOW_REGISTER seeds the system default to
   false so the public POST /api/register (internal/service/user Register) is
@@ -69,3 +70,9 @@ description: >-
   `docker compose up -d` blocks until Ech0 answers and the Owner is seeded and
   the engine's "deploy finished" is honest (engine#204: up -d returns before the
   app is up).
+credentials:
+  adopt_from: .panelalpha/ech0/ech0.env
+  fields:
+    ECH0_OWNER_USERNAME: {kind: username, value: owner}
+    ECH0_OWNER_PASSWORD: {kind: password}
+    ECH0_OWNER_EMAIL: {kind: email, value: owner@ech0.local}

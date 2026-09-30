@@ -111,7 +111,7 @@ Fusio reads `psx_env` at all.
 | File | What it does |
 |---|---|
 | `panelalpha.yaml` | `extends: php`, `docroot: public`, `database: mysql`, and the `fusio-setup` command on the install and upgrade stages |
-| `hooks/prepare.sh` | Rewrites the committed `.env` (project key, `prod`, debug off, trusted proxy header), deletes `APP_CONNECTION`, generates the administrator password, removes `public/install.php` |
+| `hooks/prepare.sh` | Rewrites the committed `.env` (project key, `prod`, debug off, trusted proxy header), deletes `APP_CONNECTION`, hands the engine's administrator password to the install stage, removes `public/install.php` |
 | `files/panelalpha/fusio-setup.sh` | `APP_CONNECTION` and `APP_URL` from the provisioned database and domain, the migrations, the first administrator, the administration app |
 | `overrides/docker-compose.override.yml` | The app healthcheck, the memory limit and the `ready` gate |
 
@@ -139,10 +139,11 @@ mistyping a password enough times would ban every visitor.
 
 ## Credentials
 
-`~/project/.panelalpha-admin-password`, mode 0600, generated per account by
-`hooks/prepare.sh` and never a default; the copy of record is
-`~/.panelalpha/fusio-admin-password`, so a rebuild restores the same password
-rather than writing a file that no longer matches the database. The
+The engine generates the password per account (`credentials:` in
+`panelalpha.yaml`) and keeps it on the project, so a rebuild restores the same
+password; `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`)
+returns the login. `hooks/prepare.sh` hands it to the install stage in
+`~/project/.panelalpha-admin-password`, mode 0600. The
 administrator is `admin` / `admin@example.com` — a hook is told neither the
 account's address nor its domain. Override either with `FUSIO_ADMIN_USER` /
 `FUSIO_ADMIN_EMAIL` in the project's env vars before the first deploy.

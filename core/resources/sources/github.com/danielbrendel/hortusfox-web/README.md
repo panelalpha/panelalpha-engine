@@ -21,15 +21,19 @@ runs `:latest` with the README's default admin (`admin@example.com` /
 `hooks/prepare.sh` generates, once, into `~/.panelalpha/hortusfox/` (0600 in 0700):
 
 - `db.env`: MariaDB user and root passwords
-- `app.env`: `DB_PASSWORD` and `APP_ADMIN_PASSWORD`
+- `app.env`: `DB_PASSWORD`
 
 They are kept because the database volume outlives `~/project`. Values are hex
-because the image's entrypoint pastes them into SQL and a `php -r` string.
+because the image's entrypoint pastes them into SQL and a `php -r` string. The
+admin login (`APP_ADMIN_EMAIL`, `APP_ADMIN_PASSWORD`) is declared under
+`credentials:` in `panelalpha.yaml`; the engine generates it (letters and
+digits) and writes `~/.panelalpha/app-credentials.env`.
 
 ## Login
 
-E-mail `admin@<site domain>`, password `APP_ADMIN_PASSWORD` in
-`~/.panelalpha/hortusfox/app.env`. The entrypoint creates the admin only while
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) returns the
+e-mail and password. Accounts deployed before the engine owned the login keep
+their admin `admin@<site domain>`. The entrypoint creates the admin only while
 no admin exists, so a password changed in the UI survives redeploys. There is
 no public registration; the admin adds further users.
 

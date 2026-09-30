@@ -7,8 +7,15 @@ description: >-
   app self-generates and persists its signing secret in /data/.secret, so no
   secret is injected. BugPin ships a hardcoded default admin
   (admin@example.com / changeme123) it seeds on first boot with no env override;
-  a one-shot init service pre-seeds the first admin with a strong password
-  generated once into ~/.panelalpha/bugpin/ before the server runs, so that
-  documented default is never written to the database. There is no public
+  a one-shot init service pre-seeds the first admin with the login the engine
+  generates (`credentials:` below) before the server runs, so that documented
+  default is never written to the database. The login is returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get). There is no public
   registration — accounts are created only by the admin — so closing the
   default credential closes the only account-takeover path.
+credentials:
+  login_path: /admin/
+  adopt_from: .panelalpha/bugpin/admin.env
+  fields:
+    BUGPIN_ADMIN_EMAIL: {kind: email, value: admin@bugpin.local}
+    BUGPIN_ADMIN_PASSWORD: {kind: password}

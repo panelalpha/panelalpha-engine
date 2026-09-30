@@ -1,6 +1,7 @@
 #!/bin/bash
-# Generates the password salt and the owner's credentials once, in
-# ~/.panelalpha (survives redeploys; ~/project does not).
+# Generates the password salt once, in ~/.panelalpha (survives redeploys;
+# ~/project does not). The owner's login is the engine's (`credentials:` in
+# panelalpha.yaml), written to ~/.panelalpha/app-credentials.env before this hook.
 set -e
 cd ~/project
 
@@ -12,12 +13,7 @@ chmod 700 "${HOME}/.panelalpha" "${STORE}"
 if [ ! -f "${STORE}/wakapi.env" ]; then
     (umask 077; echo "WAKAPI_PASSWORD_SALT=$(openssl rand -hex 32)" > "${STORE}/wakapi.env")
 fi
-
-# Read only by the seed service; the app never sees the owner's password.
-if [ ! -f "${STORE}/admin.env" ]; then
-    (umask 077; printf 'WAKAPI_ADMIN_USER=admin\nWAKAPI_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 16)" > "${STORE}/admin.env")
-fi
-chmod 600 "${STORE}/wakapi.env" "${STORE}/admin.env"
+chmod 600 "${STORE}/wakapi.env"
 
 # The compose file lists .env; make sure it exists.
 touch .env

@@ -14,10 +14,9 @@ description: >-
 
   POSTGRES, NOT H2. Upstream documents the embedded H2 file as unsuitable for
   production, so the application database is postgres:16-alpine on the pgdata
-  volume. hooks/prepare.sh writes the database password,
-  MB_ENCRYPTION_SECRET_KEY (encrypts stored connection details) and the admin
-  password once to ~/.panelalpha/metabase/ (0600 in 0700) with a
-  credentials.txt note. MB_SITE_URL is the account's public URL. The JVM heap
+  volume. hooks/prepare.sh writes the database password and
+  MB_ENCRYPTION_SECRET_KEY (encrypts stored connection details) once to
+  ~/.panelalpha/metabase/ (0600 in 0700). MB_SITE_URL is the account's public URL. The JVM heap
   is capped with JAVA_OPTS=-Xmx1g inside a 1.75 GB container (the JVM
   measured ~1.35 GB resident).
 
@@ -26,8 +25,17 @@ description: >-
   /api/session/properties and POST /api/setup to become admin. A one-shot
   `setup` service boots Metabase with MB_JETTY_HOST=127.0.0.1 (unreachable
   from outside the container), runs the migrations, creates the admin
-  (admin@<domain>, or MB_ADMIN_EMAIL) through /api/setup with the generated
-  password, stops, and records a marker on the mb-state volume. The public
+  through /api/setup with the login the engine generated (`credentials:`
+  below; returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get), stops, and records a marker on the mb-state volume. The public
   `app` service starts only after it completes, and a `ready` gate makes the
   deploy finish only when /api/health answers. Metabase has no open sign-up;
   further users are invited by the admin.
+credentials:
+  login_path: /auth/login
+  # Accounts deployed before this keep their password; their admin email was
+  # admin@<domain>, which the old file did not record.
+  adopt_from: .panelalpha/metabase/admin.env
+  fields:
+    MB_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    MB_ADMIN_PASSWORD: {kind: password}

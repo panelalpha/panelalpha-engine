@@ -10,7 +10,8 @@ services:
     restart: "no"
     entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
     env_file:
-      - ../.panelalpha/lightnvr/admin.env
+      # LIGHTNVR_ADMIN_USER / LIGHTNVR_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - config:/etc/lightnvr
       - data:/var/lib/lightnvr/data

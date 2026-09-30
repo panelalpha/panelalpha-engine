@@ -13,7 +13,7 @@ services:
       - ./panelalpha/tinyfm/config.php:/var/www/html/config.php:ro
       - ./panelalpha/tinyfm/apache.conf:/etc/apache2/conf-enabled/zz-tinyfm.conf:ro
       - ./panelalpha/tinyfm/php.ini:/usr/local/etc/php/conf.d/zz-tinyfm.ini:ro
-      # bcrypt hash only; the password stays in ~/.panelalpha/tinyfm.
+      # bcrypt hash only; the password stays in ~/.panelalpha/app-credentials.env.
       - ./panelalpha/tinyfm/admin.hash:/etc/tinyfm/admin.hash:ro
       # The managed files. Not under /var/www/html, so never served or executed.
       - files:/srv/files

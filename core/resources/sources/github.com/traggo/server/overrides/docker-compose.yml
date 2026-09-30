@@ -14,21 +14,20 @@ services:
     image: traggo/server:0.8.3
     restart: unless-stopped
     # .env is the platform-merged account env (touched by the prepare hook so
-    # `up` never aborts on a missing file); traggo.env carries the admin
-    # password the hook generated once and keeps stable across redeploys. Paths
-    # are relative to ~/project, where the engine writes and runs this file.
+    # `up` never aborts on a missing file); app-credentials.env carries the
+    # admin login the engine generated and keeps. Paths are relative to
+    # ~/project, where the engine writes and runs this file.
     env_file:
       - .env
-      - ../.panelalpha/traggo/traggo.env
+      - ../.panelalpha/app-credentials.env
     environment:
       # Only dialect the binary ships; SQLite file on the named volume below.
       TRAGGO_DATABASE_DIALECT: sqlite3
       TRAGGO_DATABASE_CONNECTION: /opt/traggo/data/traggo.db
       TRAGGO_PORT: "3030"
-      # First-admin bootstrap. TRAGGO_DEFAULT_USER_PASS comes from traggo.env
-      # (generated, never the shipped `admin`); the user is created only when no
-      # users exist yet, so this is a no-op on every deploy after the first.
-      TRAGGO_DEFAULT_USER_NAME: admin
+      # First-admin bootstrap: TRAGGO_DEFAULT_USER_NAME / _PASS come from
+      # app-credentials.env (never the shipped `admin`); the user is created only
+      # when no users exist yet, so this is a no-op on every deploy after the first.
       TRAGGO_LOG_LEVEL: info
       TZ: UTC
     volumes:

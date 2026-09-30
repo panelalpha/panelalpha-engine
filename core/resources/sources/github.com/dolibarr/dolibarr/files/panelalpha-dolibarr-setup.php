@@ -199,7 +199,7 @@ if ($url === '') {
 $configured = is_file(CONF_STORE) && filesize(CONF_STORE) > 8;
 if (!$configured) {
     if ($adminPass === '') {
-        fail('DOLI_ADMIN_PASS is empty; hooks/prepare.sh generates it into ~/.panelalpha/dolibarr-app.env');
+        fail('DOLI_ADMIN_PASS is empty; the engine delivers it in ~/.panelalpha/app-credentials.env');
     }
     say('writing conf.php (first install)');
     step('step1.php', [

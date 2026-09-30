@@ -57,14 +57,14 @@ services:
       # pdo_sqlite among them, which is the database driver.
       PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/panelalpha/php
 
-    # The admin password, by a path that climbs out of the checkout.
-    # ~/.panelalpha survives the clone; ~/project does not (engine #173), and
-    # hooks/prepare.sh writes this file before compose runs. env_file rather
+    # The admin password, generated and kept by the engine, by a path that
+    # climbs out of the checkout; the engine writes it before compose runs.
+    # env_file rather
     # than `environment:` because nothing else sets this key, so nothing
     # outranks the file -- and because .env would put a login credential into
     # .env.default at mode 644 (engine #173).
     env_file:
-      - ../.panelalpha/baikal-app.env
+      - ../.panelalpha/app-credentials.env
 
     # The account's data, outside the checkout.
     #

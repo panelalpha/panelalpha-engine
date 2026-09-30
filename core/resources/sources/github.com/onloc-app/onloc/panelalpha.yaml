@@ -29,10 +29,16 @@ description: >-
   closes automatically (isSetup() true once any admin exists, and the
   "registration" setting defaults off). The public window that leaves — anyone
   could register the admin account before the owner does — is closed by a
-  one-shot `init` service that registers the generated admin (username `admin`,
-  password in ~/.panelalpha/onloc/onloc.env) as soon as the API is healthy; the
+  one-shot `init` service that registers the admin whose login the engine
+  generates (`credentials:` below; returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get) as soon as the API is healthy; the
   caddy front waits for it to finish, so the site is never publicly reachable
   with registration still open and no admin. Every API route past /api/status
   and /api/health enforces a Bearer token (401 otherwise), so locations and
   devices are never anonymously readable. Onloc has no email/SMTP anywhere —
   accounts are username + password only — so there is no mail step to document.
+credentials:
+  adopt_from: .panelalpha/onloc/onloc.env
+  fields:
+    ONLOC_ADMIN_USER: {kind: username, value: admin}
+    ONLOC_ADMIN_PASSWORD: {kind: password}

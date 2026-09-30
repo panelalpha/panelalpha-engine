@@ -8,6 +8,8 @@ services:
     env_file:
       # A missing file aborts `up` rather than starting an open editor.
       - ../.panelalpha/nodered/admin.env
+      # NODE_RED_ADMIN_USER / NODE_RED_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       TZ: UTC
     volumes:

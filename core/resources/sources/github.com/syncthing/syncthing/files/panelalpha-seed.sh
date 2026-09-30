@@ -1,5 +1,5 @@
 #!/bin/sh
-# Sets the GUI login from ~/.panelalpha/syncthing/admin.env, once: if config.xml
+# Sets the GUI login from the engine's credentials, once: if config.xml
 # already holds a password (seeded, or changed by the user) it is left alone.
 set -eu
 : "${SYNCTHING_GUI_USER:?missing}" "${SYNCTHING_GUI_PASSWORD:?missing}"

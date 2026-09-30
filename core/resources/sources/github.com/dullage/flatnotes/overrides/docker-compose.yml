@@ -1,7 +1,8 @@
 # Compose-replace: the repository ships only a Dockerfile, and the app will not
 # start without credentials. This runs the official image of the current release:
 #   - notes, attachments and the search index on a named volume at /data
-#   - password auth, credentials and JWT key from ~/.panelalpha/flatnotes/auth.env
+#   - password auth: login from ~/.panelalpha/app-credentials.env (the engine's),
+#     JWT key from ~/.panelalpha/flatnotes/auth.env
 services:
   app:
     image: dullage/flatnotes:v5.5.5
@@ -10,6 +11,7 @@ services:
       - .env
       # A missing file aborts `up` rather than starting without auth.
       - ../.panelalpha/flatnotes/auth.env
+      - ../.panelalpha/app-credentials.env
     environment:
       FLATNOTES_AUTH_TYPE: password
       FLATNOTES_PATH: /data

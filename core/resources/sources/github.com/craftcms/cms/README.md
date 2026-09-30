@@ -122,8 +122,9 @@ and `overrides/docker-compose.override.yml` names that file as a **second
 `env_file`** — `../.panelalpha/craft.env`, relative to the project directory.
 Because the key is already set when `install` runs, `setup/keys` finds
 `$generalConfig->securityKey` non-empty and never takes its own branch. The same
-file carries `CRAFT_APP_ID` (same story, `setup/app-id`) and the generated
-administrator credentials.
+file carries `CRAFT_APP_ID` (same story, `setup/app-id`). The administrator
+login is the engine's (`credentials:` in `panelalpha.yaml`), a third
+`env_file`, `../.panelalpha/app-credentials.env`.
 
 `~/project/.env` is left holding a comment and nothing else.
 
@@ -219,18 +220,13 @@ and deployed would land in `vendor/` unregistered and invisible to Craft.
 visitor it is an open administrator account on a public URL. The install stage
 runs it instead, before anything is listening:
 
-- `hooks/prepare.sh` generates the password with `openssl rand -base64 18` under
-  `umask 077` in a subshell — the umask has to cover the redirection that
-  creates the file, and must not leak into the rest of the script, where a
-  stray `077` leaves directories the engine (www-data) cannot scan while it
-  walks the tree for the document root.
-- It is stored in `~/.panelalpha/craft.env` (0600), outside the checkout, so a
-  redeploy reuses the password the database actually holds instead of writing a
-  new one the database never learns.
-- A copy goes to `~/project/.panelalpha-admin-password` (0600), which is where a
-  human is pointed. That file is outside the document root (`web/`) twice over,
-  and the engine's Apache vhost denies both dotfiles and `panelalpha[-.]` names
-  regardless.
+- The engine generates the login (`credentials:` in `panelalpha.yaml`), keeps
+  it on the project and returns it from `GET /projects/{name}/app-credentials`
+  (MCP `app_credentials_get`); every deploy writes it to
+  `~/.panelalpha/app-credentials.env` (0600), outside the checkout, so a
+  redeploy reuses the password the database actually holds. An account
+  deployed before this keeps the password from `~/.panelalpha/craft.env`
+  (`adopt_from`).
 - `files/panelalpha/craft-setup.sh` passes it on the command line to
   `craft install --interactive=0`, and `install/check` makes the whole step a
   no-op on every deploy after the first.

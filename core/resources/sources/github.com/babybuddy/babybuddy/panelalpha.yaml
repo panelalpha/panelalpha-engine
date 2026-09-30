@@ -24,7 +24,8 @@ description: >-
   Nobody edits anything here, so this override supplies the full stack: the
   pinned official image on SQLite at /config (named volume), PUID/PGID set to
   the account's own ids so the container's files stay account-owned, the
-  Django SECRET_KEY and the admin password seeded once from ~/.panelalpha, and
+  Django SECRET_KEY seeded once from ~/.panelalpha, the admin login from the
+  engine, and
   only the app publishing a port (engine#234).
 
   DOMAIN + HTTPS + CSRF. Django 4+ checks the browser Origin header on every
@@ -47,11 +48,17 @@ description: >-
   public internet. Because /config is a named volume nothing can pre-seed a DB
   into, the rotation happens after boot: a one-shot `rotate-admin` service runs
   once the app is healthy (migrations done, admin created) and sets admin's
-  password to a per-account secret generated once into ~/.panelalpha/babybuddy
-  (0600 in 0700). It is idempotent -- on a redeploy the admin already has that
-  password and it is left untouched, so sessions are not invalidated. The
-  Django SECRET_KEY is seeded the same way and reused on every rebuild (rotating
+  password to the login the engine generates (`credentials:` below), only while
+  admin still has the default password -- a password the owner changed later
+  is never reset. The login is returned by GET /projects/{name}/app-credentials
+  (MCP app_credentials_get). The Django SECRET_KEY is seeded once into
+  ~/.panelalpha/babybuddy (0600 in 0700) and reused on every rebuild (rotating
   it would log everyone out). The `ready` gate blocks the deploy from turning
   green until the site answers AND the admin has been rotated (engine#204/#90),
-  so the deploy never finishes with admin/admin live. Onboarding notes,
-  including the generated admin login, are written to credentials.txt.
+  so the deploy never finishes with admin/admin live.
+credentials:
+  login_path: /login/
+  adopt_from: .panelalpha/babybuddy/app.env
+  fields:
+    BB_ADMIN_USER: {kind: username, value: admin}
+    BB_ADMIN_PASSWORD: {kind: password}

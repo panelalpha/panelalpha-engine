@@ -2,7 +2,8 @@
 # Runs in the account shell after the clone and after overrides/ and files/ are
 # in place, before `docker compose up`. Two jobs the compose file cannot do for
 # itself: put this account's secrets where the next deploy will not delete them,
-# and make sure the .env the compose references exists.
+# and make sure the .env the compose references exists. The owner's login is the
+# engine's (`credentials:` in panelalpha.yaml), in ~/.panelalpha/app-credentials.env.
 set -e
 cd ~/project
 
@@ -14,7 +15,6 @@ say() { echo "[fittrackee] $*" >&2; }
 # lock the app out of the existing Postgres volume.
 STORE_DIR="${HOME}/.panelalpha/fittrackee"
 APP_ENV="${STORE_DIR}/app.env"
-NOTE="${STORE_DIR}/credentials.txt"
 
 mkdir -p "${STORE_DIR}"
 chmod 700 "${HOME}/.panelalpha" "${STORE_DIR}"
@@ -24,7 +24,6 @@ if [ ! -f "${APP_ENV}" ]; then
     # from an unquoted env file and out of a URL.
     DB_PASSWORD="$(openssl rand -base64 36 | tr -d '\n=/+:' | cut -c1-32)"
     APP_SECRET_KEY="$(openssl rand -base64 64 | tr -d '\n=/+' | cut -c1-64)"
-    ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+:' | cut -c1-24)"
 
     (
         umask 077
@@ -43,46 +42,9 @@ DATABASE_URL=postgresql://fittrackee:${DB_PASSWORD}@fittrackee-db:5432/fittracke
 
 # Flask signing key; required in production. Reused so sessions survive redeploy.
 APP_SECRET_KEY=${APP_SECRET_KEY}
-
-# Read by the seed-admin one-shot to create the owner account on first deploy.
-# Email is only an identifier here (no SMTP configured).
-FT_ADMIN_USER=admin
-FT_ADMIN_EMAIL=admin@fittrackee.local
-FT_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-EOF
-        cat > "${NOTE}" <<EOF
-FitTrackee on this account
-==========================
-
-FitTrackee imports GPX files and tracks outdoor activities per sport. The whole
-app is behind a login; workouts are private by default. New users can self-
-register (each sees only their own data and workouts explicitly made public);
-the owner can disable self-registration from Administration -> Application.
-
-ADMIN LOGIN (seeded on the first deploy)
-  URL:      <this account's URL>/login
-  Username: admin
-  Password: ${ADMIN_PASSWORD}
-  Role:     owner (full administration)
-
-  Change the password from the app after first login if you like; a redeploy
-  will not reset it.
-
-SECRETS
-  APP_SECRET_KEY and the Postgres password live in ${STORE_DIR} (0600) and are
-  reused on every redeploy, which keeps logins working and the database readable
-  across rebuilds. The Postgres data, uploads (GPX/avatars), staticmap cache and
-  logs live on Docker named volumes and also survive a redeploy. Do not delete
-  either.
-
-OPTIONAL
-  Email is not configured, so notification/confirmation mails are not sent
-  (accounts are created active). Redis is running for API rate limits; async
-  data export is not processed (no worker), which only affects the user data
-  export feature.
 EOF
     )
-    say "secrets written to ${STORE_DIR}; onboarding notes in ${NOTE}"
+    say "secrets written to ${STORE_DIR}"
 else
     say "reusing the secrets in ${STORE_DIR}"
 fi

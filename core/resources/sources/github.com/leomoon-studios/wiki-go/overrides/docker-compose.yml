@@ -2,7 +2,7 @@
 # example compose files for `leomoonstudios/wiki-go:latest`. On first start
 # Wiki-Go writes data/config.yaml with admin/admin. This compose runs the
 # current release image and seeds that file first:
-#   - `init` hashes the generated password from ~/.panelalpha/wikigo/admin.env
+#   - `init` hashes the engine's password from ~/.panelalpha/app-credentials.env
 #     into config.yaml, only while the data volume has none
 #   - `app` starts after it, so the built-in admin/admin is never written
 #   - all pages, uploads, users and settings live on the `data` volume
@@ -14,7 +14,7 @@ services:
     user: "0:0"
     entrypoint: ["/bin/sh", "/panelalpha/wikigo-init.sh"]
     env_file:
-      - ../.panelalpha/wikigo/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       WIKIGO_OWNER: ${PA_PUBLIC_HOST}
     volumes:

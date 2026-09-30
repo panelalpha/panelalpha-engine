@@ -1,6 +1,6 @@
 #!/bin/bash
 # Completes Snipe-IT's own setup wizard (first visitor wins) with the generated
-# admin from ~/.panelalpha/snipeit/admin.env. A no-op once setup is complete.
+# admin from ~/.panelalpha/app-credentials.env. A no-op once setup is complete.
 set -euo pipefail
 
 BASE="http://app:80"

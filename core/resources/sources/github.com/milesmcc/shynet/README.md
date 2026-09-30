@@ -108,8 +108,9 @@ Four things nothing else can.
    would sign every session cookie and password-reset token.
 4. **An administrator.** Shynet has no first-run setup form and no sign-up
    page by default, so an instance with no user is an instance nobody can log
-   into. Created by the `init` gate before the web container starts; the
-   password is written to `~/.panelalpha/shynet/credentials.txt`.
+   into. Created by the `init` gate before the web container starts, with the
+   login the engine generates and returns from
+   `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`).
 
 ## Shape of the stack
 
@@ -156,8 +157,8 @@ defaults it to 2.
 | Path | What |
 |---|---|
 | `~/.panelalpha/shynet/db.env` | `POSTGRES_PASSWORD`, 0600. Read by the database container and nothing else |
-| `~/.panelalpha/shynet/app.env` | `DJANGO_SECRET_KEY`, `DB_PASSWORD`, administrator email and password, 0600 |
-| `~/.panelalpha/shynet/credentials.txt` | the administrator login, for the account owner |
+| `~/.panelalpha/shynet/app.env` | `DJANGO_SECRET_KEY`, `DB_PASSWORD`, 0600 |
+| `~/.panelalpha/app-credentials.env` | the administrator login, written by the engine (`credentials:`) |
 | `~/project/.env` | the tunable settings, 0644, merged over by the account's env vars |
 | `project_pgdata` volume | every session and hit ever recorded |
 
@@ -213,8 +214,7 @@ http://<domain>/accounts/password/reset/key/1-df82k7-080f7133a43ee8e1c021559dbca
 
 into `docker logs` for the app. Anyone who can read that log can take the
 administrator account over without the password. It is upstream's behaviour and
-the fix is to configure SMTP; `hooks/prepare.sh` says so in
-`credentials.txt`, and this is the reason the recipe does not advertise
+the fix is to configure SMTP, and this is the reason the recipe does not advertise
 password reset as working. (The link is `http://` because Shynet sets no
 `SECURE_PROXY_SSL_HEADER` and has no setting to, so `request.is_secure()` is
 false behind the proxy.)

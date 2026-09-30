@@ -13,8 +13,9 @@ services:
     image: ghcr.io/dictionarry-hub/profilarr:2.2.0
     restart: "no"
     entrypoint: ["/bin/bash", "/panelalpha-seed.sh"]
+    # PROFILARR_ADMIN_USER / PROFILARR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/profilarr/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       PUID: "1000"
       PGID: "1000"

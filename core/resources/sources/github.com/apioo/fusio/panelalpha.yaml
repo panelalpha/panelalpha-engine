@@ -56,7 +56,9 @@ description: >-
   internal `Administrator` row whose password is generated and told to nobody,
   which is why Fusio's own readiness check asks for *more than one* user. The
   setup script creates the human account with `system:user_add`, entirely
-  non-interactively, using a password generated per account into
+  non-interactively, with the login the engine generates per account
+  (`credentials:` below; GET /projects/{name}/app-credentials, MCP
+  app_credentials_get, returns it), handed to the install stage in
   ~/project/.panelalpha-admin-password (0600).
 
   **And Fusio ships no user interface.** The administration app at
@@ -104,3 +106,9 @@ commands:
       administrator if there is none, and installs the administration app.
       Idempotent: the upgrade stage replays it on every redeploy.
     run: 'sh panelalpha/fusio-setup.sh'
+credentials:
+  login_path: /apps/fusio
+  fields:
+    FUSIO_ADMIN_USER: {kind: username, value: admin}
+    FUSIO_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    FUSIO_ADMIN_PASSWORD: {kind: password}

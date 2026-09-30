@@ -13,8 +13,9 @@ description: >-
   FIRST USER SEEDED BEFORE THE PORT OPENS. With no users, /create-user lets
   the first visitor create the admin. A one-shot `init` service on the same
   volume runs the migrations (the image entrypoint), then
-  `bin/console.php user:create` with an admin login generated once into
-  ~/.panelalpha/movary (credentials.txt there). It creates the user only while
+  `bin/console.php user:create` with the admin login the engine generates
+  (`credentials:` below) into ~/.panelalpha/app-credentials.env; GET
+  /projects/{name}/app-credentials (MCP app_credentials_get) returns it. It creates the user only while
   the database has none, so a login changed in the app survives a redeploy.
   Once a user exists /create-user redirects to the login, and
   ENABLE_REGISTRATION is set to 0 explicitly. The app service depends on
@@ -22,3 +23,9 @@ description: >-
 
   TMDB_API_KEY is left empty: it is the user's own key, set under
   Settings -> Server (or as an env var). Without it movie search does not work.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/movary/admin.env
+  fields:
+    MOVARY_ADMIN_EMAIL: {kind: email, value: admin@movary.local}
+    MOVARY_ADMIN_PASSWORD: {kind: password}

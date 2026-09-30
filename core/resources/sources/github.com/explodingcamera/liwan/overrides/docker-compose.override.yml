@@ -2,18 +2,20 @@
 # right about the app -- it builds files/Dockerfile.panelalpha, publishes 9042
 # and injects the public-URL aliases the entrypoint maps to LIWAN_BASE_URL --
 # and it is missing only the three things a stateful app needs: somewhere for
-# its database to live across redeploys, the admin secret, and a gate so
+# its database to live across redeploys, the admin login, and a gate so
 # `up -d` returns once the site actually answers.
 services:
   app:
     # The embedded database (users, entities, settings, every analytics event)
     # is all the state Liwan has, and ~/project is wiped and re-cloned on every
     # deploy (engine#173). A named volume survives rebuilds; a bind mount into
-    # ~/project would not. /pa carries the generated admin password, read-only,
-    # from the one account directory a redeploy keeps.
+    # ~/project would not.
     volumes:
       - liwan-data:/data
-      - ../.panelalpha/liwan:/pa:ro
+    # LIWAN_ADMIN_USERNAME / LIWAN_ADMIN_PASSWORD, generated and kept by the
+    # engine; the entrypoint seeds the administrator from them once.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     # busybox wget is in the wrapper image. GET / is the SPA shell, served only
     # once the listener is bound, so a build or config that stopped Liwan
     # starting shows up as a failed deploy rather than a silent 502. 8080 is the

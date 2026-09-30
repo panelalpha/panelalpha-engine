@@ -13,12 +13,21 @@ description: >-
 
   Security: upstream starts with no admin password. SecurityService
   .CheckAuthorised() returns true for everyone while AdminPassword is empty,
-  so the whole UI, indexer credentials and the API key would be open to
-  anyone with the address. hooks/prepare.sh generates a password and API key
-  once into ~/.panelalpha/jackett/jackett.env; a one-shot `init` service
-  writes ServerConfig.json before Jackett's first boot, only if it is absent,
-  with AdminPassword in the form Jackett stores it (SHA512 over UTF-16LE of
-  password + APIKey, lowercase hex; SecurityService.HashPassword()) and
-  BaseUrlOverride set to the public URL for Torznab links. A password changed
-  later in the UI is never reset by a redeploy. `ready` gates `compose up -d`
-  on the app's healthcheck.
+  so the whole UI, indexer credentials and the API key would be open to anyone
+  with the address. The engine generates the admin password (`credentials:`
+  below, written to ~/.panelalpha/app-credentials.env) and hooks/prepare.sh an
+  API key once into ~/.panelalpha/jackett/jackett.env; a one-shot `init`
+  service writes ServerConfig.json before Jackett's first boot, only if it is
+  absent, with AdminPassword in the form Jackett stores it (SHA512 over
+  UTF-16LE of password + APIKey, lowercase hex;
+  SecurityService.HashPassword()) and BaseUrlOverride set to the public URL
+  for Torznab links. A password changed later in the UI is never reset by a
+  redeploy. `ready` gates `compose up -d` on the app's healthcheck. The
+  password is returned by GET /projects/{name}/app-credentials; accounts
+  deployed before this kept it in ~/.panelalpha/jackett/jackett.env, which
+  `adopt_from` carries over.
+credentials:
+  login_path: /UI/Login
+  adopt_from: .panelalpha/jackett/jackett.env
+  fields:
+    JACKETT_ADMIN_PASSWORD: {kind: password}

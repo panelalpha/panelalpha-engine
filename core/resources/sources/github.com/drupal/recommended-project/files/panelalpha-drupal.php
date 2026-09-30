@@ -542,4 +542,4 @@ foreach (preg_split('/\s+/', trim($extra), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $pa
 }
 
 pa_say("Sign in at https://{$domain}/user/login as {$adminUser}");
-pa_say('the password is in ~/.panelalpha/drupal/drupal-admin-credentials.txt');
+pa_say('the login is returned by GET /projects/{name}/app-credentials');

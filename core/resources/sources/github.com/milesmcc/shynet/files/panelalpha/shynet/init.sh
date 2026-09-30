@@ -101,7 +101,7 @@ print("PACREATED:1")
         exit 1
     fi
 else
-    # Never touched again. The password in ~/.panelalpha/shynet/ is the one
+    # Never touched again. The password the engine returns is the one
     # this account was created with; if it was changed inside Shynet, that is
     # the owner's business and overwriting it here would be data loss.
     say "an account already exists; leaving it alone"

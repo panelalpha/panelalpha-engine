@@ -14,7 +14,7 @@ case "$code" in
     *) echo "[rdtclient] unexpected IsLoggedIn status $code" >&2; exit 1 ;;
 esac
 
-# The generated password is [A-Za-z0-9] only, so it needs no JSON escaping.
+# The engine's generated password is [A-Za-z0-9] only, so it needs no JSON escaping.
 curl -fsS -o /dev/null -H 'Content-Type: application/json' \
     --data "{\"userName\":\"$RDTCLIENT_ADMIN_USER\",\"password\":\"$RDTCLIENT_ADMIN_PASSWORD\"}" \
     "$api/Create"

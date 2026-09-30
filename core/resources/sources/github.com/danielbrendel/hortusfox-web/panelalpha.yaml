@@ -9,11 +9,12 @@ description: >-
 
   overrides/docker-compose.yml keeps the same two services on the current
   release image (v6.1) and MariaDB 11.4 LTS, unpublishes the database, and
-  feeds the admin and database passwords from ~/.panelalpha/hortusfox/,
-  generated once by hooks/prepare.sh so they survive redeploys alongside the
-  MariaDB and upload volumes. The image's own entrypoint runs the migrations
-  and creates the admin (admin@<site domain>, APP_ADMIN_PASSWORD in
-  ~/.panelalpha/hortusfox/app.env) only while no admin exists, so a password
+  feeds the database passwords from ~/.panelalpha/hortusfox/, generated once
+  by hooks/prepare.sh so they survive redeploys alongside the MariaDB and
+  upload volumes. The engine generates the admin login (`credentials:` below)
+  into ~/.panelalpha/app-credentials.env; GET /projects/{name}/app-credentials
+  (MCP app_credentials_get) returns it. The image's own entrypoint runs the
+  migrations and creates that admin only while no admin exists, so a password
   changed in the UI is kept. There is no public registration.
 
   The entrypoint's CLI steps run only with APP_DEBUG=true, so the app service's
@@ -23,3 +24,9 @@ description: >-
   them after 15 minutes. A no-op `ready` service waits for the app's
   healthcheck (the login form renders), so the deploy ends once migrations
   and the admin exist.
+credentials:
+  login_path: /auth
+  adopt_from: .panelalpha/hortusfox/app.env
+  fields:
+    APP_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    APP_ADMIN_PASSWORD: {kind: password}

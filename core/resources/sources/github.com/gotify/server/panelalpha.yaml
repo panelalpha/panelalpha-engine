@@ -9,10 +9,16 @@ description: >-
   a named volume that survives redeploys.
 
   Gotify creates an admin user whenever the database holds no users, and the
-  upstream default is admin/admin. hooks/prepare.sh generates the password once
-  into ~/.panelalpha/gotify/admin.env (0600 in 0700), fed to the container as an
-  env_file, so the first start seeds `admin` with that password and admin/admin
-  never exists. The value is only read while the user table is empty; a password
+  upstream default is admin/admin. The engine generates the login
+  (`credentials:` below) and writes ~/.panelalpha/app-credentials.env, fed to the
+  container as an env_file, so the first start seeds `admin` with that password
+  and admin/admin never exists; GET /projects/{name}/app-credentials (MCP
+  app_credentials_get) returns it. The value is only read while the user table is empty; a password
   changed later in the UI is not reset by a redeploy. Public registration is
   off (GOTIFY_REGISTRATION=false), so only the admin creates users; session
   cookies are marked Secure since the site is served over HTTPS.
+credentials:
+  adopt_from: .panelalpha/gotify/admin.env
+  fields:
+    GOTIFY_DEFAULTUSER_NAME: {kind: username, value: admin}
+    GOTIFY_DEFAULTUSER_PASS: {kind: password}

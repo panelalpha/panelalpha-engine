@@ -46,14 +46,14 @@ services:
       # create them as root.
       - ../.panelalpha/tine/data:/data
 
-    # Both files, spelled out, because compose's merge rule for `env_file`
+    # All three files, spelled out, because compose's merge rule for `env_file`
     # between a base file and an override is not something to bet a deploy on:
     # listed here in full, the result is the same whether compose replaces the
     # base list or appends to it.
     #
-    # .env is the engine's, and carries DB_*. app.env is this account's three
-    # generated secrets -- the tine administrator's password, the setup user's
-    # password and credentialCacheSharedKey -- written once by
+    # .env is the engine's, and carries DB_*. app.env is this account's two
+    # generated secrets -- the setup user's password and
+    # credentialCacheSharedKey -- written once by
     # hooks/prepare.sh, 0600 in a 0700 directory, outside ~/project because a
     # redeploy wipes that (engine#173) and because engine#173 also leaves
     # .env.default there 0644.
@@ -62,9 +62,13 @@ services:
     # and a value written afterwards never reaches getenv() however right the
     # file looks. hooks/prepare.sh runs before `docker compose up`, which is
     # the only reason this works.
+    #
+    # app-credentials.env is the administrator's login (TINE_ADMIN_LOGIN /
+    # TINE_ADMIN_PASSWORD), generated and kept by the engine.
     env_file:
       - .env
       - ../.panelalpha/tine/app.env
+      - ../.panelalpha/app-credentials.env
 
     environment:
       # The one way to give this container a php.ini. The base image loads none

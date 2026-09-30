@@ -1,5 +1,5 @@
 # One-shot before the app is published: create_app() makes the schema and the
-# passwordless "admin"; give it the generated password so /set-password is closed.
+# passwordless "admin"; give it the engine's password so /set-password is closed.
 import os
 import sys
 

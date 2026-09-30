@@ -21,6 +21,11 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    # NC_ADMIN_EMAIL / NC_ADMIN_PASSWORD for initAdminFromEnv.ts, generated and
+    # kept by the engine. Without them the first stranger to find the URL gets
+    # `org-level-creator,super`.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     environment:
       # Not a real address, and not meant to survive: ComposePlaceholders
       # rewrites a bare http://localhost under a *_URL-shaped key to the
@@ -29,10 +34,6 @@ services:
       # resets, webhook callbacks and OAuth redirects from it; mail.service.ts
       # refuses to send at all when it is unset.
       NC_SITE_URL: http://localhost
-      # initAdminFromEnv.ts. Without these the first stranger to find the URL
-      # gets `org-level-creator,super`. See hooks/prepare.sh.
-      NC_ADMIN_EMAIL: ${NC_ADMIN_EMAIL}
-      NC_ADMIN_PASSWORD: ${NC_ADMIN_PASSWORD}
       # Noco.ts persists a uuidv4 into nc_store when this is unset; a real key
       # is better and lives outside the database.
       NC_AUTH_JWT_SECRET: ${NC_AUTH_JWT_SECRET}
@@ -80,9 +81,8 @@ services:
     depends_on:
       nocodb:
         condition: service_healthy
-    environment:
-      NC_ADMIN_EMAIL: ${NC_ADMIN_EMAIL}
-      NC_ADMIN_PASSWORD: ${NC_ADMIN_PASSWORD}
+    env_file:
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha-setup.cjs:/panelalpha-setup.cjs:ro
       # For the marker that keeps this from overriding a later choice.

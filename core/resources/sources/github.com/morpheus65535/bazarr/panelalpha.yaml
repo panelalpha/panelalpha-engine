@@ -17,10 +17,18 @@ description: >-
   /init writes one with auth.type form, username admin, the md5 hex of a
   generated password (what check_credentials in utilities/helper.py compares)
   and a generated auth.apikey. Bazarr fills every other setting with its
-  defaults. The password, its hash and the API key are generated once into
-  ~/.panelalpha/bazarr (0600 in 0700); the plain password and API key are in
-  credentials.txt there. An existing config.yaml is never rewritten, so changes
-  made in the UI survive a redeploy. Sonarr/Radarr connections are runtime
-  settings made in the UI.
+  defaults. The engine generates the login (`credentials:` below, written to
+  ~/.panelalpha/app-credentials.env; the wrapper hashes it) and returns it
+  from GET /projects/{name}/app-credentials; the API key is generated once
+  into ~/.panelalpha/bazarr (0600 in 0700) and shown in Settings > General. An
+  account an older recipe seeded kept only the password's hash in app.env;
+  while config.yaml still holds that hash, the wrapper replaces it once with
+  the engine's. Otherwise an existing config.yaml is never rewritten, so
+  changes made in the UI survive a redeploy. Sonarr/Radarr connections are
+  runtime settings made in the UI.
 
   A `ready` gate holds the deploy until /api/system/ping answers.
+credentials:
+  fields:
+    BAZARR_AUTH_USERNAME: {kind: username, value: admin}
+    BAZARR_AUTH_PASSWORD: {kind: password}

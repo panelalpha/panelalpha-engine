@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Platform;
 
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
+use App\Lib\Deploy\Credentials\CredentialSpec;
 use App\Lib\Deploy\Health\CheckRegistry;
 use App\Lib\Deploy\Platform\Runtime\Requirement;
 use App\Lib\Deploy\Platform\Runtime\Php\PhpDocroot;
@@ -46,6 +47,7 @@ final class PlatformManifest
         'build_args',
         'system_packages',
         'frontend_build',
+        'credentials',
     ];
 
     /** Databases a manifest can ask the engine to provision. */
@@ -105,6 +107,11 @@ final class PlatformManifest
          * even when package.json declares none. `runtime: php` only.
          */
         public readonly string|false|null $frontendBuild,
+        /**
+         * The login the application is seeded with: the engine generates the
+         * values, keeps them on the project and writes them into the account.
+         */
+        public readonly ?CredentialSpec $credentials,
         public readonly array $detect,
         /**
          * Health checks this manifest adds to the ones its runtime brings, as `<group>`
@@ -185,6 +192,7 @@ final class PlatformManifest
             self::readBuildArgs($reader),
             self::readSystemPackages($reader),
             self::readFrontendBuild($reader),
+            CredentialSpec::parse($reader->raw('credentials'), $reader->fail(...)),
             $reader->object('detect', 'must be a non-empty condition object', $requireDetect),
             $checks = self::readChecks($reader, $recipeChecks),
             self::readCheckSkips($reader, $runtime, $checks, $recipeChecks),
@@ -709,6 +717,7 @@ final class PlatformManifest
             'build_args' => $this->buildArgs,
             'system_packages' => $this->systemPackages,
             'frontend_build' => $this->frontendBuild,
+            'credentials' => $this->credentials?->toArray(),
         ];
     }
 

@@ -32,8 +32,8 @@ services:
     image: verdaccio/verdaccio:6.10.4
     restart: "no"
     env_file:
-      # A missing file aborts `up` rather than starting without an admin.
-      - ../.panelalpha/verdaccio/admin.env
+      # The engine's login; a missing file aborts `up` rather than starting without an admin.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - storage:/verdaccio/storage
     entrypoint:

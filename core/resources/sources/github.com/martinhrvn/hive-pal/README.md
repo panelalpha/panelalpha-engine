@@ -14,12 +14,13 @@ second repo — a single origin, so no fronting nginx is needed.
 
 ## Secrets and the public URL
 
-`hooks/prepare.sh` generates the DB password, the Better Auth session secret and
-the admin password **once** into `~/.panelalpha/hive-pal/secrets.env` (0600) and
-reuses them on every redeploy — `~/project` is wiped each deploy (engine#173), so
-regenerating them would log everyone out or lock the app out of its pgdata
-volume. The generated admin login is also written to
-`~/.panelalpha/hive-pal/admin-credentials.txt` (0600).
+`hooks/prepare.sh` generates the DB password and the Better Auth session secret
+**once** into `~/.panelalpha/hive-pal/secrets.env` (0600) and reuses them on
+every redeploy — `~/project` is wiped each deploy (engine#173), so regenerating
+them would log everyone out or lock the app out of its pgdata volume. The admin
+login is the engine's (`credentials:` in `panelalpha.yaml`), returned by
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`); an account
+deployed before this keeps its password from `secrets.env` (`adopt_from`).
 
 `BETTER_AUTH_URL` and `FRONTEND_URL` are set to `http://localhost` in the compose
 `environment:` and rewritten to the account's public https URL by the engine's
@@ -34,8 +35,7 @@ The image (pinned `0.19.0`, the release whose entrypoint carries the Better Auth
 seed) waits for postgres, runs `prisma migrate deploy`, then runs `seed-admin.js`,
 which creates the owner admin from `ADMIN_EMAIL` / `ADMIN_PASSWORD` **before the
 app starts serving** — so the admin exists before the site is publicly reachable
-and there is no race for the admin address. The generated login is written to
-`~/.panelalpha/hive-pal/admin-credentials.txt`. Better Auth email+password sign-in
+and there is no race for the admin address. Better Auth email+password sign-in
 (`/api/auth/sign-in/email`) works immediately; the admin gets the `ADMIN` role.
 
 Two upstream behaviours to know about (neither is patched — configuration only):

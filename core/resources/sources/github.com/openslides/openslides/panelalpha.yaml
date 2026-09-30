@@ -8,10 +8,16 @@ description: >-
   a plain deploy lands on the fallback placeholder. This recipe renders
   upstream's osmanage compose template (openslides-cli contrib) for the 4.3.4
   release images with local HTTPS off, since the engine terminates TLS.
-  hooks/prepare.sh generates the five secrets osmanage would (auth token and
-  cookie keys, internal auth password, database and superadmin passwords)
-  once into ~/.panelalpha/openslides/secrets.env; a one-shot `secrets` service
-  writes them into the files the services read. backendManage creates the
-  initial data and the `superadmin` account on an empty database, as
-  upstream's example config does; the password is OS_SUPERADMIN_PASSWORD in
-  that file. The database is on a named volume.
+  hooks/prepare.sh generates four of the secrets osmanage would (auth token
+  and cookie keys, internal auth password, database password) once into
+  ~/.panelalpha/openslides/secrets.env; the superadmin password is generated
+  by the engine (`credentials:` below) and returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get). A one-shot
+  `secrets` service writes them into the files the services read.
+  backendManage creates the initial data and the `superadmin` account on an
+  empty database, as upstream's example config does. The database is on a named volume.
+credentials:
+  adopt_from: .panelalpha/openslides/secrets.env
+  fields:
+    OS_SUPERADMIN_USER: {kind: username, value: superadmin}
+    OS_SUPERADMIN_PASSWORD: {kind: password}

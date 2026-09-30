@@ -31,17 +31,23 @@ description: >-
   (trust-on-first-use; once a user exists /setup 302s to /login). Leaving that
   form reachable by the public would let a stranger claim the admin. So the
   `seed` one-shot completes /setup itself (GET for the CSRF token + session
-  cookie, then POST) with a strong password generated once by hooks/prepare.sh,
+  cookie, then POST) with the login the engine generates (`credentials:`
+  below; returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get),
   and the `ready` gate waits on it -- the engine only publishes the site after
   the admin already exists, so the setup window is never public. seed is
   idempotent: on redeploy it sees a user and does nothing.
 
   PERSISTENCE. The SQLite db (redirects + the admin user's bcrypt hash) lives on
   a named Docker volume at /data, so it survives redeploy and storage reclaim;
-  the admin therefore persists via the volume, not by re-seeding. The generated
-  admin password is written once into ~/.panelalpha/re-director/ (0600 in 0700),
-  the only writable place a deploy does not wipe, and reused on every redeploy.
+  the admin therefore persists via the volume, not by re-seeding.
 
   PORT. The app listens on 80 (live profile). Published as 8080:80 so the
   engine's port scan takes host port 8080 as the primary (host port 80 is the
   proxy's own), which for a Spring app must equal the primary (engine#231).
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/re-director/admin.env
+  fields:
+    RD_ADMIN_USERNAME: {kind: username, value: admin}
+    RD_ADMIN_PASSWORD: {kind: password}

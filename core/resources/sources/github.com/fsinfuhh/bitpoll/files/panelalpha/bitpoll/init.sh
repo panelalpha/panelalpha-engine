@@ -33,7 +33,8 @@ python manage.py migrate --noinput
 
 # Seed the owner admin only when it is missing, so a redeploy never resets a
 # password the owner changed and never fails on "username already taken".
-# DJANGO_SUPERUSER_{USERNAME,EMAIL,PASSWORD} come from ~/.panelalpha/bitpoll/.
+# DJANGO_SUPERUSER_{USERNAME,EMAIL,PASSWORD} are the engine's
+# (~/.panelalpha/app-credentials.env).
 if [ -n "${DJANGO_SUPERUSER_USERNAME:-}" ]; then
     exists="$(python -c "import django; django.setup(); from django.contrib.auth import get_user_model; import os; print(1 if get_user_model().objects.filter(username=os.environ['DJANGO_SUPERUSER_USERNAME']).exists() else 0)")"
     if [ "${exists}" = "1" ]; then

@@ -43,7 +43,7 @@ services:
       retries: 30
     mem_limit: 512m
 
-  # Claims the "create first user" form (first visitor wins) with the generated
+  # Claims the "create first user" form (first visitor wins) with the engine's
   # password before the site is public, then proves the login. Idempotent.
   bootstrap:
     image: curlimages/curl:8.11.1
@@ -51,8 +51,11 @@ services:
     depends_on:
       app:
         condition: service_healthy
+    # PBW_ADMIN_EMAIL / PBW_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/pgbackweb/admin.env
+      - ../.panelalpha/app-credentials.env
+    environment:
+      PBW_ADMIN_NAME: Administrator
     entrypoint:
       - /bin/sh
       - -c

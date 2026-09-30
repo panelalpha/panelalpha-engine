@@ -14,7 +14,8 @@ services:
     restart: "no"
     env_file:
       - ../.panelalpha/notemark/secret.env
-      - ../.panelalpha/notemark/admin.env
+      # NOTEMARK_ADMIN_USER / NOTEMARK_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       DATA_PATH: /data
       PUBLIC_URL: ${PA_PUBLIC_URL}

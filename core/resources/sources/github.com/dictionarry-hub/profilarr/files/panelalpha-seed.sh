@@ -1,5 +1,5 @@
 #!/bin/bash
-# Creates Profilarr's one password account from ~/.panelalpha/profilarr/admin.env,
+# Creates Profilarr's one password account from ~/.panelalpha/app-credentials.env,
 # only when none exists. The app runs here on loopback in a container with no
 # published port, so nobody else can reach /auth/setup meanwhile.
 set -euo pipefail

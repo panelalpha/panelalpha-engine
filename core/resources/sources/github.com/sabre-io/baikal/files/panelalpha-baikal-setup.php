@@ -141,7 +141,7 @@ $hasPassword = trim((string) ($config['system']['admin_passwordhash'] ?? '')) !=
 if ($configured === null || !$hasPassword) {
     $adminPass = (string) getenv('BAIKAL_ADMIN_PASS');
     if (strlen($adminPass) < 12) {
-        fail('BAIKAL_ADMIN_PASS is missing or too short; ~/.panelalpha/baikal-app.env should carry it');
+        fail('BAIKAL_ADMIN_PASS is missing or too short; ~/.panelalpha/app-credentials.env should carry it');
     }
 
     $standard = new \Baikal\Model\Config\Standard();
@@ -170,7 +170,7 @@ if ($configured === null || !$hasPassword) {
     $database->set('encryption_key', bin2hex(random_bytes(16)));
     $database->persist();
 
-    say('wrote ' . $configFile . ' (sqlite backend, admin password from ~/.panelalpha/baikal-app.env)');
+    say('wrote ' . $configFile . ' (sqlite backend, admin password from the engine)');
 } else {
     say('config already carries an admin password; left untouched');
 }

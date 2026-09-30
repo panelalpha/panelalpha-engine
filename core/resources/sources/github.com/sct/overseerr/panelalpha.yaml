@@ -16,12 +16,13 @@ description: >-
   is empty, the ADMIN -- any free Plex account claims a fresh instance. A
   one-shot `seed` service runs before the app on every boot: it migrates with
   Overseerr's own compiled datasource, creates a local owner (User entity,
-  bcrypt via User.setPassword, Permission.ADMIN) only when no user exists,
-  and sets public.initialized, applicationUrl and trustProxy in settings.json.
+  bcrypt via User.setPassword, Permission.ADMIN) only when no user exists, and
+  sets public.initialized, applicationUrl and trustProxy in settings.json.
   With a user present the Plex path admits only the owner's own Plex account
-  or users of the owner's Plex server. The owner email has a random local part
-  (admin-<hex>@<domain>) so a Plex account registered with a guessable
-  address cannot match it before the customer links their own Plex account.
+  or users of the owner's Plex server. The owner email is the email the
+  project was created with, or, when it has none, one with a random local part
+  (admin-<hex>@<domain>) so a Plex account registered with a guessable address
+  cannot match it before the customer links their own Plex account.
 
   LINKING PLEX. The owner is linked to Plex only by a Plex sign-in whose email
   equals the owner's, and Overseerr has no UI to change an email. Setting
@@ -29,7 +30,19 @@ description: >-
   the owner's email to it (only while the owner has no plexId); the customer
   then signs in with that Plex account and configures Settings > Plex.
 
-  SECRETS AND PERSISTENCE. hooks/prepare.sh writes the owner password once to
-  ~/.panelalpha/overseerr/ (0600 in 0700) with a credentials.txt note. The
-  database, settings.json (API key, session secret) and logs live on the
-  overseerr-config named volume and survive redeploys.
+  SECRETS AND PERSISTENCE. The engine generates the owner login
+  (`credentials:` below: OVERSEERR_OWNER_EMAIL, the project's email or
+  admin-<hex>@<domain>, and a password, written to
+  ~/.panelalpha/app-credentials.env) and returns it from GET
+  /projects/{name}/app-credentials; an OVERSEERR_OWNER_EMAIL set in the
+  project env replaces the generated email. Accounts deployed before this keep
+  their password (`adopt_from` their ~/.panelalpha/overseerr/admin.env); their
+  owner, while no media account is linked, is moved to the new email by the
+  seed. The database, settings.json (API key, session secret) and logs live on
+  the overseerr-config named volume and survive redeploys.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/overseerr/admin.env
+  fields:
+    OVERSEERR_OWNER_EMAIL: {kind: email, value: "{email}"}
+    OVERSEERR_ADMIN_PASSWORD: {kind: password}

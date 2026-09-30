@@ -4,7 +4,8 @@
 # a redeploy will not delete, then re-writes the env_files the compose reads.
 # Rotating any of these breaks an existing instance: a new DB or Redis password
 # locks the app out of its volume, a new SECRET_KEY invalidates every session
-# and stored token, a new admin password silently changes the login.
+# and stored token. The admin login is the engine's (`credentials:`), read by
+# the app from ~/.panelalpha/app-credentials.env.
 set -e
 
 # ~/project is wiped every deploy (engine#173); ~/.panelalpha survives, so the
@@ -27,7 +28,6 @@ gen_or_read() {
 DB_PASSWORD=$(gen_or_read "$STORE/db_password" openssl rand -hex 16)
 REDIS_PASSWORD=$(gen_or_read "$STORE/redis_password" openssl rand -hex 16)
 SECRET_KEY=$(gen_or_read "$STORE/secret_key" openssl rand -hex 32)
-ADMIN_PASSWORD=$(gen_or_read "$STORE/admin_password" openssl rand -hex 16)
 
 umask 077
 
@@ -48,17 +48,8 @@ cat > "$STORE/app.env" <<EOF
 POSTGRES_PASSWORD=${DB_PASSWORD}
 REDIS_PASSWORD=${REDIS_PASSWORD}
 WEBLATE_SECRET_KEY=${SECRET_KEY}
-WEBLATE_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 EOF
 chmod 600 "$STORE/db.env" "$STORE/redis.env" "$STORE/app.env"
-
-# Record the admin login for the operator (idempotent).
-cat > "$STORE/credentials.txt" <<EOF
-Weblate admin login
-  username: admin
-  password: ${ADMIN_PASSWORD}
-EOF
-chmod 600 "$STORE/credentials.txt"
 
 # Pre-pull so compose up starts fast and an image NotFound surfaces here.
 docker pull weblate/weblate:2026.9.1.2 || true

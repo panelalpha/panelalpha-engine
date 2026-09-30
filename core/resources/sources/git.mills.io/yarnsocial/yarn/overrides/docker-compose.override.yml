@@ -17,6 +17,8 @@ services:
     # ~/project wipe (engine#173).
     volumes:
       - "../.panelalpha/yarn:/data"
+      # The admin login, generated and kept by the engine; read by pa-run.sh.
+      - "../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro"
     # Seed the admin and reuse persistent secrets before yarnd takes over.
     command: ["/usr/local/bin/pa-run.sh"]
     mem_limit: 1g

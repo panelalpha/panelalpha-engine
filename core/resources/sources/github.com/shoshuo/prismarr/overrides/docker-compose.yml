@@ -13,8 +13,9 @@ services:
     image: shoshuo/prismarr:1.2.0
     restart: "no"
     command: ["/command/with-contenv", "/bin/sh", "/panelalpha-seed.sh"]
+    # PRISMARR_ADMIN_EMAIL / PRISMARR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/prismarr/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - prismarr_data:/var/www/html/var/data
       - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro

@@ -2,8 +2,9 @@
 # README's default admin (admin@example.com / password), fixed database
 # passwords and MariaDB published on 3306. Same two services here, with:
 #   - the current release image (v6.1) and MariaDB 11.4 LTS, db not published
-#   - the admin and DB passwords from ~/.panelalpha/hortusfox/*.env (hook)
-#   - the admin e-mail on the site's own domain, release mode when serving
+#   - DB passwords from ~/.panelalpha/hortusfox/*.env (hook), the admin login
+#     from ~/.panelalpha/app-credentials.env (the engine's)
+#   - release mode when serving
 #   - a sweeper that deletes web backup exports after 15 minutes
 #   - a no-op `ready` gate so the deploy ends once migrations and the admin exist
 services:
@@ -34,12 +35,13 @@ services:
     restart: unless-stopped
     ports:
       - "8000:80"
-    # DB_PASSWORD and APP_ADMIN_PASSWORD. The entrypoint creates the admin
-    # only while no admin exists, so later changes in the UI are kept.
+    # DB_PASSWORD, and APP_ADMIN_EMAIL / APP_ADMIN_PASSWORD (the engine's).
+    # The entrypoint creates the admin only while no admin exists, so later
+    # changes in the UI are kept.
     env_file:
       - ../.panelalpha/hortusfox/app.env
+      - ../.panelalpha/app-credentials.env
     environment:
-      APP_ADMIN_EMAIL: admin@${PA_PUBLIC_HOST}
       # The entrypoint's migrate/seed steps use the asatru CLI, which refuses
       # to run unless APP_DEBUG is true; `command` turns it off before serving.
       APP_DEBUG: "true"

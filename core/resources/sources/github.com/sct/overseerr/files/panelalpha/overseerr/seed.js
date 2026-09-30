@@ -16,10 +16,11 @@ const need = (k) => {
 
 (async () => {
   const password = need('OVERSEERR_ADMIN_PASSWORD');
-  // OVERSEERR_OWNER_EMAIL (project env) should be the customer's Plex email:
-  // "Sign in with Plex" with that account then links Plex to the owner.
-  const wanted = (process.env.OVERSEERR_OWNER_EMAIL || '').trim().toLowerCase();
-  const email = wanted || `admin-${need('OVERSEERR_ADMIN_TAG')}@${need('PA_PUBLIC_HOST')}`.toLowerCase();
+  // OVERSEERR_OWNER_EMAIL: the engine's admin-<random>@<domain>, or the project
+  // env's value, the customer's Plex email: "Sign in with Plex" with that
+  // account then links Plex to the owner.
+  const wanted = need('OVERSEERR_OWNER_EMAIL').trim().toLowerCase();
+  const email = wanted;
 
   const db = await dataSource.initialize();
   await db.query('PRAGMA foreign_keys=OFF');

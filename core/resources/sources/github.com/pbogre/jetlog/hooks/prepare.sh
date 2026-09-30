@@ -8,7 +8,6 @@ set -e
 PA_DIR="${HOME}/.panelalpha/jetlog"
 DATA_DIR="${PA_DIR}/data"
 ENV_FILE="${PA_DIR}/jetlog.env"
-CRED_FILE="${PA_DIR}/credentials.txt"
 IMAGE="pbogre/jetlog:latest"
 
 mkdir -p "${DATA_DIR}"
@@ -26,7 +25,9 @@ if [ ! -f "${ENV_FILE}" ]; then
     # redeploy. PUID/PGID are the account's own ids so the container chowns the
     # bind mount back to files the account (and SFTP) can read.
     SECRET_KEY=$(openssl rand -hex 32)
-    ADMIN_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)
+    # JETLOG_ADMIN_USER / JETLOG_ADMIN_PASSWORD: the engine's (`credentials:`),
+    # written before this hook.
+    set -a; . "${HOME}/.panelalpha/app-credentials.env"; set +a
 
     umask 077
     {
@@ -45,7 +46,7 @@ if [ ! -f "${ENV_FILE}" ]; then
     # hasher, so the hash matches what jetlog verifies against.
     docker run --rm \
         --user "$(id -u):$(id -g)" \
-        -e PW="${ADMIN_PASSWORD}" \
+        -e PW="${JETLOG_ADMIN_PASSWORD}" -e PU="${JETLOG_ADMIN_USER}" \
         -v "${DATA_DIR}:/seed" \
         --entrypoint python "${IMAGE}" -c '
 import os, sqlite3
@@ -60,18 +61,26 @@ c.execute("""CREATE TABLE users (
     last_login    DATETIME,
     created_on    DATETIME NOT NULL DEFAULT current_timestamp
 )""")
-c.execute("INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, 1)", ["admin", h])
+c.execute("INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, 1)", [os.environ["PU"], h])
 c.commit(); c.close()
 '
-
-    umask 077
-    cat > "${CRED_FILE}" <<EOF
-Jetlog admin account (generated $(date -u +%FT%TZ))
-url:      set by PanelAlpha (your project's public domain)
-username: admin
-password: ${ADMIN_PASSWORD}
-
-Change this password from Settings after first login.
-EOF
-    chmod 600 "${CRED_FILE}"
+elif [ -f "${PA_DIR}/credentials.txt" ]; then
+    # Once, on an account the old recipe seeded: its password was in
+    # credentials.txt (not dotenv, so the engine could not adopt it). Set the
+    # admin to the engine's login, then drop the old file so this never repeats.
+    set -a; . "${HOME}/.panelalpha/app-credentials.env"; set +a
+    docker run --rm \
+        --user "$(id -u):$(id -g)" \
+        -e PW="${JETLOG_ADMIN_PASSWORD}" -e PU="${JETLOG_ADMIN_USER}" \
+        -v "${DATA_DIR}:/seed" \
+        --entrypoint python "${IMAGE}" -c '
+import os, sqlite3
+from argon2 import PasswordHasher
+h = PasswordHasher().hash(os.environ["PW"])
+c = sqlite3.connect("/seed/jetlog.db")
+c.execute("UPDATE users SET password_hash = ? WHERE username = ?", [h, os.environ["PU"]])
+c.commit(); c.close()
+'
+    rm -f "${PA_DIR}/credentials.txt"
+    echo "[jetlog] admin password handed over to the engine's login" >&2
 fi

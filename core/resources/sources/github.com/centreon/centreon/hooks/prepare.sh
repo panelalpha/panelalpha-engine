@@ -2,7 +2,9 @@
 # Account shell, after the clone and before `docker compose up`.
 #
 # Everything here is a value neither the checkout nor the engine can supply:
-# three passwords and the answer files Centreon's unattended installer reads.
+# two database passwords and the answer files Centreon's unattended installer
+# reads. The admin login is the engine's (`credentials:` in panelalpha.yaml), in
+# ~/.panelalpha/app-credentials.env.
 # Nothing in the checkout is edited, patched or compiled.
 set -e
 cd ~/project
@@ -23,46 +25,26 @@ if [ ! -f "${STATE}/secrets" ]; then
     # a '$' or a quote would be a different bug in each of the four.
     DB_ROOT_PASSWORD=$(openssl rand -hex 24)
     DB_PASSWORD=$(openssl rand -hex 24)
-    # The one a human types. Centreon's default password policy is 12
-    # characters with mixed case, a digit and a special character; 20 random
-    # alphanumerics satisfy length, case and digit, and the '!' covers the
-    # last rule without putting a shell metacharacter in the password.
-    ADMIN_PASSWORD="$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | cut -c1-20)!"
-
-    # Centreon stores bcrypt in contact_password.password, and its unattended
-    # installer writes admin.json's value into that column *verbatim* -- which
-    # is why upstream's own admin.json holds a '$2y$10$...' string rather than
-    # a password. So the hash is what has to be generated here. The account's
-    # own PHP does it; there is no bcrypt in coreutils and `openssl passwd` on
-    # OpenSSL 3 offers -1/-5/-6 and no -2.
-    ADMIN_HASH=$(P="${ADMIN_PASSWORD}" php -r 'echo password_hash(getenv("P"), PASSWORD_BCRYPT);')
-
     umask 077
     cat > "${STATE}/secrets" <<EOF
 CENTREON_DB_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
 CENTREON_DB_PASSWORD=${DB_PASSWORD}
 EOF
-    printf '%s' "${ADMIN_PASSWORD}" > "${STATE}/admin-password"
-    printf '%s' "${ADMIN_HASH}" > "${STATE}/admin-hash"
-
-    # What the customer is handed. Centreon has no sign-up page and no
-    # first-run wizard once the unattended installer has run: without this, the
-    # site comes up on a login form whose only account is admin/Centreon!2021,
-    # a pair that is in this repository, in every CI log and in the
-    # documentation.
-    cat > "${STATE}/credentials" <<EOF
-# Written by PanelAlpha on the first deploy of this account.
-# Centreon's own installer answer file ships the bcrypt hash of
-# "Centreon!2021"; this account was installed with the password below instead,
-# and the shipped one has never been valid here.
-CENTREON_URL=/centreon/
-CENTREON_ADMIN_USER=admin
-CENTREON_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-EOF
 fi
 
 # shellcheck disable=SC1091
 . "${STATE}/secrets"
+set -a; . "${HOME}/.panelalpha/app-credentials.env"; set +a
+
+# Centreon stores bcrypt in contact_password.password, and its unattended
+# installer writes admin.json's value into that column *verbatim* -- which is
+# why upstream's own admin.json holds a '$2y$10$...' string rather than a
+# password. So the hash is what has to be generated here, with the account's
+# own PHP (there is no bcrypt in coreutils). Kept while it still matches, so
+# the image layer that copies it stays cached.
+if ! P="${CENTREON_ADMIN_PASSWORD}" H="${STATE}/admin-hash" php -r 'exit(is_file(getenv("H")) && password_verify(getenv("P"), file_get_contents(getenv("H"))) ? 0 : 1);'; then
+    (umask 077; P="${CENTREON_ADMIN_PASSWORD}" php -r 'echo password_hash(getenv("P"), PASSWORD_BCRYPT);' > "${STATE}/admin-hash")
+fi
 ADMIN_HASH="$(cat "${STATE}/admin-hash")"
 
 # The installer's answer files, rebuilt into the checkout on every deploy and
@@ -111,8 +93,7 @@ EOF
 # Read by the replacement 20-configuration_files.sh, which runs Centreon's CLI
 # as admin to generate and push the poller configuration. Upstream's version
 # has the password written into it.
-cp "${STATE}/admin-password" panelalpha/admin-password
-cp "${STATE}/credentials" .panelalpha-admin-password
+printf '%s' "${CENTREON_ADMIN_PASSWORD}" > panelalpha/admin-password
 chmod 644 panelalpha/database.json panelalpha/admin.json panelalpha/admin-password
 
 # What Compose interpolates. Only the two database passwords: the admin hash is

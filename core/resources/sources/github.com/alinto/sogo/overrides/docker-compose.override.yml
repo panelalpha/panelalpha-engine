@@ -6,12 +6,13 @@
 services:
   app:
     # .env first so the engine's own file still wins where it says anything;
-    # the second carries the database password and the first login, and lives
-    # outside ~/project, which every deploy empties. Both are read when the
-    # container is created, and hooks/prepare.sh has written the second by then.
+    # the second carries the database password, the third the engine's first
+    # login; both live outside ~/project, which every deploy empties. All are
+    # read when the container is created, after hooks/prepare.sh has run.
     env_file:
       - .env
       - ../.panelalpha/sogo/sogo.env
+      - ../.panelalpha/app-credentials.env
     depends_on:
       db:
         condition: service_healthy

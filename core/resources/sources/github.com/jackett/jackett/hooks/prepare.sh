@@ -1,6 +1,8 @@
 #!/bin/bash
-# Generates the admin password and API key once, in ~/.panelalpha (survives
-# redeploys; ~/project does not). The init service seeds them into Jackett.
+# Generates the API key once, in ~/.panelalpha (survives redeploys; ~/project
+# does not). The admin password is the engine's (`credentials:` in
+# panelalpha.yaml), in ~/.panelalpha/app-credentials.env before this hook runs.
+# The init service seeds both into Jackett.
 set -e
 cd ~/project
 
@@ -9,9 +11,7 @@ mkdir -p "${STORE}"
 chmod 700 "${HOME}/.panelalpha" "${STORE}"
 
 if [ ! -f "${STORE}/jackett.env" ]; then
-    pw="$(openssl rand -base64 24 | tr -d '\n=/+')"
-    key="$(openssl rand -hex 16)"
-    (umask 077; printf 'JACKETT_ADMIN_PASSWORD=%s\nJACKETT_API_KEY=%s\n' "$pw" "$key" > "${STORE}/jackett.env")
+    (umask 077; printf 'JACKETT_API_KEY=%s\n' "$(openssl rand -hex 16)" > "${STORE}/jackett.env")
 fi
 chmod 600 "${STORE}/jackett.env"
 

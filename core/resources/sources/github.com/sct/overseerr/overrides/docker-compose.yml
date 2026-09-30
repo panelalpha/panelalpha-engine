@@ -10,11 +10,11 @@ services:
     working_dir: /app
     env_file:
       - .env
-      - ../.panelalpha/overseerr/admin.env
+      # OVERSEERR_OWNER_EMAIL / OVERSEERR_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       NODE_ENV: production
       PA_PUBLIC_URL: ${PA_PUBLIC_URL}
-      PA_PUBLIC_HOST: ${PA_PUBLIC_HOST}
     volumes:
       - overseerr-config:/app/config
       - ./panelalpha/overseerr:/pa:ro

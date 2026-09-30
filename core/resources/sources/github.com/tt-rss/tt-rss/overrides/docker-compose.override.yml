@@ -116,6 +116,8 @@ services:
     # stack's behalf; the hook is what guarantees it exists.
     env_file:
       - ../.panelalpha/tt-rss-app.env
+      # TTRSS_ADMIN_PASS, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
 
     depends_on:
       ttrss-db:

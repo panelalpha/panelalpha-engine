@@ -32,6 +32,11 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
 
+    # ADMIN_USERNAME / ADMIN_PASSWORD for CREATE_ADMIN, generated and kept by
+    # the engine. Appended to the generated service's own env_file (.env).
+    env_file:
+      - ../.panelalpha/app-credentials.env
+
     # Miniflux exits rather than waits: NewConnectionPool and store.Ping() both
     # end in printfAndExit, so a first boot that raced initdb would be a restart
     # loop until postgres happened to win.

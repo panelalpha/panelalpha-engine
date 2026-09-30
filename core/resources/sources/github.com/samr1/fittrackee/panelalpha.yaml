@@ -46,8 +46,9 @@ description: >-
   ADMIN + REGISTRATION. FitTrackee's entrypoint creates no admin. The first user
   would normally self-register and be promoted, so instead a one-shot `seed-admin`
   service runs once the API is healthy (migrations done) and, if it does not yet
-  exist, creates the account `admin` with role `owner` and a per-account password
-  generated once into ~/.panelalpha/fittrackee (0600 in 0700), via
+  exist, creates the account `admin` with role `owner` and the login the engine
+  generates (`credentials:` below; returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get), via
   `ftcli users create ... --role owner` (the created account is active, so no
   email verification is needed). It is idempotent: on a redeploy the account
   already exists, so the password is left untouched and only the role is re-
@@ -57,5 +58,11 @@ description: >-
   Self-registration is left at the app default (enabled): new accounts see only
   their own data plus workouts explicitly made public, so open sign-up does not
   expose the owner's private data; the owner can disable it from Administration ->
-  Application if a closed instance is wanted. The generated admin login is
-  written to credentials.txt.
+  Application if a closed instance is wanted. FitTrackee signs in by email.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/fittrackee/app.env
+  fields:
+    FT_ADMIN_USER: {kind: username, value: admin}
+    FT_ADMIN_EMAIL: {kind: email, value: admin@fittrackee.local}
+    FT_ADMIN_PASSWORD: {kind: password}

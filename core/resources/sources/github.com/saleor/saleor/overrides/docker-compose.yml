@@ -100,6 +100,9 @@ services:
     env_file:
       - .env
       - ../.panelalpha/saleor/saleor.env
+      # SALEOR_ADMIN_EMAIL / SALEOR_ADMIN_PASSWORD for the superuser, generated
+      # and kept by the engine. Only init reads them.
+      - ../.panelalpha/app-credentials.env
     environment: &saleor_env
       # settings.py:86 defaults this to True, which on a public domain means
       # Django's debug page -- 406 settings rows and a traceback with local

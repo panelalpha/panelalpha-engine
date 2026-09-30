@@ -25,7 +25,11 @@ sessions survive a rebuild).
 indexer's credentials and the API key are then open to whoever has the
 address.
 
-- `hooks/prepare.sh` generates an admin password and an API key once into
+- The admin password is declared in `panelalpha.yaml` (`credentials:`): the
+  engine generates it once and writes `~/.panelalpha/app-credentials.env`
+  before the prepare hook on every deploy (`adopt_from` keeps the password of
+  an account seeded from `~/.panelalpha/jackett/jackett.env`).
+- `hooks/prepare.sh` generates the API key once into
   `~/.panelalpha/jackett/jackett.env` (0600 in a 0700 dir).
 - The one-shot `init` service (same image, `files/panelalpha/jackett-seed.sh`)
   writes `ServerConfig.json` before Jackett first boots, **only if it is
@@ -33,12 +37,13 @@ address.
   Jackett stores it (`SecurityService.HashPassword()`: SHA512 over UTF-16LE of
   password + APIKey, lowercase hex), `UpdateDisabled`, and `BaseUrlOverride` =
   the public URL so Torznab links point at the account. A password changed
-  later in the UI is never reset by a redeploy (the file then no longer
-  matches `jackett.env`).
+  later in the UI is never reset by a redeploy (the engine then keeps
+  returning the seeded one).
 - `ready` gates `compose up -d` on the app's healthcheck (`/UI/Login` 200).
 
-Log in at the site with the password from `jackett.env`; the API key for the
-*arr apps is shown on the dashboard.
+Log in at the site with the password `GET /projects/{name}/app-credentials`
+(MCP `app_credentials_get`) returns; the API key for the *arr apps is shown on
+the dashboard.
 
 ## Verified (10.10.10.25, engine 705f250a, memory_limit 2000)
 

@@ -120,12 +120,14 @@ description: >-
   user `ALL ON *.* WITH GRANT OPTION`. Measured on a stock build of the same
   images: `admin`/`Centreon!2021` returns HTTP 200 and an API token.
 
-  This recipe never installs on any of the three. hooks/prepare.sh generates a
-  database root password, a database user password and a 20-character admin
-  password, bcrypt-hashes the last with the account's own PHP, and writes its
-  own admin.json and database.json into ~/.panelalpha/centreon/ (the only
-  writable directory that survives a rebuild, panelalpha/engine#173) and from
-  there into the checkout on every deploy. A container.d step copies them over
+  This recipe never installs on any of the three. The admin login is generated
+  by the engine (`credentials:` below, with a symbol for Centreon's password
+  policy) and returned by GET /projects/{name}/app-credentials (MCP
+  app_credentials_get). hooks/prepare.sh generates a database root password and
+  a database user password into ~/.panelalpha/centreon/ (the only writable
+  directory that survives a rebuild, panelalpha/engine#173), bcrypt-hashes the
+  admin password with the account's own PHP, and writes its own admin.json and
+  database.json into the checkout on every deploy. A container.d step copies them over
   upstream's *before* the installer reads them, and refuses to continue -- exit
   1, which stops the container, because container.sh sources these scripts --
   if they are missing or still hold the shipped hash.
@@ -239,3 +241,9 @@ description: >-
   configuration-apply caveat above. No SMTP is configured, so notifications
   are defined and displayed but email nothing until a notification command and
   a contact's media are filled in. No `overrides/app.sh`.
+credentials:
+  login_path: /centreon/
+  adopt_from: .panelalpha/centreon/credentials
+  fields:
+    CENTREON_ADMIN_USER: {kind: username, value: admin}
+    CENTREON_ADMIN_PASSWORD: {kind: password, symbol: true}

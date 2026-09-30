@@ -16,14 +16,16 @@ services:
     # preferred proxy port and the engine forwards to it.
     ports:
       - "8080:5000"
+    # ACCOUNT_ADMIN_EMAIL / ACCOUNT_ADMIN_PASSWORD: the engine's login, written
+    # by hooks/prepare.sh.
+    env_file:
+      - ../.panelalpha/memtly/admin.env
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       TITLE: Memtly
       # Rotate the shipped default admin (admin@example.com / "admin"). The
       # uppercase env names are Memtly's documented config interface (verified:
       # TITLE above changes the rendered page title, so these bind too).
-      ACCOUNT_ADMIN_EMAIL: admin@example.com
-      ACCOUNT_ADMIN_PASSWORD: ${MEMTLY_ADMIN_PASSWORD}
       # Replace the literal "ChangeMe" the image ships for gallery-secret
       # encryption. Generated once and persisted, so data encrypted on the
       # config volume stays decryptable across a redeploy.

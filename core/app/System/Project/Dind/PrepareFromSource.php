@@ -10,6 +10,7 @@ use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Detect\DeployabilityCheck;
 use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
+use App\Lib\Deploy\Credentials\CredentialSpec;
 use App\Lib\Deploy\DetectProjectStrategy;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\Strategies;
@@ -60,6 +61,8 @@ class PrepareFromSource
         $logger?->stage(DeployLogger::STAGE_RUNNING);
 
         $appConfig = $this->dind->appConfig($gitRepo);
+        // Before the app config's prepare hook, which may read the file.
+        $this->dind->appCredentials()->deliver($appConfig?->credentials(), final: false);
         $this->dind->strategy()->bootstrap($appConfig, $projectDir, $chown);
 
         $this->dropSupersededPlaceholder($projectDir, $logger);
@@ -169,6 +172,13 @@ class PrepareFromSource
         if ($unreciped !== null) {
             Telemetry::signal($user->username, $unreciped['signal'], $unreciped['detail']);
         }
+
+        // The manifest detection chose has the last word, before its own prepare commands run.
+        $this->dind->appCredentials()->deliver(
+            CredentialSpec::fromArray(is_array($decision['credentials'] ?? null) ? $decision['credentials'] : null)
+                ?? $appConfig?->credentials(),
+            final: true
+        );
 
         $sourceLabel = $gitRepo !== null ? GitUrl::sanitize($gitRepo) : 'uploaded archive';
         $this->dind->strategy()->apply($decision, $appConfig, $projectDir, $chown, $sourceLabel);

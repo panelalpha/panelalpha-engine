@@ -110,8 +110,8 @@ php -d memory_limit=512M bin/fusio migrations:migrate --no-interaction --allow-n
 # "has a human account been created yet", and it keeps the upgrade stage from
 # trying to add the same account again.
 #
-# The password was generated per account by hooks/prepare.sh, before anything
-# could serve a request. `system:user_add` takes every field as an option, so
+# The password is the engine's, handed across by hooks/prepare.sh before
+# anything could serve a request. `system:user_add` takes every field as an option, so
 # nothing here is interactive.
 if php bin/fusio system:check user >/dev/null 2>&1; then
     log "administrator already exists; not creating one"

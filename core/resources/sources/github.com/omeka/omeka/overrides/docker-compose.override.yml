@@ -31,7 +31,6 @@ services:
       #                           WEB_FILES (the URL a visitor fetches them
       #                           from) to the same `files` under the document
       #                           root.
-      #   /data/admin-credentials the generated super user, 0600.
       #   /data/php/zz-omeka.ini  the php.ini the base image does not load.
       #
       # A redeploy empties and re-clones ~/project (engine#173), so a
@@ -43,6 +42,9 @@ services:
       # why the data directory is a child of that one. The prepare hook creates
       # it before this mount is made, so Docker never gets to create it as root.
       - ../.panelalpha/omeka:/data
+      # The super user's login, generated and kept by the engine; read by
+      # panelalpha-install.php on the first install.
+      - ../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro
 
     environment:
       # The one way to give this container a php.ini. The base image loads none

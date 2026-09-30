@@ -2,7 +2,8 @@
 # stack (snipe/snipe-it + MariaDB) but takes every value from a .env the
 # checkout does not ship, so MariaDB started with no root password and failed.
 # Same two services here, with:
-#   - secrets from ~/.panelalpha/snipeit/*.env, generated once by the hook
+#   - secrets from ~/.panelalpha/snipeit/*.env, generated once by the hook;
+#     the admin login from ~/.panelalpha/app-credentials.env (the engine's)
 #   - APP_URL in `environment:`, where the engine substitutes the public URL
 #   - a one-shot `setup` that completes the first-visitor-wins web wizard
 #   - a no-op `ready` gate so `compose up -d` returns once the admin exists
@@ -77,7 +78,7 @@ services:
     restart: "no"
     entrypoint: ["/bin/bash", "/panelalpha/snipeit-setup.sh"]
     env_file:
-      - ../.panelalpha/snipeit/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       SNIPEIT_ADMIN_EMAIL: admin@${PA_PUBLIC_HOST}
     volumes:

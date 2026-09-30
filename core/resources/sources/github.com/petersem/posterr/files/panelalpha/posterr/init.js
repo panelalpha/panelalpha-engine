@@ -15,7 +15,7 @@ const FILE = "config/settings.json";
   if (s.password === undefined || s.password === "" || s.password === DEFAULT) {
     s.password = pw;
     fs.writeFileSync(FILE, JSON.stringify(s, null, 4));
-    console.log("[panelalpha] posterr init: settings password set from ~/.panelalpha");
+    console.log("[panelalpha] posterr init: settings password set from app-credentials.env");
   } else {
     console.log("[panelalpha] posterr init: settings password already non-default; nothing to do");
   }

@@ -4,13 +4,13 @@
 # Baby Buddy's overridden `migrate` command creates a superuser admin/admin
 # whenever the database has no superuser (babybuddy/management/commands/
 # migrate.py). This runs after the web service is healthy -- so migrations ran
-# and the user exists -- and sets admin's password to the per-account secret
-# seeded once in ~/.panelalpha. /config is a named volume nothing can pre-seed a
+# and the user exists -- and sets admin's password to the login the engine
+# generated (~/.panelalpha/app-credentials.env). /config is a named volume nothing can pre-seed a
 # database into, so the default cannot be pre-empted; it is rotated here instead,
 # before the `ready` gate lets the deploy finish.
 #
-# Idempotent: if admin already has the target password (a redeploy), it is left
-# unchanged, so a re-hash does not invalidate live sessions.
+# Once: only while admin still has the shipped admin/admin password. A password
+# already rotated, or changed by the owner since, is never touched again.
 set -e
 
 cd /app/www/public
@@ -20,7 +20,7 @@ export DJANGO_SETTINGS_MODULE="babybuddy.settings.base"
 export SECRET_KEY="${SECRET_KEY:-$(cat /config/.secretkey 2>/dev/null || true)}"
 : "${DB_NAME:=/config/data/db.sqlite3}"
 export DB_NAME
-: "${BB_ADMIN_PASSWORD:?BB_ADMIN_PASSWORD is not set; prepare.sh did not run}"
+: "${BB_ADMIN_PASSWORD:?BB_ADMIN_PASSWORD is not set; app-credentials.env was not delivered}"
 
 python3 manage.py shell -c '
 import os
@@ -28,11 +28,11 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 pw = os.environ["BB_ADMIN_PASSWORD"]
-u = User.objects.filter(username="admin").first()
+u = User.objects.filter(username=os.environ.get("BB_ADMIN_USER") or "admin").first()
 if u is None:
     print("[panelalpha] no admin user found; nothing to rotate")
-elif u.check_password(pw):
-    print("[panelalpha] admin already rotated; password left unchanged")
+elif not u.check_password("admin"):
+    print("[panelalpha] admin no longer has the default password; left unchanged")
 else:
     u.set_password(pw)
     u.is_superuser = True

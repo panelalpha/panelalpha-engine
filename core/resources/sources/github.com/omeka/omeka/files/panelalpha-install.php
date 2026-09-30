@@ -373,38 +373,35 @@ function omeka_panelalpha_install($baseDir)
     }
 
     echo "[omeka] installed; the super user is {$credentials['username']} <{$email}>,"
-        . " password in ~/.panelalpha/omeka/admin-credentials\n";
+        . " login from GET /projects/{name}/app-credentials\n";
 }
 
 /**
- * The generated super-user credentials, from the file hooks/prepare.sh writes
- * outside the checkout. /data is ~/.panelalpha/omeka, bind-mounted by the
- * compose override; a redeploy empties ~/project (engine#173) and would take
- * a password kept there with it, while the user row in the database survived.
+ * The super-user login the engine generates (`credentials:`), from
+ * ~/.panelalpha/app-credentials.env, bind-mounted by the compose override.
  *
  * @return array{username: string, password: string}
  */
 function omeka_panelalpha_credentials()
 {
-    $path = '/data/admin-credentials';
+    $path = '/pa/app-credentials.env';
     if (!is_readable($path)) {
-        fwrite(STDERR, "[omeka] {$path} is missing; hooks/prepare.sh writes it\n");
+        fwrite(STDERR, "[omeka] {$path} is missing; the engine writes it\n");
         exit(1);
     }
 
-    // Not parse_ini_file(): the file leads with `#` comments for whoever opens
-    // it over SFTP, and PHP's ini parser does not accept those.
+    // NAME='value' lines under a `#` comment, which parse_ini_file() rejects.
     $values = ['username' => 'admin', 'password' => ''];
     foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
-        if (preg_match('/^OMEKA_ADMIN_USERNAME=(.*)$/', $line, $m)) {
+        if (preg_match("/^OMEKA_ADMIN_USERNAME='?([^']*)'?$/", $line, $m)) {
             $values['username'] = trim($m[1]);
-        } elseif (preg_match('/^OMEKA_ADMIN_PASSWORD=(.*)$/', $line, $m)) {
+        } elseif (preg_match("/^OMEKA_ADMIN_PASSWORD='?([^']*)'?$/", $line, $m)) {
             $values['password'] = trim($m[1]);
         }
     }
 
     if ($values['password'] === '') {
-        fwrite(STDERR, "[omeka] the generated super-user password is empty\n");
+        fwrite(STDERR, "[omeka] the super-user password is empty\n");
         exit(1);
     }
 

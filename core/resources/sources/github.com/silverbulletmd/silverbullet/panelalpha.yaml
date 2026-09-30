@@ -9,10 +9,17 @@ description: >-
   redeploys.
 
   A fresh data folder boots multi-space mode's /.setup wizard, whose first
-  visitor becomes the administrator. hooks/prepare.sh generates the admin
-  password once into ~/.panelalpha/silverbullet/admin.env (0600 in 0700), and a
-  one-shot `init` service runs the upstream `silverbullet setup` command with it
+  visitor becomes the administrator. The engine generates the admin login
+  (`credentials:` below; returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get), and a one-shot `init` service runs the upstream
+  `silverbullet setup` command with it
   before the server starts, creating the admin account and a private space
   "Notes" bound to /. Anonymous access to the space is `none`, so every page
   and the /.fs API need a login. Setup is skipped once users.json exists, so a
   redeploy keeps the pages, accounts and a password changed in the Dashboard.
+credentials:
+  login_path: /.dashboard/login
+  adopt_from: .panelalpha/silverbullet/admin.env
+  fields:
+    PA_SB_ADMIN_USER: {kind: username, value: admin}
+    PA_SB_ADMIN_PASSWORD: {kind: password}

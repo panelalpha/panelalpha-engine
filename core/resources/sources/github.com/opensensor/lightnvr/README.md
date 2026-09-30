@@ -12,8 +12,8 @@ for RTSP, WebRTC and HLS.
   `/var/lib/lightnvr/data` (database, recordings) are named volumes.
 - **admin/admin never exists:** LightNVR creates `admin` on first start with
   `[web] password` from `lightnvr.ini`, or `admin` when that is empty.
-  `hooks/prepare.sh` writes `~/.panelalpha/lightnvr/admin.env` once (24 hex
-  chars: LightNVR stores the ini password in a 32-byte buffer and silently
+  The engine generates the login (`credentials:` in `panelalpha.yaml`; 24
+  characters: LightNVR stores the ini password in a 32-byte buffer and silently
   truncates anything over 31 characters). `files/panelalpha-seed.sh` runs as
   the `seed` service before the app starts and, while no database exists,
   writes that password into `lightnvr.ini`. Once the database exists it does
@@ -32,7 +32,9 @@ The cameras must be reachable from the host (public RTSP URL or a tunnel).
 
 ## Login
 
-`admin` / the password in `~/.panelalpha/lightnvr/admin.env`. To reset it:
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) returns the
+username and password the seed created; a password changed later in the UI is
+not reflected there. To reset it:
 stop the app, `DELETE FROM users WHERE username='admin'` in
 `/var/lib/lightnvr/data/database/lightnvr.db`, put `password = ...` back under
 `[web]` in `/etc/lightnvr/lightnvr.ini`, and start it again.

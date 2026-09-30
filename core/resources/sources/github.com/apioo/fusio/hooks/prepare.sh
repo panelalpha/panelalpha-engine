@@ -27,7 +27,6 @@ ENV_FILE=.env
 STORE_DIR="$HOME/.panelalpha"
 mkdir -p "$STORE_DIR"
 KEY_STORE="$STORE_DIR/fusio-project-key"
-PW_STORE="$STORE_DIR/fusio-admin-password"
 
 # 1. The project key, which is the encryption key for every connection
 #    credential Fusio stores in its database.
@@ -44,20 +43,18 @@ if [ ! -f "$KEY_STORE" ]; then
 fi
 PROJECT_KEY=$(cat "$KEY_STORE")
 
-# 2. The first administrator's password, generated per account and never a
-#    default. Fusio seeds only its own internal `Administrator` row with a
-#    random password nobody is told; a human account is created from the
-#    install stage, which needs a password that exists before it runs.
+# 2. The first administrator's password: the engine's (`credentials:` in
+#    panelalpha.yaml), written to ~/.panelalpha/app-credentials.env before this
+#    hook. Fusio seeds only its own internal `Administrator` row with a random
+#    password nobody is told; a human account is created from the install
+#    stage, which only sees ~/project, so the password is handed across there.
 #
 #    The umask is inside a subshell on purpose -- it has to cover the
 #    redirection that creates the file, and it must not leak into the rest of
 #    this script, where a 077 default would leave directories the engine
 #    (www-data) cannot scan when it walks the tree for the document root.
-if [ ! -f "$PW_STORE" ]; then
-    ( umask 077; openssl rand -base64 18 | tr -d '/+=' > "$PW_STORE" )
-    chmod 600 "$PW_STORE"
-fi
-( umask 077; cp "$PW_STORE" .panelalpha-admin-password )
+( umask 077; set -a; . "$STORE_DIR/app-credentials.env"
+  printf '%s\n' "$FUSIO_ADMIN_PASSWORD" > .panelalpha-admin-password )
 chmod 600 .panelalpha-admin-password
 
 # 3. .env, which the repository ships filled in for a developer's laptop.

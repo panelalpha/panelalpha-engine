@@ -1,9 +1,9 @@
-// Creates Questarr's admin from ~/.panelalpha/questarr/admin.env, only while
+// Creates Questarr's admin from ~/.panelalpha/app-credentials.env, only while
 // setup is open. Questarr runs here on loopback with no published port.
 import { spawn } from "node:child_process";
 
 const { QUESTARR_ADMIN_USER: user, QUESTARR_ADMIN_PASSWORD: password } = process.env;
-if (!user || !password) throw new Error("admin.env is missing QUESTARR_ADMIN_USER/PASSWORD");
+if (!user || !password) throw new Error("app-credentials.env is missing QUESTARR_ADMIN_USER/PASSWORD");
 const api = "http://127.0.0.1:5000/api";
 
 const app = spawn("node", ["dist/server/index.js"], { stdio: "inherit" });

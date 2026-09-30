@@ -61,6 +61,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/bitpoll/app.env
+      # DJANGO_SUPERUSER_*, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       DB_HOST: db
       DB_PORT: "5432"

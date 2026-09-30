@@ -31,8 +31,10 @@ description: >-
      PmWiki lets any visitor edit every page, and stores pages in wiki.d/ and
      attachments in uploads/ inside the tree -- both wiped by the redeploy that
      empties ~/project (engine#173). pmwiki-setup.sh moves wiki.d/ and uploads/
-     onto ~/.panelalpha (symlinked back in each boot) and, on first boot,
-     generates an admin password (bcrypt, into ~/.panelalpha/pmwiki, 0600).
+     onto ~/.panelalpha (symlinked back in each boot) and writes the bcrypt
+     hash of the admin password the engine generates (`credentials:` below,
+     returned by GET /projects/{name}/app-credentials, MCP app_credentials_get)
+     into ~/.panelalpha/pmwiki (0600).
      config.php reads that hash into $DefaultPasswords['admin'] and sets
      ['edit'] to the same, so reading stays public but editing and uploading
      require the admin login. Redeploy survival is the acceptance test.
@@ -52,5 +54,9 @@ commands:
       - start
     before: true
     timeout: 120
-    description: Move wiki.d and uploads onto ~/.panelalpha and symlink them back, and on first boot generate the admin password, so wiki content survives the redeploy that empties ~/project and the wiki is not world-editable.
+    description: Move wiki.d and uploads onto ~/.panelalpha and symlink them back, and write the hash of the engine's admin password, so wiki content survives the redeploy that empties ~/project and the wiki is not world-editable.
     run: 'sh panelalpha/pmwiki-setup.sh'
+credentials:
+  login_path: /?action=login
+  fields:
+    PMWIKI_ADMIN_PASSWORD: {kind: password}

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Creates Prowlarr's Forms-login user once, via PUT /api/v1/config/host.
-# Env: PROWLARR_ADMIN_USER, PROWLARR_ADMIN_PASSWORD (~/.panelalpha/prowlarr/admin.env).
+# Env: PROWLARR_ADMIN_USER, PROWLARR_ADMIN_PASSWORD (~/.panelalpha/app-credentials.env).
 set -eu
 API=http://app:9696/api/v1
 

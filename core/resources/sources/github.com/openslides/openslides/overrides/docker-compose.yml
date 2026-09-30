@@ -56,11 +56,14 @@ x-os: &os
       condition: service_completed_successfully
 
 services:
-  # Writes ~/.panelalpha/openslides/secrets.env into the files the services read.
+  # Writes ~/.panelalpha/openslides/secrets.env, and the superadmin password the
+  # engine generated and keeps, into the files the services read.
   secrets:
     image: redis:8.2.2-alpine
     restart: "no"
-    env_file: ../.panelalpha/openslides/secrets.env
+    env_file:
+      - ../.panelalpha/openslides/secrets.env
+      - ../.panelalpha/app-credentials.env
     entrypoint:
       - /bin/sh
       - -c

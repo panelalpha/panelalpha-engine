@@ -16,6 +16,12 @@ services:
     # because it is a page of reasons.
     entrypoint: ["/bin/sh", "/panelalpha-bootstrap.sh"]
 
+    # PA_AUTHELIA_ADMIN_USERNAME / PA_AUTHELIA_ADMIN_PASSWORD, generated and
+    # kept by the engine; the bootstrap creates the admin from them once.
+    env_file:
+      - .env
+      - ../.panelalpha/app-credentials.env
+
     volumes:
       # Everything Authelia keeps: configuration.yml, users_database.yml, the
       # SQLite database behind storage.local, and the notification file that

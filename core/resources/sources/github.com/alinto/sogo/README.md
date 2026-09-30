@@ -124,8 +124,11 @@ Everything SOGo expects from a machine it owns, which a tenant account is not.
   died" and takes the container down, once a minute, forever, while sogod is up
   and answering. That was the `Restarting (0)` on the first deploy here.
 - **Persistence.** `~/project` is emptied on every deploy (engine#173), so the
-  database password and the first login are generated once by `hooks/prepare.sh`
-  into `~/.panelalpha/sogo/sogo.env` and read as a second `env_file`; the
+  database password is generated once by `hooks/prepare.sh` into
+  `~/.panelalpha/sogo/sogo.env` and read as a second `env_file`; the first
+  login (`sogoadmin`) is the engine's (`credentials:` in `panelalpha.yaml`),
+  returned by `GET /projects/{name}/app-credentials` (MCP
+  `app_credentials_get`); the
   calendars and contacts are rows in the named volume `sogo-db`.
 - **A gate.** `docker compose up -d` runs without `--wait` (engine#204), so
   `probe` polls `/SOGo/` and `ready` waits on it having exited.

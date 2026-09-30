@@ -39,9 +39,14 @@ trap 'kill -TERM "$YARN_PID" 2>/dev/null || true' TERM INT
 # marks setup complete. A verifying retry loop absorbs the brief window right
 # after boot before the server reliably accepts the POST, and stops as soon as
 # GET /setup 302s — which is also the redeploy case (setup already complete),
-# making this idempotent. The password is generated once by the prepare hook.
-if [ -f /data/.admin_password ]; then
-  ADMIN_PW="$(cat /data/.admin_password)"
+# making this idempotent. The login is the engine's (`credentials:`), mounted
+# read-only at /pa/app-credentials.env.
+if [ -f /pa/app-credentials.env ]; then
+  set -a
+  . /pa/app-credentials.env
+  set +a
+  ADMIN_USER="${YARN_ADMIN_USER:-${ADMIN_USER:-admin}}"
+  ADMIN_PW="${YARN_ADMIN_PASSWORD}"
   CJ="$(mktemp)"
   HTML="$(mktemp)"
   n=0

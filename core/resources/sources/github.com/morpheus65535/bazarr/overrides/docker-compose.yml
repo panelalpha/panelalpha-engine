@@ -4,7 +4,7 @@
 #   - linuxserver/bazarr pinned to the current release v1.6.2
 #   - /config (config.yaml, SQLite db, logs, backups) on a named volume
 #   - form login + API key seeded into config.yaml on the first boot from
-#     ~/.panelalpha/bazarr, so the UI and API are never open to the internet
+#     ~/.panelalpha, so the UI and API are never open to the internet
 #   - only the app publishes a port
 services:
   bazarr:
@@ -13,9 +13,11 @@ services:
     # Seeds config.yaml when the volume has none, then execs the image's /init.
     entrypoint: ["/bin/bash", "/panelalpha/entrypoint.sh"]
     env_file:
-      # Account env first, then the seeded secrets (PUID/PGID, auth values).
+      # Account env first, then the seeded secrets (PUID/PGID, API key), then
+      # BAZARR_AUTH_USERNAME / BAZARR_AUTH_PASSWORD, generated and kept by the engine.
       - .env
       - ../.panelalpha/bazarr/app.env
+      - ../.panelalpha/app-credentials.env
     environment:
       TZ: "UTC"
     volumes:

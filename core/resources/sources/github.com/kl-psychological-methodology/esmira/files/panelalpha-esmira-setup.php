@@ -105,13 +105,11 @@ if ($store->isInit()) {
 
     // One honest warning, and the reason it exists.
     //
-    // ~/.panelalpha/esmira/data and ~/.panelalpha/esmira-app.env are two
-    // separate things in the same directory, and losing only the second is
-    // possible -- a partial restore, a hand-edit, an account moved between
-    // hosts. hooks/prepare.sh would then mint a *new* password and write a new
-    // credentials file, this branch would skip the install because the data
-    // folder is still there, and the file would confidently state a password
-    // that opens nothing. The hash is bcrypt, so it cannot be repaired from
+    // ~/.panelalpha/esmira/data and the login the engine keeps are two
+    // separate things, and they can drift -- a partial restore, an account
+    // moved between hosts, a password changed in the web interface. This branch
+    // skips the install because the data folder is still there, so the stored
+    // login may open nothing. The hash is bcrypt, so it cannot be repaired from
     // here; saying so in the deploy log is the whole remedy.
     $account = getenv('ESMIRA_ADMIN_USER') ?: '';
     $password = getenv('ESMIRA_ADMIN_PASS') ?: '';
@@ -119,13 +117,12 @@ if ($store->isInit()) {
         $accounts = $store->getAccountStore();
         if (!$accounts->doesAccountExist($account)) {
             fwrite(STDERR, "[esmira] warning: the data folder has no account '$account'. "
-                . "~/.panelalpha/esmira-admin-credentials.txt does not describe this server.\n");
+                . "The engine's stored login does not describe this server.\n");
         } elseif (!$accounts->checkAccountLogin($account, $password)) {
-            fwrite(STDERR, "[esmira] warning: the password in ~/.panelalpha/esmira-app.env no longer "
+            fwrite(STDERR, "[esmira] warning: the engine's stored password no longer "
                 . "opens account '$account'. Either it was changed in the web interface -- in which "
-                . "case this is expected and ~/.panelalpha/esmira-admin-credentials.txt is simply out "
-                . "of date -- or that file was lost and regenerated, in which case the real password "
-                . "is not recoverable from here.\n");
+                . "case this is expected -- or the stored login was lost and regenerated, in which "
+                . "case the real password is not recoverable from here.\n");
         }
     }
 
@@ -135,9 +132,10 @@ if ($store->isInit()) {
 // ---------------------------------------------------------------------------
 // Install: the credentials.
 //
-// Written by hooks/prepare.sh into ~/.panelalpha/esmira-app.env and delivered
-// by env_file:, so they are outside ~/project (engine #173) and outside .env,
-// which ProjectEnvironment::apply() copies to .env.default at mode 644.
+// The engine's login (`credentials:` in panelalpha.yaml), written to
+// ~/.panelalpha/app-credentials.env and delivered by env_file:, so it is
+// outside ~/project (engine #173) and outside .env, which
+// ProjectEnvironment::apply() copies to .env.default at mode 644.
 $account = getenv('ESMIRA_ADMIN_USER') ?: '';
 $password = getenv('ESMIRA_ADMIN_PASS') ?: '';
 

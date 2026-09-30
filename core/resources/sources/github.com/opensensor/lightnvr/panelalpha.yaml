@@ -9,8 +9,9 @@ description: >-
   redeploys.
 
   A one-shot `seed` service writes lightnvr.ini before LightNVR first starts,
-  with `[web] password` set to the value in
-  ~/.panelalpha/lightnvr/admin.env (generated once by hooks/prepare.sh).
+  with `[web] password` set to the password the engine generates
+  (`credentials:` below; returned by GET /projects/{name}/app-credentials,
+  MCP app_credentials_get).
   LightNVR's own bootstrap then creates `admin` with that password instead of
   `admin`, so the default credential is never valid. Once the database exists
   the seed does nothing, so a password changed in the UI survives redeploys.
@@ -19,3 +20,8 @@ description: >-
   view has to use HLS, which LightNVR proxies through :8080 (not exercised
   without a camera), and RTSP re-streaming (8554), WebRTC
   (8555) and the go2rtc API (1984) are not reachable from outside.
+credentials:
+  adopt_from: .panelalpha/lightnvr/admin.env
+  fields:
+    LIGHTNVR_ADMIN_USER: {kind: username, value: admin}
+    LIGHTNVR_ADMIN_PASSWORD: {kind: password}

@@ -12,6 +12,12 @@
 # off the table entirely.
 services:
   app:
+    # HEIMDALL_ADMIN_USER / HEIMDALL_ADMIN_PASSWORD, generated and kept by the
+    # engine; set-admin-password.php gives the seeded admin that password.
+    env_file:
+      - .env
+      - ../.panelalpha/app-credentials.env
+
     # Two requests, and the second is the one that proves anything.
     #
     # The entrypoint's install stage does the real work before Apache binds:

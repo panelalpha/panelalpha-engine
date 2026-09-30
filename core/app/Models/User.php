@@ -60,6 +60,9 @@ class User extends Authenticatable
 
     private const ENCRYPTED_SECRET_PREFIX = 'laravel-encrypted:v1:';
 
+    /** Details stored as one encrypted JSON document each. */
+    private const ENCRYPTED_JSON_DETAILS = ['env_vars', 'app_credentials'];
+
     protected $fillable = [
         'username',
         'domain',
@@ -289,10 +292,12 @@ class User extends Authenticatable
                 }
             }
         }
-        if (isset($details['env_vars']) && is_string($details['env_vars'])) {
-            $decoded = $this->decryptSecretString($details['env_vars']);
-            $decoded = $decoded !== null ? json_decode($decoded, true) : null;
-            $details['env_vars'] = is_array($decoded) ? $decoded : [];
+        foreach (self::ENCRYPTED_JSON_DETAILS as $key) {
+            if (isset($details[$key]) && is_string($details[$key])) {
+                $decoded = $this->decryptSecretString($details[$key]);
+                $decoded = $decoded !== null ? json_decode($decoded, true) : null;
+                $details[$key] = is_array($decoded) ? $decoded : [];
+            }
         }
 
         return $details;
@@ -343,10 +348,12 @@ class User extends Authenticatable
                 }
             }
         }
-        if (isset($details['env_vars']) && is_array($details['env_vars'])) {
-            $details['env_vars'] = $this->encryptSecretString(
-                (string) json_encode($details['env_vars'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-            );
+        foreach (self::ENCRYPTED_JSON_DETAILS as $key) {
+            if (isset($details[$key]) && is_array($details[$key])) {
+                $details[$key] = $this->encryptSecretString(
+                    (string) json_encode($details[$key], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                );
+            }
         }
 
         $this->attributes['details'] = json_encode($details);
@@ -1147,6 +1154,25 @@ class User extends Authenticatable
         }
 
         return $result;
+    }
+
+    /**
+     * The application login the engine generated and delivers on every
+     * deploy, as {@see \App\Lib\Deploy\Credentials\AppCredentials} stores it.
+     *
+     * @return ?array<string, mixed>
+     */
+    public function getAppCredentials(): ?array
+    {
+        $stored = $this->getDetails()['app_credentials'] ?? null;
+
+        return is_array($stored) && $stored !== [] ? $stored : null;
+    }
+
+    /** @param ?array<string, mixed> $stored null forgets them */
+    public function setAppCredentials(?array $stored): void
+    {
+        $this->setDetails(['app_credentials' => $stored]);
     }
 
     public function usedCustomEnvVars(): bool

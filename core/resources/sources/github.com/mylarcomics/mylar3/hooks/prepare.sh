@@ -1,6 +1,7 @@
 #!/bin/bash
-# Generates the login password and API key once, in ~/.panelalpha (survives
-# redeploys; ~/project does not).
+# Generates the API key once, in ~/.panelalpha (survives redeploys; ~/project
+# does not). The login is the engine's (`credentials:` in panelalpha.yaml),
+# written to ~/.panelalpha/app-credentials.env before this hook runs.
 set -e
 cd ~/project
 
@@ -9,7 +10,6 @@ mkdir -p "${STORE}"
 chmod 700 "${HOME}/.panelalpha" "${STORE}"
 
 if [ ! -f "${STORE}/app.env" ]; then
-    pass="$(openssl rand -hex 16)"
     # Mylar rejects an API key that is not exactly 32 characters.
     key="$(openssl rand -hex 16)"
     (
@@ -17,14 +17,7 @@ if [ ! -f "${STORE}/app.env" ]; then
         cat > "${STORE}/app.env" <<EOF
 PUID=$(id -u)
 PGID=$(id -g)
-MYLAR_USER=admin
-MYLAR_PASSWORD=${pass}
 MYLAR_API_KEY=${key}
-EOF
-        cat > "${STORE}/credentials.txt" <<EOF
-Mylar3 login: admin / ${pass}
-API key:      ${key}
-Seeded into config.ini on the first boot only; change them in Settings afterwards.
 EOF
     )
 fi

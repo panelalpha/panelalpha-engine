@@ -61,6 +61,7 @@ return [
     \App\Mcp\Tools\Api\Projects\ProjectDeleteTool::class,
     \App\Mcp\Tools\Api\Projects\ProjectGetTool::class,
     \App\Mcp\Tools\Api\Projects\ProjectUpdateTool::class,
+    \App\Mcp\Tools\Api\Projects\AppCredentialsGetTool::class,
     \App\Mcp\Tools\Api\Containers\AppHealthCheckTool::class,
     \App\Mcp\Tools\Api\AppUsers\AppInfoTool::class,
     \App\Mcp\Tools\Api\AppUsers\AppInstallTool::class,

@@ -9,8 +9,8 @@
 # sidesteps engine#229 (image-seed NotFound is the GHCR case, not Hub).
 #
 # SECURITY: the upload endpoint (POST /) is world-writable unless a token is set
-# (config.rs). AUTH_TOKEN (generated once by hooks/prepare.sh, kept in
-# ~/.panelalpha) is merged into the server token set, so only the owner can
+# (config.rs). AUTH_TOKEN (generated and kept by the engine, `credentials:`) is
+# merged into the server token set, so only the owner can
 # upload and no stranger can fill the account's disk. Reading a paste by its URL
 # stays public -- that is the point of a pastebin. expose_version/expose_list are
 # off in config.toml so neither the version nor the file list leaks.
@@ -37,11 +37,11 @@ services:
         condition: service_completed_successfully
     env_file:
       # Account env_vars merged in by the platform (touched by prepare.sh so
-      # `up` never aborts on a missing file), then the generated tokens.
-      # AUTH_TOKEN / DELETE_TOKEN come from here, NOT from `environment:`, so they
-      # never appear in the recipe and are never rewritten across redeploys.
+      # `up` never aborts on a missing file), then the tokens the engine
+      # generated and keeps. AUTH_TOKEN / DELETE_TOKEN come from here, NOT from
+      # `environment:`, so they never appear in the recipe.
       - .env
-      - ../.panelalpha/rustypaste/app.env
+      - ../.panelalpha/app-credentials.env
     environment:
       # Bind on all interfaces inside the container (config::Environment
       # separator "__" -> server.address). Only this service publishes a port.

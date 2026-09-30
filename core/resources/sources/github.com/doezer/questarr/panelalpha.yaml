@@ -18,9 +18,17 @@ description: >-
   published; the engine terminates TLS.
 
   Security: with no user in the database POST /api/auth/setup lets the first
-  visitor create the only account. hooks/prepare.sh generates the admin
-  password once into ~/.panelalpha/questarr/admin.env; a one-shot `seed`
-  service starts Questarr on loopback against the same volume and creates the
-  user through that endpoint before the app publishes its port. Indexer and
-  download-client API keys stay behind the login. IGDB (Twitch) client
-  credentials are runtime settings entered in Settings after login.
+  visitor create the only account. The engine generates the login
+  (`credentials:` below) and writes it to ~/.panelalpha/app-credentials.env; a
+  one-shot `seed` service starts Questarr on loopback against the same volume
+  and creates the user through that endpoint before the app publishes its
+  port. Indexer and download-client API keys stay behind the login. IGDB
+  (Twitch) client credentials are runtime settings entered in Settings after
+  login. The login is returned by GET /projects/{name}/app-credentials;
+  accounts deployed before this kept it in ~/.panelalpha/questarr/admin.env,
+  which `adopt_from` carries over.
+credentials:
+  adopt_from: .panelalpha/questarr/admin.env
+  fields:
+    QUESTARR_ADMIN_USER: {kind: username, value: admin}
+    QUESTARR_ADMIN_PASSWORD: {kind: password}

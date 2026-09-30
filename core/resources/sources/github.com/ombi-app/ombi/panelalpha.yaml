@@ -10,14 +10,17 @@ description: >-
   /config on a named volume that survives redeploys.
 
   Ombi's first run is a wizard whose POST /api/v1/Identity/Wizard is anonymous
-  and creates the admin: first visitor wins. hooks/prepare.sh generates the
-  admin password once into ~/.panelalpha/ombi/admin.env. A one-shot `seed`
-  service runs Ombi on 127.0.0.1 only, sets the application URL, creates the
-  admin through the wizard's own endpoint, confirms /api/v1/Status/Wizard is
-  true, and stops. The published `app` service depends on it completing, so
-  the wizard is never reachable from outside; on a redeploy the seed sees the
-  wizard done and does nothing. `ready` makes `compose up -d` return only once
-  the app answers.
+  and creates the admin: first visitor wins. The engine generates the admin
+  login (`credentials:` below) and writes it to
+  ~/.panelalpha/app-credentials.env. A one-shot `seed` service runs Ombi on
+  127.0.0.1 only, sets the application URL, creates the admin through the
+  wizard's own endpoint, confirms /api/v1/Status/Wizard is true, and stops.
+  The published `app` service depends on it completing, so the wizard is never
+  reachable from outside; on a redeploy the seed sees the wizard done and does
+  nothing. `ready` makes `compose up -d` return only once the app answers. The
+  login is returned by GET /projects/{name}/app-credentials; accounts deployed
+  before this kept it in ~/.panelalpha/ombi/admin.env, which `adopt_from`
+  carries over.
 
   POST /api/v1/Jellyfin and /api/v1/Emby are also anonymous upstream and save
   a media-server connection whenever none is configured (measured: an
@@ -25,3 +28,9 @@ description: >-
   saves a disabled "Not configured" server for each, after which both return
   204 without acting; the admin replaces it with the real server in Settings.
   Media-server and Sonarr/Radarr connections are runtime settings in the UI.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/ombi/admin.env
+  fields:
+    OMBI_ADMIN_USER: {kind: username, value: admin}
+    OMBI_ADMIN_PASSWORD: {kind: password}

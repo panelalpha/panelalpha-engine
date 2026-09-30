@@ -36,12 +36,13 @@ if [ -f Dockerfile.dev ]; then
     cp -f Dockerfile.dev.dockerignore Dockerfile.panelalpha.dockerignore 2>/dev/null || true
 fi
 
-# 2. Secrets and the admin credential.
+# 2. Secrets.
 #
 # The repository ships no .env and the generated app service reads one through
-# `env_file:`, so this file is both the credential store and the way in. The
-# bootstrap entrypoint reads these out of its own environment and writes them
-# into /config/configuration.yml on first boot.
+# `env_file:`, so this file is the way in. The bootstrap entrypoint reads these
+# out of its own environment and writes them into /config/configuration.yml on
+# first boot. The admin login is the engine's (`credentials:` in
+# panelalpha.yaml), read from ~/.panelalpha/app-credentials.env by the override.
 #
 # Written once: the /config volume outlives the checkout, and rolling any of
 # these under a live instance is destructive rather than merely inconvenient --
@@ -59,22 +60,8 @@ if [ ! -f .env ]; then
 PA_AUTHELIA_SESSION_SECRET=$(rand 32)
 PA_AUTHELIA_STORAGE_ENCRYPTION_KEY=$(rand 32)
 PA_AUTHELIA_JWT_SECRET=$(rand 32)
-PA_AUTHELIA_ADMIN_USERNAME=admin
-PA_AUTHELIA_ADMIN_PASSWORD=$(rand 12)
 EOF
     chmod 600 .env
-
-    # The credential a person has to be handed. Authelia has no sign-up page,
-    # no first-run wizard and no bootstrap admin: an instance whose
-    # users_database.yml was never written is an instance nobody can log in to,
-    # and the file backend's own template ships the disabled account
-    # `authelia` / `authelia`, which is a published password.
-    ADMIN_PASSWORD=$(sed -n 's/^PA_AUTHELIA_ADMIN_PASSWORD=//p' .env)
-    cat > .panelalpha-admin-password <<EOF
-username: admin
-password: ${ADMIN_PASSWORD}
-EOF
-    chmod 600 .panelalpha-admin-password
 fi
 
 # 3. The one image the override adds, fetched before the build rather than

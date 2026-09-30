@@ -167,6 +167,33 @@ Do not edit `package.json` from `hooks/prepare.sh` to get either effect.
 
 ---
 
+### The application's login (`credentials`)
+
+An application seeded with an admin login declares what it needs; the engine generates the values, keeps them on the project and tells the customer:
+
+```yaml
+credentials:
+  login_path: /login                          # optional; login_url = public URL + this
+  adopt_from: .panelalpha/sonarr/admin.env    # optional; relative to the account home
+  fields:
+    SONARR_ADMIN_USER: {kind: username, value: admin}
+    SONARR_ADMIN_PASSWORD: {kind: password}
+```
+
+| Kind | Value |
+|---|---|
+| `username` | `value`, or `admin` |
+| `email` | `value`, or `admin@example.com` |
+| `password` | generated: 24 letters and digits with an upper, a lower and a digit; `symbol: true` adds one of `-_!`. `value` is refused |
+
+A `username` or `email` value may contain `{random}` (8 hex characters), `{host}` (the account's domain) and `{email}` (the email the project was created with, or `admin-{random}@{host}` when it has none), filled once when the value is first stored. `value: "{email}"` makes the customer's own address the login.
+
+On every deploy and rebuild, before `hooks/prepare.sh` runs, the engine writes `~/.panelalpha/app-credentials.env` (0600, the account's). A compose service reads it with `env_file: ../.panelalpha/app-credentials.env`, a hook with `. ~/.panelalpha/app-credentials.env`. Stored values are kept; a field with no stored value is taken from `app-credentials.env` itself or from `adopt_from` when either sets it (an account a recipe seeded before the engine owned the login keeps its password), and generated otherwise; a field the project's own `env_vars` set takes that value; a field no longer declared is dropped. `GET /projects/{name}/app-credentials` returns them and `GET /projects/{name}` says they exist. Passwords are masked in the deploy log and telemetry.
+
+Seed only when the application has no user yet, so a password changed in the application stays changed; the API keeps returning the seeded one. Do not generate a password in `hooks/prepare.sh` any more.
+
+---
+
 ### Secrets derived from the install path
 
 Every account's checkout is mounted at `/app`, so any value an application

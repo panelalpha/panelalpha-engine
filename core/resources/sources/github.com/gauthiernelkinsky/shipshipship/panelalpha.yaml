@@ -20,18 +20,19 @@ description: >-
   EMPTY the server switches into "demo mode", where `AuthMiddleware` waves
   every request through as the `demo` user and anonymous visitors can create
   and edit entries. So the credentials must be present AND non-default before
-  the page is public. The prepare hook generates a strong password and JWT
-  secret once into `~/.panelalpha/shipshipship/` (0600) and reuses them on
-  every redeploy; the compose reads them from the account's `.env`, and its
-  interpolation defaults are non-empty on purpose so a missing `.env` can never
-  drop the app into demo mode.
+  the page is public. The engine generates the login (`credentials:` below)
+  and returns it from GET /projects/{name}/app-credentials (MCP
+  app_credentials_get); the compose reads it from
+  ~/.panelalpha/app-credentials.env, and a missing file aborts `up` rather than
+  drop the app into demo mode. The prepare hook generates the JWT secret once
+  into `~/.panelalpha/shipshipship/` (0600) and reuses it on every redeploy.
 
   Second, state. The only state is the SQLite file at `/app/data/changelog.db`
   (entries, settings, subscribers); `~/project` is wiped on every redeploy, so
   the data directory is a named volume that survives. The admin identity lives
   in the environment, not the DB, so the volume needs no seeding — the same
-  generated password re-supplied from `~/.panelalpha` logs into the persisted
-  database after a redeploy.
+  password, re-supplied by the engine, logs into the persisted database after a
+  redeploy.
 
   The image listens on 8080 (its own default), which is the port the engine's
   proxy routes the domain to. The service publishes `8080:8080` so that inside
@@ -40,3 +41,8 @@ description: >-
   not enough — it stays on the inner compose network and the proxy 502s.
   `BASE_URL` is set to a localhost value the engine rewrites to the real public
   origin (it is used only for newsletter unsubscribe links).
+credentials:
+  login_path: /admin
+  fields:
+    ADMIN_USERNAME: {kind: username, value: admin}
+    ADMIN_PASSWORD: {kind: password}

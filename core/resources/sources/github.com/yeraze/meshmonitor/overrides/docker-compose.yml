@@ -9,8 +9,9 @@ services:
     restart: "no"
     entrypoint: ["/usr/local/bin/docker-entrypoint.sh", "/bin/sh", "/panelalpha-seed.sh"]
     env_file:
-      - ../.panelalpha/meshmonitor/admin.env
       - ../.panelalpha/meshmonitor/app.env
+      # ADMIN_USERNAME / MESHMONITOR_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       NODE_ENV: production
       PORT: "3001"

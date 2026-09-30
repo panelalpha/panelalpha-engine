@@ -195,26 +195,10 @@ if ($alreadyInstalled) {
     exit(0);
 }
 
-$credentialsPath = $dataDir . '/admin-credentials';
-
-/**
- * Read once, with a regex rather than parse_ini_file().
- *
- * The file is written for a person to read and its explanatory header contains
- * quotes and URLs; PHP's ini parser does not treat `#` as a comment and chokes
- * on the first one it meets, which cost a deploy.
- */
-$password = '';
-$username = 'admin';
-if (is_file($credentialsPath)) {
-    $raw = (string) file_get_contents($credentialsPath);
-    if (preg_match('/^ATHEOS_ADMIN_USERNAME=(.*)$/m', $raw, $m) === 1) {
-        $username = trim($m[1]);
-    }
-    if (preg_match('/^ATHEOS_ADMIN_PASSWORD=(.*)$/m', $raw, $m) === 1) {
-        $password = trim($m[1]);
-    }
-}
+// The login the engine generated (`credentials:` in panelalpha.yaml), passed
+// to the container from ~/.panelalpha/app-credentials.env.
+$username = trim((string) getenv('ATHEOS_ADMIN_USERNAME')) ?: 'admin';
+$password = trim((string) getenv('ATHEOS_ADMIN_PASSWORD'));
 
 if ($password === '') {
     // Fail closed, but not into a restart loop. The container restarts
@@ -223,7 +207,7 @@ if ($password === '') {
     // installer-guard stub are written instead: Atheos serves a login form
     // against an empty user table, the installer stays shut, and the operator
     // has a legible reason in `docker logs`.
-    fwrite(STDERR, "[panelalpha] no usable credentials at {$credentialsPath}; leaving the installer closed and no user created\n");
+    fwrite(STDERR, "[panelalpha] ATHEOS_ADMIN_PASSWORD is not set; leaving the installer closed and no user created\n");
     writeConfig($configPath, $DATA, $WORKSPACE);
     if (!is_dir(dirname($stubPath))) {
         mkdir(dirname($stubPath), 0755, true);

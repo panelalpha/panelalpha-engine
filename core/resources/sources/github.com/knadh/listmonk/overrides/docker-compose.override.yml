@@ -5,15 +5,15 @@
 # LISTMONK_ADMIN_PASSWORD are set on the first start; left empty, as its
 # compose file leaves them, /admin/login offers "Pick a username and password
 # for the Super Admin account" to anyone. start.sh runs upstream's own install
-# and upgrade with the credentials hooks/prepare.sh generated, claims a
+# and upgrade with the login the engine generated, claims a
 # database that was installed without an admin, and only then serves.
 services:
   app:
     env_file:
-      # PA_ADMIN_USER / PA_ADMIN_PASSWORD, generated once. Not LISTMONK_* names:
-      # upstream's environment: sets those to empty, and environment: wins
-      # over env_file.
-      - ../.panelalpha/listmonk/admin.env
+      # PA_ADMIN_USER / PA_ADMIN_PASSWORD, generated and kept by the engine.
+      # Not LISTMONK_* names: upstream's environment: sets those to empty, and
+      # environment: wins over env_file.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha/listmonk:/pa:ro
     command: ["sh", "/pa/start.sh"]

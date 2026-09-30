@@ -117,7 +117,7 @@ class OwnerSetupSourceRecipesTest extends TestCase
         $app = $this->compose($config)['services']['app'];
 
         $this->assertSame(['sh', '/pa/start.sh'], $app['command']);
-        $this->assertSame(['../.panelalpha/listmonk/admin.env'], $app['env_file']);
+        $this->assertSame(['../.panelalpha/app-credentials.env'], $app['env_file']);
         $this->assertContains('./panelalpha/listmonk:/pa:ro', $app['volumes']);
 
         $start = $this->file($config, 'panelalpha/listmonk/start.sh');
@@ -130,13 +130,16 @@ class OwnerSetupSourceRecipesTest extends TestCase
         $this->assertTrue($install < $loopback && $loopback < $serve, 'install, claim on loopback, then serve');
     }
 
-    public function test_listmonk_keeps_generated_credentials_outside_the_checkout(): void
+    public function test_listmonk_takes_its_super_admin_from_the_engine(): void
     {
-        $prepare = (string) $this->config('knadh/listmonk')->setupCommands();
+        $config = $this->config('knadh/listmonk');
+        $prepare = (string) $config->setupCommands();
 
-        $this->assertStringContainsString('DATA_HOME="${HOME}/.panelalpha/listmonk"', $prepare);
-        $this->assertStringContainsString('ADMIN_ENV="${DATA_HOME}/admin.env"', $prepare);
-        $this->assertStringContainsString('NOTE="${DATA_HOME}/credentials.txt"', $prepare);
+        // The engine generates and keeps the login; the hook no longer writes one.
+        $this->assertSame(['PA_ADMIN_USER', 'PA_ADMIN_PASSWORD'], array_keys($config->credentials()?->fields ?? []));
+        $this->assertSame('.panelalpha/listmonk/admin.env', $config->credentials()?->adoptFrom);
+        $this->assertStringNotContainsString('admin.env', $prepare);
+        $this->assertStringNotContainsString('credentials.txt', $prepare);
     }
 
     /**

@@ -12,8 +12,16 @@ description: >-
   LIDARR__AUTH__METHOD=Forms and LIDARR__AUTH__REQUIRED=Enabled pin a login
   form from the very first boot (environment wins over config.xml and the UI;
   "disabled for local addresses" would open it to everyone, since every
-  request arrives through the local proxy). hooks/prepare.sh generates the
-  login password once into ~/.panelalpha/lidarr/admin.env; a one-shot `seed`
-  service, after the app is healthy, reads Lidarr's own API key from
-  config.xml and sets the user through PUT /api/v1/config/host, only when no
-  user exists. `ready` makes `compose up -d` return only after that.
+  request arrives through the local proxy). The engine generates the login
+  (`credentials:` below) and writes it to ~/.panelalpha/app-credentials.env; a
+  one-shot `seed` service, after the app is healthy, reads Lidarr's own API
+  key from config.xml and sets the user through PUT /api/v1/config/host, only
+  when no user exists. `ready` makes `compose up -d` return only after that.
+  The login is returned by GET /projects/{name}/app-credentials. Accounts
+  deployed before this kept theirs in ~/.panelalpha/lidarr/admin.env, which
+  `adopt_from` carries over.
+credentials:
+  adopt_from: .panelalpha/lidarr/admin.env
+  fields:
+    LIDARR_ADMIN_USER: {kind: username, value: admin}
+    LIDARR_ADMIN_PASSWORD: {kind: password}

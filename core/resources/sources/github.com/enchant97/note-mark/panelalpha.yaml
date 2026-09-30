@@ -26,8 +26,9 @@ description: >-
      Secure flag of the session cookie both derive from it.
   3. An owner, created before the port opens. Signup is open by default
      (ENABLE_INTERNAL_SIGNUP=true, first visitor gets an account), so it is
-     set false, and a one-shot `init` runs `note-mark user add` with a
-     generated password from ~/.panelalpha/notemark/admin.env; `app` waits
+     set false, and a one-shot `init` runs `note-mark user add` with the
+     login the engine generates (`credentials:` below) into
+     ~/.panelalpha/app-credentials.env; `app` waits
      on `init: service_completed_successfully`. The upstream image is
      distroless (no shell), so `init` is built from
      files/panelalpha/notemark/Dockerfile: alpine plus the upstream static
@@ -50,5 +51,11 @@ description: >-
   token both still valid. /.env, /.git/config, /db.sqlite serve only the SPA
   shell (1198 bytes). App container ~5 MiB, account ~120 MiB.
 
-  Credentials: ~/.panelalpha/notemark/credentials.txt. More users:
+  Login: GET /projects/{name}/app-credentials (MCP app_credentials_get). More users:
   `docker compose -p project exec app /note-mark user add -u <name> -p <pw>`.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/notemark/admin.env
+  fields:
+    NOTEMARK_ADMIN_USER: {kind: username, value: admin}
+    NOTEMARK_ADMIN_PASSWORD: {kind: password}

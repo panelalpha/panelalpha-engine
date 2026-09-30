@@ -89,14 +89,10 @@ themselves.
 
 **The admin password.** `sql/pgsql/schema.sql` seeds `admin` with the SHA1 of
 `password`, and tt-rss puts a red banner on every page until it changes. The
-install stage replaces it — before Apache binds — with 20 random alphanumerics
-generated per account. The value lives in `~/.panelalpha/tt-rss-app.env` (0600)
-and is written out for the owner at
-`~/.panelalpha/tt-rss-admin-credentials.txt` (0600):
-
-```
-cat ~/.panelalpha/tt-rss-admin-credentials.txt
-```
+install stage replaces it — before Apache binds — with the password the engine
+generates (`credentials:` in `panelalpha.yaml`), delivered in
+`~/.panelalpha/app-credentials.env` (0600) and returned by
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`).
 
 The rotation is guarded by `update.php --user-check-password admin:password`,
 so once the owner changes it in Preferences a redeploy leaves it alone.
@@ -160,7 +156,7 @@ and re-cloned on every deploy while the postgres volume is not. From there they
 take different routes, and the difference is forced rather than chosen:
 
 * The **admin password** reaches the app container through `env_file:` at
-  `../.panelalpha/tt-rss-app.env`, a path that climbs out of the document root.
+  `../.panelalpha/app-credentials.env`, a path that climbs out of the document root.
   Nothing else sets `TTRSS_ADMIN_PASS`, so nothing outranks the file, and the
   value never enters the checkout at all.
 * The **database password** has to be a compose variable, so it is also written

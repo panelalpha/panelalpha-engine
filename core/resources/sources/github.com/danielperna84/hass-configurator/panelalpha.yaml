@@ -18,10 +18,11 @@ description: >-
 
   == What the recipe supplies ==
 
-  1. HTTP Basic login admin / generated password, created once by
-     hooks/prepare.sh into ~/.panelalpha/hassconf/ (credentials.txt holds the
-     password; auth.env holds only HC_PASSWORD={sha256}<hash>, so the plaintext
-     never enters the container). With both set the app installs its
+  1. HTTP Basic login admin / a password the engine generates (`credentials:`
+     below), returned by GET /projects/{name}/app-credentials (MCP
+     app_credentials_get). hooks/prepare.sh writes ~/.panelalpha/hassconf/
+     auth.env on every deploy with only HC_PASSWORD={sha256}<hash>, so the
+     plaintext never enters the container. With both set the app installs its
      AuthHandler for every GET and POST; other methods answer 501.
   2. HC_BASEPATH=/config on the named volume hassconf-config, which survives
      redeploys, and HC_ENFORCE_BASEPATH=true.
@@ -31,7 +32,7 @@ description: >-
   4. HC_BANLIMIT=0 and no ALLOWED_NETWORKS/BANNED_IPS: behind the engine's
      proxy every client arrives from the proxy's address, so a ban or an
      allow-list would lock out everyone at once. Brute force is limited only
-     by the 28-character random password.
+     by the random password.
   5. A `ready` service waits on the app's healthcheck so `up -d` returns only
      once it listens (engine#204).
 
@@ -55,3 +56,7 @@ description: >-
   of /config/configuration.yaml read back byte for byte; /api/file of
   /etc/passwd "Access denied.". Rebuild 36s: auth.env unchanged, the file
   still there, the same 401s. App ~18 MiB, account ~100 MiB.
+credentials:
+  fields:
+    HC_USERNAME: {kind: username, value: admin}
+    HC_LOGIN_PASSWORD: {kind: password}

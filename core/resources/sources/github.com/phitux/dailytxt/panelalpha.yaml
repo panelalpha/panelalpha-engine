@@ -15,11 +15,14 @@ description: >-
 
   == What the recipe supplies ==
 
-  1. hooks/prepare.sh writes, once, to ~/.panelalpha/dailytxt/ (0600 in 0700):
-     secret.env (SECRET_TOKEN, which signs the login cookie - without it the
-     backend picks a random one per start and every restart logs everyone
-     out; ADMIN_PASSWORD for the admin panel), user.env (the first user) and
-     credentials.txt.
+  1. hooks/prepare.sh writes, once, to ~/.panelalpha/dailytxt/secret.env
+     (0600 in 0700) SECRET_TOKEN, which signs the login cookie - without it
+     the backend picks a random one per start and every restart logs everyone
+     out. The engine generates the first user's login and ADMIN_PASSWORD for
+     the admin panel (`credentials:` below) into
+     ~/.panelalpha/app-credentials.env; GET /projects/{name}/app-credentials
+     (MCP app_credentials_get) returns them. ADMIN_PASSWORD is read from the
+     env on every start.
   2. Registration closed, no first-visitor-wins. Upstream's compose ships
      ALLOW_REGISTRATION=true "for the first user", and the admin panel that
      can reopen it needs a logged-in user. The public app runs with
@@ -49,5 +52,11 @@ description: >-
 
   Note: upstream prints SECRET_TOKEN in the container log at start.
 
-  Credentials: ~/.panelalpha/dailytxt/credentials.txt. More users: admin panel
-  (Settings), which opens registration for a few minutes.
+  More users: admin panel (Settings), which opens registration for a few
+  minutes.
+credentials:
+  adopt_from: .panelalpha/dailytxt/user.env
+  fields:
+    DAILYTXT_USER: {kind: username, value: admin}
+    DAILYTXT_PASSWORD: {kind: password}
+    ADMIN_PASSWORD: {kind: password}

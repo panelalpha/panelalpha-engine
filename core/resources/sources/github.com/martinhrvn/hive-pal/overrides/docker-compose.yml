@@ -4,7 +4,8 @@
 # FRONTEND_URL from http://localhost to the account's public https URL (both end
 # in _URL, the value matches the local-host pattern, port 80 is in the allow
 # list). Secrets come from ~/.panelalpha/hive-pal/secrets.env (generated once by
-# the prepare hook, reused across redeploys). The entrypoint waits for postgres,
+# the prepare hook, reused across redeploys), the admin login from the engine's
+# ~/.panelalpha/app-credentials.env. The entrypoint waits for postgres,
 # runs `prisma migrate deploy`, then seeds/promotes the admin from ADMIN_EMAIL /
 # ADMIN_PASSWORD — no open-registration window.
 services:
@@ -17,7 +18,6 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: production
-      ADMIN_EMAIL: admin@hive-pal.local
       # Local-host values, rewritten to the public https URL by
       # ComposePlaceholders. BETTER_AUTH_URL is where /api/auth/* is served and
       # the trusted origin for session cookies; FRONTEND_URL is used in emails.
@@ -27,9 +27,10 @@ services:
       STORAGE_TYPE: local
       STORAGE_LOCAL_PATH: /data/uploads
     env_file:
-      # POSTGRES_PASSWORD + DATABASE_URL + BETTER_AUTH_SECRET + ADMIN_PASSWORD.
-      # ~/project/../.panelalpha -> ~/.panelalpha.
+      # POSTGRES_PASSWORD + DATABASE_URL + BETTER_AUTH_SECRET, then ADMIN_EMAIL +
+      # ADMIN_PASSWORD (the engine's). ~/project/../.panelalpha -> ~/.panelalpha.
       - ../.panelalpha/hive-pal/secrets.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - hivepal-uploads:/data/uploads
     depends_on:

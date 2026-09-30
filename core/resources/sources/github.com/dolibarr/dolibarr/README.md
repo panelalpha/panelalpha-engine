@@ -10,7 +10,9 @@ framework, no front controller, the dependencies committed into
 
 Verdict with this recipe: `deploy-ok`, `serving: ok`, HTTP 200 — and, which is
 the only thing that matters for an ERP, an application that is *claimed*: an
-administrator with a per-account password, the install wizard closed, and an
+administrator with the login the engine generates (`credentials:` in
+`panelalpha.yaml`, returned by `GET /projects/{name}/app-credentials`, MCP
+`app_credentials_get`), the install wizard closed, and an
 invoice that can be created, validated and read back (see **Verification**).
 
 ## What the engine got right on its own

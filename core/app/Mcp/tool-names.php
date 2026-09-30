@@ -202,6 +202,7 @@ return [
     // The deployed application (WordPress and friends). These "users" are
     // accounts inside that application, not projects.
     'GET /projects/{username}/app/health' => 'app_health_check',
+    'GET /projects/{username}/app-credentials' => 'app_credentials_get',
     'GET /projects/{username}/app/info' => 'app_info',
     'POST /projects/{username}/app/install' => 'app_install',
     'GET /projects/{username}/app/roles' => 'app_role_list',

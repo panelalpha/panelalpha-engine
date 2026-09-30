@@ -10,8 +10,9 @@ description: >-
   (leomoonstudios/wiki-go:1.9.2) with all data (pages, uploads, users,
   settings) on a named `data` volume. A one-shot `init` service writes
   config.yaml before Wiki-Go first starts, only while the volume has none: the
-  admin's bcrypt hash of a password generated once by hooks/prepare.sh into
-  ~/.panelalpha/wikigo/admin.env, secure cookies, the site's domain as owner,
+  admin's bcrypt hash of the password the engine generates (`credentials:`
+  below; GET /projects/{name}/app-credentials, MCP app_credentials_get,
+  returns it), secure cookies, the site's domain as owner,
   and the account's Docker bridge (172.16.0.0/12) as the only trusted proxy,
   so the login ban lands on the visitor's address (the proxy-added last
   X-Forwarded-For hop) rather than on the shared internal address. Wiki-Go
@@ -22,3 +23,9 @@ description: >-
   wiki: visitors can read pages and attachments; creating, editing,
   commenting and uploading need a login. Admin > Settings > Private turns
   anonymous reading off.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/wikigo/admin.env
+  fields:
+    WIKIGO_ADMIN_USER: {kind: username, value: admin}
+    WIKIGO_ADMIN_PASSWORD: {kind: password}

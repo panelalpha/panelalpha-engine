@@ -1,13 +1,15 @@
 # Compose-replace: the repo's compose runs :latest from .env, i.e. the
 # .env.example defaults (admin/supersecret, a published JWT_SECRET). This pins
-# the current release and takes every secret from ~/.panelalpha/invio/.
+# the current release and takes every secret from ~/.panelalpha/.
 services:
   app:
     image: ghcr.io/kittendevv/invio:v2.2.0
     restart: unless-stopped
     env_file:
-      # ADMIN_USER, ADMIN_PASS, JWT_SECRET, generated once by hooks/prepare.sh.
+      # JWT_SECRET, generated once by hooks/prepare.sh.
       - ../.panelalpha/invio/secret.env
+      # ADMIN_USER, ADMIN_PASS, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       ORIGIN: ${PA_PUBLIC_URL}
       BASE_URL: ${PA_PUBLIC_URL}

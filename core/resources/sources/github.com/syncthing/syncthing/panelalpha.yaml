@@ -10,8 +10,9 @@ description: >-
 
   A one-shot `seed` service runs `syncthing generate` against that volume
   before the app publishes its port: it creates the device keys and config on
-  first run and sets the GUI user `admin` with a bcrypt hash of the password in
-  ~/.panelalpha/syncthing/admin.env (generated once by hooks/prepare.sh). An
+  first run and sets the GUI user `admin` with a bcrypt hash of the password the engine
+  generates (`credentials:` below; returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get). An
   existing password is never overwritten, so a password changed in the GUI
   survives redeploys. The API key is Syncthing's own, generated once into
   config.xml. STGUIADDRESS=0.0.0.0:8384 overrides config.xml's loopback
@@ -20,3 +21,8 @@ description: >-
   published: the sync port 22000 (TCP/QUIC) and local discovery are not
   reachable from outside, so peers connect through the public relay pool
   (outbound TCP), which works but is slower than a direct connection.
+credentials:
+  adopt_from: .panelalpha/syncthing/admin.env
+  fields:
+    SYNCTHING_GUI_USER: {kind: username, value: admin}
+    SYNCTHING_GUI_PASSWORD: {kind: password}

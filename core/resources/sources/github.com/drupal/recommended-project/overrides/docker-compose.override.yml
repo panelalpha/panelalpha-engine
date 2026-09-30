@@ -37,9 +37,10 @@ services:
       # image toolkit.
       PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/panelalpha/php
 
-    # The hash salt and the administrator credentials, by a path that climbs
-    # out of the checkout. ~/.panelalpha survives the clone; ~/project does not
-    # (engine #173), and hooks/prepare.sh writes this file before compose runs.
+    # The hash salt, and the administrator login the engine generated and keeps
+    # (DRUPAL_ADMIN_USER / DRUPAL_ADMIN_PASS), by paths that climb out of the
+    # checkout. ~/.panelalpha survives the clone; ~/project does not
+    # (engine #173), and both files are written before compose runs.
     #
     # env_file rather than `environment:` because nothing else sets these keys,
     # so nothing outranks the file -- and because .env would put the
@@ -49,6 +50,7 @@ services:
     # `- .env`, so both are read and `environment:` still outranks both.
     env_file:
       - ../.panelalpha/drupal/app.env
+      - ../.panelalpha/app-credentials.env
 
     # The account's own data, outside the checkout.
     #

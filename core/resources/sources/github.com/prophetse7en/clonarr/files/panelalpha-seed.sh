@@ -1,5 +1,5 @@
 #!/bin/sh
-# Creates Clonarr's admin from ~/.panelalpha/clonarr/admin.env through its own
+# Creates Clonarr's admin from ~/.panelalpha/app-credentials.env through its own
 # /setup, only when none exists, and requires login for every address. The app
 # runs here in a container with no published port, so nobody else can reach it.
 set -eu

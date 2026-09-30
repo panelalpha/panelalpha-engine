@@ -4,7 +4,8 @@
 # own data dir; here it is disabled and Tolgee points at postgres:17-alpine on a
 # named volume. Only the app publishes a port (8080), so the port scan takes it
 # as the primary. Secrets come from env_files hooks/prepare.sh writes into
-# ~/.panelalpha/tolgee (../.panelalpha resolves from ~/project).
+# ~/.panelalpha/tolgee, and the admin login from the engine's
+# ~/.panelalpha/app-credentials.env (../.panelalpha resolves from ~/project).
 services:
   db:
     # Pin the major: a datadir cannot migrate backwards, so a floating tag would
@@ -35,10 +36,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # SPRING_DATASOURCE_PASSWORD, TOLGEE_AUTHENTICATION_JWT_SECRET and
-    # TOLGEE_AUTHENTICATION_INITIAL_PASSWORD come from here.
+    # SPRING_DATASOURCE_PASSWORD and TOLGEE_AUTHENTICATION_JWT_SECRET come from
+    # app.env; TOLGEE_AUTHENTICATION_INITIAL_USERNAME / _PASSWORD from the
+    # engine's app-credentials.env.
     env_file:
       - ../.panelalpha/tolgee/app.env
+      - ../.panelalpha/app-credentials.env
     environment:
       # Use the external sidecar, not the image's embedded Postgres.
       TOLGEE_POSTGRES_AUTOSTART_ENABLED: "false"
@@ -48,7 +51,6 @@ services:
       TOLGEE_AUTHENTICATION_ENABLED: "true"
       TOLGEE_AUTHENTICATION_NATIVE_ENABLED: "true"
       TOLGEE_AUTHENTICATION_REGISTRATIONS_ALLOWED: "false"
-      TOLGEE_AUTHENTICATION_INITIAL_USERNAME: "admin"
       # File storage (screenshots, imports) on the named volume mounted at /data.
       TOLGEE_FILE_STORAGE_FS_DATA_PATH: "/data/"
       # Rewritten to the real https origin at deploy (key ends in _URL, value is

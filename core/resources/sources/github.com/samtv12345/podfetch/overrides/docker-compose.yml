@@ -6,9 +6,10 @@ services:
     image: docker.io/samuel19982/podfetch:v5.2.3
     restart: unless-stopped
     env_file:
-      # BASIC_AUTH=true, USERNAME=admin, PASSWORD=<generated>.
-      - ../.panelalpha/podfetch/auth.env
+      # USERNAME=admin, PASSWORD=<generated>, kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
+      BASIC_AUTH: "true"
       DATABASE_URL: sqlite:///app/db/podcast.db
       POLLING_INTERVAL: "60"
     volumes:

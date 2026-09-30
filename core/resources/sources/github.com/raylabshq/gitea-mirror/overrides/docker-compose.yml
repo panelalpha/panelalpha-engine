@@ -17,10 +17,12 @@ services:
     image: ghcr.io/raylabshq/gitea-mirror:v3.40.3
     restart: "no"
     entrypoint: ["sh", "/panelalpha/init.sh"]
+    # GM_ADMIN_EMAIL / GM_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/giteamirror/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       <<: *gm-env
+      GM_ADMIN_NAME: admin
       HOST: 127.0.0.1
       PORT: "4321"
       BETTER_AUTH_URL: ${PA_PUBLIC_URL}

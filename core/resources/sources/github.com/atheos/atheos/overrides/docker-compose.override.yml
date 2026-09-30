@@ -12,6 +12,10 @@
 # document root and the staged entrypoint -- off the table entirely.
 services:
   app:
+    # ATHEOS_ADMIN_USERNAME / ATHEOS_ADMIN_PASSWORD, generated and kept by the
+    # engine; the install stage creates the first user from them.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     volumes:
       # ~/.panelalpha/atheos. Everything this account accumulates lives here
       # and nowhere else:
@@ -20,7 +24,6 @@ services:
       #   /data/data/              users.json.php (password hashes), the
       #                            project list, per-user settings and drafts,
       #                            the access and project logs
-      #   /data/admin-credentials  the generated administrator, 0600
       #
       # Upstream puts the first two inside the checkout -- WORKSPACE and DATA
       # both default to BASE_PATH . "/..." -- and a redeploy re-clones

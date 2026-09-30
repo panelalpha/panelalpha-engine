@@ -1,6 +1,7 @@
 #!/bin/bash
-# Generates APP_KEY, the MariaDB passwords and the admin password once, in
-# ~/.panelalpha (survives redeploys; ~/project does not). Regenerating any of
+# Generates APP_KEY and the MariaDB passwords once, in ~/.panelalpha (survives
+# redeploys; ~/project does not). The admin login is the engine's
+# (`credentials:` in panelalpha.yaml), in ~/.panelalpha/app-credentials.env. Regenerating any of
 # them against the surviving volumes would lock Snipe-IT out of its data.
 set -e
 cd ~/project
@@ -19,9 +20,5 @@ if [ ! -f "${STORE}/app.env" ]; then
     printf 'APP_KEY=base64:%s\nDB_PASSWORD=%s\n' \
         "$(openssl rand -base64 32)" \
         "$(sed -n 's/^MARIADB_PASSWORD=//p' "${STORE}/db.env")" > "${STORE}/app.env"
-fi
-if [ ! -f "${STORE}/admin.env" ]; then
-    printf 'SNIPEIT_ADMIN_USER=admin\nSNIPEIT_ADMIN_PASSWORD=%s\n' \
-        "$(openssl rand -hex 16)" > "${STORE}/admin.env"
 fi
 chmod 600 "${STORE}"/*.env

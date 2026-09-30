@@ -9,9 +9,17 @@ description: >-
   Postgres 17 sidecar on a named volume; uploaded images live in the database,
   so nothing else needs persisting.
 
-  hooks/prepare.sh generates the database password and the admin password once
-  into ~/.panelalpha/fredbet/. FredBet reads `fredbet.admin-password` (here
+  hooks/prepare.sh generates the database password once into
+  ~/.panelalpha/fredbet/; the engine generates the admin login (`credentials:`
+  below) into ~/.panelalpha/app-credentials.env, and GET
+  /projects/{name}/app-credentials (MCP app_credentials_get) returns it. FredBet reads `fredbet.admin-password` (here
   FREDBET_ADMIN_PASSWORD) only when it creates the admin user on an empty
   database, so admin/admin is never valid and a password changed in the UI
   survives redeploys. Self-registration is off by default and additionally
   needs a random registration code. Only the app port is published.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/fredbet/app.env
+  fields:
+    FREDBET_ADMIN_USERNAME: {kind: username, value: admin}
+    FREDBET_ADMIN_PASSWORD: {kind: password}

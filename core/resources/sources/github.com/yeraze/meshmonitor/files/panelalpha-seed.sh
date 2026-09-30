@@ -59,7 +59,7 @@ if [ "$(login changeme)" = 200 ]; then
         -d "{\"currentPassword\":\"changeme\",\"newPassword\":\"$MESHMONITOR_ADMIN_PASSWORD\"}" "$B/auth/change-password")
     [ "$code" = 200 ] || fail "change-password returned $code: $(cat /tmp/pa-change.json)"
     [ "$(login "$MESHMONITOR_ADMIN_PASSWORD")" = 200 ] || fail "generated password does not log in"
-    echo "meshmonitor-seed: admin '$U' password set from ~/.panelalpha/meshmonitor/admin.env"
+    echo "meshmonitor-seed: admin '$U' password set from the engine's credentials"
 fi
 
 [ "$(login changeme)" = 401 ] || fail "default password is still accepted"

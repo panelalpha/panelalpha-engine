@@ -9,15 +9,16 @@ services:
     image: dbeaver/cloudbeaver:26.2.1
     init: true
     restart: unless-stopped
-    # CB_SERVER_NAME/CB_ADMIN_NAME/CB_ADMIN_PASSWORD (generated once by
-    # hooks/prepare.sh) drive CloudBeaver's built-in automatic configuration on
+    # CB_SERVER_NAME and CB_ADMIN_NAME/CB_ADMIN_PASSWORD (generated and kept by
+    # the engine) drive CloudBeaver's built-in automatic configuration on
     # the FIRST boot: the server creates the admin, marks itself configured and
     # writes its runtime config into the workspace. On a redeploy the workspace
     # volume already carries that config, so the server is not in configuration
     # mode and ignores these -- the existing admin is kept.
     env_file:
-      - ../.panelalpha/cloudbeaver/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
+      CB_SERVER_NAME: CloudBeaver
       # CloudBeaver defaults anonymousAccessEnabled to true (an anonymous visitor
       # could open the database manager as the "user" team). Turn it off so the
       # whole console and GraphQL API sit behind the login.

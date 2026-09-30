@@ -11,7 +11,8 @@ services:
     restart: "no"
     entrypoint: ["/bin/entrypoint.sh", "/bin/sh", "/panelalpha-seed.sh"]
     env_file:
-      - ../.panelalpha/syncthing/admin.env
+      # SYNCTHING_GUI_USER / SYNCTHING_GUI_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - data:/var/syncthing
       - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro

@@ -14,10 +14,13 @@ description: >-
 
   CLOSED FIRST RUN. The first migration (create_users_table) inserts the only
   admin from config('app.admin_email') / config('app.admin_password'), which
-  default to admin@example.com / password. hooks/prepare.sh generates
-  ADMIN_EMAIL, ADMIN_PASSWORD and APP_KEY once into ~/.panelalpha/speedtest/
-  (0600 in 0700) with a credentials.txt note, delivered by env_file, so the
+  default to admin@example.com / password. The engine generates ADMIN_EMAIL
+  and ADMIN_PASSWORD (`credentials:` below) into
+  ~/.panelalpha/app-credentials.env and hooks/prepare.sh APP_KEY once into
+  ~/.panelalpha/speedtest/ (0600 in 0700), both delivered by env_file, so the
   admin is created with a generated password before the site is reachable.
+  GET /projects/{name}/app-credentials (MCP app_credentials_get) returns the
+  login.
   The Filament panel has no registration.
 
   NO SCHEDULE BY DEFAULT. SPEEDTEST_SCHEDULE is left unset, so nothing runs
@@ -28,3 +31,9 @@ description: >-
 
   READY GATE. A no-op `ready` service waits on /api/healthcheck so the deploy
   finishes only once the app answers.
+credentials:
+  login_path: /admin/login
+  adopt_from: .panelalpha/speedtest/app.env
+  fields:
+    ADMIN_EMAIL: {kind: email, value: admin@speedtest.local}
+    ADMIN_PASSWORD: {kind: password}

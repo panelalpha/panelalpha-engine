@@ -12,6 +12,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/blackcandy/app.env
+      # BC_ADMIN_EMAIL / BC_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       MEDIA_PATH: /media_data
     volumes:

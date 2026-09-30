@@ -10,13 +10,13 @@
 #  3. Hand the container to tube.
 set -eu
 
-# 1. Upload-auth secret (generated once by hooks/prepare.sh, 0600). Lives in the
-# /data mount, never in ~/project. Exported under both spellings so the /upload
-# gate holds on the published images (auth_password) and on newer builds that
-# also read AUTH_PASSWORD.
-if [ -f /data/secrets.env ]; then
+# 1. Upload-auth secret, generated and kept by the engine (`credentials:`),
+# mounted read-only from ~/.panelalpha/app-credentials.env, never in ~/project.
+# Exported under both spellings so the /upload gate holds on the published
+# images (auth_password) and on newer builds that also read AUTH_PASSWORD.
+if [ -f /pa/app-credentials.env ]; then
   set -a
-  . /data/secrets.env
+  . /pa/app-credentials.env
   set +a
 fi
 : "${auth_password:=}"

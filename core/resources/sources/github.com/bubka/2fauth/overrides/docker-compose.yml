@@ -23,9 +23,10 @@ services:
       LOG_CHANNEL: stderr
       IS_DEMO_APP: "false"
       SITE_OWNER: ${SITE_OWNER}
-      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL}
-      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
-      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME}
+      SEED_ADMIN_NAME: admin
+    # SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD, generated and kept by the engine.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     volumes:
       - twofauth_data:/2fauth
       - ./panelalpha:/panelalpha:ro

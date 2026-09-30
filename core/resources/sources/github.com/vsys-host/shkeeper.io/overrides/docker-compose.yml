@@ -9,7 +9,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/shkeeper/app.env
-      - ../.panelalpha/shkeeper/admin.env
+      # SHKEEPER_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - shkeeper-instance:/shkeeper.io/instance
       - ./panelalpha/shkeeper/seed.py:/pa/seed.py:ro

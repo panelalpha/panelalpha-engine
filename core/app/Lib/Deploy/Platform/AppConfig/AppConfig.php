@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\AppConfig;
 
+use App\Lib\Deploy\Credentials\CredentialSpec;
 use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Platform\PlatformCommand;
 use App\Lib\Deploy\Platform\PlatformManifest;
@@ -66,6 +67,7 @@ final class AppConfig
         private readonly array $requires,
         private readonly array $env,
         private readonly ?array $manifest,
+        private readonly ?CredentialSpec $credentials,
     ) {
     }
 
@@ -123,6 +125,7 @@ final class AppConfig
             $config?->requires() ?? [],
             $config?->env() ?? [],
             $config?->manifest(),
+            $config?->credentials(),
         );
     }
 
@@ -166,6 +169,10 @@ final class AppConfig
             self::readRequires($raw),
             self::readEnv($raw),
             self::readManifest($raw),
+            CredentialSpec::parse(
+                $raw['credentials'] ?? null,
+                static fn (string $m): ManifestException => new ManifestException(self::YAML_FILENAME . ": {$m}")
+            ),
         );
     }
 
@@ -200,6 +207,7 @@ final class AppConfig
             $config?->requires() ?? [],
             $config?->env() ?? [],
             $config?->manifest(),
+            $config?->credentials(),
         );
 
         return $appConfig->isEmpty() ? null : $appConfig;
@@ -237,7 +245,8 @@ final class AppConfig
             && $this->commands === []
             && $this->requires === []
             && $this->env === []
-            && $this->manifest === null;
+            && $this->manifest === null
+            && $this->credentials === null;
     }
 
     /**
@@ -368,6 +377,15 @@ final class AppConfig
         return $this->env;
     }
 
+    /**
+     * The login this application is seeded with. Read here as well as in the
+     * manifest: it is delivered before the prepare hook, ahead of detection.
+     */
+    public function credentials(): ?CredentialSpec
+    {
+        return $this->credentials;
+    }
+
     // -- YAML reading ------------------------------------------------------
 
     /**
@@ -479,7 +497,8 @@ final class AppConfig
         if (isset($raw[self::EXTENDS_KEY])) {
             $manifest[self::EXTENDS_KEY] = $raw[self::EXTENDS_KEY];
         }
-        $describes = array_diff(array_keys($manifest), ['requires', self::EXTENDS_KEY]) !== [];
+        // `credentials` rides along too: a compose recipe declares a login without being a manifest.
+        $describes = array_diff(array_keys($manifest), ['requires', 'credentials', self::EXTENDS_KEY]) !== [];
 
         $inherit = $raw[self::EXTENDS_KEY] ?? null;
         if ($inherit !== null) {

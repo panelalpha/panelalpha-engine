@@ -20,12 +20,19 @@ description: >-
   CLOSED FIRST RUN. create_app() inserts a passwordless "admin", and /login
   sends every visitor to /set-password until one sets it (shkeeper/auth.py),
   so the first visitor would own the gateway. A one-shot `seed` service runs
-  create_app() and sets the generated password before the app is published.
+  create_app() and sets the password the engine generates (`credentials:`
+  below; GET /projects/{name}/app-credentials, MCP app_credentials_get,
+  returns it) before the app is published.
   /metrics uses HTTP Basic that defaults to shkeeper/shkeeper; METRICS_USERNAME
   and METRICS_PASSWORD are generated. SECRET_KEY is fixed so a restart does
   not log everyone out, and an instance config.py marks the session cookie
   Secure (the engine serves HTTPS).
 
-  SECRETS. hooks/prepare.sh writes SECRET_KEY, the metrics credentials and the
-  admin password once to ~/.panelalpha/shkeeper/ (0600 in 0700) with a
-  credentials.txt note. A no-op `ready` service gates the deploy on /login.
+  SECRETS. hooks/prepare.sh writes SECRET_KEY and the metrics credentials
+  once to ~/.panelalpha/shkeeper/app.env (0600 in 0700). A no-op `ready` service gates the deploy on /login.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/shkeeper/admin.env
+  fields:
+    SHKEEPER_ADMIN_USER: {kind: username, value: admin}
+    SHKEEPER_ADMIN_PASSWORD: {kind: password}

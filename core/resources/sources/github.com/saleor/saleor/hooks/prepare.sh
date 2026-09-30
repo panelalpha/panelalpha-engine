@@ -2,8 +2,9 @@
 # Account shell, after the clone and after overrides/ and files/ have been
 # written, before the build.
 #
-# One job: put this account's secrets somewhere the next clone will not delete,
-# and tell the owner where the administrator password is.
+# One job: put this account's secrets somewhere the next clone will not delete.
+# The administrator login is the engine's (`credentials:` in panelalpha.yaml),
+# in ~/.panelalpha/app-credentials.env, which only `init` reads.
 set -e
 cd ~/project
 
@@ -45,16 +46,13 @@ fi
 STORE_DIR="${HOME}/.panelalpha/saleor"
 ENV_STORE="${STORE_DIR}/saleor.env"
 RSA_PEM="${STORE_DIR}/jwt-rsa.pem"
-NOTE="${STORE_DIR}/credentials.txt"
 
 mkdir -p "${STORE_DIR}"
 chmod 700 "${HOME}/.panelalpha" "${STORE_DIR}"
 
 if [ ! -f "${ENV_STORE}" ]; then
-    ADMIN_EMAIL=admin@localhost
-    # No '/', '+' or '=' -- this value is read back by a POSIX shell, written
-    # into an env file with no quoting, and pasted into a GraphQL string.
-    ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
+    # No '/', '+' or '=' -- this value is read back by a POSIX shell and
+    # written into an env file with no quoting.
     PG_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
     SECRET_KEY="$(openssl rand -hex 32)"
     (
@@ -73,14 +71,9 @@ SECRET_KEY=${SECRET_KEY}
 # boot to connect as it. DATABASE_URL is assembled from it in the entrypoint
 # rather than stored, so the password appears in exactly one file.
 POSTGRES_PASSWORD=${PG_PASSWORD}
-
-# The superuser created by panelalpha/saleor/init.sh before anything listens.
-# Saleor's USERNAME_FIELD is the email (saleor/account/models.py:220).
-SALEOR_ADMIN_EMAIL=${ADMIN_EMAIL}
-SALEOR_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 EOF
     )
-    say "administrator credentials written to ${NOTE}"
+    say "secrets written to ${ENV_STORE}"
 else
     say "reusing the secrets in ${ENV_STORE}"
 fi
@@ -111,7 +104,7 @@ for secret in "${ENV_STORE}" "${RSA_PEM}"; do
         600|400) ;;
         '') say "WARNING: cannot stat ${secret}" ;;
         *)
-            say "${secret} is mode ${mode} and cannot be changed; it holds this account's database password and administrator password"
+            say "${secret} is mode ${mode} and cannot be changed; it holds this account's database password"
             exit 1
             ;;
     esac
@@ -155,44 +148,3 @@ if ! grep -q '^RSA_PRIVATE_KEY_B64=' "${ENV_STORE}"; then
     )
     say "JWT signing key encoded into ${ENV_STORE}"
 fi
-
-# ---------------------------------------------------------------------------
-# 3. The note.
-#
-# Written every deploy: it is derived from the store, contains nothing the
-# store does not, and a first deploy that failed after writing the env file
-# would otherwise leave the owner with no note at all.
-ADMIN_EMAIL="$(sed -n 's/^SALEOR_ADMIN_EMAIL=//p' "${ENV_STORE}" | head -n 1)"
-ADMIN_PASSWORD="$(sed -n 's/^SALEOR_ADMIN_PASSWORD=//p' "${ENV_STORE}" | head -n 1)"
-(
-    umask 077
-    cat > "${NOTE}" <<EOF
-Saleor administrator for this account
-=====================================
-
-  email:    ${ADMIN_EMAIL}
-  password: ${ADMIN_PASSWORD}
-
-Saleor is a headless API. There is no login page: you authenticate by sending
-the tokenCreate mutation to /graphql/ and using the token it returns as a
-bearer token on every later request.
-
-  curl -s https://<your-domain>/graphql/ \\
-    -H 'content-type: application/json' \\
-    -d '{"query":"mutation{tokenCreate(email:\\"${ADMIN_EMAIL}\\",password:\\"...\\"){token errors{message}}}"}'
-
-  curl -s https://<your-domain>/graphql/ \\
-    -H 'content-type: application/json' \\
-    -H "authorization: Bearer <token>" \\
-    -d '{"query":"{me{email isStaff}}"}'
-
-Opening /graphql/ in a browser gives you the same thing with a schema browser
-around it. The Saleor Dashboard is a separate application
-(github.com/saleor/saleor-dashboard) and is not part of this repository or this
-deployment; point one at https://<your-domain>/graphql/ if you want a shop UI.
-
-Created on the first deploy and never changed by PanelAlpha afterwards. If you
-change the password through the API, this file is out of date and the one in
-the application wins -- nothing here overwrites it.
-EOF
-)

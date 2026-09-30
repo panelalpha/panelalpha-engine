@@ -1,6 +1,8 @@
 #!/bin/bash
-# Generates OpenSlides' five secrets once, in ~/.panelalpha (survives redeploys;
-# ~/project does not). Same shapes as `osmanage setup`.
+# Generates OpenSlides' four boot secrets once, in ~/.panelalpha (survives
+# redeploys; ~/project does not). Same shapes as `osmanage setup`. The
+# superadmin password is the engine's (`credentials:`), in
+# ~/.panelalpha/app-credentials.env.
 set -e
 STORE="${HOME}/.panelalpha/openslides"
 mkdir -p "${STORE}"
@@ -14,7 +16,6 @@ if [ ! -f "${STORE}/secrets.env" ]; then
         printf 'OS_AUTH_COOKIE_KEY=%s\n' "$(openssl rand -base64 32)"
         printf 'OS_INTERNAL_AUTH_PASSWORD=%s\n' "$(openssl rand -base64 32)"
         printf 'OS_POSTGRES_PASSWORD=%s\n' "$(pw 40)"
-        printf 'OS_SUPERADMIN_PASSWORD=%s\n' "$(pw 20)"
     } > "${STORE}/secrets.env"
 fi
 chmod 600 "${STORE}/secrets.env"

@@ -9,11 +9,11 @@ services:
     working_dir: /app
     env_file:
       - .env
-      - ../.panelalpha/seerr/admin.env
+      # SEERR_OWNER_EMAIL / SEERR_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       NODE_ENV: production
       PA_PUBLIC_URL: ${PA_PUBLIC_URL}
-      PA_PUBLIC_HOST: ${PA_PUBLIC_HOST}
     volumes:
       - seerr-config:/app/config
       - ./panelalpha/seerr:/pa:ro

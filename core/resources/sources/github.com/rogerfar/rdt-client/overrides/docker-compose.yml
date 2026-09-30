@@ -27,14 +27,15 @@ services:
       start_period: 15s
     mem_limit: 1g
 
-  # Creates the login from ~/.panelalpha/rdtclient/admin.env through the app's
+  # Creates the login from ~/.panelalpha/app-credentials.env through the app's
   # own setup API, once. Same image: it already has curl.
   seed:
     image: rogerfar/rdtclient:2.0.142
     restart: "no"
     entrypoint: ["/bin/sh", "/panelalpha/rdtclient-seed.sh"]
+    # RDTCLIENT_ADMIN_USER / RDTCLIENT_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/rdtclient/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha/rdtclient-seed.sh:/panelalpha/rdtclient-seed.sh:ro
     depends_on:

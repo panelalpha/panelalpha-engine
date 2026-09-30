@@ -19,10 +19,10 @@ description: >-
   never regenerates it, because ~/project is wiped on every redeploy
   (engine#173). Second, admin:admin must never reach the public internet: the
   hook pre-seeds ~/.panelalpha/jetlog/data/jetlog.db with a users table holding
-  a single admin whose password is randomly generated (argon2, using the
-  image's own hasher), so the container finds the DB already present and its
-  admin:admin bootstrap path never runs. The generated password is written
-  0600 to ~/.panelalpha/jetlog/credentials.txt for the account owner.
+  a single admin with the login the engine generates (`credentials:` below;
+  argon2, using the image's own hasher), so the container finds the DB already
+  present and its admin:admin bootstrap path never runs. The login is returned
+  by GET /projects/{name}/app-credentials (MCP app_credentials_get).
 
   The SQLite database is the entire state (users + flights), so /data is a bind
   mount onto ~/.panelalpha/jetlog/data — the only writable, rebuild-surviving
@@ -32,3 +32,7 @@ description: >-
   no-op `ready` service gated on service_healthy make `compose up` block until
   jetlog actually answers, so the engine's "deploy finished" is honest
   (engine#90: up -d returns before the app is up).
+credentials:
+  fields:
+    JETLOG_ADMIN_USER: {kind: username, value: admin}
+    JETLOG_ADMIN_PASSWORD: {kind: password}

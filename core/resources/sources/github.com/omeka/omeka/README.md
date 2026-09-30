@@ -73,9 +73,9 @@ asks for one.
 the only thing in front of it is `SHOW TABLES LIKE 'omeka_options'`. On a
 public HTTPS address that means the first stranger to load `/install` owns the
 site. `files/panelalpha-install.php` runs the same `Installer_Default` from the
-install stage instead, before Apache binds, with a password generated per
-account into `~/.panelalpha/omeka/admin-credentials` (0600, in a 0700
-directory). Afterwards `/install` answers *"Omeka is installed."*
+install stage instead, before Apache binds, with the login the engine
+generates (`credentials:` in `panelalpha.yaml`), returned by
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`). Afterwards `/install` answers *"Omeka is installed."*
 
 Two things the browser does for the web installer had to be done by hand, and
 both were found by running it, not by reading it:

@@ -213,7 +213,7 @@ try {
         exit(0);
     }
 
-    say('replaced the seeded admin password; this account\'s is in ~/.panelalpha/plainpad-admin');
+    say('replaced the seeded admin password with the engine\'s login');
 } catch (Throwable $e) {
     say('could not set the admin password (' . $e->getMessage() . '); leaving the account as it is');
 }

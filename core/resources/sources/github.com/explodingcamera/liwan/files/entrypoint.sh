@@ -39,12 +39,8 @@ export LIWAN_DUCKDB_THREADS="${LIWAN_DUCKDB_THREADS:-2}"
 # the client IP. Override with a CIDR list to tighten.
 export LIWAN_TRUSTED_PROXIES="${LIWAN_TRUSTED_PROXIES:-*}"
 
-# The owner administrator. hooks/prepare.sh generated the password once into
-# ~/.panelalpha/liwan/admin.env and the override mounts that directory at /pa.
-if [ -f /pa/admin.env ]; then
-    # shellcheck disable=SC1091
-    . /pa/admin.env
-fi
+# The owner administrator: LIWAN_ADMIN_USERNAME / LIWAN_ADMIN_PASSWORD, which the
+# engine generated and keeps, from ~/.panelalpha/app-credentials.env (env_file).
 ADMIN_USER="${LIWAN_ADMIN_USERNAME:-admin}"
 
 # `add-user` is a plain insert and dies on a duplicate username, so it must run

@@ -4,7 +4,8 @@
 # them somewhere a redeploy will not delete, then re-writes the env_files the
 # compose reads. Rotating any of these would break an existing instance: a new
 # DB password locks the app out of the postgres volume, a new JWT secret
-# invalidates every session, a new admin password silently changes the login.
+# invalidates every session. The initial admin login is the engine's
+# (`credentials:`), read by the app from ~/.panelalpha/app-credentials.env.
 set -e
 
 # ~/project is wiped every deploy (engine#173); ~/.panelalpha survives, so the
@@ -26,7 +27,6 @@ gen_or_read() {
 # hex only: reads back cleanly from an env file and a JDBC URL (no /,+,=,#,@,:).
 DB_PASSWORD=$(gen_or_read "$STORE/db_password" openssl rand -hex 16)
 JWT_SECRET=$(gen_or_read "$STORE/jwt_secret" openssl rand -hex 32)
-ADMIN_PASSWORD=$(gen_or_read "$STORE/admin_password" openssl rand -hex 16)
 
 umask 077
 
@@ -41,17 +41,8 @@ EOF
 cat > "$STORE/app.env" <<EOF
 SPRING_DATASOURCE_PASSWORD=${DB_PASSWORD}
 TOLGEE_AUTHENTICATION_JWT_SECRET=${JWT_SECRET}
-TOLGEE_AUTHENTICATION_INITIAL_PASSWORD=${ADMIN_PASSWORD}
 EOF
 chmod 600 "$STORE/db.env" "$STORE/app.env"
-
-# Record the admin login for the operator (idempotent).
-cat > "$STORE/credentials.txt" <<EOF
-Tolgee admin login
-  username: admin
-  password: ${ADMIN_PASSWORD}
-EOF
-chmod 600 "$STORE/credentials.txt"
 
 # Pre-pull so compose up starts fast and an image NotFound surfaces here.
 docker pull tolgee/tolgee:v3.224.5 || true

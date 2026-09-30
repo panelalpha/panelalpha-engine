@@ -13,15 +13,16 @@ description: >-
   CLOSED FIRST RUN. Seerr's setup wizard makes the first Plex account, or the
   first administrator of any Jellyfin/Emby server the caller names, the ADMIN
   (server/routes/auth.ts). While mediaServerType is NOT_CONFIGURED the
-  Jellyfin route even rewrites an existing user 1 as that caller (measured:
-  a seeded local owner became evil@example.com, userType Jellyfin). A
-  one-shot `seed` service runs before the app on every boot: it migrates with
-  Seerr's own compiled datasource, creates a local owner (User entity, bcrypt
-  via User.setPassword, Permission.ADMIN) only when no user exists, pins
+  Jellyfin route even rewrites an existing user 1 as that caller (measured: a
+  seeded local owner became evil@example.com, userType Jellyfin). A one-shot
+  `seed` service runs before the app on every boot: it migrates with Seerr's
+  own compiled datasource, creates a local owner (User entity, bcrypt via
+  User.setPassword, Permission.ADMIN) only when no user exists, pins
   mediaServerType while no server or account is linked, and sets
   public.initialized, applicationUrl and network.trustProxy. The owner email
-  has a random local part (admin-<hex>@<domain>) so a Plex account with a
-  guessable address cannot match it.
+  is the email the project was created with, or, when it has none, one with a
+  random local part (admin-<hex>@<domain>) so a Plex account with a guessable
+  address cannot match it.
 
   MEDIA SERVER. SEERR_MEDIA_SERVER (project env) is plex (default), jellyfin
   or emby. Seerr cannot start in Jellyfin/Emby mode without a server API key
@@ -32,7 +33,19 @@ description: >-
   customer's Plex email and redeploy (only while the owner has no linked
   account), then sign in with Plex.
 
-  SECRETS AND PERSISTENCE. hooks/prepare.sh writes the owner password once to
-  ~/.panelalpha/seerr/ (0600 in 0700) with a credentials.txt note. The
+  SECRETS AND PERSISTENCE. The engine generates the owner login
+  (`credentials:` below: SEERR_OWNER_EMAIL, the project's email or
+  admin-<hex>@<domain>, and a password, written to
+  ~/.panelalpha/app-credentials.env) and returns it from GET
+  /projects/{name}/app-credentials; a SEERR_OWNER_EMAIL set in the project env
+  replaces the generated email. Accounts deployed before this keep their
+  password (`adopt_from` their ~/.panelalpha/seerr/admin.env); their owner,
+  while no media account is linked, is moved to the new email by the seed. The
   database, settings.json (API key, session secret) and logs live on the
   seerr-config named volume and survive redeploys.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/seerr/admin.env
+  fields:
+    SEERR_OWNER_EMAIL: {kind: email, value: "{email}"}
+    SEERR_ADMIN_PASSWORD: {kind: password}

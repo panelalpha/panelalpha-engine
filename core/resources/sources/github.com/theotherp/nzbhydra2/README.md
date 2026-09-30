@@ -25,8 +25,13 @@ backups and logs.
 API key are then open to anyone with the address, and the first visitor
 decides the configuration.
 
-- `hooks/prepare.sh` generates an admin password, its bcrypt hash and an API
-  key once into `~/.panelalpha/nzbhydra/nzbhydra.env` (0600 in a 0700 dir).
+- The admin login is declared in `panelalpha.yaml` (`credentials:`): the
+  engine generates `NZBHYDRA_ADMIN_USER=admin` and a random password once and
+  writes `~/.panelalpha/app-credentials.env` before the prepare hook on every
+  deploy (`adopt_from` keeps the password of an account seeded from
+  `~/.panelalpha/nzbhydra/nzbhydra.env`).
+- `hooks/prepare.sh` writes that password's bcrypt hash and an API key once
+  into `~/.panelalpha/nzbhydra/nzbhydra.env` (0600 in a 0700 dir).
   The hash is `{bcrypt}$2a$...`, which Spring's delegating password encoder
   (the one NZBHydra2 authenticates with) accepts and which is what the app
   itself writes when a password is set in the UI.
@@ -39,8 +44,9 @@ decides the configuration.
   file. A password or key changed later in the UI is never reset by a redeploy.
 - `ready` gates `compose up -d` on `/actuator/health/ping`.
 
-Log in as `admin` with the password from `nzbhydra.env`; the API key for the
-*arr apps is in Config > Main.
+Log in with the username and password `GET /projects/{name}/app-credentials`
+(MCP `app_credentials_get`) returns; the API key for the *arr apps is in
+Config > Main.
 
 ## Verified (mariusz.panelalpha.tools, engine 705f250a, memory_limit 2500)
 

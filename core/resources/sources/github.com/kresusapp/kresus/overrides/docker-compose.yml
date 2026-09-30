@@ -32,6 +32,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # KRESUS_AUTH=<user>:<pass> from the engine's login: HTTP Basic Auth gating
+    # the WHOLE app (server/index.ts mounts it before every route). Written by
+    # the prepare hook with a colon-free password (Kresus splits on the first ':').
+    env_file:
+      - ../.panelalpha/kresus/auth.env
     environment:
       # The stable image's entrypoint runs `yarn global upgrade kresus` on every
       # boot unless IS_NIGHTLY is set. Pin to the version baked in 0.25.4:
@@ -44,10 +49,6 @@ services:
       KRESUS_DB_USERNAME: kresus
       KRESUS_DB_PASSWORD: ${KRESUS_DB_PASSWORD}
       KRESUS_DB_NAME: kresus
-      # HTTP Basic Auth gating the WHOLE app (server/index.ts mounts it before
-      # every route). Format is user:pass; the prepare hook generates it once
-      # with a colon-free password (Kresus splits on the first ':').
-      KRESUS_AUTH: ${KRESUS_AUTH}
       # Stable salt for export encryption; generated once, reused across deploys.
       KRESUS_SALT: ${KRESUS_SALT}
     volumes:

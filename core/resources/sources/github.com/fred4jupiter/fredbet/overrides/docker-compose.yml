@@ -2,7 +2,7 @@
 # gate, publishes Postgres with fred/fred, and FredBet creates admin/admin.
 #   - official image of the current release + Postgres on a named volume
 #   - the admin is created on first start from FREDBET_ADMIN_PASSWORD
-#     (~/.panelalpha/fredbet/app.env), so admin/admin never exists
+#     (~/.panelalpha/app-credentials.env, the engine's), so admin/admin never exists
 services:
   db:
     image: docker.io/library/postgres:17-alpine
@@ -31,6 +31,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/fredbet/app.env
+      # FREDBET_ADMIN_USERNAME / FREDBET_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/fredbet
       SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver

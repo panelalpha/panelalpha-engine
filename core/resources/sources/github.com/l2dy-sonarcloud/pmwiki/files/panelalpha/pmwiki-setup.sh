@@ -4,9 +4,9 @@
 #
 # Runs before the web server on every boot (start stage, before: true). It keeps
 # the page store and attachments outside the per-deploy wipe of ~/project, and
-# on the first boot generates the admin password so the wiki is not left
-# world-editable. Idempotent: once admin.hash exists, only the symlinks and the
-# persistent directories are (re)made.
+# writes the admin password hash so the wiki is not left world-editable. The
+# password is the engine's (`credentials:` in panelalpha.yaml). Idempotent: the
+# hash is rewritten only when it does not match that password.
 #
 # Persistence lives on /pa-data, which the recipe's docker-compose.override.yml
 # bind-mounts from ~/.panelalpha (the account home survives a redeploy; ~/project
@@ -16,7 +16,6 @@ set -eu
 
 PA_DATA="/pa-data/pmwiki"
 HASH="${PA_DATA}/admin.hash"
-CREDS="${PA_DATA}/admin-credentials.txt"
 
 if [ ! -d /pa-data ]; then
     echo "panelalpha/pmwiki: /pa-data is not mounted; the compose override did not apply" >&2
@@ -55,13 +54,13 @@ ln -sfn "${PA_DATA}/uploads" /app/uploads
 # Never serve the clone's VCS metadata.
 rm -rf /app/.git
 
-# First boot: generate an admin password. bcrypt hash goes to admin.hash (read
-# by local/config.php); the plaintext is surfaced only into the owner's store.
-if [ ! -f "${HASH}" ]; then
-    PW="$(php -r 'echo bin2hex(random_bytes(12));')"
-    php -r 'echo password_hash($argv[1], PASSWORD_DEFAULT);' "${PW}" > "${HASH}"
+# The admin password is the engine's, in ~/.panelalpha/app-credentials.env
+# (/pa-data here). Its bcrypt hash goes to admin.hash (read by local/config.php);
+# PmWiki keeps passwords in config only, so the engine's value is authoritative
+# and the hash is rewritten whenever it does not match it.
+. /pa-data/app-credentials.env
+if ! PW="${PMWIKI_ADMIN_PASSWORD}" H="${HASH}" php -r 'exit(is_file(getenv("H")) && password_verify(getenv("PW"), trim(file_get_contents(getenv("H")))) ? 0 : 1);'; then
+    PW="${PMWIKI_ADMIN_PASSWORD}" php -r 'echo password_hash(getenv("PW"), PASSWORD_DEFAULT);' > "${HASH}"
     chmod 600 "${HASH}"
-    printf 'PmWiki admin login\nuse: ?action=login  (username field is left blank; enter the password)\npassword: %s\n' "${PW}" > "${CREDS}"
-    chmod 600 "${CREDS}"
-    echo "panelalpha/pmwiki: generated admin password at ~/.panelalpha/pmwiki/admin-credentials.txt" >&2
+    echo "panelalpha/pmwiki: admin password hash written" >&2
 fi

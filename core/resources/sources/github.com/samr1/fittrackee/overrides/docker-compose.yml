@@ -73,7 +73,7 @@ services:
     command: "sh docker-entrypoint.sh"
     env_file:
       # Platform-merged account env first, then this account's seeded secrets
-      # (APP_SECRET_KEY, DATABASE_URL, admin creds) so an empty default cannot
+      # (APP_SECRET_KEY, DATABASE_URL) so an empty default cannot
       # clobber them.
       - .env
       - ../.panelalpha/fittrackee/app.env
@@ -124,8 +124,8 @@ services:
     mem_limit: 2g
 
   # One-shot: seeds the owner account. FitTrackee's entrypoint creates no admin,
-  # so this creates `admin` with role `owner` and the per-account password from
-  # ~/.panelalpha once the API is healthy (schema exists). Idempotent: on a
+  # so this creates the login the engine generated and keeps (app-credentials.env)
+  # with role `owner` once the API is healthy (schema exists). Idempotent: on a
   # redeploy the account already exists, so the password is left untouched and
   # only the role is re-asserted.
   seed-admin:
@@ -134,6 +134,7 @@ services:
     env_file:
       - .env
       - ../.panelalpha/fittrackee/app.env
+      - ../.panelalpha/app-credentials.env
     environment:
       FLASK_APP: "fittrackee"
       FLASK_SKIP_DOTENV: "1"

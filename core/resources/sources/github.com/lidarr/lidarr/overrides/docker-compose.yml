@@ -39,8 +39,9 @@ services:
     image: linuxserver/lidarr:3.1.0
     restart: "no"
     entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    # LIDARR_ADMIN_USER / LIDARR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/lidarr/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - lidarr-config:/config:ro
       - lidarr-music:/music

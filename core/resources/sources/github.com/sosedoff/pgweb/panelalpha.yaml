@@ -12,9 +12,10 @@ description: >-
   postgres:18-alpine sidecar as its database, the version upstream's own
   compose uses.
 
-  SECURED. hooks/prepare.sh generates an HTTP Basic auth password and the
-  database password once into ~/.panelalpha/pgweb/ (0600 files, 0700 dir;
-  credentials.txt holds the login). pgweb's basic auth is global middleware,
+  SECURED. The engine generates the HTTP Basic auth login (`credentials:`
+  below; returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get); hooks/prepare.sh generates the database password once
+  into ~/.panelalpha/pgweb/ (0600 files, 0700 dir). pgweb's basic auth is global middleware,
   so every route -- the page, static assets and the whole /api -- answers 401
   without it. pgweb also runs with --lock-session: it opens only
   PGWEB_DATABASE_URL, and /api/connect and /api/switchdb refuse, so even a
@@ -27,3 +28,8 @@ description: >-
 
   PERSISTENCE. The sidecar's data is the named volume pgweb-db and survives
   rebuilds.
+credentials:
+  adopt_from: .panelalpha/pgweb/pgweb.env
+  fields:
+    PGWEB_AUTH_USER: {kind: username, value: admin}
+    PGWEB_AUTH_PASS: {kind: password}

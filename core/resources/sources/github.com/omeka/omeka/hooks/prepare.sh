@@ -154,42 +154,9 @@ chmod -R u+rwX "${DATA_HOME}/files"
 ln -sfn /data/files files
 
 # ---------------------------------------------------------------------------
-# 4. The first administrator's password, generated per account and never a
-#    default.
-#
-#    Omeka Classic creates no user of its own. install/install.php puts a form
-#    at /install that creates the super user, and nothing authenticates it:
-#    IndexController::preDispatch() only checks whether the `options` table
-#    exists, so on an account that has just been given a public HTTPS name,
-#    the first stranger to load /install becomes the site's super user. The
-#    install runs from the install stage instead (files/panelalpha-setup.sh),
-#    and it needs a password that exists before it does.
-#
-#    Outside the checkout, because the engine copies whatever .env the clone
-#    ends with into a world-readable .env.default and writes the generated
-#    compose file 644 (engine#173) -- and because ~/project is deleted and
-#    re-cloned on every deploy, so a password kept there would stop matching
-#    the user in the database that survived.
-#
-#    Written once and never rewritten, for that same reason: the setup script
-#    is a no-op on an account that already has a super user.
-CREDENTIALS="${DATA_HOME}/admin-credentials"
-if [ ! -f "${CREDENTIALS}" ]; then
-    umask 077
-    cat > "${CREDENTIALS}" <<EOF
-# Written by PanelAlpha on first deploy. This is the Omeka super user for this
-# account -- sign in at https://<your-domain>/admin .
-#
-# Omeka Classic's installer is first-visitor-wins: /install creates the super
-# user and asks nobody who they are. It was run at deploy time instead, with
-# these values, and /install now answers "Omeka has already been installed".
-# Change the password under your profile and this file stops being
-# interesting.
-OMEKA_ADMIN_USERNAME=admin
-OMEKA_ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
-EOF
-    chmod 600 "${CREDENTIALS}"
-fi
+# 4. The first administrator's login is the engine's (`credentials:` in
+#    panelalpha.yaml): ~/.panelalpha/app-credentials.env, mounted into the app
+#    container by the override and read by files/panelalpha-install.php.
 
 # ---------------------------------------------------------------------------
 # 5. A php.ini, on a platform that loads none.

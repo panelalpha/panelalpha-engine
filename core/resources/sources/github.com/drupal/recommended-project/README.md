@@ -72,7 +72,7 @@ docblock is written about Drupal by name. It has never once fired — see
 | install/upgrade command 2 | `composer drupal:scaffold`, by name, so the document root is repaired even on a boot where Composer had nothing to install. |
 | install/upgrade command 3 | Removes `vendor/drupal/core`, 164 MB the host build downloaded into the wrong place. |
 | install/upgrade command 4 | `panelalpha-drupal.php`: writes `settings.php`, and on an empty database installs Drupal — before Apache binds. |
-| `hooks/prepare.sh` | The persistent store, the hash salt and the administrator password, the bind-mount sources and the mount point. |
+| `hooks/prepare.sh` | The persistent store, the hash salt, the bind-mount sources and the mount point. |
 | `overrides/docker-compose.override.yml` | The second `env_file:`, the two bind mounts, `PHP_INI_SCAN_DIR`, and a healthcheck that asks two questions. |
 | `files/panelalpha/php/zz-drupal.ini` | The container has no php.ini at all (engine #185). |
 | `files/panelalpha-dr.php` | A working entry point for Drupal's own CLI; `vendor/bin/dr` is broken here. |
@@ -188,11 +188,17 @@ instead — 0600 files in a 0700 directory, created by the hook because the
 account home is root-owned 755:
 
 ```
-~/.panelalpha/drupal/app.env       DRUPAL_HASH_SALT, DRUPAL_ADMIN_USER, DRUPAL_ADMIN_PASS
+~/.panelalpha/drupal/app.env       DRUPAL_HASH_SALT
 ~/.panelalpha/drupal/files/        the public file system  -> /app/web/sites/default/files
 ~/.panelalpha/drupal/private/      private files + config sync -> /app/private
-~/.panelalpha/drupal-admin-credentials.txt
 ```
+
+The administrator login (`DRUPAL_ADMIN_USER`, `DRUPAL_ADMIN_PASS`) is the
+engine's: `credentials:` in `panelalpha.yaml`, delivered in
+`~/.panelalpha/app-credentials.env` as a third `env_file:` entry and returned by
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`). An account
+deployed before this keeps the password from `~/.panelalpha/drupal/app.env`
+(`adopt_from`).
 
 `settings.php` is **not** persisted. It is regenerated from the container
 environment on both the install and the upgrade stage, so it cannot drift from

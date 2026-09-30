@@ -44,8 +44,9 @@ description: >-
      127.0.0.1 only, during the start hook BEFORE Apache serves: the DB step is
      answered from mes_options.php's _INSTALL_* constants, the schema is created,
      the plugins activated and the super-admin created with SPIP's server-side
-     hashing. The admin password is generated once into ~/.panelalpha/spip/
-     (0600) and reused; a redeploy finds the webmestre and skips. So the first
+     hashing, with the login the engine generates (`credentials:` below;
+     returned by GET /projects/{name}/app-credentials, MCP
+     app_credentials_get); a redeploy finds the webmestre and skips. So the first
      public visitor never sees an open installer. See README "First run".
 
   Hardening: mes_options.php and connect.php (which hold the DB password) live
@@ -88,3 +89,8 @@ commands:
     timeout: 300
     description: Redirect SPIP's config dir to persistent storage, symlink IMG/ onto ~/.panelalpha so uploaded media survives the redeploy that empties ~/project, and seed mes_options.php so the install wizard's database step is pre-filled from the account MySQL credentials.
     run: 'sh panelalpha/spip-setup.sh'
+credentials:
+  login_path: /ecrire/
+  fields:
+    SPIP_ADMIN_LOGIN: {kind: username, value: admin}
+    SPIP_ADMIN_PASSWORD: {kind: password}

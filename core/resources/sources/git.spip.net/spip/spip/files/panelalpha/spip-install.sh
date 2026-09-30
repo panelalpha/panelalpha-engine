@@ -12,13 +12,14 @@
 # non-interactive; the admin account is created at the etape_3b POST.
 #
 # Idempotent: if a webmestre already exists (a redeploy: the DB and connect.php
-# persist on /pa-data) it exits at once. The admin password is generated ONCE
-# into ~/.panelalpha/spip/admin-credentials.txt (0600) and reused.
+# persist on /pa-data) it exits at once. The admin login is the engine's
+# (`credentials:` in panelalpha.yaml), ~/.panelalpha/app-credentials.env, which
+# is /pa-data/app-credentials.env here.
 set -u
 
 ETC="${SPIP_ETC_DIR:-/pa-data/spip/config}"
 PA="/pa-data/spip"
-CREDS="${PA}/admin-credentials.txt"
+CREDS=/pa-data/app-credentials.env
 APP_URL="$(printf '%s' "${APP_URL:-}" | sed 's#/*$##')"
 PORT=8399
 CJ=/tmp/pa-spip-cj
@@ -45,12 +46,14 @@ fi
 # stale/partial one that would make it report "already installed".
 rm -f "${ETC}/connect.php"
 
-# --- Admin password: generate once, reuse thereafter.
-PW=""
-if [ -f "${CREDS}" ]; then
-	PW="$(sed -n 's/^password:[[:space:]]*//p' "${CREDS}" | head -1)"
+# --- Admin login: the engine's, NAME='value' lines.
+LOGIN="$(sed -n "s/^SPIP_ADMIN_LOGIN='\{0,1\}\([^']*\)'\{0,1\}$/\1/p" "${CREDS}" 2>/dev/null | head -1)"
+PW="$(sed -n "s/^SPIP_ADMIN_PASSWORD='\{0,1\}\([^']*\)'\{0,1\}$/\1/p" "${CREDS}" 2>/dev/null | head -1)"
+[ -n "${LOGIN}" ] || LOGIN=admin
+if [ -z "${PW}" ]; then
+	echo "panelalpha/spip: no SPIP_ADMIN_PASSWORD in ${CREDS}; leaving install to the owner" >&2
+	exit 1
 fi
-[ -n "${PW}" ] || PW="$(php -r 'echo bin2hex(random_bytes(12));')"
 MAILDOM="$(printf '%s' "${APP_URL}" | sed 's#^[a-z]*://##;s#/.*##;s#:.*##')"
 [ -n "${MAILDOM}" ] || MAILDOM="localhost"
 
@@ -79,7 +82,7 @@ curl -s --max-time 90 -c "${CJ}" -b "${CJ}" "${B}&etape=3b" \
 	--data-urlencode exec=install --data-urlencode etape=3b \
 	--data-urlencode nom=Administrator \
 	--data-urlencode "email=admin@${MAILDOM}" \
-	--data-urlencode login=admin \
+	--data-urlencode "login=${LOGIN}" \
 	--data-urlencode "pass=${PW}" --data-urlencode "pass_verif=${PW}" \
 	-o /tmp/pa-spip-3b.html -w '%{http_code}' >/dev/null
 # etape_4: activate the bundled plugins.
@@ -112,10 +115,6 @@ $s=$c->prepare("UPDATE spip_meta SET valeur=? WHERE nom=\x27adresse_site\x27"); 
 # drop the compiled cache so the corrected adresse_site takes effect on first hit
 rm -rf /app/tmp/cache/* 2>/dev/null || true
 
-# --- Store the credentials for the owner (0600), plaintext nowhere else.
-umask 077
-printf 'url:      %s/ecrire/\nlogin:    admin\npassword: %s\n' "${APP_URL}" "${PW}" > "${CREDS}"
-chmod 600 "${CREDS}" 2>/dev/null || true
 rm -f "${CJ}" /tmp/pa-spip-step.html /tmp/pa-spip-3b.html
-echo "panelalpha/spip: headless install complete; admin credentials at ~/.panelalpha/spip/admin-credentials.txt" >&2
+echo "panelalpha/spip: headless install complete; GET /projects/{name}/app-credentials returns the admin login" >&2
 exit 0

@@ -63,7 +63,8 @@ description: >-
   the `admin` account sql/pgsql/schema.sql seeds with the SHA1 of `password`,
   which tt-rss itself puts a red banner about on every page. files/
   panelalpha-ttrss-setup.sh replaces it on the install stage, before Apache
-  binds, with a password generated per account into ~/.panelalpha (0600) --
+  binds, with the password the engine generates (`credentials:` below;
+  returned by GET /projects/{name}/app-credentials, MCP app_credentials_get) --
   guarded by `--user-check-password admin:password`, so a redeploy never
   overwrites a password the owner has since chosen. SINGLE_USER_MODE is set
   false explicitly: it would skip authentication entirely and log every visitor
@@ -98,3 +99,8 @@ commands:
       Starts update.php --daemon in the background before the entrypoint execs
       Apache. It is the only thing that fetches a feed.
     run: 'sh panelalpha-ttrss-updater.sh'
+credentials:
+  adopt_from: .panelalpha/tt-rss-app.env
+  fields:
+    TTRSS_ADMIN_USER: {kind: username, value: admin}
+    TTRSS_ADMIN_PASS: {kind: password}

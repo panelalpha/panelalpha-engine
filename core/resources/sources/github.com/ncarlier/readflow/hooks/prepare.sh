@@ -18,7 +18,6 @@ SECRETS="${STORE}/secrets.env"   # generated once, sourced every deploy
 DB_ENV="${STORE}/db.env"         # POSTGRES_PASSWORD, read by the db container
 APP_ENV="${STORE}/app.env"       # READFLOW_* secrets, injected into readflow
 HTPASSWD="${STORE}/htpasswd"     # basic-auth credentials file
-NOTE="${STORE}/credentials.txt"
 
 mkdir -p "${STORE}"
 chmod 700 "${HOME}/.panelalpha" "${STORE}"
@@ -28,8 +27,6 @@ if [ ! -f "${SECRETS}" ]; then
     # '/', '+', '@', '=' or quotes to confuse either. The htpasswd hashers
     # (bcrypt / SHA) accept it as-is.
     PG_PASSWORD="$(openssl rand -hex 24)"
-    BASIC_USER="admin"
-    BASIC_PASSWORD="$(openssl rand -hex 18)"
     HASH_KEY="$(openssl rand -hex 32)"
     HASH_SALT="$(openssl rand -hex 16)"
     (
@@ -38,8 +35,6 @@ if [ ! -f "${SECRETS}" ]; then
 # Written once by PanelAlpha on the first deploy and never regenerated. Deleting
 # this file strands the pgdata volume (old password) and breaks content hashing.
 PG_PASSWORD=${PG_PASSWORD}
-BASIC_USER=${BASIC_USER}
-BASIC_PASSWORD=${BASIC_PASSWORD}
 HASH_KEY=${HASH_KEY}
 HASH_SALT=${HASH_SALT}
 EOF
@@ -51,6 +46,9 @@ fi
 
 # shellcheck disable=SC1090
 . "${SECRETS}"
+# BASIC_USER / BASIC_PASSWORD: the engine's (`credentials:`), written before
+# this hook. Read after secrets.env, which held them on older accounts.
+set -a; . "${HOME}/.panelalpha/app-credentials.env"; set +a
 
 # Materialise the per-deploy files from the persisted secrets (umask so nothing
 # is group/other readable except where a container needs it).
@@ -72,8 +70,8 @@ EOF
 
 # 3. htpasswd. Prefer a bcrypt hash (htpasswd -nbB) when apache2-utils is on the
 #    host; otherwise fall back to {SHA} (base64(sha1)), which readflow's htpasswd
-#    parser also accepts. The password itself is 36 hex chars (~144 bits), so it
-#    is not brute-forceable whichever digest wraps it.
+#    parser also accepts. The password is the engine's 24 random letters and
+#    digits, so it is not brute-forceable whichever digest wraps it.
 if command -v htpasswd >/dev/null 2>&1; then
     htpasswd -nbB "${BASIC_USER}" "${BASIC_PASSWORD}" > "${HTPASSWD}"
     say "htpasswd written (bcrypt)"
@@ -87,38 +85,6 @@ fi
 # owner; 600 would be unreadable there. 644 keeps it inside this single-tenant
 # account's own container. It holds only a hash, not the plaintext password.
 chmod 644 "${HTPASSWD}"
-
-# Onboarding note with the plaintext password (0600, never leaves the store).
-cat > "${NOTE}" <<EOF
-readflow on this account
-========================
-
-readflow is a self-hosted read-later / feed reader. This instance uses HTTP
-Basic Authentication.
-
-LOGIN (generated once, on the first deploy)
-  URL:      this account's URL
-  Username: ${BASIC_USER}
-  Password: ${BASIC_PASSWORD}
-
-  Your browser prompts for these on first access. The account is created inside
-  readflow automatically on first login and is an administrator. A redeploy
-  does not change the password (it is reused from ${STORE}).
-
-  To change it, regenerate the htpasswd (e.g. htpasswd -B ${STORE}/htpasswd
-  ${BASIC_USER}) and redeploy, or add more users to that file.
-
-SECRETS
-  The database password and the content-hash key/salt live in ${STORE} (0600).
-  They are generated once and reused on every redeploy so logins and data
-  survive rebuilds. Do not delete this directory.
-
-FEEDS / EMAIL
-  readflow ingests articles via its API, incoming webhooks, the browser
-  bookmarklet, and an optional built-in SMTP receiver (disabled here). Outgoing
-  notification email needs SMTP configured; none is set by default.
-EOF
-chmod 600 "${NOTE}"
 
 # The engine lists ~/project/.env as an env_file on generated services; make
 # sure it exists even when the platform has not written it yet, so

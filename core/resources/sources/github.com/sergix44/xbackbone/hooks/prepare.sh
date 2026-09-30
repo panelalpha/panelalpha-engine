@@ -126,27 +126,8 @@ fi
 # been completed, EnsureInstalled redirects every request to /install and
 # whoever opens it first picks the database, the storage backend and the admin
 # account. panelalpha/xbb-install.php closes that window on the install stage,
-# from these credentials, before Apache binds.
-#
-# Written once per account and never rewritten: the install script is a no-op
-# once XBackBone reports itself installed, so a regenerated password would
-# stop matching the account in a database that survived the redeploy.
-CREDENTIALS="${DATA_HOME}/admin-credentials"
-if [ ! -f "${CREDENTIALS}" ]; then
-    umask 077
-    cat > "${CREDENTIALS}" <<EOF
-# Written by PanelAlpha on first deploy. This is the XBackBone administrator
-# for this account -- sign in at https://<your-domain>/login .
-#
-# XBackBone's web installer creates the first administrator, and on a public
-# address that is whoever loads /install first. It was run at deploy time
-# instead, with these values, and is now closed. Change the password under
-# Profile and this file stops being interesting.
-XBACKBONE_ADMIN_EMAIL=admin@localhost
-XBACKBONE_ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
-EOF
-    chmod 600 "${CREDENTIALS}"
-fi
+# before Apache binds, with the login the engine generates (`credentials:` in
+# panelalpha.yaml): ~/.panelalpha/app-credentials.env, mounted by the override.
 
 # ------------------------------------------------------------------ 4. .env
 
@@ -163,8 +144,7 @@ fi
 # operator's -- the operator's own overrides come from the panel's env_vars,
 # which the engine merges over this file.
 cat > .env <<'EOF'
-# Written by PanelAlpha. See ~/.panelalpha/xbackbone/ for the application key
-# and the administrator credentials.
+# Written by PanelAlpha. See ~/.panelalpha/xbackbone/ for the application key.
 APP_ENV=production
 APP_DEBUG=false
 APP_INSTALLED=false

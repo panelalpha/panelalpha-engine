@@ -9,8 +9,10 @@ description: >-
   workflow as ghcr.io/muety/wakapi) pinned to the 2.18.0 release, on SQLite in
   a named volume that survives redeploys.
 
-  hooks/prepare.sh generates WAKAPI_PASSWORD_SALT and the owner's password once
-  into ~/.panelalpha/wakapi/. Signup is closed (WAKAPI_ALLOW_SIGNUP=false), so
+  hooks/prepare.sh generates WAKAPI_PASSWORD_SALT once into ~/.panelalpha/wakapi/;
+  the engine generates the owner's login (`credentials:` below) into
+  ~/.panelalpha/app-credentials.env, and GET /projects/{name}/app-credentials
+  (MCP app_credentials_get) returns it. Signup is closed (WAKAPI_ALLOW_SIGNUP=false), so
   there is no first-visitor-wins registration. The owner is created by a
   one-shot `seed` service after the app is healthy: it writes a single-use
   invite code into Wakapi's key_string_values table (the same row Settings >
@@ -18,3 +20,9 @@ description: >-
   first user Wakapi creates is its admin. Further users join through invite
   codes the owner generates. `ready` makes `compose up -d` return only after
   the seed has run.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/wakapi/admin.env
+  fields:
+    WAKAPI_ADMIN_USER: {kind: username, value: admin}
+    WAKAPI_ADMIN_PASSWORD: {kind: password}

@@ -13,6 +13,10 @@
 # dropped and the readiness gate wired up backwards.
 services:
   app:
+    # PRETIX_ADMIN_EMAIL / PRETIX_ADMIN_PASSWORD for panelalpha-admin-password.py,
+    # generated and kept by the engine. Appended to the generated env_file (.env).
+    env_file:
+      - ../.panelalpha/app-credentials.env
     # Three steps in place of the image's `CMD ["all"]`, run through bash
     # because two of them need a shell.
     #

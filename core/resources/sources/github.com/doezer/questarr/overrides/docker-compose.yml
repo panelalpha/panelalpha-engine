@@ -17,8 +17,9 @@ services:
     <<: *questarr
     restart: "no"
     command: ["node", "/panelalpha-seed.mjs"]
+    # QUESTARR_ADMIN_USER / QUESTARR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/questarr/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       PUID: "1001"
       PGID: "1001"

@@ -12,6 +12,8 @@ services:
     entrypoint: ["/bin/bash", "/panelalpha/jackett-seed.sh"]
     env_file:
       - ../.panelalpha/jackett/jackett.env
+      # JACKETT_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       JACKETT_BASE_URL: ${PA_PUBLIC_URL}
     volumes:

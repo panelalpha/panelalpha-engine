@@ -100,13 +100,11 @@ the seeder's echo, and identical in every Plainpad ever deployed. This is the
 same first-visitor-wins class as Koillection, Outline, NocoDB and Mattermost,
 except that here the password is not even unknown. So:
 
-- `hooks/prepare.sh` generates a 20-character password per account and writes it
-  to `~/.panelalpha/plainpad-admin` (0600), along with a bcrypt hash (cost 10,
+- The engine generates the password per account (`credentials:` in
+  `panelalpha.yaml`, returned by `GET /projects/{name}/app-credentials`, MCP
+  `app_credentials_get`) and writes `~/.panelalpha/app-credentials.env` before
+  the prepare hook; `hooks/prepare.sh` writes its bcrypt hash (cost 10,
   `config/hashing.php`'s own default) at `server/.panelalpha-admin.hash` (0600).
-  `~/.panelalpha` rather than the checkout, because a redeploy re-clones
-  `~/project` while the MySQL account in it lives on — a credentials file in the
-  checkout would be destroyed and the password lost. The account already owns
-  that directory; the home above it is root-owned 755.
 - `panelalpha/install.php` puts the hash on the account, **only while the stored
   one still verifies `12345678`**. A password the operator later chooses in the
   application is never reset under them.
@@ -219,7 +217,7 @@ and a file that is not the application should not be in the way.
 | File | Why |
 |---|---|
 | `panelalpha.yaml` | `extends: laravel`, `app_root`, `docroot`, `database`, `APP_REPOSITORY`, the install command, and the account of what was wrong |
-| `hooks/prepare.sh` | moves the workstation compose aside, deletes `setup.php`, generates and persists the admin password and the `APP_KEY` into `~/.panelalpha/` |
+| `hooks/prepare.sh` | moves the workstation compose aside, deletes `setup.php`, hashes the engine's admin password and persists the `APP_KEY` into `~/.panelalpha/` |
 | `files/package.json` | the root `package.json` `HostCompile::runForPhp()` looks for |
 | `files/panelalpha/build-client.sh` | build.sh's client build and merge, with `npm install` and `CI=false` |
 | `files/server/panelalpha/install.php` | APP_KEY into `.env`, the seed, and the admin password — all three guarded |
@@ -235,8 +233,8 @@ baseline and `php` checks passing, and HTTP 200 with the title `Plainpad`.
 Beyond the status code, against the public HTTPS domain:
 
 - `POST /api.php/v1/sessions` with `admin@example.org` / `12345678` — the
-  password upstream seeds — answers **401**. With the password from
-  `~/.panelalpha/plainpad-admin` it answers **201** with a session token.
+  password upstream seeds — answers **401**. With the generated password it
+  answers **201** with a session token.
 - With that token: `POST /api.php/v1/notes` creates a note (201) and
   `GET /api.php/v1/notes` reads it back with its title, content and pinned flag
   intact. `GET /api.php/v1/settings` returns the nine seeded rows and
@@ -286,7 +284,7 @@ Beyond the status code, against the public HTTPS domain:
   untested.
 - **Mail is not configured.** `SettingsSeeder` seeds `smtp.mailtrap.io:2525`
   with no credentials, which is upstream's placeholder. Plainpad needs mail only
-  for password recovery, and the one password there is sits in a file instead.
+  for password recovery, and the one password there is is kept by the engine.
   An admin can set a real server under Settings.
 - The engine leaves an empty root-owned `~/project/node_modules` behind (the
   host build's cache mount point) and a two-line `package-lock.json` from the

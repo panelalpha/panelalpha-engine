@@ -29,9 +29,10 @@ const SERVERS = {
   const serverName = (process.env.SEERR_MEDIA_SERVER || 'plex').trim().toLowerCase();
   const serverType = SERVERS[serverName];
   if (!serverType) throw new Error(`SEERR_MEDIA_SERVER must be plex, jellyfin or emby, not '${serverName}'`);
-  // SEERR_OWNER_EMAIL (project env): a Plex sign-in with this email links to the owner.
-  const wanted = (process.env.SEERR_OWNER_EMAIL || '').trim().toLowerCase();
-  const email = wanted || `admin-${need('SEERR_ADMIN_TAG')}@${need('PA_PUBLIC_HOST')}`.toLowerCase();
+  // SEERR_OWNER_EMAIL: the engine's admin-<random>@<domain>, or the project env's
+  // value: a Plex sign-in with this email links to the owner.
+  const wanted = need('SEERR_OWNER_EMAIL').toLowerCase();
+  const email = wanted;
 
   const db = await dataSource.initialize();
   if (isPgsql) {

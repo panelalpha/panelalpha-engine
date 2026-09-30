@@ -22,8 +22,11 @@ Sonarr recipe; the one real difference is how auth is pinned.
   (`NoAuthenticationHandler`), and "disabled for local addresses" would open it
   to everyone behind the proxy. A change made in the UI holds until the next
   deploy, which re-pins it.
-- `hooks/prepare.sh` writes `~/.panelalpha/whisparr/admin.env` once
-  (`WHISPARR_ADMIN_USER=admin`, random hex password).
+- The login is declared in `panelalpha.yaml` (`credentials:`): the engine
+  generates `WHISPARR_ADMIN_USER=admin` and a random password once, keeps them
+  on the project and writes `~/.panelalpha/app-credentials.env` before the
+  prepare hook on every deploy. `adopt_from` takes the password an account
+  deployed before this already has from `~/.panelalpha/whisparr/admin.env`.
 - `files/panelalpha-seed.sh` runs as the `seed` service after the app is
   healthy (`/ping`). It reads the API key from `/config/config.xml` (with sed:
   the hotio image has no xmlstarlet), and if `GET /api/v3/config/host` has no
@@ -33,5 +36,7 @@ Sonarr recipe; the one real difference is how auth is pinned.
 
 ## Login
 
-`admin` / the password in `~/.panelalpha/whisparr/admin.env`. The API key is in
+`GET /projects/{name}/app-credentials` returns the username and password (the
+MCP tool `app_credentials_get`). They are what the seed created: a password
+changed later in the UI is not reflected there. The API key is in
 Settings > General. Indexers and download clients are runtime configuration.

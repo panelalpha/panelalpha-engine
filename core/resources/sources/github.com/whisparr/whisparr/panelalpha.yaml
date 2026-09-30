@@ -14,9 +14,16 @@ description: >-
   visitor own the instance. Unlike Sonarr v4 it reads no WHISPARR__AUTH__ env,
   so a one-shot `init` service pins AuthenticationMethod=Forms (Basic is kept
   if the admin chose it), AuthenticationRequired=Enabled, port, bind address
-  and URL base in config.xml before the app starts, on every deploy.
-  hooks/prepare.sh generates the login password once into
-  ~/.panelalpha/whisparr/admin.env; a one-shot `seed` service, after the app
+  and URL base in config.xml before the app starts, on every deploy. The
+  engine generates the login (`credentials:` below) and writes it to
+  ~/.panelalpha/app-credentials.env; a one-shot `seed` service, after the app
   is healthy, reads Whisparr's own API key from config.xml and sets the user
   through PUT /api/v3/config/host, only when no user exists. `ready` makes
-  `compose up -d` return only after that.
+  `compose up -d` return only after that. The login is returned by GET
+  /projects/{name}/app-credentials. Accounts deployed before this kept theirs
+  in ~/.panelalpha/whisparr/admin.env, which `adopt_from` carries over.
+credentials:
+  adopt_from: .panelalpha/whisparr/admin.env
+  fields:
+    WHISPARR_ADMIN_USER: {kind: username, value: admin}
+    WHISPARR_ADMIN_PASSWORD: {kind: password}

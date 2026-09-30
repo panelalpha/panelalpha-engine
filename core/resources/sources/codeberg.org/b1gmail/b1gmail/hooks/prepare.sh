@@ -6,8 +6,9 @@ STATE="$HOME/.panelalpha/b1gmail"
 ENV_FILE="$STATE/b1gmail.env"
 
 # ~/project is emptied and re-cloned on every deploy (ProjectTree::clearContents),
-# so nothing that must survive one can live under it: the signing key, the admin
-# password and the mail store all go here instead.
+# so nothing that must survive one can live under it: the signing key and the
+# mail store go here instead. The admin login is the engine's (`credentials:`
+# in panelalpha.yaml), written to ~/.panelalpha/app-credentials.env before this hook.
 mkdir -p "$STATE/data"
 chmod 700 "$HOME/.panelalpha" "$STATE"
 
@@ -15,10 +16,11 @@ if [ ! -f "$ENV_FILE" ]; then
     umask 077
     {
         echo "B1GMAIL_SIGNKEY=$(openssl rand -hex 16)"
-        echo "B1GMAIL_ADMIN_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-16)"
     } > "$ENV_FILE"
-    echo "[panelalpha] b1gMail: generated $ENV_FILE (admin password lives here)"
+    echo "[panelalpha] b1gMail: generated $ENV_FILE"
 fi
+# An older deploy kept the admin password here too; the engine adopted it.
+sed -i '/^B1GMAIL_ADMIN_PASSWORD=/d' "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
 # The data directory is bind-mounted at /var/lib/b1gmail/data and holds every

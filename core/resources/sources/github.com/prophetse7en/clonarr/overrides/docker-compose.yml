@@ -11,8 +11,9 @@ services:
     image: ghcr.io/prophetse7en/clonarr:v3.4.0
     restart: "no"
     entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    # CLONARR_ADMIN_USER / CLONARR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/clonarr/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       TZ: Etc/UTC
       TRUSTED_NETWORKS: 127.0.0.1

@@ -11,8 +11,17 @@ description: >-
   With AUTH=on and no password account Profilarr sends every visitor to
   /auth/setup, where the first one owns the instance. A one-shot `seed`
   service starts Profilarr privately against the same volume, creates the
-  account through /auth/setup from ~/.panelalpha/profilarr/admin.env
-  (generated once by hooks/prepare.sh), and only then does the app service
-  publish its port. PROFILARR_API_KEY (app.env) gives full X-Api-Key access.
-  Linked databases (Dictionarry, TRaSH) are cloned from GitHub and Radarr/
-  Sonarr instances are added at runtime from the UI.
+  account through /auth/setup with the login the engine generates
+  (`credentials:` below, written to ~/.panelalpha/app-credentials.env), and
+  only then does the app service publish its port. PROFILARR_API_KEY (app.env)
+  gives full X-Api-Key access. Linked databases (Dictionarry, TRaSH) are
+  cloned from GitHub and Radarr/Sonarr instances are added at runtime from the
+  UI. The login is returned by GET /projects/{name}/app-credentials; accounts
+  deployed before this kept it in ~/.panelalpha/profilarr/admin.env, which
+  `adopt_from` carries over.
+credentials:
+  login_path: /auth/login
+  adopt_from: .panelalpha/profilarr/admin.env
+  fields:
+    PROFILARR_ADMIN_USER: {kind: username, value: admin}
+    PROFILARR_ADMIN_PASSWORD: {kind: password}

@@ -47,8 +47,9 @@ description: >-
   whole site (every route 302s to /setup until an admin exists) — a
   first-visitor-wins window (engine#200) if left for a stranger. The boot
   command closes it: it starts yarnd, waits for it to listen, and POSTs /setup
-  on localhost with the owner admin username and a password generated once into
-  ~/.panelalpha/yarn (0600) BEFORE the port is publicly reachable, so the admin
+  on localhost with the owner admin login the engine generates (`credentials:`
+  below; returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get) BEFORE the port is publicly reachable, so the admin
   is seeded non-interactively and the window never opens. Registration is left
   OPEN (OPEN_REGISTRATIONS/OPEN_PROFILES=true) because a Yarn.social pod is a
   social platform meant for sign-ups; registration and login are password-based
@@ -75,3 +76,8 @@ env:
   OPEN_REGISTRATIONS: 'true'
   OPEN_PROFILES: 'true'
   ADMIN_USER: 'admin'
+credentials:
+  login_path: /login
+  fields:
+    YARN_ADMIN_USER: {kind: username, value: admin}
+    YARN_ADMIN_PASSWORD: {kind: password}

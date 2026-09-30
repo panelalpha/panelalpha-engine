@@ -12,12 +12,14 @@ services:
       PUID: "${CONTAINER_UID}"
       PGID: "${CONTAINER_GID}"
     # ~/.panelalpha/tube (relative to the compose dir ~/project) -> /data. Holds
-    # every uploaded/transcoded video, thumbnails, the tube.db index, the upload
-    # password and the rendered config.json — all of tube's state, surviving the
+    # every uploaded/transcoded video, thumbnails, the tube.db index and the
+    # rendered config.json — all of tube's state, surviving the
     # per-deploy ~/project wipe (engine#173).
     volumes:
       - "../.panelalpha/tube:/data"
-    # Reuse the persistent upload password and render config.json before tube
+      # The upload login, generated and kept by the engine; read by pa-run.sh.
+      - "../.panelalpha/app-credentials.env:/pa/app-credentials.env:ro"
+    # Export the upload password and render config.json before tube
     # takes over.
     command: ["/usr/local/bin/pa-run.sh"]
     # Transcoding is CPU/RAM heavy; give it room on this heavy host.

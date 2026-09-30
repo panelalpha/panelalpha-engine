@@ -7,7 +7,8 @@
 #   - creates that dir,
 #   - generates the three production pod secrets ONCE (reused forever) so
 #     sessions/tokens survive a restart, 0600, never in ~/project,
-#   - generates the admin password ONCE for the non-interactive /setup seed,
+#   - (the admin login for the /setup seed is the engine's, `credentials:` in
+#     panelalpha.yaml, mounted read-only for pa-run.sh),
 #   - records the account uid/gid and the container secrets path into
 #     ~/project/.env for the compose ${...} interpolation.
 set -e
@@ -33,28 +34,6 @@ if [ ! -f "${SECRETS}" ]; then
   echo "yarnd: generated pod secrets."
 else
   echo "yarnd: reusing existing pod secrets."
-fi
-
-# Admin password for the first-boot /setup seed. Generated once, reused.
-PW_FILE="${DATA_DIR}/.admin_password"
-if [ ! -f "${PW_FILE}" ]; then
-  umask 077
-  tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 24 > "${PW_FILE}"
-  chmod 600 "${PW_FILE}"
-fi
-
-# Owner-recoverable credential record — 0600, in the persistent dir, never in
-# ~/project.
-CRED="${DATA_DIR}/panelalpha-credentials.txt"
-if [ ! -f "${CRED}" ]; then
-  umask 077
-  cat > "${CRED}" <<EOF
-Yarn.social pod admin login
-  username: admin
-  password: $(cat "${PW_FILE}")
-Registration is OPEN; anyone may sign up. Set SMTP_* to enable password reset.
-EOF
-  chmod 600 "${CRED}"
 fi
 
 # The dockerfile strategy declares env_file: .env and the override interpolates

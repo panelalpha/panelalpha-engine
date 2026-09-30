@@ -79,14 +79,16 @@ description: >-
   md5('bluecherry'.salt) -- and the only consequence in the UI is a dismissible
   banner. On a public HTTPS name that is a working administrator login of
   Admin / bluecherry for anyone who knows the product. files/panelalpha-setup.sh
-  replaces that row with a password generated per account, then signs in with it
+  replaces that row with the login the engine generates (`credentials:` below,
+  returned by GET /projects/{name}/app-credentials, MCP app_credentials_get),
+  then signs in with it
   and fetches an access_setup page to prove the replacement works. The UPDATE is
   conditioned on the row still carrying that exact default -- the same test
   lib.php makes -- so it is idempotent across redeploys and never overwrites a
   password the customer has since chosen; when it matches nothing the script
   says so and skips the sign-in check rather than logging a refusal.
 
-  Every credential lives in ~/.panelalpha/bluecherry.env (0600, in a 0700
+  Every other secret lives in ~/.panelalpha/bluecherry.env (0600, in a 0700
   directory) and nowhere else, and that file is also the stack's env_file --
   compose reads it at ../.panelalpha/bluecherry.env, relative to the
   --project-directory the engine passes. ~/project/.env holds one line, the
@@ -128,3 +130,8 @@ description: >-
   limit was found enforced anywhere in the tree -- though that was not tested
   with cameras attached, which is the one part of this application no deploy
   here exercises.
+credentials:
+  adopt_from: .panelalpha/bluecherry.env
+  fields:
+    BLUECHERRY_ADMIN_USERNAME: {kind: username, value: Admin}
+    BLUECHERRY_ADMIN_PASSWORD: {kind: password}

@@ -5,10 +5,9 @@ cd ~/project
 # Secrets live outside ~/project, not in it. The engine wipes and re-clones
 # ~/project on every deploy (engine#173), so a guard on a file there never
 # fires on a redeploy -- it would regenerate the database password while the
-# db_data volume still holds the old one, and regenerate an admin password
-# nobody was ever told while the Users row still has the old hash. ~/.panelalpha
-# survives the clone, so that is where the account's credentials are kept and
-# where a human is pointed. The home directory is root-owned 0755, so the
+# db_data volume still holds the old one. ~/.panelalpha survives the clone, so
+# that is where the account's secrets are kept. The admin login is the engine's
+# (`credentials:` in panelalpha.yaml), in ~/.panelalpha/app-credentials.env. The home directory is root-owned 0755, so the
 # directory has to be created rather than assumed.
 SECRETS_DIR="${HOME}/.panelalpha"
 SECRETS="${SECRETS_DIR}/bluecherry.env"
@@ -28,27 +27,25 @@ if [ ! -f "${SECRETS}" ]; then
     # default_password when password == md5('bluecherry'.salt). So a fresh
     # instance on a public HTTPS name accepts Admin / bluecherry from anyone
     # who knows the product. The UI shows a dismissible banner and nothing
-    # more. files/panelalpha-setup.sh replaces that row with these values.
+    # more. files/panelalpha-setup.sh replaces that row with the engine's login
+    # and this salt.
     #
     # The salt column is char(4) and the application's own generator is
     # data::getRandomString(4) over [0-9a-z], so the salt matches that shape
-    # exactly; the entropy is in the password, which is 20 alphanumerics --
-    # passed through the container environment, embedded in a shell-quoted SQL
-    # literal and typed by a human, so no punctuation.
+    # exactly; the entropy is in the password, which the engine generates as
+    # alphanumerics -- it is embedded in a shell-quoted SQL literal.
     umask 077
     DB_ROOT_PASSWORD=$(openssl rand -hex 24)
     cat > "${SECRETS}" <<EOF
 # Written by PanelAlpha on the first deploy of this account, and reused by
 # every redeploy. Bluecherry ships a fixed default administrator
 # (Admin / bluecherry) in its initial data; PanelAlpha replaces it with the
-# credential below rather than leaving that door open.
+# login in ../app-credentials.env, salted with the value below.
 #
 # This file is also the compose stack's env_file -- overrides/docker-compose.yml
 # reads it at ../.panelalpha/bluecherry.env, relative to the project directory
 # -- so nothing in here is ever copied into ~/project. The two duplicated
 # values at the bottom are the names the two images' own entrypoints read.
-BLUECHERRY_ADMIN_USERNAME=Admin
-BLUECHERRY_ADMIN_PASSWORD=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-20)
 BLUECHERRY_ADMIN_SALT=$(openssl rand -hex 8 | tr -dc '0-9a-f' | cut -c1-4)
 # The database account the application connects with.
 BLUECHERRY_DB_PASSWORD=$(openssl rand -hex 24)

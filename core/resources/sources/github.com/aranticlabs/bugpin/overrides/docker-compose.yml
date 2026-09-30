@@ -3,8 +3,8 @@
 # all state on a named volume that survives project_rebuild and pre-seeds a
 # strong admin credential before the server boots.
 services:
-  # One-shot: pre-seed the first admin with the password generated into
-  # ~/.panelalpha/bugpin/admin.env, so BugPin's own bootstrap never writes its
+  # One-shot: pre-seed the first admin with the login the engine generated
+  # (~/.panelalpha/app-credentials.env), so BugPin's own bootstrap never writes its
   # documented default (admin@example.com / changeme123). Idempotent — a no-op
   # once the account exists. Runs on the same /data volume as the app.
   bugpin-init:
@@ -14,7 +14,7 @@ services:
       - NODE_ENV=production
       - DATA_DIR=/data
     env_file:
-      - ../.panelalpha/bugpin/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - bugpin_data:/data
       - ./docker/pa-seed.ts:/app/pa-seed.ts:ro

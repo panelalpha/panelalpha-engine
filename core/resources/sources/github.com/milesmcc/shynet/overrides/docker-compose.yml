@@ -57,6 +57,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/shynet/app.env
+      # SHYNET_ADMIN_EMAIL / SHYNET_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       DB_HOST: db
       DB_PORT: "5432"

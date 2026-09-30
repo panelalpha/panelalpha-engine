@@ -46,7 +46,8 @@ services:
     user: "65532:65532"
     entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
     env_file:
-      - ../.panelalpha/wakapi/admin.env
+      # WAKAPI_ADMIN_USER / WAKAPI_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - wakapi-data:/data
       - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro

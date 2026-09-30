@@ -133,32 +133,17 @@ if [ ! -f "$STORE" ]; then
 # existing database is not recoverable.
 CRAFT_SECURITY_KEY=$(openssl rand -base64 32 | tr -d '\n')
 CRAFT_APP_ID=CraftCMS--$(openssl rand -hex 8)
-# The first administrator. Created non-interactively from the install stage,
-# so the install never sits open on /index.php?p=admin/install waiting for
-# whoever arrives first to claim it.
-PA_CRAFT_ADMIN_USERNAME=admin
-PA_CRAFT_ADMIN_EMAIL=admin@example.com
-PA_CRAFT_ADMIN_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)
 PA_CRAFT_SITE_NAME=Craft CMS
 EOF
     )
     chmod 600 "$STORE"
-    say "generated the account's security key and administrator password in ~/.panelalpha/craft.env"
+    say "generated the account's security key in ~/.panelalpha/craft.env"
 fi
 
-# Where a human is pointed. ~/project is re-cloned every deploy, so this is a
-# copy of the stored value rather than the value itself -- the same password on
-# every redeploy, and the one the database actually holds.
-(
-    umask 077
-    {
-        echo "# Written by PanelAlpha. Craft has no sign-up page and its installer"
-        echo "# creates the first administrator; this is the one it created."
-        grep -E '^PA_CRAFT_ADMIN_(USERNAME|EMAIL|PASSWORD)=' "$STORE" | sed 's/^PA_CRAFT_//'
-        echo "# Control panel: <your domain>/admin"
-    } > .panelalpha-admin-password
-)
-chmod 600 .panelalpha-admin-password
+# The first administrator is the engine's (`credentials:` in panelalpha.yaml):
+# ~/.panelalpha/app-credentials.env, the third env_file. Created
+# non-interactively from the install stage, so the install never sits open on
+# /index.php?p=admin/install waiting for whoever arrives first to claim it.
 
 # ---------------------------------------------------------------------------
 # 4. The directories Craft writes into.

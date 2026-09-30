@@ -15,8 +15,8 @@ server on `:3001` (plus an internal Apprise API), SQLite in `/data`.
   as `admin` / `changeme` (hard-coded, no env to seed it). `files/panelalpha-seed.sh`
   runs as the `seed` service before the app publishes its port: it starts the
   server privately, logs in with `changeme` and calls
-  `POST /api/auth/change-password` with the password from
-  `~/.panelalpha/meshmonitor/admin.env`, then fails unless `changeme` returns 401.
+  `POST /api/auth/change-password` with the password the engine generates
+  (`credentials:` in `panelalpha.yaml`), then fails unless `changeme` returns 401.
   On a redeploy it checks the admin hash read-only first and exits without
   starting a second server if `changeme` no longer matches.
 - Only the web UI is published. The embedded MQTT broker stays inside the
@@ -32,4 +32,5 @@ server on `:3001` (plus an internal Apprise API), SQLite in `/data`.
 
 ## Login
 
-`admin` / the password in `~/.panelalpha/meshmonitor/admin.env`.
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) returns the
+login the seed set; a password changed later in the UI is not reflected there.

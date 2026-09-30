@@ -44,8 +44,8 @@ done
 # first-run setup and it has a web face: an uninstalled Craft answers
 # /index.php?p=admin/install with the installer, and whoever reaches it first
 # becomes the administrator of the site. Running it from the install stage,
-# before Apache binds, with a password generated per account into
-# ~/.panelalpha/craft.env, means the window never opens.
+# before Apache binds, with the login the engine generated
+# (~/.panelalpha/app-credentials.env), means the window never opens.
 #
 # `install/check` exits 1 when Craft is not installed, which is what makes this
 # idempotent: the upgrade stage of a redeploy finds an installed Craft and

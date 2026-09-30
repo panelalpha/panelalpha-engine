@@ -24,7 +24,13 @@ class Networking
 
     public function publicAppUrl(): ?string
     {
-        $domain = $this->project->userModel()->getMainDomain();
+        return self::publicUrlOf($this->project->userModel());
+    }
+
+    /** The same answer from the model alone, for readers that have no runtime. */
+    public static function publicUrlOf(User $user): ?string
+    {
+        $domain = $user->getMainDomain();
         if ($domain === null) {
             return null;
         }

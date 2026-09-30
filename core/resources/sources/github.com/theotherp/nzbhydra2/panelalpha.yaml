@@ -11,12 +11,21 @@ description: >-
   on a named volume (nzbhydra.yml, the H2 database, backups).
 
   Security: upstream starts with auth type NONE, so the web UI, indexer
-  credentials and the API key would be open to anyone with the address.
-  hooks/prepare.sh generates an admin password (bcrypt-hashed as Spring's
-  delegating encoder expects, {bcrypt}$2a$...) and an API key once into
-  ~/.panelalpha/nzbhydra/nzbhydra.env; a one-shot `init` service writes
-  nzbhydra.yml from the image's own default before the first boot, only if it
-  is absent, with form login, every area restricted to the admin, the API key
-  and the welcome dialog marked shown. A password or key changed later in the
-  UI is never reset by a redeploy. `ready` gates `compose up -d` on the app's
-  health endpoint.
+  credentials and the API key would be open to anyone with the address. The
+  engine generates the admin login (`credentials:` below, written to
+  ~/.panelalpha/app-credentials.env); hooks/prepare.sh writes its bcrypt hash
+  (as Spring's delegating encoder expects, {bcrypt}$2a$...) and an API key
+  once into ~/.panelalpha/nzbhydra/nzbhydra.env; a one-shot `init` service
+  writes nzbhydra.yml from the image's own default before the first boot, only
+  if it is absent, with form login, every area restricted to the admin, the
+  API key and the welcome dialog marked shown. A password or key changed later
+  in the UI is never reset by a redeploy. `ready` gates `compose up -d` on the
+  app's health endpoint. The login is returned by GET
+  /projects/{name}/app-credentials; accounts deployed before this kept it in
+  ~/.panelalpha/nzbhydra/nzbhydra.env, which `adopt_from` carries over.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/nzbhydra/nzbhydra.env
+  fields:
+    NZBHYDRA_ADMIN_USER: {kind: username, value: admin}
+    NZBHYDRA_ADMIN_PASSWORD: {kind: password}

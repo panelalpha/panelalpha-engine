@@ -13,6 +13,7 @@ use App\System\Project\Dind\AccountMemory;
 use App\System\Project\Dind\AccountTeardown;
 use App\System\Project\Dind\AccountTemplate;
 use App\System\Project\Dind\AppCertificate;
+use App\System\Project\Dind\AppCredentialDelivery;
 use App\System\Project\Dind\AppManager;
 use App\System\Project\Dind\ContainerOperations;
 use App\System\Project\Dind\AppHealth;
@@ -68,6 +69,7 @@ class Dind implements DeployableDindProject, Runtime
     private ?AppCertificate $appCertificate = null;
     private ?PrepareFromSource $prepareFromSource = null;
     private ?ProjectEnvironment $projectEnvironment = null;
+    private ?AppCredentialDelivery $appCredentials = null;
 
     public function __construct(
         private readonly ProjectAggregate $project,
@@ -305,6 +307,12 @@ class Dind implements DeployableDindProject, Runtime
     public function applyProjectEnvVars(): void
     {
         $this->projectEnvironment()->apply();
+    }
+
+    /** The login a manifest's `credentials:` declares, written into the account. */
+    public function appCredentials(): AppCredentialDelivery
+    {
+        return $this->appCredentials ??= new AppCredentialDelivery($this);
     }
 
     private function prepareFromSource(): PrepareFromSource

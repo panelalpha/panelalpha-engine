@@ -9,8 +9,9 @@ services:
     image: zefhemel/silverbullet:2.11.1-slim
     restart: "no"
     env_file:
-      # Missing file aborts `up` rather than leaving setup open.
-      - ../.panelalpha/silverbullet/admin.env
+      # PA_SB_ADMIN_USER / PA_SB_ADMIN_PASSWORD, generated and kept by the
+      # engine. Missing file aborts `up` rather than leaving setup open.
+      - ../.panelalpha/app-credentials.env
     entrypoint:
       - /bin/sh
       - -c

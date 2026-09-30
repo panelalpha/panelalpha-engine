@@ -83,6 +83,8 @@ services:
     # exists.
     env_file:
       - ../.panelalpha/davical-app.env
+      # DAVICAL_ADMIN_PASS, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
 
     depends_on:
       davical-db:

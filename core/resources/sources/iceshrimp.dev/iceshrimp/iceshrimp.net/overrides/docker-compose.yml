@@ -66,9 +66,9 @@ services:
         set -e
         mkdir -p /media && chmod 0777 /media
         ./Iceshrimp.Backend --migrate
-        echo "Iceshrimp: ensuring admin user '$$ADMIN_USERNAME' exists"
+        echo "Iceshrimp: ensuring admin user '$$ICESHRIMP_ADMIN_USER' exists"
         set +e
-        OUT=$$(./Iceshrimp.Backend --create-admin-user "$$ADMIN_USERNAME" --password "$$ADMIN_PASSWORD" 2>&1); RC=$$?
+        OUT=$$(./Iceshrimp.Backend --create-admin-user "$$ICESHRIMP_ADMIN_USER" --password "$$ICESHRIMP_ADMIN_PASSWORD" 2>&1); RC=$$?
         echo "$$OUT"
         set -e
         if [ $$RC -ne 0 ]; then
@@ -83,8 +83,9 @@ services:
       Database__Username: iceshrimp
       Database__Password: ${ICESHRIMP_DB_PASSWORD}
       Storage__Local__Path: /media
-      ADMIN_USERNAME: ${ICESHRIMP_ADMIN_USER}
-      ADMIN_PASSWORD: ${ICESHRIMP_ADMIN_PASSWORD}
+    # ICESHRIMP_ADMIN_USER / ICESHRIMP_ADMIN_PASSWORD, generated and kept by the engine.
+    env_file:
+      - ../.panelalpha/app-credentials.env
     volumes:
       - media-data:/media
     depends_on:

@@ -54,9 +54,9 @@ or unreachable falls back to `:latest` — a tag whose pull fails takes the whol
 deploy with it, and `:latest` at least runs.
 
 Secrets, generated in `hooks/prepare.sh` into `.env`, which compose
-interpolates:
+interpolates (the super admin's `NC_ADMIN_EMAIL` / `NC_ADMIN_PASSWORD` are the
+engine's; see below):
 
-- `NC_ADMIN_EMAIL` / `NC_ADMIN_PASSWORD` — the super admin. See below.
 - `NC_AUTH_JWT_SECRET` — 32 random bytes. `Noco.ts` persists a `uuidv4()` into
   `nc_store` when this is unset, which works but is 122 bits and lives only in
   the database.
@@ -67,8 +67,7 @@ interpolates:
 
 The hook writes `.env` only when there is none: the data volume outlives the
 checkout, and a regenerated JWT secret would log everyone out, a regenerated
-encryption key would make stored data-source credentials undecryptable, and a
-regenerated admin password would be one nobody was ever told.
+encryption key would make stored data-source credentials undecryptable.
 
 ## `NC_SITE_URL`
 
@@ -100,9 +99,10 @@ HTTPS name, the first stranger who finds it.
 `helpers/initAdminFromEnv.ts` is the way out: with `NC_ADMIN_EMAIL` and
 `NC_ADMIN_PASSWORD` set, NocoDB creates the super admin itself on first boot
 (and refuses to start at all if the email is set and the password is empty).
-`hooks/prepare.sh` generates a 20-character password per account into
-`~/project/.panelalpha-admin-password` (0600) — never a fixed default. NocoDB's
-own rule is only "at least 8 letters" (`nocodb-sdk/passwordHelpers.ts`).
+The engine generates both (`credentials:` in `panelalpha.yaml`), the services
+read them from `~/.panelalpha/app-credentials.env`, and
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) returns them
+— never a fixed default.
 
 **Creating the admin does not close the door behind it.**
 `DEFAULT_APP_SETTINGS.invite_only_signup` is `false`
@@ -167,7 +167,7 @@ probe:
 - `GET /` 302s to `/dashboard`, which 301s to `/dashboard/` and serves 19 KB of
   the real SPA with a 200.
 - `POST /api/v1/auth/user/signin` with the credentials from
-  `.panelalpha-admin-password` returns a JWT. A wrong password returns 400, so
+  `app-credentials` returns a JWT. A wrong password returns 400, so
   the 200 is not a page that would greet anyone.
 - `GET /api/v1/app-settings` with that token returns
   `{"invite_only_signup":true,…}`, and `POST /api/v1/auth/user/signup` for a

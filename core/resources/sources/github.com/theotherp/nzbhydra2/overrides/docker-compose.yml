@@ -12,6 +12,8 @@ services:
     entrypoint: ["/bin/bash", "/panelalpha/nzbhydra-seed.sh"]
     env_file:
       - ../.panelalpha/nzbhydra/nzbhydra.env
+      # NZBHYDRA_ADMIN_USER / NZBHYDRA_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - nzbhydra-config:/config
       - ./panelalpha/nzbhydra-seed.sh:/panelalpha/nzbhydra-seed.sh:ro

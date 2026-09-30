@@ -11,10 +11,19 @@ description: >-
 
   With no user in the database autobrr sends every visitor to /onboard, where
   the first one creates the only account and owns the instance. A one-shot
-  `seed` service starts autobrr privately (loopback, no published port) against
-  the same volume and creates the user through its own /api/auth/onboard from
-  ~/.panelalpha/autobrr/admin.env (generated once by hooks/prepare.sh), only
-  while onboarding is still open; the app service publishes its port only after
-  that. Sessions are server-side rows in the database, so there is no session
-  secret to generate. The bind address is pinned to 0.0.0.0 and CORS to the
-  site's own origin by environment.
+  `seed` service starts autobrr privately (loopback, no published port)
+  against the same volume and creates the user through its own
+  /api/auth/onboard from the login the engine generates (`credentials:` below,
+  written to ~/.panelalpha/app-credentials.env), only while onboarding is
+  still open; the app service publishes its port only after that. Sessions are
+  server-side rows in the database, so there is no session secret to generate.
+  The bind address is pinned to 0.0.0.0 and CORS to the site's own origin by
+  environment. The login is returned by GET /projects/{name}/app-credentials;
+  accounts deployed before this kept it in ~/.panelalpha/autobrr/admin.env,
+  which `adopt_from` carries over.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/autobrr/admin.env
+  fields:
+    AUTOBRR_ADMIN_USER: {kind: username, value: admin}
+    AUTOBRR_ADMIN_PASSWORD: {kind: password}

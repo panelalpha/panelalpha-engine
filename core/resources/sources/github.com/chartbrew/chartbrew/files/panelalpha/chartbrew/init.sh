@@ -6,7 +6,7 @@
 # exists (UserRoute.js: areThereAnyUsers -> 401). So "first visitor wins" unless
 # we claim the owner seat ourselves before the site is reachable. This container
 # waits for the API, then registers the operator's owner with the generated
-# password from ~/.panelalpha/chartbrew/owner.env.
+# login from ~/.panelalpha/app-credentials.env (the engine's).
 set -e
 
 API="http://chartbrew:4019"

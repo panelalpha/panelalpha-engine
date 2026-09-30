@@ -20,9 +20,17 @@ description: >-
   admin@admin.com / foobar when the database is created. A one-shot `init`
   service on the same storage volume runs `rails db:prepare` (which creates and
   seeds the database), then a `rails runner` script that changes that admin's
-  email and password to the ones generated once into ~/.panelalpha/blackcandy.
+  email and password to the login the engine generates (`credentials:` below)
+  into ~/.panelalpha/app-credentials.env.
   The app service depends on it completing, so the default login never answers
   on the public port. It acts only while admin@admin.com still authenticates
-  with foobar, so a login changed in the app survives a redeploy. The generated
-  login is in credentials.txt there. A `ready` gate holds the deploy until
+  with foobar, so a login changed in the app survives a redeploy. GET
+  /projects/{name}/app-credentials (MCP app_credentials_get) returns the
+  login. A `ready` gate holds the deploy until
   /up answers.
+credentials:
+  login_path: /sessions/new
+  adopt_from: .panelalpha/blackcandy/app.env
+  fields:
+    BC_ADMIN_EMAIL: {kind: email, value: admin@blackcandy.local}
+    BC_ADMIN_PASSWORD: {kind: password}

@@ -161,13 +161,14 @@ services:
     depends_on:
       bluecherry:
         condition: service_healthy
-    # Secrets, as above.
+    # Secrets, as above, then the admin login the engine generated and keeps.
     env_file:
       - ../.panelalpha/bluecherry.env
+      - ../.panelalpha/app-credentials.env
     environment:
-      # The credentials -- BLUECHERRY_DB_PASSWORD, BLUECHERRY_ADMIN_USERNAME,
-      # BLUECHERRY_ADMIN_PASSWORD, BLUECHERRY_ADMIN_SALT -- come from the
-      # env_file above under exactly those names.
+      # The credentials -- BLUECHERRY_DB_PASSWORD, BLUECHERRY_ADMIN_SALT and
+      # BLUECHERRY_ADMIN_USERNAME / BLUECHERRY_ADMIN_PASSWORD -- come from the
+      # env_files above under exactly those names.
       BLUECHERRY_DB_HOST: db
       BLUECHERRY_DB_NAME: bluecherry
       BLUECHERRY_DB_USER: bluecherry

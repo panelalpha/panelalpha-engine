@@ -9,9 +9,11 @@ description: >-
 
   With no password set Houndarr sends every visitor to /setup, where the first
   one owns the instance. A one-shot `seed` service starts Houndarr on loopback
-  against the same volume, submits /setup from ~/.panelalpha/houndarr/admin.env
-  (generated once by hooks/prepare.sh), and only then does the app service
-  publish its port.
+  against the same volume, submits /setup with the login the engine generates
+  (`credentials:` below, written to ~/.panelalpha/app-credentials.env), and
+  only then does the app service publish its port. The login is returned by
+  GET /projects/{name}/app-credentials; accounts deployed before this kept it
+  in ~/.panelalpha/houndarr/admin.env, which `adopt_from` carries over.
 
   The login rate limit (5 failures a minute) is keyed on the client address.
   HOUNDARR_TRUSTED_PROXIES stays unset: Houndarr would read the left-most
@@ -26,3 +28,9 @@ description: >-
   widget API key generated through Settings (CSRF enforced, 403 without)
   reads /api/v1/widget, and both admin and key survive a rebuild with the
   seed reporting "admin present, nothing to seed".
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/houndarr/admin.env
+  fields:
+    HOUNDARR_ADMIN_USER: {kind: username, value: admin}
+    HOUNDARR_ADMIN_PASSWORD: {kind: password}

@@ -24,15 +24,16 @@ services:
       - lingarr-config:/app/config
     mem_limit: 1g
 
-  # Creates the admin from ~/.panelalpha/lingarr/admin.env and completes
+  # Creates the admin from ~/.panelalpha/app-credentials.env and completes
   # onboarding, talking to the app directly before the proxy exists. Only ever
   # creates: an existing admin (and a password changed in the UI) is left alone.
   seed:
     image: alpine:3
     restart: "no"
     entrypoint: ["/bin/sh", "/panelalpha/lingarr-seed.sh"]
+    # LINGARR_ADMIN_USER / LINGARR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/lingarr/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha/lingarr-seed.sh:/panelalpha/lingarr-seed.sh:ro
     depends_on:

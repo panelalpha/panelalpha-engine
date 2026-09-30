@@ -51,9 +51,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # Secrets (DB/Redis passwords, CB_ENCRYPTION_KEY, CB_SECRET, BullMQ creds).
+    # Secrets (DB/Redis passwords, CB_ENCRYPTION_KEY, CB_SECRET), then the
+    # BullMQ dashboard login the engine generated (CB_BULLMQ_*).
     env_file:
       - ../.panelalpha/chartbrew/app.env
+      - ../.panelalpha/app-credentials.env
     environment:
       # Bind the API on all interfaces so nginx can reach it by service name.
       CB_API_HOST: "0.0.0.0"
@@ -89,8 +91,11 @@ services:
     depends_on:
       chartbrew:
         condition: service_healthy
+    # OWNER_EMAIL / OWNER_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/chartbrew/owner.env
+      - ../.panelalpha/app-credentials.env
+    environment:
+      OWNER_NAME: Owner
     volumes:
       - ./panelalpha/chartbrew/init.sh:/pa/init.sh:ro
     entrypoint: ["/bin/sh", "/pa/init.sh"]

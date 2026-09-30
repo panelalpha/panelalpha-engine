@@ -14,8 +14,10 @@ description: >-
 
   On an empty database Beszel serves an anonymous "create account" form
   (/api/beszel/create-user) that makes its submitter admin and superuser.
-  hooks/prepare.sh generates USER_EMAIL (admin@example.com) and USER_PASSWORD
-  once into ~/.panelalpha/beszel/admin.env (0600 in 0700), fed as an env_file;
+  The engine generates USER_EMAIL (admin@example.com) and USER_PASSWORD
+  (`credentials:` below) into ~/.panelalpha/app-credentials.env, fed as an
+  env_file, and GET /projects/{name}/app-credentials (MCP app_credentials_get)
+  returns them;
   Beszel's initial migration creates the user and the PocketBase superuser from
   them before the port opens, so the form is never registered. The values are
   read only by that migration; a password changed later is not reset by a
@@ -31,4 +33,9 @@ description: >-
   Measured on mariusz.panelalpha.tools: fresh deploy 34s, hub 11 MiB of its
   512 MiB cap; first-run false, create-user 404, anonymous sign-up 403; login
   as the seeded user returns role admin; a system created through the API reads
-  back; after rebuild the admin.env md5, the user and the system are unchanged.
+  back; after rebuild the stored login, the user and the system are unchanged.
+credentials:
+  adopt_from: .panelalpha/beszel/admin.env
+  fields:
+    USER_EMAIL: {kind: email, value: admin@example.com}
+    USER_PASSWORD: {kind: password}

@@ -15,11 +15,18 @@ description: >-
 
   Snipe-IT's first run is a web wizard in which the first visitor creates the
   superuser. A one-shot `setup` service completes that wizard over the
-  internal network with the generated admin (admin / the password in
-  ~/.panelalpha/snipeit/admin.env), running the wizard's own migrate step (it
+  internal network with the admin login the engine generates (`credentials:`
+  below; GET /projects/{name}/app-credentials, MCP app_credentials_get,
+  returns it), running the wizard's own migrate step (it
   also creates the Passport keys the API needs) and its own create-admin
   step. The artisan snipeit:create-admin command is not enough: setup counts
   as complete only when both a user and the settings row exist, and only the
   wizard writes the settings row. Once done every /setup URL redirects to the
   site. A no-op `ready` service waits for `setup` so the deploy finishes only
   once the admin exists.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/snipeit/admin.env
+  fields:
+    SNIPEIT_ADMIN_USER: {kind: username, value: admin}
+    SNIPEIT_ADMIN_PASSWORD: {kind: password}

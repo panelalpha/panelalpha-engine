@@ -44,8 +44,10 @@ description: >-
   (`step1.php:60-84`, `step2.php:62`, `step5.php:84-153`,
   `upgrade.php:88-91`), and `install/inc.php:140` carries a `getopt()` block
   and an `install_usage()` for exactly this. So `step1.php` writes `conf.php`,
-  `step2.php` loads the schema, `step5.php` creates the administrator with a
-  per-account password and writes `install.lock`, and the version-specific
+  `step2.php` loads the schema, `step5.php` creates the administrator with the
+  login the engine generates (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials, MCP app_credentials_get) and writes
+  `install.lock`, and the version-specific
   migrations stay upstream's. `hooks/prepare.sh` then denies `/install/`
   outright in an `.htaccess`, because `install/upgrade.php` and
   `install/upgrade2.php` run schema migrations with no authentication of their
@@ -117,3 +119,8 @@ commands:
       would then never run at all.
     run: 'php /app/panelalpha-dolibarr-setup.php'
     timeout: 900
+credentials:
+  adopt_from: .panelalpha/dolibarr-app.env
+  fields:
+    DOLI_ADMIN_LOGIN: {kind: username, value: admin}
+    DOLI_ADMIN_PASS: {kind: password}

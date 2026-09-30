@@ -8,14 +8,17 @@ description: >-
   published shoshuo/prismarr image of the current release, 1.2.0, with the
   same named volume.
 
-  With no user Prismarr sends every visitor into its setup wizard, whose
-  admin step creates the only account, and until the wizard is finished its
-  later steps stay reachable anonymously. A one-shot `seed` service runs the
-  image privately (no published port) against the same volume and walks the
-  wizard's own admin and finish forms from ~/.panelalpha/prismarr/admin.env
-  (login e-mail admin@prismarr.local and a password generated once by
-  hooks/prepare.sh); the app service publishes its port only after that.
-  Radarr/Sonarr/TMDb and the rest are then configured under Settings.
+  With no user Prismarr sends every visitor into its setup wizard, whose admin
+  step creates the only account, and until the wizard is finished its later
+  steps stay reachable anonymously. A one-shot `seed` service runs the image
+  privately (no published port) against the same volume and walks the wizard's
+  own admin and finish forms with the login the engine generates
+  (`credentials:` below: e-mail admin@prismarr.local and a password, written
+  to ~/.panelalpha/app-credentials.env); the app service publishes its port
+  only after that. Radarr/Sonarr/TMDb and the rest are then configured under
+  Settings. The login is returned by GET /projects/{name}/app-credentials;
+  accounts deployed before this kept it in ~/.panelalpha/prismarr/admin.env,
+  which `adopt_from` carries over.
 
   After seeding every wizard step redirects away (setup_completed=1) except
   /setup/welcome, a static language picker. Login throttling (5 per 15
@@ -31,3 +34,9 @@ description: >-
   instance added under Settings reads back from the page and the database,
   and admin and instance survive a rebuild with the seed reporting "setup
   already complete".
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/prismarr/admin.env
+  fields:
+    PRISMARR_ADMIN_EMAIL: {kind: email, value: admin@prismarr.local}
+    PRISMARR_ADMIN_PASSWORD: {kind: password}

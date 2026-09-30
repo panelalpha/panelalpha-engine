@@ -43,8 +43,9 @@ services:
     image: ghcr.io/haveagitgat/tdarr:2.91.01
     restart: "no"
     entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    # TDARR_ADMIN_USER / TDARR_ADMIN_PASSWORD, generated and kept by the engine.
     env_file:
-      - ../.panelalpha/tdarr/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - tdarr-media:/media
       - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro

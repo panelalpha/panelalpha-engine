@@ -30,11 +30,12 @@ description: >-
 
   == What the recipe supplies ==
 
-  1. hooks/prepare.sh generates one 24-character password once into
-     ~/.panelalpha/posterr/ (admin-password, admin.env, auth/htpasswd for user
-     `admin`, credentials.txt; 0600 files in 0700 dirs, never regenerated)
-     and writes a docker-compose.override.yml running the proxy as the
-     account uid so it can read the htpasswd.
+  1. The engine generates the login (`credentials:` below: user `admin` and a
+     24-character password, written to ~/.panelalpha/app-credentials.env);
+     hooks/prepare.sh writes ~/.panelalpha/posterr/auth/htpasswd from it
+     once (0600 in 0700, never regenerated) and writes a
+     docker-compose.override.yml running the proxy as the account uid so it
+     can read the htpasswd.
   2. A one-shot `init` (the same image, node, files/panelalpha/posterr/
      init.js) lets Posterr write its own default settings.json, then replaces
      the README default `raidisnotabackup` with the generated password before
@@ -55,4 +56,13 @@ description: >-
   Plex IP/token, title colour) and read back, intact after rebuild; init then
   logs "already non-default; nothing to do". App 35 MiB, proxy 9 MiB.
 
-  Credentials: ~/.panelalpha/posterr/credentials.txt.
+  The login (HTTP Basic user and password; the same password is the settings
+  page's) is returned by GET /projects/{name}/app-credentials. Accounts
+  deployed before this kept it in ~/.panelalpha/posterr/admin.env, which
+  `adopt_from` carries over.
+credentials:
+  login_path: /settings
+  adopt_from: .panelalpha/posterr/admin.env
+  fields:
+    POSTERR_USER: {kind: username, value: admin}
+    POSTERR_PASSWORD: {kind: password}

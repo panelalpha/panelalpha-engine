@@ -84,8 +84,9 @@ description: >-
   the install stage, *before* Apache binds: it writes `settings.php` and then
   drives Drupal's own `install_drupal()` non-interactively -- the same call
   `Drupal\Core\Command\InstallCommand` makes, with the MySQL driver namespace
-  in place of SQLite -- with an administrator password generated per account by
-  `hooks/prepare.sh`. Once that has run, `core/install.php` answers "Drupal
+  in place of SQLite -- with the administrator login the engine generates
+  (`credentials:` below), returned by GET /projects/{name}/app-credentials (MCP
+  app_credentials_get). Once that has run, `core/install.php` answers "Drupal
   already installed" to everyone.
 
   **On Drupal 11 the `standard` profile is no longer a standard site.** This
@@ -117,8 +118,8 @@ description: >-
   clone (`ProjectTree::clearContents()`, engine #173), which takes
   `web/sites/default/settings.php` and `web/sites/default/files` with it.
   Three things therefore live in `~/.panelalpha/drupal/` instead:
-  `app.env` (the hash salt and the administrator credentials, 0600 in a 0700
-  directory, delivered by a second `env_file:` entry), `files/` (the public
+  `app.env` (the hash salt, 0600 in a 0700 directory, delivered by a second
+  `env_file:` entry), `files/` (the public
   file system, bind-mounted back over `web/sites/default/files`) and
   `private/` (private files and the config sync directory). `settings.php`
   itself is not persisted -- it is *regenerated* from the container
@@ -203,3 +204,9 @@ commands:
       SELECT, and settings.php is rewritten because the clone deleted it.
     run: 'php /app/panelalpha-drupal.php'
     timeout: 900
+credentials:
+  login_path: /user/login
+  adopt_from: .panelalpha/drupal/app.env
+  fields:
+    DRUPAL_ADMIN_USER: {kind: username, value: admin}
+    DRUPAL_ADMIN_PASS: {kind: password}

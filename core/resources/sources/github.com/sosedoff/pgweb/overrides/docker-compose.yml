@@ -10,6 +10,8 @@ services:
     command: ["--lock-session", "--no-ssh", "--open-retry=20"]
     env_file:
       - ../.panelalpha/pgweb/pgweb.env
+      # PGWEB_AUTH_USER / PGWEB_AUTH_PASS, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     depends_on:
       postgres:
         condition: service_healthy

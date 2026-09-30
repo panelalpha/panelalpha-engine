@@ -25,11 +25,15 @@ nothing.
   and `/temp` (transcode cache).
 - **Auth is on** (`auth=true`). With no user, Tdarr's UI asks whoever loads it
   first to create the account (`POST /api/v2/public/auth/register`, which
-  answers 403 once any user exists). `hooks/prepare.sh` writes, once:
-  - `~/.panelalpha/tdarr/tdarr.env`: `authSecretKey` (JWT signing key) and
-    one `tapi_…` key used as both `seededApiKey` (server) and `apiKey` (the
-    internal node, which needs it once auth is on);
-  - `~/.panelalpha/tdarr/admin.env`: `admin` plus a random password.
+  answers 403 once any user exists). `hooks/prepare.sh` writes, once,
+  `~/.panelalpha/tdarr/tdarr.env`: `authSecretKey` (JWT signing key) and one
+  `tapi_…` key used as both `seededApiKey` (server) and `apiKey` (the internal
+  node, which needs it once auth is on).
+- The admin login is declared in `panelalpha.yaml` (`credentials:`): the
+  engine generates `TDARR_ADMIN_USER=admin` and a random password once and
+  writes `~/.panelalpha/app-credentials.env` before the prepare hook on every
+  deploy (`adopt_from` keeps the password of an account seeded from
+  `~/.panelalpha/tdarr/admin.env`).
 - `files/panelalpha-seed.sh` runs as the `seed` service (same image, it has
   curl). It chowns `/media` to PUID 1000, polls the server every second and
   registers the admin as soon as it answers, then logs in with those
@@ -39,7 +43,8 @@ nothing.
 
 ## Login
 
-`admin` / the password in `~/.panelalpha/tdarr/admin.env`. For scripts, send
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) returns the
+username and password the seed registered. For scripts, send
 `x-api-key` with the key from `tdarr.env`, or log in at
 `/api/v2/public/auth/login` and send `Authorization: Bearer <token>`.
 
