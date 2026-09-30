@@ -87,7 +87,9 @@ A IA tirou a criação de software dos limites de antes. Mais gente consegue tra
 
 Você precisa de um servidor **novo** com Debian 12/13 ou Ubuntu 22.04/24.04/26.04, com pelo menos 2 GB de RAM e 1 CPU, e entra como `root` por SSH.
 
-**One-line installation command** é o jeito mais rápido de começar: ela instala o Engine e coloca uma aplicação no ar de uma vez. Basta adicionar depois de `--repo` o repositório Git que você quer usar, e o instalador cuida das duas partes: instala o Engine e já começa a montar o projeto a partir do repositório informado. Por exemplo, para instalar o Engine e implantar o n8n ao mesmo tempo, é só isto:
+**One-line installation command** é o jeito mais rápido de começar: ela instala o Engine e coloca uma aplicação no ar de uma vez. Basta adicionar depois de `--repo` o repositório Git que você quer usar, e o instalador cuida das duas partes: instala o Engine e já começa a montar o projeto a partir do repositório informado.
+
+Por exemplo, para instalar o Engine e implantar o n8n ao mesmo tempo, é só isto:
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n

@@ -87,7 +87,9 @@ AI 已经把软件创造从旧的限制里解放出来。更多人能把想法�
 
 你需要一台**全新**的服务器，系统为 Debian 12/13 或 Ubuntu 22.04/24.04/26.04，至少 2 GB 内存和 1 核 CPU，并以 `root` 通过 SSH 登录。
 
-**One-line installation command** 是最快的上手方式：它安装 Engine，并一次性让一个应用上线。你只需在 `--repo` 后面加上想使用的 Git 仓库，安装程序就会完成两件事：安装 Engine，并立即用你提供的仓库开始创建项目。例如，想同时安装 Engine 并部署 n8n，只需这一条：
+**One-line installation command** 是最快的上手方式：它安装 Engine，并一次性让一个应用上线。你只需在 `--repo` 后面加上想使用的 Git 仓库，安装程序就会完成两件事：安装 Engine，并立即用你提供的仓库开始创建项目。
+
+例如，想同时安装 Engine 并部署 n8n，只需这一条：
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n

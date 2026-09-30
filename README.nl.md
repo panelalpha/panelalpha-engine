@@ -87,7 +87,9 @@ AI heeft software maken uit zijn oude grenzen gehaald. Meer mensen kunnen een id
 
 Je hebt een **verse** server nodig met Debian 12/13 of Ubuntu 22.04/24.04/26.04, minimaal 2 GB RAM en 1 CPU, en je logt in als `root` via SSH.
 
-**One-line installation command** is de snelste manier om te beginnen: het installeert Engine en zet in één keer een applicatie online. Je voegt na `--repo` gewoon de Git-repository toe die je wilt gebruiken, en de installer regelt beide onderdelen: hij installeert Engine en begint meteen met het opzetten van het project uit jouw repository. Wil je bijvoorbeeld Engine installeren en tegelijk n8n deployen, dan is dit alles wat je nodig hebt:
+**One-line installation command** is de snelste manier om te beginnen: het installeert Engine en zet in één keer een applicatie online. Je voegt na `--repo` gewoon de Git-repository toe die je wilt gebruiken, en de installer regelt beide onderdelen: hij installeert Engine en begint meteen met het opzetten van het project uit jouw repository.
+
+Wil je bijvoorbeeld Engine installeren en tegelijk n8n deployen, dan is dit alles wat je nodig hebt:
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n

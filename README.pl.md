@@ -87,7 +87,9 @@ AI wyłamało tworzenie oprogramowania ze starych ograniczeń. Więcej ludzi pot
 
 Potrzebujesz **świeżego** serwera z Debianem 12/13 albo Ubuntu 22.04/24.04/26.04, z minimum 2 GB RAM i 1 CPU, i logujesz się jako `root` przez SSH.
 
-**One-line installation command** to najszybszy sposób na start: instaluje Engine i od razu wystawia aplikację online. Wystarczy, że po `--repo` podasz repozytorium Git, którego chcesz użyć, a instalator zajmie się obiema częściami: zainstaluje Engine i od razu zacznie tworzyć projekt z podanego repozytorium. Na przykład, żeby zainstalować Engine i jednocześnie wdrożyć n8n, wystarczy to:
+**One-line installation command** to najszybszy sposób na start: instaluje Engine i od razu wystawia aplikację online. Wystarczy, że po `--repo` podasz repozytorium Git, którego chcesz użyć, a instalator zajmie się obiema częściami: zainstaluje Engine i od razu zacznie tworzyć projekt z podanego repozytorium.
+
+Na przykład, żeby zainstalować Engine i jednocześnie wdrożyć n8n, wystarczy to:
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
