@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Matchering 2.0, audio matching and mastering, through its official web
+  application (Matchering WEB: Django + an RQ worker + Redis under supervisord)
+  on :8360. The repository is the Python library, so a plain deploy detects
+  python, finds no server and serves the engine placeholder. Upstream's
+  DOCKER.md runs sergree/matchering-web; this recipe runs its current release,
+  0.1.7, with /app/data (SQLite database and uploaded/mastered tracks, which
+  the app deletes after 60 minutes) on a named volume that survives redeploys.

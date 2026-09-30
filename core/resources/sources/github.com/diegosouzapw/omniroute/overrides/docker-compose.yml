@@ -1,0 +1,56 @@
+# Compose-replace: the repo's compose builds from source (the Next.js build is
+# OOM-killed in a 4096 MB account) and binds ./data into the project dir a
+# redeploy wipes. This runs the published image of the current release, as
+# upstream's docker-compose.selfhost.yml does, with data on a named volume.
+services:
+  redis:
+    image: docker.io/library/redis:8.6.5-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 256m
+
+  app:
+    image: diegosouzapw/omniroute:3.8.50
+    restart: unless-stopped
+    stop_grace_period: 40s
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      DATA_DIR: /app/data
+      REDIS_URL: redis://redis:6379
+      BASE_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # SQLite store, including the JWT/API-key secrets the app generates once.
+      - omniroute-data:/app/data
+    # Dashboard and the /v1 API share one port unless API_PORT is set.
+    ports:
+      - "20128:20128"
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.mjs"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once the app answers (engine#204).
+  ready:
+    image: docker.io/library/redis:8.6.5-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  omniroute-data: {}
+  redis-data: {}

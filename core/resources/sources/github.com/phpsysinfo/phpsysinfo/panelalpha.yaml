@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  phpSysInfo, a PHP page that reports the host's uptime, CPU, memory, disks
+  and network from /proc. The repository is the application itself
+  (index.php at the root, a composer.json with only ext-* requirements), but
+  its Dockerfile outranks the PHP platform, and that Dockerfile does not build
+  the checkout: it installs Apache and PHP 7.4 on ubuntu:20.04 and
+  `git clone`s upstream into /var/www/html/phpsysinfo, so `/` serves Ubuntu's
+  default Apache page and the app only exists under /phpsysinfo/.
+
+  The recipe serves the checkout on the PHP platform from the repository root
+  and, at build, copies the shipped phpsysinfo.ini.new to phpsysinfo.ini --
+  the one step upstream's own Dockerfile and install notes do, and without
+  which every page is "ERROR: phpsysinfo.ini does not exist". The repo's
+  .htaccess keeps phpsysinfo.ini itself from being served. In a container it
+  reports the account's container, which is what it can see.
+extends: php
+docroot: .
+commands:
+  - id: config
+    stage: build
+    description: 'Start from the configuration upstream ships unless the repository commits its own; the app refuses to render without phpsysinfo.ini.'
+    run: 'test -f phpsysinfo.ini || cp phpsysinfo.ini.new phpsysinfo.ini'

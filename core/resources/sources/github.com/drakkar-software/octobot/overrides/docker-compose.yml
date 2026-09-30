@@ -1,0 +1,42 @@
+# Compose-replace: the repo compose publishes 80->5001 (dead in node mode)
+# and a watchtower that needs the host Docker socket.
+services:
+  octobot:
+    image: drakkarsoftware/octobot:3.0.0-beta2
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Default is /octobot/tasks.db, outside every volume.
+      SCHEDULER_SQLITE_FILE: /octobot/user/tasks.db
+    volumes:
+      - octobot-user:/octobot/user
+      - octobot-tentacles:/octobot/tentacles
+      - octobot-logs:/octobot/logs
+      - octobot-backtesting:/octobot/backtesting
+    healthcheck:
+      # The image's healthcheck probes the disabled 5001 interface.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/app"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1536m
+
+  # No-op: `compose up -d` returns once the node UI answers.
+  ready:
+    image: drakkarsoftware/octobot:3.0.0-beta2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    healthcheck:
+      disable: true
+    depends_on:
+      octobot:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  octobot-user: {}
+  octobot-tentacles: {}
+  octobot-logs: {}
+  octobot-backtesting: {}

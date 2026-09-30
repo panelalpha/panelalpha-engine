@@ -1,0 +1,38 @@
+# Compose-replace: the repo compose mounts a config file the repo does not
+# ship (EISDIR crash) and keeps data in bind mounts under ~/project. Runs the
+# current release image with the repo's docs-config.yaml and named volumes.
+services:
+  app:
+    image: ghcr.io/codex-team/codex.docs:v2.3.3
+    restart: unless-stopped
+    # The project's env vars; APP_CONFIG_<key>_<key> overrides any config key
+    env_file:
+      - .env
+    volumes:
+      - ./docs-config.yaml:/usr/src/app/docs-config.yaml:ro
+      - db:/usr/src/app/db
+      - uploads:/usr/src/app/uploads
+    ports:
+      - "3000:3000"
+    healthcheck:
+      # `/` redirects to the start page once one exists; any status < 400 is up
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/', r => process.exit(r.statusCode < 400 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 512m
+
+  # `compose up -d` returns only once the site answers.
+  ready:
+    image: ghcr.io/codex-team/codex.docs:v2.3.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db: {}
+  uploads: {}

@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Maintainerr is rule-based cleanup for a Plex, Jellyfin or Emby library and
+  the *arr stack (Radarr, Sonarr, Seerr, Tautulli): rules pick media, it
+  builds collections and deletes after a grace period. NestJS + React on
+  SQLite. The repository moved to github.com/Maintainerr/Maintainerr; the old
+  URL redirects.
+
+  The repository ships only a source Dockerfile (a full yarn/turbo monorepo
+  build). overrides/docker-compose.yml runs the published
+  ghcr.io/maintainerr/maintainerr image pinned to the current release (3.29.0)
+  with /opt/data (maintainerr.sqlite, logs) on a named volume and the README's
+  TELEMETRY=off.
+
+  Security: Maintainerr has no authentication at all -- no guard, no login,
+  no user model in apps/server/src -- and expects a reverse proxy to provide
+  one. It stores the customer's Plex token and every *arr/Seerr/Tautulli API
+  key, returns them in plain JSON (GET /api/settings/radarr), and
+  GET /api/settings/database/download hands out the whole SQLite file. So the
+  app publishes nothing: `proxy` (nginx-unprivileged, HTTP Basic on every
+  path) is the only thing on the account's port. hooks/prepare.sh generates
+  a 24-character password once into ~/.panelalpha/maintainerr/admin-password
+  (user `admin`) and its apr1 hash into ~/.panelalpha/maintainerr/auth/htpasswd
+  (both 0600 in 0700 dirs, never regenerated; add users by appending to
+  htpasswd), and writes a docker-compose.override.yml running the proxy as the
+  account uid so it can read that file. The proxy waits for the image's own
+  healthcheck (/api/health/ready), so a finished deploy means migrations ran.
+
+  Measured on mariusz.panelalpha.tools (2026-09-28, engine 705f250a): deploy
+  54s, rebuild 32s; app 160 MiB, proxy 10 MiB. Anonymous /, /api/settings,
+  /api/settings/radarr, /api/settings/database/download, /api/events/stream,
+  POST /api/settings/radarr and a wrong password -> 401; the app port 6246 is
+  not published. Authenticated: <title>Maintainerr, version 3.29.0, a Radarr
+  server (with API key) and the application title saved and read back, both
+  intact after rebuild with the same password. The engine's health check reads
+  the 401 as healthy (serving ok). Server-Sent Events stream through the
+  engine's webserver; the *.panelalpha.online test edge answers them with a
+  302 to its error page after ~11s (engine#170), so live updates need a real
+  domain.

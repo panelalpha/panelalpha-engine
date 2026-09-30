@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Halo, the website builder and blogging platform (Java, Spring Boot) on :8090,
+  with its console at /console.
+
+  The repository's Dockerfile only packages a jar that must be built first
+  (COPY build/libs/*.jar) and there is no compose file, so a plain deploy
+  fails at the image build. This recipe runs upstream's published image of
+  the current release, halohub/halo:2.26.1, on PostgreSQL 17 as upstream's
+  Docker Compose guide does. hooks/prepare.sh writes the database password
+  once to ~/.panelalpha/halo/db.env (0600 in 0700). halo.external-url is the
+  account's public URL. The work directory (themes, plugins, attachments) and
+  the database are on named volumes that survive redeploys. The JVM heap is
+  capped at 512 MB; a `ready` gate makes the deploy finish only once
+  /actuator/health/readiness answers.
+
+  First run is upstream's: Halo opens its setup page, where the first visitor
+  creates the administrator.

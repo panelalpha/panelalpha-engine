@@ -1,0 +1,16 @@
+# Compose-replace: the repo has no compose file, and its Dockerfile's first
+# listener (8080) is a decoy. Published image of the current release; only
+# the threat-feed dashboard is published. Honeypots keep their default ports
+# inside the container, which the site's domain does not reach.
+services:
+  app:
+    image: deceptifeed/server:0.69.0
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - deceptifeed-data:/data
+    mem_limit: 128m
+
+volumes:
+  deceptifeed-data: {}

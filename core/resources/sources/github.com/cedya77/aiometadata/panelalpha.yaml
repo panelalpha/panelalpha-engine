@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  AIOMetadata is a Stremio metadata addon (Node) with its own web configure
+  page and dashboard on :3232; user configurations live in SQLite under
+  /app/addon/data, metadata is cached in Redis.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repository ships only a Dockerfile, so
+  the engine builds it and the server answers 503 forever: REDIS_URL is
+  mandatory and the addon refuses to boot on a Redis older than 8.0 (it needs
+  HSETEX / HTTL). This recipe runs the published ghcr.io/cedya77/aiometadata
+  image of the current release (3.3.1) with a redis:8 sidecar, sets HOST_NAME
+  to the site's address, and keeps the SQLite data (and poster cache) and the
+  Redis cache on named volumes.
+
+  No server secret is needed to start. TMDB and other API keys are entered by
+  each user on the configure page, or set once for everyone as
+  BUILT_IN_TMDB_API_KEY etc.; ADMIN_KEY protects the admin dashboard
+  endpoints. All of these pass through from the project's environment.

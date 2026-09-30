@@ -1,0 +1,112 @@
+# Upstream's compose_example.yml on the published release image instead of a
+# per-account build; the config file is written from the environment.
+services:
+  web:
+    image: misskey/misskey:2026.9.1
+    restart: unless-stopped
+    # POSTGRES_PASSWORD, shared with the db service.
+    env_file:
+      - ../.panelalpha/misskey/db.env
+    environment:
+      PA_PUBLIC_URL: ${PA_PUBLIC_URL}
+      MISSKEY_CONFIG_YML: /tmp/misskey.yml
+    entrypoint: ["/usr/bin/tini", "--", "/bin/bash", "-c"]
+    command:
+      - |
+        cat > /tmp/misskey.yml <<CFG
+        url: $$PA_PUBLIC_URL/
+        port: 3000
+        db:
+          host: db
+          port: 5432
+          db: misskey
+          user: misskey
+          pass: "$$POSTGRES_PASSWORD"
+        dbReplications: false
+        redis:
+          host: redis
+          port: 6379
+        fulltextSearch:
+          provider: sqlLike
+        id: 'aidx'
+        proxyBypassHosts:
+          - api.deepl.com
+          - api-free.deepl.com
+          - www.recaptcha.net
+          - hcaptcha.com
+          - challenges.cloudflare.com
+        CFG
+        exec pnpm run migrateandstart
+    ports:
+      - "3000:3000"
+    volumes:
+      - files:/misskey/files
+    depends_on:
+      files-perms:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/healthz"]
+      interval: 5s
+      timeout: 10s
+      retries: 120
+      start_period: 60s
+    mem_limit: 1280m
+
+  # A fresh named volume is root-owned; Misskey runs as uid 991.
+  files-perms:
+    image: redis:7-alpine
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "chown 991:991 /files"]
+    volumes:
+      - files:/files
+    mem_limit: 32m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+    mem_limit: 256m
+
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/misskey/db.env
+    environment:
+      POSTGRES_USER: misskey
+      POSTGRES_DB: misskey
+    volumes:
+      - db:/var/lib/postgresql
+    shm_size: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U misskey -d misskey"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Misskey answers.
+  ready:
+    image: redis:7-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  files: {}
+  redis: {}
+  db: {}

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Directus is a headless CMS and data platform: a Node API plus its Vue admin
+  app on :8055. The repository's root docker-compose.yml is not the application;
+  its header reads "ONLY FOR DEBUGGING. THIS IS NOT INTENDED FOR PRODUCTION
+  USE" and it starts a matrix of test databases (Oracle, MSSQL, CockroachDB,
+  Keycloak, MailDev ...) with no Directus service, so a plain deploy serves
+  MailDev and crash-loops Oracle.
+
+  This recipe runs the official directus/directus image of the current
+  release, 12.4.1, on SQLite (the image's own default) with the database,
+  uploads and extensions directories on named volumes that survive redeploys.
+  PUBLIC_URL is the account's HTTPS address. hooks/prepare.sh generates SECRET
+  once into ~/.panelalpha/directus/app.env (0600 in 0700), so login tokens stay
+  valid across restarts. No admin is seeded: with no ADMIN_EMAIL/ADMIN_PASSWORD
+  Directus opens its own first-run setup form, as upstream ships it.

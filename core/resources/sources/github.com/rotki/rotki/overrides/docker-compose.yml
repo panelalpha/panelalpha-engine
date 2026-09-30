@@ -1,0 +1,28 @@
+# Compose-replace: the repo Dockerfile needs a ROTKI_VERSION build arg and a
+# long Rust/PyInstaller build; run the published image of the current release.
+services:
+  app:
+    image: rotki/rotki:v1.44.0
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      TZ: UTC
+    volumes:
+      - rotki-data:/data
+      - rotki-logs:/logs
+    mem_limit: 1536m
+
+  # No-op: `compose up -d` returns once starling reports every backend ready.
+  ready:
+    image: rotki/rotki:v1.44.0
+    restart: "no"
+    entrypoint: ["/opt/rotki/starling", "healthcheck", "--url", "http://app:80/health"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  rotki-data: {}
+  rotki-logs: {}

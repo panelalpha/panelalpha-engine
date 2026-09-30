@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  GLPI, IT asset management and helpdesk (PHP on Apache) with MariaDB. The
+  repository's docker-compose.yaml is a development environment (source bind
+  mount, mailpit, dbgate, openldap) and its default branch is a bugfix branch
+  whose npm build needs PHP, so the plain deploy failed. This recipe runs the
+  official image of the current release (glpi/glpi:11.0.9) the way upstream's
+  docker-compose.example.yml does: with the database variables set, the image
+  installs or updates the schema itself on boot. The database password is
+  generated per account by the engine. GLPI's config, files and marketplace
+  live on a named volume. A health-check gate makes the deploy wait until the
+  install has finished and Apache answers.

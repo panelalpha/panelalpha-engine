@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Steel Browser, a self-hosted browser API and sandbox for AI agents with a
+  session-viewer web UI. Upstream's docker-compose.yml runs the API (3000) and
+  the UI (5173) as two containers; the account publishes one port and a plain
+  deploy routes the site to the API, which answers 404 on /. This recipe runs
+  upstream's all-in-one image instead (the one its render.yaml deploys): the
+  API on 3000 serving the UI under /ui, with DOMAIN and USE_SSL set to the
+  site's address so the session URLs it hands out are https. Upstream publishes
+  only `latest`, so the image is pinned by digest to the build of the current
+  main commit. Session logs, exports and the browser cache are on named
+  volumes. No authentication (upstream behaviour).

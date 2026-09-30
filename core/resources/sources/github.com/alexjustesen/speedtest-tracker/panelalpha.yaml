@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Speedtest Tracker is a Laravel/Filament app that runs scheduled Ookla
+  speedtests and charts download, upload and latency over time, served here
+  by the LinuxServer.io image of the current release (v1.15.0) on SQLite.
+
+  IMAGE OF THE CURRENT RELEASE. The repo's compose.yaml is a Laravel Sail
+  development environment (source bind-mounted, Postgres, Mailpit, Apprise).
+  overrides/docker-compose.yml replaces it with lscr.io/linuxserver/
+  speedtest-tracker, the image upstream's docs install from, with the SQLite
+  database on the speedtest-config named volume so results and settings
+  survive redeploys. The engine terminates TLS; the app trusts all proxies
+  (bootstrap/app.php) and APP_URL is the account's public URL.
+
+  CLOSED FIRST RUN. The first migration (create_users_table) inserts the only
+  admin from config('app.admin_email') / config('app.admin_password'), which
+  default to admin@example.com / password. hooks/prepare.sh generates
+  ADMIN_EMAIL, ADMIN_PASSWORD and APP_KEY once into ~/.panelalpha/speedtest/
+  (0600 in 0700) with a credentials.txt note, delivered by env_file, so the
+  admin is created with a generated password before the site is reachable.
+  The Filament panel has no registration.
+
+  NO SCHEDULE BY DEFAULT. SPEEDTEST_SCHEDULE is left unset, so nothing runs
+  until the admin starts a test or sets a cron. One run on the test host moved
+  ~12 GB down and ~7 GB up at 8.7/4.5 Gbps; a schedule is the owner's call.
+  Upstream keeps /api/speedtest/latest public (the latest numbers and server
+  name, for Homepage widgets); /prometheus is off until enabled in settings.
+
+  READY GATE. A no-op `ready` service waits on /api/healthcheck so the deploy
+  finishes only once the app answers.

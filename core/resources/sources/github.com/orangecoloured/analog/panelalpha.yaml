@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ANALOG, a minimal self-hosted event analytics tool (Vite dashboard served by
+  its Node server, events kept for 10-30 days). Upstream publishes no image;
+  the plain dockerfile deploy builds the repository's Dockerfile but starts it
+  with no ANALOG_PORT_SERVER, no static server and no database, so nothing
+  answers on the published port. This recipe builds the same Dockerfile with
+  upstream's Docker settings (static server on :8080, request queue and
+  clean-up off) and stores events in a Redis sidecar with append-only
+  persistence on a named volume that survives redeploys. The dashboard is
+  open unless the customer sets ANALOG_TOKEN (then ?token=<value> is needed).

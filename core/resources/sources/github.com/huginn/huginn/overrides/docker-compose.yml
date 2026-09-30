@@ -1,0 +1,76 @@
+# Compose-replace: upstream's docker/single-process/postgresql.yml on the
+# published release image, with a current Postgres and named volumes.
+x-huginn-env: &huginn-env
+  DATABASE_ADAPTER: postgresql
+  DATABASE_HOST: db
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: huginn
+  DATABASE_USERNAME: huginn
+  DATABASE_PASSWORD: ${HUGINN_DB_PASSWORD:?HUGINN_DB_PASSWORD is required}
+  # Rails secret: generated per account, so sessions survive a redeploy.
+  APP_SECRET_TOKEN: ${APP_SECRET_TOKEN:?APP_SECRET_TOKEN is required}
+  DOMAIN: ${PA_PUBLIC_HOST}
+
+services:
+  app:
+    image: huginn/huginn-single-process:v2026.09.22
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # Optional settings (SMTP_*, INVITATION_CODE, SEED_*, ...) from the project env.
+    env_file:
+      - path: .env
+        required: false
+    environment: *huginn-env
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:3000/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1g
+
+  threaded:
+    image: huginn/huginn-single-process:v2026.09.22
+    restart: unless-stopped
+    command: ["/scripts/init", "bin/threaded.rb"]
+    env_file:
+      - path: .env
+        required: false
+    environment: *huginn-env
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 768m
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: huginn
+      POSTGRES_PASSWORD: ${HUGINN_DB_PASSWORD:?HUGINN_DB_PASSWORD is required}
+      POSTGRES_DB: huginn
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U huginn"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 384m
+
+  # No-op gate: `compose up -d` returns once Huginn has migrated and answers.
+  ready:
+    image: postgres:17-alpine
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db-data: {}

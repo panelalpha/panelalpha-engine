@@ -1,0 +1,35 @@
+# A plain deploy compiles better-sqlite3 on Node 20 and fails. This runs
+# upstream's image of the current stable build (docker/Dockerfile, CI tag
+# YYYY.MM.DD = stable @ c8bbfe70), which bundles Redis, Xvfb and Chromium.
+services:
+  app:
+    image: docker.io/lswl/vertex:2026.09.19
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      TZ: UTC
+    volumes:
+      # config, SQLite db, settings, rules, torrents and the first-run password.
+      - data:/vertex
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || curl -fsS -o /dev/null http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once Vertex answers.
+  ready:
+    image: docker.io/lswl/vertex:2026.09.19
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

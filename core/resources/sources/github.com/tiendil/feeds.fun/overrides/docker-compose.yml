@@ -1,0 +1,109 @@
+# Compose-replace: upstream's docs/examples/single-user setup on the 1.29.3
+# images; the repo's root compose is the development stack.
+x-backend-env: &backend-env
+  FFUN_ENVIRONMENT: prod
+  FFUN_DISPATCHER_ENFORCE_ENTITLEMENTS: "False"
+  FFUN_ORIGINS: '["${PA_PUBLIC_URL}"]'
+  FFUN_POSTGRESQL__HOST: postgres
+  FFUN_POSTGRESQL__USER: ffun
+  FFUN_POSTGRESQL__DATABASE: ffun
+  FFUN_LIBRARIAN_TAG_PROCESSORS_CONFIG: /ffun/tag_processors.toml
+  PYTHONOPTIMIZE: "1"
+
+services:
+  postgres:
+    image: postgres:18.3-trixie
+    restart: unless-stopped
+    volumes:
+      - ffun_postgres_data:/var/lib/postgresql/18/docker
+    # POSTGRES_PASSWORD, generated once by hooks/prepare.sh.
+    env_file:
+      - ../.panelalpha/feeds-fun/db.env
+    environment:
+      POSTGRES_DB: ffun
+      POSTGRES_USER: ffun
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ffun -d ffun"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  backend-api:
+    image: tiendil/feeds-fun-backend:1.29.3
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - /bin/bash
+      - -c
+      - |
+        ffun migrate
+        echo "migrations successed"
+        uvicorn ffun.application.application:app --host 0.0.0.0 --port 8000 --workers 1
+    volumes:
+      - ./docs/examples/single-user/tag_processors.toml:/ffun/tag_processors.toml:ro
+    # FFUN_POSTGRESQL__PASSWORD and FFUN_USER_SETTINGS_SECRET_KEY.
+    env_file:
+      - ../.panelalpha/feeds-fun/app.env
+    environment:
+      <<: *backend-env
+      FFUN_ENABLE_API_SPA: "True"
+      FFUN_AUTH_FORCE_EXTERNAL_USER_ID: dev-user
+      FFUN_AUTH_FORCE_EXTERNAL_IDENTITY_PROVIDER_ID: single_user
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 2)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 768m
+
+  backend-workers:
+    image: tiendil/feeds-fun-backend:1.29.3
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - /bin/bash
+      - -c
+      - |
+        ffun migrate
+        echo "migrations successed"
+        ffun workers --loader --librarian
+    volumes:
+      - ./docs/examples/single-user/tag_processors.toml:/ffun/tag_processors.toml:ro
+    env_file:
+      - ../.panelalpha/feeds-fun/app.env
+    environment:
+      <<: *backend-env
+    mem_limit: 1g
+
+  # Builds the web UI into the shared volume and exits (upstream's design).
+  frontend-data:
+    image: tiendil/feeds-fun-frontend-data:1.29.3
+    restart: "no"
+    volumes:
+      - ffun_frontend_data:/ffun-static-data
+    mem_limit: 1536m
+
+  frontend-caddy:
+    image: caddy:2.10.0
+    restart: unless-stopped
+    volumes:
+      - ffun_frontend_data:/ffun-static-data:ro
+      - ./panelalpha/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      frontend-data:
+        condition: service_completed_successfully
+      backend-api:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  ffun_postgres_data: {}
+  ffun_frontend_data: {}

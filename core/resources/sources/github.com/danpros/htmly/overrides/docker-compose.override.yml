@@ -1,0 +1,8 @@
+# Keep HTMLy's settings/users (config/) and posts/uploads (content/) outside
+# the re-cloned checkout; add the pre-install redirect to Apache.
+services:
+  app:
+    volumes:
+      - ../.panelalpha/htmly/config:/app/config
+      - ../.panelalpha/htmly/content:/app/content
+      - ./panelalpha-htmly.conf:/etc/apache2/conf-enabled/panelalpha-htmly.conf:ro

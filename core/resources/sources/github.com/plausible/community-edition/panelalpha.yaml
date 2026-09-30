@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Plausible Community Edition, privacy-friendly web analytics: the published
+  ghcr.io/plausible/community-edition image (Elixir/Phoenix on :8000) with
+  PostgreSQL and ClickHouse. The repository is upstream's own deployment
+  (compose.yml, pinned to v3.2.1, the current release), but it expects a
+  hand-written .env and a reverse proxy of your own: the plausible service
+  publishes no port, and BASE_URL / SECRET_KEY_BASE are empty, so the plain
+  deploy crash-loops on "BASE_URL must start with `http` or `https`" behind a
+  502.
+
+  This recipe is upstream's compose.yml with three changes: port 8000 is
+  published, BASE_URL is the site's address, and SECRET_KEY_BASE (64+ bytes,
+  which the engine's generated 48-character secrets do not reach, engine#338)
+  plus the PostgreSQL password are generated once into ~/.panelalpha/plausible-ce
+  by hooks/prepare.sh. A gate service waits for Plausible's own /api/health.
+  First run is as upstream ships it: the site opens Plausible's registration
+  page for the first account.

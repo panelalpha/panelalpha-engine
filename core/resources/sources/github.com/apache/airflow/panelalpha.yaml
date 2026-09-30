@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Apache Airflow, workflow scheduling and monitoring (Python). The repository
+  is Airflow's source tree: a plain deploy builds its root Dockerfile, which
+  compiles the production image from scratch. This recipe runs upstream's
+  howto/docker-compose/docker-compose.yaml of the 3.3.2 release on the
+  release image apache/airflow:3.3.2, with LocalExecutor instead of Celery
+  (no Redis, no Celery worker) and at most four parallel tasks to fit a
+  3072 MB account: api-server (the web UI on
+  8080), scheduler, dag-processor, triggerer, the one-shot airflow-init
+  (migrations, admin user) and Postgres 16. DAGs, logs, config and plugins
+  are named volumes instead of bind mounts into the checkout.
+  hooks/prepare.sh generates the database password, the Fernet key, the JWT
+  secret and the API secret key once into ~/.panelalpha/airflow/airflow.env.
+  First run is upstream's: airflow-init creates the admin airflow / airflow.

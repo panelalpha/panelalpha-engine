@@ -1,0 +1,41 @@
+# The repository ships no compose file, only a Dockerfile that builds the
+# .NET backend and React frontend from source. This runs the published image
+# of the current release instead, with /config (db.sqlite: accounts,
+# settings, queue/history) on a named volume.
+services:
+  app:
+    image: ghcr.io/nzbdav-dev/nzbdav:0.6.4
+    restart: unless-stopped
+    env_file:
+      - .env
+      - ../.panelalpha/nzbdav/app.env
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      # The site is served over HTTPS; keep the UI session cookie off plain HTTP.
+      SECURE_COOKIES: "true"
+      TZ: Etc/UTC
+    volumes:
+      - config:/config
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once the UI answers.
+  ready:
+    image: ghcr.io/nzbdav-dev/nzbdav:0.6.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}

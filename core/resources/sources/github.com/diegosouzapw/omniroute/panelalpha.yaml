@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OmniRoute is a self-hosted AI gateway: one OpenAI-compatible /v1 endpoint
+  routed across many LLM providers, with a Next.js dashboard, on :20128. The
+  plain deploy builds the repo's Dockerfile and the Next.js build worker is
+  OOM-killed (SIGKILL) even in a 4096 MB account.
+
+  This recipe runs the image upstream publishes for the current release,
+  diegosouzapw/omniroute:3.8.50, beside redis as upstream's
+  docker-compose.selfhost.yml does. Nothing is built. The SQLite store under
+  /app/data is on a named volume; the app generates its JWT and API-key
+  secrets on first start and keeps them there. BASE_URL is the site address.
+  Everything else is the image's default, including its first-run
+  onboarding and REQUIRE_API_KEY=true for the /v1 proxy.

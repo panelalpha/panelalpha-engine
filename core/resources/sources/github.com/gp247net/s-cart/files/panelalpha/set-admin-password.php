@@ -45,7 +45,8 @@ $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 // changes under us.
 $prefix = defined('GP247_DB_PREFIX') ? GP247_DB_PREFIX : (string) env('GP247_DB_PREFIX', 'gp247_');
 $table = $prefix . 'admin_user';
-$file = $root . '/.panelalpha-admin-password';
+// ~/.panelalpha/scart, mounted by the compose override; ~/project is wiped on redeploy.
+$file = '/panelalpha/admin-password';
 
 try {
     $admin = \Illuminate\Support\Facades\DB::table($table)->where('username', 'admin')->first();
@@ -97,5 +98,5 @@ if ($updated === 0) {
     exit(0);
 }
 
-echo "[s-cart] set a generated password for `admin`; it is in ~/project/.panelalpha-admin-password (0600)\n";
+echo "[s-cart] set a generated password for `admin`; it is in ~/.panelalpha/scart/admin-password (0600)\n";
 exit(0);

@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Komari is a self-hosted server monitoring dashboard: one Go binary serving
+  the web UI, the API and the WebSocket endpoint its agents report to, with a
+  SQLite database.
+
+  The checkout does not build: web/public/public.go embeds
+  defaultTheme/dist.tar.zst, the compiled frontend theme, which is produced by
+  a separate pipeline and not committed, so the engine's `go` strategy stops
+  at `pattern defaultTheme/dist.tar.zst: no matching files found`. The root
+  Dockerfile only packages a binary built beforehand by CI
+  (`COPY komari-${TARGETOS}-${TARGETARCH}`).
+
+  overrides/docker-compose.yml runs the image upstream publishes for the
+  current release, ghcr.io/komari-monitor/komari:1.5.1, on its port 25774,
+  with /app/data (database and settings) on the named volume `data`.
+
+  First run is upstream's: with no user in the database Komari serves its
+  first-run installation guide, where the owner creates the admin account.

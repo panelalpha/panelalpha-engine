@@ -1,0 +1,87 @@
+# Compose-replace: the checkout is the unreleased 3.6 development branch with
+# asset builds; this runs PKP's official image of the current release.
+services:
+  # One-shot: fills the persisted config.inc.php from the image's own template
+  # on first deploy; the web installer then writes it, and later deploys keep it.
+  config-init:
+    image: docker.io/pkpofficial/ojs:3_5_0-5
+    user: "0"
+    restart: "no"
+    environment:
+      BASE_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - ../.panelalpha/ojs/config.inc.php:/cfg/config.inc.php
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ ! -s /cfg/config.inc.php ]; then
+          sed -e 's/^restful_urls = Off/restful_urls = On/' \
+              -e 's/^enable_cdn = On/enable_cdn = Off/' \
+              -e "s#^base_url = .*#base_url = \"$$BASE_URL\"#" \
+              /var/www/html/config.TEMPLATE.inc.php > /cfg/config.inc.php
+          echo "config.inc.php created from the 3.5.0-5 template"
+        fi
+        chown 33:33 /cfg/config.inc.php
+        chmod 640 /cfg/config.inc.php
+    mem_limit: 128m
+
+  app:
+    image: docker.io/pkpofficial/ojs:3_5_0-5
+    restart: unless-stopped
+    environment:
+      SERVERNAME: ${PA_PUBLIC_HOST}
+      PKP_CLI_INSTALL: "0"
+    volumes:
+      - ../.panelalpha/ojs/config.inc.php:/var/www/html/config.inc.php
+      - ./panelalpha/ojs-https.conf:/etc/apache2/conf-enabled/zz-panelalpha-https.conf:ro
+      - files:/var/www/files
+      - public:/var/www/html/public
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    healthcheck:
+      # Sent with the site's Host: once installed, OJS answers 400 to any host
+      # outside allowed_hosts, which the installer sets to the site's name.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null -H \"Host: $$SERVERNAME\" http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1024m
+
+  db:
+    image: docker.io/library/mariadb:11.8
+    restart: unless-stopped
+    env_file: ../.panelalpha/ojs/secrets.env
+    environment:
+      MARIADB_DATABASE: ojs
+      MARIADB_USER: ojs
+    volumes:
+      - db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the app answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  files: {}
+  public: {}
+  db: {}

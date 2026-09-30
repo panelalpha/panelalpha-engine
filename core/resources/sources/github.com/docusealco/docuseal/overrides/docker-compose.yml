@@ -1,0 +1,30 @@
+# Compose-replace: the repo compose adds a Caddy that binds 80/443 and needs $HOST,
+# and bind-mounts data under ./ (wiped on redeploy). Official image, SQLite, named volume.
+services:
+  app:
+    image: docuseal/docuseal:3.3.0
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - data:/data/docuseal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/up || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once DocuSeal answers /up.
+  ready:
+    image: docuseal/docuseal:3.3.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

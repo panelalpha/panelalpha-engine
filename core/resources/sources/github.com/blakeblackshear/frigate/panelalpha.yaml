@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Frigate is a network video recorder with real-time object detection for IP
+  cameras (Python, Go and ffmpeg behind its own NGINX). The repository's
+  docker-compose.yml is a devcontainer (source bind-mounted, host GPU groups,
+  an MQTT broker) and nothing else builds it, so a plain deploy serves the
+  PanelAlpha placeholder.
+
+  This recipe runs the image upstream publishes
+  (ghcr.io/blakeblackshear/frigate, current release 0.18.0) on its
+  authenticated port 8971, as the installation docs' compose example does.
+  Frigate serves 8971 over a self-signed TLS certificate unless the config
+  turns it off, which a reverse proxy cannot talk to; a one-shot `config`
+  service therefore writes Frigate's own default config with `tls: enabled:
+  false` (the change upstream's TLS docs give for running behind a proxy),
+  only when /config holds no config yet. Config, database and recordings are
+  named volumes kept across redeploys. First run is left as upstream ships
+  it: Frigate creates the `admin` user and prints its password in the
+  container log, and cameras are added in the UI. RTSP (8554) and WebRTC
+  (8555) restreams are not published; only the web UI is.

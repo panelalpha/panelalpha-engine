@@ -106,6 +106,17 @@ data". So `panelalpha/install.sh` runs it only when GP247's own
 `gp247-installed.txt` marker is absent — `storage/app/private/` on Laravel 11+,
 `storage/app/` before that, both checked.
 
+That marker is in `~/project`, which the engine empties on every deploy, while
+the database lives on the `dbdata` volume. So a missing marker is not enough:
+when `gp247_admin_store` already has a row, the script treats the deploy as a
+redeploy, re-runs only the file side of the install (the `gp247:core-public`,
+`gp247:functions-except`, `lfm_public`, `gp247:front-public` and
+`gp247:front-template` publishes, `storage:link`) and writes the marker back.
+The GP247 service providers gate every route on that marker, so without it the
+site would not serve the shop at all; without the database check a rebuild would
+reinstall over the live shop. A database it cannot reach fails the step rather
+than guessing.
+
 ### 3. The admin account was `admin` / `admin`
 
 `GP247\Core\Database\Seeders\DataDefaultSeeder` creates the single
@@ -123,7 +134,7 @@ been given a public HTTPS name, that is a shop whose administration is open to
 anyone who has read the manual.
 
 `files/panelalpha/set-admin-password.php` generates a 24-character password,
-writes it to `~/project/.panelalpha-admin-password` (0600) and sets it with
+writes it to `~/.panelalpha/scart/admin-password` (0600) and sets it with
 `Hash::make()` — **only while the password still verifies as `admin`**. Rotate
 what upstream shipped, never what somebody chose: re-running it on an account
 whose operator has since picked their own password prints *"the admin account no
@@ -222,8 +233,31 @@ manifest's and never matched by id: there is no way to *remove* the platform's
 (SMTP passwords, OAuth secrets, licences) fall back to `APP_KEY`, and an
 `APP_KEY` rotation then destroys them. Setting it on day one is free.
 
-Both are guarded on `.env` not existing, so a redeploy never invalidates
-sessions, encrypted columns or an operator's own edits.
+Both keys and the database password are generated once into
+`~/.panelalpha/scart/secrets.env` (0600 in a 0700 dir) and written into `.env`
+from there. They cannot live only in `.env`: the engine empties `~/project` on
+every deploy. An earlier version guarded on `.env` not existing, and a rebuild
+generated all three again — the install stage then died on
+`SQLSTATE[HY000] [1045] Access denied for user 'scart'` against the MariaDB
+volume created with the old password, and the new keys would have made the
+sessions and every encrypted column unreadable.
+
+## What survives a rebuild
+
+The engine empties `~/project` before every deploy, so everything the shop
+writes at runtime is kept under `~/.panelalpha/scart/` (created by
+`hooks/prepare.sh`, bind-mounted by `overrides/docker-compose.override.yml`):
+
+| Path on the account | In the container | What |
+|---|---|---|
+| `~/.panelalpha/scart/uploads/` | `/app/storage/app/public` | uploads: the `public` and `gp247` disks (product, banner, logo, avatar ... images from the file manager), served as `/storage/...` through the `public/storage` symlink that `storage:link` recreates on every deploy |
+| `~/.panelalpha/scart/admin-password` | `/panelalpha/admin-password` | the generated admin password note (0600) |
+| `~/.panelalpha/scart/secrets.env` | `/panelalpha/secrets.env` | `APP_KEY`, `GP247_ENCRYPTION_KEY`, the MariaDB password |
+
+The database is on the `dbdata` volume. Not kept: `storage/logs` (logs go to
+stderr anyway), and extensions or templates installed from the admin
+marketplace into `app/GP247` / `public/GP247`, which the install stage
+re-publishes from the vendor packages on every deploy.
 
 ## Readiness
 
@@ -269,10 +303,10 @@ queued mail or scheduled jobs needs them back.
 | File | Why |
 |---|---|
 | `panelalpha.yaml` | the whole manifest (so `key-generate` is not inherited), the `env:` the container needs, and the install and password commands |
-| `hooks/prepare.sh` | moves both workstation compose files out of the root before detection, and writes a `.env` with generated keys and a generated database password |
-| `files/panelalpha/install.sh` | runs `gp247:install --force=1` exactly once, guarded on GP247's own marker, as `APP_ENV=local` so its unforced migrations are not cancelled |
+| `hooks/prepare.sh` | moves both workstation compose files out of the root before detection, creates `~/.panelalpha/scart/uploads`, and writes a `.env` with the keys and database password kept in `~/.panelalpha/scart/` |
+| `files/panelalpha/install.sh` | runs `gp247:install --force=1` exactly once, guarded on GP247's own marker and on a seeded database, as `APP_ENV=local` so its unforced migrations are not cancelled; on a redeploy re-publishes the install's files and restores the marker |
 | `files/panelalpha/set-admin-password.php` | replaces the seeded `admin`/`admin` credential and records the new one |
-| `overrides/docker-compose.override.yml` | a two-request healthcheck plus a `ready` gate, so the deploy waits for the database, the three installs and the template publish |
+| `overrides/docker-compose.override.yml` | bind-mounts `~/.panelalpha/scart` (uploads, password note) into the app; a two-request healthcheck plus a `ready` gate, so the deploy waits for the database, the three installs and the template publish |
 
 ## Verified
 
@@ -284,7 +318,7 @@ and PHP checks passing, and `GET /` returning the storefront with the title
 Beyond the status code, on a second account kept alive for it:
 
 - `POST /gp247_admin/auth/login` with `admin` and the password from
-  `~/project/.panelalpha-admin-password` redirects to `/gp247_admin`, and as
+  `~/.panelalpha/scart/admin-password` redirects to `/gp247_admin`, and as
   that session `/gp247_admin` is `GP247 Admin | Dashboard`, `/gp247_admin/user`
   is `User manager` and `/gp247_admin/store_info` is `Website infomation` — all
   200. The dashboard is the page that 500s on SQLite.
@@ -303,3 +337,12 @@ Beyond the status code, on a second account kept alive for it:
   are both present after the install stage.
 - Steady-state memory: `project-app-1` 112 MiB, `project-db-1` 120.6 MiB of its
   512 MiB limit.
+
+Uploads across a rebuild (mariusz.panelalpha.tools, engine 705f250a, memory
+limit 2500): a PNG uploaded as the admin through the file manager's own
+`POST /gp247_admin/uploads/upload` landed in
+`~/.panelalpha/scart/uploads/product/` and `GET /storage/product/<file>` served
+it over HTTPS (200, `image/png`, same md5). After
+`POST /projects/<name>/rebuild` the same URL served the same bytes, the admin
+still logged in with the password from `~/.panelalpha/scart/admin-password`
+(unchanged md5), and `/.env` and `/.git/config` were 403.

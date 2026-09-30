@@ -1,0 +1,51 @@
+# The repository is C source whose build needs PCRE2 headers Railpack lacks;
+# this runs upstream's image of the current release (docs/010-installation/docker.rst).
+services:
+  # Named volumes start root-owned; the image runs as uid 1000 (mympd).
+  init:
+    image: ghcr.io/jcorporation/mympd/mympd:26.0.0
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "chown 1000:1000 /var/lib/mympd /var/cache/mympd"]
+    volumes:
+      - workdir:/var/lib/mympd
+      - cachedir:/var/cache/mympd
+    mem_limit: 32m
+
+  app:
+    image: ghcr.io/jcorporation/mympd/mympd:26.0.0
+    restart: unless-stopped
+    environment:
+      # Read on first start only, then kept in the workdir's config/ files.
+      MYMPD_SSL: "false"
+      MYMPD_HTTP_PORT: "8080"
+      MYMPD_MYMPD_URI: ${PA_PUBLIC_URL}
+    volumes:
+      - workdir:/var/lib/mympd
+      - cachedir:/var/cache/mympd
+    ports:
+      - "8080:8080"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once myMPD answers.
+  ready:
+    image: ghcr.io/jcorporation/mympd/mympd:26.0.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  workdir: {}
+  cachedir: {}

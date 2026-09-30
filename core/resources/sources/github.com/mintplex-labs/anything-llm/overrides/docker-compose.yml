@@ -1,0 +1,38 @@
+# Compose-replace: upstream's compose builds the image from source and
+# bind-mounts ./.env and ../server/storage from the checkout, which a deploy wipes.
+services:
+  app:
+    image: mintplexlabs/anythingllm:1.16.2
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      STORAGE_DIR: /app/server/storage
+    # The app writes its settings to /app/server/.env; keep that file on the volume.
+    entrypoint:
+      - /bin/bash
+      - -c
+      - touch /app/server/storage/.env && ln -sfn /app/server/storage/.env /app/server/.env && exec /bin/bash /usr/local/bin/docker-entrypoint.sh
+    volumes:
+      # SQLite DB, documents, vector cache, models and the settings file.
+      - anythingllm-storage:/app/server/storage
+    healthcheck:
+      test: ["CMD", "/bin/bash", "/usr/local/bin/docker-healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 2g
+
+  # No-op: `compose up -d` returns once the server answers /api/ping (first boot runs Prisma migrations).
+  ready:
+    image: mintplexlabs/anythingllm:1.16.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  anythingllm-storage: {}

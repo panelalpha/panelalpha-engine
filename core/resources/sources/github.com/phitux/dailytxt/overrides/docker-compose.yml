@@ -1,0 +1,57 @@
+# Compose-replace: the repo's docker-compose.yml names the placeholder tag
+# phitux/dailytxt:2.x.x and a ./data bind mount. This runs the published image
+# of the current release on a named volume, with registration closed.
+services:
+  # One-shot, every boot: on an empty users.json, a private backend with
+  # registration open creates `admin` through DailyTxT's own register API.
+  seed:
+    image: docker.io/phitux/dailytxt:2.6.3
+    restart: "no"
+    env_file:
+      - ../.panelalpha/dailytxt/secret.env
+      - ../.panelalpha/dailytxt/user.env
+    volumes:
+      - dailytxt-data:/data
+      - ./panelalpha/dailytxt:/pa:ro
+    entrypoint: ["sh", "/pa/seed.sh"]
+    mem_limit: 256m
+
+  app:
+    image: docker.io/phitux/dailytxt:2.6.3
+    restart: unless-stopped
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    env_file:
+      # SECRET_TOKEN (signs the login cookie) and ADMIN_PASSWORD (admin panel).
+      - ../.panelalpha/dailytxt/secret.env
+    environment:
+      ALLOW_REGISTRATION: "false"
+      LOGOUT_AFTER_DAYS: "40"
+      # Upstream's entrypoint substitutes this into index.html as a JS literal.
+      PUBLIC_DEMO_MODE: "false"
+    volumes:
+      # users.json, per-user encrypted logs and files; survives redeploys.
+      - dailytxt-data:/data
+    ports:
+      - "8000:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/api/version"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 384m
+
+  # `up -d` runs without --wait (engine#204); this blocks it until DailyTxT answers.
+  ready:
+    image: docker.io/phitux/dailytxt:2.6.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  dailytxt-data: {}

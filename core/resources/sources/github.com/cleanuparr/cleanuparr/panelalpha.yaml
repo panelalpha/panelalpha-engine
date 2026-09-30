@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Cleanuparr cleans up the Servarr download queue: it removes stalled,
+  slow, failed and blocklisted downloads from qBittorrent, Transmission,
+  Deluge and others and tells Sonarr/Radarr/Lidarr to search again. One .NET
+  process serves an Angular web UI and its API on :11011, SQLite in /config.
+
+  The repository root holds no project file (the app is code/backend, an
+  Angular frontend in code/frontend), so the generic .NET recipe fails with
+  MSB1003, and code/Dockerfile restores FLM.* packages from the project's
+  private GitHub Packages feed, which needs a token. This recipe runs the
+  upstream release image ghcr.io/cleanuparr/cleanuparr:2.10.8 (pinned by
+  digest) as the upstream Docker Compose docs lay it out, with /config on a
+  named volume that survives redeploys. The Sonarr/Radarr and download
+  client connections are configured in the web UI.

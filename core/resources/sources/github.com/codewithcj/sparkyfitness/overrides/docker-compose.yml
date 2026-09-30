@@ -1,0 +1,67 @@
+# Compose-replace: the repo root is a pnpm workspace with no start script; the
+# upstream deployment is docker/docker-compose.prod.yml. Same three services on
+# the published images of the current release, data on named volumes.
+services:
+  sparkyfitness-db:
+    image: postgres:18.3-alpine
+    restart: unless-stopped
+    env_file: ../.panelalpha/sparkyfitness/secrets.env
+    environment:
+      POSTGRES_DB: sparkyfitness_db
+      POSTGRES_USER: sparky
+    volumes:
+      # PostgreSQL 18 keeps PGDATA under /var/lib/postgresql/18/docker.
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sparky -d sparkyfitness_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  sparkyfitness-server:
+    image: codewithcj/sparkyfitness_server:v1.7.3
+    restart: unless-stopped
+    depends_on:
+      sparkyfitness-db: { condition: service_healthy }
+    # DB passwords, SPARKY_FITNESS_API_ENCRYPTION_KEY, BETTER_AUTH_SECRET (hooks/prepare.sh).
+    env_file: ../.panelalpha/sparkyfitness/secrets.env
+    environment:
+      SPARKY_FITNESS_DB_HOST: sparkyfitness-db
+      SPARKY_FITNESS_DB_PORT: "5432"
+      SPARKY_FITNESS_DB_NAME: sparkyfitness_db
+      SPARKY_FITNESS_DB_USER: sparky
+      SPARKY_FITNESS_APP_DB_USER: sparky_app
+      SPARKY_FITNESS_FRONTEND_URL: ${PA_PUBLIC_URL}
+      SPARKY_FITNESS_SERVER_PORT: "3010"
+      NODE_ENV: production
+      SPARKY_FITNESS_LOG_LEVEL: ERROR
+    volumes:
+      - server_backup:/app/SparkyFitnessServer/backup
+      - server_uploads:/app/SparkyFitnessServer/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3010/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1024m
+
+  sparkyfitness-frontend:
+    image: codewithcj/sparkyfitness:v1.7.3
+    restart: unless-stopped
+    depends_on:
+      sparkyfitness-server: { condition: service_healthy }
+    ports:
+      - "8080:80"
+    environment:
+      SPARKY_FITNESS_FRONTEND_URL: ${PA_PUBLIC_URL}
+      SPARKY_FITNESS_SERVER_HOST: sparkyfitness-server
+      SPARKY_FITNESS_SERVER_PORT: "3010"
+      NGINX_LISTEN_PORT: "80"
+    mem_limit: 256m
+
+volumes:
+  db_data: {}
+  server_backup: {}
+  server_uploads: {}

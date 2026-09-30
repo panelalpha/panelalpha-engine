@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SnapOtter is a self-hosted file-processing web app (AGPL-3.0 core; the
+  community edition needs no licence key): image, video, audio, PDF and file
+  tools, pipelines and a REST API.
+
+  == Why compose-replace from the published image ==
+
+  The repository has no root compose file; docker/docker-compose.yml builds
+  the image from source, which compiles Redis, libheif, LibRaw and more (about
+  10 minutes and a lot of build memory). This recipe runs the official image of
+  the current release, docker.io/snapotter/snapotter:2.2.0, in the
+  single-container mode of the README's quick start: with neither DATABASE_URL
+  nor REDIS_URL set, the entrypoint starts an embedded Postgres 17 and Redis 8
+  bound to loopback, with their data under /data.
+
+  == What the recipe supplies ==
+
+  The image, /data and /tmp/workspace on named volumes, EXTERNAL_URL (used only
+  for OIDC/SAML callbacks) set to the site's address, and a `ready` service
+  that holds `up -d` until /api/v1/health answers. Nothing else: the first-run
+  state is left as upstream ships it, i.e. the admin/admin login with a
+  password change required on first login.
+
+  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
+
+  Fresh create: success in 142s (mostly the ~1.9 GB image pull). / is
+  <title>SnapOtter</title> (2.4 kB), /api/v1/health {"status":"healthy",
+  "version":"2.2.0"}, logs "SnapOtter embedded mode" and "Default admin user
+  'admin' created - password change required on first login". Login answers
+  with mustChangePassword true. Rebuild 51s: the admin was not re-created and
+  still logs in. /.env and /.git/config return the SPA shell only;
+  /api/v1/files is 401 without a session. App ~570 MiB idle, /data 473 MB.
+
+  File uploads through the *.panelalpha.online test domain time out at its
+  edge (panelalpha/engine#170); they work on a real domain or against the
+  engine host directly.

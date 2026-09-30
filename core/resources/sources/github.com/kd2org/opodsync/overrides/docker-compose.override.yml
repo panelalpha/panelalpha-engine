@@ -1,0 +1,8 @@
+# Layers over the compose file the php strategy generates.
+# DATA_ROOT is read by server/_inc.php; it moves the SQLite DB out of the checkout.
+services:
+  app:
+    environment:
+      DATA_ROOT: /data
+    volumes:
+      - ../.panelalpha/opodsync:/data

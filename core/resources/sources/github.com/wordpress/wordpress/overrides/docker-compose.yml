@@ -4,17 +4,40 @@ services:
     restart: unless-stopped
     volumes:
       - db_data:/var/lib/mysql
+    # MYSQL_PASSWORD and MYSQL_ROOT_PASSWORD, written once by hooks/prepare.sh
+    # outside ~/project so a redeploy does not regenerate them.
+    env_file:
+      - ../.panelalpha/wordpress/db.env
     environment:
       MYSQL_DATABASE: wordpress
       MYSQL_USER: wordpress
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    # A real login over TCP. `mysqladmin ping` exits 0 even on access denied,
+    # and answers the init-time server, which listens on the socket only.
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql -h 127.0.0.1 -u wordpress -e 'SELECT 1' wordpress >/dev/null"]
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 60s
+
+  # ~/project is emptied on every deploy, so wp-content (uploads, plugins and
+  # themes installed from the admin) lives on a volume. This seeds it from the
+  # checkout without overwriting anything already there, refreshes the
+  # PanelAlpha must-use plugin, and hands new files to www-data, as the
+  # official image does for its own copy.
+  wp-content:
+    image: wordpress:latest
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        cp -R --update=none /seed/. /wp-content/ &&
+        cp -f /seed/mu-plugins/panelalpha-app.php /wp-content/mu-plugins/ &&
+        find /wp-content ! -user www-data -exec chown www-data:www-data {} +
+    volumes:
+      - ./wp-content:/seed:ro
+      - wp_content:/wp-content
+
   wordpress:
     image: wordpress:latest
     restart: unless-stopped
@@ -22,14 +45,23 @@ services:
       - "8080:80"
     volumes:
       - ./:/var/www/html
-    env_file: .env
+      - wp_content:/var/www/html/wp-content
+      # The document root is the checkout: keep .git and other dot paths off the web.
+      - ./panelalpha/apache-deny-dotfiles.conf:/etc/apache2/conf-enabled/zz-panelalpha-deny-dotfiles.conf:ro
+    # WORDPRESS_DB_PASSWORD and the eight keys/salts, read by the image's
+    # wp-config.php through getenv, so a regenerated wp-config.php keeps them.
+    env_file:
+      - ../.panelalpha/wordpress/wordpress.env
     environment:
       WORDPRESS_DB_HOST: db
       WORDPRESS_DB_USER: wordpress
-      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
       WORDPRESS_DB_NAME: wordpress
     depends_on:
       db:
         condition: service_healthy
+      wp-content:
+        condition: service_completed_successfully
+
 volumes:
   db_data: {}
+  wp_content: {}

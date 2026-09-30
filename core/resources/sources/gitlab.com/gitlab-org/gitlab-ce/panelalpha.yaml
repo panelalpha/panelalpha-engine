@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  GitLab Community Edition, the self-hosted Git forge (repositories, merge
+  requests, issues, CI), from the old gitlab-ce URL, which GitLab redirects
+  to gitlab-org/gitlab-foss; same recipe as that repository's.
+
+  The repository's docker-compose.yml is the old v1 layout (a bare `app:` key,
+  no `services:`), which Compose v2 refuses, so a plain deploy falls back to
+  building the Rails source and fails in `yarn install` (Cannot find module
+  '/app/scripts/frontend/preinstall.mjs'); GitLab is not run from source
+  anyway. This recipe runs upstream's Omnibus image of the current release,
+  gitlab/gitlab-ce:19.4.1-ce.0, with /etc/gitlab, /var/opt/gitlab and the
+  logs on named volumes. external_url is the account's public https address;
+  TLS ends at the engine's proxy, so Omnibus nginx listens on plain HTTP with
+  X-Forwarded-Proto https. GitLab's memory-constrained settings (no Puma
+  cluster, Sidekiq concurrency 10, no bundled Prometheus, no KAS) keep it
+  under ~3 GB, so give the project a memory_limit of 4096. First boot takes
+  several minutes; a `ready` gate makes the deploy finish only once
+  /-/readiness answers. First run is upstream's: the root password is
+  generated into /etc/gitlab/initial_root_password (deleted by GitLab after
+  24 hours). Git over SSH is not published; clone over HTTPS.

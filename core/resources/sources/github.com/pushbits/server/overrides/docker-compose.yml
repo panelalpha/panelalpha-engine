@@ -1,0 +1,63 @@
+# The repository has no compose file; its Dockerfile builds from source. This
+# runs the published image of the current release (0.10.7) the way the
+# upstream docs' compose example does, with the database on a named volume.
+services:
+  # One-shot: PushBits cannot start without a Matrix account, so the deploy
+  # fails here naming each missing variable. The values are read from .env
+  # (the project's env vars), not interpolated: the engine would generate a
+  # value for a required variable named *_PASSWORD. Also hands the data
+  # volume to the image's user (uid 1000); the volume is created root-owned.
+  init:
+    image: ghcr.io/pushbits/server:0.10.7
+    restart: "no"
+    user: "0"
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        missing=""
+        [ -n "$$PUSHBITS_MATRIX_USERNAME" ] || missing="$$missing PUSHBITS_MATRIX_USERNAME (the Matrix account notifications are sent from)"
+        [ -n "$$PUSHBITS_MATRIX_PASSWORD" ] || missing="$$missing PUSHBITS_MATRIX_PASSWORD (that account's password)"
+        [ -n "$$PUSHBITS_ADMIN_MATRIXID" ] || missing="$$missing PUSHBITS_ADMIN_MATRIXID (the admin's Matrix ID, e.g. @you:matrix.org)"
+        if [ -n "$$missing" ]; then
+          echo "Error: set in the project's environment variables:$$missing"
+          exit 1
+        fi
+        chown 1000:1000 /data
+    volumes:
+      - data:/data
+    mem_limit: 32m
+
+  server:
+    image: ghcr.io/pushbits/server:0.10.7
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    # PUSHBITS_* settings (Matrix account, admin password, homeserver).
+    env_file: .env
+    volumes:
+      # pushbits.db (and an optional config.yml) live here.
+      - data:/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once PushBits answers.
+  ready:
+    image: ghcr.io/pushbits/server:0.10.7
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      server:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

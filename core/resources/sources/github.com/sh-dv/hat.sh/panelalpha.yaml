@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hat.sh, a web app that encrypts and decrypts files in the browser
+  (Next.js static export served by nginx; nothing leaves the browser, no
+  server-side state). The repository's Dockerfile builds `FROM node:alpine`
+  unpinned, which now resolves to Node 26, and `npm run build` crashes in
+  Next 12's bundled jsonwebtoken ("Cannot read properties of undefined
+  (reading 'prototype')"). Its docker-compose.yml bind-mounts ./src over the
+  web root.
+
+  This recipe runs upstream's published image instead: shdv/hat.sh, built
+  from v2.3.6 (the current HEAD, 540d3cc) and pinned by digest because
+  upstream publishes only `latest`. nginx listens on 80 inside the
+  container, published as 8080.
+
+  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
+
+  Fresh create: health :8080 200, 48 s. / 200 <title>Hat.sh - Simple, fast,
+  secure client-side file encryption</title>; the page's _next chunks,
+  /service-worker.js (1.3 MB) and /about/ all 200. Rebuild: 18 s, / 200 with
+  the same title. /.env and /.git/config are nginx 404s.

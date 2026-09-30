@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  farmOS, web-based farm record keeping (Drupal 11 on Apache/PHP 8.4) on
+  PostgreSQL 17. The plain deploy built the repository as a PHP site and
+  Composer could not resolve its dependencies: the repository is a Drupal
+  distribution meant to be pulled into farmOS/composer-project. This recipe
+  is upstream's docker/docker-compose.production.yml: the official
+  farmos/farmos image of the current release (4.0.6) with PostgreSQL, and the
+  sites directory (settings.php, uploaded files) and OAuth keys on named
+  volumes, so an installed farm survives redeploys. hooks/prepare.sh
+  generates the database password once into ~/.panelalpha/farmos/db.env
+  (0600 in 0700). First run is upstream's Drupal installer: on its database
+  step choose PostgreSQL, database and user `farm`, the POSTGRES_PASSWORD
+  from ~/.panelalpha/farmos/db.env and, under Advanced options, host `db`.
+  A `ready` service gates on Apache answering.

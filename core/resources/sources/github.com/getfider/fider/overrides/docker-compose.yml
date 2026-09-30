@@ -1,0 +1,67 @@
+# The repository's docker-compose.yml is a developer environment (MailHog,
+# Postgres, MinIO) with no Fider service. This runs the published image of the
+# current release with PostgreSQL, the way upstream's self-hosting docs do.
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fider
+      POSTGRES_PASSWORD: ${FIDER_DB_PASSWORD:?FIDER_DB_PASSWORD is required}
+      POSTGRES_DB: fider
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "fider"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  # One-shot: fails the deploy naming each missing mail setting. Values come
+  # from .env (the project's env vars), not interpolation (engine#336).
+  email-check:
+    image: getfider/fider:v0.38.0
+    restart: "no"
+    env_file: .env
+    entrypoint: ["/bin/sh", "/email-check.sh"]
+    volumes:
+      - ./fider-email-check.sh:/email-check.sh:ro
+    mem_limit: 32m
+
+  app:
+    image: getfider/fider:v0.38.0
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # EMAIL_* and any other Fider setting from the project's env vars.
+    env_file: .env
+    environment:
+      BASE_URL: ${PA_PUBLIC_URL}
+      DATABASE_URL: postgres://fider:${FIDER_DB_PASSWORD:?FIDER_DB_PASSWORD is required}@db:5432/fider?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+    depends_on:
+      db:
+        condition: service_healthy
+      email-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "./fider", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Fider answers its ping.
+  ready:
+    image: postgres:17
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}

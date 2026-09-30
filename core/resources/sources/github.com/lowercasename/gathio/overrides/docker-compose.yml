@@ -1,0 +1,55 @@
+# The repository's compose builds the checkout and bind-mounts host folders the
+# README asks you to create by hand. This runs the published image of the
+# current release (1.6.7) with MongoDB, as the Docker install docs describe.
+services:
+  gathio:
+    image: ghcr.io/lowercasename/gathio:1.6.7
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      # Referenced from config.toml as ${GATHIO_DOMAIN}.
+      GATHIO_DOMAIN: ${PA_PUBLIC_HOST}
+    volumes:
+      - ./config/config.toml:/app/config/config.toml:ro
+      - images:/app/public/events
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  mongo:
+    # 7.0, not 8: every 8.x image (8.0.32, 8.3.11) exits on Linux 6.19+ with
+    # "MongoDB cannot start ... SERVER-121912". 8.x data cannot be opened by 7.0.
+    image: docker.io/library/mongo:7.0
+    restart: unless-stopped
+    volumes:
+      - mongodb_data_db:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Gathio answers.
+  ready:
+    image: ghcr.io/lowercasename/gathio:1.6.7
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      gathio:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  mongodb_data_db: {}
+  images: {}

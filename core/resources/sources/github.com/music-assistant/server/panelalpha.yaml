@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Music Assistant is a music library manager and player hub (Python/asyncio)
+  that links streaming services and local libraries to networked speakers. Its
+  web UI and API are served on :8095; configuration, the SQLite library and the
+  cache live in /data. The repository cannot be deployed from source: its
+  Dockerfile starts with `ADD dist dist`, a wheel only upstream CI builds, and
+  installed with pip the package misses runtime imports (hass_client) that only
+  requirements_all.txt pins, one of which (audible==0.10.0) has no build for the
+  Python it requires.
+
+  This recipe runs the official ghcr.io/music-assistant/server image of the
+  current stable release, 2.10.4, with /data on a named volume that survives
+  redeploys, publishing only the web port. Speaker discovery (mDNS/UPnP,
+  AirPlay, Chromecast) needs the host network, which an account does not have;
+  cloud and URL-based providers and the built-in web player work without it.
+  The first visitor creates the admin account in the app's own onboarding.

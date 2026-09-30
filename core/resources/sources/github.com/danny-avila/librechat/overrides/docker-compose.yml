@@ -1,0 +1,68 @@
+# Compose-replace: upstream's composes use unpinned dev images and `user: ${UID}:${GID}`
+# bind mounts. This runs the release image (API + built client on :3080) with MongoDB.
+services:
+  app:
+    image: ghcr.io/danny-avila/librechat:v0.8.8-rc4
+    restart: unless-stopped
+    ports:
+      - "3080:3080"
+    env_file:
+      - path: .env
+        required: false
+      - ../.panelalpha/librechat/app.env
+    # The engine seeds .env from upstream's .env.example (localhost addresses);
+    # the values below win over it.
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3080"
+      NODE_ENV: "production"
+      MONGO_URI: "mongodb://mongodb:27017/LibreChat"
+      DOMAIN_CLIENT: "${PA_PUBLIC_URL}"
+      DOMAIN_SERVER: "${PA_PUBLIC_URL}"
+      LIBRECHAT_TEMP_CREDENTIALS_PATH: /app/data/.env.temp
+      # One replica per account: lets the scheduler arm without Redis.
+      SCHEDULES_SINGLE_PROCESS: "true"
+    volumes:
+      - librechat-images:/app/client/public/images
+      - librechat-uploads:/app/uploads
+      - librechat-data:/app/data
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1536m
+
+  mongodb:
+    # mongo:7.0 rather than upstream's 8.0 (MongoDB 8 does not start on kernel 6.19+, engine#146).
+    image: mongo:7.0
+    restart: unless-stopped
+    command: ["mongod", "--noauth", "--quiet", "--bind_ip_all"]
+    volumes:
+      - librechat-mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      interval: 5s
+      timeout: 30s
+      retries: 30
+    mem_limit: 512m
+
+  # No-op: `compose up -d` returns once LibreChat answers /health.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  librechat-images: {}
+  librechat-uploads: {}
+  librechat-data: {}
+  librechat-mongo: {}

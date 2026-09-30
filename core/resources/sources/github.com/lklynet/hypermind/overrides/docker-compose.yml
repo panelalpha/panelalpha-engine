@@ -1,0 +1,11 @@
+# Upstream's compose runs the image with `network_mode: host` and no `ports:`.
+# The account cannot share the host network, so the port is published instead.
+services:
+  hypermind:
+    image: ghcr.io/lklynet/hypermind:1.0.1
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    mem_limit: 256m

@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  useSend, an open-source transactional and marketing e-mail platform on
+  top of AWS SES (Next.js on :3000 with PostgreSQL and Redis). The plain
+  deploy builds the repository's Dockerfile, a turborepo build that was
+  OOM-killed at 2048 MB; at 4096 MB it built, but the app crash-looped on
+  "Invalid environment variables" because the only defaults are the dev
+  .env.example (blank NEXTAUTH_SECRET, localhost database).
+
+  This recipe runs upstream's production compose with the published image
+  of the current release (usesend/usesend:v1.9.8), Postgres and Redis on
+  named volumes, NEXTAUTH_URL set to the site address, and the Postgres
+  password and NEXTAUTH_SECRET generated once into ~/.panelalpha/usesend.
+  The customer supplies a sign-in provider (GITHUB_ID + GITHUB_SECRET, or
+  GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET) in the project's environment
+  variables; a one-shot check service fails the deploy naming them when
+  neither pair is set. Sending mail needs AWS_ACCESS_KEY_ID /
+  AWS_SECRET_ACCESS_KEY / AWS_DEFAULT_REGION, set the same way.

@@ -1,0 +1,53 @@
+# Compose-replace: the repository's docker-compose.yml is the v1 layout (no
+# `services:`), so the engine builds the Rails source instead, which is not how
+# GitLab runs. This runs upstream's Omnibus image of the current release.
+services:
+  gitlab:
+    image: docker.io/gitlab/gitlab-ce:19.4.1-ce.0
+    restart: unless-stopped
+    environment:
+      # TLS ends at the engine's proxy: Omnibus nginx serves plain HTTP on 80
+      # and is told the visitor's scheme is https. Sized for a 4 GB account
+      # (GitLab's "memory-constrained" settings).
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url '${PA_PUBLIC_URL}'
+        nginx['listen_port'] = 80
+        nginx['listen_https'] = false
+        nginx['proxy_set_headers'] = { 'X-Forwarded-Proto' => 'https', 'X-Forwarded-Ssl' => 'on' }
+        letsencrypt['enable'] = false
+        puma['worker_processes'] = 0
+        sidekiq['concurrency'] = 10
+        prometheus_monitoring['enable'] = false
+        gitlab_kas['enable'] = false
+        gitlab_rails['env'] = { 'MALLOC_CONF' => 'dirty_decay_ms:1000,muzzy_decay_ms:1000' }
+        gitaly['env'] = { 'MALLOC_CONF' => 'dirty_decay_ms:1000,muzzy_decay_ms:1000', 'GITALY_COMMAND_SPAWN_MAX_PARALLEL' => '2' }
+    volumes:
+      - config:/etc/gitlab
+      - logs:/var/log/gitlab
+      - data:/var/opt/gitlab
+    shm_size: 256m
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/-/readiness"]
+      interval: 15s
+      timeout: 10s
+      retries: 80
+      start_period: 120s
+    mem_limit: 3200m
+
+  # No-op gate: first boot runs `gitlab-ctl reconfigure` and the migrations
+  # (several minutes); `compose up -d` returns only once GitLab is ready.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      gitlab:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  logs: {}
+  data: {}

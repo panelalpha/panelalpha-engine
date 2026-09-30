@@ -1,0 +1,45 @@
+# Compose-replace: the checkout does not build without `go generate` (templ +
+# Hugo docs + transpiled email templates). Runs the published image of the
+# current release with its SQLite databases, images and config on a volume.
+services:
+  app:
+    image: reaper99/recipya:v1.2.2
+    restart: unless-stopped
+    environment:
+      RECIPYA_SERVER_PORT: "8078"
+      RECIPYA_SERVER_URL: ${PA_PUBLIC_URL}
+      # Served over https: links use the URL above and cookies are Secure.
+      RECIPYA_SERVER_IS_PROD: ${RECIPYA_SERVER_IS_PROD:-true}
+      RECIPYA_SERVER_NO_SIGNUPS: ${RECIPYA_SERVER_NO_SIGNUPS:-false}
+      RECIPYA_SERVER_AUTOLOGIN: ${RECIPYA_SERVER_AUTOLOGIN:-false}
+      RECIPYA_EMAIL: ${RECIPYA_EMAIL:-}
+      RECIPYA_EMAIL_SENDGRID: ${RECIPYA_EMAIL_SENDGRID:-}
+      RECIPYA_DI_ENDPOINT: ${RECIPYA_DI_ENDPOINT:-}
+      RECIPYA_DI_KEY: ${RECIPYA_DI_KEY:-}
+    volumes:
+      # The v1.2.2 image runs as root: os.UserConfigDir() is /root/.config.
+      - data:/root/.config/Recipya
+    ports:
+      - "8078:8078"
+    healthcheck:
+      # First start downloads the 62.6 MB FDC nutrition database before serving.
+      # Not `/`: its relative redirect chain trips busybox wget.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8078/auth/login"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 512m
+
+  # `compose up -d` returns only once Recipya answers.
+  ready:
+    image: reaper99/recipya:v1.2.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

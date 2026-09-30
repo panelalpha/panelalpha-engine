@@ -1,0 +1,38 @@
+# The Django recipe runs the source outside its container layout and
+# restart-loops; this runs the release image as in the README's example.
+services:
+  app:
+    image: ghcr.io/meeb/tubesync:v0.18.4@sha256:f865736a425eab33ecf8bef2ea605e70ba0c6bcb386264b53da1607e4819f8a1
+    restart: unless-stopped
+    stop_grace_period: 5m
+    environment:
+      TZ: Etc/UTC
+      PUID: "1000"
+      PGID: "1000"
+    volumes:
+      # SQLite database, settings and the task queue.
+      - config:/config
+      - downloads:/downloads
+    ports:
+      - "4848:4848"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4848/', timeout=5)"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once TubeSync answers.
+  ready:
+    image: ghcr.io/meeb/tubesync:v0.18.4@sha256:f865736a425eab33ecf8bef2ea605e70ba0c6bcb386264b53da1607e4819f8a1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  downloads: {}

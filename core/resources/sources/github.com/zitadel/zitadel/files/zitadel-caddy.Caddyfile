@@ -1,0 +1,28 @@
+# Upstream's Traefik routes (deploy/compose/docker-compose.yml labels). The
+# engine drops a traefik service from a compose file (engine#334), so Caddy
+# does the same routing here.
+{
+	admin off
+	auto_https off
+	servers {
+		# Keep X-Forwarded-Proto: https from the account's webserver.
+		trusted_proxies static private_ranges
+	}
+}
+
+:8080 {
+	@root path /
+	handle @root {
+		rewrite * /ui/v2/login/
+		reverse_proxy zitadel-login:3000
+	}
+	handle /ui/v2/login* {
+		reverse_proxy zitadel-login:3000
+	}
+	handle_path /api/* {
+		reverse_proxy h2c://zitadel-api:8080
+	}
+	handle {
+		reverse_proxy h2c://zitadel-api:8080
+	}
+}

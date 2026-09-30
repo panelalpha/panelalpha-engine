@@ -1,0 +1,99 @@
+# Compose-replace: the repository has no compose file, and its root Dockerfile
+# builds the whole uberjar and frontend from source. This runs upstream's own
+# published OSS image of the current release instead, on PostgreSQL.
+services:
+  db:
+    # Pinned major: Postgres cannot open a datadir from a newer major.
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/metabase/db.env
+    environment:
+      POSTGRES_DB: metabase
+      POSTGRES_USER: metabase
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metabase -d metabase -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  # One-shot: boots Metabase on loopback only (migrations run here on the first
+  # deploy), creates the admin through /api/setup, and exits, so the wizard is
+  # never reachable from outside. A marker on mb-state skips it afterwards.
+  setup:
+    image: docker.io/metabase/metabase:v0.63.18
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+      - ../.panelalpha/metabase/app.env
+      - ../.panelalpha/metabase/admin.env
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: db
+      MB_DB_PORT: "5432"
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: metabase
+      MB_SITE_URL: ${PA_PUBLIC_URL}
+      MB_ANON_TRACKING_ENABLED: "false"
+      JAVA_OPTS: -Xmx1g
+      PA_PUBLIC_HOST: ${PA_PUBLIC_HOST}
+    volumes:
+      - mb-state:/state
+      - ./panelalpha/metabase:/pa:ro
+    entrypoint: ["/bin/bash", "/pa/setup.sh"]
+    mem_limit: 1536m
+
+  app:
+    image: docker.io/metabase/metabase:v0.63.18
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      setup:
+        condition: service_completed_successfully
+    # The admin password is not given to the long-running app.
+    env_file:
+      - .env
+      - ../.panelalpha/metabase/app.env
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: db
+      MB_DB_PORT: "5432"
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: metabase
+      MB_SITE_URL: ${PA_PUBLIC_URL}
+      MB_ANON_TRACKING_ENABLED: "false"
+      # 1 GB heap; the JVM measured ~1.35 GB resident, hence 1.75 GB.
+      JAVA_OPTS: -Xmx1g
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    mem_limit: 1792m
+
+  # Exits 0 once app is healthy, so `compose up -d` returns only when Metabase
+  # answers.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}
+  mb-state: {}

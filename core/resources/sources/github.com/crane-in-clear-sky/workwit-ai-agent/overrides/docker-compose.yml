@@ -1,0 +1,39 @@
+# The app lives in workwit/ (the repo root holds only README.md), so the engine
+# found nothing to run. This is workwit/docker-compose.yml from the repo root:
+# the same backend build, with the ./data bind mount (wiped by every deploy)
+# moved to a named volume.
+services:
+  backend:
+    image: workwit-local:latest
+    build:
+      context: ./workwit/backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Optional MODEL_*_BASE / MODEL_*_KEY (see workwit/.env.example) seed the
+    # model table on first start; models can also be set in the admin UI.
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      # SQLite app.db, mcp.json, uploads and skill artifacts.
+      - data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 15s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once the backend answers.
+  ready:
+    image: workwit-local:latest
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

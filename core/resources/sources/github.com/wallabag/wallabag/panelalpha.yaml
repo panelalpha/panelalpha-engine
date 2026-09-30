@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  wallabag is a read-it-later service (Symfony, PHP): saves web pages for
+  reading later, with a web UI, an API and browser/mobile clients.
+
+  The plain deploy builds the source of the default branch (master) on the
+  php strategy and never serves: the first deploy on a host fails on the
+  missing tidy extension (its PHP variant image is only built in the
+  background), and once that exists every request answers 500 with
+  `Invalid type for path "sentry.dsn"` from the checked-out code. The repo's
+  compose.yaml is a developer stack.
+
+  This recipe runs the official image of the current release,
+  wallabag/wallabag:2.6.14, the way upstream's docker README does: SQLite
+  under /var/www/wallabag/data and saved images under
+  /var/www/wallabag/web/assets/images, both on named volumes that survive
+  redeploys, and SYMFONY__ENV__DOMAIN_NAME set to the account's public URL
+  so links and assets use the real domain. The image's entrypoint creates the
+  schema on first start. Everything else is upstream's default, including the
+  first login wallabag / wallabag.

@@ -1,0 +1,21 @@
+# Layers over the repo's docker-compose.yml: every bind mount there lives in
+# ~/project, which a redeploy replaces, so state moves to named volumes.
+services:
+  youtarr-db:
+    volumes:
+      - youtarr-db-data:/var/lib/mysql
+
+  youtarr:
+    image: dialmaster/youtarr:v1.86.1
+    volumes:
+      - youtarr-downloads:/usr/src/app/data
+      - youtarr-images:/app/server/images
+      - youtarr-config:/app/config
+      - youtarr-jobs:/app/jobs
+
+volumes:
+  youtarr-db-data: {}
+  youtarr-downloads: {}
+  youtarr-images: {}
+  youtarr-config: {}
+  youtarr-jobs: {}

@@ -1,0 +1,39 @@
+# Compose-replace: the repo's compose reads the image tag from an unset ${TAG}.
+# Runs the published image of the current release with SQLite on a named volume.
+services:
+  app:
+    image: ghcr.io/venil7/assets:1.8.6
+    restart: unless-stopped
+    ports:
+      - "4020:4020"
+    # Optional project env vars: ASSETS_CACHE_TTL, ASSETS_JWT_EXPIRES_IN, ASSETS_USERNAME...
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ASSETS_DB: /data/assets.db
+      # Signs login tokens; generated per account by the engine and kept stable.
+      ASSETS_JWT_SECRET: ${ASSETS_JWT_SECRET:?ASSETS_JWT_SECRET is required}
+    volumes:
+      - assets-data:/data
+    healthcheck:
+      # No curl/wget in the image; bash's /dev/tcp does the request.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4020 && printf 'GET /app/ HTTP/1.0\r\n\r\n' >&3 && head -n1 <&3 | grep -q ' 200'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op: `compose up -d` returns once Assets serves its web UI.
+  ready:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  assets-data: {}

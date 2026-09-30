@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Focus Flow, a Pomodoro and task time-tracking server (Rust API with the
+  web app/PWA bundled in the release image, PostgreSQL). The repository has
+  no root compose or Dockerfile: a plain deploy compiles only the Rust
+  backend, without the database, the required variables or the web app.
+
+  Compose-REPLACE with upstream's documented compose on the official image
+  of the current release (ghcr.io/francesco-gaglione/focusflowcloud:v1.3.0)
+  plus postgres:15-alpine, serving the bundled PWA (PWA_DIST_DIR=/app/pwa)
+  on port 8080. hooks/prepare.sh generates the JWT secret, the database
+  password and a VAPID private key once into ~/.panelalpha/focusflow/app.env.
+  Registration is admin-only and the only way to create the first account is
+  upstream's ADMIN_USERNAME / ADMIN_PASSWORD; they come from the project env
+  vars and a one-shot check fails the deploy naming whichever is missing.

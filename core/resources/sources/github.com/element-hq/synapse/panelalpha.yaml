@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Synapse, the reference Matrix homeserver. A plain deploy builds the repo's
+  Dockerfile (Rust + Python from source, ~4 minutes) and the container then
+  exits on every start with "Config file '/data/homeserver.yaml' does not
+  exist": the image never writes its own config. This recipe runs upstream's
+  release image (matrixdotorg/synapse:v1.162.0) and a one-shot `generate`
+  service that writes homeserver.yaml and the signing key into the named
+  volume on first boot, with the account's public host as the permanent
+  server name; later deploys keep them. SQLite and the media store live on
+  the same volume. Registration stays closed as upstream ships it; users are
+  created with register_new_matrix_user.

@@ -1,0 +1,33 @@
+# The repository has no deployment compose (only docker/ CI and dev stacks).
+# This is upstream's docs/src/setup compose on the 2.16.0 release image. The
+# site serves the admin UI (:81); the proxy listeners (80/443) stay inside the
+# account, and /data and /etc/letsencrypt are named volumes.
+services:
+  app:
+    image: jc21/nginx-proxy-manager:2.16.0
+    restart: unless-stopped
+    ports:
+      - "81:81"
+    volumes:
+      - npm-data:/data
+      - npm-letsencrypt:/etc/letsencrypt
+    healthcheck:
+      test: ["CMD", "/usr/bin/check-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  npm-data: {}
+  npm-letsencrypt: {}

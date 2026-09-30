@@ -1,0 +1,63 @@
+# Compose-replace: the repository's compose runs `latest` in development mode,
+# publishes the MQTT broker and leaves the first admin as admin/changeme.
+#   - image of the current release, NODE_ENV=production behind the proxy
+#   - `seed` replaces 'changeme' with the generated password BEFORE the app
+#     publishes its port, and fails the deploy if 'changeme' still logs in
+services:
+  seed:
+    image: ghcr.io/yeraze/meshmonitor:4.16.1
+    restart: "no"
+    entrypoint: ["/usr/local/bin/docker-entrypoint.sh", "/bin/sh", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/meshmonitor/admin.env
+      - ../.panelalpha/meshmonitor/app.env
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      # Private one-shot: plain-HTTP cookies on loopback, room for its few logins.
+      COOKIE_SECURE: "false"
+      RATE_LIMIT_AUTH: "100"
+    volumes:
+      - data:/data
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    mem_limit: 768m
+
+  app:
+    image: ghcr.io/yeraze/meshmonitor:4.16.1
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/meshmonitor/app.env
+    environment:
+      NODE_ENV: production
+      TZ: Etc/UTC
+      TRUST_PROXY: "1"
+      COOKIE_SECURE: "true"
+      ALLOWED_ORIGINS: ${PA_PUBLIC_URL}
+    volumes:
+      - data:/data
+    # Web UI only; the embedded MQTT broker (1883) stays inside the account.
+    ports:
+      - "8080:3001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3001/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once the app answers.
+  ready:
+    image: ghcr.io/yeraze/meshmonitor:4.16.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

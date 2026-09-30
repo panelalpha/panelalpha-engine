@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LiberaForms is a Flask web app for creating and managing web forms, backed by
+  PostgreSQL. Upstream publishes no image and the repo has no compose file,
+  only docker-compose.yml.example plus a long list of settings the app reads
+  with os.environ[...] and so crashes without (KeyError: 'GUNICORN_WORKERS').
+
+  This recipe builds the repo's own Dockerfile and runs it beside
+  postgres:18-alpine, as docs/container.md describes: the defaults from
+  dotenv.example in files/panelalpha/liberaforms/defaults.env, BASE_URL from
+  the account's public URL, and the database password, SECRET_KEY and the
+  Fernet CRYPTO_KEY generated once into ~/.panelalpha/liberaforms. A one-shot
+  init service fails the deploy unless the customer sets ROOT_USER (the email
+  that becomes the admin when it signs up), then creates the schema on a fresh
+  database (create-tables + db stamp) or runs `flask db upgrade` on an existing
+  one. Postgres, uploads and logs are on named volumes.

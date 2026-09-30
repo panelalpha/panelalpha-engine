@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MKVPriority sets default/forced flags on the audio and subtitle tracks of MKV
+  files. It has no web UI: its container runs a webhook listener (POST
+  /process on :8080) that Sonarr/Radarr call from the bundled custom script
+  mkvpriority.sh, on a media directory both containers share. The repository's
+  compose.yaml is exactly that pair (Sonarr + MKVPriority), but with
+  /path/to/... placeholder bind mounts that Docker creates root-owned, so
+  MKVPriority (user 1000) died with "PermissionError: [Errno 13] Permission
+  denied: '/config/config.toml'".
+
+  This recipe keeps upstream's pair on release images (MKVPriority 2.2.0,
+  LinuxServer Sonarr 4.0.20) with named volumes instead of the placeholders:
+  the media library shared by both, Sonarr's config, and MKVPriority's
+  /config (config.toml, archive.db, mkvpriority.sh), which Sonarr sees at
+  /mkvpriority. A one-shot `perms` service hands the fresh volumes to uid
+  1000. Only Sonarr's UI (:8989) is published; the webhook stays on the
+  internal network, as upstream's script expects (host `mkvpriority`). In
+  Sonarr, add Settings > Connect > Custom Script with path
+  /mkvpriority/mkvpriority.sh.

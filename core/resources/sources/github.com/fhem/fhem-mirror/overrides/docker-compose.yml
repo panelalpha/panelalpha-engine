@@ -1,0 +1,36 @@
+# The repository is the FHEM source tree (a Perl daemon installed by a
+# Makefile) with no container build; this runs upstream's minimal image
+# (github.com/fhem/fhem-docker) of the current release.
+services:
+  app:
+    image: ghcr.io/fhem/fhem-minimal-docker:5.4.0-bookworm
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      # FHEM itself (installed here on first start), fhem.cfg, logs and state.
+      - fhem:/opt/fhem
+    # FHEMWEB; telnet (7072) stays inside the container.
+    ports:
+      - "8083:8083"
+    # The image's own check, with room for the first start's install.
+    healthcheck:
+      test: ["CMD", "/health-check.sh"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once FHEMWEB answers.
+  ready:
+    image: ghcr.io/fhem/fhem-minimal-docker:5.4.0-bookworm
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  fhem: {}

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  My Mind, a browser-only mind-mapping app. The repository commits its built
+  output (index.html, my-mind.js, my-mind.css) at the root, and package.json
+  holds only devDependencies for rebuilding it (esbuild, less, typescript) --
+  no scripts, no server. The plain deploy let that package.json send it to
+  Railpack, which found no start command and left a container that exits at
+  once (HTTP 502). The site is the files as committed, so the recipe serves
+  them with the static platform's nginx.
+
+  output_directory is `.` because a package.json makes the engine host-run
+  `npm install` for an nginx recipe and then require <output>/index.html
+  (default dist/, which this repo never produces); the static strategy
+  serves the repository root either way (engine#341).
+extends: static
+output_directory: .

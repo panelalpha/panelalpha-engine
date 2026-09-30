@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OpenOlat, the learning management system (Java web application on Tomcat
+  10.1 / Java 17, PostgreSQL).
+
+  The repository is the Maven source tree of a .war and upstream publishes
+  no current image (frentix/openolat stops at 19.1.6, "for testing only");
+  a plain deploy was detected as `java` and never answered. This recipe
+  follows upstream's installation guide instead: the release .war of the
+  current version (openolat_2103.war, 21.0.3, from openolat.com/releases)
+  on tomcat:10.1-jre17 with PostgreSQL 18. A one-shot `fetch` service
+  downloads the .war once per version, checks its pinned SHA-256 and
+  unpacks it into the `webapp` volume. files/openolat/ carries the guide's
+  server.xml (on port 8080) and ROOT.xml; olat.local.properties is written
+  at container start (db.source=local, the database password from
+  ~/.panelalpha/openolat/openolat.env, generated once by hooks/prepare.sh,
+  0600 in 0700). server.domainname is the account's host and
+  server.port.ssl=443, because TLS ends at the engine's proxy. OpenOlat
+  creates its schema on first start (about 2 minutes); a `ready` gate makes
+  the deploy finish only once /dmz/ renders the login page. Database and
+  olatdata are named volumes. Heap as the guide's setenv.sh (-Xmx1024m);
+  about 1 GB resident in total. Mail is disabled (smtp.host=disabled) until
+  the customer configures it.
+
+  First run is upstream's: the documented default account administrator /
+  openolat.

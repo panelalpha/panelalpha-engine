@@ -1,0 +1,53 @@
+# The repository's compose file runs dumbwareio/dumbpad:latest with the notes in
+# a ./data bind mount and no PIN. This runs the current release (1.0.5), keeps
+# /app/data on a named volume, and always sets the PIN from ~/.panelalpha.
+#
+# DumbPad's websocket (live edits, and `sync_request` replaying the last 1000
+# edits of any notepad) checks no PIN, and its PIN cookie is checked on /api
+# without the lockout that guards /api/verify-pin. So the app publishes
+# nothing: `proxy` is the only thing on the account's port.
+services:
+  app:
+    image: dumbwareio/dumbpad:1.0.5
+    restart: unless-stopped
+    env_file:
+      # Missing file aborts `up` rather than starting without a PIN.
+      - ../.panelalpha/dumbpad/pin.env
+    environment:
+      BASE_URL: ${PA_PUBLIC_URL}
+      # The http origin is what GET / compares when a request has no Referer.
+      ALLOWED_ORIGINS: ${PA_PUBLIC_URL},http://${PA_PUBLIC_HOST}
+      NODE_ENV: production
+      SITE_TITLE: DumbPad
+      # Every request arrives from `proxy`, so the PIN lockout is one shared
+      # counter; trusting X-Forwarded-For would let a client pick its own.
+      TRUST_PROXY: "false"
+    volumes:
+      - data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    mem_limit: 256m
+
+  proxy:
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../.panelalpha/dumbpad/pin.env
+    environment:
+      # Only the PIN is substituted into the template; nginx's own $vars stay.
+      NGINX_ENVSUBST_FILTER: DUMBPAD_PIN
+    volumes:
+      - ./panelalpha/dumbpad-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 48m
+
+volumes:
+  data: {}

@@ -1,0 +1,34 @@
+# The repo root has no compose; the generic rust build is OOM-killed. This runs
+# the published server image of the current release, as docker/docker-compose.yml does.
+services:
+  app:
+    image: ghcr.io/zerx-lab/fluxdown-server:0.4.8
+    restart: unless-stopped
+    volumes:
+      # Database, logs and the access key set in the first-run wizard.
+      - fluxdown-data:/data
+      # Default download directory (HOME=/root in the image).
+      - fluxdown-downloads:/root/Downloads
+    ports:
+      - "17800:17800"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:17800/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once the app answers (engine#204).
+  ready:
+    image: ghcr.io/zerx-lab/fluxdown-server:0.4.8
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  fluxdown-data: {}
+  fluxdown-downloads: {}

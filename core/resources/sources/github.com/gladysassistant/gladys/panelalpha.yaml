@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gladys Assistant is a privacy-first home automation hub: a Node.js server
+  with a Preact UI on :80 and a SQLite/DuckDB database. The repository is a
+  monorepo (server/ and front/) whose root package.json only runs the dev
+  servers, and its docker/docker-compose.yml is a host install (privileged,
+  host network, /dev and the host's docker.sock, plus Watchtower), so a
+  plain deploy cannot run it.
+
+  This recipe runs the image upstream publishes
+  (gladysassistant/gladys, current release v5.1.3) with the environment of
+  docker/docker-compose.yml, minus the host access an account cannot give:
+  no privileged mode, host network, /dev or docker.sock. Gladys detects the
+  missing Docker daemon and starts without it; what it loses are the
+  integrations it runs as sibling containers (MQTT broker, Zigbee2MQTT,
+  Node-RED, Matter) and USB/Bluetooth devices. The database and backups live
+  on a named volume kept across redeploys. First run is left as upstream
+  ships it: the first visit opens Gladys's own signup page to create the
+  admin account.

@@ -1,0 +1,75 @@
+# The repo builds with Gradle/Jib; this runs the published image of the current
+# release the way upstream's docker-examples/docker-compose.yml does.
+services:
+  # One-shot: Kuvasz refuses to start without the admin login. Values are read
+  # from .env (the project's env vars), not interpolated (engine#336).
+  check:
+    image: docker.io/library/postgres:18-alpine
+    restart: "no"
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        missing=""
+        [ -n "$$ADMIN_USER" ] || missing="$$missing ADMIN_USER"
+        [ -n "$$ADMIN_PASSWORD" ] || missing="$$missing ADMIN_PASSWORD (min. 12 characters)"
+        if [ -n "$$missing" ]; then
+          echo "Error: set in the project's environment variables:$$missing"
+          exit 1
+        fi
+    mem_limit: 32m
+
+  kuvasz-db:
+    image: docker.io/library/postgres:18-alpine
+    restart: unless-stopped
+    env_file: ../.panelalpha/kuvasz/db.env
+    environment:
+      POSTGRES_USER: kuvasz
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "kuvasz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    volumes:
+      - kuvasz-db-data:/var/lib/postgresql
+    mem_limit: 256m
+
+  kuvasz:
+    image: docker.io/kuvaszmonitoring/kuvasz:4.4.0
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+      - ../.panelalpha/kuvasz/app.env
+    environment:
+      DATABASE_HOST: kuvasz-db
+      DATABASE_USER: kuvasz
+    volumes:
+      - ./kuvasz.yml:/config/kuvasz.yml:ro
+    depends_on:
+      check:
+        condition: service_completed_successfully
+      kuvasz-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/api/v2/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once Kuvasz answers.
+  ready:
+    image: docker.io/library/postgres:18-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      kuvasz:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  kuvasz-db-data: {}

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Fidus Writer, a collaborative editor for academic writing (Django, SQLite).
+  The repository's only compose file (docker/docker-compose.yml) builds the
+  whole toolchain from source, and the configuration.py the image generates
+  on first start hardcodes ALLOWED_HOSTS to localhost, so the plain deploy
+  answered Django's "DisallowedHost" 400 on the public domain.
+
+  This recipe runs the published fiduswriter/fiduswriter image of the current
+  release (4.1.21) with /data (configuration.py, the SQLite database, media)
+  on a named volume. A small wrapper creates configuration.py the same way
+  the image's start script does (random SECRET_KEY), appends the public host
+  to ALLOWED_HOSTS and the public URL to CSRF_TRUSTED_ORIGINS once, then runs
+  upstream's start script unchanged. First run is as upstream ships it: open
+  registration, no admin seeded.

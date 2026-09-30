@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hound is a fast code search engine: a Go server (houndd) with a web UI on
+  :6080 that clones the repositories listed in its config.json and indexes
+  them.
+
+  The plain deploy builds the repository's own Dockerfile correctly, but its
+  ENTRYPOINT is `houndd -conf /data/config.json` and the checkout ships no
+  such file, so the container restart-loops with
+  "panic: open /data/config.json: no such file or directory". The README's
+  Docker instructions are to mount a directory holding a config.json at
+  /data, and name default-config.json (Hound indexing its own source) as the
+  example.
+
+  The recipe keeps the dockerfile strategy and only supplies that mount.
+  hooks/prepare.sh copies upstream's default-config.json to
+  ~/.panelalpha/hound/config.json once; overrides/docker-compose.override.yml
+  mounts it at /data/config.json over a named volume at /data, where Hound
+  keeps its clones and indexes (dbpath "db" resolves next to the config).
+  Edit ~/.panelalpha/hound/config.json to list your own repositories (see
+  config-example.json) and redeploy. extra.dockerfile / port_hint state what
+  the dockerfile probe would find, since a source recipe runs without probes.
+extends: dockerfile
+extra:
+  dockerfile: Dockerfile
+  port_hint: 6080

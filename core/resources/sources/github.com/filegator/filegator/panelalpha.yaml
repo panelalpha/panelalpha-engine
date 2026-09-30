@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  FileGator is a multi-user PHP web file manager (JSON users file, no
+  database). The repository's compose builds its Dockerfile, which clones
+  master again and runs npm, composer and phpunit: slow and heavy for an
+  account. overrides/docker-compose.yml runs the official filegator/filegator
+  image of the current release, v7.16.5, on :8080. Apache's document root is
+  /var/www/filegator/dist, so configuration.php, private/ and repository/
+  have no URL.
+
+  Security: the image ships users.json.blank with admin/admin123 and copies it
+  to private/users.json on the first request. hooks/prepare.sh generates the
+  admin password and its bcrypt hash once into ~/.panelalpha/filegator/
+  (admin.env and admin.hash, 0600 in 0700). The users-seed service runs
+  before the app, the only one given the hash, and writes users.json into the
+  `private` volume while it is missing or its admin still has the default (or
+  an empty) password; a password changed in the app, and users added there,
+  are never touched. It exits non-zero on a missing hash or unreadable
+  users.json, which keeps the app from starting. The guest user has no
+  permissions, as upstream ships it.
+
+  Files live on the `repository` named volume at /var/www/filegator/repository,
+  outside the document root, so an uploaded .php is never executed and files
+  are only reachable through the logged-in API. users.json, sessions and logs
+  live on the `private` volume, so logins and users survive redeploys. A
+  `ready` service gates on the app answering.
+
+  Measured on mariusz2.panelalpha.tools (2026-09-28, engine 705f250a,
+  memory_limit 1200): deploy 63s, rebuild 26-28s, app 21 MiB. admin/admin123,
+  guest and a wrong password: 422 "Login failed"; the generated admin logs in
+  as role admin. Uploaded a .txt and a .php, listed and downloaded both
+  byte-for-byte; anonymous download 404; /pa-shell.php, /repository/...,
+  /private/users.json, /configuration.php, /.env, /.git/config, /vendor/... 404.
+  After rebuild the files and the password were intact, and a password changed
+  through the app survived a further rebuild. Uploads must be tested against
+  the engine host: the *.panelalpha.online test edge stalls multipart POSTs
+  (panelalpha/engine#170).

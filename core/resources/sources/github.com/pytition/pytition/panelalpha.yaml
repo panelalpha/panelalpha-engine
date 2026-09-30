@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Pytition is a Django application for self-hosted, privacy-friendly online
+  petitions, on PostgreSQL. The repository's docker-compose.yml is a
+  development stack (Django runserver, maildev, the source bind-mounted), and
+  its Dockerfile has no CMD of its own, so a plain deploy built the image and
+  ran the python base image's default `python3`, which exits at once and
+  restart-loops.
+
+  This recipe builds the repository's own Dockerfile (release v2.9 is HEAD)
+  and runs it the way upstream's production docs describe: a config module
+  from config_example.py (files/panelalpha_config.py, mounted at
+  /config/panelalpha_config.py and selected with DJANGO_SETTINGS_MODULE, as
+  upstream's compose does with its docker_config) and uWSGI, which is in the
+  project's dependencies, serving /static and /mediaroot itself. Every start
+  runs migrate, collectstatic and compilemessages (upstream's
+  start_pytition.sh); the interactive createsuperuser step is left to the
+  owner, and registration is upstream's default. ALLOWED_HOSTS and
+  CSRF_TRUSTED_ORIGINS are the site's address. PostgreSQL 18 on a named
+  volume; uploads on a second volume. The database password and SECRET_KEY
+  are generated once per account by the engine. Mail is upstream's default
+  (synchronous SMTP to localhost) until configured.

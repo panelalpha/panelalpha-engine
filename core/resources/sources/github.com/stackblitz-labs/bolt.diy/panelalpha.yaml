@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  bolt.diy is a browser IDE that prompts an LLM of your choice to generate,
+  run and edit full-stack apps (Remix, served by wrangler pages dev on :5173).
+  The plain deploy builds the repo's Dockerfile, whose `pnpm run build` asks
+  for a 4 GB V8 heap and is OOM-killed (exit 137) inside a 4096 MB account.
+
+  This recipe runs the image upstream publishes for its latest release,
+  ghcr.io/stackblitz-labs/bolt.diy:stable (v1.0.0; there is no v1.0.0 tag),
+  with the Dockerfile's own production CMD. Nothing is built. The per-commit
+  main images do not start: `pnpm prune --prod` drops wrangler, a
+  devDependency, and the CMD exits with "wrangler: not found". The server
+  keeps no state: chats live in the visitor's browser, and LLM provider keys
+  are entered in the app's settings.

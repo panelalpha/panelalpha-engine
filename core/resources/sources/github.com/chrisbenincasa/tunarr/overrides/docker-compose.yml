@@ -1,0 +1,32 @@
+# The repo has no deployment compose; its Dockerfile builds from source. This
+# runs the published image of the current release as upstream's run docs do.
+services:
+  tunarr:
+    image: chrisbenincasa/tunarr:2026.9.2
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      TUNARR_LOG_LEVEL: ${TUNARR_LOG_LEVEL:-info}
+    ports:
+      - "8000:8000"
+    volumes:
+      # Database, settings and the search index.
+      - tunarr-data:/config/tunarr
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/api/system/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  # No-op gate: `compose up -d` returns only once Tunarr answers.
+  ready:
+    image: chrisbenincasa/tunarr:2026.9.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      tunarr:
+        condition: service_healthy
+
+volumes:
+  tunarr-data: {}

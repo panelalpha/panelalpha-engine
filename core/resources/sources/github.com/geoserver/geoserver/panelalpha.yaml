@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  GeoServer, the OGC map and feature server (Java on Tomcat) with its web
+  admin at /geoserver/web/.
+
+  The repository is the Maven source tree under src/ with no Dockerfile or
+  compose file (upstream's Docker packaging is the separate geoserver/docker
+  repository). A plain deploy is detected as `python` only because of the
+  docs-only requirements.txt (mkdocs) at the root, and serves the engine's
+  "Project not configured" placeholder.
+
+  This recipe runs upstream's published image of the current release,
+  docker.osgeo.org/geoserver:3.0.1, as geoserver/docker documents it: the
+  image's own startup script and default heap (-Xms256m -Xmx1g), the data
+  directory /opt/geoserver_data on a named volume (seeded with upstream's
+  demo data on first start and kept across redeploys), ROOT_WEBAPP_REDIRECT
+  so "/" redirects to the web admin, and PROXY_BASE_URL plus
+  GEOSERVER_CSRF_WHITELIST set to the public address so links and the web
+  admin work behind the engine's TLS proxy. Measured ~480 MB for the
+  container; it is capped at 2 GB. A `ready` gate makes the deploy finish
+  only once GeoServer answers the image's own healthcheck URL.
+
+  First run is upstream's: the default admin / geoserver login is left as
+  shipped.

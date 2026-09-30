@@ -1,0 +1,184 @@
+# Upstream docker-compose.yml / DOCKER_COMPOSE_SETUP.md with named volumes,
+# generated secrets and the image built once from the repo's own Dockerfile.
+x-loops: &loops
+  image: loops-local:latest
+  restart: unless-stopped
+  env_file:
+    # Optional project env vars (MAIL_*, AWS_*, ...).
+    - path: .env
+      required: false
+    # APP_KEY and the DB/Redis passwords, generated once by hooks/prepare.sh.
+    - ../.panelalpha/loops/app.env
+  volumes:
+    - storage:/var/www/html/storage
+
+# Values from upstream's .env.docker.example.
+x-loops-env: &loops-env
+  APP_NAME: Loops
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_URL: ${PA_PUBLIC_URL}
+  APP_TIMEZONE: UTC
+  APP_LOCALE: en
+  TRUST_PROXIES_ENABLED: "true"
+  DB_CONNECTION: mysql
+  DB_HOST: db
+  DB_PORT: "3306"
+  DB_DATABASE: loops_server
+  DB_USERNAME: loops_admin
+  REDIS_CLIENT: phpredis
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  MAIL_MAILER: log
+  SESSION_DRIVER: database
+  SESSION_LIFETIME: "86400"
+  SESSION_DOMAIN: "null"
+  SESSION_SECURE_COOKIE: "true"
+  LOG_CHANNEL: stderr
+  BROADCAST_CONNECTION: log
+  FILESYSTEM_DISK: local
+  QUEUE_CONNECTION: redis
+  CACHE_STORE: redis
+  CACHE_PREFIX: cache_
+  HORIZON_PREFIX: horizon_
+  FFMPEG_BINARIES: /usr/bin/ffmpeg
+  FFPROBE_BINARIES: /usr/bin/ffprobe
+  PHP_POST_MAX_SIZE: 100M
+  PHP_UPLOAD_MAX_FILE_SIZE: 100M
+  PHP_OPCACHE_ENABLE: "1"
+  PHP_MEMORY_LIMIT: 512M
+
+services:
+  # Builds the image from the repo Dockerfile once and exits; the other
+  # services reference the tag.
+  build:
+    image: loops-local:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    mem_limit: 64m
+
+  db:
+    image: mysql:9
+    restart: unless-stopped
+    env_file: ../.panelalpha/loops/app.env
+    environment:
+      MYSQL_DATABASE: loops_server
+      MYSQL_USER: loops_admin
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\""]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1g
+
+  redis:
+    image: redis:8-trixie
+    restart: unless-stopped
+    env_file: ../.panelalpha/loops/app.env
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 128m
+
+  loops:
+    <<: *loops
+    environment:
+      <<: *loops-env
+      SSL_MODE: "off"
+      AUTORUN_ENABLED: "true"
+      AUTORUN_LARAVEL_MIGRATION: "true"
+      AUTORUN_LARAVEL_MIGRATION_ISOLATION: "true"
+      AUTORUN_LARAVEL_STORAGE_LINK: "true"
+      AUTORUN_LARAVEL_EVENT_CACHE: "true"
+      AUTORUN_LARAVEL_ROUTE_CACHE: "true"
+      AUTORUN_LARAVEL_VIEW_CACHE: "true"
+      AUTORUN_LARAVEL_CONFIG_CACHE: "true"
+    ports:
+      - "8080:8080"
+    depends_on:
+      build:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8080/up"]
+      interval: 5s
+      timeout: 5s
+      retries: 90
+      start_period: 30s
+    mem_limit: 768m
+
+  # One-shot, after migrations: upstream's setup steps 6-8 (admin settings
+  # defaults, OAuth keys, boot-time checks). Settings are seeded only once so a
+  # redeploy does not reset what the admin changed; keys stay on the volume.
+  init:
+    <<: *loops
+    restart: "no"
+    environment:
+      <<: *loops-env
+      AUTORUN_ENABLED: "false"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ ! -f storage/app/.panelalpha-settings-seeded ]; then
+          php artisan db:seed --class=AdminSettingsSeeder --force
+          touch storage/app/.panelalpha-settings-seeded
+        fi
+        [ -f storage/oauth-private.key ] || php artisan passport:keys
+        php artisan app:ensure-boottime
+    depends_on:
+      loops:
+        condition: service_healthy
+    mem_limit: 256m
+
+  horizon:
+    <<: *loops
+    command: ["php", "artisan", "horizon"]
+    environment:
+      <<: *loops-env
+      AUTORUN_ENABLED: "false"
+      PHP_OPCACHE_ENABLE: "0"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "php", "artisan", "horizon:status"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    # Upstream's auto balancing starts a worker per queue (~850 MB idle).
+    mem_limit: 1536m
+
+  scheduler:
+    <<: *loops
+    command: ["php", "artisan", "schedule:work"]
+    stop_signal: SIGTERM
+    environment:
+      <<: *loops-env
+      AUTORUN_ENABLED: "false"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "healthcheck-schedule"]
+      start_period: 10s
+    mem_limit: 256m
+
+volumes:
+  dbdata: {}
+  redisdata: {}
+  storage: {}

@@ -1,0 +1,42 @@
+# Compose-replace: the repo's compose.yaml is the developer environment (a
+# Caddy with `tls internal` proxying to a Vite server on the host).
+services:
+  keeper:
+    image: ghcr.io/ridafkih/keeper-standalone:2.24.6
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    env_file:
+      # BETTER_AUTH_SECRET, ENCRYPTION_KEY (hooks/prepare.sh).
+      - ../.panelalpha/keeper/keeper.env
+    environment:
+      BETTER_AUTH_URL: ${PA_PUBLIC_URL}
+      # better-auth CSRF check; without it sign-up from the domain fails.
+      TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+    volumes:
+      # The bundled PostgreSQL 17 (users, calendars, sync state).
+      - keeper-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1536m
+
+  # No-op: `compose up -d` returns once migrations ran and the API answers.
+  ready:
+    image: ghcr.io/ridafkih/keeper-standalone:2.24.6
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      keeper:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  keeper-data: {}

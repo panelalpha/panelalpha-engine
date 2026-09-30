@@ -1,0 +1,73 @@
+# Replaces the source build (the generated .NET publish fails on the
+# multi-targeted SignalR project). Servarr publishes no image; linuxserver has
+# no Whisparr. This runs hotio's build of the current v2 release, which is
+# what the repository's v2-develop branch releases.
+services:
+  # Pins auth, port and URL base in config.xml before the app reads it.
+  init:
+    image: ghcr.io/hotio/whisparr:v2-2.2.0-release.231
+    restart: "no"
+    entrypoint: ["/bin/sh", "/panelalpha-init.sh"]
+    volumes:
+      - whisparr-config:/config
+      - whisparr-library:/library
+      - ./panelalpha-init.sh:/panelalpha-init.sh:ro
+    mem_limit: 64m
+
+  app:
+    image: ghcr.io/hotio/whisparr:v2-2.2.0-release.231
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      UMASK: "002"
+      TZ: Etc/UTC
+    volumes:
+      # config.xml (API key, auth) and whisparr2.db (login user, sites, settings).
+      - whisparr-config:/config
+      # Library root folder for Settings > Media Management.
+      - whisparr-library:/library
+    ports:
+      - "6969:6969"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:6969/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1g
+
+  # Sets the login user once through Whisparr's own API, then exits. Same
+  # image: it already has curl, jq and sed.
+  seed:
+    image: ghcr.io/hotio/whisparr:v2-2.2.0-release.231
+    restart: "no"
+    entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/whisparr/admin.env
+    volumes:
+      - whisparr-config:/config:ro
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 128m
+
+  # No-op gate: `up -d` returns only after the app is healthy and seeded.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  whisparr-config: {}
+  whisparr-library: {}

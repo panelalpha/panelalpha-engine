@@ -47,10 +47,14 @@ build here at all — there is nothing to point it at. The published image
 - **ready** — a no-op that exits 0. See *Readiness*.
 
 Secrets (generated in `hooks/prepare.sh` into `.env`, which compose
-interpolates): `RC_ADMIN_PASSWORD`, and the resolved `ROCKETCHAT_IMAGE` beside
-it. The hook only writes `.env` when there is none — the mongo volume outlives
-the checkout, so a regenerated admin password on a redeploy would be one nobody
-was ever told while the account in the database still has the old one. It is
+interpolates): `RC_ADMIN_PASSWORD`, and the resolved `ROCKETCHAT_IMAGE` and
+`MONGO_IMAGE` beside it. `~/project` is wiped on every deploy while the mongo
+volume is not, so the password and the MongoDB image are generated once into
+`~/.panelalpha/rocketchat/state.env` (0600, dir 0700) and reused; `.env` is
+rewritten from it on every deploy. A regenerated password would be one nobody
+was ever told while the account in the database still has the old one (an
+earlier version of this hook did exactly that: its "only when there is no
+`.env`" guard never fired, because the checkout is wiped). The password is
 also written to `~/project/.panelalpha-admin-password` (0600), which is where a
 human is pointed.
 
@@ -127,9 +131,11 @@ version of MongoDB. See https://jira.mongodb.org/browse/SERVER-121912"}
 That is a fatal exit before `mongod` starts, so the replica-set healthcheck
 never passed, `up -d` never returned and the engine rolled the whole deploy
 back. It is a refusal, not a crash: MongoDB added the guard itself. It is in
-every current 8.x image — `mongo:8.0` and `mongo:latest` both — and `mongo:8.1`
-and `mongo:8.2` do not exist. The test host runs `7.0.0-30-generic`, so nothing
-in the 8 series can run there at all.
+every current 8.x image — re-checked 2026-09-29 on kernel `7.0.0-30-generic`:
+`mongo:8.0` (8.0.32) and `mongo:8` / `mongo:8.3` (8.3.11) all refuse, even
+`mongod --version`. `mongo:8.2` (8.2.12) does start, but that line is finished:
+its image was last rebuilt on 2026-07-23, when 8.3 replaced it, while 7.0, 8.0
+and 8.3 were rebuilt on 2026-09-16. So no maintained 8.x runs on such a host.
 
 `mongo:7.0` (7.0.43, rebuilt six days before this was written) carries no such
 guard and starts normally, and Rocket.Chat accepts it:
@@ -140,6 +146,19 @@ and has a deadline, which is why the choice is conditional rather than a pin:
 the hook uses 8.0 on a kernel below 6.19 and 7.0 at or above it. Containers
 share the host's kernel, so `uname -r` in the account shell is the kernel
 `mongod` will run on.
+
+The choice is made on the **first** deploy and kept in
+`~/.panelalpha/rocketchat/state.env`; a redeploy never switches it. That is
+deliberate, because the two majors are not interchangeable over the same data:
+
+- 7.0 data (featureCompatibilityVersion 7.0) opens under 8.0, so an install
+  created on a new kernel can move to 8.0 later by editing `MONGO_IMAGE` there.
+- **8.0 data does not open under 7.0.** An install created on a kernel below
+  6.19 runs 8.0; if its host later moves to 6.19 or newer, mongod refuses to
+  start and switching the image to 7.0 does not help. Recovering it needs an
+  8.x server on an older kernel: either `mongodump` there and `mongorestore`
+  into 7.0, or `db.adminCommand({setFeatureCompatibilityVersion: "7.0",
+  confirm: true})` there first, per MongoDB's downgrade procedure.
 
 When MongoDB ships an 8.x image without the guard, the `-ge 19` branch is the
 only line that needs deleting.

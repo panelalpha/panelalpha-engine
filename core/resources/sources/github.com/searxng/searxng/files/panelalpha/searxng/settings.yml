@@ -1,0 +1,14 @@
+# Recipe settings over upstream defaults. secret_key and base_url come from
+# SEARXNG_SECRET / SEARXNG_BASE_URL, valkey.url from SEARXNG_VALKEY_URL.
+use_default_settings: true
+
+server:
+  # Forces limiter, link_token and the image proxy; exits without Valkey.
+  public_instance: true
+  limiter: true
+  image_proxy: true
+
+search:
+  # HTML only: no JSON/CSV/RSS API for scrapers.
+  formats:
+    - html

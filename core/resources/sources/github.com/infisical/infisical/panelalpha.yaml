@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Infisical, an open-source secrets-management platform (Node backend that
+  also serves the web UI on :8080, PostgreSQL, Redis). The engine picks the
+  repository's Dockerfile, a from-source FIPS build whose `npm ci` is killed
+  for memory inside a 2.5 GB account. Upstream's deployment is
+  docker-compose.prod.yml on the published image.
+
+  This recipe runs that compose on infisical/infisical:v0.165.16 (the
+  current release) with PostgreSQL 14 and Redis 7; the backend applies its
+  database migrations on start. The prepare hook generates ENCRYPTION_KEY,
+  AUTH_SECRET and the database password once into ~/.panelalpha/infisical,
+  since secrets stored in the database are unreadable under a different
+  key. The database and Redis are on named volumes. SITE_URL is the site's
+  address; telemetry is off. First run is upstream's: the signup page
+  creates the first admin. SMTP is the operator's to configure (SMTP_*).

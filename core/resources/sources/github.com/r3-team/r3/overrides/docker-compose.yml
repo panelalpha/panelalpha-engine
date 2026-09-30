@@ -1,0 +1,60 @@
+# The vendor compose from rei3.de/docker_x64 (not shipped in the repository),
+# with the r3_docker build context pinned and container names/host ports dropped.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    volumes:
+      - data_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  app:
+    build:
+      context: https://github.com/r3-team/r3_docker.git#906f35318ac3b03a2d1aa18e0580335d9227fa5b
+      args:
+        r3_version: "3.12.8"
+        r3_db_host: db
+        r3_db_name: app
+        r3_db_user: app
+        r3_db_pass: app
+        r3_os_arch: x64
+        im_policy: /etc/ImageMagick-6/policy.xml
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    volumes:
+      - data_app:/opt/r3/data
+    # The image has no curl; bash can open the port itself.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/80"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once REI3 accepts connections.
+  ready:
+    image: postgres:16
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data_db: {}
+  data_app: {}

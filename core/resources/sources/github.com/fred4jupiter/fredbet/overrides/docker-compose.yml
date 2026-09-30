@@ -1,0 +1,62 @@
+# Compose-replace: the repo compose builds from source behind a `profiles:`
+# gate, publishes Postgres with fred/fred, and FredBet creates admin/admin.
+#   - official image of the current release + Postgres on a named volume
+#   - the admin is created on first start from FREDBET_ADMIN_PASSWORD
+#     (~/.panelalpha/fredbet/app.env), so admin/admin never exists
+services:
+  db:
+    image: docker.io/library/postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/fredbet/db.env
+    environment:
+      POSTGRES_DB: fredbet
+      POSTGRES_USER: fredbet
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fredbet -d fredbet -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 384m
+
+  app:
+    image: docker.io/fred4jupiter/fredbet:4.8.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+      - ../.panelalpha/fredbet/app.env
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/fredbet
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_DATASOURCE_USERNAME: fredbet
+      # TLS ends at the proxy; build redirects from X-Forwarded-*.
+      SERVER_FORWARD_HEADERS_STRATEGY: native
+      JAVA_TOOL_OPTIONS: -Duser.timezone=Europe/Berlin -XX:MaxRAMPercentage=70
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once FredBet answers.
+  ready:
+    image: docker.io/library/postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db_data: {}

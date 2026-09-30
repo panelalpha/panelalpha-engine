@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Fess is an enterprise search server: a Java web app (crawler, admin UI,
+  search UI) on port 8080 that keeps its index and all of its configuration
+  in OpenSearch.
+
+  COMPOSE-REPLACE FROM PUBLISHED IMAGES. The repository is the Maven source
+  with no compose file. The recipe runs upstream's published images of the
+  current release, ghcr.io/codelibs/fess:15.8.0 and
+  ghcr.io/codelibs/fess-opensearch:3.8.0 (OpenSearch with the Fess plugins),
+  as codelibs/docker-fess's compose files do: one node, no security plugin,
+  9200 not published. The index and configuration live on the search-data
+  and search-dictionary volumes, Fess's own var dir on fess-var, so a
+  redeploy keeps them. A `ready` gate makes the deploy finish only once
+  /api/v2/health answers.
+
+  MEMORY. Measured: OpenSearch ~1.42 GB (fixed 1 GB heap, as upstream ships
+  it), Fess ~0.75 GB idle and ~1.1 GB while a crawl job's forked JVM runs,
+  about 2.5 GB in total. hooks/precheck.sh fails the deploy below 3072 MB
+  with a message saying so.
+
+  FIRST RUN AS UPSTREAM SHIPS IT. The admin login is admin / admin and Fess
+  asks for a new password on the first login.

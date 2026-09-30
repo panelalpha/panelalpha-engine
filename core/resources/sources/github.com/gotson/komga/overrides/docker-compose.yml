@@ -1,0 +1,38 @@
+# The repository is a Gradle multi-project (server, desktop tray, web UIs);
+# its image is assembled by a release pipeline from komga/docker/Dockerfile.tpl
+# and a prebuilt jar. This runs the official image of the current release, as
+# the Komga docs' compose example does, on named volumes.
+services:
+  app:
+    image: gotson/komga:1.27.1
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      # database.sqlite, tasks.sqlite, lucene index, application.yml, logs.
+      - config:/config
+      # Library root for comics, manga and books.
+      - data:/data
+    ports:
+      - "25600:25600"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:25600/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once Komga answers.
+  ready:
+    image: gotson/komga:1.27.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  data: {}

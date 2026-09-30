@@ -1,0 +1,96 @@
+# Socialhome as upstream documents its Docker install: the published backend
+# image of the current release, the separately published SPA build, Postgres
+# and Redis, with nginx doing the documented path routing.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: socialhome
+      POSTGRES_DB: socialhome
+    env_file:
+      - ../.panelalpha/socialhome/db.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U socialhome -d socialhome"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    mem_limit: 128m
+
+  # Fetches the SPA build (socialhome-ui) into a volume once per version.
+  ui:
+    image: nginx:1.28-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        [ -f "/ui/.version-$$UI_VERSION" ] && exit 0
+        rm -rf /ui/dist /ui/.version-*
+        wget -qO- "https://codeberg.org/api/packages/socialhome/generic/socialhome-ui/$$UI_VERSION/socialhome-ui.tgz" | tar xz -C /ui
+        touch "/ui/.version-$$UI_VERSION"
+    environment:
+      UI_VERSION: "0.12.2"
+    volumes:
+      - ui:/ui
+    mem_limit: 64m
+
+  app:
+    image: codeberg.org/socialhome/socialhome:v0.24.0
+    restart: unless-stopped
+    environment:
+      DJANGO_ALLOWED_HOSTS: ${PA_PUBLIC_HOST}
+      SOCIALHOME_DOMAIN: ${PA_PUBLIC_HOST}
+      REDIS_HOST: redis
+      # One job-runner process; the default is one per host vCPU at ~500 MB each.
+      DRAMATIQ_NPROCS: "1"
+      DRAMATIQ_NTHREADS: "4"
+    env_file:
+      - ../.panelalpha/socialhome/app.env
+    volumes:
+      - media:/app/socialhome/media
+      - var:/app/var
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null -H \"Host: $$SOCIALHOME_DOMAIN\" -H 'X-Forwarded-Proto: https' http://127.0.0.1:23564/.well-known/nodeinfo"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
+    mem_limit: 1536m
+
+  web:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./panelalpha/socialhome-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ui:/ui:ro
+      - media:/media:ro
+    depends_on:
+      ui:
+        condition: service_completed_successfully
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}
+  redis-data: {}
+  ui: {}
+  media: {}
+  var: {}

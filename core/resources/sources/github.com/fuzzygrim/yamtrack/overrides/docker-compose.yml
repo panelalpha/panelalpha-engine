@@ -1,0 +1,91 @@
+# Compose-replace: the repo's docker-compose.yml is a sample to edit by hand
+# (SECRET=longstring, TZ=Europe/Berlin, a ./db bind mount, no public URL). This
+# runs the same stack made durable and self-configuring:
+#   - the official image ghcr.io/fuzzygrim/yamtrack pinned to release 0.26.3
+#   - SQLite (Yamtrack's default) on a named volume, Redis for cache + Celery
+#   - SECRET and the admin password seeded once from ~/.panelalpha/yamtrack
+#   - registration closed, admin created by a one-shot after the app is healthy
+services:
+  yamtrack:
+    image: ghcr.io/fuzzygrim/yamtrack:0.26.3
+    restart: unless-stopped
+    env_file:
+      - .env
+      - ../.panelalpha/yamtrack/app.env
+    environment:
+      TZ: "UTC"
+      REDIS_URL: "redis://redis:6379"
+      # Public origin: Yamtrack adds it to CSRF_TRUSTED_ORIGINS and ALLOWED_HOSTS
+      # (localhost/127.0.0.1 are added automatically for the healthcheck).
+      URLS: "${PA_PUBLIC_URL}"
+      ALLOWED_HOSTS: "${PA_PUBLIC_HOST}"
+      # Only the seeded admin; no first-visitor sign-up.
+      REGISTRATION: "False"
+      DEBUG: "False"
+      PUID: "1000"
+      PGID: "1000"
+      # BASE_URL is a path prefix in Yamtrack, not the site URL; never set it.
+    volumes:
+      - db:/yamtrack/db
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # /health/ checks the DB, the cache, Redis and a Celery ping.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/health/ || exit 1"]
+      interval: 10s
+      timeout: 15s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1g
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 256m
+
+  # One-shot after migrations ran: create the admin once (upstream's own
+  # documented manage.py shell route). Runs as the app's uid so SQLite files stay writable.
+  seed-admin:
+    image: ghcr.io/fuzzygrim/yamtrack:0.26.3
+    restart: "no"
+    user: "1000:1000"
+    entrypoint: ["/bin/sh", "/panelalpha/seed-admin.sh"]
+    env_file:
+      - .env
+      - ../.panelalpha/yamtrack/app.env
+      - ../.panelalpha/yamtrack/admin.env
+    environment:
+      REDIS_URL: "redis://redis:6379"
+    volumes:
+      - db:/yamtrack/db
+      - ./panelalpha:/panelalpha:ro
+    depends_on:
+      yamtrack:
+        condition: service_healthy
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once the app answers and the admin exists.
+  ready:
+    image: redis:8-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      yamtrack:
+        condition: service_healthy
+      seed-admin:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  db: {}
+  redis_data: {}

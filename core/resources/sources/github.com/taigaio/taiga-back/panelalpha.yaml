@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Taiga, the agile project management platform (Kanban, Scrum, issues,
+  wiki). taiga-back is its Django API only.
+
+  A plain deploy builds the repository's Dockerfile and the container
+  crash-loops at import time ("The SECRET_KEY setting must not be empty");
+  it would also need PostgreSQL, two RabbitMQ brokers and the separate
+  front, events and protected-media services, none of which this repository
+  provides. This recipe runs upstream's taiga-docker stack on the published
+  images of the current release (taiga-back 6.10.2, taiga-front 6.10.3,
+  taiga-events 6.10.0, taiga-protected 6.10.1) behind upstream's nginx
+  gateway (files/taiga-gateway/taiga.conf, unchanged), with PostgreSQL,
+  RabbitMQ, static files and uploads on named volumes. hooks/prepare.sh
+  generates the secret key and the database and RabbitMQ passwords once into
+  ~/.panelalpha/taiga/. Scheme and domain are the account's public https
+  address. Mail goes to the console, as upstream's example ships it.
+  First run is upstream's: public registration is off and there is no user
+  until one is created with `python manage.py createsuperuser` in the
+  taiga-back container. A `ready` gate makes the deploy finish only once the
+  API has migrated and answers.

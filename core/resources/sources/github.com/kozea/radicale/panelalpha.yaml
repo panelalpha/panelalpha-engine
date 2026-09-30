@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Radicale is a CalDAV/CardDAV server: one Python process serving the
+  calendars, the address books and a small web UI (/.web/) on :5232, storing
+  collections as plain files in /var/lib/radicale. The repository's compose.yaml
+  binds two volumes to ./config and ./data through the local driver, but
+  ./config is a file in the repository and ./data does not exist, so a plain
+  deploy fails with "failed to mount local volume ... no such file or
+  directory" before the container is created.
+
+  This recipe runs the official ghcr.io/kozea/radicale image of the current
+  release, 3.8.1, with the collections and /etc/radicale on named volumes
+  that survive redeploys. Authentication is left as upstream ships it: since
+  3.5.0 the default is `[auth] type = denyall`, so the web UI shows its login
+  form and refuses every login until the owner puts a config file into the
+  config volume (e.g. `type = htpasswd` with an htpasswd file there; the image
+  ships `htpasswd` from apache2-utils).

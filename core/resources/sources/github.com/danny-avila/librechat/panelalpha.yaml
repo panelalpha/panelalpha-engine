@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LibreChat, a multi-provider AI chat UI (Node API that also serves the built
+  React client on :3080) with MongoDB. The repository's root compose runs
+  unpinned dev images as `user: "${UID}:${GID}"`, which the plain deploy
+  cannot interpolate, and deploy-compose.yml adds an nginx on host ports
+  80/443.
+
+  This recipe runs the release image ghcr.io/danny-avila/librechat:v0.8.8-rc4
+  (upstream's current release; all its recent releases are tagged
+  pre-release) with mongo:7.0 (MongoDB 8 does not start on kernel 6.19+,
+  engine#146). CREDS_KEY/CREDS_IV (encryption of user-provided API keys) and
+  the JWT secrets are generated once into ~/.panelalpha/librechat/app.env.
+  DOMAIN_CLIENT/DOMAIN_SERVER are the site address; the rest of upstream's
+  .env.example (registration open, search off, TRUST_PROXY=1) and the project's
+  env vars (provider API keys) come through .env. Uploads, images, app data and
+  MongoDB are on named volumes. Meilisearch, the RAG API and the admin panel are
+  optional upstream services and are not started. SCHEDULES_SINGLE_PROCESS
+  lets the scheduler arm without Redis (one replica per account). A `ready` gate waits for
+  /health. First run is upstream's: the site opens the login page with sign-up.
+
+  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
+
+  Create success in 146 s; / is <title>LibreChat</title>, /api/config reports
+  registration enabled and the https site address. Registered a user over
+  https (first user role ADMIN), logged in, created a preset. /.env and
+  /.git/config return the SPA shell (no secrets). Rebuild: success in 51 s,
+  the same user logged in and the preset is still there.

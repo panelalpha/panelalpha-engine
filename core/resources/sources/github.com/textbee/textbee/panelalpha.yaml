@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  TextBee is an SMS gateway: a NestJS API (Mongo, Redis) that pushes send jobs
+  to an Android phone over Firebase Cloud Messaging, and a Next.js dashboard.
+  The repo's docker-compose.yaml cannot deploy as is: it reads ./api/.env and
+  ./web/.env (not in the repo), pins mongo:latest (refuses to start on kernel
+  6.19+), and points the dashboard at http://localhost:3001 for the API.
+
+  COMPOSE-REPLACE, building api/ and web/ from the repo's own Dockerfiles
+  (upstream's ghcr images are not public), with mongo:7.0 and redis:7-alpine.
+  ONE DOMAIN: files/web/.env.production makes `next build` inline
+  NEXT_PUBLIC_API_BASE_URL=/api/v1, and a small nginx `web` service
+  (files/panelalpha/router.conf) sends /api/v1 to the API and everything else
+  to the dashboard. It is the only service that publishes a port (8080).
+
+  The API does not start without a Firebase service account, so the customer
+  sets FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY
+  (plus optionally FIREBASE_PRIVATE_KEY_ID, FIREBASE_CLIENT_ID,
+  FIREBASE_CLIENT_C509_CERT_URL, MAIL_*) in the project's environment
+  variables; a one-shot `check` service fails the deploy naming each missing
+  one. The Mongo password, JWT_SECRET, EMAIL_LINK_SECRET and NEXTAUTH_SECRET
+  are generated once into ~/.panelalpha/textbee (0600 in 0700). Turnstile uses
+  upstream's .env.example test keys (always pass), as upstream ships it; the
+  secret can be overridden with CLOUDFLARE_TURNSTILE_SECRET_KEY. Data is on
+  named volumes. First run is upstream's: anyone can register an account.

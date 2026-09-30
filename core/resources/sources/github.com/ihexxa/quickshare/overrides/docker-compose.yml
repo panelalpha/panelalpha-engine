@@ -1,0 +1,36 @@
+# Compose-replace: the repo ships no compose file and its Dockerfile builds the
+# frontend and backend from source. Runs the published image of the current
+# release (v0.11.4), as upstream's `docker run` example does.
+services:
+  app:
+    image: hexxa/quickshare:v0.11.4
+    restart: unless-stopped
+    ports:
+      - "8686:8686"
+    environment:
+      # Read only on first start; without a name the app prompts on stdin.
+      DEFAULTADMIN: ${DEFAULTADMIN:-admin}
+      # Unset: the app generates the password and prints it to its log.
+      DEFAULTADMINPWD: ${DEFAULTADMINPWD:-}
+    volumes:
+      # Uploaded files and quickshare.sqlite.
+      - quickshare-root:/quickshare/root
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8686"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns once QuickShare listens.
+  ready:
+    image: hexxa/quickshare:v0.11.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  quickshare-root: {}

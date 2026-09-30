@@ -48,13 +48,16 @@ The image tag is pinned to the major rather than derived from the checkout.
 release time — so the checkout genuinely cannot say which 2.5.x it is. `2` is
 the tag upstream's own example compose uses.
 
-Secrets, generated in `hooks/prepare.sh` into `.env`, which compose
-interpolates:
+Secrets, generated once by `hooks/prepare.sh` into `~/.panelalpha/wiki/`
+(0600 files in a 0700 directory) and read through `env_file:`. Not into
+`~/project/.env`: `~/project` is emptied on every deploy while the volumes
+outlive it.
 
-- `POSTGRES_PASSWORD` — read by the database and by Wiki.js, one value.
-- `WIKI_ADMIN_EMAIL` / `WIKI_ADMIN_PASSWORD` — the root administrator the setup
-  finalizer creates. Written once: the volume outlives the checkout, and a
-  regenerated password would be one the `users` table never learns.
+- `db.env`: `POSTGRES_PASSWORD` for the database; `wiki.env` carries the same
+  value as `DB_PASS` for Wiki.js.
+- `wiki.env`: `WIKI_ADMIN_EMAIL` / `WIKI_ADMIN_PASSWORD`, the root
+  administrator the setup finalizer creates. A regenerated password would be
+  one the `users` table never learns.
 
 Wiki.js generates its own `sessionSecret` and RSA keypair during `/finalize`
 and keeps them in the `settings` table, so there is nothing else for the hook

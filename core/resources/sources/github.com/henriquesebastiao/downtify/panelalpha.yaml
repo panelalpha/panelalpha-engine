@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Downtify, a self-hosted Spotify/YouTube Music downloader (FastAPI server with
+  a Vue UI, one image on :8000). The plain deploy builds the repo's Dockerfile
+  but the engine seeds .env from upstream's .env.example, whose
+  WEB_GUI_LOCATION="/frontend/dist" is a path that does not exist in the image
+  (the UI is at /downtify/frontend/dist), so the server crash-loops with
+  "RuntimeError: Directory '/frontend/dist' does not exist".
+
+  This recipe runs the published image at the current release
+  (ghcr.io/henriquesebastiao/downtify:3.2.0) as upstream's README compose does:
+  /data (database, settings, signing key) and /downloads (the music) are named
+  volumes. The image's own paths and port are spelled out so the copied
+  .env.example cannot move them; other project env vars (TZ,
+  DOWNTIFY_DISABLE_AUTH, ...) still reach the app through .env.
+  DOWNTIFY_TRUSTED_PROXIES names the private ranges so the login rate limiter
+  counts the proxy-added client address rather than the engine's proxy, which
+  every visitor shares. First sign-in is upstream's default (admin/downtify,
+  changed in Settings).

@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  NodeBB, Node.js forum software (web UI and API on :4567, MongoDB). The
+  repository's compose builds the checkout and bind-mounts its volumes into
+  ./.docker under ~/project, so the plain deploy restart-loops on "No write
+  permission for directory /opt/config" (the image runs as uid 1001) and would
+  lose its data on every redeploy anyway. overrides/docker-compose.yml runs
+  the published ghcr.io/nodebb/nodebb image of the current release with
+  mongo:7.0 (8.x does not start on this kernel, engine#146) and named volumes
+  for the config, build, uploads and database. hooks/prepare.sh generates the
+  MongoDB root and NodeBB passwords once into ~/.panelalpha/nodebb/; the
+  NodeBB user is created by an init script on the first start, as upstream's
+  mongodb-user-init.js does. The site address and database are passed as
+  NodeBB's nconf environment, so the upstream web installer asks only for the
+  first admin account, as it ships. The database credentials go in as
+  mongo__uri: the installer renders mongo:password (but not the URI) into its
+  page, visible to anyone until the install is done. trust_proxy is set to
+  the private ranges: the https url makes the session cookie Secure, and
+  without proxy trust every login answers 403.

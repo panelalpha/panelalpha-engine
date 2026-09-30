@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Glance is a self-hosted dashboard (feeds, monitors, weather, markets and
+  service widgets on one page): a single Go binary on :8080 configured by YAML
+  files, with no database. A plain deploy builds the repository's Dockerfile,
+  which starts FROM golang:1.27.1-alpine3.24.1, a tag that was never
+  published, so the build stops at its first line.
+
+  This recipe runs upstream's published image of the current release
+  (glanceapp/glance:v0.8.6) with /app/config on a named volume that survives
+  redeploys. On the first deploy a one-shot service copies the repository's
+  docs/glance.yml into it, the starter file upstream's README tells users to
+  download; after that the config in the volume is the customer's and is never
+  overwritten. There is no login, as upstream ships it.

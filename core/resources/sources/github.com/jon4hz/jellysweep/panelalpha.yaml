@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Jellysweep, a cleanup tool for a Jellyfin media server with a web UI for
+  reviewing and requesting to keep what is scheduled for removal (Go, SQLite).
+  The repository's root requirements.txt (docs only) made the engine detect it
+  as Python with no entry point, and its only compose file is a host-network
+  dev stack. This recipe runs the published ghcr.io/jon4hz/jellysweep image of
+  the current release (v0.16.1) with the database on a named volume. Jellysweep
+  will not start without Jellyfin, Sonarr and Radarr
+  (both, despite the README saying either), and Jellystat or
+  Streamystats: the customer supplies their URLs and API keys as project env
+  vars, and a one-shot check service fails the deploy naming each missing one.
+  The library list can only be set in the config file, so prepare.sh writes a
+  starter config.yml (upstream's example libraries) and a session key into
+  ~/.panelalpha/jellysweep once.

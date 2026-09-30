@@ -1,0 +1,17 @@
+# Setup writes the hostname into the Primary Group regexp, and Cronicle reads
+# it from $HOSTNAME (the engine sets 0.0.0.0): keep both stable. Storage, job
+# logs and the job queue survive redeploys on named volumes.
+services:
+  app:
+    hostname: cronicle
+    environment:
+      HOSTNAME: cronicle
+    volumes:
+      - cronicle-data:/app/data
+      - cronicle-logs:/app/logs
+      - cronicle-queue:/app/queue
+
+volumes:
+  cronicle-data:
+  cronicle-logs:
+  cronicle-queue:

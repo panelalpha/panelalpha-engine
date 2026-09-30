@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  asciinema server hosts terminal recordings (Elixir/Phoenix on :4000 +
+  PostgreSQL). The repository has no compose file, so the plain deploy builds
+  the Dockerfile (~6 minutes of mix/cargo) and runs it alone, where the
+  image's default DATABASE_URL (postgresql://postgres@postgres/postgres)
+  points at a database that does not exist and the server never answers.
+
+  This recipe follows upstream's self-hosting quick start: the published
+  ghcr.io/asciinema/asciinema-server:20260626 (current release) beside
+  postgres:18-alpine, URL_HOST/URL_SCHEME from the site's https address,
+  SECRET_KEY_BASE and the database password generated once by
+  hooks/prepare.sh into ~/.panelalpha/asciinema/, and recordings on a named
+  volume (/var/lib/asciinema). Login is by e-mailed link: set SMTP_HOST,
+  SMTP_USERNAME, SMTP_PASSWORD (and optionally SMTP_PORT, SMTP_FROM_ADDRESS)
+  in the project's environment variables to deliver it; the server starts
+  and serves without them. Everything else is upstream's default.

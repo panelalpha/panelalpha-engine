@@ -1,0 +1,62 @@
+# Upstream's compose, publishing only the web port. Its second port (3001,
+# "Bull Board") has no listener in src/, and the engine picked it as the
+# site's port.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PORT=3000
+      - MAX_FILE_SIZE=104857600
+      - JOB_TTL_HOURS=24
+      - CLEANUP_CRON=*/15 * * * *
+      - DEFAULT_TOLERANCE=0.01
+    volumes:
+      - uploads:/app/uploads
+      - converted:/app/converted
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:3000/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+    # FreeCAD does the conversions in-process; leave it room.
+    mem_limit: 1536m
+
+  redis:
+    image: redis:8-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once Stepifi answers /health.
+  ready:
+    image: redis:8-alpine
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  uploads: {}
+  converted: {}
+  redis_data: {}

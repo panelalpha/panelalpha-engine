@@ -1,0 +1,42 @@
+# The repo's compose (Binner/compose.yml) serves HTTPS with a self-signed
+# certificate; the engine terminates TLS, so this runs the same published image
+# on plain HTTP.
+services:
+  binner:
+    image: docker.io/binnerofficial/binner:v2.6.25
+    restart: unless-stopped
+    environment:
+      BINNER_USEHTTPS: "false"
+      BINNER_PORT: "8090"
+      BINNER_PROVIDER: Binner
+      BINNER_DB_FILENAME: /data/binner.db
+      BINNER_PUBLICURL: ${PA_PUBLIC_URL}
+    ports:
+      - "8090:8090"
+    volumes:
+      # /config is seeded from the image (appsettings.json, nlog.config).
+      - binner-config:/config
+      - binner-data:/data
+      - binner-userfiles:/userfiles
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8090/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once Binner answers.
+  ready:
+    image: docker.io/binnerofficial/binner:v2.6.25
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      binner:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  binner-config: {}
+  binner-data: {}
+  binner-userfiles: {}

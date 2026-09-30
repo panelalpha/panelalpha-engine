@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Khoj, the AI second brain (Django/FastAPI server with pgvector, the Terrarium
+  code sandbox and SearXNG web search). A plain deploy of upstream's
+  docker-compose.yml started the app on 42110, but the optional `computer`
+  desktop service publishes VNC on 5900, the lower port won, and the site
+  answered 502. Its images are also `latest`, which for ghcr.io/khoj-ai/khoj
+  is a July 2025 build. This recipe keeps upstream's stack without `computer`
+  (off by default, needs the Docker socket), pins the current release
+  2.0.0-beta.28 (Terrarium by digest, SearXNG by dated tag), sets KHOJ_DOMAIN
+  to the site so Django trusts its origin, and publishes only 42110. As
+  upstream ships it the server runs in anonymous mode; its placeholder
+  KHOJ_DJANGO_SECRET_KEY and KHOJ_ADMIN_PASSWORD are filled per account by the
+  engine. Data is on upstream's named volumes. Chat needs an LLM provider,
+  configured in the admin panel (/server/admin) or by env.

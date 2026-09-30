@@ -1,0 +1,40 @@
+# Compose-replace of the repo's docker-compose.yml: same services and settings,
+# with a fixed web port, the MCP sidecar unpublished and data on a named volume.
+services:
+  webserver:
+    image: ghcr.io/timothepoznanski/poznote:6.100.0
+    restart: always
+    env_file: .env
+    environment:
+      SQLITE_DATABASE: /var/www/html/data/database/poznote.db
+      POZNOTE_PHP_FPM_MAX_CHILDREN: ${POZNOTE_PHP_FPM_MAX_CHILDREN:-}
+      POZNOTE_PHP_MEMORY_LIMIT: ${POZNOTE_PHP_MEMORY_LIMIT:-}
+    ports:
+      # Upstream's default HTTP_WEB_PORT; the only published port.
+      - "8040:80"
+    volumes:
+      - poznote-data:/var/www/html/data
+    healthcheck:
+      # Upstream's check: the port is read from the nginx config.
+      test: ["CMD-SHELL", "port=$$(grep -o 'listen [0-9][0-9]*;' /etc/nginx/http.d/default.conf | head -n 1 | tr -dc 0-9); wget --quiet --tries=1 --timeout=5 -O /dev/null http://127.0.0.1:$${port:-80}/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Upstream binds it to 127.0.0.1 only; here it stays on the compose network.
+  mcp-server:
+    image: ghcr.io/timothepoznanski/poznote-mcp:6.100.0
+    restart: always
+    environment:
+      POZNOTE_API_URL: http://webserver:80/api/v1
+      POZNOTE_DEBUG: ${POZNOTE_DEBUG:-false}
+      POZNOTE_USER_ID: ${POZNOTE_USER_ID:-1}
+      POZNOTE_MCP_AUTH_TOKEN: ${POZNOTE_MCP_AUTH_TOKEN:-}
+    volumes:
+      - poznote-data:/var/www/html/data:ro
+    depends_on:
+      - webserver
+
+volumes:
+  poznote-data: {}

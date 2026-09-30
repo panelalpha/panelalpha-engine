@@ -1,0 +1,83 @@
+# Compose-replace: the repository's docker-compose.yml is upstream's quick
+# start, which mounts the host Docker socket and /tmp and runs as root. This is
+# the same stack (standalone server on PostgreSQL) at the current release,
+# without the host mounts.
+services:
+  postgres:
+    # Pinned major: Postgres cannot open a datadir from a newer major.
+    image: docker.io/library/postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kestra
+      POSTGRES_USER: kestra
+      POSTGRES_PASSWORD: ${KESTRA_DB_PASSWORD:?generated per account}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kestra -d kestra -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  kestra:
+    image: docker.io/kestra/kestra:v2.0.3
+    restart: unless-stopped
+    # Upstream's default: let running tasks finish before the server stops.
+    stop_grace_period: 6m
+    # As upstream's compose: a fresh named volume is root-owned and the
+    # image's user cannot create the plugin repository in it.
+    user: "root"
+    command: server standalone
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      JAVA_OPTS: -XX:MaxRAMPercentage=60
+      KESTRA_CONFIGURATION: |
+        datasources:
+          postgres:
+            url: jdbc:postgresql://postgres:5432/kestra
+            driverClassName: org.postgresql.Driver
+            username: kestra
+            password: ${KESTRA_DB_PASSWORD:?generated per account}
+        kestra:
+          repository:
+            type: postgres
+          storage:
+            type: local
+            local:
+              base-path: /app/storage
+          queue:
+            type: postgres
+          tasks:
+            tmp-dir:
+              path: /tmp/kestra-wd/tmp
+          url: ${PA_PUBLIC_URL}/
+    volumes:
+      - storage:/app/storage
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # Management port, not published.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8081/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 90
+      start_period: 60s
+    mem_limit: 3g
+
+  # No-op gate: `compose up -d` returns only once Kestra reports healthy.
+  ready:
+    image: docker.io/library/postgres:18-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      kestra:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  storage: {}

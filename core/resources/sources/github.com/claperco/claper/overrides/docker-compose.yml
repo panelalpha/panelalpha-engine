@@ -1,0 +1,68 @@
+# Compose-replace: upstream's compose runs :latest with a hand-filled .env and a
+# fixed DB password. This pins release 3.0.0 and seeds every secret per account.
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/claper/app.env
+    volumes:
+      - claper-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -U claper -d claper"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  app:
+    image: ghcr.io/claperco/claper:3.0.0
+    restart: unless-stopped
+    command: ["sh", "/panelalpha/start.sh"]
+    env_file:
+      - .env
+      - ../.panelalpha/claper/app.env
+    environment:
+      BASE_URL: ${PA_PUBLIC_URL}
+      SECURE_COOKIE: "true"
+      PRESENTATION_STORAGE: local
+      PRESENTATION_STORAGE_DIR: /app/uploads
+      MAIL_TRANSPORT: local
+      # The image sets LC_ALL=en_US.UTF-8 but never generates that locale, so
+      # the VM falls back to latin1 file names; force UTF-8 ones.
+      ELIXIR_ERL_OPTIONS: "+fnu"
+      # Presenters are created by the admin; attendees need no account.
+      ENABLE_ACCOUNT_CREATION: "false"
+      # Behind the engine's proxy: take the client IP from X-Forwarded-For so
+      # the login rate limit is per visitor, not per proxy.
+      REMOTE_IP_PROXIES: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+    volumes:
+      - claper-uploads:/app/uploads
+      - ./panelalpha:/panelalpha:ro
+    ports:
+      - "4000:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:4000/users/log_in || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up` returns only once Claper answers.
+  ready:
+    image: postgres:15-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  claper-db: {}
+  claper-uploads: {}

@@ -1,0 +1,28 @@
+# Compose-replace: the repo's compose lives in docker-compose/ and needs the host
+# PID/network namespaces and docker.sock. Runs upstream's image in web mode.
+services:
+  app:
+    image: nicolargo/glances:4.5.7
+    restart: unless-stopped
+    environment:
+      GLANCES_OPT: "-w"
+      PYTHONPYCACHEPREFIX: /tmp/py_caches
+    ports:
+      - "61208:61208"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:61208/api/4/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 256m
+
+  # No-op: `compose up -d` returns once the web server answers.
+  ready:
+    image: nicolargo/glances:4.5.7
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m

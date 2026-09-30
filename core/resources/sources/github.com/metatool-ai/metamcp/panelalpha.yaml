@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MetaMCP aggregates MCP servers behind one gateway with an admin web UI: one
+  container (Next.js frontend on 12008, Express backend on 12009 behind it)
+  and Postgres. The repo's docker-compose.yml pulls :latest and defaults
+  APP_URL to http://localhost:12008, so the plain deploy answers but every
+  login fails: better-auth sets the session cookie with Domain=localhost, and
+  the OAuth metadata and MCP endpoint URLs point at localhost. It also ships a
+  fixed BETTER_AUTH_SECRET and Postgres password.
+
+  COMPOSE-REPLACE with the release image ghcr.io/metatool-ai/metamcp:2.4.22 and
+  postgres:16-alpine. APP_URL and NEXT_PUBLIC_APP_URL are the site's address.
+  The Postgres password and BETTER_AUTH_SECRET are generated once into
+  ~/.panelalpha/metamcp (0600 in 0700). Postgres and upstream's uv cache are on
+  named volumes. Only the app publishes a port (12008). Optional settings
+  (OIDC_*, BOOTSTRAP_*, EXTRA_TRUSTED_ORIGINS) come from the project's
+  environment variables. First run is upstream's: anyone can sign up until
+  registration is disabled in the app's settings.

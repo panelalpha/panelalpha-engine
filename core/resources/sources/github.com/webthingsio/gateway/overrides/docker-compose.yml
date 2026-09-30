@@ -1,0 +1,16 @@
+# Compose-replace: upstream's release image on the account network with its
+# data directory on a volume (upstream uses host networking and a host path).
+services:
+  app:
+    image: webthingsio/gateway:2.0.0
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      - data:/home/node/.webthings
+    ports:
+      - "8080:8080"
+    mem_limit: 1g
+
+volumes:
+  data: {}

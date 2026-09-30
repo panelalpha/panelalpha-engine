@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Appsmith Community Edition, a low-code builder for internal tools. The
+  repository is the monorepo source (its root Dockerfile needs a prebuilt base
+  and artefacts), so the plain deploy detected nothing and served the engine's
+  placeholder. This recipe runs the published all-in-one image of the current
+  release (appsmith/appsmith-ce:v2.4.2), as upstream's self-hosting compose
+  does: Caddy on :80 in front of the Java backend, the realtime server, and the
+  bundled MongoDB, Redis and PostgreSQL. The image generates its own encryption
+  password and salt into /appsmith-stacks on first boot; that directory is a
+  named volume, so apps, data and keys survive a redeploy. The first visitor
+  gets upstream's sign-up page to create the admin. Needs about 3 GB of memory
+  (memory_limit 4096). A health-check gate makes the deploy wait until the
+  backend answers.

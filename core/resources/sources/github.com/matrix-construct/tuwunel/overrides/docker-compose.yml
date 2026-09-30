@@ -1,0 +1,44 @@
+# Tuwunel v1.9.3 release image; RocksDB on a named volume.
+services:
+  homeserver:
+    image: ghcr.io/matrix-construct/tuwunel:v1.9.3
+    restart: unless-stopped
+    # Upstream: a first boot after an upgrade may migrate the database; do not kill it.
+    stop_grace_period: 30m
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TUWUNEL_SERVER_NAME: ${PA_PUBLIC_HOST}
+      TUWUNEL_DATABASE_PATH: /var/lib/tuwunel
+      TUWUNEL_ADDRESS: 0.0.0.0
+      TUWUNEL_PORT: 8008
+      TUWUNEL_MAX_REQUEST_SIZE: 20000000
+      # Federation reaches this server on 443 through the engine, not on 8448.
+      TUWUNEL_WELL_KNOWN__SERVER: ${PA_PUBLIC_HOST}:443
+      TUWUNEL_WELL_KNOWN__CLIENT: ${PA_PUBLIC_URL}
+    volumes:
+      - tuwunel_db:/var/lib/tuwunel
+    ports:
+      - "8008:8008"
+    healthcheck:
+      test: ["CMD", "tuwunel", "--health-check"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once the homeserver answers.
+  ready:
+    image: ghcr.io/matrix-construct/tuwunel:v1.9.3
+    restart: "no"
+    # The image has no shell; --version exits 0.
+    command: ["--version"]
+    depends_on:
+      homeserver:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  tuwunel_db: {}

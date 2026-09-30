@@ -1,0 +1,34 @@
+# Compose-replace: develop does not build (uv.lock pins an unfetchable SDK
+# commit) and the repo compose bind-mounts ./mydata. Runs the release image.
+services:
+  app:
+    image: heartexlabs/label-studio:1.23.1
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      LABEL_STUDIO_HOST: ${PA_PUBLIC_URL}
+      CSRF_TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+    volumes:
+      # SQLite DB, uploads, exports and the generated secret key.
+      - labelstudio-data:/label-studio/data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1536m
+
+  # No-op: `compose up -d` returns once Label Studio answers (first boot migrates).
+  ready:
+    image: heartexlabs/label-studio:1.23.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  labelstudio-data: {}

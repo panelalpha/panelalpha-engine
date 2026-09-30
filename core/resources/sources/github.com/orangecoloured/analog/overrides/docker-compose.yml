@@ -1,0 +1,59 @@
+# Compose-replace: builds the repository's own Dockerfile (no published image)
+# as upstream's Docker instructions do, with a Redis store on a named volume.
+services:
+  app:
+    build:
+      context: .
+      args:
+        # Upstream's settings for a Docker deploy.
+        VITE_ANALOG_API_GET_REQUEST_QUEUE: "false"
+        VITE_ANALOG_API_GET_REQUEST_CLEAN_UP: "false"
+    image: analog-app:local
+    restart: unless-stopped
+    environment:
+      ANALOG_STATIC_SERVER: "true"
+      ANALOG_PORT_SERVER: "8080"
+      ANALOG_DATABASE_PROVIDER: redis
+      ANALOG_REDIS_URL: redis://redis:6379
+      # Optional: set ANALOG_TOKEN (and ANALOG_PROTECT_POST=true) in the
+      # project env to require ?token= on the dashboard, as upstream documents.
+      ANALOG_TOKEN: ${ANALOG_TOKEN:-}
+      ANALOG_PROTECT_POST: ${ANALOG_PROTECT_POST:-false}
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  redis:
+    image: redis:8.2-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 128m
+
+  # No-op: `compose up -d` returns once ANALOG answers.
+  ready:
+    image: redis:8.2-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  redis-data: {}

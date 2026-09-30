@@ -1,0 +1,9 @@
+# Compose-replace: the repository's Dockerfile cannot fetch its lockfile's
+# npmmirror.com packages (see panelalpha.yaml). Upstream's image of the release.
+services:
+  app:
+    image: pubuzhixing/drawnix:v0.4.1
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    mem_limit: 64m

@@ -1,0 +1,22 @@
+# Upstream's docs/examples/single-user/Caddyfile, answering any host on :8080
+# (the engine terminates TLS in front of it).
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	encode gzip
+
+	route {
+		respond /caddy-alive-marker "Caddy works!"
+
+		reverse_proxy /spa/api/* backend-api:8000
+
+		root * /ffun-static-data
+		try_files {path} /index.html
+		file_server
+	}
+
+	log
+}

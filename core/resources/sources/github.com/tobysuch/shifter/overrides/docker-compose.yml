@@ -1,0 +1,40 @@
+# Compose-replace: no root compose upstream, and the image needs SHIFTER_URL.
+# Release image, SQLite and uploads on named volumes.
+services:
+  app:
+    image: ghcr.io/tobysuch/shifter:0.7.0
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/shifter/app.env
+    environment:
+      SHIFTER_URL: ${PA_PUBLIC_URL}
+      DEBUG: "0"
+      DATABASE: sqlite
+      TIMEZONE: UTC
+    volumes:
+      - db:/home/app/web/db
+      - media:/home/app/web/media
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # TCP only: ALLOWED_HOSTS holds just the public name, so a local HTTP probe gets 400.
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Shifter answers.
+  ready:
+    image: ghcr.io/tobysuch/shifter:0.7.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db: {}
+  media: {}

@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LibrePhotos, a self-hosted photo manager (Django + React) with face
+  recognition, captioning and scene tagging. The repository is a monorepo
+  (apps/backend, apps/frontend, deploy/) with nothing at the root, so the
+  plain deploy fails with `Runtime 'python' is required but could not be
+  resolved for this project`.
+
+  Compose-REPLACE with upstream's deploy/compose/docker-compose.yml (proxy,
+  frontend, backend, pgautoupgrade Postgres) on the 1.2.1 release images:
+  photos, media, logs (secret.key), model cache and the database on named
+  volumes; the database password is generated once by hooks/prepare.sh into
+  ~/.panelalpha/librephotos/db.env. One scan worker instead of one per host
+  core. First run is as upstream ships it: the site asks to create the admin.

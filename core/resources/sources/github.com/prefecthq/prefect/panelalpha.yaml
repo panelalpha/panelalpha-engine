@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Prefect, the workflow orchestration server with a web dashboard. The
+  repository's Dockerfile builds a CLI base image whose entrypoint ends in an
+  interactive `bash --login`, so without a command the container only prints
+  the Prefect banner and exits in a restart loop. This recipe runs upstream's
+  published image of the current release, prefecthq/prefect:3.8.7-python3.12,
+  with `prefect server start --host 0.0.0.0 --port 4200` as upstream documents
+  for self-hosting. The server's SQLite database lives in PREFECT_HOME on a
+  named volume; the UI talks to the API at the account's public URL + /api.

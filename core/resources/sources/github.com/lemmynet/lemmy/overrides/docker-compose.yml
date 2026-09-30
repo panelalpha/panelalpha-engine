@@ -1,0 +1,133 @@
+# Upstream's docker/docker-compose.yml builds the development HEAD, mounts a
+# dev config with a seeded admin and runs lemmy-ui:nightly. This follows
+# lemmy-ansible instead: the published 0.19.20 release images of lemmy and
+# lemmy-ui, pict-rs 0.5, Postgres and upstream's internal nginx proxy.
+services:
+  proxy:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    volumes:
+      - ./panelalpha/lemmy-nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      lemmy:
+        condition: service_healthy
+      lemmy-ui:
+        condition: service_started
+      pictrs:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 10s
+    mem_limit: 64m
+
+  lemmy:
+    image: dessalines/lemmy:0.19.20
+    hostname: lemmy
+    restart: unless-stopped
+    # POSTGRES_PASSWORD and PICTRS__SERVER__API_KEY, shared with postgres/pictrs.
+    env_file:
+      - ../.panelalpha/lemmy/secrets.env
+    environment:
+      LEMMY_HOSTNAME: ${PA_PUBLIC_HOST}
+      LEMMY_CONFIG_LOCATION: /tmp/config.hjson
+      RUST_LOG: warn
+    # Lemmy reads its hostname and pict-rs key only from the hjson config.
+    # No setup block: the first visitor creates the admin in Lemmy's own setup page.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /tmp/config.hjson <<CFG
+        {
+          hostname: "$$LEMMY_HOSTNAME"
+          bind: "0.0.0.0"
+          port: 8536
+          tls_enabled: true
+          database: {
+            host: "postgres"
+            port: 5432
+            user: "lemmy"
+            database: "lemmy"
+            password: "$$POSTGRES_PASSWORD"
+          }
+          pictrs: {
+            url: "http://pictrs:8080/"
+            api_key: "$$PICTRS__SERVER__API_KEY"
+          }
+        }
+        CFG
+        exec lemmy_server
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pictrs:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8536/api/v3/site"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+    mem_limit: 512m
+
+  lemmy-ui:
+    image: dessalines/lemmy-ui:0.19.20
+    restart: unless-stopped
+    environment:
+      LEMMY_UI_LEMMY_INTERNAL_HOST: lemmy:8536
+      LEMMY_UI_LEMMY_EXTERNAL_HOST: ${PA_PUBLIC_HOST}
+      LEMMY_UI_HTTPS: "true"
+    depends_on:
+      lemmy:
+        condition: service_healthy
+    init: true
+    mem_limit: 384m
+
+  pictrs:
+    image: asonix/pictrs:0.5.24
+    hostname: pictrs
+    restart: unless-stopped
+    user: "991:991"
+    env_file:
+      - ../.panelalpha/lemmy/secrets.env
+    volumes:
+      - pictrs:/mnt
+    mem_limit: 512m
+
+  postgres:
+    image: postgres:16-alpine
+    hostname: postgres
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/lemmy/secrets.env
+    environment:
+      POSTGRES_USER: lemmy
+      POSTGRES_DB: lemmy
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lemmy -d lemmy"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the site answers.
+  ready:
+    image: nginx:1.29-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      proxy:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pictrs: {}
+  pgdata: {}

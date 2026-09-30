@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  google-webfonts-helper, a web UI to download Google Fonts for self-hosting
+  (Node/Express, stateless). The plain deploy built the repository's
+  Dockerfile and the container exited in a loop: the server refuses to start
+  without GOOGLE_FONTS_API_KEY, and nothing asked for it. This recipe runs the
+  published ghcr.io/majodev/google-webfonts-helper image of the current
+  release (v1.7.1, the tagged HEAD), and a one-shot check service fails the
+  deploy with a clear message while GOOGLE_FONTS_API_KEY is unset or rejected by Google.

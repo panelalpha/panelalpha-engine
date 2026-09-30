@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Comic Library Utilities (CLU), a Flask/gunicorn web app on :5577 for
+  managing a comic library (CBZ conversion, metadata, reading lists, a
+  reader), with its settings and SQLite database in /config.
+
+  Upstream's docker-compose.yaml is a template meant to be hand-edited: it
+  mounts placeholder host paths (/path/to/local/config, /e/Comics,
+  /f/downloads, /path/to/cache) and the Docker socket, and lists
+  `config-volume:/config` while the top-level `volumes:` block declaring it is
+  commented out, so the plain deploy fails with `service "comic-utils" refers
+  to undefined volume config-volume: invalid compose project`.
+
+  overrides/docker-compose.yml runs the published image of the current
+  release (allaboutduncan/comic-utils-web:v6.5.3) with /config, /data (the
+  library), /downloads and /cache on named volumes, no Docker socket, and a
+  no-op `ready` service so the deploy finishes once /health answers. The
+  project's env vars (.env) reach the app, for its optional settings such as
+  CLU_USERNAME/CLU_PASSWORD or MONITOR=yes. As upstream ships it, the app
+  asks for no login until users or CLU_USERNAME/CLU_PASSWORD are configured;
+  the first visit opens its "Browse Library" page.

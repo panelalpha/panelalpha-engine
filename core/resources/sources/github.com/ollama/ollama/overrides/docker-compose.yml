@@ -1,0 +1,20 @@
+# Compose-replace: the repository's Dockerfile builds every GPU backend (CUDA 12/13,
+# ROCm, Vulkan) on a 7.65 GB ROCm base and does not finish. Runs the published
+# image of the current release instead.
+services:
+  ollama:
+    image: ollama/ollama:0.35.0
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      # Optional: browser origins allowed to call the API (CORS).
+      OLLAMA_ORIGINS: ${OLLAMA_ORIGINS:-}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+    volumes:
+      # Pulled models and the server's key pair.
+      - ollama-models:/root/.ollama
+
+volumes:
+  ollama-models: {}

@@ -1,0 +1,55 @@
+# Compose-replace of the repo's dev compose (host networking, `build: .`, whose
+# parallel stages run out of memory in 2 GB): the release image and Postgres.
+services:
+  app:
+    image: mirego/accent:v1.31.0
+    restart: unless-stopped
+    # Generated secrets last, so the project env cannot blank them; login
+    # providers (GITHUB_CLIENT_ID, OIDC_*, DUMMY_LOGIN_ENABLED, ...) come from .env.
+    env_file:
+      - .env
+      - ../.panelalpha/accent/app.env
+    environment:
+      PORT: "4000"
+      CANONICAL_URL: ${PA_PUBLIC_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    healthcheck:
+      # /ping answers before the canonical-host and force-SSL redirects.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4000 && printf 'GET /ping HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/accent/db.env
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U accent -d accent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  # No-op gate: `compose up -d` returns only once Accent answers.
+  ready:
+    image: postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db: {}

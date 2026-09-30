@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bonfire, a federated social platform (Elixir/Phoenix). The repository's
+  compose builds a development image (Dockerfile.dev, whose cargo step fails)
+  and its release compose names no image. This recipe runs upstream's published
+  bonfirenetworks/bonfire image of the current release (1.0.7, social flavour)
+  on port 4000 with PostGIS 17, secrets generated once into
+  ~/.panelalpha/bonfire, and uploads and the database on named volumes.

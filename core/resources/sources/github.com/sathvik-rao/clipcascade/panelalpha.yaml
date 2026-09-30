@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ClipCascade syncs clipboards between devices through a small server: one
+  Spring Boot process on :8080 serving the login/admin web page, the /health
+  endpoint and the WebSocket the desktop and mobile clients connect to, with
+  users in an embedded H2 database under /database. The repository is a
+  monorepo (desktop, mobile and ClipCascade_Server/ with only a
+  pre-built-jar Dockerfile and example compose files in a subdirectory), so
+  the plain deploy finds nothing at the root and serves the engine's
+  placeholder page.
+
+  This recipe runs the published image of the current release
+  (sathvikrao/clipcascade:0.7.0, as upstream's
+  ClipCascade_Server/docker-compose/docker-compose.yml pins it) with the H2
+  database on a named volume. Everything else is upstream's default,
+  including the first-run admin login admin/admin123 that upstream asks you
+  to change after the first login.

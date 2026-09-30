@@ -1,0 +1,131 @@
+# Compose-replace of the repo's docker-compose.yaml: published images instead of
+# three source builds, sizes that fit an account, a longer RabbitMQ health budget
+# (it needs ~27s to start here), and no optional FoundationDB services.
+x-env: &env
+  REDIS_URL: redis://redis:6379
+  REDIS_RATE_LIMIT_URL: redis://redis:6379
+  PLAYWRIGHT_MICROSERVICE_URL: http://playwright-service:3000/scrape
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+  POSTGRES_DB: postgres
+  POSTGRES_HOST: nuq-postgres
+  POSTGRES_PORT: "5432"
+  USE_DB_AUTHENTICATION: "false"
+  NUM_WORKERS_PER_QUEUE: ${NUM_WORKERS_PER_QUEUE:-8}
+  # Upstream starts 5 NuQ worker processes; 2 keep the API inside the account.
+  NUQ_WORKER_COUNT: ${NUQ_WORKER_COUNT:-2}
+  CRAWL_CONCURRENT_REQUESTS: ${CRAWL_CONCURRENT_REQUESTS:-10}
+  MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-5}
+  BROWSER_POOL_SIZE: ${BROWSER_POOL_SIZE:-5}
+  # Optional integrations, passed through from the project's env vars.
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+  MODEL_NAME: ${MODEL_NAME:-}
+  MODEL_EMBEDDING_NAME: ${MODEL_EMBEDDING_NAME:-}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+  BULL_AUTH_KEY: ${BULL_AUTH_KEY:-}
+  SELF_HOSTED_WEBHOOK_URL: ${SELF_HOSTED_WEBHOOK_URL:-}
+  LOGGING_LEVEL: ${LOGGING_LEVEL:-}
+  PROXY_SERVER: ${PROXY_SERVER:-}
+  PROXY_USERNAME: ${PROXY_USERNAME:-}
+  PROXY_PASSWORD: ${PROXY_PASSWORD:-}
+  SEARXNG_ENDPOINT: ${SEARXNG_ENDPOINT:-}
+  SEARXNG_ENGINES: ${SEARXNG_ENGINES:-}
+  SEARXNG_CATEGORIES: ${SEARXNG_CATEGORIES:-}
+
+services:
+  api:
+    # 2.11.426 = :latest = HEAD b5d187b (2026-09-29).
+    image: ghcr.io/firecrawl/firecrawl:2.11.426
+    restart: unless-stopped
+    command: ["node", "dist/src/harness.js", "--start-docker"]
+    environment:
+      <<: *env
+      HOST: 0.0.0.0
+      PORT: "3002"
+      EXTRACT_WORKER_PORT: "3004"
+      WORKER_PORT: "3005"
+      NUQ_RABBITMQ_URL: amqp://rabbitmq:5672
+      HARNESS_STARTUP_TIMEOUT_MS: "120000"
+      ENV: local
+    ports:
+      - "3002:3002"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    depends_on:
+      redis:
+        condition: service_started
+      playwright-service:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      nuq-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3002/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 3g
+
+  playwright-service:
+    # Upstream publishes only :latest; pinned to the digest current on 2026-09-29.
+    image: ghcr.io/firecrawl/playwright-service@sha256:645387a4e7ba418ba5125e98185ef5ce3e597d537465048f5345eb604102d68f
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      PROXY_SERVER: ${PROXY_SERVER:-}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
+      BLOCK_MEDIA: ${BLOCK_MEDIA:-}
+      MAX_CONCURRENT_PAGES: ${CRAWL_CONCURRENT_REQUESTS:-10}
+    tmpfs:
+      - /tmp/.cache:noexec,nosuid,size=512m
+    mem_limit: 1g
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--bind", "0.0.0.0"]
+    mem_limit: 256m
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 30s
+    mem_limit: 512m
+
+  nuq-postgres:
+    # Postgres 17 + pg_cron with the NuQ schema applied at initdb; only :latest
+    # is published, pinned to the digest current on 2026-09-29.
+    image: ghcr.io/firecrawl/nuq-postgres@sha256:9b638af78d99873bc0ba2b57c9cbcd01df6ce96efeaa72d36cfbe0f76521e8fc
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+    mem_limit: 256m
+
+  # No-op: `compose up -d` returns once the API answers.
+  ready:
+    image: redis:8-alpine
+    restart: "no"
+    entrypoint: ["/bin/true"]
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 32m

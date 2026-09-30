@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Thumbor, an on-demand image cropping, resizing and filtering service
+  (Python/Tornado) on port 8888. The repository has no compose file and its
+  docker/Dockerfile installs a wheel it expects in dist/, so the engine ran it
+  as a generic Python app and served its own placeholder. This recipe runs
+  upstream's published ghcr.io/thumbor/thumbor image of the current release
+  (7.8.0, Python 3.12) with thumbor's default configuration. Thumbor keeps no
+  user data (originals and results are a cache in /tmp).

@@ -1,0 +1,21 @@
+# The repository has no deployable compose, and building it from source is
+# OOM-killed at 2.5 GB (Go link in `make build`). This runs upstream's published
+# launcher image of the v0.3.1 release: the web console on 18800, which also
+# starts the gateway and proxies its websocket (/pico/ws) on the same port.
+services:
+  picoclaw:
+    image: docker.io/sipeed/picoclaw:v0.3.1-launcher
+    restart: unless-stopped
+    # As upstream's docker/docker-compose.yml launcher profile.
+    command: ["-console", "-public", "-no-browser"]
+    environment:
+      PICOCLAW_GATEWAY_HOST: 0.0.0.0
+    ports:
+      - "18800:18800"
+    volumes:
+      # config.json, workspace, dashboard password store.
+      - picoclaw-data:/root/.picoclaw
+    mem_limit: 512m
+
+volumes:
+  picoclaw-data: {}

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  RetroAssembly, a browser-based retro game cabinet for your own ROM
+  collection (React Router on Node, SQLite, port 8000). The repository's
+  Dockerfile does not build: its production stage runs `pnpm i --prod` on
+  node:26.5.0-alpine, better-sqlite3 has no prebuilt binary there, and the
+  stage has no Python or C toolchain for node-gyp.
+
+  This recipe runs upstream's documented quick-start instead: the release
+  image arianrhodsandlot/retroassembly:v7.260906.1627 on port 8000, with
+  /app/data (the SQLite database, uploaded ROMs and save states) on a named
+  volume. Accounts are created in the app's own sign-up form, as upstream
+  ships it.
+
+  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
+
+  Fresh create: health :8000 200, 55 s. / -> /library -> /login 200
+  <title>Log in to RetroAssembly</title>, 16 KB. Registered a user through
+  /api/v1/auth/register; /library then 200 <title>RetroAssembly</title>,
+  41 KB. Rebuild: 32 s, the same user logged in again. /.env redirects to
+  /library, /.git/config is the app's own 404 page.

@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Stash is a self-hosted organizer and streamer for a personal video and image
+  collection: one Go binary serving a React web UI and a GraphQL API on :9999,
+  SQLite and settings under /root/.stash, ffmpeg for previews and transcodes.
+
+  The repository root holds no main package (the binary is cmd/stash, engine
+  #328) and the UI is a separate pnpm build, so this recipe runs upstream's
+  published v0.31.1 release image (pinned by digest) laid out like upstream's
+  docker/production compose, with config, library, metadata, cache, blobs and
+  generated files on named volumes that survive redeploys.
+
+  Behind the engine every request carries the visitor's public address in
+  X-Forwarded-For. Stash without a login treats that as exposure to the
+  internet: it answers 403 and writes security_tripwire_accessed_from_public_internet
+  into config.yml, which keeps it locked until the file is edited by hand.
+  Stash's own switch for running this way is dangerous_allow_public_without_auth
+  in config.yml; it has no STASH_* environment variable and is only read at
+  startup, so the container writes a first config.yml (that key plus the
+  volume paths, library /data/) when none exists. Stash then starts as an
+  already configured system instead of showing its /setup paths wizard, and
+  owns config.yml from then on. Setting a login under Settings > Security
+  makes the key irrelevant.
+
+  Adding media: copy files into the data volume, e.g. `docker compose -p
+  project cp <dir> app:/data/`, then scan from the web UI.

@@ -1,0 +1,37 @@
+# Compose-replace: the repository's Dockerfile only packages prebuilt release
+# artifacts (_output/*.tar.gz, UI/Web/dist). This runs the official image of
+# the current release on named volumes.
+services:
+  app:
+    image: jvmilazz0/kavita:0.9.1
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      # appsettings.json, kavita.db, covers, logs, backups.
+      - config:/kavita/config
+      # Library root for comics, manga and books.
+      - library:/library
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:5000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Kavita answers.
+  ready:
+    image: jvmilazz0/kavita:0.9.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  library: {}

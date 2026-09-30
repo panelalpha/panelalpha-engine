@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SVG-edit is a browser SVG editor: a static front-end built with Vite, with
+  no server side. The repository root carries a composer.json ("type":
+  "library", empty require, no PHP code) next to the real package.json, so
+  detection picked the PHP platform and the site answered 403 ("There is no
+  index.php anywhere in ~/project").
+
+  The recipe uses the Vite platform instead: `npm ci`, then the project's own
+  `npm run build` (vite builds packages/svgcanvas, packages/react-test and the
+  editor, and the postbuild step copies index.html, CSS, images and
+  extensions), and nginx serves dist/editor, the directory upstream's
+  netlify.toml publishes.
+extends: vite
+output_directory: dist/editor

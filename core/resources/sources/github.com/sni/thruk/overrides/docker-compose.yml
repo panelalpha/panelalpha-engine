@@ -1,0 +1,39 @@
+# Thruk's docs name OMD as the recommended install: OMD-Labs ships Thruk as the
+# default GUI with Naemon as its monitoring backend. The repository itself is
+# Thruk's Perl source and has no deployable manifest.
+services:
+  app:
+    image: consol/omd-labs-debian:v5.70
+    restart: unless-stopped
+    volumes:
+      # Named volumes start with the image's site (and its default login);
+      # start.sh only re-initialises a volume that is empty.
+      - omd-etc:/omd/sites/demo/etc
+      - omd-var:/omd/sites/demo/var
+      - omd-local:/omd/sites/demo/local
+      - ./panelalpha-omd.yml:/root/ansible_dropin/playbook.yml:ro
+    ports:
+      - "8080:80"
+    healthcheck:
+      # Thruk's login page answers 401 until a user logs in.
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/demo/thruk/cgi-bin/login.cgi | grep -qx 401"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns once Thruk's login page answers.
+  ready:
+    image: consol/omd-labs-debian:v5.70
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  omd-etc: {}
+  omd-var: {}
+  omd-local: {}

@@ -1,0 +1,82 @@
+# Compose-replace: upstream's espocrm-docker compose on the published image
+# instead of building the development tree.
+services:
+  app:
+    image: espocrm/espocrm:10.0.9
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    # ESPOCRM_ADMIN_USERNAME / ESPOCRM_ADMIN_PASSWORD from the project's env vars,
+    # if set; otherwise the image's own defaults apply.
+    env_file:
+      - .env
+    environment:
+      ESPOCRM_DATABASE_PLATFORM: Mysql
+      ESPOCRM_DATABASE_HOST: db
+      ESPOCRM_DATABASE_NAME: espocrm
+      ESPOCRM_DATABASE_USER: espocrm
+      ESPOCRM_DATABASE_PASSWORD: ${ESPOCRM_DB_PASSWORD:?ESPOCRM_DB_PASSWORD is required}
+      ESPOCRM_SITE_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - espocrm-data:/var/www/html/data
+      - espocrm-custom:/var/www/html/custom
+      - espocrm-client-custom:/var/www/html/client/custom
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 768m
+
+  # Scheduled jobs (upstream's espocrm-daemon); exits until the install is done.
+  daemon:
+    image: espocrm/espocrm:10.0.9
+    restart: unless-stopped
+    entrypoint: ["docker-daemon.sh"]
+    volumes:
+      - espocrm-data:/var/www/html/data
+      - espocrm-custom:/var/www/html/custom
+      - espocrm-client-custom:/var/www/html/client/custom
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 256m
+
+  db:
+    image: mariadb:11.8
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: espocrm
+      MARIADB_USER: espocrm
+      MARIADB_PASSWORD: ${ESPOCRM_DB_PASSWORD:?ESPOCRM_DB_PASSWORD is required}
+      MARIADB_RANDOM_ROOT_PASSWORD: "yes"
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 512m
+
+  # No-op gate (mariadb's entrypoint execs `true`): `compose up -d` returns
+  # once the schema is installed and Apache answers.
+  ready:
+    image: mariadb:11.8
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  espocrm-data: {}
+  espocrm-custom: {}
+  espocrm-client-custom: {}
+  db-data: {}

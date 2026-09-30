@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Suwayomi is a manga reader server (Tachiyomi extensions) with a web UI and
+  GraphQL API on :4567, run as upstream's Java image; data (SQLite, extensions,
+  downloads, the downloaded WebUI and server.conf) lives in
+  /home/suwayomi/.local/share/Tachidesk. The repository's docker-compose.yml
+  is the deployment, with a Byparr (FlareSolverr) sidecar.
+
+  That compose bind-mounts ./data over the data directory. The checkout's
+  data/ is owned by the account user while the image runs as uid 1000, so the
+  entrypoint cannot write server.conf ("mv: cannot create regular file ...
+  Permission denied") and the container exits. This recipe layers an override
+  that moves the data directory onto a named volume (it takes the image's
+  1000-owned directory and survives redeploys) and pins the current stable
+  release v2.3.2243 instead of the `preview` channel the compose names. A
+  no-op `ready` service makes `compose up -d` return once the server answers.

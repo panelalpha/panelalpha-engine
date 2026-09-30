@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Formbricks, an open-source survey and experience-management platform
+  (Next.js). The repository root has no compose file, so the engine detects
+  Next.js and compiles the monorepo; the build stops at the app's own env
+  validation (AUTHZED_TOKEN, CUBEJS_API_SECRET must not be empty).
+  Upstream's deployment is docker/docker-compose.yml.
+
+  This recipe runs that stack from release 6.0.1 with pinned images:
+  ghcr.io/formbricks/formbricks:6.0.1, hub 0.8.7 (the current tag), SpiceDB
+  v1.52.0, Cube v1.6.6, pgvector pg18 and upstream's valkey digest, with
+  upstream's one-shot steps (Prisma migrations, SpiceDB bootstrap and
+  migrate, AuthZed prepare, Hub migrations). The bootstrap script and Cube
+  model are mounted from the checkout's docker/ directory. Every secret is
+  generated once into ~/.panelalpha/formbricks, one env file per consumer;
+  PostgreSQL and Valkey data are on named volumes. WEBAPP_URL and
+  NEXTAUTH_URL are the site's address.
+
+  First run is upstream's: the setup page creates the first user and
+  organization. Email verification and password reset stay off as upstream
+  ships them (they need SMTP); file uploads need S3 settings as project env
+  vars. TRUSTED_PROXY_HOP_COUNT keeps its default of 1, so rate limits key
+  on the hop the engine's proxy added (engine#319).

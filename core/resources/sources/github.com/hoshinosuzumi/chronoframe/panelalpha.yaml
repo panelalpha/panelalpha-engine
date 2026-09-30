@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ChronoFrame is a self-hosted photo gallery (Nuxt/Nitro, SQLite) with a public
+  gallery and a login-protected dashboard for uploading and managing photos.
+
+  Compose-REPLACE from the official image ghcr.io/hoshinosuzumi/chronoframe:0.14.1,
+  the current stable release (ghcr :latest points at the same digest; the 1.0.0
+  line is still release-candidate). The repo compose mounts ./data, which a
+  redeploy wipes; here /app/data (SQLite database + local photo storage) is the
+  named volume chronoframe-data.
+
+  CLOSING THE DEFAULT ADMIN. On an empty database the image seeds one admin from
+  CFRAME_ADMIN_EMAIL / CFRAME_ADMIN_PASSWORD, falling back to
+  admin@chronoframe.com / CF1234@! when they are unset. hooks/prepare.sh
+  generates the email, password, NUXT_SESSION_PASSWORD and NUXT_OG_IMAGE_SECRET
+  once into ~/.panelalpha/chronoframe/ (0600 in 0700) and the compose reads them
+  as an env_file. The login is in credentials.txt there. There is no public
+  registration; GitHub OAuth stays disabled.
+
+  Do not move this recipe to the 1.0.0 release candidates as-is: that line
+  replaces the env seed with an onboarding wizard whose /api/wizard/* handlers
+  carry no session check, and GET /api/wizard/schema?namespace=admin returns
+  CFRAME_ADMIN_PASSWORD in its response (server/api/wizard/schema.get.ts at
+  upstream HEAD).

@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  WBO (whitebophir) is an online collaborative whiteboard: one Node server
+  (socket.io for live drawing, plain HTTP for pages and board SVGs), no
+  database. Each board is persisted as /opt/app/server-data/board-<name>.svg
+  (older releases wrote JSON; current ones migrate it to SVG on load).
+
+  STRATEGY: compose-REPLACE with the official image lovasoa/wbo, pinned to the
+  current release tag (v2.17.1, the image of the repo's HEAD 06e675c5). No
+  platform block is declared, so detection runs normally and picks the
+  override compose (980) over the repo Dockerfile (970). The repo's own
+  docker-compose.yml cannot deploy: it bind-mounts the absolute host path
+  /opt/app/server-data, which Docker creates root-owned, and the image runs as
+  uid 1000, so boot's history-dir check calls process.exit(1) before its log
+  line flushes - an empty log and a restart loop. The override uses a NAMED
+  volume instead: it initialises from the image's node-owned directory, so it
+  is writable with no chown, and it survives project rebuilds. PORT=8080
+  keeps the app off a privileged port.
+
+  CLIENT IP: every socket arrives from the DinD bridge gateway, so WBO's
+  per-IP rate limits and bans would treat all visitors as one. The recipe sets
+  WBO_IP_SOURCE=X-Forwarded-For with WBO_TRUST_PROXY_HOPS=1: WBO then takes
+  the rightmost entry, the one the engine's nginx appends itself, which a
+  client cannot forge. Verified: a direct visitor is logged as its own
+  address instead of 172.18.0.1.
+
+  ACCESS: left PUBLIC-BY-DESIGN on purpose. WBO has no accounts, no login and
+  no token issuer; a board is a capability URL (there is no board index, and
+  /random mints unguessable names), which is the product. AUTH_SECRET_KEY
+  switches the whole instance to JWT-gated boards, but the tokens must be
+  minted by some other system the operator runs, so enabling it by default
+  would make a fresh deploy unusable (every page answers 403). It is passed
+  through: set AUTH_SECRET_KEY in the project's env_vars to gate the instance
+  (verified: 403 without ?token=, drawing works with an HS256 token carrying
+  roles ["editor"]). The container healthcheck probes /rules, which answers
+  200 in both modes.
+
+  WEBSOCKETS: the engine vhost passes Upgrade and a direct connection upgrades
+  to websocket (101). On the *.panelalpha.online test edge the upgrade is
+  stripped and idle requests are cut at ~10s (engine#170), so socket.io falls
+  back to polling and reconnects often there; drawings still persist. A real
+  domain on the engine host does not have this problem.

@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PG Back Web is a web UI for scheduled PostgreSQL backups (pg_dump for
+  PostgreSQL 13-18) to local storage or S3, written in Go. It keeps its own
+  metadata (users, registered databases, destinations, backup jobs, executions)
+  in a PostgreSQL database and encrypts stored credentials with
+  PBW_ENCRYPTION_KEY.
+
+  COMPOSE-REPLACE FROM THE OFFICIAL IMAGE. The repository ships only a
+  development Dockerfile under docker/ and no compose file, so bare detection
+  builds that and the app dies on `goose` with no PBW_POSTGRES_CONN_STRING. This
+  recipe runs the published eduardolat/pgbackweb:0.5.2 image (the current
+  release) with a postgres:17-alpine sidecar for the metadata database, as the
+  upstream README's own compose example does. The image entrypoint runs the
+  migrations and then serves on 8085; only the app publishes a port.
+
+  SECRETS. hooks/prepare.sh generates the metadata-DB password, the encryption
+  key and the admin password once into ~/.panelalpha/pgbackweb/ (0600 files in a
+  0700 dir, delivered with env_file) and never rewrites them: a new encryption
+  key would make every stored connection string unreadable, and ~/project is
+  wiped on every deploy.
+
+  FIRST USER IS SEEDED. With no users the app serves "Create first user" to
+  whoever visits first. A `bootstrap` one-shot posts that form on the internal
+  network with the generated password (admin@pgbackweb.local) as soon as the app
+  is healthy, then proves a login; the `ready` gate makes `compose up` wait for
+  it. It is idempotent: on a redeploy the login succeeds and nothing changes.
+  0.5.2 enforces a single user at the database level, so no second account can
+  be created through the form afterwards.
+
+  PERSISTENCE. The metadata database and /backups (the "local" destination) are
+  named volumes and survive rebuilds.

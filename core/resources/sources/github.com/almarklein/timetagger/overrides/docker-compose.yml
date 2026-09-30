@@ -1,0 +1,34 @@
+# Compose-replace: the repo only ships example compose files under deploy/.
+# Runs the published image of the current release; data on a named volume.
+services:
+  app:
+    image: ghcr.io/almarklein/timetagger:v26.1.3
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      TIMETAGGER_BIND: 0.0.0.0:8080
+      TIMETAGGER_DATADIR: /root/_timetagger
+      TIMETAGGER_LOG_LEVEL: info
+      # From the project's env vars; the check below refuses an empty value.
+      TIMETAGGER_CREDENTIALS: ${TIMETAGGER_CREDENTIALS:-}
+    volumes:
+      - timetagger-data:/root/_timetagger
+    depends_on:
+      credentials-check:
+        condition: service_completed_successfully
+    mem_limit: 256m
+
+  # Fails `compose up` (and so the deploy) while TIMETAGGER_CREDENTIALS is unusable.
+  credentials-check:
+    image: ghcr.io/almarklein/timetagger:v26.1.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "/credentials-check.sh"]
+    environment:
+      TIMETAGGER_CREDENTIALS: ${TIMETAGGER_CREDENTIALS:-}
+    volumes:
+      - ./timetagger-credentials-check.sh:/credentials-check.sh:ro
+    mem_limit: 32m
+
+volumes:
+  timetagger-data: {}

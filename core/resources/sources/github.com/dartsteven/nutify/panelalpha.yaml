@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Nutify, a web dashboard for UPS monitoring on top of NUT (Flask +
+  Socket.IO, SQLite, on :5050). The repository's docker-compose.yaml runs
+  dartsteven/nutify:latest-amd64 with cap_drop ALL plus a cap_add list; the
+  engine keeps the drop and strips the add (engine#349), so the entrypoint
+  cannot chown /etc/nut or write its settings file and the container
+  crash-loops. It also binds /dev/bus/usb and /run/udev and keeps its state
+  in ./Nutify inside ~/project, which every deploy wipes.
+
+  This recipe runs the current release image (dartsteven/nutify:0.3.0-amd64,
+  the checkout's v0.3.0) with default capabilities, no USB passthrough (a
+  hosted account has no UPS attached; point Nutify at a remote NUT server in
+  its setup wizard), the database, logs and generated NUT configuration on
+  named volumes, SOCKETIO_ALLOWED_ORIGINS set to the site address, and only
+  the web port published. hooks/prepare.sh generates SECRET_KEY once into
+  ~/.panelalpha/nutify/app.env. A `ready` gate waits for /health. First run
+  is upstream's setup wizard.

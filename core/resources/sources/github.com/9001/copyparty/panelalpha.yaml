@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  copyparty is a portable file server (browser upload/download with resumable
+  uploads, media indexing and thumbnails, WebDAV) served by one Python process
+  on :3923. The repository is the Python package source with no server entry
+  point the engine recognises, so a plain deploy serves the engine
+  placeholder. This recipe runs upstream's recommended image edition of the
+  current release, docker.io/copyparty/ac:1.20.24, with the shared folder (/w)
+  and copyparty's state (/cfg) on named volumes that survive redeploys.
+
+  Without a /cfg/*.conf the image disables all access (its Docker failsafe:
+  every page is HTTP 500). hooks/prepare.sh writes upstream's docker example
+  config once to ~/.panelalpha/copyparty/copyparty.conf, without the example
+  account, so "/" is read-write for everyone as upstream documents; edit that
+  file (accounts, permissions) and redeploy to apply it. The config also makes
+  copyparty take the visitor's address from the engine's proxy hop, so its
+  failed-login bans hit one visitor rather than everyone.

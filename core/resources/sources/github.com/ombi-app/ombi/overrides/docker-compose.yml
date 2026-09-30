@@ -1,0 +1,56 @@
+# Replaces a source build that crash-loops under the engine (exit 139). Runs the
+# LinuxServer.io image of the repository's own HEAD, v4.60.16.
+services:
+  app:
+    image: lscr.io/linuxserver/ombi:development-v4.60.16-ls476
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+    volumes:
+      # Ombi.db (users), OmbiSettings.db, OmbiExternal.db, logs.
+      - ombi-config:/config
+    ports:
+      - "3579:3579"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3579/api/v1/Status"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+    # The public port opens only once the wizard is closed.
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 1g
+
+  # One-shot: runs Ombi on loopback, completes the wizard with the generated
+  # admin, exits. Same image, which already has curl and jq.
+  seed:
+    image: lscr.io/linuxserver/ombi:development-v4.60.16-ls476
+    restart: "no"
+    entrypoint: ["/bin/sh", "/panelalpha/ombi-seed.sh"]
+    env_file:
+      - ../.panelalpha/ombi/admin.env
+    environment:
+      PA_PUBLIC_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - ombi-config:/config
+      - ./panelalpha:/panelalpha:ro
+    mem_limit: 1g
+
+  # No-op gate: `up -d` returns only after the app answers.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  ombi-config: {}

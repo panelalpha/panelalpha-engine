@@ -1,0 +1,62 @@
+# Compose-replace: the repository root is the Maven source tree (its root
+# build needs the absent server-ee module). This follows upstream's own
+# server-product/docker/docker-compose.yaml with the published image of the
+# current release, minus the host docker.sock and bind mounts.
+services:
+  db:
+    # Pinned major: Postgres cannot open a datadir from a newer major.
+    image: docker.io/library/postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: onedev
+      POSTGRES_USER: onedev
+      POSTGRES_PASSWORD: ${ONEDEV_DB_PASSWORD:?generated per account}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onedev -d onedev -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  app:
+    image: docker.io/1dev/server:16.7.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      hibernate_dialect: io.onedev.server.persistence.PostgreSQLDialect
+      hibernate_connection_driver_class: org.postgresql.Driver
+      hibernate_connection_url: jdbc:postgresql://db:5432/onedev
+      hibernate_connection_username: onedev
+      hibernate_connection_password: ${ONEDEV_DB_PASSWORD:?generated per account}
+    volumes:
+      # Installation dir: repositories, attachments, config, index.
+      - data:/opt/onedev
+    ports:
+      - "6610:6610"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:6610/"]
+      interval: 10s
+      timeout: 10s
+      retries: 90
+      start_period: 60s
+    mem_limit: 2g
+
+  # No-op gate: `compose up -d` returns only once OneDev answers.
+  ready:
+    image: docker.io/library/postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  data: {}

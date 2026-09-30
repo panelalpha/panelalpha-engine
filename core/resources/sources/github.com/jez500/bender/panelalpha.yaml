@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bender is a link dashboard managed from its own UI (a Homer look-alike
+  without YAML): one Nuxt 2 server on :8080 keeping all links and settings in
+  /app/static/config.json, with icons under /app/static/images.
+
+  The repository's docker-compose.yml bind-mounts the README's placeholder
+  path `/your/local/assets/` over /app/static. Docker creates it root-owned,
+  the container runs as 1000:1000, and the entrypoint exits on every start
+  with "Assets directory not writable". overrides/docker-compose.yml runs the
+  published jez500/bender:1.0.3 (the current release) with /app/static on a
+  named volume: a fresh volume is filled from the image, owned by 1000, so
+  the default assets install and the dashboard's saves survive redeploys.
+
+  First run is upstream's: the dashboard, including editing, is open to
+  anyone who reaches the site.

@@ -1,0 +1,37 @@
+# Compose-replace: the repository has no deployable compose at its root and a
+# plain deploy compiles the binary and runs it without a command. This runs
+# upstream's published image of the current release (pydio/cells:5.0.3).
+services:
+  app:
+    image: docker.io/pydio/cells:5.0.3
+    restart: unless-stopped
+    environment:
+      # Plain HTTP: TLS ends at the engine's proxy.
+      CELLS_SITE_BIND: 0.0.0.0:8080
+      CELLS_SITE_NO_TLS: "1"
+      CELLS_SITE_EXTERNAL: ${PA_PUBLIC_URL}
+    volumes:
+      # Configuration, keys, the SQLite database option and all stored files.
+      - cells:/var/cells
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -q -O /dev/null http://127.0.0.1:8080/ || curl -fsS -o /dev/null http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once Cells answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  cells: {}

@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Soketi App Manager is a Laravel/Filament admin panel for a Soketi
+  (Pusher-compatible) WebSocket server: it keeps Soketi's app list in MySQL,
+  shows metrics and has a Pusher playground. It runs beside MySQL, Redis and
+  Soketi itself.
+
+  The plain deploy takes the repo's workstation compose (the app built from
+  docker/ with the checkout bind-mounted, served by a separate nginx), which
+  the engine rewrites to its own image; the kept nginx then cannot resolve its
+  upstream `soketi-app-manager` and the site answers 502. This recipe instead
+  follows upstream's Coolify compose: the published release image
+  ghcr.io/rahulhaque/soketi-app-manager-filament-alpine:1.1.7
+  (serversideup php-fpm + nginx on :8080, migrations and the upstream seed run
+  by its autorun), mysql:8.0 and redis:7.4 on named volumes, and Soketi
+  1.6.1 reading its apps from the same database, as upstream's .env.docker.example
+  configures it. APP_KEY and the database passwords are generated once into
+  ~/.panelalpha/soketi-app-manager. Only the panel publishes a port; Soketi's
+  WebSocket port 6001 stays internal to the account.

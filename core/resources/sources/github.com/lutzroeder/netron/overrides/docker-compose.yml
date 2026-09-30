@@ -1,0 +1,28 @@
+# Run the released netron server; the checkout alone does not form a package.
+services:
+  app:
+    image: python:3.12-slim
+    restart: unless-stopped
+    environment:
+      PIP_ROOT_USER_ACTION: ignore
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    entrypoint: ["/bin/sh", "-c", "pip install --no-cache-dir -q netron==9.3.0 && exec netron --host 0.0.0.0 -p 8080"]
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/')"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once Netron answers.
+  ready:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m

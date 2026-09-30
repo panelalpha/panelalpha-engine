@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  gamja, a web IRC client: static files that connect from the browser to an
+  IRC WebSocket server. The plain deploy ran `npm start`, which is
+  dev-server.js, a development helper that listens on 8080 and never on the
+  published port (HTTP 502). Upstream's production path (README "Production
+  build", doc/setup.md) is `npm run build` (Parcel, into dist/) served by any
+  HTTP server, which is what this recipe does with nginx.
+
+  The IRC server is chosen by the visitor (`?server=wss://...`) or by a
+  config.json at the site root (doc/config-file.md); gamja defaults to
+  `/socket`, which this account does not proxy anywhere.
+extends: bundler-spa

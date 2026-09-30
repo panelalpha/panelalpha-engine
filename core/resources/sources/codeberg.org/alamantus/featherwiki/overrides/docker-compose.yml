@@ -1,0 +1,34 @@
+# Compose-replace: the repo has no server of its own besides the "nests". This
+# serves upstream's PHP nest (nests/index.php) on the official PHP Apache image;
+# the wiki file and admin hash it writes live on a named volume.
+services:
+  app:
+    image: php:8.3-apache-bookworm
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      # featherwiki.html and .featherwikiadmin are written next to index.php.
+      - featherwiki:/var/www/html
+      - ./nests/index.php:/var/www/html/index.php:ro
+      - ./featherwiki-nest.conf:/etc/apache2/conf-enabled/zz-featherwiki-nest.conf:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "-X", "OPTIONS", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op: `compose up -d` returns once Apache answers.
+  ready:
+    image: php:8.3-apache-bookworm
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  featherwiki: {}

@@ -1,0 +1,50 @@
+# Keeps what Live Helper Chat writes at runtime across redeploys: the settings
+# file its installer creates (from ~/.panelalpha) and the uploads under var/
+# (named volumes). Layered over the engine-generated php `app` service.
+services:
+  # One-shot: named volumes are created root-owned; hand them to the account
+  # user Apache runs as (the owner of the checkout).
+  lhc-volumes:
+    image: busybox:1.37
+    restart: "no"
+    user: "0"
+    command: ["sh", "-c", "chown $$(stat -c %u:%g /src) /v/*"]
+    volumes:
+      - ./lhc_web:/src:ro
+      - lhc-storage:/v/storage
+      - lhc-storageform:/v/storageform
+      - lhc-storagetheme:/v/storagetheme
+      - lhc-storageinvitation:/v/storageinvitation
+      - lhc-storageadmintheme:/v/storageadmintheme
+      - lhc-storagedocshare:/v/storagedocshare
+      - lhc-userphoto:/v/userphoto
+      - lhc-botphoto:/v/botphoto
+      - lhc-bottrphoto:/v/bottrphoto
+    mem_limit: 32m
+
+  app:
+    depends_on:
+      lhc-volumes:
+        condition: service_completed_successfully
+    volumes:
+      - ../.panelalpha/lhc/settings.ini.php:/app/settings/settings.ini.php
+      - lhc-storage:/app/var/storage
+      - lhc-storageform:/app/var/storageform
+      - lhc-storagetheme:/app/var/storagetheme
+      - lhc-storageinvitation:/app/var/storageinvitation
+      - lhc-storageadmintheme:/app/var/storageadmintheme
+      - lhc-storagedocshare:/app/var/storagedocshare
+      - lhc-userphoto:/app/var/userphoto
+      - lhc-botphoto:/app/var/botphoto
+      - lhc-bottrphoto:/app/var/bottrphoto
+
+volumes:
+  lhc-storage: {}
+  lhc-storageform: {}
+  lhc-storagetheme: {}
+  lhc-storageinvitation: {}
+  lhc-storageadmintheme: {}
+  lhc-storagedocshare: {}
+  lhc-userphoto: {}
+  lhc-botphoto: {}
+  lhc-bottrphoto: {}

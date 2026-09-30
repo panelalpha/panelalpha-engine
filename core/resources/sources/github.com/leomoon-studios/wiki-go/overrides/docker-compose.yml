@@ -1,0 +1,53 @@
+# The repository ships no docker-compose.yml, only its Dockerfile and two
+# example compose files for `leomoonstudios/wiki-go:latest`. On first start
+# Wiki-Go writes data/config.yaml with admin/admin. This compose runs the
+# current release image and seeds that file first:
+#   - `init` hashes the generated password from ~/.panelalpha/wikigo/admin.env
+#     into config.yaml, only while the data volume has none
+#   - `app` starts after it, so the built-in admin/admin is never written
+#   - all pages, uploads, users and settings live on the `data` volume
+services:
+  init:
+    # htpasswd for the bcrypt hash; the wiki-go image ships no hashing tool
+    image: httpd:2.4-alpine
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/panelalpha/wikigo-init.sh"]
+    env_file:
+      - ../.panelalpha/wikigo/admin.env
+    environment:
+      WIKIGO_OWNER: ${PA_PUBLIC_HOST}
+    volumes:
+      - data:/wiki/data
+      - ./panelalpha/wikigo-init.sh:/panelalpha/wikigo-init.sh:ro
+    mem_limit: 64m
+
+  app:
+    image: leomoonstudios/wiki-go:1.9.2
+    restart: unless-stopped
+    ports:
+      - "8000:8080"
+    volumes:
+      - data:/wiki/data
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/login"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 256m
+
+  ready:
+    image: httpd:2.4-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

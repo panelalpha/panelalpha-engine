@@ -1,0 +1,45 @@
+# Upstream's "simplified" compose (README, no SYS_ADMIN / fuse) from the
+# v0.43.1 image, with the data on a named volume and APP_SECRET from
+# ~/.panelalpha (hooks/prepare.sh).
+services:
+  zerobyte:
+    image: ghcr.io/nicotsx/zerobyte:v0.43.1
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/zerobyte/app.env
+    environment:
+      TZ: UTC
+      PORT: "4096"
+      BASE_URL: ${PA_PUBLIC_URL}
+      # The engine terminates TLS and forwards over http (docs: reverse proxy).
+      TRUST_PROXY: "true"
+      # The image's own defaults, spelled out so a copied .env.example
+      # (./data/... development paths) cannot move them off the volume.
+      ZEROBYTE_DATABASE_URL: /var/lib/zerobyte/data/zerobyte.db
+      ZEROBYTE_REPOSITORIES_DIR: /var/lib/zerobyte/repositories
+      ZEROBYTE_VOLUMES_DIR: /var/lib/zerobyte/volumes
+      RESTIC_CACHE_DIR: /var/lib/zerobyte/restic/cache
+    volumes:
+      - zerobyte_data:/var/lib/zerobyte
+    ports:
+      - "4096:4096"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4096/api/healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Zerobyte answers.
+  ready:
+    image: ghcr.io/nicotsx/zerobyte:v0.43.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      zerobyte:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  zerobyte_data: {}

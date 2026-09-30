@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  CommaFeed, a Google Reader-style RSS reader (Quarkus server, React client) on
+  :8082. The repository is a Maven reactor; the plain java deploy builds it for
+  several minutes and then starts the client module's webjar, which has no
+  Main-Class, so the container crash-loops (engine#361). This recipe runs the
+  official athou/commafeed image of the current release, 7.3.2, in its H2
+  flavour (upstream's quickstart), with /commafeed/data on a named volume that
+  survives redeploys. The first visit shows CommaFeed's own initial-setup page
+  for the admin account.

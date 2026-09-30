@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Saltcorn is a no-code database application builder: a Node.js server on
+  port 3000 backed by PostgreSQL.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repository is the monorepo with
+  several Dockerfiles and no deployment compose; the plain deploy builds
+  Dockerfile.isolated.release (about 18 minutes, 1+ GB), whose entrypoint is
+  the saltcorn CLI with no command, so it prints its help and restart-loops.
+  This recipe runs upstream's docker quickstart (deploy/examples/test) the
+  way it is meant to run: saltcorn/saltcorn:1.6.2 (the current stable
+  release, also :latest) with `serve`, plus postgres:17-alpine in place of
+  the example's EOL postgres:13. `serve -a` creates the schema in the empty
+  database on first start, so the example's 2020 schema dump is not needed.
+
+  hooks/prepare.sh writes, once, ~/.panelalpha/saltcorn/db.env (Postgres
+  credentials) and app.env (SALTCORN_SESSION_SECRET), both 0600. The app does not read the project's .env: the engine seeds it
+  from upstream's .env.example, a local-testing file that sets
+  SQLITE_FILEPATH (which would put the database inside the container) and a
+  published SALTCORN_SESSION_SECRET (engine#218). The file
+  store and installed plugins (/root/.local/share) and the database are on
+  named volumes, so they survive a redeploy. Saltcorn forks one worker per
+  CPU (about 200 MB each, 4 workers used 794 MB here); SALTCORN_NWORKERS
+  defaults to 2 and can be changed in the project's environment variables. First run is as upstream ships
+  it: the first visitor creates the admin account.

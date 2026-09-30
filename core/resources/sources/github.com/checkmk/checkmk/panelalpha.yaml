@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Checkmk is an IT monitoring system (OMD site: Apache, Nagios core,
+  Livestatus, Python web GUI). The repository is the full product source, built
+  with Bazel into distribution packages; it has no deployable entry point, so a
+  plain deploy picks the Python strategy and fails.
+
+  This recipe runs the official Community edition image
+  (checkmk/check-mk-community, formerly check-mk-raw) of the current release,
+  2.5.0p14. The container creates the site `cmk` on first start and serves it
+  on :5000 at /cmk/ (/ redirects there), with the whole site under
+  /omd/sites on a named volume so hosts, rules and history survive redeploys.
+  As upstream ships it, the site generates a random password for `cmkadmin` on
+  first start and prints it in the container log ("The admin user for the web
+  applications is cmkadmin with password: ..."). That log line exists only in
+  the first container, so a redeploy loses it; set the CMK_PASSWORD project
+  variable before the first deploy to choose the password instead (it is read
+  only when the site is created; later, change it in the GUI or with
+  cmk-passwd). The Livestatus (6557) and agent ports are not published.

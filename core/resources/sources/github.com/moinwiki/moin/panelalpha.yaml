@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MoinMoin 2, a wiki engine (Python/Flask) on port 8000. The repository has no
+  compose file and its .dockerignore excludes src/, so the engine's generic
+  Python build had nothing to install and served its own placeholder;
+  upstream's contrib/docker/Dockerfile needs a release wheel and a prepared
+  wiki in the build context. This recipe runs python:3.14-slim, installs the
+  current release (moin 2.0.0b5) with upstream's hypercorn pin into a venv on
+  a named volume on first boot, creates the instance with
+  `moin create-instance --full` (help and welcome pages, search index) on a
+  second volume with its own SECRET_KEY, and serves it with upstream's
+  contrib/docker/config.toml.

@@ -1,0 +1,23 @@
+# The repository's compose publishes 7200, which is HTTPS with a self-signed
+# certificate. The same image also listens on plain HTTP 17200 for use behind a
+# TLS-terminating proxy (README), which is what the engine is.
+services:
+  app:
+    image: koreader/kosync:v2.1.1
+    restart: unless-stopped
+    ports:
+      - "17200:17200"
+    # Project env vars, e.g. ENABLE_USER_REGISTRATION=false (the image defaults to true).
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - redis-data:/var/lib/redis
+      - redis-logs:/var/log/redis
+      - app-logs:/app/koreader-sync-server/logs
+    mem_limit: 256m
+
+volumes:
+  redis-data: {}
+  redis-logs: {}
+  app-logs: {}

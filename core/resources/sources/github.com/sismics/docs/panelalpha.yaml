@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Teedy (sismics/docs, GPL-2.0) is a document management system: one Java
+  webapp in Jetty on :8080 with a REST API under /api, storing encrypted
+  document files under /data and its metadata in H2 or PostgreSQL.
+
+  OFFICIAL IMAGE, NOT A SOURCE BUILD. The root Dockerfile copies
+  docs-web/target/docs-web-*.war, a Maven output a clone does not have. The
+  repo's docker-compose.yml runs the older v1.10 image on the embedded H2
+  database (upstream logs it as "only suitable for testing purpose") and
+  ships a published example admin hash. overrides/docker-compose.yml replaces
+  it with the current release image docker.io/sismics/docs:v1.11 on
+  postgres:16-alpine (pgdata volume); /data is the teedy-data volume.
+
+  NO DEFAULT LOGIN. Teedy seeds admin/admin. hooks/prepare.sh generates the
+  admin and database passwords once into ~/.panelalpha/teedy/ (0600 in 0700,
+  credentials.txt holds the login) and passes the admin's bcrypt hash as
+  DOCS_ADMIN_PASSWORD_INIT, upstream's own switch: AppContext replaces the
+  password while the webapp starts, before Jetty opens the port, and only
+  while it is still the upstream default, so a password changed in the UI
+  survives redeploys. DOCS_ADMIN_EMAIL_INIT sets admin@<domain>. Teedy has no
+  open sign-up; guest login and header authentication stay off (defaults).
+  A `ready` gate makes the deploy finish only when /api/app answers.
+
+  Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500:
+  deploy success in 101s, `/` title "Teedy" (6284 B). admin/admin -> 403
+  ForbiddenError; the generated login -> 200, is_default_password false,
+  email admin@<domain>. Jetty logged the webapp context started before its
+  connector. A document created via PUT /api/document with a text file
+  attached read back byte-identical from /api/file/<id>/data (anonymous 403).
+  Rebuild 68s: admin and document intact, full-text search finds the file.
+  /.env, /.git/config, /docker-compose.yml, /docs.mv.db, /WEB-INF/web.xml all
+  404; anonymous /api/document/list and PUT /api/user 403. App ~470-600 MiB,
+  db ~40-75 MiB.

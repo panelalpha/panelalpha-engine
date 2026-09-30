@@ -1,0 +1,67 @@
+# Compose-replace: the repo compose builds a Dockerfile that needs a CI-made
+# buildMetadata.json. This runs upstream's release image instead.
+services:
+  app:
+    image: docker.io/mauriceo/viewtube:0.17.0
+    restart: unless-stopped
+    environment:
+      VIEWTUBE_DATABASE_HOST: mongo
+      VIEWTUBE_REDIS_HOST: redis
+      VIEWTUBE_DATA_DIRECTORY: /data
+      VIEWTUBE_SECURE: "true"
+      VIEWTUBE_ADMIN_USER: admin
+      VIEWTUBE_CORS_ORIGIN: ${PA_PUBLIC_URL}
+    volumes:
+      - data:/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8066:8066"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8066/"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1024m
+
+  # 7.0, not 8.x: MongoDB 8.0+ refuses to start on Linux 6.19+ (SERVER-121912).
+  mongo:
+    image: docker.io/library/mongo:7.0
+    restart: unless-stopped
+    volumes:
+      - db:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 768m
+
+  redis:
+    image: docker.io/library/redis:8-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once the web app answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  db: {}

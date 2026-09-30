@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Flagsmith, feature flags and remote config (one Django image serving the API
+  and the dashboard on :8000, a task processor, PostgreSQL). The repository's
+  docker-compose.yml is the right topology, but it hard-codes the database
+  password `password` in both POSTGRES_PASSWORD and DATABASE_URL; the engine
+  replaces the first with a generated value and leaves the second
+  (engine#363), so migrate-db fails with `password authentication failed for
+  user "postgres"` and nothing starts. This recipe runs the same services on
+  the current release (flagsmith/flagsmith:2.277.0, postgres:15.5-alpine) with
+  the database password and DJANGO_SECRET_KEY generated once into
+  ~/.panelalpha/flagsmith and FLAGSMITH_DOMAIN set to the account's host.
+  The first visitor signs up and becomes the organisation admin, as upstream
+  ships it.

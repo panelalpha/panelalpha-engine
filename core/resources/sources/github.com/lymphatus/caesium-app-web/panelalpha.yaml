@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Caesium Web (Lymphatus/caesium-app-web, GPL-3.0) is a Nuxt image compressor
+  that runs in the browser on libcaesium-wasm; the server only serves the app
+  on :3000 and keeps no data.
+
+  A plain deploy picks the repository's docker-compose.yml, which is a
+  workstation container (node:lts-alpine, source bind-mounted, tty, no
+  command) and sits in the Node REPL, so nothing listens on :3000. This recipe
+  replaces the compose with the official lymphatus/caesium-app-web:v2.2.3
+  image of the current release, which is upstream's own Dockerfile build.
+  Stateless: no volumes.

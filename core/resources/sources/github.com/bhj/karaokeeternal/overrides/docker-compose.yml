@@ -1,0 +1,24 @@
+# Compose-replace: the repository ships no compose file or Dockerfile and no
+# `start` script. Railpack builds it, but the server then listens on a random
+# port and keeps its database inside the container. This runs the official
+# image of the current release the way upstream documents it: port 8080,
+# database in /config, media in /mnt/karaoke, both on named volumes.
+services:
+  app:
+    image: radrootllc/karaoke-eternal:2.0.2
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      - config:/config
+      # Add /mnt/karaoke under Media Folders in the app.
+      - media:/mnt/karaoke
+    ports:
+      - "8080:8080"
+    mem_limit: 512m
+
+volumes:
+  config: {}
+  media: {}

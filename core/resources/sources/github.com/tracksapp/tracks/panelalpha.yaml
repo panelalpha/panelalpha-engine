@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tracks is a Getting Things Done to-do manager (Rails/Puma on :3000 +
+  MariaDB). The repo's docker-compose.yml is a CI/development stack: it builds
+  the Dockerfile (~9 minutes), bind-mounts the checkout over /app, runs as the
+  MariaDB root user with an empty password, and never creates the schema.
+
+  This recipe follows upstream's docker install docs with the published
+  tracksapp/tracks:2.7.1 (current release) beside mariadb:11.8: a one-shot
+  `migrate` service loads the schema into an empty database (upstream's
+  `rake db:reset` step without the drop) and migrates an existing one, then
+  Puma starts. The database password and SECRET_KEY_BASE (the image's
+  site.yml bakes in secret_token "change-me") are generated once by
+  hooks/prepare.sh into ~/.panelalpha/tracks/; the database is on a named
+  volume. The first visitor creates the admin user on Tracks' own sign-up
+  page, as upstream ships it.

@@ -1,0 +1,58 @@
+# Upstream's Traefik labels (docker-compose.yml, v5.2.1) as a Caddyfile:
+# same path routing, phantom-token forward auth and CORS headers.
+{
+	admin off
+	auto_https off
+}
+
+:8901 {
+	@cors path /api/* /video*
+	header @cors {
+		Access-Control-Allow-Origin "*"
+		Access-Control-Allow-Methods "GET, OPTIONS"
+		Access-Control-Allow-Headers "Authorization, Content-Type, Range, X-Api-Key"
+		Vary Origin
+	}
+	@preflight {
+		method OPTIONS
+		path /api/* /video*
+		header Access-Control-Request-Method *
+	}
+	handle @preflight {
+		respond 204
+	}
+
+	handle /api/* {
+		forward_auth auth:4568 {
+			uri /auth/jwt
+			copy_headers Authorization
+		}
+		reverse_proxy api:3567
+	}
+	handle /video* {
+		forward_auth auth:4568 {
+			uri /auth/jwt
+			copy_headers Authorization
+		}
+		reverse_proxy transcoder:7666
+	}
+	handle /scanner/* {
+		forward_auth auth:4568 {
+			uri /auth/jwt
+			copy_headers Authorization
+		}
+		reverse_proxy scanner:4389
+	}
+	handle /swagger* {
+		reverse_proxy api:3567
+	}
+	handle /auth/* {
+		reverse_proxy auth:4568
+	}
+	handle /.well-known/* {
+		reverse_proxy auth:4568
+	}
+	handle {
+		reverse_proxy front:8901
+	}
+}

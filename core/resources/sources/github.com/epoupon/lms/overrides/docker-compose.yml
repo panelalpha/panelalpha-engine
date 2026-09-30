@@ -1,0 +1,33 @@
+# The repository has no compose file, only source builds of FFmpeg + Wt + LMS.
+# This runs the image upstream publishes for the current release.
+services:
+  app:
+    image: epoupon/lms:3.81.0
+    restart: unless-stopped
+    volumes:
+      # lms.db (users, settings, scan results), covers and transcode caches.
+      - data:/var/lms
+      - music:/music
+    ports:
+      - "5082:5082"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5082/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once LMS answers.
+  ready:
+    image: epoupon/lms:3.81.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  music: {}

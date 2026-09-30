@@ -1,12 +1,18 @@
-#!/bin/bash
-set -e
-cd ~/project
-
-# Guarded as a whole: the mongo volume outlives the checkout, so a regenerated
-# admin password would be one nobody was ever told, while the account it
-# belongs to still has the old one in the database.
-if [ -f .env ]; then
-    exit 0
+    #!/bin/bash
+    set -e
+    cd ~/project
+    
+    # ~/project is wiped on every deploy, but the mongo volume is not: the admin
+    # password and the MongoDB major are chosen once and kept in ~/.panelalpha.
+    # A regenerated password would be one the database never heard of, and a
+    # different major could not open the existing data.
+    STATE_DIR="${HOME}/.panelalpha/rocketchat"
+    STATE="${STATE_DIR}/state.env"
+    mkdir -p "${STATE_DIR}"
+    chmod 700 "${STATE_DIR}"
+    if [ -f "${STATE}" ]; then
+        # shellcheck disable=SC1090
+        . "${STATE}"
 fi
 
 # The tag comes from the checkout rather than from a constant. The root
@@ -49,25 +55,29 @@ fi
 # and is still supported — apps/meteor/server/startup/serverRunning.ts exits
 # only on <7.0.0 and prints a deprecation box on <8.0.0. Containers share the
 # host's kernel, so uname here is the kernel mongod will run on.
-KERNEL_MAJOR=$(uname -r | cut -d. -f1)
-KERNEL_MINOR=$(uname -r | cut -d. -f2)
-case "${KERNEL_MAJOR}${KERNEL_MINOR}" in
-    '' | *[!0-9]*) MONGO_IMAGE=mongo:7.0 ;;
-    *)
-        if [ "${KERNEL_MAJOR}" -gt 6 ] || { [ "${KERNEL_MAJOR}" -eq 6 ] && [ "${KERNEL_MINOR}" -ge 19 ]; }; then
-            MONGO_IMAGE=mongo:7.0
-        else
-            MONGO_IMAGE=mongo:8.0
-        fi
-        ;;
-esac
+# Chosen on the first deploy only: 7.0 cannot open data written by 8.0, so a
+# later kernel upgrade must not silently switch the major (see README.md).
+if [ -z "${MONGO_IMAGE:-}" ]; then
+    KERNEL_MAJOR=$(uname -r | cut -d. -f1)
+    KERNEL_MINOR=$(uname -r | cut -d. -f2)
+    case "${KERNEL_MAJOR}${KERNEL_MINOR}" in
+        '' | *[!0-9]*) MONGO_IMAGE=mongo:7.0 ;;
+        *)
+            if [ "${KERNEL_MAJOR}" -gt 6 ] || { [ "${KERNEL_MAJOR}" -eq 6 ] && [ "${KERNEL_MINOR}" -ge 19 ]; }; then
+                MONGO_IMAGE=mongo:7.0
+            else
+                MONGO_IMAGE=mongo:8.0
+            fi
+            ;;
+    esac
+fi
 
 # Rocket.Chat has no installer, and its setup wizard hands admin to whoever
 # completes it. insertAdminUserFromEnv() in apps/meteor/server/startup/
 # initialData.ts creates the account from these instead, on a boot where no
 # user holds the admin role.
-RC_ADMIN_USERNAME=admin
-RC_ADMIN_EMAIL=admin@example.com
+RC_ADMIN_USERNAME=${RC_ADMIN_USERNAME:-admin}
+RC_ADMIN_EMAIL=${RC_ADMIN_EMAIL:-admin@example.com}
 
 # Built to satisfy Rocket.Chat's own default password policy, which is on:
 # Accounts_Password_Policy_Enabled is true, MinLength is 14, and the character
@@ -75,7 +85,20 @@ RC_ADMIN_EMAIL=admin@example.com
 # digit and a symbol whatever the random part turns out to be; '-' is the
 # symbol because this value is interpolated by compose, embedded in a JSON body
 # by the setup script and typed by a human.
-RC_ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-16)Aa1-"
+if [ -z "${RC_ADMIN_PASSWORD:-}" ]; then
+    RC_ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-16)Aa1-"
+fi
+
+if [ ! -f "${STATE}" ]; then
+    umask 077
+    cat > "${STATE}" <<EOF
+MONGO_IMAGE=${MONGO_IMAGE}
+RC_ADMIN_USERNAME=${RC_ADMIN_USERNAME}
+RC_ADMIN_EMAIL=${RC_ADMIN_EMAIL}
+RC_ADMIN_PASSWORD=${RC_ADMIN_PASSWORD}
+EOF
+    chmod 600 "${STATE}"
+fi
 
 cat > .env <<EOF
 ROCKETCHAT_IMAGE=rocketchat/rocket.chat:${ROCKETCHAT_TAG}

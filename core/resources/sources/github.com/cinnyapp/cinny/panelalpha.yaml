@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Cinny is a Matrix web client: a Vite/React single-page app that the
+  upstream Dockerfile builds with node and then serves as static files from
+  nginx on :80. It holds no server-side state; users sign in to a Matrix
+  homeserver of their choice from the browser.
+
+  The repository's own Dockerfile sets NODE_OPTIONS=--max_old_space_size=4096
+  for `vite build`, and the build is OOM-killed inside a 2500 MB account
+  ("npm run build ... cannot allocate memory"). This recipe runs the image
+  the project publishes for each release instead, ghcr.io/cinnyapp/cinny at
+  the current tag v4.12.7, which is that same Dockerfile's nginx stage, so
+  nothing is compiled in the account.

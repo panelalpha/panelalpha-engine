@@ -1,0 +1,37 @@
+# Compose-replace of the repo's compose: its image tag (ghcr.io/ontola/atomic-server,
+# i.e. :latest) was never published there. Upstream publishes only the :develop
+# build of the default branch; configured for the engine's TLS proxy per upstream docs.
+services:
+  atomic-server:
+    image: ghcr.io/ontola/atomic-server:develop
+    restart: unless-stopped
+    # Customer settings (ATOMIC_OWNER_AGENT, ATOMIC_HOST_MODE, ...) from the project env.
+    env_file: .env
+    environment:
+      ATOMIC_DOMAIN: ${PA_PUBLIC_HOST}
+      ATOMIC_PORT: "80"
+      ATOMIC_HTTPS: "false"
+    volumes:
+      - atomic-storage:/atomic-storage
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the server answers.
+  ready:
+    image: ghcr.io/ontola/atomic-server:develop
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      atomic-server:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  atomic-storage: {}

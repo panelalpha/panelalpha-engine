@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Forte, an ActivityPub server in plain PHP (a streams fork). It serves from
+  the repository root through index.php?req=..., not from public/, which is a
+  leftover Symfony stub that answers 500. The recipe points the document root
+  at /app, enables upstream's htaccess.dist, provisions a MySQL database and
+  keeps .htconfig.php (written by Forte's own web setup) and store/ outside
+  the re-cloned checkout. Forte's setup page is left as upstream ships it.
+extends: php
+database: mysql

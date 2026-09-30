@@ -1,0 +1,41 @@
+# Compose-replace: the repository's compose builds a PHP 7.4 (EOL) image served
+# by `php -S` with the managed files inside the web root. This runs the single
+# file on the official PHP 8.3 Apache image with a config.php that seeds one
+# admin and keeps the managed files outside the web root.
+services:
+  app:
+    image: php:8.3-apache-bookworm
+    restart: unless-stopped
+    # The volume root is created root-owned; Apache's workers run as www-data.
+    command: ["sh", "-c", "chown www-data:www-data /srv/files && exec apache2-foreground"]
+    volumes:
+      - ./tinyfilemanager.php:/var/www/html/index.php:ro
+      - ./panelalpha/tinyfm/config.php:/var/www/html/config.php:ro
+      - ./panelalpha/tinyfm/apache.conf:/etc/apache2/conf-enabled/zz-tinyfm.conf:ro
+      - ./panelalpha/tinyfm/php.ini:/usr/local/etc/php/conf.d/zz-tinyfm.ini:ro
+      # bcrypt hash only; the password stays in ~/.panelalpha/tinyfm.
+      - ./panelalpha/tinyfm/admin.hash:/etc/tinyfm/admin.hash:ro
+      # The managed files. Not under /var/www/html, so never served or executed.
+      - files:/srv/files
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once the login page answers.
+  ready:
+    image: php:8.3-apache-bookworm
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  files: {}

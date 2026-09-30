@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Lemmy, a federated link aggregator and forum (Rust backend, Inferno
+  lemmy-ui frontend, pict-rs image host, PostgreSQL). The repository's only
+  compose file is docker/docker-compose.yml, a development stack that builds
+  the HEAD backend from source and mounts a dev config; the plain deploy
+  builds docker/Dockerfile alone, which ships no config, no database and no
+  web UI (the image panics with "Failed to load settings file").
+
+  This recipe runs the published images of the current release, 0.19.20
+  (dessalines/lemmy and dessalines/lemmy-ui), with asonix/pictrs:0.5.24,
+  postgres:16-alpine and upstream's internal nginx proxy (lemmy-ansible's
+  nginx_internal.conf), which sends pages to lemmy-ui and the API, pict-rs,
+  feeds and federation to the backend. Lemmy reads its hostname and pict-rs
+  key only from its hjson config, so the lemmy service writes that config
+  from the account's host at start. The Postgres password and the pict-rs API
+  key are generated once into ~/.panelalpha/lemmy/; the database and uploaded
+  images are on named volumes. No admin is seeded: the first visitor gets
+  Lemmy's own setup page. Email is not configured.

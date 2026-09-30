@@ -1,0 +1,71 @@
+# Compose-replace: the repo's compose builds the source and passes config as
+# env vars, which v2 ignores (it takes CLI flags only). Runs the official image
+# of the current release with the flags built from env, SQLite on a volume.
+services:
+  app:
+    image: quay.io/authorizer/authorizer:2.4.1
+    restart: unless-stopped
+    # The named volume is root-owned; the upstream README runs it as root for SQLite.
+    user: "0:0"
+    env_file:
+      - ../.panelalpha/authorizer/secrets.env
+      # The project's env vars (AUTHORIZER_ADMIN_SECRET).
+      - .env
+    environment:
+      AUTHORIZER_URL: ${PA_PUBLIC_URL}
+    entrypoint:
+      - /bin/sh
+      - -c
+      # Trusting private ranges makes rate limits and the admin lockout use
+      # the proxy-added client hop instead of the shared proxy address.
+      - >-
+        exec ./authorizer
+        --url="$$AUTHORIZER_URL"
+        --database-type=sqlite
+        --database-url=/authorizer/data/data.db
+        --client-id="$$AUTHORIZER_CLIENT_ID"
+        --client-secret="$$AUTHORIZER_CLIENT_SECRET"
+        --admin-secret="$$AUTHORIZER_ADMIN_SECRET"
+        --jwt-type=HS256
+        --jwt-secret="$$AUTHORIZER_JWT_SECRET"
+        --encryption-key="$$AUTHORIZER_ENCRYPTION_KEY"
+        --trusted-proxies=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+        --log-level=info
+    volumes:
+      - data:/authorizer/data
+    ports:
+      - "8080:8080"
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    mem_limit: 512m
+
+  # Fails `compose up` (and so the deploy) while the admin secret is unset.
+  env-check:
+    image: quay.io/authorizer/authorizer:2.4.1
+    restart: "no"
+    env_file:
+      - .env
+    entrypoint: ["/bin/sh", "/authorizer-env-check.sh"]
+    volumes:
+      - ./authorizer-env-check.sh:/authorizer-env-check.sh:ro
+    mem_limit: 32m
+
+  # No-op: `compose up -d` returns once Authorizer answers /healthz.
+  ready:
+    image: quay.io/authorizer/authorizer:2.4.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

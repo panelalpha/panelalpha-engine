@@ -1,0 +1,43 @@
+# Compose-replace: the repository's compose files are a dev environment and a
+# Traefik example (docker.sock, whoami). This runs the official image of the
+# current release on its own, with /data (SQLite sessions, OIDC keys) on a volume.
+services:
+  app:
+    image: ghcr.io/tinyauthapp/tinyauth:v5.2.0
+    restart: unless-stopped
+    env_file:
+      # The project's env vars: users, OIDC clients, OAuth/LDAP settings.
+      - .env
+    environment:
+      # Tinyauth refuses to start without a login provider; fail the deploy
+      # early with the name of the variable instead. Each $ in the hash must be
+      # written $$ (engine#326), as in any compose file.
+      TINYAUTH_AUTH_USERS: ${TINYAUTH_AUTH_USERS:?Set the project env var TINYAUTH_AUTH_USERS to user:bcrypt-hash, every $$ in the hash written as $$$$, comma-separated for several users}
+      TINYAUTH_APPURL: ${PA_PUBLIC_URL}
+      # The shared parent domain is not a public suffix: a parent-domain cookie
+      # would reach other accounts' sites. Set true on a domain of your own.
+      TINYAUTH_AUTH_SUBDOMAINSENABLED: ${TINYAUTH_AUTH_SUBDOMAINSENABLED:-false}
+    volumes:
+      - data:/data
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "tinyauth", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once Tinyauth answers.
+  ready:
+    image: ghcr.io/tinyauthapp/tinyauth:v5.2.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

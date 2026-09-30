@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Apache Superset (BI and dashboards) packaged by amancevice/docker-superset.
+  Bare detection built the repo Dockerfile, whose CMD starts gunicorn on an
+  unmigrated metadata DB with the insecure default SECRET_KEY: Superset refused
+  to boot, and with a key set every request 500'd on "no such table". This
+  recipe runs the published amancevice/superset:6.1.0 release image, runs
+  upstream's `superset db upgrade` and `superset init` in a one-shot service
+  before gunicorn (3 workers instead of the image's 10), keeps the SQLite
+  metadata DB on a named volume, and generates SUPERSET_SECRET_KEY once into
+  ~/.panelalpha/superset/. First-run behaviour is upstream's: no admin exists
+  until one is created with `superset fab create-admin` in the app container.

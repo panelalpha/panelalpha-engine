@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Norish, a realtime recipe app for families: one Next.js/Node server on :3000
+  with PostgreSQL, Redis and a headless-browser sidecar (Obscura) for recipe
+  URL imports. The plain deploy builds the repository's docker/Dockerfile,
+  which stops on `RUN test -n "${NORISH_VERSION_REPORT_JSON}"`, a build
+  argument only upstream's release CI fills in; upstream ships the app as the
+  norishapp/norish image instead.
+
+  This recipe is upstream's docker/docker-compose.example.yml with the image
+  pinned to the current release (v0.24.0-beta), AUTH_URL set to the site's
+  address, and MASTER_KEY and the database password as required compose
+  variables the engine generates once per account (stable across redeploys).
+  Uploads, PostgreSQL and Redis live on named volumes. A gate service waits
+  for Norish's own /api/v1/health. First run is as upstream ships it: the
+  site opens Norish's sign-in page, where the first account is registered.

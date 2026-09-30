@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Colanode, an offline-first collaboration suite (chat, pages, databases,
+  files): a Node server on PostgreSQL (pgvector) and Valkey, and a web client
+  that connects to any server by URL. The repository root is the source
+  monorepo, which the plain deploy builds with Railpack into a container that
+  never answers; upstream's deployment is hosting/docker/docker-compose.yaml
+  on published images, which publishes the server (3000) and the web client
+  (4000) as two origins. This recipe runs those services on the 0.4.7 release
+  images with one public port: the web image's nginx (default.conf replaced
+  by files/panelalpha-colanode/web.conf) serves the client and proxies /api/
+  to the server, whose config.json sets pathPrefix "api", CORS and the web
+  domain from the account's address, and file storage on a named volume.
+  hooks/prepare.sh generates the PostgreSQL and Valkey passwords once into
+  ~/.panelalpha/colanode. In the client, add the server as
+  https://<domain>/api/config and register the first account.

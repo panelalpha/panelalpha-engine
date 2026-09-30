@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DumbDo is a small Node (Express) to-do list: every list is kept in one JSON
+  file under /app/data, guarded by an optional numeric PIN.
+
+  The repository's docker-compose.yml runs dumbwareio/dumbdo:latest with a
+  ./data bind mount and the PIN from .env, which the engine fills from
+  .env.example: DUMBDO_PIN=1234. overrides/docker-compose.yml runs the image
+  built from the current commit (tagged with its SHA; upstream publishes no
+  version tags), with /app/data on a named volume that survives redeploys and
+  ALLOWED_ORIGINS set to the site's address.
+
+  Security: hooks/prepare.sh generates a 10-digit PIN once into
+  ~/.panelalpha/dumbdo/pin.env (0600 in 0700); that file is where the owner
+  reads it, and it replaces .env so 1234 is never used. The app refuses every
+  page and /api call without the PIN and locks /api/verify-pin after 5 wrong
+  PINs for 15 minutes per client address. It also compares a PIN cookie or
+  X-Pin header on every request with no lockout. `proxy` (nginx), the only
+  service on the account's port, closes that: it drops X-Pin, forwards only the
+  one PIN cookie it checked, throttles requests carrying a wrong one to 10 per
+  minute, caps PIN submissions at 10 per minute for everyone as a backstop, and
+  hands the app the engine's X-Real-IP so a stranger's failures do not lock
+  the owner out. Behind a relay (a withoutdns.com name) every visitor has the
+  relay's address and shares one lockout. No websocket.

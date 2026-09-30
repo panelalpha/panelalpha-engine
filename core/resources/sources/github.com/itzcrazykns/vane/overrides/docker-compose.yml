@@ -1,0 +1,14 @@
+# Compose-replace: the repo's compose builds the image from source.
+# Published image of the current release; SearXNG runs inside it on :8080.
+services:
+  app:
+    image: itzcrazykns1337/vane:v1.12.2
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # Settings (config.json), chat history database and uploads.
+      - vane-data:/home/vane/data
+
+volumes:
+  vane-data: {}

@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Open Source Point of Sale (CodeIgniter 4, PHP 8.2 + Apache) with MariaDB.
+  Deployed from source the engine picks the repository's Dockerfile over its
+  compose file and builds the final stage, ospos_dev, which runs
+  `adduser --uid $USERID` with no USERID build arg and fails (exit 51,
+  engine#412). This recipe does what upstream's docker-compose.yml does,
+  running the official jekkos/opensourcepos image of the current release,
+  3.4.2, with MariaDB (10.11 LTS rather than the file's end-of-life 10.5).
+  Instead of the file's fixed database passwords the prepare hook generates
+  them, and ENCRYPTION_KEY and THROTTLE_KEY (which the app reads when there is
+  no .env, as .env.example documents for Docker), once into
+  ~/.panelalpha/opensourcepos/secrets.env. The image's own CMD serves:
+  upstream's `php spark env:provision` start command writes /app/.env as root
+  with mode 0640, which Apache (www-data) cannot read, so every page fails
+  with a CodeIgniter exception. ALLOWED_HOSTNAMES is the account's domain and
+  FORCE_HTTPS is set because TLS ends at the engine's proxy. Uploads, logs and
+  the database are on named volumes. On first visit the login page offers
+  OSPOS's own "Initialize" step, which runs its migrations; the default login
+  is upstream's.

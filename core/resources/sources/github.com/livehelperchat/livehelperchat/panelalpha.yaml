@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Live Helper Chat, live-support chat (PHP >= 8.2, MySQL). The plain deploy
+  builds the repo's Dockerfile, which is stale: FROM php:7.4-apache (the README
+  requires PHP 8.2) on an archived Debian, so `apt-get update` fails with exit
+  code 100 and nothing starts.
+
+  The application is lhc_web/ (composer.json, index.php), so this runs it on
+  the engine's php platform with app_root: lhc_web: Composer and the frontend
+  build run as the platform does, Apache serves lhc_web/, and the account's
+  MySQL is provisioned (database: mysql; its DB_* values are what the
+  customer enters in LHC's own installer, left as upstream ships it).
+  Redeploys wipe ~/project, so the settings file the installer writes is
+  bind-mounted from ~/.panelalpha/lhc/settings.ini.php (created empty, 0600,
+  by hooks/prepare.sh) and the upload directories under var/ are named
+  volumes, handed to the account user by a one-shot service.
+extends: php
+app_root: lhc_web
+database: mysql

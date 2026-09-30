@@ -1,0 +1,36 @@
+# The repo is the Python package source with no recognised entry point; this
+# runs upstream's image of the current release, config from ~/.panelalpha.
+services:
+  app:
+    image: docker.io/copyparty/ac:1.20.24
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - data:/w
+      - cfg:/cfg
+      - ../.panelalpha/copyparty/copyparty.conf:/cfg/copyparty.conf:ro
+    ports:
+      - "3923:3923"
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q 127.0.0.1:3923/?reset=/._"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once copyparty answers.
+  ready:
+    image: docker.io/copyparty/ac:1.20.24
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  cfg: {}

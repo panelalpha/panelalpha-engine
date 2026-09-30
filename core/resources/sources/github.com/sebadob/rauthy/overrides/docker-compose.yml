@@ -1,0 +1,34 @@
+# Compose-replace: the repo is Rauthy's source tree, whose release build needs a dataset
+# fetched by `just fido-mds-prep` first. Runs the official image of the current release;
+# Hiqlite data on a named volume, boot secrets from ~/.panelalpha (hooks/prepare.sh).
+services:
+  app:
+    image: ghcr.io/sebadob/rauthy:0.36.2
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/rauthy/secrets.env
+      - path: .env
+        required: false
+    environment:
+      # Single node: Hiqlite refuses to start without a node id.
+      HQL_NODE_ID: "1"
+      LISTEN_SCHEME: http
+      PUB_URL: ${PA_PUBLIC_HOST}
+      RP_ID: ${PA_PUBLIC_HOST}
+      RP_ORIGIN: ${PA_PUBLIC_URL}:443
+      # Behind the engine's TLS proxy: https issuer, redirect URIs and cookies.
+      PROXY_MODE: "true"
+      # Rauthy bans an IP for a day on scanner paths (/.env, ...): key it on the
+      # X-Real-IP the engine proxy sets, not the client-supplied first
+      # X-Forwarded-For entry (engine#319). Peer is the account's Docker gateway.
+      PEER_IP_HEADER_NAME: X-Real-IP
+      TRUSTED_PROXIES: "172.16.0.0/12"
+    volumes:
+      # Hiqlite state machine and logs (users, clients, keys).
+      - data:/app/data
+    ports:
+      - "8080:8080"
+    mem_limit: 512m
+
+volumes:
+  data: {}

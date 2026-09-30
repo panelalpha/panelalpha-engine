@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Plex Media Server: closed-source freeware (no paid key needed to run) that
+  organises and streams a movie/TV/music library, web app at /web on :32400.
+  The repository only packages Plex's binary; its compose files are templates
+  with placeholders. This recipe runs the official image of the current
+  release, with config, transcode and media on named volumes that survive
+  redeploys.
+
+  Ownership is the security question. An unclaimed server serves everything,
+  including the claim endpoint that binds it to a Plex account, to any
+  request it considers local, and it takes that from the first
+  X-Forwarded-For entry (which the engine's proxy passes through from the
+  visitor) and from a Host that is an IP literal, a single label or
+  *.plex.direct. A small nginx in front replaces X-Forwarded-For with the
+  address it resolved itself, replaces such Hosts, and refuses
+  /myplex/claim, so nothing reaching the domain is ever local.
+
+  The only way to claim is PLEX_CLAIM (from https://plex.tv/claim, valid 4
+  minutes) in the project's environment variables, which the image exchanges
+  for a server token on first start. A `plex-claim` gate fails the deploy with
+  that instruction while the server is not claimed, so a deploy never ends
+  "successful" on a server nobody can sign in to.

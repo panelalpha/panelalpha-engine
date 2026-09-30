@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  code-server: VS Code in the browser on :8080. The repository has no compose
+  file and the plain deploy tried to build it from source as an Express app,
+  failing in npm install on the native-keymap module (no C toolchain). This
+  recipe runs the published codercom/code-server image of the current release
+  (4.139.1) with /home/coder on a named volume, so the generated password,
+  extensions and workspace survive redeploys.

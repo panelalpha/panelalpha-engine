@@ -1,0 +1,54 @@
+# The repository is the Go library; the plain deploy runs the CLI, which exits.
+# This runs the relay proxy image of the current release (v1.55.3) as upstream's
+# getting-started guide does, config and flags on a named volume.
+services:
+  # One-shot: writes the config and an empty flags file only when missing.
+  init:
+    image: gofeatureflag/go-feature-flag:v1.55.3-trixie
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        [ -f /goff/goff-proxy.yaml ] || printf '%s\n' \
+          'pollingInterval: 1000' \
+          'retrievers:' \
+          '  - kind: file' \
+          '    path: /goff/flags.goff.yaml' > /goff/goff-proxy.yaml
+        [ -f /goff/flags.goff.yaml ] || : > /goff/flags.goff.yaml
+    volumes:
+      - goff:/goff
+    mem_limit: 32m
+
+  app:
+    image: gofeatureflag/go-feature-flag:v1.55.3-trixie
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    # Relay proxy settings as environment variables (RETRIEVERS_0_*, AUTHORIZEDKEYS_*).
+    env_file: .env
+    volumes:
+      # goff-proxy.yaml and flags.goff.yaml.
+      - goff:/goff
+    ports:
+      - "1031:1031"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/1031 && printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once the relay proxy answers.
+  ready:
+    image: gofeatureflag/go-feature-flag:v1.55.3-trixie
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  goff: {}

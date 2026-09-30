@@ -1,0 +1,15 @@
+# The repo's compose sets IP / DATA_FOLDER / GAMES_FOLDER, but the server reads
+# MINUS_GAMES_* (minus_games_server/src/configuration), so it binds 127.0.0.1.
+# The host bind mount is replaced by a named volume (same container path).
+services:
+  minus_games_server:
+    environment:
+      MINUS_GAMES_IP: 0.0.0.0
+      MINUS_GAMES_PORT: "8415"
+      MINUS_GAMES_DATA_FOLDER: /var/lib/minus_games_server/data/
+      MINUS_GAMES_GAMES_FOLDER: /var/lib/minus_games_server/games/
+    volumes:
+      - data:/var/lib/minus_games_server/
+
+volumes:
+  data: {}

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Raneto, a Markdown knowledge base: one Node process on :8080, built from the
+  repository's own Dockerfile (0.18.1). That Dockerfile's allow-list
+  .dockerignore leaves content/ out of the image, and the app refuses to start
+  without SESSION_SECRET or an existing content/pages directory. The override
+  keeps content on a named volume, seeded once from the repository's sample
+  pages, and gives SESSION_SECRET the account's PA_INSTANCE_SECRET unless the
+  customer sets one. Authentication is upstream's default: editing needs a
+  login, and with no ADMIN_USERNAME/ADMIN_PASSWORD set Raneto prints generated
+  credentials to the container log on each start.
+extends: dockerfile
+extra:
+  # A source recipe is applied without probe data; state what the probe finds.
+  dockerfile: Dockerfile
+  port_hint: 8080

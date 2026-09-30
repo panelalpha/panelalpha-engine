@@ -1,0 +1,15 @@
+# Compose-replace: the repository has no compose file and its source build runs
+# out of memory at 2000 MB. This runs the official release image with its own
+# default config (UI + search on :5000) and the registry storage on a volume.
+services:
+  app:
+    image: ghcr.io/project-zot/zot:v2.1.21
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - zot_data:/var/lib/registry
+    mem_limit: 1g
+
+volumes:
+  zot_data: {}

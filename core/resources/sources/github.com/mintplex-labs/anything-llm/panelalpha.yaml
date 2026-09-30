@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  AnythingLLM, an all-in-one document chat and RAG workspace, on :3001. The
+  plain deploy built docker/Dockerfile (about seven minutes) and the container
+  then restart-looped, because nothing set STORAGE_DIR (collector crashes in
+  path.resolve on undefined). This recipe runs the published
+  mintplexlabs/anythingllm image of the current release (1.16.2) the way the
+  upstream Docker quickstart does: STORAGE_DIR=/app/server/storage on a named
+  volume, and the app's own settings file /app/server/.env kept on that same
+  volume (a symlink made before the upstream entrypoint), so the LLM
+  configuration, generated SIG_KEY/SIG_SALT and workspaces survive redeploys.

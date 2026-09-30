@@ -1,0 +1,28 @@
+# Compose-replace: the repository's Dockerfile names a base image that does
+# not exist. This runs upstream's image of the current release.
+services:
+  app:
+    image: glanceapp/glance:v0.8.6
+    restart: unless-stopped
+    volumes:
+      - config:/app/config
+    ports:
+      - "8080:8080"
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
+    mem_limit: 256m
+
+  # First deploy only: the starter glance.yml upstream's README says to download
+  # (docs/glance.yml of the clone). An existing config is never touched.
+  config-init:
+    image: glanceapp/glance:v0.8.6
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "[ -f /app/config/glance.yml ] || cp /seed/glance.yml /app/config/glance.yml"]
+    volumes:
+      - config:/app/config
+      - ./docs/glance.yml:/seed/glance.yml:ro
+    mem_limit: 32m
+
+volumes:
+  config: {}

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  authentik, an identity provider (SSO over OAuth2/OIDC, SAML, LDAP) with a
+  web admin UI: a Django server and a background worker on PostgreSQL. The
+  plain deploy detects the source tree as `django` and crash-loops with
+  "ModuleNotFoundError: No module named 'django'" (the dependencies are a uv
+  workspace the django recipe does not install, and the web UI needs a
+  separate build). This recipe runs upstream's release compose
+  (goauthentik.io/docker-compose.yml) with the current release image
+  (ghcr.io/goauthentik/server:2026.8.3): server on port 9000, worker,
+  postgres:16-alpine, all state on named volumes instead of ./ bind mounts,
+  and without the worker's docker.sock mount (only used for Docker-managed
+  outposts). AUTHENTIK_SECRET_KEY and the database password are generated
+  once by hooks/prepare.sh into ~/.panelalpha/authentik/. authentik's
+  first-run behaviour (the initial-setup flow that sets the akadmin
+  password) is left as upstream ships it.

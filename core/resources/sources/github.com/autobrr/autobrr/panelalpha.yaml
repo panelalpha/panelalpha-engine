@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  autobrr watches IRC announce channels and RSS/Torznab feeds, matches releases
+  against user filters and pushes them to torrent clients and the *arr apps:
+  one Go binary serving its web UI and REST API (/api) on :7474, SQLite in
+  /config. The repository's docker-compose.yml is a development environment (a
+  source build plus two Postgres services with fixed passwords, ./config bind
+  mount that the engine wipes on every deploy); this recipe replaces it with
+  the official image of the current release, v1.87.0, /config on a named
+  volume that survives redeploys.
+
+  With no user in the database autobrr sends every visitor to /onboard, where
+  the first one creates the only account and owns the instance. A one-shot
+  `seed` service starts autobrr privately (loopback, no published port) against
+  the same volume and creates the user through its own /api/auth/onboard from
+  ~/.panelalpha/autobrr/admin.env (generated once by hooks/prepare.sh), only
+  while onboarding is still open; the app service publishes its port only after
+  that. Sessions are server-side rows in the database, so there is no session
+  secret to generate. The bind address is pinned to 0.0.0.0 and CORS to the
+  site's own origin by environment.

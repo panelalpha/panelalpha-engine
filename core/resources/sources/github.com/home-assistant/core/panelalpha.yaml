@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Home Assistant, the open-source home automation platform (Python/aiohttp),
+  with its web UI and API on port 8123.
+
+  The repository's Dockerfile starts FROM ${BUILD_FROM}, a build argument only
+  Home Assistant's own builder supplies, so a plain deploy fails before the
+  first layer. This recipe runs the image upstream publishes for the current
+  release, ghcr.io/home-assistant/home-assistant:2026.9.4, with /config on a
+  named volume so the configuration, users, history database and
+  integrations survive a redeploy. A one-shot `init` service lets Home
+  Assistant write its own default configuration on first run and adds the
+  `http:` block it needs behind the account's reverse proxy
+  (use_x_forwarded_for with the private ranges as trusted proxies); without
+  it every proxied request is answered 400. A `ready` gate makes the deploy
+  finish only once the web server answers.
+
+  First run is upstream's: the onboarding page asks the first visitor to
+  create the owner account. Local network discovery (mDNS/SSDP), USB and
+  Bluetooth devices are not available in the account; cloud and IP-based
+  integrations work.

@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Huginn, agents that watch the web and act on events (an IFTTT/Zapier
+  alternative): a Rails app on :3000, a threaded background worker and
+  PostgreSQL. The repository has no deployable compose at its root, so the
+  plain deploy built it as a generic Rails app, which failed. This recipe runs
+  upstream's single-process layout (docker/single-process/postgresql.yml) on the
+  published image of the current release
+  (huginn/huginn-single-process:v2026.09.22) with postgres:17. The web container
+  creates, migrates and seeds the database on boot, as upstream ships it; the
+  worker waits for the migrations. APP_SECRET_TOKEN and the database password
+  are generated per account by the engine; DOMAIN is the site's address. A
+  health-check gate makes the deploy wait until Huginn answers.

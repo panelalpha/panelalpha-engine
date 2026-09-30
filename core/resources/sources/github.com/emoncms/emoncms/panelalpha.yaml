@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Emoncms, the OpenEnergyMonitor web app for logging and graphing energy,
+  temperature and other sensor data: plain PHP on MySQL, served by the
+  engine's PHP platform (detection was already right).
+
+  The plain deploy answered 200 with Emoncms's own hard stop, "missing
+  settings file: Create a settings.ini file from a example.settings.ini
+  template" (process_settings.php). Emoncms reads its database only from
+  settings.ini or settings.php; settings.env.ini's {{MYSQL_HOST}} placeholders
+  are never expanded (ini_check_envvars is commented out).
+
+  The recipe asks for a MySQL database (`database: mysql`) and installs
+  settings.php (example.settings.php's format) reading the DB_* credentials
+  the engine hands the container. Emoncms creates its tables on the first
+  request (db_schema_setup). Feed data (PHPFina/PHPTimeSeries files) and the
+  log go to /var/opt/emoncms on the named volume emoncms-data; a one-shot
+  data-init service creates the directories owned by the account's uid, since
+  the app runs unprivileged. Redis and MQTT stay off, as upstream defaults.
+  The first account registered on the login page is the administrator.
+
+  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
+
+  Create: success in 45-60s; / is <title>Emoncms - user login </title> (15.5 KB).
+  Registered user 1, logged in, created a PHPFina feed and inserted 123.4:
+  phpfina/1.dat and 1.meta appeared on the volume; /feed/view and
+  /admin/info render. Rebuild: success in 29s, the same login works and
+  /feed/data.json returns the point [1790698340000,123.4]. /.env and
+  /.git/config answer 403; /settings.php executes to an empty body.
+extends: php
+database: mysql

@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OpenClaw, a self-hosted personal AI assistant Gateway with a browser
+  Control UI (Node, one process serving HTTP and WebSocket on :18789).
+
+  A plain deploy picks the repository's docker-compose.yml, builds the image
+  from source (about 16 minutes) and then restart-loops: it bind-mounts
+  ${HOME}/.openclaw into /home/node/.openclaw, which the image's uid 1000
+  cannot write ("EACCES: permission denied, mkdir
+  '/home/node/.openclaw/migration'"). This recipe runs upstream's published
+  image of the current release, ghcr.io/openclaw/openclaw:2026.9.6, with the
+  state directory and the auth-profile secret directory on named volumes. The
+  Gateway runs as upstream's compose runs it (`gateway --bind lan`, plus
+  `--allow-unconfigured` as upstream's Render blueprint does, since no
+  onboarding has run). A lan bind refuses to start without auth, so
+  hooks/prepare.sh generates OPENCLAW_GATEWAY_TOKEN once into
+  ~/.panelalpha/openclaw/gateway.env; paste it into the Control UI to
+  connect. A one-shot service runs upstream's `config set` to make the site's
+  address the Control UI's allowed browser origin (the Gateway otherwise
+  seeds only localhost for a lan bind) and to trust the private-range
+  reverse proxy in front of it (without gateway.trustedProxies every proxied
+  request is refused with 403 "proxy_attribution_required"); it re-applies on
+  every deploy, so a changed domain follows. Model providers and channels are
+  configured by the user afterwards, as upstream's onboarding would.

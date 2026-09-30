@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  nzbfast, a Usenet downloader (single Rust binary) with a built-in indexer,
+  web dashboard and SABnzbd/NZBGet-compatible API on port 6789.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repository's docker-compose.yml keeps
+  /config and /watch on ./ bind mounts (emptied on every deploy), downloads on
+  the host path /data/usenet, adds a Watchtower that needs the Docker socket,
+  and pairs cap_drop ALL with cap_add; the engine keeps only the drop
+  (engine#349), so the entrypoint dies with "failed switching to 1000:1000".
+  This recipe runs nzbfast/nzbfast of the current release (1.7.1) with the
+  default capability set and /config, /watch and /data/usenet on named
+  volumes. The Usenet server is added in the dashboard's Welcome panel; the
+  API key nzbfast generates on first run is in its log and in /config.

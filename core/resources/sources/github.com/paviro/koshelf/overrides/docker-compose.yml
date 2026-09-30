@@ -1,0 +1,36 @@
+# Compose-replace: the plain deploy's cargo build needs npm for the embedded
+# frontend and fails. This runs the release image upstream's docs point to.
+services:
+  # Fresh named volumes are root-owned; the image runs as uid 1000.
+  init:
+    image: ghcr.io/devtigro/koshelf:2026.8.0
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "chown 1000:1000 /books /settings /data"]
+    restart: "no"
+    volumes:
+      - koshelf_books:/books
+      - koshelf_settings:/settings
+      - koshelf_data:/data
+    mem_limit: 64m
+
+  app:
+    image: ghcr.io/devtigro/koshelf:2026.8.0
+    restart: unless-stopped
+    # The image defaults KOSHELF_STATISTICS_DB to /settings/statistics.sqlite3 and
+    # serve refuses a missing file; drop the flag until the database is synced in.
+    entrypoint: ["/bin/sh", "-c", '[ -f "$$KOSHELF_STATISTICS_DB" ] || unset KOSHELF_STATISTICS_DB; exec /entrypoint.sh']
+    ports:
+      - "3000:3000"
+    volumes:
+      - koshelf_books:/books
+      - koshelf_settings:/settings
+      - koshelf_data:/data
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    mem_limit: 512m
+
+volumes:
+  koshelf_books: {}
+  koshelf_settings: {}
+  koshelf_data: {}

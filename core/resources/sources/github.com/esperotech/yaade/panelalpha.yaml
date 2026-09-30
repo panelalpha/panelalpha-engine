@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Yaade is a self-hosted collaborative API development environment (MIT): a
+  Kotlin/Vert.x server with an H2 file database serving the React UI and API on
+  :9339, data under /app/data.
+
+  Compose-REPLACE from the official image docker.io/esperotech/yaade:latest
+  (upstream publishes no versioned tags; `latest` is the release channel the
+  README documents). The repository root has nothing the engine can build -
+  client/ (Vite) and server/ (Gradle, whose Dockerfile copies build output that
+  is not in the checkout) are assembled by upstream's scripts - so a plain
+  deploy serves the engine's placeholder. This recipe is the README's
+  `docker run`: /app/data on a named volume and YAADE_ADMIN_USERNAME, which the
+  server requires to start, set to upstream's documented `admin` (override it
+  as a project environment variable before the first deploy).
+
+  First run is left as upstream ships it: the admin user is created with
+  Yaade's default password `password`, to be changed under Settings > Account.
+
+  Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500:
+  create success in 49s, / is <title>Yaade</title> (SPA shell, bundles load),
+  admin/password logs in through /api/login. A collection created before a
+  rebuild (40s) is still listed after it. /.env and /.git/config are 404. App
+  ~300 MiB.

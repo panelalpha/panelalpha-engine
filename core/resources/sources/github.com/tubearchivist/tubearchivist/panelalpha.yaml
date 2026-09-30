@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tube Archivist indexes and downloads YouTube channels, playlists and videos
+  into a self-hosted library: a Django + Celery app behind nginx on :8000,
+  Elasticsearch for the index and Redis for the queue. The repository's
+  docker-compose.yml is the deployment upstream documents, but it asks
+  Elasticsearch for `ulimits: memlock: -1`, which a nested account container
+  cannot grant ("error setting rlimit type 8: operation not permitted"), so
+  the stack never starts. This recipe is that compose file with the images
+  pinned to the current release (bbilly1/tubearchivist:v0.5.12,
+  bbilly1/tubearchivist-es:8.19.0), the memlock ulimit dropped
+  (panelalpha/engine#346), TA_HOST set to the site's address, and all data on
+  named volumes.
+
+  The image needs TA_USERNAME and TA_PASSWORD (the initial login) from the
+  project env vars; a one-shot check fails the deploy naming whichever is
+  missing. The Elasticsearch password is generated once into
+  ~/.panelalpha/tubearchivist/.
+
+  Memory: Elasticsearch keeps upstream's 1 GB heap and needs ~1.55 GB in
+  total (it was OOM-killed at a 1.5 GB cap), the app ~0.65 GB. Measured
+  steady at ~2.2 GB on an account with memory_limit 4096; give the account
+  at least 3072.

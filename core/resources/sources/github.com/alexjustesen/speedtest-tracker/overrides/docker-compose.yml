@@ -1,0 +1,43 @@
+# Compose-replace: the repo's compose.yaml is a Laravel Sail dev environment
+# (bind-mounted source, Postgres, Mailpit, Apprise). This runs the LinuxServer.io
+# image of the current release on SQLite, kept on a named volume.
+services:
+  app:
+    image: lscr.io/linuxserver/speedtest-tracker:v1.15.0-ls173
+    restart: unless-stopped
+    # .env holds panel-overridable defaults; app.env the persisted secrets and
+    # the admin that the first migration seeds.
+    env_file:
+      - .env
+      - ../.panelalpha/speedtest/app.env
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      DB_CONNECTION: sqlite
+      APP_URL: ${PA_PUBLIC_URL}
+      ASSET_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # database.sqlite, logs and the image's generated config.
+      - speedtest-config:/config
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/api/healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 768m
+
+  # No-op gate: `up -d` returns only once the app answers (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  speedtest-config: {}

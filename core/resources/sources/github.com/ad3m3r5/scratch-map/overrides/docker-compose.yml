@@ -1,0 +1,20 @@
+# Compose-replace: the repo's ./data bind mount is created root-owned and the
+# image runs as `node`, so the app cannot write its database. Published image of
+# the current release; data on a named volume at /app/data (node-owned in the image).
+services:
+  app:
+    image: ad3m3r5/scratch-map:1.2.3
+    restart: unless-stopped
+    environment:
+      ADDRESS: 0.0.0.0
+      PORT: "8080"
+      DATA_DIR: /app/data
+      LOG_LEVEL: INFO
+    volumes:
+      - data:/app/data
+    ports:
+      - "8080:8080"
+    mem_limit: 256m
+
+volumes:
+  data: {}

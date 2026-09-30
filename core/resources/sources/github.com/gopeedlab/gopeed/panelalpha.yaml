@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gopeed is a download manager (HTTP, BitTorrent, magnet, ed2k) with a Flutter
+  web UI and a REST API, one Go binary on :9999. The repository's own
+  docker-compose.yml runs liwei2633/gopeed and deploys as is; this recipe
+  layers an override that pins the current release v1.9.3 and puts
+  /app/storage (gopeed.db: settings and the task list) and /app/Downloads on
+  named volumes. Upstream leaves storage on an anonymous volume, which a
+  rebuild replaces, and Downloads on a bind into the account container's
+  /root, so both were lost on redeploy.
+
+  Authentication is left as upstream ships it: off. The web UI and API are
+  open to anyone with the URL until the customer enables Gopeed's own login
+  (`command: -u <user> -p <password>` on the gopeed service).

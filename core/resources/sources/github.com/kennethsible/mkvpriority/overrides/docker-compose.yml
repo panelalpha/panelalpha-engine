@@ -1,0 +1,76 @@
+# Upstream compose.yaml (Sonarr + MKVPriority on a shared media dir) on
+# release images, with named volumes instead of /path/to/... placeholders.
+services:
+  sonarr:
+    image: linuxserver/sonarr:4.0.20
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+    volumes:
+      - media:/media
+      - sonarr-config:/config
+      # MKVPriority's /config; the custom script is /mkvpriority/mkvpriority.sh.
+      - mkvpriority-config:/mkvpriority
+    ports:
+      - "8989:8989"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8989/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+    depends_on:
+      perms:
+        condition: service_completed_successfully
+    mem_limit: 1g
+
+  mkvpriority:
+    image: ghcr.io/kennethsible/mkvpriority:2.2.0
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      WEBHOOK_PORT: "8080"
+      MKVPRIORITY_ARGS: --archive /config/archive.db
+    volumes:
+      - media:/media
+      - mkvpriority-config:/config
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    depends_on:
+      perms:
+        condition: service_completed_successfully
+    mem_limit: 256m
+
+  # Fresh named volumes are root-owned; both apps run as uid 1000.
+  perms:
+    image: ghcr.io/kennethsible/mkvpriority:2.2.0
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "chown 1000:1000 /media /config"]
+    volumes:
+      - media:/media
+      - mkvpriority-config:/config
+    mem_limit: 32m
+
+  # No-op gate: `compose up -d` returns once both services answer.
+  ready:
+    image: ghcr.io/kennethsible/mkvpriority:2.2.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      sonarr:
+        condition: service_healthy
+      mkvpriority:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  media: {}
+  sonarr-config: {}
+  mkvpriority-config: {}

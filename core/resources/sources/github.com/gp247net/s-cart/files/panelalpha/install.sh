@@ -31,6 +31,37 @@ if [ -f storage/app/private/gp247-installed.txt ] || [ -f storage/app/gp247-inst
     exit 0
 fi
 
+# The marker is in ~/project, emptied on every deploy; the database is on a
+# volume. A seeded store row without the marker is a redeploy: re-create only the
+# files the install wrote (publish tags, storage:link, marker), never the
+# destructive install. Exit 2 = database unreadable, fail rather than guess.
+set +e
+php -r '
+try {
+    $pdo = new PDO("mysql:host=".getenv("DB_HOST").";port=".(getenv("DB_PORT") ?: "3306").";dbname=".getenv("DB_DATABASE"), getenv("DB_USERNAME"), getenv("DB_PASSWORD"));
+    $seeded = $pdo->query("SHOW TABLES LIKE \"gp247_admin_store\"")->fetchColumn()
+        && $pdo->query("SELECT COUNT(*) FROM gp247_admin_store")->fetchColumn() > 0;
+    exit($seeded ? 0 : 1);
+} catch (Throwable $e) { fwrite(STDERR, $e->getMessage()."\n"); exit(2); }'
+installed=$?
+set -e
+if [ "$installed" = 2 ]; then
+    echo "[s-cart] cannot read the database to tell a new site from a redeploy" >&2
+    exit 1
+fi
+if [ "$installed" = 0 ]; then
+    echo "[s-cart] database already holds GP247; restoring its published files and marker"
+    mkdir -p storage/app/private
+    date '+%Y-%m-%d %H:%M:%S' > storage/app/private/gp247-installed.txt
+    php artisan vendor:publish --tag=gp247:core-public
+    php artisan vendor:publish --tag=gp247:functions-except
+    php artisan vendor:publish --tag=lfm_public --force
+    php artisan vendor:publish --tag=gp247:front-public --force
+    php artisan vendor:publish --tag=gp247:front-template --force
+    php artisan storage:link
+    exit 0
+fi
+
 echo "[s-cart] installing GP247 (core -> front -> shop)"
 
 # APP_ENV=local for this one process, and it is what makes the install work at

@@ -1,0 +1,111 @@
+# The repository is a monorepo with nothing to run at its root; this runs
+# upstream's published image of the current release as
+# examples/deployments/docker/docker-compose.yaml does.
+x-argilla: &argilla
+  image: docker.io/argilla/argilla-server:v2.8.0
+  restart: unless-stopped
+  env_file:
+    - ../.panelalpha/argilla/app.env
+  depends_on:
+    postgres:
+      condition: service_healthy
+    elasticsearch:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  argilla:
+    <<: *argilla
+    environment:
+      ARGILLA_HOME_PATH: /var/lib/argilla
+      ARGILLA_ELASTICSEARCH: http://elasticsearch:9200
+      ARGILLA_REDIS_URL: redis://redis:6379/0
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    ports:
+      - "6900:6900"
+    volumes:
+      - argilladata:/var/lib/argilla
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:6900/api/v1/version', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1024m
+
+  worker:
+    <<: *argilla
+    environment:
+      ARGILLA_HOME_PATH: /var/lib/argilla
+      ARGILLA_ELASTICSEARCH: http://elasticsearch:9200
+      ARGILLA_REDIS_URL: redis://redis:6379/0
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      BACKGROUND_NUM_WORKERS: "2"
+    command: sh -c 'python -m argilla_server worker --num-workers $${BACKGROUND_NUM_WORKERS}'
+    mem_limit: 768m
+
+  postgres:
+    image: docker.io/library/postgres:14
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/argilla/db.env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: argilla
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgresdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d argilla -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 384m
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    restart: unless-stopped
+    environment:
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      node.name: elasticsearch
+      cluster.name: es-argilla-local
+      discovery.type: single-node
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+      xpack.security.enabled: "false"
+    volumes:
+      - elasticdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    # 512 MB heap plus off-heap: 1.03 GiB measured idle.
+    mem_limit: 1536m
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once the server answers.
+  ready:
+    image: docker.io/library/redis:7-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      argilla:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  argilladata: {}
+  postgresdata: {}
+  elasticdata: {}

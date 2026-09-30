@@ -1,0 +1,61 @@
+# Published release images instead of the repo compose (Caddy for a fixed
+# domain, bind mounts under ~/project that every deploy wipes).
+services:
+  zerotier:
+    image: zyclonite/zerotier:1.16.2
+    restart: unless-stopped
+    environment:
+      # Controller API reachable from zero-ui over the compose network only.
+      ZT_OVERRIDE_LOCAL_CONF: "true"
+      ZT_ALLOW_MANAGEMENT_FROM: 0.0.0.0/0
+    volumes:
+      # Controller identity, authtoken.secret and network definitions.
+      - zerotier-one:/var/lib/zerotier-one
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /var/lib/zerotier-one/authtoken.secret"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  zero-ui:
+    image: dec0dos/zero-ui:1.5.8
+    restart: unless-stopped
+    depends_on:
+      zerotier:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    # ZU_DEFAULT_PASSWORD for the admin created on first run, generated once
+    # by hooks/prepare.sh.
+    env_file:
+      - ../.panelalpha/zero-ui/zero-ui.env
+    environment:
+      ZU_CONTROLLER_ENDPOINT: http://zerotier:9993/
+      ZU_SECURE_HEADERS: "true"
+      ZU_DEFAULT_USERNAME: admin
+    volumes:
+      # Read-only: zero-ui only reads authtoken.secret from it.
+      - zerotier-one:/var/lib/zerotier-one:ro
+      - zero-ui-data:/app/backend/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 384m
+
+  # No-op gate: `compose up -d` returns once the UI answers.
+  ready:
+    image: dec0dos/zero-ui:1.5.8
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      zero-ui:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  zerotier-one: {}
+  zero-ui-data: {}

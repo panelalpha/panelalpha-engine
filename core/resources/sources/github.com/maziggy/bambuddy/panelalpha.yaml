@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bambuddy, a self-hosted dashboard for Bambu Lab 3D printers (FastAPI backend
+  with a built React UI, SQLite by default). The repository's compose runs the
+  container with `network_mode: host` and leaves its `ports:` block commented
+  out; the engine strips host networking, so the plain deploy started the app
+  with no published port and the domain answered 502. This recipe runs the
+  published ghcr.io/maziggy/bambuddy image of the current release (1.2.5.6)
+  in bridge mode, publishes only the web UI on :8000, and keeps /app/data
+  (database, uploads, archives) and /app/logs on named volumes. Printers are
+  added by IP in the app; LAN discovery and the virtual-printer ports need
+  host networking and are not available here.

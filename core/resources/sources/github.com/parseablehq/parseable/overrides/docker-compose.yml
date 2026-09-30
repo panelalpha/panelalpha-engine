@@ -1,0 +1,27 @@
+# The repository ships only dev/test compose files; its Dockerfile compiles
+# the server from source. This runs the published release image instead.
+services:
+  parseable:
+    image: quay.io/parseablehq/parseable:v3.2.2
+    restart: unless-stopped
+    # The image's CMD has no storage subcommand, so the binary exits at once.
+    command: ["/usr/bin/parseable", "local-store"]
+    # Optional P_USERNAME / P_PASSWORD and other P_* settings.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      P_ADDR: 0.0.0.0:8000
+      P_FS_DIR: /parseable/data
+      P_STAGING_DIR: /parseable/staging
+      P_ORIGIN_URI: ${PA_PUBLIC_URL}
+    ports:
+      - "8000:8000"
+    volumes:
+      - data:/parseable/data
+      - staging:/parseable/staging
+    mem_limit: 1g
+
+volumes:
+  data: {}
+  staging: {}

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  GPTWOL is a web front end for Wake-on-LAN: a Flask app under gunicorn on
+  :5000 that keeps its computer list in SQLite at /app/db/computers.db and
+  its scheduled wake-ups in /etc/cron.d.
+
+  The repository ships only a Dockerfile; the compose file is in the README.
+  Built as-is, the app crash-loops with "sqlite3.OperationalError: unable to
+  open database file": the database path is hard-coded to /app/db and nothing
+  creates that directory unless a volume is mounted there.
+  overrides/docker-compose.yml runs the published misterbabou/gptwol:7.1.6
+  (the current release) with /app/db and /etc/cron.d on named volumes, as the
+  README's compose does, so the computer list and schedules survive
+  redeploys. The README's `network_mode: host` is dropped; the account
+  cannot share the host's network.
+
+  Magic packets are broadcast on the account's own container network, so they
+  do not reach machines on the customer's LAN; status checks (ping, TCP) of
+  addresses reachable from the host do work. First run is upstream's: no
+  login unless ENABLE_LOGIN=true (with USERNAME/PASSWORD, default admin/admin)
+  or OIDC is set in the project's environment variables.

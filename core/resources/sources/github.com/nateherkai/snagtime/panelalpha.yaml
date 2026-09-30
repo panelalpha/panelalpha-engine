@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Snagtime, a self-hosted scheduling app (Next.js web + outbox worker +
+  PostgreSQL 18). Upstream ships only a Dockerfile at the root (the engine
+  builds it alone, and the runtime then refuses to start without a
+  role-separated PostgreSQL over verified TLS) and a compose.production.yml
+  whose secrets are all external. This recipe runs that same topology in one
+  account: postgres from infrastructure/postgresql, a one-shot init that
+  applies the Prisma migrations and provisions the role logins, the worker and
+  the web server, with every generated secret and a private CA kept in
+  ~/.panelalpha/snagtime. Google OAuth, Stripe test keys and TLS SMTP are
+  mandatory in upstream's production mode; a one-shot check fails the deploy
+  naming whichever is missing.

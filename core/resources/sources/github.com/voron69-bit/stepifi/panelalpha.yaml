@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Stepifi converts STL meshes to STEP (and 3MF) files in the browser: an
+  Express server on :3000 that runs FreeCAD (baked into its image) through a
+  BullMQ queue on Redis. The repository's docker-compose.yml is a deployment
+  file, but it publishes two ports, 3000 (the app) and 3001 ("Bull Board"),
+  and the engine chose 3001 as the site's port. Nothing listens on 3001 at
+  HEAD (src/ never starts a Bull Board server), so the site answered 502.
+
+  This recipe is upstream's compose with only the app port published. The app
+  is still built from the repository's own Dockerfile (v2.0.0 is HEAD);
+  uploads, converted files and Redis's append-only file stay on named
+  volumes. Redis is the current release, redis:8-alpine. There is no login
+  (upstream ships none).

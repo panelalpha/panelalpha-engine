@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kinto is a JSON storage and sync HTTP API (Python/waitress on :8888) with
+  the Kinto Admin web UI at /v1/admin/. The repo's docker-compose.yml builds
+  the Dockerfile and runs it next to PostgreSQL and memcached, but the ini the
+  image generates at build time (`kinto init`) listens on 127.0.0.1 only, so
+  the plain deploy starts and never answers on 8888; upstream's published
+  image (kinto/kinto-server:26.3.3) is the same.
+
+  This recipe runs the current release image with PostgreSQL for storage,
+  permissions and cache, and copies the image's own ini to /tmp at start with
+  only `host = 0.0.0.0` changed. The database password and the two HMAC
+  secrets the image bakes in at build time (the same in every copy of the
+  image) are generated once by hooks/prepare.sh into ~/.panelalpha/kinto/ and
+  passed as KINTO_* environment settings. The database is on a named volume.
+  Everything else is upstream's default, including open account sign-up.

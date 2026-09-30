@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  audioserve, a personal server streaming audiobooks and other audio from
+  directories, with a web client and playback-position sync (one Rust binary
+  on :3000). The binary refuses to start without a collection directory and
+  either a shared secret or --no-authentication, and the repository's
+  Dockerfile passes neither; building it is also a ~15 minute LTO cargo build
+  that ran out of memory at a 2500 MB limit. This recipe runs the official image of the current release
+  (izderadicka/audioserve:latest, v0.30.1, pinned by digest) with the
+  collection on the named volume /audiobooks and its data directory on a named
+  volume. The shared secret (the login) is the customer's
+  AUDIOSERVE_SHARED_SECRET; without it the deploy fails and says so.

@@ -1,0 +1,132 @@
+# Upstream's self-host stack (github.com/julianpoy/recipesage-selfhost) with the
+# current release images; the repo's own compose is a dev environment.
+# Secrets are required variables the engine generates; data on named volumes.
+services:
+  proxy:
+    image: julianpoy/recipesage-selfhost-proxy:2026-08-16
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - static
+      - api
+      - pushpin
+    mem_limit: 128m
+
+  static:
+    image: julianpoy/recipesage-selfhost:static-v4.0.16
+    restart: unless-stopped
+    mem_limit: 128m
+
+  api:
+    image: julianpoy/recipesage-selfhost:api-v4.0.16
+    restart: unless-stopped
+    command: ./scripts/selfhost-startup.sh
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pushpin:
+        condition: service_started
+      valkey:
+        condition: service_started
+    environment:
+      API_PUBLIC_BASE_URL: ${PA_PUBLIC_URL}/api
+      GRIP_KEY: ${GRIP_KEY:?GRIP_KEY is required}
+      POSTGRES_DB: recipesage
+      POSTGRES_USER: recipesage
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      DATABASE_URL: postgresql://recipesage:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/recipesage
+      # Upstream defaults; the AI features stay off until the customer sets a key.
+      GROCERY_CATEGORIZER_URL: ${GROCERY_CATEGORIZER_URL:-https://grocery-categorizer.recipesage.com/}
+      AI_PROVIDER: ${AI_PROVIDER:-openrouter}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_API_BASE_URL: ${AI_API_BASE_URL:-}
+      AI_MODEL_WEBPAGE: ${AI_MODEL_WEBPAGE:-google/gemini-2.5-flash-lite}
+      AI_MODEL_TEXT: ${AI_MODEL_TEXT:-google/gemini-2.5-flash-lite}
+      AI_MODEL_OCR: ${AI_MODEL_OCR:-google/gemini-2.5-flash}
+      AI_MODEL_DOCUMENT: ${AI_MODEL_DOCUMENT:-google/gemini-2.5-flash}
+      AI_MODEL_MODERATION: ${AI_MODEL_MODERATION:-google/gemini-2.5-flash}
+      AI_MODEL_VISION: ${AI_MODEL_VISION:-anthropic/claude-sonnet-4.6}
+      AI_MODEL_NUTRITION: ${AI_MODEL_NUTRITION:-google/gemini-2.5-flash-lite}
+      AI_MODEL_ASSISTANT: ${AI_MODEL_ASSISTANT:-anthropic/claude-sonnet-4.6}
+      AI_MODEL_ASSISTANT_LOW: ${AI_MODEL_ASSISTANT_LOW:-google/gemini-2.5-flash}
+      SCRAPFLY_API_KEY: ${SCRAPFLY_API_KEY:-}
+      # Fixed by upstream's self-host compose.
+      ENVIRONMENT: selfhost
+      NODE_ENV: selfhost
+      NODE_OPTIONS: "--max-old-space-size=400"
+      MALLOC_ARENA_MAX: "2"
+      FILESYSTEM_STORAGE_PATH: /rs-media
+      STORAGE_TYPE: filesystem
+      VERBOSE: "false"
+      VERSION: selfhost
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_SSL: "false"
+      POSTGRES_LOGGING: "false"
+      DATABASE_SSL: "false"
+      GRIP_URL: http://pushpin:5561/
+      JOB_QUEUE_REDIS_HOST: valkey
+      STRIPE_SK: ""
+      GCM_KEYPAIR: ""
+      SENTRY_DSN: ""
+      STRIPE_WEBHOOK_SECRET: ""
+    volumes:
+      - apimedia:/rs-media
+    healthcheck:
+      # Answers once migrations, seeders and the search index rebuild are done.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(()=>process.exit(0),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1g
+
+  pushpin:
+    image: julianpoy/pushpin:2023-09-17
+    restart: unless-stopped
+    entrypoint: /bin/sh -c
+    command:
+      [
+        'sed -i "s/sig_key=changeme/sig_key=$$GRIP_KEY/" /etc/pushpin/pushpin.conf && echo "* $${TARGET},over_http" > /etc/pushpin/routes && pushpin --merge-output',
+      ]
+    environment:
+      GRIP_KEY: ${GRIP_KEY:?GRIP_KEY is required}
+      TARGET: api:3000
+    mem_limit: 256m
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: recipesage
+      POSTGRES_USER: recipesage
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgresdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-d", "recipesage", "-U", "recipesage"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 512m
+
+  valkey:
+    image: valkey/valkey:8
+    restart: unless-stopped
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once the API answers.
+  ready:
+    image: valkey/valkey:8
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  apimedia: {}
+  postgresdata: {}

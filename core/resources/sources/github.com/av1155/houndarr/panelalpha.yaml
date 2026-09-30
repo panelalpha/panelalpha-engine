@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Houndarr runs scheduled, rate-limited backlog searches for Radarr, Sonarr,
+  Lidarr, Readarr and Whisparr: one Python (FastAPI) process with its web UI
+  on :8877 and SQLite plus the master key that encrypts the stored *arr API
+  keys in /data. The repository's docker-compose.yml bind-mounts ./data, which
+  the engine wipes on every deploy; this recipe replaces it with the published
+  image pinned to the current release v1.13.3 and /data on a named volume.
+
+  With no password set Houndarr sends every visitor to /setup, where the first
+  one owns the instance. A one-shot `seed` service starts Houndarr on loopback
+  against the same volume, submits /setup from ~/.panelalpha/houndarr/admin.env
+  (generated once by hooks/prepare.sh), and only then does the app service
+  publish its port.
+
+  The login rate limit (5 failures a minute) is keyed on the client address.
+  HOUNDARR_TRUSTED_PROXIES stays unset: Houndarr would read the left-most
+  X-Forwarded-For, which a visitor controls (engine#319), so every visitor
+  shares one bucket instead. A factory reset from Settings reopens /setup
+  for its owner to finish; a redeploy re-seeds the stored admin instead.
+
+  Measured on 10.10.10.25 (2026-09-29, engine 705f250a): deploy 201s cold
+  (image pull), rebuild 47s; app 55 MiB. Anonymous / and /setup -> 302
+  /login, a POST /setup takeover -> 302 /login and its credentials -> 401;
+  the generated admin logs in (303 -> "Dashboard | Houndarr", 35.9 kB); a
+  widget API key generated through Settings (CSRF enforced, 403 without)
+  reads /api/v1/widget, and both admin and key survive a rebuild with the
+  seed reporting "admin present, nothing to seed".

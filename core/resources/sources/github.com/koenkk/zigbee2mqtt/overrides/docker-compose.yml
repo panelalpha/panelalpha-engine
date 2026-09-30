@@ -1,0 +1,38 @@
+# Compose-replace: upstream's release image with /app/data on a volume, and an
+# internal MQTT broker, which Zigbee2MQTT needs before it will run.
+services:
+  app:
+    image: koenkk/zigbee2mqtt:2.14.1
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+      ZIGBEE2MQTT_CONFIG_MQTT_SERVER: mqtt://mqtt:1883
+      ZIGBEE2MQTT_CONFIG_FRONTEND_ENABLED: "true"
+      ZIGBEE2MQTT_CONFIG_FRONTEND_PORT: "8080"
+      # After onboarding it would redirect to http://localhost:8080.
+      Z2M_ONBOARD_NO_REDIRECT: "1"
+    volumes:
+      - data:/app/data
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mqtt
+    mem_limit: 512m
+
+  # Internal broker, no published port, anonymous clients on 1883. The config
+  # sits in /etc/mosquitto: a host AppArmor profile for /usr/sbin/mosquitto
+  # denies reading /mosquitto/config (engine#366).
+  mqtt:
+    image: eclipse-mosquitto:2.1.2-alpine
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /etc/mosquitto
+        printf 'listener 1883\nallow_anonymous true\n' > /etc/mosquitto/mosquitto.conf
+        exec /usr/sbin/mosquitto -c /etc/mosquitto/mosquitto.conf
+    mem_limit: 64m
+
+volumes:
+  data: {}

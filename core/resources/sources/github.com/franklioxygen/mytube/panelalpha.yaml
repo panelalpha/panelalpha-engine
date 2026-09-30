@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MyTube downloads and plays videos from YouTube, Bilibili and other yt-dlp
+  sites, with channel subscriptions and a local library. The repository root
+  is an npm workspace wrapper (backend/ and frontend/ each have their own
+  package.json and Dockerfile), so the generic Node strategy runs the root
+  `npm run build` without the frontend's dependencies and fails with
+  "vite: not found". It ships no root compose file; its stacks/ files are
+  QNAP examples with absolute host paths.
+
+  This recipe runs upstream's single-container image (backend with the built
+  frontend) of the current release, v1.11.12, pinned by digest, on port 5551,
+  with /app/data (SQLite, settings) and /app/uploads (videos, thumbnails) on
+  named volumes so the library survives redeploys. /app/data is mounted
+  with nocopy: seeded from the image it is already uid 1000, so the
+  entrypoint skips its chown and exits with "Runtime home directory is not
+  writable for uid/gid 1000:1000: /app/data/.home". MYTUBE_ADMIN_TRUST_LEVEL is
+  upstream's own compose default. First run is left as upstream ships it.

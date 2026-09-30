@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Habitica, a habit tracker that plays like an RPG (Express API plus a Vue
+  client served by the same Node process on :3000, MongoDB replica set). The
+  repository publishes no image and its compose is a development environment;
+  the plain deploy runs it as a generic Express app, which crashes at boot on
+  the missing SESSION_SECRET_KEY ("The first argument must be of type string
+  ... Received undefined" in libs/encryption.js). This recipe builds the repo's
+  own Dockerfile-Dev (client build and `gulp build:prod`), starts the
+  transpiled server in production mode as the Procfile does. The Dockerfile's
+  client build reads config.json, which upstream ships only as
+  config.json.example ("Cannot read properties of undefined (reading
+  'indexOf')" in vite.config.mjs without it), so hooks/prepare.sh creates it
+  from the example as upstream's setup instructions do; the compose environment
+  overrides it at runtime. MongoDB is mongo:7.0 as a
+  single-member replica set on a named volume. BASE_URL follows the project's
+  address; SESSION_SECRET and SESSION_SECRET_KEY are generated once by
+  hooks/prepare.sh into ~/.panelalpha/habitica/.

@@ -1,0 +1,59 @@
+# Compose-replace: building the monorepo's Dockerfile.server runs out of memory.
+# Runs upstream's image of the current release with PostgreSQL, as
+# docker-compose.server.yml does (without the optional transcribe services).
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: joplin
+      POSTGRES_PASSWORD: ${JOPLIN_DB_PASSWORD:?JOPLIN_DB_PASSWORD is required}
+      POSTGRES_DB: joplin
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "joplin"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  app:
+    image: joplin/server:3.7.2
+    restart: unless-stopped
+    ports:
+      - "22300:22300"
+    environment:
+      APP_PORT: "22300"
+      APP_BASE_URL: ${PA_PUBLIC_URL}
+      PA_PUBLIC_HOST: ${PA_PUBLIC_HOST}
+      DB_CLIENT: pg
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DATABASE: joplin
+      POSTGRES_USER: joplin
+      POSTGRES_PASSWORD: ${JOPLIN_DB_PASSWORD:?JOPLIN_DB_PASSWORD is required}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Joplin answers 404 unless Host matches APP_BASE_URL's host.
+      test: ["CMD", "node", "-e", "require('http').get({host:'127.0.0.1',port:22300,path:'/api/ping',headers:{host:process.env.PA_PUBLIC_HOST}},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Joplin Server answers /api/ping.
+  ready:
+    image: postgres:16
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}

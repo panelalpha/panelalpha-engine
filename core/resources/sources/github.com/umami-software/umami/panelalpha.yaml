@@ -1,5 +1,7 @@
 # yaml-language-server: $schema=../../../_schema.json
 description: >-
   Umami on the compose stack its repository ships, with an override that
-  injects the generated secrets and mounts the app-management helper, so the
-  upstream file is never modified.
+  injects the secrets and mounts the app-management helper, so the upstream
+  file is never modified. The prepare hook generates the secrets once into
+  ~/.panelalpha/umami and copies them to .env on every deploy, because
+  ~/project is emptied while the Postgres volume keeps its password.

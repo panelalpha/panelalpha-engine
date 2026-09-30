@@ -1,0 +1,36 @@
+# Compose-replace: the repository holds only docs; this is upstream's
+# documented compose with the release image pinned and a generated DB password.
+services:
+  homechart:
+    image: ghcr.io/candiddev/homechart:v2026.09.24
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - ../.panelalpha/homechart/app.env
+    environment:
+      homechart_app_baseURL: ${PA_PUBLIC_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 512m
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/homechart/db.env
+    environment:
+      POSTGRES_USER: homechart
+      POSTGRES_DB: homechart
+    volumes:
+      - homechart-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homechart -d homechart"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 512m
+
+volumes:
+  homechart-db: {}

@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  TimeTracker is a Flask time-tracking app (timers, projects, clients,
+  invoicing, reports) served by gunicorn in upstream's
+  ghcr.io/drytrix/timetracker image, on PostgreSQL.
+
+  IMAGE OF THE CURRENT RELEASE. The repo's docker-compose.yml builds the app
+  from source behind a self-signed nginx with a cert generator, a Peppol
+  bridge and an opt-in Ollama profile, and refuses to start without
+  SECRET_KEY. overrides/docker-compose.yml runs the release image 5.17.2 (the
+  VERSION on HEAD) with the same Postgres 16, on named volumes that survive
+  redeploys; the engine terminates TLS, so cookies are Secure and the public
+  URL is the trusted CSRF origin.
+
+  CLOSED FIRST RUN. Upstream creates the admin ("admin", ADMIN_USERNAMES)
+  with no password and lets the first login set one, and its /setup wizard
+  (which can turn self-registration on) is unauthenticated until finished.
+  A one-shot `seed` service runs upstream's own start.py steps (migrations,
+  default rows) before the app is published, gives the admin the generated
+  password and completes the wizard with self-registration off.
+
+  SECRETS. hooks/prepare.sh writes SECRET_KEY, a Fernet
+  SETTINGS_ENCRYPTION_KEY, the Postgres password and the admin password once
+  to ~/.panelalpha/timetracker/ (0600 in 0700) with a credentials.txt note.

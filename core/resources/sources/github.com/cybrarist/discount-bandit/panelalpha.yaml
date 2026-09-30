@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Discount Bandit, a price tracker (Laravel + Filament on FrankenPHP/Octane,
+  port 80 in the container, SQLite, a queue worker and scheduler under
+  supervisord, headless Chromium for scraping). The repository's
+  docker-compose.yaml leaves APP_KEY empty ("required, check docs"), so the
+  plain deploy boots with no key and Octane exits with
+  MissingAppKeyException in a restart loop; nothing answers on :80.
+
+  overrides/docker-compose.yml runs the same published image at the current
+  release (cybrarist/discount-bandit:v4.0.4) with a Laravel APP_KEY generated
+  once into ~/.panelalpha/discount-bandit by hooks/prepare.sh, the SQLite
+  directory (/app/database/sqlite) and /logs on named volumes, and APP_URL /
+  ASSET_URL set to the site's address. A healthcheck and a no-op `ready`
+  service gate the deploy. First run is upstream's: register on the login
+  page.

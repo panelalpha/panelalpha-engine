@@ -1,0 +1,55 @@
+# Upstream's compose at the release image, with the public host allowed: the
+# repo hardcodes ALLOWED_HOSTS/CSRF_TRUSTED_ORIGINS, so every request 400s.
+# No docker.sock (in-app updater), no bypasser/telegram profiles.
+services:
+  vibravid:
+    image: ghcr.io/astraelabs/vibravid:v1.4.4
+    restart: unless-stopped
+    env_file:
+      # Project env vars, e.g. TMDB_API_KEY (optional).
+      - path: .env
+        required: false
+    environment:
+      DJANGO_DEBUG: "false"
+      DJANGO_DB_DIR: "/app/data"
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: "/app"
+      # DJANGO_SECRET_KEY unset: the app generates one into /app/data (volume).
+      ALLOWED_HOSTS: "${PA_PUBLIC_HOST},localhost,127.0.0.1"
+      CSRF_TRUSTED_ORIGINS: "${PA_PUBLIC_URL}"
+      USE_X_FORWARDED_HOST: "true"
+      SECURE_PROXY_SSL_HEADER_ENABLED: "true"
+      CSRF_COOKIE_SECURE: "true"
+      SESSION_COOKIE_SECURE: "true"
+    volumes:
+      - vibravid_db:/app/data
+      - vibravid_videos:/app/Video
+      - vibravid_logs:/app/.cache/logs
+      - vibravid_config:/app/Conf
+      - vibravid_binary:/home/appuser/.local/bin/binary
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1g
+
+  # No-op: `compose up -d` returns once the app answers.
+  ready:
+    image: ghcr.io/astraelabs/vibravid:v1.4.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      vibravid:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  vibravid_db: {}
+  vibravid_videos: {}
+  vibravid_logs: {}
+  vibravid_config: {}
+  vibravid_binary: {}

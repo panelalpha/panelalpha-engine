@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MediaMTX, a media server and proxy that publishes, reads, records and
+  re-streams video/audio over RTSP, RTMP, SRT, WebRTC and HLS. The repository
+  is the Go source, whose build embeds hls.js and a VERSION file produced by
+  upstream's release pipeline, so the generic go recipe fails with "embeds
+  files that have to be produced by an earlier build step". This recipe runs
+  the official bluenviron/mediamtx image of the current release, 1.21.1, with
+  its built-in configuration and publishes the HLS server (:8888): every path
+  is watchable in a browser at https://<domain>/<path>/.
+
+  Only HTTP reaches an account, so RTSP/RTMP/SRT/WebRTC ingest from outside is
+  not available; streams come from pull sources (a camera or remote stream
+  pulled by MediaMTX) or from publishers inside the account. Configuration is
+  MediaMTX's own MTX_* environment overrides set as project env vars, e.g.
+  MTX_PATHS_CAM_SOURCE=rtsp://user:pass@camera/stream. Recordings (off by
+  default) land on a named volume.

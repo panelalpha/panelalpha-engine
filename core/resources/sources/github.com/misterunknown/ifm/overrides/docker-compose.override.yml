@@ -1,0 +1,8 @@
+# Layers over the compose file the php strategy generates.
+# IFM_ROOT_DIR is IFM's own setting: the directory it manages, kept outside the checkout.
+services:
+  app:
+    environment:
+      IFM_ROOT_DIR: /data
+    volumes:
+      - ../.panelalpha/ifm:/data

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Your Spotify records what you listen to on Spotify and serves statistics
+  about it through a web app (Node API + static client, MongoDB).
+
+  The repository's compose files are a dev stack and an example with two
+  separate public endpoints (client :3000, API :8080); a plain deploy built
+  the server Dockerfile alone and it exited on `API_ENDPOINT env variable is
+  missing`. This recipe runs the all-in-one image of the current release,
+  lscr.io/linuxserver/your_spotify:1.20.0-ls167 (upstream's README points to
+  it), which serves the client on / and the API on /api from one port, with
+  APP_URL and CORS set to the site's address and MongoDB 7.0 on a named
+  volume, so accounts and listening history survive a redeploy. A `ready`
+  gate makes the deploy finish once both the web app and the API answer.
+  MongoDB is 7.0 because 8.0 and newer refuse to start on Linux 6.19+
+  (SERVER-121912); Your Spotify supports MongoDB 5+.
+
+  The customer must supply a Spotify application: set SPOTIFY_PUBLIC and
+  SPOTIFY_SECRET in the project's environment variables and register
+  `<site URL>/api/oauth/spotify/callback` as its redirect URI. Without them a
+  one-shot `check` service fails the deploy naming each missing variable.

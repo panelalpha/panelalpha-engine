@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Invidious, an alternative YouTube front end (Crystal server on :3000,
+  PostgreSQL, and Invidious companion, which fetches the video streams). The
+  repository's docker-compose.yml is a development build from source; on the
+  engine its `shards install` fails cloning will/crystal-pg (HTTP 401) and its
+  placeholder hmac_key "CHANGE_ME!!" would stop the server anyway. This recipe
+  runs the published images as the installation docs' compose does:
+  quay.io/invidious/invidious of the current release, 2.20260804.1, the
+  companion (rolling images only; the current dated build) behind Invidious'
+  built-in /companion proxy, and PostgreSQL 14. The domain is the site's
+  address over https. The prepare hook generates the HMAC key, the 16-character
+  companion key and the database password once into
+  ~/.panelalpha/invidious/secrets.env; the database is on a named volume and
+  Invidious creates its tables on start (check_tables).

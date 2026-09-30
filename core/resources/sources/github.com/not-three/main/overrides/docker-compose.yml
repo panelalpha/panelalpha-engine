@@ -1,0 +1,77 @@
+# The repository's compose.yml runs Traefik on the Docker socket with scaled
+# replicas. This runs the same three published images of the current releases
+# behind Caddy doing upstream's path routing on one public port:
+#   /api/draw/ -> draw, /api -> api, everything else -> ui.
+# (Caddy, not Traefik: the engine drops any traefik service, engine#334.)
+services:
+  proxy:
+    image: docker.io/library/caddy:2.11.4-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      ui:
+        condition: service_healthy
+      draw:
+        condition: service_started
+    volumes:
+      - ./panelalpha/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/api/info"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 128m
+
+  api:
+    image: ghcr.io/not-three/api:2.1.0
+    restart: unless-stopped
+    environment:
+      # SQLite (the default) at /app/db/database.sqlite, on a named volume.
+      DATABASE_MODE: sqlite3
+      # Rate limits and bans key on the visitor, not the shared proxy address.
+      # X-Real-Ip is set by the engine proxy; X-Forwarded-For's first entry is
+      # client-supplied (engine#319).
+      BEHIND_PROXY: "true"
+      IP_HEADER: X-Real-Ip
+    volumes:
+      - db:/app/db
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:4000/info"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  ui:
+    image: ghcr.io/not-three/ui:2.2.0
+    restart: unless-stopped
+    # API_URL / DRAW_URL default to /api/ and /api/draw/ on the same origin.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  draw:
+    image: ghcr.io/not-three/draw:2.0.1
+    restart: unless-stopped
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once the proxy answers.
+  ready:
+    image: docker.io/library/caddy:2.11.4-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      proxy:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db: {}

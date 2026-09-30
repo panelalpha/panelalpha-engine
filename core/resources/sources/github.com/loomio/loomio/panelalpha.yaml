@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Loomio, collaborative decision-making (Rails, Postgres, Redis). The plain
+  deploy builds the repo's Dockerfile, which needs NODE_VERSION/NPM_VERSION
+  build args that only upstream's Kamal/CI supplies, and fails with
+  `failed to parse stage name "node:-slim"`.
+
+  Compose-REPLACE following upstream's deploy/docker-compose.yml on the
+  loomio/loomio:3.9.0 release image: app (thruster + puma, :80), worker
+  (solid queue jobs), postgres:17 and redis:8.4. Left out: nginx-proxy/acme
+  (the engine terminates TLS), haraka (reply-by-email needs inbound :25) and
+  hocuspocus (needs its own hocuspocus.<host> subdomain; the editor falls
+  back to plain editing after 2s). DATABASE_URL, the Postgres password,
+  SECRET_COOKIE_TOKEN and RAILS_INBOUND_EMAIL_PASSWORD are generated once by
+  hooks/prepare.sh into ~/.panelalpha/loomio. Uploads, storage and the
+  database live on named volumes. Sign-in e-mails need SMTP_SERVER, SMTP_PORT,
+  SMTP_USERNAME, SMTP_PASSWORD (and SMTP_USE_SSL/SMTP_AUTH) set as project
+  env vars; without them mail is not sent.

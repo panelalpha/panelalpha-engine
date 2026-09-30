@@ -1,0 +1,27 @@
+# Layered over the compose the php strategy generates (service `app`).
+services:
+  # One-shot: the new volume is root-owned and the app runs as the account's
+  # uid; create the feed/log dirs owned by whoever owns the checkout.
+  data-init:
+    image: alpine:3.22
+    restart: "no"
+    volumes:
+      - ./index.php:/owner-ref:ro
+      - emoncms-data:/data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /data/phpfina /data/phptimeseries /data/log
+        chown -R "$$(stat -c %u:%g /owner-ref)" /data
+    mem_limit: 32m
+
+  app:
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+    volumes:
+      # Feed data (PHPFina/PHPTimeSeries files) and the log survive a redeploy.
+      - emoncms-data:/var/opt/emoncms
+
+volumes:
+  emoncms-data: {}

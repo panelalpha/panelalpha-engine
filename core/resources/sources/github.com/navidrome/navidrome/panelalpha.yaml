@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Navidrome is a self-hosted music server and streamer (GPL-3.0): one Go binary
+  serving a React web UI and the Subsonic/OpenSubsonic API on :4533, with SQLite
+  under /data and the library under /music.
+
+  Compose-REPLACE from the official release image deluan/navidrome:0.64.2. The
+  repo ships only a source-build Dockerfile (npm ci + Go build, ~5 min per
+  deploy); the image is the same binary. /data (navidrome.db, cache, plugins)
+  and /music are the named volumes navidrome-data and navidrome-music.
+
+  CLOSING FIRST RUN. On an empty database the web UI offers "Create Admin User"
+  to whoever arrives first. The `navidrome user create` CLI only reads the
+  password from a terminal, so the one-shot `init` service starts a private
+  Navidrome on 127.0.0.1 inside its own container and creates the admin through
+  the app's own /auth/createAdmin endpoint; `app` (the only service with a
+  published port) starts only after init exits 0. The generated login is in
+  ~/.panelalpha/navidrome/credentials.txt, together with a per-account
+  ND_PASSWORDENCRYPTIONKEY (replaces the key compiled into every binary). Both
+  are written once and reused; a redeploy never resets them. The insights
+  collector (anonymous usage reports to navidrome.org) is off.
+
+  Behind the engine every visitor reaches Navidrome from the same proxy
+  address, so the web login rate limit (5 attempts per 20s, per IP) is shared by
+  all visitors. ExtAuth.TrustedSources is deliberately left unset: setting it
+  would also enable reverse-proxy header login (Remote-User) and trust a
+  client-supplied X-Forwarded-For (engine#319).
+
+  Adding music: copy files into the navidrome-music volume, e.g.
+  `docker compose -p project cp <dir> app:/music/`, then scan from the web UI
+  or wait for the file watcher.

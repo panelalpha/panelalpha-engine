@@ -1,0 +1,46 @@
+# Compose-replace: the repository's Dockerfile builds FROM ${GPAC_IMAGE} and
+# prebuilt base images named by build args only upstream's CI passes. This runs
+# upstream's published image of the current release instead.
+services:
+  app:
+    image: roflcoopter/viseron:3.7.0
+    restart: unless-stopped
+    # Upstream's documented size; ffmpeg frame buffers live in /dev/shm.
+    shm_size: "1024mb"
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      # config.yaml, the bundled PostgreSQL (/config/postgresql) and state.
+      - config:/config
+      - segments:/segments
+      - snapshots:/snapshots
+      - thumbnails:/thumbnails
+      - event_clips:/event_clips
+      - timelapse:/timelapse
+    ports:
+      - "8888:8888"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8888/"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 2g
+
+  # No-op gate: `compose up -d` returns only once the web UI answers.
+  ready:
+    image: roflcoopter/viseron:3.7.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  segments: {}
+  snapshots: {}
+  thumbnails: {}
+  event_clips: {}
+  timelapse: {}

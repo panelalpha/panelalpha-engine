@@ -1,0 +1,56 @@
+# The repo's docker/Dockerfile is the tools base image (needs a VERSION build-arg,
+# serves nothing). This runs upstream's kiwix-serve image of the current release.
+services:
+  app:
+    image: ghcr.io/kiwix/kiwix-serve:3.8.2
+    restart: unless-stopped
+    environment:
+      # A ZIM file URL; upstream's start.sh downloads it into /data on start.
+      DOWNLOAD: ${DOWNLOAD:-}
+    # Serve every ZIM in /data (start.sh expands the glob in /data).
+    command: ["*.zim"]
+    volumes:
+      - data:/data
+    ports:
+      - "8080:8080"
+    depends_on:
+      download-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      # Allows ~10 minutes for the ZIM download on first start.
+      retries: 120
+      start_period: 10s
+    mem_limit: 512m
+
+  # Fails the deploy with a clear message while DOWNLOAD is unset:
+  # kiwix-serve refuses to start without a ZIM file.
+  download-check:
+    image: ghcr.io/kiwix/kiwix-serve:3.8.2
+    restart: "no"
+    environment:
+      DOWNLOAD: ${DOWNLOAD:-}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ -z "$$DOWNLOAD" ]; then
+          echo "Missing environment variable DOWNLOAD: set it to the URL of a ZIM file to serve, e.g. one from https://download.kiwix.org/zim/ (see https://library.kiwix.org)." >&2
+          exit 1
+        fi
+    mem_limit: 32m
+
+  # No-op gate: `compose up -d` returns only once kiwix-serve answers.
+  ready:
+    image: ghcr.io/kiwix/kiwix-serve:3.8.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

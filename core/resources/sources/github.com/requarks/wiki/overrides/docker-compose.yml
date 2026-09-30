@@ -28,7 +28,10 @@ services:
     environment:
       POSTGRES_DB: wiki
       POSTGRES_USER: wikijs
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # POSTGRES_PASSWORD, written once by hooks/prepare.sh outside ~/project so
+    # a redeploy does not regenerate it.
+    env_file:
+      - ../.panelalpha/wiki/db.env
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -51,6 +54,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # DB_PASS (the same value as the database's POSTGRES_PASSWORD) and the
+    # WIKI_ADMIN_* pair, written once by hooks/prepare.sh.
+    env_file:
+      - ../.panelalpha/wiki/wiki.env
     environment:
       # The image's config.yml is a template of $(VAR) placeholders
       # (dev/build/config.yml); these are the names it substitutes. Wiki.js
@@ -61,15 +68,12 @@ services:
       DB_HOST: db
       DB_PORT: "5432"
       DB_USER: wikijs
-      DB_PASS: ${POSTGRES_PASSWORD}
       DB_NAME: wiki
       # Not a real address, and not meant to survive: ComposePlaceholders
       # rewrites a bare http://localhost under a *_URL-shaped key to the
       # account's public https URL before the stack starts. Read only by
       # panelalpha-setup.sh, which posts it to the wizard as `siteUrl`.
       WIKI_SITE_URL: http://localhost
-      WIKI_ADMIN_EMAIL: ${WIKI_ADMIN_EMAIL}
-      WIKI_ADMIN_PASSWORD: ${WIKI_ADMIN_PASSWORD}
       NODE_OPTIONS: --max-old-space-size=768
     volumes:
       # The one path the image declares as a VOLUME.

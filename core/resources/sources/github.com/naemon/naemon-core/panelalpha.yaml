@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Naemon is a Nagios-compatible host/service/network monitoring core written
+  in C. The repository is that core's autotools source with no deployable
+  manifest and no web UI of its own (Naemon's web interface is Thruk, which it
+  talks to over Livestatus), so the plain deploy fell back to the engine
+  placeholder. This recipe runs the current release of the OMD Labs
+  monitoring distribution (consol/omd-labs-debian:v5.70), whose default site runs the Naemon core with Livestatus and Thruk as the GUI. The
+  site's etc, var and local are on named volumes, so monitoring config, state
+  and the login survive redeploys.
+
+  TLS ends at the engine's proxy, so the image's Ansible drop-in
+  (files/panelalpha-omd.yml, run by the image before the site starts) switches
+  the site apache from "ssl" to "own" mode (ssl mode redirects every plain
+  http request to https, a loop behind the proxy) and turns on the / -> /demo/
+  redirect. Thruk is at /demo/thruk/ with the image's default login
+  (omdadmin / omd); the login page answers 401 until a user logs in, which the
+  health check expects.

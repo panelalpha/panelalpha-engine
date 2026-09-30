@@ -1,0 +1,57 @@
+# Compose-replace: the repository compose publishes RTSP, WebRTC and the
+# unauthenticated go2rtc API, and LightNVR creates admin/admin on first start.
+#   - official image of the current release, config + data on named volumes
+#   - `seed` writes the generated admin password into lightnvr.ini BEFORE the
+#     app first starts, so the default account never exists
+services:
+  # One-shot: seeds lightnvr.ini while no database exists yet. No port.
+  seed:
+    image: ghcr.io/opensensor/lightnvr:0.42.8
+    restart: "no"
+    entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/lightnvr/admin.env
+    volumes:
+      - config:/etc/lightnvr
+      - data:/var/lib/lightnvr/data
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    mem_limit: 64m
+
+  app:
+    image: ghcr.io/opensensor/lightnvr:0.42.8
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      GO2RTC_CONFIG_PERSIST: "true"
+      LIGHTNVR_AUTO_INIT: "true"
+    volumes:
+      - config:/etc/lightnvr
+      - data:/var/lib/lightnvr/data
+    # Only the web UI is published; RTSP (8554), WebRTC (8555) and the
+    # go2rtc API (1984, no auth) stay inside the account.
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/api/auth/login/config"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once the web UI answers.
+  ready:
+    image: ghcr.io/opensensor/lightnvr:0.42.8
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  data: {}

@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Ollama, a local LLM server (Go) exposing its REST API on :11434 (`/` answers
+  "Ollama is running", models are managed through /api/pull, /api/tags,
+  /api/generate). The repository's Dockerfile compiles llama.cpp for every GPU
+  backend (CUDA 12 and 13, ROCm, Vulkan) on a 7.65 GB ROCm base image and does
+  not finish within a deploy. This recipe runs the published image of the
+  current release (ollama/ollama:0.35.0) on CPU, with /root/.ollama (pulled
+  models and the server key) on a named volume that survives redeploys.
+  OLLAMA_ORIGINS and OLLAMA_KEEP_ALIVE are optional project environment
+  variables. Models are not bundled; pull one after the deploy.

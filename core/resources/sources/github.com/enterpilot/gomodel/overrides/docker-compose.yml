@@ -1,0 +1,23 @@
+# Compose-replace: upstream's compose runs the gateway only under the `app`
+# profile (default `up` starts just its dev datastores and Adminer). This runs
+# the published release image alone, with its default SQLite storage.
+services:
+  app:
+    image: enterpilot/gomodel:0.1.98
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Provider keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...) and
+      # GOMODEL_MASTER_KEY come from the project's env vars.
+      GOMAXPROCS: "2"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # SQLite database, media files, pid file and install identity
+      - gomodel-data:/app/data
+    mem_limit: 512m
+
+volumes:
+  gomodel-data: {}

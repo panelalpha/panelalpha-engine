@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  myCart, a single-binary Go shop (Fiber, embedded Svelte admin and
+  storefront, SQLite by default). The plain deploy builds the repo's
+  Dockerfile.build and fails at `npm ci` in web/admin: the committed
+  package-lock.json no longer matches package.json (ERESOLVE, svelte 5 vs
+  svelte-french-toast's svelte 3/4 peer). Upstream builds with bun and
+  publishes release images, so this replaces the compose file with the image
+  of the current release (ghcr.io/shurco/mycart:v0.2.10).
+
+  The binary resolves its data relative to /app: lc_base (config.json and the
+  SQLite database), lc_uploads, lc_digitals and lc_certs, each on a named
+  volume. The image is FROM scratch and runs as 65532, so a one-shot init
+  creates the volumes owned by that uid. The shop's own first-run installer
+  (/_/install) is left as upstream ships it.

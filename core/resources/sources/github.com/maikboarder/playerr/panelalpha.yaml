@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Playerr is a Radarr/Sonarr-style library manager and PVR for video games:
+  IGDB/Steam metadata, Prowlarr/Jackett/Torznab indexers, qBittorrent,
+  Transmission, SABnzbd, NZBGet and other download clients. .NET 8 server
+  with a React UI, SQLite.
+
+  The repository's docker-compose.yml is a build-from-source dev stack with
+  ./config and ./games bind mounts, and docker-compose.casaos.yml names an
+  image (playerr:latest) that was never published, which is what the stock
+  deploy failed on. overrides/docker-compose.yml runs the published
+  maikboarder/playerr image of the current release (v0.4.8) with /app/config
+  (playerr.db, the settings JSON files, the log) and /media on named volumes.
+
+  Security: Playerr has no authentication whatsoever - no login, no API key,
+  every /api/v3 route is anonymous, and GET /api/v3/settings/prowlarr (and
+  jackett, igdb, steam, downloadclient) returns the stored credentials for
+  the user's other services; /api/v3/filesystem lists the container's
+  filesystem. So the app publishes no port: `proxy` (nginx) is the only
+  thing on the account's port and requires HTTP Basic auth on every path.
+  hooks/prepare.sh generates the password once into
+  ~/.panelalpha/playerr/admin.txt (user `admin`) and rewrites the htpasswd
+  hash from it on every deploy; to change the password edit admin.txt and
+  redeploy. The proxy waits for the app's healthcheck, so the deploy is not
+  called finished before Playerr answers.
+
+  Measured on mariusz.panelalpha.tools (2026-09-28, engine 705f250a): deploy
+  43s, rebuild 23s; app 63 MiB, proxy 9 MiB. Anonymous /, /index.html,
+  /api/v3/settings/prowlarr, /api/v3/filesystem, /API/V3/game and
+  //api/v3/settings/igdb -> 401; a wrong password -> 401. With the generated
+  credentials the UI (<title>Playerr</title>, 4.4 MB bundle) loads, a game
+  created through POST /api/v3/game and Prowlarr settings saved through the
+  API both read back, and survive a rebuild with the password unchanged.
+  The stock deploy's docker-compose.casaos.yml sidecar is engine#314.

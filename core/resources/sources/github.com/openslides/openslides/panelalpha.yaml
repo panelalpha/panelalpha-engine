@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OpenSlides 4, a presentation and assembly system (motions, agenda,
+  elections): a Traefik proxy in front of the Angular client, the Python
+  backend (action, presenter, manage) and the Go autoupdate, search, projector,
+  auth, vote, media and ICC services on PostgreSQL 17 and Redis. The
+  repository is only the meta-repo of submodules and ships no compose file, so
+  a plain deploy lands on the fallback placeholder. This recipe renders
+  upstream's osmanage compose template (openslides-cli contrib) for the 4.3.4
+  release images with local HTTPS off, since the engine terminates TLS.
+  hooks/prepare.sh generates the five secrets osmanage would (auth token and
+  cookie keys, internal auth password, database and superadmin passwords)
+  once into ~/.panelalpha/openslides/secrets.env; a one-shot `secrets` service
+  writes them into the files the services read. backendManage creates the
+  initial data and the `superadmin` account on an empty database, as
+  upstream's example config does; the password is OS_SUPERADMIN_PASSWORD in
+  that file. The database is on a named volume.

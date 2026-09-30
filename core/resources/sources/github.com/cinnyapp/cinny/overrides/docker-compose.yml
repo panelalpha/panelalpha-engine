@@ -1,0 +1,14 @@
+# Compose-replace: the repo's Dockerfile needs a 4 GB V8 heap to build, so run
+# the published release image (the same Dockerfile's nginx stage).
+services:
+  app:
+    image: ghcr.io/cinnyapp/cinny:v4.12.7
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 64m

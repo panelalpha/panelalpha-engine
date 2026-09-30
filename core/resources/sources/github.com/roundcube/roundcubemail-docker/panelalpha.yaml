@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Roundcube is a browser-based IMAP webmail client (PHP, Apache, SQLite by
+  default). It is a mail client only: it logs in to an existing IMAP server
+  and sends through an existing SMTP server.
+
+  roundcube/roundcubemail-docker is the tooling that builds the official
+  image, not an application checkout: the root holds only per-variant
+  Dockerfiles (apache/, fpm/, fpm-alpine/) and example compose files, so a
+  plain deploy detects nothing and serves the placeholder.
+  overrides/docker-compose.yml runs the image upstream publishes for the
+  current release, roundcube/roundcubemail:1.7.4-apache, with the web root
+  (including config.inc.php and its generated des_key) on the named volume
+  `html` and the SQLite database on `db`.
+
+  The mail servers are the image's own environment variables, set in the
+  project's env vars: ROUNDCUBEMAIL_DEFAULT_HOST (IMAP, e.g.
+  ssl://mail.example.com, default localhost), ROUNDCUBEMAIL_DEFAULT_PORT
+  (default 143), ROUNDCUBEMAIL_SMTP_SERVER and ROUNDCUBEMAIL_SMTP_PORT.
+  Without them the login page is served but no login succeeds.

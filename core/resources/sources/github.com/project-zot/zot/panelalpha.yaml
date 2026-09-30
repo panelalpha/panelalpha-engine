@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  zot, an OCI-native container image registry (Go) with a web UI. The
+  repository ships no compose file, and the plain deploy builds zot from
+  source, which runs out of memory at a 2000 MB plan ("The build ran out of
+  memory"). This recipe runs the official ghcr.io/project-zot/zot image of the
+  current release (v2.1.21) with the config it ships (/etc/zot/config.json:
+  registry on :5000, search, CVE scanning and the UI extensions enabled) and
+  /var/lib/registry on a named volume, so pushed images survive redeploys.
+  Upstream's default is an open registry without authentication; that is left
+  as shipped.

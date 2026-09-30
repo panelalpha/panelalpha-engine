@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LMS (Lightweight Music Server) streams a music library through a Wt (C++)
+  web player and the Subsonic/OpenSubsonic API on :5082, with its SQLite
+  database and caches in /var/lms and the library in /music. The repository
+  ships no compose file, only source-build Dockerfiles (FFmpeg, Wt, TagLib and
+  LMS compiled from source); a plain deploy detects Railpack, cmake stops on
+  "Could NOT find GTest", and the engine serves its placeholder. Upstream's
+  INSTALL.md sends Docker users to the published image, so this recipe runs
+  epoupon/lms of the current release 3.81.0 with /var/lms and /music on named
+  volumes and the stock /etc/lms.conf.
+
+  First run is left as upstream ships it: the web UI asks the first visitor
+  to create the admin account. Adding music: copy files into the music
+  volume, e.g. `docker compose -p project cp <dir> app:/music/`, then add
+  /music as a library in the admin settings and scan.

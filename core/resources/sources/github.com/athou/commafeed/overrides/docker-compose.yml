@@ -1,0 +1,33 @@
+# Compose-replace: the repository is a Maven + React monorepo whose images are
+# built by CI (the Dockerfiles copy prebuilt artifacts). Runs the official
+# image of the current release with the embedded H2 database.
+services:
+  app:
+    image: athou/commafeed:7.3.2-h2
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    volumes:
+      # H2 database files, kept across redeploys.
+      - commafeed-data:/commafeed/data
+    healthcheck:
+      # No curl/wget in the image; bash's /dev/tcp answers "is HTTP up".
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8082 && printf 'GET / HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '^HTTP/1.[01] 200' <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op: `compose up -d` returns once CommaFeed answers.
+  ready:
+    image: athou/commafeed:7.3.2-h2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  commafeed-data: {}

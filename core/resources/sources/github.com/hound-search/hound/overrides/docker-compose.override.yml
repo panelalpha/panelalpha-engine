@@ -1,0 +1,9 @@
+# Layered over the compose the dockerfile strategy generates for service `app`.
+# houndd reads /data/config.json and keeps clones/indexes in /data/db.
+services:
+  app:
+    volumes:
+      - hound-data:/data
+      - ../.panelalpha/hound/config.json:/data/config.json:ro
+volumes:
+  hound-data:

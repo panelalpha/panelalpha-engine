@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Misskey, a federated (ActivityPub) microblogging server (Node.js,
+  PostgreSQL, Redis). The develop branch has no deployment compose (only
+  compose_example.yml and compose.local-db.yml), so the plain deploy takes
+  the generic Node path: `pnpm install --frozen-lockfile` on node 26 fails
+  compiling the re2 native module ("gyp ERR! not ok").
+
+  This recipe follows upstream's compose_example.yml on the published image
+  of the current release, misskey/misskey:2026.9.1, with postgres:18-alpine
+  and redis:7-alpine. Misskey reads its config from a YAML file compiled at
+  start, so the web service writes it (url from the account's address, the
+  database and Redis) to /tmp and points MISSKEY_CONFIG_YML at it; the
+  image's healthcheck reads .config/default.yml, so the compose checks
+  /healthz directly, and a one-shot service hands the fresh files volume to
+  Misskey's uid 991. The Postgres password is generated once into
+  ~/.panelalpha/misskey/; the database, Redis and uploaded files are on
+  named volumes. The first visitor creates the admin in Misskey's own
+  initial setup page.

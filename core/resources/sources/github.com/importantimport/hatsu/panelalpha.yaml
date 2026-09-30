@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hatsu, a Rust ActivityPub bridge that gives a static site a Fediverse
+  account: it reads the site's feed and publishes its posts, serving
+  ActivityPub, WebFinger, NodeInfo and a Mastodon-compatible API on :3939,
+  with SQLite. The repository's docker-compose.yaml builds its Dockerfile,
+  which copies a binary that CI produces beforehand (target_<arch>/hatsu), so
+  the plain deploy fails with `"/target_amd64/hatsu": not found`.
+
+  Compose-REPLACE from the published image of the current release
+  (ghcr.io/importantimport/hatsu:0.3.4). HATSU_DOMAIN is the project's domain;
+  the SQLite database is on a named volume. Both are set in `environment:` so
+  the engine's copy of .env.example (hatsu.local, a relative database) does
+  not apply; its HATSU_LOG arrives quoted (engine#348) and only warns. The customer sets
+  HATSU_PRIMARY_ACCOUNT (the static site's domain, which must serve a feed
+  over HTTPS) in the project's environment variables; a one-shot check
+  service fails the deploy naming it when it is missing. HATSU_ACCESS_TOKEN
+  (Admin API) and HATSU_NODE_NAME/DESCRIPTION are optional and passed through
+  the same way.

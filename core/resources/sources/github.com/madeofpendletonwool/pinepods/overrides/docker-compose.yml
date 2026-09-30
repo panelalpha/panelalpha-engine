@@ -1,0 +1,81 @@
+# Upstream's PostgreSQL compose (deployment/docker/compose-files) with named
+# volumes instead of /home/user/pinepods bind mounts.
+services:
+  db:
+    image: postgres:18.1
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pinepods_database
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PINEPODS_DB_PASSWORD:?PINEPODS_DB_PASSWORD is required}
+      PGDATA: /var/lib/pgdata/pgdata
+    volumes:
+      - pgdata:/var/lib/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pinepods_database"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  app:
+    image: madeofpendletonwool/pinepods:0.9.0
+    restart: unless-stopped
+    ports:
+      - "8040:8040"
+    # Any other PinePods setting from the project's env vars (OIDC_*, TZ, ...).
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SEARCH_API_URL: "https://search.pinepods.online/api/search"
+      PEOPLE_API_URL: "https://people.pinepods.online"
+      # Public address for RSS feed links; SERVER_URL wins over HOSTNAME.
+      SERVER_URL: ${PA_PUBLIC_URL}
+      HOSTNAME: ${PA_PUBLIC_URL}
+      DB_TYPE: postgresql
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${PINEPODS_DB_PASSWORD:?PINEPODS_DB_PASSWORD is required}
+      DB_NAME: pinepods_database
+      VALKEY_HOST: valkey
+      VALKEY_PORT: 6379
+      DEBUG_MODE: "false"
+      PUID: "911"
+      PGID: "911"
+      DEFAULT_LANGUAGE: en
+    volumes:
+      - downloads:/opt/pinepods/downloads
+      - backups:/opt/pinepods/backups
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once the app answers its health check.
+  ready:
+    image: valkey/valkey:8-alpine
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  downloads: {}
+  backups: {}

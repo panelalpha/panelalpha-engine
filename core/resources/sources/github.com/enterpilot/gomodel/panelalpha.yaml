@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  GoModel, an OpenAI/Anthropic-compatible AI gateway in Go with an admin
+  dashboard at /admin/dashboard. The repository's docker-compose.yaml starts
+  the gateway only under the `app` profile (it builds it from source), so the
+  plain compose deploy ran only its development Redis, PostgreSQL, MongoDB and
+  Adminer, and the site never answered. This recipe runs upstream's published
+  image of the current release (enterpilot/gomodel:0.1.98) alone, with its
+  default SQLite storage on a named volume at /app/data. Provider API keys
+  and GOMODEL_MASTER_KEY are optional project env vars, as upstream ships
+  them; without a master key the gateway starts in its own unauthenticated
+  mode.

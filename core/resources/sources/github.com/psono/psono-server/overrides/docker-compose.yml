@@ -1,0 +1,70 @@
+# psono-server is the API only; upstream's single-image deployment is
+# psono-combo (server + web client + admin portal behind nginx) on Postgres.
+services:
+  app:
+    # Server 7.4.4 (the checkout's release), web client 4.8.2, portal 1.10.0.
+    image: psono/psono-combo:7.4.4-4.8.2-1.10.0
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/psono/psono.env
+    environment:
+      PSONO_ALLOWED_HOSTS: '["*"]'
+      # Usernames are <name>@<allowed domain>.
+      PSONO_ALLOWED_DOMAINS: '["${PA_PUBLIC_HOST}"]'
+      PSONO_HOST_URL: ${PA_PUBLIC_URL}/server
+      PSONO_WEB_CLIENT_URL: ${PA_PUBLIC_URL}
+      # Client IP for the per-IP throttles (login 48/day): the engine vhost
+      # appends the visitor, the image's nginx appends the vhost, so the
+      # visitor is 2nd from the right. Unset, everyone is 127.0.0.1.
+      PSONO_NUM_PROXIES: "2"
+      PSONO_WEBCLIENT_CONFIG_JSON: '{"backend_servers":[{"title":"Psono","url":"${PA_PUBLIC_URL}/server"}],"base_url":"${PA_PUBLIC_URL}/","allow_custom_server":true,"allow_registration":true,"allow_lost_password":true,"authentication_methods":["AUTHKEY"]}'
+      PSONO_PORTAL_CONFIG_JSON: '{"backend_servers":[{"title":"Psono","url":"${PA_PUBLIC_URL}/server"}],"base_url":"${PA_PUBLIC_URL}/portal/","allow_custom_server":true,"authentication_methods":["AUTHKEY"]}'
+    volumes:
+      - ./panelalpha/psono-settings.yaml:/root/.psono_server/settings.yaml:ro
+    ports:
+      - "80:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    # The image's own check calls /server/healthcheck/, throttled to 61/hour
+    # per IP. nginx starts only after migrations and daphne are up, so the
+    # static client page is the readiness signal.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+    mem_limit: 768m
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/psono/psono.env
+    environment:
+      POSTGRES_USER: psono
+      POSTGRES_DB: psono
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U psono -d psono"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 256m
+
+  # No-op: makes `compose up -d` return only once the app answers.
+  ready:
+    image: postgres:17-alpine
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db: {}

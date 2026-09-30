@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Fava, the web UI for Beancount ledgers (Python, :5000). The plain deploy
+  detects the python platform, installs the dev tree with uv and serves the
+  engine placeholder: fava is a CLI that needs a ledger file to open and
+  exits with NoFileSpecifiedError without one, so nothing starts.
+
+  Compose-REPLACE that builds upstream's own contrib/docker/Dockerfile
+  unchanged (pip install of the current fava release from PyPI) with
+  BEANCOUNT_FILE=/data/main.beancount on a named volume. A one-shot `ledger`
+  service creates an empty main.beancount there on first start and never
+  touches an existing one; edit it (or replace it) to load your books. Fava
+  has no login of its own, as upstream ships it.

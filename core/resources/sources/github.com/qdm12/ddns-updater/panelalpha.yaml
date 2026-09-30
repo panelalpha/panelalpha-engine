@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DDNS Updater keeps DNS A/AAAA records at 50+ providers pointed at the host's
+  public IP, with a small web UI on :8000 listing each record's status and
+  history. One static Go binary in a scratch image, running as 1000:1000.
+
+  The repository's own docker-compose.yml is the deployment (image
+  ghcr.io/qdm12/ddns-updater), but it bind-mounts ./data for config.json and
+  the update history. Docker creates that directory root-owned, the process
+  cannot write config.json ("cannot write configuration to file: permission
+  denied") and restart-loops. This recipe layers an override that moves
+  /updater/data onto a named volume, which takes the image's 1000-owned
+  directory and survives redeploys, and pins the current release v2.10.0.
+
+  The records to update are the customer's: set them with the CONFIG env var
+  (the JSON settings document from the upstream docs) or edit config.json in
+  the data volume. Without any, the UI answers with an empty table.

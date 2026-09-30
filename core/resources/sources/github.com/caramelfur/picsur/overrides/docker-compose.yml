@@ -1,0 +1,52 @@
+# Upstream's README compose with the published image of the current release.
+# The DB password is a required variable; the engine generates it per account.
+services:
+  app:
+    image: ghcr.io/caramelfur/picsur:0.5.6
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      PICSUR_DB_HOST: db
+      PICSUR_DB_USERNAME: picsur
+      PICSUR_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      PICSUR_DB_DATABASE: picsur
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/info >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: picsur
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: picsur
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "picsur", "-d", "picsur"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once Picsur answers its API.
+  ready:
+    image: postgres:17-alpine
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db_data: {}

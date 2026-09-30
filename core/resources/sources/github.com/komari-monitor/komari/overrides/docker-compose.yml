@@ -1,0 +1,33 @@
+# Compose-replace: the checkout cannot be built (the embedded frontend bundle
+# is not committed). Runs the published image of the current release with
+# its database on the `data` volume.
+services:
+  app:
+    image: ghcr.io/komari-monitor/komari:1.5.1
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - data:/app/data
+    ports:
+      - "25774:25774"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:25774/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 512m
+
+  # `compose up -d` returns only once Komari answers.
+  ready:
+    image: ghcr.io/komari-monitor/komari:1.5.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

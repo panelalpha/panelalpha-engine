@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  yarr (yet another rss reader) is a web feed aggregator: one Go binary serving
+  the reader UI and the Fever API, state in a single SQLite file. The Go build
+  compiles with CGO_ENABLED=0, so mattn/go-sqlite3 is a stub and the binary
+  exits at boot ("go-sqlite3 requires cgo to work", engine#118); the binary
+  also listens on 127.0.0.1:7070 by default and needs its JS assets built first.
+
+  This recipe runs upstream's official image of the current release,
+  ghcr.io/nkanaev/yarr:v2.9 (built from etc/dockerfile by the repo's own CI),
+  listening on 0.0.0.0:7070 with the database on a named volume that survives
+  redeploys. yarr ships without a login unless YARR_AUTH (username:password)
+  is set; that is left as upstream ships it and can be set in the project's
+  env vars.

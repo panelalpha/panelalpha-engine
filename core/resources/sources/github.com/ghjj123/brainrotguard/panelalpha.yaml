@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  BrainRotGuard is a FastAPI web app where kids search and request YouTube
+  videos and a parent approves them, optionally through a Telegram bot.
+  The repository's docker-compose.yml bind-mounts ./config.yaml, which is not
+  in the repository (only config.example.yaml), so Docker created a directory
+  there and the app crashed on start with IsADirectoryError.
+
+  This recipe replaces the compose with the published release image
+  ghcr.io/ghjj123/brainrotguard:1.33.0 (the tag of the current HEAD) and no
+  config file: without one the app reads its BRG_* environment variables.
+  BRG_BOT_TOKEN and BRG_ADMIN_CHAT_ID are optional project env vars (the bot
+  starts only when both are set); BRG_PIN is the app's optional PIN.
+  BRG_BASE_URL is the site's public URL. The SQLite database, including the
+  generated session secret, lives on a named volume.

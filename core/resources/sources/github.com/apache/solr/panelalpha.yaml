@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Apache Solr, the enterprise search platform (Java, embedded Jetty on :8983)
+  with its web Admin UI at /solr/.
+
+  The repository is the Gradle source tree with no Dockerfile or compose
+  file; a plain deploy picks the generic java-gradle build, which stops at
+  "Gradle 9.7.0 is required (hint: use the gradlew script): this gradle is
+  Gradle 8.14.5" (engine#99). This recipe runs the official Docker image of
+  the current release, solr:10.0.0, the way upstream's Docker documentation
+  does: the image's default `solr-foreground` (SolrCloud mode with embedded
+  ZooKeeper, the 10.x default) with the image's default 512 MB heap, and
+  /var/solr (collections, ZooKeeper data, logs) on a named volume that
+  survives redeploys. Measured ~705 MB for the container with one
+  collection; it is capped at 1.5 GB. A `ready` gate makes the deploy finish
+  only once Solr answers /solr/admin/info/system.
+
+  First run is upstream's: no collection exists and the Admin UI is open
+  (Solr ships without authentication); collections are created from the UI
+  or with `solr create -c <name>` in the app container.

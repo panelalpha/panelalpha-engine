@@ -1,0 +1,33 @@
+# Compose-replace: the repo ships no compose file and its Dockerfile needs
+# binaries built by `make` first. Official image of the current release;
+# config (/etc/prometheus) and TSDB (/prometheus) on named volumes.
+services:
+  app:
+    image: prom/prometheus:v3.15.0
+    restart: unless-stopped
+    ports:
+      - "8080:9090"
+    volumes:
+      - config:/etc/prometheus
+      - data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Prometheus reports ready.
+  ready:
+    image: prom/prometheus:v3.15.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  data: {}

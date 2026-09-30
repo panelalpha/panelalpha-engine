@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  RomM is a ROM manager with a web UI and in-browser emulators: a Python
+  backend and Vue frontend served on :8080, MariaDB for the catalogue, a
+  bundled Valkey for background tasks. The repository's docker-compose.yml is
+  a developer environment (a `romm-dev` service with `command: bash`, the
+  source bind-mounted, the dev database and Valkey published), so a plain
+  deploy never serves the app.
+
+  This recipe runs the image upstream publishes (rommapp/romm, current release
+  5.3.1) the way examples/docker-compose.example.yml does, with MariaDB
+  alongside. hooks/prepare.sh generates the database passwords and
+  ROMM_AUTH_SECRET_KEY (RomM refuses to start without one) once into
+  ~/.panelalpha/romm/. The library, assets, config, resources and database
+  are named volumes kept across redeploys. First run is left as upstream
+  ships it: the setup wizard creates the admin user. Metadata provider keys
+  (IGDB, ScreenScraper, SteamGridDB, RetroAchievements) are optional project
+  environment variables.

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ToolJet Community Edition, low-code internal-tool builder (NestJS + React).
+  The repository's docker-compose.yaml is a development stack that builds the
+  checkout; a plain deploy rejects it as a workstation compose, Railpack
+  cannot build the monorepo and the engine serves its placeholder. The two
+  enterprise submodules (ee-frontend, ee-server) are private and are skipped.
+  This recipe runs upstream's deploy/docker/docker-compose-db.yaml of the
+  v3.20.235-lts release on the release image tooljet/tooljet-ce:v3.20.235-lts
+  (server and client on 3000, Redis bundled in the image), Postgres 13 on a
+  named volume and PostgREST v12.0.2 for ToolJet Database. hooks/prepare.sh
+  generates what upstream's deploy/docker/internal.sh writes into .env
+  (LOCKBOX_MASTER_KEY, SECRET_KEY_BASE, PGRST_JWT_SECRET, the database
+  password and PGRST_DB_URI) once into ~/.panelalpha/tooljet/tooljet.env.
+  TOOLJET_HOST is the account's public URL. First run is upstream's: the
+  first visitor creates the admin account on the setup page.

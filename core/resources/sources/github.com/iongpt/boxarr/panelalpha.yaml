@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Boxarr tracks the weekly box office top 10 and adds those movies to Radarr:
+  a FastAPI app on :8888 with its settings (local.yaml), history, ignore
+  list and logs in /config. The repository's docker-compose.yml builds from
+  source with a ./config bind mount, which the engine wipes on every deploy;
+  overrides/docker-compose.yml runs the published ghcr.io/iongpt/boxarr image
+  of the current release (2.1.0) with /config on a named volume.
+
+  Security: Boxarr has no authentication whatsoever. Every visitor lands on
+  /setup, which renders the stored Radarr API key into the page, and every
+  /api route (save the Radarr connection, add movies to Radarr, trigger the
+  scheduler) is anonymous. So the app publishes no port: `proxy` (nginx) is
+  the only thing on the account's port and requires HTTP Basic auth on every
+  path. hooks/prepare.sh generates the password once into
+  ~/.panelalpha/boxarr/admin.txt (user `admin`) and rewrites the htpasswd
+  hash from it on every deploy; to change the password edit admin.txt and
+  redeploy. The proxy waits for the app's healthcheck, so the deploy is not
+  called finished before Boxarr answers. The Radarr connection is entered
+  behind the gate in /setup.
+
+  Measured on mariusz.panelalpha.tools (2026-09-29, engine 705f250a): deploy
+  37s, rebuild 25s; app 58 MiB, proxy 11 MiB. Anonymous /, /setup,
+  /api/health, /api/config, /api/movies/ignore, /static/..., /.env,
+  //setup, /%73etup and POST /api/movies/ignore -> 401; a wrong password ->
+  401. With the generated credentials /setup (<title>Boxarr Setup</title>)
+  saved a Radarr connection through POST /api/config/save, / then redirects
+  to /overview (<title>Movie Overview - Boxarr</title>), an ignore-list
+  entry reads back, and all of it survives a rebuild with the password
+  unchanged.

@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  WeeWX is weather station software: the weewxd daemon reads a station
+  through a driver, archives to SQLite and generates a static HTML/PNG site
+  (the Seasons skin) into public_html on every archive interval. The python
+  platform installs the package but serves the engine placeholder: the only
+  entry points are the console scripts weectl and weewxd, neither is a web
+  server, and upstream serves public_html with a separate web server.
+
+  The recipe installs the checkout into a venv (upstream's own
+  `pip install .`), creates the station on the first start with upstream's
+  defaults (`weectl station create --no-prompt`: the simulator driver, which
+  is also what a fresh upstream install runs) in /var/lib/weewx on a named
+  volume, sends weewxd's log to stdout instead of the absent /dev/log, runs
+  weewxd in the foreground and serves public_html with Python's http.server
+  on port 8000. The first report is written at the first archive boundary
+  (archive_interval 300 s), so the deploy waits for index.html. To use a real
+  station, edit /var/lib/weewx/weewx.conf in the app container (driver,
+  location, units) with `weectl station reconfigure` and restart; USB/serial
+  hardware cannot be reached from an account, network drivers and uploads
+  (WeatherLink Live, Ecowitt, MQTT) can.
+extends: python
+commands:
+  - id: pip-install
+    stage: build
+    role: dependencies
+    run: 'python -m venv .venv && .venv/bin/pip install .'
+  - id: weewx-serve
+    stage: start
+    serve: true
+    run: 'sh /app/panelalpha/weewx-start.sh'

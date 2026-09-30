@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ThingsBoard Community Edition, the IoT platform (device management,
+  telemetry, dashboards; Java) with its web UI and REST/HTTP device API on
+  port 8080.
+
+  The repository is the Maven source tree; a plain deploy was detected as
+  `java` and failed because the project compiles for Java 25. This recipe
+  runs the single-node setup upstream documents for Docker
+  (thingsboard.io/docs/user-guide/install/docker/): the published
+  thingsboard/tb-node image at the current release, 4.4.0, on
+  postgres:18-alpine with the default in-memory queue. Upstream's one-time
+  install step (`INSTALL_TB=true`, no demo data) runs as a one-shot `install`
+  service on the first deploy and records a marker on the /data volume so
+  later deploys skip it. The database password is generated per account by
+  the engine (TB_DB_PASSWORD) and kept across redeploys; the database and
+  /data are named volumes. Only the HTTP port is published, so MQTT, CoAP
+  and Edge RPC are not reachable; devices use the HTTP API. The heap is
+  1.5 GB inside a 3 GB container. A `ready` gate makes the deploy finish only
+  once /login answers.
+
+  First run is upstream's: the install creates the documented default
+  sysadmin@thingsboard.org / sysadmin account, left as shipped.

@@ -1,0 +1,42 @@
+# Compose-replace: the repository is the source meta-repo (submodules, no
+# deployable build). This runs upstream's published all-in-one image of the
+# current release (nginx, converter, PostgreSQL, RabbitMQ, Redis inside).
+services:
+  app:
+    image: docker.io/onlyoffice/documentserver:9.4.0.1
+    restart: unless-stopped
+    # JWT_SECRET generated once by prepare.sh (JWT validation stays on).
+    env_file:
+      - ../.panelalpha/onlyoffice/app.env
+    environment:
+      JWT_ENABLED: "true"
+    volumes:
+      # Data directories named by the image's README (logs and certs left out).
+      - lib:/var/lib/onlyoffice
+      - db:/var/lib/postgresql
+      - fonts:/usr/share/fonts/truetype/custom
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    # Upstream asks for 4 GB of RAM; stay under the account limit (engine#428).
+    mem_limit: 3g
+
+  # No-op gate: `compose up -d` returns only once the Document Server answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  lib: {}
+  db: {}
+  fonts: {}

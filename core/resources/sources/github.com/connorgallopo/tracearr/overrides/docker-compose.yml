@@ -1,0 +1,87 @@
+# The repo has no root compose file (Railpack builds the monorepo and runs out
+# of memory); this is upstream's docker/examples/docker-compose.pg18.yml on the
+# published image of the current release, with secrets from ~/.panelalpha.
+services:
+  timescale:
+    image: timescale/timescaledb-ha:pg18.4-ts2.29.1
+    restart: unless-stopped
+    shm_size: 256mb
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    command: postgres -c timescaledb.license=timescale -c timescaledb.max_tuples_decompressed_per_dml_transaction=100000 -c max_locks_per_transaction=4096 -c timescaledb.telemetry_level=off -c max_connections=150
+    env_file:
+      - ../.panelalpha/tracearr/db.env
+    environment:
+      POSTGRES_USER: tracearr
+      POSTGRES_DB: tracearr
+    volumes:
+      - timescale_data:/home/postgres/pgdata/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracearr -d tracearr"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 768m
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 128m
+
+  app:
+    image: ghcr.io/connorgallopo/tracearr:2.5.1
+    restart: unless-stopped
+    depends_on:
+      timescale:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/tracearr/app.env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      TZ: UTC
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: "*"
+      LOG_LEVEL: info
+    volumes:
+      - tracearr_backups:/data/backup
+      - tracearr_images:/data/tracearr/image-cache
+    ports:
+      - "3000:3000"
+    # The image's own check, polled faster so the ready gate is not held 30s.
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns once migrations ran and /health answers.
+  ready:
+    image: redis:8-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 16m
+
+volumes:
+  tracearr_backups: {}
+  tracearr_images: {}
+  timescale_data: {}
+  redis_data: {}

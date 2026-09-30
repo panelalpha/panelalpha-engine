@@ -1,0 +1,40 @@
+# PiGallery2 is a Node server, not a static Angular site: run the published
+# image of the current release (upstream's docker/docker-compose/pigallery2-only).
+services:
+  pigallery2:
+    image: bpatrik/pigallery2:3.5.2
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      NODE_ENV: production
+    volumes:
+      - pigallery2-config:/app/data/config
+      - pigallery2-db:/app/data/db
+      # Writable (upstream mounts it read-only) so the app's own upload works.
+      - pigallery2-images:/app/data/images
+      - pigallery2-tmp:/app/data/tmp
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/heartbeat"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    # Upstream suggests up to 3G; thumbnailing and video jobs are the peak.
+    mem_limit: 2g
+
+  # No-op gate: `compose up -d` returns only once /heartbeat answers.
+  ready:
+    image: bpatrik/pigallery2:3.5.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      pigallery2:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pigallery2-config: {}
+  pigallery2-db: {}
+  pigallery2-images: {}
+  pigallery2-tmp: {}

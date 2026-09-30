@@ -1,0 +1,17 @@
+# Compose-replace: upstream's own quick-start (the published release image),
+# with the SQLite database, ROMs and save states on a named volume.
+services:
+  retroassembly:
+    image: arianrhodsandlot/retroassembly:v7.260906.1627
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8000:8000"
+    volumes:
+      - retroassembly_data:/app/data
+    mem_limit: 512m
+
+volumes:
+  retroassembly_data: {}

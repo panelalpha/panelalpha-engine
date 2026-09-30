@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  bittorrent-tracker, the WebTorrent project's BitTorrent tracker server
+  (Node): an HTTP tracker (/announce, /scrape), a WebSocket tracker for
+  WebTorrent browser clients and a stats page at /stats, all on one port.
+  The plain deploy restart-looped: package.json has no start script, so the
+  generated start ran `node index.js`, which only exports the library and
+  exits. The server is the package's own CLI, bin/cmd.js.
+
+  This recipe builds with the express platform (`npm install`; the repo has
+  no lockfile) and starts `node bin/cmd.js --http --ws --trust-proxy` on the
+  published port 3000. The UDP tracker is left off: an account has no inbound
+  UDP. --trust-proxy (upstream's flag for running behind a reverse proxy)
+  makes the tracker record the visitor's address from X-Forwarded-For rather
+  than the account gateway's; it takes the first entry, which a client can
+  set itself (engine#319). The tracker keeps its swarm state in memory only,
+  so there is no data to keep across redeploys.
+extends: express
+commands:
+  - id: npm-install
+    stage: build
+    role: dependencies
+    # {{js.install}} is not resolved in a recipe (engine#351); the repo has no lockfile.
+    run: 'npm install --omit=dev --no-audit --no-fund'
+  # Not `serve`: under that id the node platform swaps in package.json's `bin`.
+  - id: tracker-serve
+    stage: start
+    serve: true
+    run: >-
+      sh -c 'exec node bin/cmd.js --http --ws --trust-proxy --port "${PORT:-3000}"'

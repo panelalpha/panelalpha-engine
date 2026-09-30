@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MediKeep, a self-hosted personal medical records app (FastAPI serving its own
+  React build on :8000) on PostgreSQL. Bare detection built docker/Dockerfile
+  alone, with no database, and the container restart-looped on
+  "DATABASE_URL is not set". This recipe runs the published
+  ghcr.io/afairgiant/medikeep image of the current release (v0.71.0) with a
+  postgres:17-alpine sidecar, following the upstream docker/docker-compose.yml.
+  The DB password and SECRET_KEY (JWT signing) are generated once into
+  ~/.panelalpha/medikeep/ by hooks/prepare.sh and delivered with env_file.
+  Database, uploads, logs and backups are on named volumes. First-run behaviour
+  is upstream's (the app creates its default admin account on first boot).

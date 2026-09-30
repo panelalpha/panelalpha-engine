@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mempool, a Bitcoin block and mempool explorer: an Angular frontend served by
+  nginx (mempool/frontend) that proxies /api to a Node backend
+  (mempool/backend), which reads blocks and transactions from the customer's
+  own Bitcoin Core node over RPC and keeps statistics in MariaDB.
+
+  The repository root has no manifest; the plain deploy ran upstream's
+  docker/docker-compose.yml, which pulls the `latest` images, bind-mounts
+  ./mysql/data and runs MariaDB as uid 1000, so MariaDB could not write its
+  data directory ("Can't create/write to file '/var/lib/mysql/aria_log_control'
+  (Errcode: 13 "Permission denied")") and restart-looped.
+
+  This recipe runs the same stack on the v3.3.1 release images (the latest
+  release), MariaDB 10.5.21 as upstream pins it, with the database and the
+  backend cache on named volumes and the MariaDB passwords generated once
+  into ~/.panelalpha/mempool/db.env. MEMPOOL_BACKEND defaults to "none" as in
+  upstream's compose (Bitcoin Core only).
+
+  The customer sets CORE_RPC_HOST (and CORE_RPC_PORT, CORE_RPC_USERNAME,
+  CORE_RPC_PASSWORD when they differ from upstream's 8332/mempool/mempool)
+  in the project's environment variables; a one-shot init service fails the
+  deploy naming CORE_RPC_HOST when it is missing. Any other upstream backend
+  setting (ELECTRUM_HOST, MEMPOOL_BACKEND=electrum, ...) is read from the same
+  variables. The node must accept RPC from this host.
+
+  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
+
+  Without CORE_RPC_HOST the deploy fails naming it. With CORE_RPC_HOST set
+  (an unreachable test address; the backend runs with ALLOW_UNREACHABLE, as
+  upstream defaults): create success in 122s; / is <title>mempool - Bitcoin
+  Explorer</title> and a browser renders the dashboard; /api/v1/backend-info
+  answers {"version":"3.3.1",...}; the backend loads mining pools and price
+  history into MariaDB (2585 prices, 172 pools). Rebuild: success in 156s,
+  row counts unchanged. /.env and /.git/config return the SPA's index page,
+  not the files. The live websocket (/api/v1/ws) answers 101 on the host
+  directly; the *.panelalpha.online front drops it (engine#170).

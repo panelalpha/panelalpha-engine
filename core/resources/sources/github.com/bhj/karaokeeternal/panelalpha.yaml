@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Karaoke Eternal (bhj/KaraokeEternal, ISC) is a karaoke party server: a Node
+  web app and socket.io server where guests queue songs from their phones and
+  a browser player plays MP3+G and MP4 media from the server's library.
+
+  The repository ships no compose file, no Dockerfile and no `start` script, so
+  a plain deploy goes to Railpack: it builds, but the server picks a random
+  port at startup ("Web server running at http://172.18.0.2:41941/") while the
+  engine waits on 80, and the SQLite database sits in the container's
+  /root/.config. This recipe replaces the compose with the official
+  radrootllc/karaoke-eternal:2.0.2 image of the current release, as upstream's
+  documentation runs it: port 8080, the database in /config and the media
+  library in /mnt/karaoke, both on named volumes that survive redeploys.
+  The first visitor creates the admin account in the app's own setup page.

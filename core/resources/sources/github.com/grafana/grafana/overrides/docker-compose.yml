@@ -1,0 +1,34 @@
+# The repository has no compose file and its Dockerfile is a full source build
+# (Go + JS, several GB). This runs the official image of the current release.
+services:
+  app:
+    image: grafana/grafana:13.2.2
+    restart: unless-stopped
+    environment:
+      # Links, redirects and the login Origin check use the public domain.
+      GF_SERVER_ROOT_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # grafana.db, plugins and sessions; survives redeploys.
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Grafana answers /api/health.
+  ready:
+    image: grafana/grafana:13.2.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  grafana-data: {}

@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  YTPTube is a web UI and automation manager for yt-dlp downloads: one Python
+  process serving its UI and API on :8081, settings and its SQLite queue in
+  /config, media in /downloads.
+
+  The repository's compose.yaml runs the image as uid 1000 with ./config and
+  ./downloads bind-mounted; the engine creates those directories as root, so
+  YTPTube exits with "Unable to write to '/config' data directory. Current
+  user id '1000' while directory owner is '0'" and restart-loops. This recipe
+  runs the published image of the current release, v2.7.4 (pinned by digest),
+  with /config and /downloads on named volumes, which take the image's own
+  app:app ownership and survive redeploys.
+
+  The optional Chromium (CDP) and FlareSolverr sidecars from the upstream
+  example are left out: YTPTube starts and downloads without them, and the
+  Chromium container alone costs more memory than the app. First run is left
+  as upstream ships it (no login unless YTP_AUTH_USERNAME/YTP_AUTH_PASSWORD
+  are set in the project's environment variables).

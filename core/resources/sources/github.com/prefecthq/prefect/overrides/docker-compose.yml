@@ -1,0 +1,36 @@
+# Compose-replace: the repo Dockerfile is a CLI base with no server command.
+# Runs the release image as `prefect server start`, SQLite on a named volume.
+services:
+  app:
+    image: prefecthq/prefect:3.8.7-python3.12
+    restart: unless-stopped
+    command: ["prefect", "server", "start", "--host", "0.0.0.0", "--port", "4200"]
+    ports:
+      - "4200:4200"
+    environment:
+      PREFECT_HOME: /root/.prefect
+      # The browser reaches the API through the account's domain.
+      PREFECT_UI_API_URL: ${PA_PUBLIC_URL}/api
+    volumes:
+      # prefect.db (flows, runs, deployments, blocks) and server state.
+      - prefect-data:/root/.prefect
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4200/api/health', timeout=4)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1536m
+
+  # No-op: `compose up -d` returns once the server answers (first boot migrates).
+  ready:
+    image: prefecthq/prefect:3.8.7-python3.12
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  prefect-data: {}

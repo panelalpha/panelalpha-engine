@@ -1,0 +1,66 @@
+# Compose-replace: the repo ships no compose file at all (it is a pnpm
+# monorepo), so a bare deploy goes to Railpack and never serves. Upstream
+# publishes the app as an image; this runs the official rootless release from
+# Docker Hub (same build as ghcr.io/papra-hq/papra), pinned to 26.6.2.
+services:
+  # One-shot: on the very first boot only, migrate and create the owner account
+  # through Papra's own sign-up API on loopback, then exit. Registration is
+  # never enabled on the published app, so there is no first-visitor window.
+  seed:
+    image: docker.io/corentinth/papra:26.6.2-rootless
+    restart: "no"
+    env_file:
+      - ../.panelalpha/papra/app.env
+      - ../.panelalpha/papra/admin.env
+    environment:
+      APP_BASE_URL: ${PA_PUBLIC_URL}
+      PAPRA_ADMIN_EMAIL: admin@${PA_PUBLIC_HOST}
+    volumes:
+      - papra-data:/app/app-data
+      - ./panelalpha/papra:/pa:ro
+    entrypoint: ["/bin/sh", "/pa/seed.sh"]
+    mem_limit: 768m
+
+  app:
+    image: docker.io/corentinth/papra:26.6.2-rootless
+    restart: unless-stopped
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    # .env is the account's own env (tunables); app.env holds AUTH_SECRET,
+    # generated once by hooks/prepare.sh under ~/.panelalpha.
+    env_file:
+      - .env
+      - ../.panelalpha/papra/app.env
+    environment:
+      APP_BASE_URL: ${PA_PUBLIC_URL}
+      # Closed instance: the owner was seeded by `seed`; more users are added
+      # by invitation or by the operator flipping this in the account env.
+      AUTH_IS_REGISTRATION_ENABLED: ${AUTH_IS_REGISTRATION_ENABLED:-false}
+    volumes:
+      # SQLite DB (app-data/db) and uploaded documents (app-data/documents).
+      - papra-data:/app/app-data
+    ports:
+      - "1221:1221"
+    healthcheck:
+      # The slim image has no curl; node's fetch probes the app's own route.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:1221/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    mem_limit: 768m
+
+  # Exits 0 once app is healthy, so `compose up -d` returns only when Papra
+  # answers (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  papra-data: {}

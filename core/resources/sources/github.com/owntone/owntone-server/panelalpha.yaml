@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OwnTone is a music server (DAAP/iTunes, MPD, AirPlay and Chromecast
+  output) with a web UI for browsing the library and controlling playback.
+  The repository is a C/autotools source tree with no container build, so
+  this recipe runs upstream's official image of the current release,
+  owntone/owntone:29.3, with the config (/etc/owntone), the music library
+  (/srv/media, scanned automatically) and the SQLite database
+  (/var/cache/owntone) on named volumes. The database volume is handed to
+  the `owntone` user before the image's init starts, since a fresh named
+  volume is root-owned and OwnTone otherwise exits with "Could not open
+  database".
+
+  Adding music: copy files into the media volume, e.g.
+  `docker compose -p project cp <dir> app:/srv/media/`.
+
+  Only the web UI/DAAP port (3689) goes through the engine's proxy. The web
+  UI's live-update websocket listens on its own port (3688; the image's
+  libevent 2.1 cannot serve it on the web port), so the page does not
+  refresh by itself when the player state changes elsewhere. mDNS discovery
+  and AirPlay/Chromecast speakers on a home network cannot be reached from
+  the account.

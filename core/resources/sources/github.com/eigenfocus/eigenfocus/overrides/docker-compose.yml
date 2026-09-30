@@ -1,0 +1,34 @@
+# The repo's Dockerfile does not build from a clean checkout (assets:precompile
+# needs config/database.yml, copied only in the final stage). Runs upstream's
+# published image of the current release, as the README's Docker install does.
+services:
+  app:
+    image: eigenfocus/eigenfocus:1.5.1-free
+    restart: unless-stopped
+    environment:
+      DEFAULT_HOST_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # SQLite databases, the generated secret key base and uploads.
+      - app-data:/eigenfocus-app/app-data
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/up"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns once the migrations ran and Rails answers.
+  ready:
+    image: eigenfocus/eigenfocus:1.5.1-free
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  app-data: {}

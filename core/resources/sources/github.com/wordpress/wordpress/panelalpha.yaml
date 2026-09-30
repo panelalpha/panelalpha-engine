@@ -2,5 +2,8 @@
 description: >-
   WordPress on the official image with MySQL 8, since the repository ships
   source and no compose file. The prepare hook generates the database
-  credentials and all eight secret keys; a must-use plugin provides user
+  credentials and all eight secret keys once into ~/.panelalpha/wordpress,
+  outside the checkout a redeploy empties, and the stack reads them through
+  env_file. wp-content lives on a volume seeded from the checkout, so uploads,
+  plugins and themes survive a redeploy; a must-use plugin provides user
   management and SSO.

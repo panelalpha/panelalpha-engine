@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Sim, a workspace for building and running AI agent workflows (Next.js app,
+  Socket.IO realtime server, Bun migrations, a cron scheduler, PostgreSQL
+  with pgvector, Redis). The repository has no root compose, so a plain
+  deploy takes the Next.js strategy and fails installing isolated-vm (no
+  Python/C toolchain in the build image). Upstream's deployment is
+  docker-compose.prod.yml on published images.
+
+  Compose-REPLACE with those services on the current release
+  (ghcr.io/simstudioai/*:v0.9.6). hooks/prepare.sh generates
+  BETTER_AUTH_SECRET, ENCRYPTION_KEY, INTERNAL_API_SECRET, CRON_SECRET and
+  the database password once into ~/.panelalpha/sim/app.env. The public URL
+  is the site's address, and an nginx front (files/sim-nginx.conf) routes
+  /socket.io/ to realtime and the rest to the app, as upstream's Helm
+  ingress does on a shared host; only nginx publishes a port. The database
+  is on a named volume. First run is as upstream ships it: the site offers
+  sign-up.

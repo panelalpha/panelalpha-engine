@@ -42,8 +42,10 @@ description: >-
   redirect()->refresh(). With the key coming from the environment the rewrite
   changes nothing, the next request compares equal again, and the site is an
   infinite redirect. Upstream's .env.k8s ships exactly that value. The prepare
-  hook generates a real base64:<32 bytes> instead, once, and keeps it: it
-  encrypts the sessions and the stored OIDC secrets.
+  hook generates a real base64:<32 bytes> instead, once, into
+  ~/.panelalpha/linkace/ with the database passwords, and rebuilds .env from
+  there on every deploy -- ~/project is emptied each time, and the key encrypts
+  the sessions and the stored OIDC secrets.
 
   TRUSTED_HOSTS, because LinkAce registers TrustHosts in its global middleware
   (stock Laravel ships it disabled) and its hosts() falls back to

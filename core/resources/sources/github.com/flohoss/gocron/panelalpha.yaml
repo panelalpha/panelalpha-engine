@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  gocron, a task scheduler: a Go binary with an embedded Vue UI that runs
+  jobs from a YAML file on cron schedules and keeps run history in SQLite,
+  serving on :8156. The repository's root compose.yml is the developer
+  environment (air live-reload backend built from docker/dev.dockerfile,
+  sqlc, a vite dev server and an openapi type generator that fetches from the
+  backend); the plain deploy runs its tooling services and fails with
+  `service "types" didn't complete successfully: exit 4`.
+
+  Compose-REPLACE from the published image of the current release
+  (ghcr.io/flohoss/gocron:v0.13.1), as upstream's README quick start:
+  /app/config on a named volume. On first start gocron writes a default
+  config.yaml with example jobs there; the SQLite database sits beside it.
+  First run is as upstream ships it.

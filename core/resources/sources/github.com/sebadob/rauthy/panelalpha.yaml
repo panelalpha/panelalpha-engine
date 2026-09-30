@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Rauthy is an OpenID Connect / OAuth 2 identity provider with an admin UI and
+  account dashboard: one Rust binary serving /auth/v1 on :8080, with its
+  embedded Hiqlite database in /app/data. The repository is the source tree; a
+  plain deploy builds it as a Rust app and fails in the rauthy-data build
+  script (`assets/fido_mds/dataset.bin is missing and this is a release
+  build`), a file upstream fetches with `just fido-mds-prep` before building.
+
+  This recipe runs the official ghcr.io/sebadob/rauthy image of the current
+  release, 0.36.2, configured through environment variables: plain HTTP behind
+  the engine's TLS proxy, PUB_URL / RP_ID / RP_ORIGIN from the site address,
+  and the Hiqlite Raft/API secrets and the data encryption key generated once
+  by hooks/prepare.sh into ~/.panelalpha/rauthy (kept across redeploys; losing
+  the key makes the stored data unreadable). The database is on a named
+  volume. Rauthy blacklists an IP for a day when it requests a scanner path
+  (/.env, /.git/config, ...), so the client address is taken from the
+  X-Real-IP the engine proxy sets rather than the visitor-supplied first
+  X-Forwarded-For entry; on a *.panelalpha.online domain that header is the
+  shared front address until engine#319 is fixed. First start is left as
+  upstream ships it: Rauthy creates
+  admin@localhost with a random password printed once in the container log.
+  E-mail is not configured (SMTP_URL etc. can be set as project env vars).

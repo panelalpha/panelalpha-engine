@@ -1,0 +1,37 @@
+# Compose-replace: the repository's compose builds the same image but mounts
+# ./websurfx/ as the config, whose config.lua binds 127.0.0.1. This builds the
+# repository's own Dockerfile (in-memory cache, its default) and serves a copy
+# of that config with only the bind address changed.
+services:
+  # One-shot: copies the repo's websurfx/ config dir on every deploy, binding 0.0.0.0.
+  config:
+    image: busybox:1.37
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        cp /src/allowlist.txt /src/blocklist.txt /cfg/
+        sed 's/^binding_ip = .*/binding_ip = "0.0.0.0"/' /src/config.lua > /cfg/config.lua
+        grep '^binding_ip' /cfg/config.lua
+    volumes:
+      - ./websurfx:/src:ro
+      - websurfx-config:/cfg
+    mem_limit: 32m
+
+  app:
+    build:
+      context: .
+    image: websurfx:local
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - websurfx-config:/etc/xdg/websurfx:ro
+    depends_on:
+      config:
+        condition: service_completed_successfully
+    mem_limit: 512m
+
+volumes:
+  websurfx-config: {}

@@ -1,0 +1,62 @@
+# Compose-replace: upstream's df-docker image (the release build of this repo)
+# with MariaDB; the checkout itself needs ext-mongodb and a web server.
+services:
+  web:
+    image: dreamfactorysoftware/df-docker:7.7.1
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/dreamfactory/app.env
+    environment:
+      SERVERNAME: ${PA_PUBLIC_HOST}
+      # TLS ends at the engine; Laravel must emit https:// URLs.
+      HTTPS_HEADER: "on"
+      DB_DRIVER: mysql
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_USERNAME: dreamfactory
+      DB_DATABASE: dreamfactory
+    volumes:
+      - df_storage:/opt/dreamfactory/storage
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1024m
+
+  mysql:
+    image: mariadb:11.4
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/dreamfactory/db.env
+    environment:
+      MARIADB_USER: dreamfactory
+      MARIADB_DATABASE: dreamfactory
+    volumes:
+      - df_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns once DreamFactory answers.
+  ready:
+    image: mariadb:11.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  df_storage: {}
+  df_mysql: {}

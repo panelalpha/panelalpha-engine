@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bichon, an email archiving server (Rust) that pulls mail from IMAP accounts,
+  indexes it for full-text search and serves a web UI. The repository's
+  docker/Dockerfile only packages binaries that CI builds, and the Rust recipe
+  cannot build it either (the server crate builds the web frontend with pnpm in
+  build.rs), so this recipe runs the published rustmailer/bichon image of the
+  current release (2.0.3) on port 15630 with /data on a named volume.
+  BICHON_ENCRYPT_PASSWORD (encrypts stored IMAP passwords and OAuth tokens; the
+  server refuses to start without it) is generated once by hooks/prepare.sh
+  into ~/.panelalpha/bichon/app.env. Upstream's first login is admin /
+  admin@bichon, as shipped.

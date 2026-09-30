@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Ghostfolio, the wealth management dashboard (NestJS API + Angular client,
+  PostgreSQL, Redis). A plain deploy built the repository's Dockerfile, whose
+  Nx production build of the Angular client ran out of memory in a 2500 MB
+  account ("npm run build:production ... cannot allocate memory"). This recipe
+  runs the official ghostfolio/ghostfolio image of the current release
+  (3.75.0) on port 3333 with the stack of upstream's docker/docker-compose.yml
+  (PostgreSQL 15, Redis with a password) on named volumes. The database and
+  Redis passwords, ACCESS_TOKEN_SALT and JWT_SECRET_KEY are generated once into
+  ~/.panelalpha/ghostfolio. The image migrates and seeds the database on boot;
+  the first visitor who signs up becomes the admin (upstream behaviour).

@@ -1,0 +1,74 @@
+# Compose-replace: the repo's compose with the release image pinned, generated
+# secrets, and the README's one-time setup commands as an init service.
+x-facto-env: &facto-env
+  # Attachments on a volume; no pidfile, so a restart is not blocked by RUNNING_PID.
+  JAVA_OPTS: "-Dpidfile.path=/dev/null -Dapp.accounting.attachmentsFolder=/data/attachments"
+
+services:
+  db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/facto/db.env
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 20s
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  init:
+    image: nymanjens/facto:v4.29
+    restart: "no"
+    entrypoint: ["/bin/bash", "/panelalpha/facto-init.sh"]
+    env_file:
+      - ../.panelalpha/facto/app.env
+    environment: *facto-env
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      - facto_state:/state
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 768m
+
+  web:
+    image: nymanjens/facto:v4.29
+    command: bin/server
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    env_file:
+      - .env
+      - ../.panelalpha/facto/app.env
+    environment: *facto-env
+    volumes:
+      - facto_attachments:/data/attachments
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:9000/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1024m
+
+  # No-op gate: `up -d` returns once the app answers.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db_data: {}
+  facto_state: {}
+  facto_attachments: {}

@@ -1,0 +1,9 @@
+# Serve the repository root, and mount the web setup's config file and the
+# uploads store from ~/.panelalpha so a redeploy keeps them.
+services:
+  app:
+    environment:
+      PA_DOCROOT: /app
+    volumes:
+      - ../.panelalpha/forte/htconfig.php:/app/.htconfig.php
+      - ../.panelalpha/forte/store:/app/store

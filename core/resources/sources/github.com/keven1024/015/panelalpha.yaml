@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  015 is a temporary file and text sharing platform: an app image (Nuxt front,
+  Go API, Caddy on port 80), a worker image for image processing and cleanup,
+  and Redis.
+
+  OFFICIAL IMAGES, COMPOSE-REPLACE of the repo's docker-compose.yml, which
+  bind-mounts a ./config.yaml the repo does not ship (both Go services panic
+  with `Config File "config" Not Found`). The replacement pins the 0.14.1
+  release images, mounts the repo's own config.example.yaml read-only as
+  config.yaml, and overrides only what must differ through environment
+  variables (viper AutomaticEnv): SITE_URL is the site's address,
+  UPLOAD_PATH points at the uploads volume, and the download-token secret
+  and password salt come from ~/.panelalpha/015/secrets.env, generated once
+  by hooks/prepare.sh (0600 in a 0700 dir) so shared links and passwords
+  survive a redeploy. Uploads and Redis data live on named volumes. Only
+  the app service publishes a port.

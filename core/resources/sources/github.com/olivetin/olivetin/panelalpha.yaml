@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OliveTin, a web dashboard of buttons that run predefined shell commands: one
+  Go binary serving the web UI and API on :1337, configured by
+  /config/config.yaml. The repository has no compose file and its Dockerfiles
+  copy a prebuilt OliveTin binary and webui produced by the release pipeline,
+  so the plain deploy detects nothing and serves the engine placeholder.
+
+  Compose-REPLACE from the published image of the current release
+  (jamesread/olivetin:3000.20.0). /config is a named volume, seeded from the
+  image's example config.yaml on first start and kept across redeploys; edit
+  it there to define your own actions. First run is as upstream ships it.

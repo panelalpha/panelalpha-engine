@@ -1,0 +1,9 @@
+# Installer-written config and user uploads survive a redeploy.
+services:
+  app:
+    volumes:
+      - ../.panelalpha/cloudlog:/pa-data
+      - ../.panelalpha/cloudlog/uploads:/app/uploads
+      - ../.panelalpha/cloudlog/backup:/app/backup
+      - ../.panelalpha/cloudlog/assets/qslcard:/app/assets/qslcard
+      - ../.panelalpha/cloudlog/images/eqsl_card_images:/app/images/eqsl_card_images

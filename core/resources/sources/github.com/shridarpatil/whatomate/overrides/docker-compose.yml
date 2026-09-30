@@ -1,0 +1,66 @@
+# Upstream's docker/docker-compose.yml on the release image, configured with
+# WHATOMATE_* variables (double underscore = config section) instead of config.toml.
+services:
+  app:
+    image: shridh0r/whatomate:0.1.1-beta-0.17
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../.panelalpha/whatomate/app.env
+    environment:
+      WHATOMATE_APP__ENVIRONMENT: production
+      WHATOMATE_APP__DEBUG: "false"
+      WHATOMATE_SERVER__ALLOWED_ORIGINS: ${PA_PUBLIC_URL}
+      WHATOMATE_DATABASE__HOST: db
+      WHATOMATE_DATABASE__USER: whatomate
+      WHATOMATE_DATABASE__NAME: whatomate
+      WHATOMATE_REDIS__HOST: redis
+      WHATOMATE_STORAGE__TYPE: local
+      WHATOMATE_STORAGE__LOCAL_PATH: /app/uploads
+      WHATOMATE_CALLING__AUDIO_DIR: /app/audio
+      TZ: ${TZ:-UTC}
+    # An empty -config skips the config file; the image ships none.
+    command: ["server", "-migrate", "-config", ""]
+    volumes:
+      - uploads:/app/uploads
+      - audio:/app/audio
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 512m
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/whatomate/app.env
+    environment:
+      POSTGRES_USER: whatomate
+      POSTGRES_DB: whatomate
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U whatomate -d whatomate"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - redis-data:/data
+
+volumes:
+  postgres-data:
+  redis-data:
+  uploads:
+  audio:

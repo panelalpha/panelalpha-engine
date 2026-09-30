@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DumbPad is a small Node (Express) notepad: plain-text/markdown notepads kept
+  as files under /app/data, live collaborative editing over a websocket, and an
+  optional numeric PIN.
+
+  The repository's docker-compose.yml runs dumbwareio/dumbpad:latest with a
+  ./data bind mount and an empty PIN, which leaves every note readable and
+  writable by anyone. Its .env.example is saved as UTF-16, which the engine
+  copies into a .env compose refuses (engine#315); hooks/prepare.sh writes its
+  own .env so that file is never read. overrides/docker-compose.yml runs the
+  current release, 1.0.5, with /app/data on a named volume that survives
+  redeploys, BASE_URL and ALLOWED_ORIGINS set to the site's address.
+
+  Security: hooks/prepare.sh generates a 10-digit PIN once into
+  ~/.panelalpha/dumbpad/pin.env (0600 in 0700); that file is where the owner
+  reads it. The app refuses /api without the PIN cookie and locks
+  /api/verify-pin after 5 wrong PINs for 15 minutes (one counter for everyone,
+  since all requests come from the proxy). Two upstream gaps are closed by
+  `proxy` (nginx), the only service on the account's port: the websocket
+  checks no PIN at all (an anonymous client could replay the last 1000 edits
+  of a notepad with `sync_request` or inject edits), so an upgrade needs the
+  PIN cookie; and the cookie is the PIN itself, compared on every /api call
+  with no lockout, so requests carrying a wrong PIN cookie are throttled to
+  10 per minute.

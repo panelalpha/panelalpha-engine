@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  transfer.sh is a file-sharing server: one Go binary serving a web page and
+  an upload API (`curl --upload-file ./x https://<domain>/x`) on :8080. The
+  repo's Dockerfile builds fine, but its entrypoint passes only --listener and
+  the server exits at boot with "provider not set or invalid" - a storage
+  backend (local, s3, gdrive, storj) is mandatory.
+
+  This recipe runs upstream's official image of the current release,
+  dutchcoders/transfer.sh:v1.6.1, with the local provider storing uploads in
+  /data on a named volume that survives redeploys. Every setting is an env var
+  (PURGE_DAYS, MAX_UPLOAD_SIZE, HTTP_AUTH_USER/HTTP_AUTH_PASS, ...), so the
+  project's env vars can change them. Uploads are open to anyone by default,
+  as upstream ships it.

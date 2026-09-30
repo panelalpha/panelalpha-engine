@@ -1,0 +1,18 @@
+# The repo's compose bind-mounts a placeholder host path over /app/static, which
+# Docker creates root-owned; the image runs as 1000 and exits. Published image
+# of the current release with /app/static on a named volume (filled from the image).
+services:
+  app:
+    image: jez500/bender:1.0.3
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      INIT_ASSETS: "1"
+    volumes:
+      - static:/app/static
+    ports:
+      - "8080:8080"
+    mem_limit: 512m
+
+volumes:
+  static: {}

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Ideon, a project workspace on an infinite canvas (Next.js) with PostgreSQL.
+  The repository's docker-compose.yml already runs the published image, but
+  it reads every value (database name/user/password, SECRET_KEY, APP_URL)
+  from a .env the checkout does not ship, so the compose deploy failed with
+  "The DB_USER variable is not set". This recipe keeps the same two services
+  on the current release image (ghcr.io/3xpyth0n/ideon:0.9.7, upstream's
+  compose uses `latest`) and postgres:18-alpine. hooks/prepare.sh generates
+  the database password and SECRET_KEY once into ~/.panelalpha/ideon/;
+  APP_URL and AUTH_URL are the engine's public URL (without AUTH_URL the
+  middleware rejects every session as UntrustedHost and sends logged-in users
+  back to /login). Uploads and avatars live on the
+  /app/storage volume. The first visitor creates the admin account in the
+  app's own setup, as upstream ships it. A health-check gate makes the
+  deploy wait until /api/health answers.

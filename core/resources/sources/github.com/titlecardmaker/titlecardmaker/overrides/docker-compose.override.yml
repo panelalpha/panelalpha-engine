@@ -1,0 +1,27 @@
+# Layered over the compose the dockerfile strategy generates for service `app`.
+services:
+  app:
+    # The app hardcodes /config in Docker (backend/app/core/config.py) for its
+    # SQLite DB, logs and cards; start.sh chowns it, so it must exist as a volume.
+    volumes:
+      - tcm-config:/config
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "-s", "-o", "/dev/null", "http://127.0.0.1:4242/api/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once the app answers its healthcheck.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  tcm-config: {}

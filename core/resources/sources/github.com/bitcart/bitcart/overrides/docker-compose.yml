@@ -1,0 +1,153 @@
+# bitcart-docker's generated compose for the default pack (backend, worker,
+# admin, store, BTC daemon, PostgreSQL, Redis) in one-domain mode, on the
+# 0.10.3.0 release images. docker-gen (needs the Docker socket) is replaced by
+# a static nginx with the same routes. Service names are the ones the image's
+# conf/.env points at (database, redis, bitcoin, worker).
+x-bitcart-env: &bitcart-env
+  BITCART_ENV: production
+  LOG_FILE: bitcart.log
+  BITCART_DATADIR: /datadir
+  BITCART_BACKUPS_DIR: /backups
+  BITCART_VOLUMES: /datadir /backups /plugins
+  DB_PORT: "5432"
+  DB_HOST: database
+  DB_USER: postgres
+  BITCART_CRYPTOS: btc
+  BTC_NETWORK: mainnet
+  BTC_LIGHTNING: "false"
+  UPDATE_URL: https://api.bitcart.ai/updates/latest
+  BITCART_BACKEND_ROOTPATH: /api
+  BITCART_BACKEND_PLUGINS_DIR: /plugins/backend
+  BITCART_ADMIN_PLUGINS_DIR: /plugins/admin
+  BITCART_STORE_PLUGINS_DIR: /plugins/store
+  BITCART_DOCKER_PLUGINS_DIR: /plugins/docker
+  BITCART_HOST: ${PA_PUBLIC_HOST}
+  BITCART_ADMIN_HOST: ${PA_PUBLIC_HOST}
+  BITCART_ADMIN_ROOTPATH: /admin
+  BITCART_REVERSEPROXY: nginx
+  BITCART_HTTPS_ENABLED: "true"
+  FORWARDED_ALLOW_IPS: "*"
+  ONE_DOMAIN_MODE: "true"
+  # gunicorn defaults to 2 x host cores + 1 workers (17 here), which the
+  # container cannot hold; upstream's own knob.
+  BITCART_API_WORKERS: "2"
+
+services:
+  backend:
+    image: bitcart/bitcart:0.10.3.0
+    restart: unless-stopped
+    command: just prod-api-up
+    env_file: ../.panelalpha/bitcart/app.env
+    environment:
+      <<: *bitcart-env
+    volumes:
+      - bitcart_datadir:/datadir
+      - backup_datadir:/backups
+      - plugins:/plugins
+    depends_on:
+      database: {condition: service_healthy}
+      redis: {condition: service_started}
+      bitcoin: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/')"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 768m
+
+  worker:
+    image: bitcart/bitcart:0.10.3.0
+    restart: unless-stopped
+    command: just worker
+    env_file: ../.panelalpha/bitcart/app.env
+    environment:
+      <<: *bitcart-env
+    volumes:
+      - bitcart_datadir:/datadir
+      - backup_datadir:/backups
+      - plugins:/plugins
+    depends_on:
+      - backend
+    mem_limit: 384m
+
+  admin:
+    image: bitcart/bitcart-admin:0.10.3.0
+    restart: unless-stopped
+    command: yarn start
+    environment:
+      BITCART_ADMIN_LOG_FILE: bitcart.log
+      BITCART_ADMIN_API_URL: ${PA_PUBLIC_URL}/api
+      BITCART_ADMIN_SERVER_API_URL: http://backend:8000
+      BITCART_ADMIN_ROOTPATH: /admin
+      BITCART_STORE_HOST: ${PA_PUBLIC_HOST}
+      BITCART_STORE_ROOTPATH: /
+      ONE_DOMAIN_MODE: "true"
+    mem_limit: 384m
+
+  store:
+    image: bitcart/bitcart-store:0.10.3.0
+    restart: unless-stopped
+    command: yarn start
+    environment:
+      BITCART_STORE_API_URL: ${PA_PUBLIC_URL}/api
+      BITCART_STORE_SERVER_API_URL: http://backend:8000
+      BITCART_STORE_ROOTPATH: /
+      BITCART_ADMIN_HOST: ${PA_PUBLIC_HOST}/admin
+      BITCART_ADMIN_ROOTPATH: /admin
+      ONE_DOMAIN_MODE: "true"
+    mem_limit: 384m
+
+  bitcoin:
+    image: bitcart/bitcart-btc:0.10.3.0
+    restart: unless-stopped
+    environment:
+      BTC_NETWORK: mainnet
+      BTC_LIGHTNING: "false"
+      BTC_LIGHTNING_GOSSIP: "false"
+      BTC_DEBUG: "false"
+    volumes:
+      - bitcoin_datadir:/data
+    mem_limit: 512m
+
+  database:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    command: ["-c", "random_page_cost=1.0"]
+    env_file: ../.panelalpha/bitcart/db.env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: bitcart
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bitcart"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+    mem_limit: 256m
+
+  redis:
+    image: redis:8.2.2-alpine
+    restart: unless-stopped
+    mem_limit: 128m
+
+  router:
+    image: nginx:1.29.1-alpine
+    restart: unless-stopped
+    volumes:
+      - ./panelalpha-bitcart/router.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      backend: {condition: service_healthy}
+      admin: {condition: service_started}
+      store: {condition: service_started}
+    mem_limit: 64m
+
+volumes:
+  bitcart_datadir: {}
+  backup_datadir: {}
+  plugins: {}
+  bitcoin_datadir: {}
+  dbdata: {}

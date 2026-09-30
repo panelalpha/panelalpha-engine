@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Posterr is a digital poster wall for Plex/Jellyfin/Emby, Sonarr, Radarr and
+  Readarr (petersem/posterr, GPL-3.0): one Node/Express process on :3000 with
+  config/settings.json holding its settings password and every media-server
+  and *arr token.
+
+  == Why compose-replace from the published image ==
+
+  The repo's docker-compose.yml builds the source with a Brisbane TZ and
+  ~/docker bind mounts. This runs the image upstream publishes for the current
+  release, petersem/posterr:v1.21.18, with config/ and public/custom (custom
+  pictures) on named volumes.
+
+  == Security: why a proxy, and what stays public ==
+
+  Posterr's settings "login" is client-side only. GET /settings renders the
+  settings password and every Plex/*arr token into the HTML for anyone and
+  then redirects with JavaScript; POST /settings saves the whole config with
+  no check at all; /debug renders the settings too. Changing the password
+  alone therefore secures nothing. So the app publishes no port: `proxy`
+  (nginx-unprivileged) is the only thing on the account's port and asks for
+  HTTP Basic on every path except the poster wall a display screen loads
+  anonymously: `/`, `/getcards`, `/conncheck`, GET `/api/sleep` (sleep state
+  only; POST needs Basic) and GET on the static and cache directories (css,
+  js, images, favicons, webfonts, webfontkit, custom, imagecache, mp3cache,
+  randomthemes). That wall is public by design (lobby/home-cinema screen); it
+  shows what is playing, including the Plex user name unless "hide user" is
+  set in the settings. Everything else, unlisted paths included, needs Basic.
+
+  == What the recipe supplies ==
+
+  1. hooks/prepare.sh generates one 24-character password once into
+     ~/.panelalpha/posterr/ (admin-password, admin.env, auth/htpasswd for user
+     `admin`, credentials.txt; 0600 files in 0700 dirs, never regenerated)
+     and writes a docker-compose.override.yml running the proxy as the
+     account uid so it can read the htpasswd.
+  2. A one-shot `init` (the same image, node, files/panelalpha/posterr/
+     init.js) lets Posterr write its own default settings.json, then replaces
+     the README default `raidisnotabackup` with the generated password before
+     `app` starts. A password changed later in the UI is kept.
+  3. The proxy waits for the image's own HEALTHCHECK (GET / on :3000).
+
+  Posterr checks for updates at logz.nesretep.net on start (upstream, no
+  switch to turn it off).
+
+  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
+
+  Deploy 47s, rebuild 38s. Anonymous `/` -> 200 <title>Posterr; /settings,
+  /SETTINGS, /settings/, //settings, /css/%2e%2e/settings, /logon, /debug,
+  POST /settings, POST /logon, POST /api/sleep, /.env, /.git/config,
+  /config/settings.json, /package.json -> 401; Basic admin:raidisnotabackup
+  -> 401. With Basic, the app's own logon refuses raidisnotabackup ("Invalid
+  password") and accepts the generated one. Settings saved (slide duration,
+  Plex IP/token, title colour) and read back, intact after rebuild; init then
+  logs "already non-default; nothing to do". App 35 MiB, proxy 9 MiB.
+
+  Credentials: ~/.panelalpha/posterr/credentials.txt.

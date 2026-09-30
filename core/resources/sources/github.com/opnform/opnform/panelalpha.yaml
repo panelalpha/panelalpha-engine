@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OpnForm, a form builder (Laravel API with queue worker and scheduler, Nuxt
+  front end, PostgreSQL, Redis, nginx ingress). A plain deploy runs the
+  repository's docker-compose.yml, but the engine fills the api/.env and
+  client/.env it names from .env.example rather than upstream's .env.docker,
+  so the Nuxt client gets an empty API base, runs out of heap and never
+  answers (502). This recipe replaces the compose with upstream's own
+  services on the official images of the current release
+  (jhumanj/opnform-api and jhumanj/opnform-client 2.5.0), with the
+  .env.docker settings inlined and nginx addressing services by name.
+  APP_KEY, JWT_SECRET, the API/front shared secret and the database
+  password are generated once into ~/.panelalpha/opnform, as upstream's
+  setup-env.sh does; storage, PostgreSQL and Redis are on named volumes.
+  The first account is created in the app's own sign-up/setup, as upstream
+  ships it.

@@ -1,0 +1,47 @@
+# Compose-replace: the repository ships only Go source whose `//go:embed
+# all:dist` needs the frontend built first, so the `go` strategy fails. This
+# runs the official hub image of the current release:
+#   - /beszel_data (PocketBase SQLite, hub key pair) on a named volume
+#   - the first user and superuser are seeded from ~/.panelalpha/beszel/admin.env
+#     by the initial migration, so the anonymous "create account" form never opens
+#   - `ready` promotes that user to the admin role the UI first-run would give
+services:
+  app:
+    image: henrygd/beszel:0.20.0
+    restart: unless-stopped
+    env_file:
+      - .env
+      # Missing file aborts `up` rather than leaving the first-run form open.
+      - ../.panelalpha/beszel/admin.env
+    environment:
+      APP_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - data:/beszel_data
+    ports:
+      - "8090:8090"
+    # The image is FROM scratch (no shell or curl); the binary has its own probe.
+    healthcheck:
+      test: ["CMD", "/beszel", "health", "--url", "http://localhost:8090"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # Gate and one-shot: `compose up -d` returns only once the hub is healthy;
+  # then promote.sh gives the seeded first user the admin role.
+  ready:
+    image: curlimages/curl:8.22.0
+    restart: "no"
+    env_file:
+      - ../.panelalpha/beszel/admin.env
+    volumes:
+      - ./panelalpha/beszel:/pa:ro
+    entrypoint: ["/bin/sh", "/pa/promote.sh"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  data: {}

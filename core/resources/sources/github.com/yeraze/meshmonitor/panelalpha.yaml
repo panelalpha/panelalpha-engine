@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MeshMonitor is a web dashboard for Meshtastic/MeshCore mesh radio networks
+  (Node.js, SQLite in /data). The repository's compose runs the `latest` tag
+  in development mode, publishes the embedded MQTT broker, and the app creates
+  its first administrator with the hard-coded password `changeme`. This recipe
+  runs the published ghcr.io/yeraze/meshmonitor image of the current release,
+  4.16.1, in production mode behind the proxy (TRUST_PROXY=1, secure cookies,
+  ALLOWED_ORIGINS set to the site's address, SESSION_SECRET generated once),
+  with /data on a named volume that survives redeploys.
+
+  A one-shot `seed` service starts the server privately (no published port),
+  replaces `changeme` with the password in ~/.panelalpha/meshmonitor/admin.env
+  through the app's own login and change-password API, and fails the deploy
+  unless `changeme` is refused, all before the web app publishes its port. A
+  password changed later in the UI is detected read-only and left alone. Only
+  the web UI is published; the radio node connection is configured at runtime
+  in the UI and the app works (showing "disconnected") without one. Anonymous
+  visitors keep the app's default read-only dashboard/nodes view, which the
+  admin controls in the UI; there is no self-registration.

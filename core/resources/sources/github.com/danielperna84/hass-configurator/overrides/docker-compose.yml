@@ -1,0 +1,48 @@
+# The repository ships only a Dockerfile (pip install hass-configurator on
+# python:3-alpine, current Python) that starts with no login at all. This builds
+# that Dockerfile unchanged and supplies the login, standalone mode and a
+# persistent /config.
+services:
+  app:
+    build: .
+    image: panelalpha/hass-configurator:local
+    restart: unless-stopped
+    env_file:
+      # HC_USERNAME + HC_PASSWORD={sha256}...; a missing file aborts `up`.
+      - ../.panelalpha/hassconf/auth.env
+    environment:
+      HC_BASEPATH: /config
+      # Confines the file browser/reader to /config (writes and exec are not; see README).
+      HC_ENFORCE_BASEPATH: "true"
+      # No Home Assistant next to it: do not call 127.0.0.1:8123.
+      HC_HASS_API: "none"
+      # Behind the engine's proxy every client has the proxy's address, so a
+      # ban or an allow-list would apply to everyone at once.
+      HC_BANLIMIT: "0"
+      HC_DIRSFIRST: "true"
+    volumes:
+      - hassconf-config:/config
+    ports:
+      - "3218:3218"
+    healthcheck:
+      # Every route needs auth (401), so probe the socket.
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 3218), 2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+    mem_limit: 256m
+
+  # `up -d` runs without --wait (engine#204); this blocks it until the app listens.
+  ready:
+    # The Dockerfile's own base, already present after the build.
+    image: python:3-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  hassconf-config: {}

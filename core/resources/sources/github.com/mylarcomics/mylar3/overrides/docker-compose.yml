@@ -1,0 +1,49 @@
+# Compose-replace: the repository's Dockerfile pins Alpine 3.11 package
+# revisions that no longer exist and clones an old tag instead of the checkout.
+# This runs the LinuxServer.io image of the current release instead:
+#   - linuxserver/mylar3 pinned to v0.11.0 (built from MylarComics/mylar3)
+#   - /config (config.ini, mylar.db, logs, cache) and /comics on named volumes
+#   - form login + API key seeded into config.ini on the first boot from
+#     ~/.panelalpha/mylar, so the UI and API are never open to the internet
+#   - only the app publishes a port
+services:
+  mylar:
+    image: linuxserver/mylar3:v0.11.0-ls273
+    restart: unless-stopped
+    # Seeds config.ini when the volume has none, then execs the image's /init.
+    entrypoint: ["/bin/bash", "/panelalpha/entrypoint.sh"]
+    env_file:
+      # Account env first, then the seeded secrets (PUID/PGID, login, API key).
+      - .env
+      - ../.panelalpha/mylar/app.env
+    environment:
+      TZ: "UTC"
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      - config:/config
+      # Comic library root (config.ini destination_dir).
+      - comics:/comics
+    ports:
+      - "8090:8090"
+    healthcheck:
+      # The login page is the one unauthenticated HTML page.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8090/auth/login || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 60s
+    mem_limit: 768m
+
+  # No-op gate: `compose up` returns only once Mylar answers.
+  ready:
+    image: linuxserver/mylar3:v0.11.0-ls273
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      mylar:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  config: {}
+  comics: {}

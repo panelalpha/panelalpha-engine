@@ -1,0 +1,9 @@
+# Compose-replace: the repository's Dockerfile no longer builds (see
+# panelalpha.yaml). This serves upstream's image of the current release.
+services:
+  app:
+    image: corentinth/it-tools:2024.10.22-7ca5933
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    mem_limit: 64m

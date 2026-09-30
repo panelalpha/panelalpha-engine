@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Keygen CE, a software licensing and distribution API (Rails, no web UI):
+  the released keygen/api image (web on :3000 + Sidekiq worker) with
+  PostgreSQL and Redis. The repository's compose.yaml expects a hand-written
+  .env, a manual interactive `setup` run and its own Caddy, so the plain deploy
+  crash-loops (web/worker: "undefined method 'downcase' for nil" on the unset
+  KEYGEN_EDITION/MODE, caddy: "unrecognized global option: tls").
+
+  This recipe is upstream's compose without Caddy: the image is pinned to
+  v1.7.2 (the current release), KEYGEN_HOST is the site's host, and the Rails
+  and encryption secrets, the PostgreSQL password and the account ID are
+  generated once into ~/.panelalpha/keygen by hooks/prepare.sh. Keygen does not
+  boot without its single account, which upstream's `rails keygen:setup`
+  creates from KEYGEN_ADMIN_EMAIL and KEYGEN_ADMIN_PASSWORD: those two are the
+  customer's project env vars, and a one-shot check fails the deploy naming
+  whichever is missing. A setup service runs keygen:setup on the first deploy
+  and only db:migrate afterwards. A gate waits for /v1/health.

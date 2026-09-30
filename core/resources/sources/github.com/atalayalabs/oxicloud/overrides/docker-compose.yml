@@ -1,0 +1,62 @@
+# Compose-replace: the repo's compose also declares a `build:` whose LTO
+# release build runs out of memory; this runs the published release image.
+services:
+  postgres:
+    image: postgres:18.2-alpine3.23
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/oxicloud/secrets.env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: oxicloud
+    volumes:
+      - pg_data:/var/lib/postgresql/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 512m
+
+  oxicloud:
+    image: diocrafts/oxicloud:0.9.2
+    restart: unless-stopped
+    # Project env vars first; the generated connection string wins over example.env's.
+    env_file:
+      - .env
+      - ../.panelalpha/oxicloud/secrets.env
+    environment:
+      OXICLOUD_BASE_URL: ${PA_PUBLIC_URL}
+      OXICLOUD_SERVER_HOST: 0.0.0.0
+      OXICLOUD_SERVER_PORT: "8086"
+      OXICLOUD_STORAGE_PATH: /app/storage
+      OXICLOUD_STATIC_PATH: /app/static
+      MIMALLOC_PURGE_DELAY: "0"
+    volumes:
+      - storage_data:/app/storage
+    ports:
+      - "8086:8086"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8086/ready || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 1g
+
+  # No-op: `compose up -d` returns once OxiCloud answers /ready.
+  ready:
+    image: postgres:18.2-alpine3.23
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      oxicloud:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pg_data: {}
+  storage_data: {}

@@ -1,0 +1,63 @@
+# The repository's Dockerfile builds the image from source (~7 minutes) and
+# its sample compose publishes 150 radio ports and mounts docker.sock for the
+# updater. This runs the official image of the current release, web port only.
+services:
+  app:
+    image: ghcr.io/azuracast/azuracast:0.23.8
+    restart: unless-stopped
+    # MYSQL_PASSWORD and MYSQL_RANDOM_ROOT_PASSWORD for the bundled MariaDB,
+    # generated once by hooks/prepare.sh.
+    env_file:
+      - ../.panelalpha/azuracast/app.env
+    environment:
+      APPLICATION_ENV: production
+      # The in-container web updater needs the host's docker.sock.
+      ENABLE_WEB_UPDATER: "false"
+    volumes:
+      - station_data:/var/azuracast/stations
+      - backups:/var/azuracast/backups
+      - db_data:/var/lib/mysql
+      - www_uploads:/var/azuracast/storage/uploads
+      - shoutcast2_install:/var/azuracast/storage/shoutcast2
+      - stereo_tool_install:/var/azuracast/storage/stereo_tool
+      - rsas_install:/var/azuracast/storage/rsas
+      - geolite_install:/var/azuracast/storage/geoip
+      - sftpgo_data:/var/azuracast/storage/sftpgo
+      - acme:/var/azuracast/storage/acme
+    # Web UI, API and the radio streams (proxied under /listen/); the
+    # Icecast/DJ ports themselves are not published.
+    ports:
+      - "8080:80"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:80/api/status"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+    mem_limit: 2000m
+
+  # No-op gate: `compose up -d` returns only once the site answers.
+  ready:
+    image: ghcr.io/azuracast/azuracast:0.23.8
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  station_data: {}
+  backups: {}
+  db_data: {}
+  www_uploads: {}
+  shoutcast2_install: {}
+  stereo_tool_install: {}
+  rsas_install: {}
+  geolite_install: {}
+  sftpgo_data: {}
+  acme: {}

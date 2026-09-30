@@ -1,0 +1,254 @@
+# Compose-replace: upstream's docker/docker-compose.yml of release 6.0.1 with
+# images pinned, secrets from ~/.panelalpha/formbricks and ./docker/ paths.
+x-formbricks-env: &formbricks-env
+  WEBAPP_URL: ${PA_PUBLIC_URL}
+  NEXTAUTH_URL: ${PA_PUBLIC_URL}
+  REDIS_URL: redis://redis:6379
+  HUB_API_URL: http://hub:8080
+  CUBEJS_API_URL: http://cube:4000
+  CUBEJS_JWT_ISSUER: formbricks-web
+  CUBEJS_JWT_AUDIENCE: formbricks-cube
+  EMAIL_VERIFICATION_DISABLED: "1"
+  PASSWORD_RESET_DISABLED: "1"
+  AUTHZED_ENABLED: "true"
+  AUTHZED_ENDPOINT: spicedb:50051
+  AUTHZED_SYSTEM_KEY: formbricks
+  AUTHZED_INSECURE: "true"
+  AUTHZED_CONSISTENCY: fully_consistent
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/formbricks/db.env
+    environment:
+      POSTGRES_DB: formbricks
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    mem_limit: 384m
+
+  authzed-db-bootstrap:
+    image: pgvector/pgvector:pg18
+    restart: "no"
+    entrypoint: ["/bin/sh", "/usr/local/bin/authzed-postgres-bootstrap.sh"]
+    env_file:
+      - ../.panelalpha/formbricks/authzed.env
+    environment:
+      AUTHZED_DATABASE_NAME: spicedb
+      AUTHZED_DATABASE_USERNAME: spicedb
+    volumes:
+      - ./docker/authzed-postgres-bootstrap.sh:/usr/local/bin/authzed-postgres-bootstrap.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 128m
+
+  spicedb-migrate:
+    image: authzed/spicedb:v1.52.0
+    restart: "no"
+    command: datastore migrate head
+    env_file:
+      - ../.panelalpha/formbricks/authzed.env
+    environment:
+      SPICEDB_DATASTORE_ENGINE: postgres
+    depends_on:
+      authzed-db-bootstrap:
+        condition: service_completed_successfully
+    mem_limit: 256m
+
+  spicedb:
+    image: authzed/spicedb:v1.52.0
+    restart: unless-stopped
+    command: serve
+    env_file:
+      - ../.panelalpha/formbricks/authzed.env
+    environment:
+      SPICEDB_DATASTORE_ENGINE: postgres
+      SPICEDB_LOG_FORMAT: json
+      SPICEDB_LOG_LEVEL: info
+      SPICEDB_TELEMETRY_ENDPOINT: ""
+    depends_on:
+      spicedb-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=localhost:50051"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: 384m
+
+  redis:
+    # The digest upstream pins.
+    image: valkey/valkey@sha256:e0eb7c480958d32bdc4357a74bdd70653ae15f2f9b4c93c4a5a9fad1dc471c84
+    restart: unless-stopped
+    command: valkey-server --appendonly yes --maxmemory-policy noeviction
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    mem_limit: 128m
+
+  # Prisma migrations before Hub writes tables to the shared database.
+  formbricks-migrate:
+    image: ghcr.io/formbricks/formbricks:6.0.1
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - node /home/nextjs/validate-env.mjs && timeout 300 node packages/database/dist/scripts/apply-migrations.js
+    env_file:
+      - .env
+      - ../.panelalpha/formbricks/app.env
+    environment: *formbricks-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 512m
+
+  formbricks:
+    image: ghcr.io/formbricks/formbricks:6.0.1
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+      - ../.panelalpha/formbricks/app.env
+    environment:
+      <<: *formbricks-env
+      SKIP_STARTUP_MIGRATION: "true"
+    depends_on:
+      formbricks-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      cube:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1152m
+
+  # Prepares a fresh authorization datastore (idempotent), as upstream.
+  authzed-initialize:
+    image: ghcr.io/formbricks/formbricks:6.0.1
+    restart: "no"
+    entrypoint: ["formbricks-authzed"]
+    command: ["upgrade", "prepare"]
+    env_file:
+      - ../.panelalpha/formbricks/app.env
+    environment:
+      # Upstream's inert placeholders for the shared env validator.
+      ENCRYPTION_KEY: authzed-initialize-unused
+      CUBEJS_API_SECRET: authzed-initialize-unused
+      CUBEJS_API_URL: http://localhost
+      HUB_API_KEY: authzed-initialize-unused
+      HUB_API_URL: http://localhost
+      REDIS_URL: redis://localhost
+      LOG_LEVEL: fatal
+      AUTHZED_ENABLED: "true"
+      AUTHZED_ENDPOINT: spicedb:50051
+      AUTHZED_SYSTEM_KEY: formbricks
+      AUTHZED_INSECURE: "true"
+      AUTHZED_CONSISTENCY: fully_consistent
+    depends_on:
+      formbricks-migrate:
+        condition: service_completed_successfully
+      spicedb:
+        condition: service_healthy
+    mem_limit: 384m
+
+  hub-migrate:
+    image: ghcr.io/formbricks/hub:0.8.7
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - /usr/local/bin/goose -dir /app/migrations postgres "$$DATABASE_URL" up && /usr/local/bin/river migrate-up --database-url "$$DATABASE_URL"
+    env_file:
+      - ../.panelalpha/formbricks/hub.env
+    depends_on:
+      formbricks-migrate:
+        condition: service_completed_successfully
+    mem_limit: 128m
+
+  hub:
+    image: ghcr.io/formbricks/hub:0.8.7
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/formbricks/hub.env
+    depends_on:
+      hub-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    mem_limit: 192m
+
+  cube:
+    image: cubejs/cube:v1.6.6
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        if [ -z "$$CUBEJS_API_SECRET" ]; then
+          echo "CUBEJS_API_SECRET is required for Cube JWT authentication" >&2
+          exit 1
+        fi
+        exec cubejs server
+    env_file:
+      - ../.panelalpha/formbricks/cube.env
+    environment:
+      CUBEJS_DB_TYPE: postgres
+      CUBEJS_DB_HOST: postgres
+      CUBEJS_DB_NAME: formbricks
+      CUBEJS_DB_USER: postgres
+      CUBEJS_DB_PORT: "5432"
+      CUBEJS_JWT_ISSUER: formbricks-web
+      CUBEJS_JWT_AUDIENCE: formbricks-cube
+      CUBEJS_DEFAULT_API_SCOPES: meta,data
+      CUBEJS_EXTERNAL_DEFAULT: "false"
+      CUBEJS_CACHE_AND_QUEUE_DRIVER: memory
+    volumes:
+      - ./docker/cube/cube.js:/cube/conf/cube.js:ro
+      - ./docker/cube/schema:/cube/conf/model:ro
+    depends_on:
+      hub-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/readyz', (res) => { res.resume(); process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1));"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    mem_limit: 384m
+
+  # No-op: `compose up -d` returns once Formbricks answers /health.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      formbricks:
+        condition: service_healthy
+      authzed-initialize:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  postgres: {}
+  redis: {}

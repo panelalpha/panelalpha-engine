@@ -1,0 +1,35 @@
+# Compose-replace: master is unreleased and its npm postinstall needs composer
+# in the frontend build; run the image upstream's docs link, at release 2.19.
+services:
+  app:
+    image: rsprta/selfoss:2.19
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    environment:
+      # Feeds are fetched by the image's own cron service.
+      CRON_PERIOD: 15m
+      LOG_TO_STDOUT: "true"
+    volumes:
+      # config.ini, the SQLite database, favicons, thumbnails, logs.
+      - selfoss-data:/selfoss/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8888/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op: `compose up -d` returns once selfoss answers on :8888.
+  ready:
+    image: rsprta/selfoss:2.19
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  selfoss-data: {}

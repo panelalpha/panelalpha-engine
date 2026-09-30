@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  CookCLI, the Cooklang command-line tool whose `cook server` is a web UI to
+  browse, edit and scale recipes and build shopping lists (Rust, port 9080).
+  The repository's docker-compose.yml runs ghcr.io/cooklang/cookcli:latest
+  with recipes bind-mounted from ./recipes, a directory the checkout does not
+  have: Docker creates it root-owned, the image's entrypoint refuses to start
+  ("/recipes directory is not writable by user 1000:1000"), and ~/project is
+  wiped on every deploy anyway.
+
+  This recipe runs the release image ghcr.io/cooklang/cookcli:0.37.0 with the
+  recipes on a named volume (first created from the image's seed recipes, so
+  it is owned by the container user) and COOK_CORS_ORIGIN set to the site
+  address, which upstream's compose says is needed for pages reached by a
+  domain to save. Everything else is upstream's default, including no sign-in.

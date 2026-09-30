@@ -1,0 +1,47 @@
+# Compose-replace: the repository is calibre's source tree, whose setup.py is
+# a build driver pip cannot install. This runs the content server (calibre's
+# own web server) from linuxserver/calibre, which packages the current
+# release; its desktop GUI (KasmVNC) is not started.
+services:
+  app:
+    image: linuxserver/calibre:9.15.0
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    # An empty library is created on first start (calibredb opens/creates
+    # metadata.db); after that the server just reopens it.
+    command:
+      - >-
+        /opt/calibre/calibredb --with-library=/library list >/dev/null &&
+        exec /opt/calibre/calibre-server --listen-on=0.0.0.0 --port=8080 /library
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOME: /config
+      TZ: Etc/UTC
+    volumes:
+      - library:/library
+      - config:/config
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns once the content server answers.
+  ready:
+    image: linuxserver/calibre:9.15.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  library: {}
+  config: {}

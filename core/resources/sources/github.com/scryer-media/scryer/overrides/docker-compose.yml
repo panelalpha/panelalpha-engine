@@ -1,0 +1,39 @@
+# Compose-replace: the repo's Dockerfile packages CI-built binaries, and a plain
+# cargo build lacks generated files. Runs the published image of the current release.
+services:
+  app:
+    image: ghcr.io/scryer-media/scryer:0.21.11
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SCRYER_BIND: 0.0.0.0:8080
+      SCRYER_DB_PATH: /config/scryer.db
+      TZ: Etc/UTC
+      # Upstream default: auth off, public clients get 403. Upstream's recovery
+      # switch (project env var) turns login on so the owner can get in.
+      SCRYER_RECOVERY_ADMIN_PASSWORD: ${SCRYER_RECOVERY_ADMIN_PASSWORD:-}
+    volumes:
+      # Database, settings and the generated encryption key.
+      - scryer-config:/config
+    healthcheck:
+      # /health/ready is 500 when bootstrap failed; / still serves an error page.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns once Scryer answers.
+  ready:
+    image: ghcr.io/scryer-media/scryer:0.21.11
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  scryer-config: {}

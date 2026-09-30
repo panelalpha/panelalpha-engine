@@ -1,0 +1,37 @@
+# The repository has no root compose file (only test stacks under compose/).
+# This runs Amgix One, the all-in-one image of the current release (API,
+# encoders, RabbitMQ and Qdrant under supervisord), as the README's
+# `docker run -p 8234:8234 -v <path>:/data amgixio/amgix-one:1`.
+services:
+  app:
+    image: docker.io/amgixio/amgix-one:v1.6.6
+    restart: unless-stopped
+    environment:
+      # Optional API keys (upstream: auth is off when none is set).
+      AMGIX_API_KEY: ${AMGIX_API_KEY:-}
+      AMGIX_READ_KEY: ${AMGIX_READ_KEY:-}
+      AMGIX_SEARCH_KEY: ${AMGIX_SEARCH_KEY:-}
+    volumes:
+      # Qdrant, RabbitMQ and the Hugging Face model cache.
+      - data:/data
+    ports:
+      - "8234:8234"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8234/v1/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  # No-op gate: `compose up -d` returns only once the API reports ready.
+  ready:
+    image: docker.io/amgixio/amgix-one:v1.6.6
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

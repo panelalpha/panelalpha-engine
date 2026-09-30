@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SonarQube Community Build, the static-analysis server: a JVM web server,
+  compute engine and embedded Elasticsearch on port 9000, with PostgreSQL as
+  its database.
+
+  The repository is the Gradle source tree with no Dockerfile or compose file;
+  a plain deploy builds it with Gradle and nothing ever listens. This recipe
+  runs upstream's published image of the current release,
+  sonarqube:26.9.0.129388-community, with postgres:17-alpine. The database
+  password is generated per account by the engine (SONAR_DB_PASSWORD) and
+  kept across redeploys. Data, extensions and logs are on named volumes, and
+  the Elasticsearch ulimits are upstream's documented values. A `ready` gate
+  makes the deploy finish only once /api/system/status reports UP.
+
+  First run is upstream's: the default admin / admin login, which SonarQube
+  asks to change on first sign-in, is left as shipped.

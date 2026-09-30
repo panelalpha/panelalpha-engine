@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  UpSnap, a Wake-on-LAN dashboard (Go + PocketBase, SvelteKit UI embedded in
+  the binary). Upstream's docker-compose.yml runs the image with
+  `network_mode: host` and publishes no port, so the plain deploy came up
+  healthy but the engine had no port to proxy and the domain answered 502;
+  its ./data bind mount also lived in ~/project, which every deploy wipes.
+  This recipe runs the same release image, ghcr.io/seriousm4x/upsnap at the
+  current release (5.7.2), on the account's bridge network with :8090
+  published, Docker's default capabilities (they include NET_RAW, which
+  upstream adds after cap_drop ALL; the engine strips cap_add but keeps
+  cap_drop, so the upstream pair would leave none, engine#349) and the
+  PocketBase data directory (/app/pb_data) on a named volume. The first
+  visit shows UpSnap's own welcome page, which creates the first admin, as
+  upstream ships it. Wake-on-LAN magic packets and the network scan only
+  reach the account's own container network, not the customer's LAN.
+
+  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
+
+  Create: deployment_status success, health port 8090 ok. / is
+  <title>UpSnap</title> (4135 B) with its _app JS chunks answering 200;
+  /api/health 200 "API is healthy."; settings_public shows
+  setup_completed=false (welcome page). Rebuild: success, same page, the
+  settings record id unchanged (volume kept). /.env and /.git/config return
+  the SPA index, not a file. Without the cap pair the container keeps NET_RAW
+  (CapEff a80425fb) and ping works from inside it.

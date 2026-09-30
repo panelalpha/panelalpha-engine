@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tiny File Manager is a single-file PHP web file manager (no database). The
+  repository's compose builds a PHP 7.4 (end of life) image that serves the
+  file with `php -S`, bind-mounts a ./config.php that does not exist, and puts
+  the managed files at /var/www/html/data, inside the web root, where an
+  uploaded .php would be executed. overrides/docker-compose.yml instead runs
+  the official php:8.3-apache-bookworm image with tinyfilemanager.php mounted
+  read-only as index.php, on :8080.
+
+  Security: upstream hardcodes admin/admin@123 and user/12345 in
+  $auth_users. The file includes a config.php next to it that overrides its
+  settings, so upstream source is not touched: files/panelalpha/tinyfm/config.php,
+  mounted read-only, sets $auth_users to a single `admin` whose bcrypt hash
+  is read from /etc/tinyfm/admin.hash, and answers 503 without authenticating
+  anyone if that hash is missing (an empty $auth_users would switch
+  authentication off). $readonly_users is empty and the `user` account is gone.
+  hooks/prepare.sh generates the password once into
+  ~/.panelalpha/tinyfm/admin.env (0600 in 0700) and hashes it on every deploy
+  into ~/project/panelalpha/tinyfm/admin.hash, the only file the container
+  sees; to change the password, edit admin.env and redeploy.
+
+  $root_path is /srv/files, the `files` named volume, which is outside the
+  Apache document root: nothing there has a URL, so an uploaded .php is never
+  executed and files are only reachable through the logged-in app (view,
+  download). The app's "direct link" icons therefore 404. Apache denies
+  config.php and indexes (files/panelalpha/tinyfm/apache.conf). Because
+  config.php is read-only, the Settings page (language, theme) does not
+  persist. The official image has no zip extension, so zip/unzip actions are
+  unavailable; tar works. A `ready` service gates on the login page.
+
+  Measured on mariusz2.panelalpha.tools (2026-09-28, engine 705f250a,
+  memory_limit 1200): deploy 47s, rebuild 27s, app 17 MiB. admin/admin@123,
+  user/12345 and a wrong password: "Login failed"; the generated admin logs
+  in. Uploaded a .txt and a .php, listed and downloaded both byte-for-byte;
+  GET /pa-shell.php, /data/..., /srv/files/... 404, /config.php and
+  /.htaccess 403, /.env, /.git/config, /tinyfilemanager.php 404. After
+  rebuild the same password logged in and the files were intact. Uploads
+  must be tested against the engine host: the *.panelalpha.online test edge
+  stalls multipart POSTs (panelalpha/engine#170).

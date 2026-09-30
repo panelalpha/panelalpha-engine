@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LibreNMS is a network monitoring system (SNMP discovery, polling, alerting,
+  graphs). The repository is its PHP source: the plain deploy runs it as a
+  generic Laravel app, and the container restart-loops on LibreNMS's own guard,
+  "artisan must be run as the user librenms".
+
+  This recipe runs upstream's official image of the current release,
+  librenms/librenms:26.9.1.1, the way github.com/librenms/docker's example
+  compose does: the web UI on :8000, a dispatcher sidecar polling the devices,
+  MariaDB 10.11 and Redis for cache and sessions. The database passwords are
+  generated once into ~/.panelalpha/librenms/ by hooks/prepare.sh; /data
+  (APP_KEY, RRD graphs, logs) and the database are named volumes that survive
+  redeploys. The image's own first-run wizard (create the admin user) is left
+  as upstream ships it; the image offers it only while the database is empty,
+  so after a redeploy with no user yet, add one with
+  `lnms user:add --role=admin <name>` in the app container. The syslog-ng and
+  snmptrapd sidecars are left out:
+  they need inbound UDP 514/162, which an account does not receive.

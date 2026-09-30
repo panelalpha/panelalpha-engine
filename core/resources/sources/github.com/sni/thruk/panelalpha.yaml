@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Thruk is a monitoring web interface for Naemon, Nagios, Icinga and Shinken.
+  The repository is Thruk's Perl source with no deployable manifest, so the
+  plain deploy fell back to the engine placeholder. Thruk's own install docs
+  name OMD as the recommended way to install it; this recipe runs OMD-Labs
+  (consol/omd-labs-debian:v5.70, which ships the current Thruk 3.28 as its
+  default GUI and Naemon as the monitoring backend) with the site's etc, var
+  and local on named volumes, so monitoring config, state and the login
+  survive redeploys.
+
+  TLS ends at the engine's proxy, so the image's Ansible drop-in
+  (files/panelalpha-omd.yml, run by the image before the site starts) switches
+  the site apache from "ssl" to "own" mode (ssl mode redirects every plain
+  http request to https, a loop behind the proxy) and turns on the / -> /demo/
+  redirect. Thruk is at /demo/thruk/ with the image's default login
+  (omdadmin / omd); the login page answers 401 until a user logs in, which the
+  health check expects.

@@ -1,0 +1,48 @@
+# Compose-replace: upstream's compose is a dev environment (bind-mounted source,
+# Vite dev server, `node --watch`). This builds the repo's own Dockerfile-Dev,
+# which already runs the client build and `gulp build:prod`, and starts the
+# transpiled server as the Procfile does.
+services:
+  server:
+    build:
+      context: .
+      dockerfile: ./Dockerfile-Dev
+    restart: unless-stopped
+    # As the Procfile; config.json (from hooks/prepare.sh) is overridden by env below.
+    command: ["node", "./website/transpiled-babel/index.js"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    env_file:
+      # SESSION_SECRET and SESSION_SECRET_KEY, generated once by hooks/prepare.sh.
+      - ../.panelalpha/habitica/secrets.env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      BASE_URL: ${PA_PUBLIC_URL}
+      TRUSTED_DOMAINS: ${PA_PUBLIC_URL}
+      NODE_DB_URI: mongodb://mongo:27017/habitica?replicaSet=rs&directConnection=true
+      WEB_CONCURRENCY: "1"
+      ENABLE_CONSOLE_LOGS_IN_PROD: "true"
+      # The example config points logs at a placeholder Loggly account.
+      LOGGLY_TOKEN: ""
+      LOGGLY_SUBDOMAIN: ""
+
+  mongo:
+    image: mongo:7.0
+    restart: unless-stopped
+    hostname: mongodb
+    entrypoint: ["/usr/bin/mongod", "--bind_ip_all", "--replSet", "rs"]
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # Upstream's check; initiates the single-member replica set on first boot.
+      test: echo "try { rs.status() } catch (err) { rs.initiate() }" | mongosh --port 27017 --quiet
+      interval: 10s
+      timeout: 30s
+      retries: 30
+
+volumes:
+  mongo-data: {}

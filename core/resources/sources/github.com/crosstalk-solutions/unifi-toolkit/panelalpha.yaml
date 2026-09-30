@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  UniFi Toolkit (UI Toolkit) is a FastAPI dashboard of UniFi network tools
+  (Wi-Fi Stalker, Threat Watch, Network Pulse, House Arrest) on :8000, with a
+  SQLite database in /app/data.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repository's compose bind-mounts ./data
+  and ./.env; Docker creates ./data as root while the image runs as uid 1000,
+  so the app stops with "Data directory is not writable!" and restarts
+  forever. This recipe runs the published
+  ghcr.io/crosstalk-solutions/unifi-toolkit image of the current release
+  (1.11.3), keeps /app/data on a named volume (created with the image's
+  ownership), and sets DOMAIN to the site's host name so the app's
+  anti-DNS-rebinding check accepts the public address.
+
+  hooks/prepare.sh generates the Fernet ENCRYPTION_KEY once into
+  ~/.panelalpha/unifi-toolkit/app.env: it encrypts the stored controller
+  credentials, so it must survive a redeploy. DEPLOYMENT_TYPE stays at
+  upstream's default "local" (no login); set DEPLOYMENT_TYPE=production plus
+  AUTH_USERNAME / AUTH_PASSWORD_HASH to enable the app's own login. The UniFi
+  controller is configured in the app's settings page or through the
+  UNIFI_* variables.

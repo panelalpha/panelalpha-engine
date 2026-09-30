@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  pgAdmin 4, the web administration tool for PostgreSQL. The repository's
+  Dockerfile builds the JS bundle with webpack, which ran out of memory in a
+  2000 MB account (and earlier hit the Sysbox /proc/tty/driver limit), so this
+  recipe runs the official dpage/pgadmin4 image of the current release (9.18)
+  on port 8080 with /var/lib/pgadmin on a named volume. The image needs
+  PGADMIN_DEFAULT_EMAIL and PGADMIN_DEFAULT_PASSWORD (the initial admin login)
+  from the project env vars; a one-shot check fails the deploy naming whichever
+  is missing.

@@ -1,0 +1,64 @@
+# The repo is an sbt build with no container setup and the gitbucket/gitbucket
+# image stops at 4.38.4, so this runs the release WAR on the official JRE image.
+x-gitbucket: &release
+  GITBUCKET_VERSION: "4.48.0"
+  GITBUCKET_WAR_SHA256: bbd08775a5a19d51a4358f481fb16eceecb992b2b0c83bfac414e54717310359
+
+services:
+  # Downloads the release WAR once per version into the war volume.
+  fetch:
+    image: eclipse-temurin:21-jre
+    restart: "no"
+    environment: *release
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        war="/opt/gitbucket/gitbucket-$$GITBUCKET_VERSION.war"
+        if [ ! -s "$$war" ]; then
+          curl -fsSL -o "$$war.part" "https://github.com/gitbucket/gitbucket/releases/download/$$GITBUCKET_VERSION/gitbucket.war"
+          echo "$$GITBUCKET_WAR_SHA256  $$war.part" | sha256sum -c -
+          mv "$$war.part" "$$war"
+        fi
+        echo "gitbucket: $$war ready"
+    volumes:
+      - war:/opt/gitbucket
+    mem_limit: 128m
+
+  app:
+    image: eclipse-temurin:21-jre
+    restart: unless-stopped
+    environment:
+      <<: *release
+      GITBUCKET_HOME: /gitbucket
+    entrypoint: ["/bin/sh", "-c", "exec java -Xmx768m -jar /opt/gitbucket/gitbucket-$$GITBUCKET_VERSION.war --port=8080"]
+    volumes:
+      - war:/opt/gitbucket:ro
+      # Repositories, the H2 database and settings.
+      - data:/gitbucket
+    ports:
+      - "8080:8080"
+    depends_on:
+      fetch:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once GitBucket answers.
+  ready:
+    image: eclipse-temurin:21-jre
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  war: {}
+  data: {}

@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  NzbDAV streams Usenet releases as a WebDAV share and offers a
+  SABnzbd-compatible API for Sonarr/Radarr: one image running the .NET backend
+  on :8080 inside the container and the React Router frontend on :3000, which
+  proxies the API and every WebDAV path to the backend. State (accounts,
+  settings, queue/history, SQLite) lives in /config. The repository ships no
+  compose file, only a Dockerfile that builds both halves from source; this
+  recipe replaces that with the published image of the current release 0.6.4
+  and /config on a named volume. A stable SESSION_KEY for the UI session
+  cookie is generated once into ~/.panelalpha/nzbdav/app.env.
+
+  First run is left as upstream ships it: until an admin exists every page
+  redirects to /onboarding ("Register your admin account"), and the first
+  visitor creates it. The WebDAV share has no password until one is saved in
+  Settings > WebDAV, and until then it answers 401 to every request. Usenet
+  providers, the SABnzbd API key and *arr connections are set in the UI.

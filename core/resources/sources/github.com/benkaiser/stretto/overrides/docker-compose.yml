@@ -1,0 +1,75 @@
+# The repo compose is a dev setup (nodemon/webpack --watch, unpinned mongo).
+# Build the repo's Dockerfile.local (dependencies only) and run the checkout
+# on top of it the way `npm start` does.
+services:
+  # Builds the repo's Dockerfile.local into the image the app runs; exits.
+  deps:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    image: stretto-deps:local
+    restart: "no"
+    command: ["true"]
+    mem_limit: 64m
+
+  app:
+    image: stretto-deps:local
+    pull_policy: never
+    restart: unless-stopped
+    # Checkout under /app/src; the image's /app/node_modules is linked in
+    # (the SCSS imports ../../node_modules). Then what `npm start` runs.
+    working_dir: /app/src
+    command: ["sh", "-c", "ln -sfn /app/node_modules node_modules && node node_modules/webpack/bin/webpack.js && exec node --harmony index.js"]
+    environment:
+      PORT: "3000"
+      MONGO_URL: mongodb://mongo:27017/stretto
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+      SOUNDCLOUD_CLIENT_ID: ${SOUNDCLOUD_CLIENT_ID:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      YOUTUBE_REDIRECT_ENDPOINT: ${YOUTUBE_REDIRECT_ENDPOINT:-}
+      SOUNDCLOUD_REDIRECT_ENDPOINT: ${SOUNDCLOUD_REDIRECT_ENDPOINT:-}
+    volumes:
+      - .:/app/src
+    ports:
+      - "3000:3000"
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1536m
+
+  mongo:
+    # 8.x refuses to start on kernel 6.19+ (SERVER-121912).
+    image: mongo:7.0
+    restart: unless-stopped
+    command: ["mongod", "--wiredTigerCacheSizeGB", "0.25"]
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the player answers.
+  ready:
+    image: mongo:7.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  mongo_data: {}

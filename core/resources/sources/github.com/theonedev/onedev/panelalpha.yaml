@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OneDev, the all-in-one Git server with CI/CD, issues and code search (Java),
+  web UI on port 6610.
+
+  The repository root is the Maven source tree, whose build needs the absent
+  server-ee module, so a plain deploy fails. This recipe follows upstream's
+  own server-product/docker/docker-compose.yaml: the published image of the
+  current release, 1dev/server:16.7.3, with PostgreSQL (postgres:17-alpine)
+  through OneDev's hibernate_* variables. The database password is generated
+  per account by the engine (ONEDEV_DB_PASSWORD) and kept across redeploys;
+  /opt/onedev (repositories, attachments, index) is a named volume. The host
+  docker.sock mount upstream uses for its server-docker CI executor is left
+  out, and the SSH port 6611 is not published: clone and push work over
+  HTTPS. A `ready` gate makes the deploy finish only once OneDev answers.
+
+  First run is upstream's: the first visitor creates the administrator
+  account on OneDev's own server setup page.

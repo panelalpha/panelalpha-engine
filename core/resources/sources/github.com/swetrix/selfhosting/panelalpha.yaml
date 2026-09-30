@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Swetrix Community Edition, privacy-focused web analytics: the published
+  swetrix/swetrix-fe and swetrix/swetrix-api images (v5.4.1, the current
+  release) with ClickHouse 25.8 and Redis behind upstream's nginx.
+
+  The repository is upstream's own deployment (compose.yaml), but it expects
+  a .env written by the interactive configure.sh; the plain deploy failed.
+  This recipe is upstream's compose.yaml with these changes:
+  hooks/prepare.sh generates SECRET_KEY_BASE and the ClickHouse password
+  once into ~/.panelalpha/swetrix (0600 files in 0700), as configure.sh
+  would; BASE_URL is the site's address; nginx-proxy is published on 8080
+  and routes / and /backend/ exactly as upstream's nginx/config does. The
+  API's CLIENT_IP_HEADER is x-real-ip, which nginx derives from the last
+  X-Forwarded-For hop the engine's proxy added (files/panelalpha/realip.conf),
+  because the API otherwise takes the spoofable left-most entry for its login
+  rate limits. Fixed container names are dropped and memory limits set.
+  ClickHouse data is a named volume. A `ready` gate makes the deploy finish
+  only once the front end and the API report healthy. About 800 MB resident
+  in total.
+
+  First run is upstream's: DISABLE_REGISTRATION=true as configure.sh writes
+  it, which still lets the first visitor register the first account.

@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OwnTracks Recorder stores and shows locations published by the OwnTracks
+  mobile apps (C, LMDB + flat files). The repository is C source with no
+  Dockerfile or compose file, so the engine served its placeholder. This recipe
+  runs the image upstream publishes for the current release
+  (owntracks/recorder:1.0.4, built from owntracks/docker-recorder) in HTTP
+  mode: MQTT is disabled (OTR_PORT=0) and the apps publish to
+  https://<domain>/pub?u=<user>&d=<device>. The web UI (last positions, map,
+  tables) is served on / and the store lives on the named volume
+  recorder-store.

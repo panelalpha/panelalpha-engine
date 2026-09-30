@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  bitmagnet is a self-hosted BitTorrent DHT crawler, indexer and search engine
+  with a web UI and GraphQL API on :3333, backed by PostgreSQL. The
+  repository's docker-compose.yml is a "full-featured example" that routes
+  bitmagnet through a gluetun VPN container (needs NET_ADMIN and /dev/net/tun)
+  and adds Grafana/Prometheus/Loki/Pyroscope, so a plain deploy fails on
+  gluetun.
+
+  This recipe follows upstream's minimal installation example
+  (bitmagnet.io/setup/installation.md): the published image of the current
+  release ghcr.io/bitmagnet-io/bitmagnet:v0.10.0 running the http_server,
+  queue_server and dht_crawler workers, with postgres:16-alpine. The database
+  password is generated once into ~/.panelalpha/bitmagnet/; the database and
+  the config directory are on named volumes.
+
+  The DHT port (3334 tcp/udp) is not published: the crawler works from
+  outbound traffic, but other DHT nodes cannot open connections to it.
+  TMDB_API_KEY from the project's environment is passed through when set;
+  otherwise bitmagnet uses its shared default key (rate limited).

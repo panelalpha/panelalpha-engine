@@ -1,0 +1,43 @@
+# The repo root is an npm workspace wrapper with no deployable compose; this
+# runs upstream's single-container release image on named volumes.
+services:
+  app:
+    image: ghcr.io/franklioxygen/mytube:v1.11.12@sha256:ee4a6d8b75aa84137aedb262a299a8b32e8ccfab8695f09546ff4cfb6a9f868e
+    restart: unless-stopped
+    environment:
+      PORT: "5551"
+      MYTUBE_ADMIN_TRUST_LEVEL: container
+    volumes:
+      # SQLite database, settings, yt-dlp releases. nocopy: a copy-up of the
+      # image's uid-1000 /app/data makes the entrypoint skip its chown and
+      # leave the root-created .home unwritable ("Runtime home directory is
+      # not writable"); an empty root-owned volume gets the recursive chown.
+      - type: volume
+        source: data
+        target: /app/data
+        volume:
+          nocopy: true
+      # Downloaded videos, thumbnails, avatars.
+      - uploads:/app/uploads
+    ports:
+      - "5551:5551"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5551/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  # No-op gate: `compose up -d` returns only once the app answers.
+  ready:
+    image: ghcr.io/franklioxygen/mytube:v1.11.12@sha256:ee4a6d8b75aa84137aedb262a299a8b32e8ccfab8695f09546ff4cfb6a9f868e
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  uploads: {}

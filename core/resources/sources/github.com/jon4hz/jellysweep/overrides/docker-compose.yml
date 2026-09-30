@@ -1,0 +1,54 @@
+# Compose-replace: the repo's only compose file is a host-network dev stack.
+# Runs the published image of the current release, as the README's compose does.
+services:
+  app:
+    image: ghcr.io/jon4hz/jellysweep:v0.16.1
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    # Project env vars: JELLYSWEEP_JELLYFIN_URL/_API_KEY, Sonarr/Radarr, Jellystat/Streamystats...
+    env_file:
+      - path: .env
+        required: false
+      - ../.panelalpha/jellysweep/session.env
+    environment:
+      JELLYSWEEP_LISTEN: 0.0.0.0:3002
+      JELLYSWEEP_SERVER_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # Libraries can only be set in the config file; created once by prepare.sh, edit it there.
+      - ../.panelalpha/jellysweep/config.yml:/app/config.yml:ro
+      - jellysweep-data:/app/data
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/jellysweep", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  # Fails `compose up` (and so the deploy) while a required variable is unset.
+  env-check:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "/jellysweep-env-check.sh"]
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./jellysweep-env-check.sh:/jellysweep-env-check.sh:ro
+    mem_limit: 32m
+
+  # No-op: `compose up -d` returns once Jellysweep answers /health.
+  ready:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  jellysweep-data: {}

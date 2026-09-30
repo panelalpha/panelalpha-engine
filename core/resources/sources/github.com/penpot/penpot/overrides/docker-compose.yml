@@ -1,0 +1,136 @@
+# Compose-replace: the repository root is a monorepo that Railpack builds and
+# that never starts. Upstream's docker/images/docker-compose.yaml on the 2.18.0
+# images, without the Mailpit catcher; secrets from ~/.panelalpha/penpot.
+services:
+  penpot-frontend:
+    image: penpotapp/frontend:2.18.0
+    restart: unless-stopped
+    ports:
+      - "9001:8080"
+    volumes:
+      - penpot_assets:/opt/data/assets
+    depends_on:
+      - penpot-backend
+      - penpot-admin-console
+      - penpot-mcp
+      - penpot-exporter
+    environment:
+      PENPOT_FLAGS: disable-email-verification enable-mcp enable-admin-console
+      PENPOT_PUBLIC_URI: ${PA_PUBLIC_URL}
+      PENPOT_HTTP_SERVER_MAX_BODY_SIZE: "367001600"
+      PENPOT_ADMIN_CONSOLE_URI: http://penpot-admin-console:3000
+    mem_limit: 512m
+
+  penpot-backend:
+    image: penpotapp/backend:2.18.0
+    restart: unless-stopped
+    volumes:
+      - penpot_assets:/opt/data/assets
+    depends_on:
+      penpot-postgres:
+        condition: service_healthy
+      penpot-valkey:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/penpot/penpot.env
+    environment:
+      PENPOT_FLAGS: disable-email-verification enable-mcp enable-admin-console
+      PENPOT_PUBLIC_URI: ${PA_PUBLIC_URL}
+      PENPOT_HTTP_SERVER_MAX_BODY_SIZE: "367001600"
+      PENPOT_DATABASE_URI: postgresql://penpot-postgres/penpot
+      PENPOT_DATABASE_USERNAME: penpot
+      PENPOT_ADMIN_CONSOLE_URI: http://penpot-admin-console:3000
+      PENPOT_REDIS_URI: redis://penpot-valkey/0
+      PENPOT_OBJECTS_STORAGE_BACKEND: fs
+      PENPOT_OBJECTS_STORAGE_FS_DIRECTORY: /opt/data/assets
+      PENPOT_SMTP_DEFAULT_FROM: no-reply@${PA_PUBLIC_HOST}
+      PENPOT_SMTP_DEFAULT_REPLY_TO: no-reply@${PA_PUBLIC_HOST}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:6060/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    mem_limit: 1280m
+
+  penpot-admin-console:
+    image: penpotapp/admin-console:2.18.0
+    restart: unless-stopped
+    depends_on:
+      penpot-postgres:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/penpot/penpot.env
+    environment:
+      PENPOT_PUBLIC_URI: ${PA_PUBLIC_URL}
+      PENPOT_DATABASE_URI: postgresql://penpot-postgres/penpot
+      PENPOT_DATABASE_USERNAME: penpot
+      PENPOT_INTERNAL_URI: http://penpot-frontend:8080
+    mem_limit: 256m
+
+  penpot-mcp:
+    image: penpotapp/mcp:2.18.0
+    restart: unless-stopped
+    mem_limit: 192m
+
+  penpot-exporter:
+    image: penpotapp/exporter:2.18.0
+    restart: unless-stopped
+    depends_on:
+      penpot-valkey:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/penpot/penpot.env
+    environment:
+      PENPOT_FLAGS: disable-email-verification enable-mcp enable-admin-console
+      PENPOT_PUBLIC_URI: ${PA_PUBLIC_URL}
+      PENPOT_INTERNAL_URI: http://penpot-frontend:8080
+      PENPOT_REDIS_URI: redis://penpot-valkey/0
+    mem_limit: 512m
+
+  penpot-postgres:
+    image: postgres:15
+    restart: unless-stopped
+    stop_signal: SIGINT
+    env_file:
+      - ../.panelalpha/penpot/db.env
+    environment:
+      POSTGRES_INITDB_ARGS: --data-checksums
+      POSTGRES_DB: penpot
+      POSTGRES_USER: penpot
+    volumes:
+      - penpot_postgres_v15:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U penpot"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
+      start_period: 5s
+    mem_limit: 384m
+
+  penpot-valkey:
+    image: valkey/valkey:8.1
+    restart: unless-stopped
+    environment:
+      VALKEY_EXTRA_FLAGS: --maxmemory 128mb --maxmemory-policy volatile-lfu
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+    mem_limit: 192m
+
+  # No-op gate: `compose up -d` returns once the backend (JVM, migrations) is ready.
+  ready:
+    image: valkey/valkey:8.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      penpot-backend:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  penpot_postgres_v15: {}
+  penpot_assets: {}

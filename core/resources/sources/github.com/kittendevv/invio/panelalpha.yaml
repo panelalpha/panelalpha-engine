@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Invio is a self-hosted invoicing app (kittendevv/invio, AGPL-3.0): one image
+  running a Deno/Hono backend on :3000 and a SvelteKit frontend on :8000 (which
+  proxies /api), with invio.db (SQLite) under /app/data and PDFs rendered by
+  WeasyPrint.
+
+  == Why compose-replace from the published image ==
+
+  The repository's docker-compose.yml runs ghcr.io/kittendevv/invio:latest
+  with `env_file: .env`, which the engine fills from .env.example: admin /
+  supersecret and JWT_SECRET=change-me-in-production. The backend seeds the
+  admin from ADMIN_USER/ADMIN_PASS while the users table is empty
+  (backend/src/database/init.ts seedAdminUser), so a stock deploy is a
+  business-data app with a published login. This recipe runs the image
+  upstream publishes for the current release, ghcr.io/kittendevv/invio:v2.2.0.
+
+  == What the recipe supplies ==
+
+  1. ADMIN_USER=admin, a generated ADMIN_PASS and a generated JWT_SECRET,
+     written once by hooks/prepare.sh into ~/.panelalpha/invio/secret.env
+     (0600, dir 0700) and delivered by env_file; nothing from .env.example
+     reaches the container. The admin is seeded on first boot, before the
+     site is reachable; there is no public registration or installer.
+  2. ORIGIN and BASE_URL from ${PA_PUBLIC_URL} (SvelteKit CSRF check, share
+     links). BACKEND_URL is http://app:3000, the service's own name: the
+     engine rewrites any *_URL=http://localhost:... to the public address
+     (engine#320), which points the frontend at itself.
+  3. Persistence: /app/data on the named volume invio_data. `ready` waits on
+     a healthcheck of both processes so `up -d` returns only once the app
+     answers (engine#204). Only :8000 is published.
+
+  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
+
+  Fresh create: success in 66s. /login title "Invio" (16.5 kB). admin/supersecret
+  refused by the API (401 "Invalid credentials") and by the login form; the
+  generated login returns a token and the form redirects to /dashboard.
+  Customer + invoice (3 x 125.50 EUR) created via /api/v1, read back, and
+  /api/v1/invoices/<id>/pdf returns a 20 kB PDF naming the customer, the
+  line and EUR 376.50. Rebuild 29s: secrets reused, default login still
+  refused, admin, customer, invoice and PDF intact. /.env, /.git/config,
+  /invio.db, /app/data/invio.db serve the app's 404 page; /users and
+  /settings 303 to /login; /api/v1/users 401 without a token. App ~375-420 MiB (mem_limit 1g).
+
+  Credentials: ~/.panelalpha/invio/credentials.txt. More users: the Users
+  page (admin only).

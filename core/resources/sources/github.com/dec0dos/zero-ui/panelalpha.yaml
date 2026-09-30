@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ZeroUI is a Node.js web UI for a self-hosted ZeroTier network controller.
+  The repository's docker-compose.yml pairs a zyclonite/zerotier controller
+  with zero-ui behind a Caddy proxy for a placeholder domain, with state in
+  bind mounts under the checkout; the engine set it aside as a workstation
+  compose, fell through to Railpack, and the container restart-looped with
+  no start command.
+
+  This recipe runs the published release images: dec0dos/zero-ui:1.5.8 (the
+  latest release) on :4000 and zyclonite/zerotier:1.16.2 as the controller,
+  whose API stays on the compose network. zero-ui reads the controller's
+  authtoken.secret from the shared volume, so it starts only after the
+  controller has written it. ZU_DEFAULT_PASSWORD, which the app requires to
+  create its admin (user `admin`) on first run, is generated once by
+  hooks/prepare.sh into ~/.panelalpha/zero-ui/. Controller identity,
+  networks and the UI's db.json live on named volumes. The controller's UDP
+  9993 is not published; members reach it through ZeroTier's own NAT
+  traversal.

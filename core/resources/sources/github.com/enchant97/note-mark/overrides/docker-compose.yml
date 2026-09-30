@@ -1,0 +1,78 @@
+# Compose-replace: the repo ships no compose file, and its docker/Dockerfile
+# compiles Rust/WASM, pnpm and Go on every deploy. This runs the image upstream
+# publishes (their documented install) and adds only configuration.
+services:
+  # One-shot: migrates the DB and creates the owner before `app` starts, so the
+  # site is never reachable without an account. Built from files/ (alpine + the
+  # upstream binary) because the upstream image has no shell.
+  init:
+    build:
+      context: ./panelalpha/notemark
+      args:
+        NOTEMARK_IMAGE: ${NOTEMARK_IMAGE:-ghcr.io/enchant97/note-mark:1.1}
+    image: panelalpha/notemark-init:local
+    restart: "no"
+    env_file:
+      - ../.panelalpha/notemark/secret.env
+      - ../.panelalpha/notemark/admin.env
+    environment:
+      DATA_PATH: /data
+      PUBLIC_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - notemark-data:/data
+    mem_limit: 256m
+
+  app:
+    image: ${NOTEMARK_IMAGE:-ghcr.io/enchant97/note-mark:1.1}
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    env_file:
+      # AUTH_TOKEN__SECRET only; generated once by hooks/prepare.sh.
+      - ../.panelalpha/notemark/secret.env
+    environment:
+      # CORS origin and cookie Secure flag both come from this.
+      PUBLIC_URL: ${PA_PUBLIC_URL}
+      ENABLE_INTERNAL_SIGNUP: "false"
+      ENABLE_ANONYMOUS_USER_SEARCH: "false"
+      LOGGING__ENABLE_JSON: "false"
+    volumes:
+      # db.sqlite and every note/asset; survives redeploys.
+      - notemark-data:/data
+    ports:
+      - "8080:8080"
+    mem_limit: 512m
+
+  # The app image cannot host a healthcheck; this polls it until it answers.
+  healthgate:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 60); do
+          wget -q -O /dev/null http://app:8080/api/info && exit 0
+          sleep 3
+        done
+        echo "note-mark did not answer in time" >&2
+        exit 1
+    mem_limit: 64m
+
+  # `up -d` runs without --wait (engine#204); this makes it block until the
+  # health gate has passed.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      healthgate:
+        condition: service_completed_successfully
+    mem_limit: 64m
+
+volumes:
+  notemark-data: {}

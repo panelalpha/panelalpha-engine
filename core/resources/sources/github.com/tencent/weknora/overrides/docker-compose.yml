@@ -1,0 +1,122 @@
+# Compose-replace: upstream's compose builds every image from source, and the
+# frontend's Vite build alone is OOM-killed even at 4 GB. This is the same
+# stack on the images upstream publishes for the v0.8.2 release.
+x-secrets: &secrets
+  env_file:
+    # DB/Redis passwords, SYSTEM_AES_KEY, SYSTEM_SIGNING_KEY, JWT_SECRET (hooks/prepare.sh).
+    - ../.panelalpha/weknora/secrets.env
+
+services:
+  frontend:
+    image: wechatopenai/weknora-ui:v0.8.2
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      MAX_FILE_SIZE_MB: "50"
+      APP_HOST: app
+      APP_PORT: "8080"
+      APP_SCHEME: http
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 128m
+
+  app:
+    <<: *secrets
+    image: wechatopenai/weknora-app:v0.8.2
+    restart: unless-stopped
+    volumes:
+      - data-files:/data/files
+      - docreader-tmp:/tmp/docreader:ro
+    environment:
+      GIN_MODE: release
+      LOG_LEVEL: info
+      TZ: UTC
+      AUTO_MIGRATE: "true"
+      AUTO_RECOVER_DIRTY: "true"
+      FRONTEND_BASE_URL: ${PA_PUBLIC_URL}
+      DB_DRIVER: postgres
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: weknora
+      DB_NAME: weknora
+      RETRIEVE_DRIVER: postgres
+      STORAGE_TYPE: local
+      LOCAL_STORAGE_BASE_DIR: /data/files
+      STREAM_MANAGER_TYPE: redis
+      REDIS_ADDR: redis:6379
+      REDIS_DB: "0"
+      REDIS_PREFIX: "stream:"
+      DOCREADER_ADDR: docreader:50051
+      DOCREADER_TRANSPORT: grpc
+      OLLAMA_OPTIONAL: "true"
+      WEKNORA_SANDBOX_DOCKER_ENABLED: "false"
+      MAX_FILE_SIZE_MB: "50"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      docreader:
+        condition: service_healthy
+    mem_limit: 1g
+
+  docreader:
+    image: wechatopenai/weknora-docreader:v0.8.2
+    restart: unless-stopped
+    volumes:
+      - docreader-tmp:/tmp/docreader
+    environment:
+      TZ: UTC
+      DOCREADER_IMAGE_OUTPUT_DIR: /tmp/docreader
+      DOCREADER_GRPC_PORT: "50051"
+      DOCREADER_GRPC_MAX_WORKERS: "2"
+      MAX_FILE_SIZE_MB: "50"
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1g
+
+  postgres:
+    <<: *secrets
+    # ParadeDB: Postgres 17 with pg_search and pgvector, which RETRIEVE_DRIVER=postgres uses.
+    image: paradedb/paradedb:v0.22.6-pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: weknora
+      POSTGRES_DB: weknora
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U weknora -d weknora"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    stop_grace_period: 1m
+    mem_limit: 512m
+
+  redis:
+    <<: *secrets
+    image: redis:7.0-alpine
+    restart: unless-stopped
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis-data:/data
+    mem_limit: 128m
+
+volumes:
+  data-files: {}
+  docreader-tmp: {}
+  postgres-data: {}
+  redis-data: {}

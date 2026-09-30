@@ -1,0 +1,50 @@
+# Compose-replace: the repo compose bind-mounts ./data and ./background into
+# ~/project (wiped every deploy). Release image, data on named volumes.
+services:
+  app:
+    image: alexscifier/neonlink:v1.4.21
+    restart: unless-stopped
+    ports:
+      - "3333:3333"
+    environment:
+      FASTIFY_PLUGIN_TIMEOUT: "120000"
+    volumes:
+      # SQLite database, secrets.json and settings.
+      - neonlink-data:/app/data
+      # Uploaded background images.
+      - neonlink-background:/app/public/static/media/background
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3333/').then(r=>process.exit(r.status<500?0:1),()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+    mem_limit: 512m
+
+  # The image runs as node (uid 1000) and ships neither directory, so Docker
+  # creates the volumes root-owned; hand them to uid 1000 before the app starts.
+  volume-init:
+    image: alexscifier/neonlink:v1.4.21
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "chown 1000:1000 /app/data /app/public/static/media/background"]
+    volumes:
+      - neonlink-data:/app/data
+      - neonlink-background:/app/public/static/media/background
+    mem_limit: 32m
+
+  # No-op: `compose up -d` returns once NeonLink answers.
+  ready:
+    image: alexscifier/neonlink:v1.4.21
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  neonlink-data: {}
+  neonlink-background: {}

@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  FacilMap, a collaborative map editor on OpenStreetMap (Node.js on :8080,
+  MySQL/MariaDB through Sequelize). The repository's docker-compose.yml is an
+  internal test stack that builds the Dockerfile, and that build runs install,
+  type-check, lint, tests and both bundles in one RUN step that ran out of
+  memory even at 4096 MB. This recipe runs the published facilmap/facilmap
+  image of the current release (4.1, v4.1.2; the repository HEAD is 5.0.0-alpha) with a mariadb:11 sidecar
+  (utf8mb4), following the upstream Docker docs. The DB password is generated
+  once into ~/.panelalpha/facilmap/ by hooks/prepare.sh. The optional
+  third-party keys (ORS_TOKEN, MAPBOX_TOKEN, MAXMIND_USER_ID,
+  MAXMIND_LICENSE_KEY, LIMA_LABS_TOKEN) are read from the project env vars;
+  the app starts without them. Database and tile cache are named volumes.

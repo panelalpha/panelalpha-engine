@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kavita is a reading server for comics, manga and eBooks: one ASP.NET Core
+  process serving the Angular web reader, admin UI, REST API and OPDS on
+  :5000, with SQLite, covers and settings in /kavita/config.
+
+  The repository is a .NET solution with test and benchmark projects and an
+  Angular UI in UI/Web; its Dockerfile only packages artifacts produced by the
+  release pipeline (_output/*.tar.gz, UI/Web/dist/browser). The engine's .NET
+  build publishes Kavita.Benchmark instead of the server and nothing ever
+  listens. This recipe runs the official image of the current release
+  jvmilazz0/kavita:0.9.1, as the Kavita docs do, with /kavita/config and the
+  library folder /library on named volumes that survive redeploys.
+
+  First run is left as upstream ships it: the first visitor registers the
+  admin account. Adding books: copy files into the library volume, e.g.
+  `docker compose -p project cp <dir> app:/library/`, then add /library/<dir>
+  as a library in the web UI.

@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Rundeck, the runbook automation and job scheduler (Grails on Java) with its
+  web console on port 4440.
+
+  The repository is the Gradle source tree with no root compose file; a plain
+  deploy tried to build it as a Java app and failed. This recipe runs the
+  image upstream publishes from docker/official at the current release,
+  rundeck/rundeck:6.2.1, with postgres:17-alpine instead of the embedded H2
+  file. The database password is generated per account by the engine
+  (RUNDECK_DB_PASSWORD) and kept across redeploys. RUNDECK_GRAILS_URL is the
+  public address and RUNDECK_SERVER_FORWARDED lets Jetty honour the proxy's
+  forwarded headers, so redirects and the login form stay on https. The
+  image's volumes (server data, execution logs) are named volumes. A `ready`
+  gate makes the deploy finish only once /user/login answers.
+
+  First run is upstream's: the default admin / admin login from the image's
+  realm.properties is left as shipped.

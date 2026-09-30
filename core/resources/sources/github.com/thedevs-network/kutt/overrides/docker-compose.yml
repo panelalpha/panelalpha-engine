@@ -1,0 +1,36 @@
+# Upstream docker-compose.yml (SQLite) on the release image. JWT_SECRET is a
+# required variable the engine generates per account.
+services:
+  server:
+    image: kutt/kutt:v3.2.6
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      DEFAULT_DOMAIN: ${PA_PUBLIC_HOST}
+      DB_FILENAME: /var/lib/kutt/data.sqlite
+    volumes:
+      - db_data_sqlite:/var/lib/kutt
+      - custom:/kutt/custom
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/v2/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Kutt answers its health route.
+  ready:
+    image: kutt/kutt:v3.2.6
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      server:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db_data_sqlite: {}
+  custom: {}

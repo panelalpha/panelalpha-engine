@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MonitoRSS delivers RSS feeds to Discord; its control panel and API
+  (monolith) answer on :8000, beside feed-requests, user-feeds,
+  discord-rest-listener, bot-presence and schedule-emitter services with
+  MongoDB, PostgreSQL, RabbitMQ and Redis. The plain deploy runs the repo's
+  compose, which builds every service from source (`npm run build` is
+  OOM-killed at 2500 MB) and uses mongo:8.0, which refuses to start on this
+  host's kernel (6.19+, SERVER-121912).
+
+  This recipe is upstream's production docker-compose.yml on the published
+  images of the current release (ghcr.io/synzen/monitorss-*:7.4.0), nothing
+  built, with mongo:7.0 run as the one-node replica set `dbrs` the shipped
+  .env.example URIs name (as upstream's dev and e2e stacks run it). The
+  customer supplies a Discord application in the project's environment
+  variables: DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET,
+  mapped onto every service's own variable; a one-shot check service fails the
+  deploy naming each one that is missing. The Discord OAuth redirect is
+  <site>/api/v1/discord/callback-v2 (add it in the Discord application).
+  The session secret/salt and the PostgreSQL password are generated once into
+  ~/.panelalpha/monitorss/secrets.env; all data is on named volumes.

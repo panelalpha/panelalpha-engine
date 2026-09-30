@@ -1,0 +1,61 @@
+# Compose-replace: the root Dockerfile.heroku is the image alone, with no
+# database. Runs upstream's published image of the current release plus Postgres.
+services:
+  manifest:
+    image: manifestdotbuild/manifest:6.27.0
+    restart: unless-stopped
+    ports:
+      - "2099:2099"
+    env_file:
+      # BETTER_AUTH_SECRET and DATABASE_URL, generated once by hooks/prepare.sh.
+      - ../.panelalpha/manifest/app.env
+    environment:
+      PORT: "2099"
+      BETTER_AUTH_URL: ${PA_PUBLIC_URL}
+      NODE_ENV: production
+      SEED_DATA: "false"
+      MANIFEST_MODE: selfhosted
+      RUN_MIGRATIONS_ON_BOOT: "true"
+      REQUEST_RECORDING_STORAGE: auto
+      REQUEST_RECORDING_FILESYSTEM_PATH: /data/request-recordings
+    volumes:
+      - manifest-recordings:/data/request-recordings
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:2099/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 100
+      start_period: 10s
+    mem_limit: 1g
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/manifest/db.env
+    environment:
+      POSTGRES_USER: manifest
+      POSTGRES_DB: manifest
+    volumes:
+      - manifest-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U manifest"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # No-op gate: `compose up -d` returns once Manifest answers.
+  ready:
+    image: postgres:16-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      manifest:
+        condition: service_healthy
+
+volumes:
+  manifest-pgdata: {}
+  manifest-recordings: {}

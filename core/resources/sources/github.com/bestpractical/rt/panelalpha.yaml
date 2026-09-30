@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Request Tracker (RT), Best Practical's ticketing system (Perl, Postgres).
+  The plain deploy builds the repo's Dockerfile, which is upstream's test
+  harness (`CMD tail -f /dev/null`, "for testing only"), so nothing listens and
+  the site answers 502. Upstream ships no deployment image.
+
+  Compose-REPLACE: the rt service runs Best Practical's own base image
+  bpssysadmin/rt-base-debian:RT-6.0.3-trixie-20260723 (the one the repo's
+  Dockerfile builds FROM, with every Perl dependency) and installs the current
+  release rt-6.0.3.tar.gz (sha256 checked) the way the README does: configure
+  for PostgreSQL, make install into the named volume /opt/rt6 (once per
+  version), rt-setup-database --action init on the first start, then rt-server
+  (Starlet) on :8080 as www-data. postgres:16 is on a named volume; both
+  database passwords are generated once by hooks/prepare.sh into
+  ~/.panelalpha/rt. The site address comes from PA_PUBLIC_HOST in a mounted
+  RT_SiteConfig.d file. Upstream's first-run login (root / password) is left
+  as shipped. Incoming mail (rt-mailgate) needs an MTA and is not set up.

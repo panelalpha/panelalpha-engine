@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SyncTube, a small Node (Haxe-compiled) server for watching videos together
+  with chat. Built from the repository's own Dockerfile and docker-compose.yml.
+  That compose bind-mounts ${PWD}/user, which the engine resolves to an empty,
+  root-owned /user (engine#354), so the app (uid 1000) cannot write its state and
+  crash-loops. The override replaces that bind with a named volume, seeded from
+  the image's user/ directory and kept across redeploys. user/config.json turns
+  off `localAdmins`: behind the engine's proxy the client IP comes from the
+  first X-Forwarded-For entry, which a visitor controls (engine#319), so
+  sending the container's own address made any visitor an admin.

@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Evolution API, a self-hosted WhatsApp integration API (Node.js REST API on
+  :8080 with the Evolution Manager web UI built in at /manager, PostgreSQL,
+  Redis). The repository's compose file does not start: its .env.example
+  points DATABASE_CONNECTION_URI at a host `postgres` with user:pass while the
+  database service is `evolution-postgres` with no user or database set, so
+  every migration fails with "P1001: Can't reach database server", and the
+  separate evoapicloud/evolution-manager:latest frontend crash-loops on its own
+  nginx config ("invalid value must-revalidate").
+
+  This recipe runs the API image of the current release
+  (evoapicloud/evolution-api:v2.3.7), which already serves the manager at
+  /manager, with postgres:15 (upstream's pin) and redis:8.2-alpine. The
+  database password and connection string are generated once into
+  ~/.panelalpha/evolution-api, SERVER_URL is the site's own address, and
+  instances, the database and Redis live on named volumes. Only the API is
+  published.
+
+  Every other setting comes from the project's .env (seeded from upstream's
+  .env.example), including AUTHENTICATION_API_KEY, the global key the manager
+  asks for at login. Upstream ships a fixed example key; set the
+  AUTHENTICATION_API_KEY project variable to your own.

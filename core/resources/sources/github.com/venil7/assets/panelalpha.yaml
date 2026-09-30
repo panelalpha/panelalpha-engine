@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Assets, a self-hosted personal net-worth and investment tracker (Bun/Express
+  API with a React UI, SQLite, prices from Yahoo Finance). The repository's
+  docker-compose.yaml takes the image tag from ${TAG}, which nothing sets, so
+  the plain deploy fails with "unable to get image 'ghcr.io/venil7/assets:':
+  invalid reference format". This recipe runs the published image of the
+  current release (ghcr.io/venil7/assets:1.8.6) on port 4020 with the database
+  on the assets-data named volume. ASSETS_JWT_SECRET is generated per account
+  by the engine; other ASSETS_* settings are optional project env vars. A
+  health-check gate makes the deploy wait until the UI answers. First run is
+  as upstream ships it: login admin / admin (ASSETS_USERNAME / ASSETS_PASSWORD
+  change the seeded account).

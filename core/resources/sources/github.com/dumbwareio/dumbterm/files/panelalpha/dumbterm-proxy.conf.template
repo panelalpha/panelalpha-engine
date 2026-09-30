@@ -1,0 +1,81 @@
+# The only thing on the account's port. The image's entrypoint renders this
+# with ${DUMBTERM_PIN}; the rendered file stays inside the container.
+#   - a wrong PIN cookie never reaches the app: upstream compares it on every
+#     request and on the websocket with no lockout, an unlimited PIN oracle
+#   - the terminal websocket needs the right PIN cookie and this site's Origin
+#     before the app sees it (a refused Origin crashes 1.2.0, server.js:401)
+#   - /verify-pin is throttled on top of upstream's 5-per-15-minutes lockout
+
+map $cookie_DUMBTERM_PIN $dumbterm_pin {
+    default           bad;
+    ""                none;
+    "${DUMBTERM_PIN}" ok;
+}
+
+# Drop the whole Cookie header when the PIN in it is wrong; the app then sends
+# the browser to /login as it would for no cookie at all.
+map $dumbterm_pin $dumbterm_cookie {
+    bad     "";
+    default $http_cookie;
+}
+
+map $http_upgrade $dumbterm_connection {
+    default upgrade;
+    ''      close;
+}
+
+# The engine's front proxy sets X-Real-IP to the client address.
+map $http_x_real_ip $dumbterm_client {
+    ""      $remote_addr;
+    default $http_x_real_ip;
+}
+
+map $server_port $dumbterm_everyone {
+    default all;
+}
+
+# Per client, plus one cap for everyone that no header can dodge.
+limit_req_zone $dumbterm_client   zone=dumbterm_login_ip:1m  rate=6r/m;
+limit_req_zone $dumbterm_everyone zone=dumbterm_login_all:1m rate=30r/m;
+
+server {
+    listen 8080 default_server;
+    server_name _;
+    client_max_body_size 1m;
+
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $dumbterm app:3000;
+
+    set $dumbterm_ws $dumbterm_pin;
+    if ($http_origin != "https://$host") {
+        set $dumbterm_ws foreign;
+    }
+    if ($http_upgrade = "") {
+        set $dumbterm_ws ok;
+    }
+    if ($dumbterm_ws != ok) {
+        return 403;
+    }
+
+    proxy_http_version 1.1;
+    proxy_set_header Host              $http_host;
+    proxy_set_header Cookie            $dumbterm_cookie;
+    # Upstream trusts one proxy hop: the last X-Forwarded-For entry is the
+    # client IP its lockout counts, so only this proxy writes it.
+    proxy_set_header X-Forwarded-For   $dumbterm_client;
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    proxy_set_header Upgrade           $http_upgrade;
+    proxy_set_header Connection        $dumbterm_connection;
+
+    location = /verify-pin {
+        limit_req zone=dumbterm_login_ip burst=5 nodelay;
+        limit_req zone=dumbterm_login_all burst=10 nodelay;
+        limit_req_status 429;
+        proxy_pass http://$dumbterm$request_uri;
+    }
+
+    location / {
+        proxy_pass http://$dumbterm$request_uri;
+        proxy_read_timeout 3600s;
+    }
+}

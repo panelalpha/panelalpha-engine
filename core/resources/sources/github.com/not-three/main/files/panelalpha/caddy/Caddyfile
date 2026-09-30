@@ -1,0 +1,18 @@
+# Upstream compose.yml's Traefik routing: /api/draw/ -> draw, /api -> api
+# (prefix stripped), everything else -> ui. TLS is the engine proxy's job.
+{
+	auto_https off
+	admin off
+}
+
+:80 {
+	handle_path /api/draw/* {
+		reverse_proxy draw:80
+	}
+	handle_path /api/* {
+		reverse_proxy api:4000
+	}
+	handle {
+		reverse_proxy ui:3000
+	}
+}

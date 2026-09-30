@@ -1,0 +1,65 @@
+# Compose-replace: the repository's compose builds the unreleased master branch
+# and needs VERDACCIO_PORT set. This runs the official image of the current
+# release with a private-registry config and a seeded admin.
+services:
+  app:
+    image: verdaccio/verdaccio:6.10.4
+    restart: unless-stopped
+    environment:
+      VERDACCIO_PUBLIC_URL: ${PA_PUBLIC_URL}
+      VERDACCIO_ADDRESS: 0.0.0.0
+      VERDACCIO_PORT: "4873"
+    volumes:
+      # Packages, htpasswd and .verdaccio-db.json (the token signing secret).
+      - storage:/verdaccio/storage
+      - ./panelalpha/verdaccio:/verdaccio/conf:ro
+    ports:
+      - "4873:4873"
+    depends_on:
+      htpasswd-seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4873/-/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # Adds `admin` to htpasswd (bcrypt) when it is not there yet, so a password
+  # changed later is never overwritten. Only this service sees the password.
+  htpasswd-seed:
+    image: verdaccio/verdaccio:6.10.4
+    restart: "no"
+    env_file:
+      # A missing file aborts `up` rather than starting without an admin.
+      - ../.panelalpha/verdaccio/admin.env
+    volumes:
+      - storage:/verdaccio/storage
+    entrypoint:
+      - node
+      - -e
+      - |
+        const fs = require('fs');
+        const bcrypt = require('/usr/local/lib/node_modules/verdaccio/node_modules/bcryptjs');
+        const f = '/verdaccio/storage/htpasswd';
+        const user = process.env.VERDACCIO_ADMIN_USER, pass = process.env.VERDACCIO_ADMIN_PASSWORD;
+        if (!user || !pass) { console.error('admin credentials missing'); process.exit(1); }
+        const cur = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
+        if (cur.split('\n').some((l) => l.startsWith(user + ':'))) process.exit(0);
+        fs.appendFileSync(f, (cur && !cur.endsWith('\n') ? '\n' : '') + user + ':' + bcrypt.hashSync(pass, 10) + '\n', { mode: 0o600 });
+        console.log('seeded ' + user);
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once the registry answers /-/ping.
+  ready:
+    image: verdaccio/verdaccio:6.10.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  storage: {}

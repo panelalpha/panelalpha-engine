@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mydia is a personal media manager (movies and TV: library, indexers, download
+  clients, player) written in Elixir/Phoenix LiveView, serving its web UI on
+  :4000 with SQLite in /config. The repository's own Dockerfile builds a Flutter
+  web player, a Rust toolchain and the Elixir release from source; the Flutter
+  precache step fails inside an account (tar cannot chown to uid 397546), so a
+  plain deploy never gets an image.
+
+  This recipe runs the official ghcr.io/getmydia/mydia image of the current
+  release, 0.15.0, with /config (SQLite and settings), /data and /media on named
+  volumes that survive redeploys. The app refuses to boot without
+  SECRET_KEY_BASE and GUARDIAN_SECRET_KEY: hooks/prepare.sh generates both once
+  into ~/.panelalpha/mydia/secrets.env (0600 in 0700), fed as an env_file, so
+  sessions survive a rebuild. PHX_HOST is the project's domain, which also
+  scopes Phoenix's websocket origin check. The first visitor creates the admin
+  account, as upstream ships it.

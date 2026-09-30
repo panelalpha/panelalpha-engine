@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Verdaccio is a private npm registry and caching proxy for registry.npmjs.org
+  (Node, file storage, no database). The repository's master branch is the
+  unreleased 9.x line and its docker-compose.yaml is a dev setup that builds
+  it and fails without VERDACCIO_PORT, so overrides/docker-compose.yml runs
+  the official verdaccio/verdaccio image of the current release, 6.10.4, on
+  :4873 with VERDACCIO_PUBLIC_URL set to the site's address (tarball links
+  are https://<domain>/...).
+
+  Security: the image's default config lets anyone `npm adduser` and read
+  everything. files/panelalpha/verdaccio/config.yaml (mounted read-only as
+  /verdaccio/conf) sets htpasswd max_users: -1, so registration answers 409
+  "user registration disabled", and access, publish and unpublish to
+  $authenticated for every package, including public ones proxied from
+  npmjs: this is a private registry, and anonymous reads would make the
+  account an open npm mirror spending its disk and bandwidth (change access
+  to $all to allow that). The audit middleware stays on, so npm audit works;
+  it forwards anonymous audit requests to npmjs and holds no data.
+  hooks/prepare.sh generates the admin password once into
+  ~/.panelalpha/verdaccio/admin.env (0600 in 0700). The htpasswd-seed
+  service, the only one given that file, adds `admin` (bcrypt) to
+  /verdaccio/storage/htpasswd when it is not there, so a later change of
+  password or added users are never overwritten. Packages, htpasswd and
+  .verdaccio-db.json (the token signing secret) live on the `storage` named
+  volume, so logins and tokens survive redeploys. A `ready` service gates on
+  /-/ping. `npm login --registry https://<domain>/` works as admin: npm's web
+  login gets a 404, it falls back to the classic flow and retries the 409
+  with the credentials, which returns a token.
+
+  Measured on mariusz.panelalpha.tools (2026-09-28, engine 705f250a): deploy
+  42s, rebuild 25-27s, app 66 MiB. Anonymous: adduser 409, publish 401,
+  package, tarball and readme 401, search empty. As admin: npm login (driven by
+  expect), token via PUT /-/user, npm whoami admin, npm publish @pa/hello, npm view and npm install
+  of it plus lodash through the uplink, web UI login; after rebuild 1.0.0
+  was still there, 1.0.1 published, and a token minted before the rebuild
+  still authenticated.

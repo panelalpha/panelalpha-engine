@@ -1,0 +1,59 @@
+# Compose-replace: the repo ships only a Dockerfile. This runs the official
+# release image on SQLite with named volumes and replaces the seeded admin login
+# before the port is published.
+services:
+  # One-shot, before the web service exists: db:prepare (which seeds
+  # admin@admin.com / foobar on a new database), then rotate that login.
+  init:
+    image: ghcr.io/blackcandy-org/blackcandy:3.2.1
+    restart: "no"
+    # The image's entrypoint drops to the app user, then runs this.
+    command: ["sh", "/panelalpha/init.sh"]
+    env_file:
+      - .env
+      - ../.panelalpha/blackcandy/app.env
+    environment:
+      MEDIA_PATH: /media_data
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      - storage:/rails/storage
+    mem_limit: 768m
+
+  app:
+    image: ghcr.io/blackcandy-org/blackcandy:3.2.1
+    restart: unless-stopped
+    env_file:
+      - .env
+      - ../.panelalpha/blackcandy/app.env
+    environment:
+      MEDIA_PATH: /media_data
+    volumes:
+      # SQLite databases (app, cache, cable, queue) and uploaded images.
+      - storage:/rails/storage
+      - media:/media_data
+    ports:
+      - "8000:80"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs --max-time 5 http://127.0.0.1:80/up >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1g
+
+  # No-op gate: `up` returns only once the site answers (engine#204).
+  ready:
+    image: ghcr.io/blackcandy-org/blackcandy:3.2.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  storage: {}
+  media: {}

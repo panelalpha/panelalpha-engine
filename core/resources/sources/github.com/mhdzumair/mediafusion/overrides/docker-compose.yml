@@ -1,0 +1,111 @@
+# The repository root is a Rust workspace plus a deprecated Python tree, so a
+# plain deploy picks the python recipe and serves the placeholder. This is
+# upstream's deployment/docker-compose stack at the release image: API, worker,
+# PostgreSQL and Redis. Left out: the nginx/mkcert TLS front (the engine
+# terminates TLS), TRAWL (headless browser pool) and Prowlarr (both optional).
+x-mediafusion: &mediafusion
+  image: mhdzumair/mediafusion:6.1.6
+  restart: unless-stopped
+  env_file:
+    # Project env vars (API_PASSWORD, CONTACT_EMAIL, debrid keys, ...).
+    - path: .env
+      required: false
+    - ../.panelalpha/mediafusion/app.env
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  mediafusion-api:
+    <<: *mediafusion
+    environment:
+      HOST_URL: "${PA_PUBLIC_URL}"
+      POSTER_HOST_URL: "${PA_PUBLIC_URL}"
+      REDIS_URL: "redis://redis:6379"
+      STREAM_RS_PORT: "8000"
+      # Upstream's .env-sample value; behind the proxy every visitor shares one IP.
+      ENABLE_RATE_LIMIT: "${ENABLE_RATE_LIMIT:-false}"
+      TASKIQ_SINGLE_WORKER_MODE: "true"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # First start runs the database migrations before it listens.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    mem_limit: 768m
+
+  mediafusion-worker:
+    <<: *mediafusion
+    command: ["/usr/local/bin/mediafusion-worker"]
+    environment:
+      HOST_URL: "${PA_PUBLIC_URL}"
+      POSTER_HOST_URL: "${PA_PUBLIC_URL}"
+      REDIS_URL: "redis://redis:6379"
+      TASKIQ_SINGLE_WORKER_MODE: "true"
+    depends_on:
+      mediafusion-api:
+        condition: service_healthy
+    mem_limit: 512m
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    shm_size: 256mb
+    env_file:
+      - ../.panelalpha/mediafusion/app.env
+    environment:
+      POSTGRES_USER: mediafusion
+      POSTGRES_DB: mediafusion
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=128MB"
+      - "-c"
+      - "effective_cache_size=384MB"
+      - "-c"
+      - "work_mem=8MB"
+      - "-c"
+      - "max_connections=100"
+      - "-c"
+      - "shared_preload_libraries=pg_stat_statements"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mediafusion -d mediafusion"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --save 60 1 --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 320m
+
+  # No-op: `compose up -d` returns once the API answers.
+  ready:
+    image: redis:8-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      mediafusion-api:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  postgres-data: {}
+  redis-data: {}

@@ -1,0 +1,31 @@
+# The repo's Dockerfile needs a VERSION build arg and binds 127.0.0.1, so this
+# runs the official image of the current release with the database on a volume.
+services:
+  app:
+    image: datasetteproject/datasette:0.65.5
+    restart: unless-stopped
+    command: ["datasette", "serve", "/data/data.db", "--create", "-h", "0.0.0.0", "-p", "8001"]
+    volumes:
+      - data:/data
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/-/versions.json')"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Datasette answers.
+  ready:
+    image: datasetteproject/datasette:0.65.5
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

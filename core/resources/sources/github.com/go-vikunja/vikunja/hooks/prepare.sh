@@ -3,11 +3,14 @@ set -e
 cd ~/project
 
 # The one value the compose file cannot state for itself. The repository ships
-# no .env, and the generated app service reads one through `env_file:`, so this
-# file is both the credential store and the way in.
+# no .env, and the generated app service reads one through `env_file:`, so .env
+# is the way in -- but ~/project, .env included, is emptied on every deploy. The
+# value lives in ~/.panelalpha/vikunja/secret.env, generated once, and .env is
+# copied from it each time.
 #
-# Written once: a redeploy must not roll the secret out from under the sessions
-# and API tokens signed with it, and the database volume outlives the checkout.
+# Generated once: a redeploy must not roll the secret out from under the
+# sessions and API tokens signed with it, and the database volume outlives the
+# checkout.
 #
 # service.secret signs every JWT and API token. Left unset, Vikunja calls
 # generateServiceSecretIfEmpty() and makes a fresh one on each boot, so a
@@ -21,11 +24,29 @@ cd ~/project
 # compose file the engine writes the account's public URL into does not exist
 # yet, and neither does the account's own ~/<domain>/ directory. The `init`
 # service picks it up at container start instead; see files/panelalpha-init.sh.
-if [ ! -f .env ]; then
-    printf 'VIKUNJA_SERVICE_SECRET=%s\n' \
-        "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" > .env
-    chmod 600 .env
+STORE="${HOME}/.panelalpha/vikunja"
+mkdir -p "${STORE}"
+chmod 700 "${HOME}/.panelalpha" "${STORE}"
+# An account deployed before the store existed keeps the secret its .env has,
+# when the checkout was not wiped.
+if [ ! -s "${STORE}/secret.env" ] && grep -q '^VIKUNJA_SERVICE_SECRET=.' .env 2>/dev/null; then
+    ( umask 077; grep '^VIKUNJA_SERVICE_SECRET=' .env | head -1 > "${STORE}/secret.env" )
 fi
+if [ ! -s "${STORE}/secret.env" ]; then
+    ( umask 077
+      printf 'VIKUNJA_SERVICE_SECRET=%s\n' \
+          "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" > "${STORE}/secret.env" )
+fi
+chmod 600 "${STORE}/secret.env"
+cp "${STORE}/secret.env" .env
+chmod 600 .env
+
+# The version mage stamps into the binary. Without RELEASE_VERSION it runs
+# `git describe`, and the engine leaves .git out of the build context
+# (engine#413), so the build dies with "not a git repository". Read here,
+# where .git is still present; the override passes it as a build arg.
+RELEASE_VERSION=$(git -c safe.directory="$PWD" describe --tags --always --abbrev=10 2>/dev/null || true)
+printf 'RELEASE_VERSION=%s\n' "${RELEASE_VERSION:-dev}" >> .env
 
 # Fetch the helper image now rather than during the build. `docker compose
 # up -d` pulls the images it does not have while it builds the ones it does not

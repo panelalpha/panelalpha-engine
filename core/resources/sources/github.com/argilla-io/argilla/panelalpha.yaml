@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Argilla, the collaboration tool for building AI datasets: a FastAPI server
+  serving its Vue frontend on :6900, a background worker, PostgreSQL, Redis
+  and Elasticsearch.
+
+  The repository is a monorepo (argilla/, argilla-server/, argilla-frontend/,
+  docs/) with nothing to run at its root. This recipe runs upstream's
+  published image of the current release, argilla/argilla-server:v2.8.0, as
+  examples/deployments/docker/docker-compose.yaml does: the server, the worker,
+  postgres:14, Redis and Elasticsearch 8.17.0 (single-node, security off on
+  the account's private network, 512 MB heap; upstream's -XX:UseSVE=0 is an
+  ARM-only JVM flag and is left out). hooks/prepare.sh writes the database
+  password and ARGILLA_AUTH_SECRET_KEY (otherwise a new random key on every
+  start, which drops every session) once to ~/.panelalpha/argilla/ (0600 in
+  0700). Application data, the database and the index are on named volumes.
+  A `ready` gate makes the deploy finish only once the server answers; it
+  starts only after pinging Elasticsearch and Redis.
+
+  First run is upstream's server default: no USERNAME/PASSWORD are set, so no
+  owner is seeded and the site opens on its sign-in page. The owner is
+  created with the server's own CLI
+  (`python -m argilla_server database users create --role owner ...`).

@@ -1,0 +1,66 @@
+# Upstream docker/docker-compose.yaml with the released image pinned, the
+# configuration as SYNCIN_* env vars (secrets from ~/.panelalpha) instead of a
+# bind-mounted environment.yaml, and the optional editor sidecars left out.
+services:
+  sync_in:
+    image: syncin/server:2.5.2
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../.panelalpha/sync-in/app.env
+    environment:
+      - SYNCIN_SERVER_PUBLICURL=${PA_PUBLIC_URL}
+      - PUID=8888
+      - PGID=8888
+      # Upstream's first-run admin (set INIT_ADMIN, optionally the login and password).
+      - INIT_ADMIN
+      - INIT_ADMIN_LOGIN
+      - INIT_ADMIN_PASSWORD
+      # Optional mail settings, passed through from the project's env vars.
+      - SYNCIN_MAIL_HOST
+      - SYNCIN_MAIL_PORT
+      - SYNCIN_MAIL_SENDER
+      - SYNCIN_MAIL_AUTH_USER
+      - SYNCIN_MAIL_AUTH_PASS
+      - SYNCIN_MAIL_SECURE
+    volumes:
+      - data:/app/data
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "server/infrastructure/availability/scripts/check-health.js"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  mariadb:
+    image: mariadb:11.8
+    restart: unless-stopped
+    command: --innodb_ft_cache_size=16000000 --max-allowed-packet=1G
+    env_file:
+      - ../.panelalpha/sync-in/db.env
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    volumes:
+      - mariadb_data:/var/lib/mysql
+
+  # No-op gate: `compose up -d` returns only once Sync-in reports ready.
+  ready:
+    image: mariadb:11.8
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      sync_in:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data:
+  mariadb_data:

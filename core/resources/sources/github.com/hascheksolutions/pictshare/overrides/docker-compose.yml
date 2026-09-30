@@ -1,0 +1,47 @@
+# Compose-replace: the repo's docker-compose.yml names `HaschekSolutions/pictshare:3`,
+# which Docker reads as a registry host (image names must be lowercase), and binds
+# ./data into ~/project, which every deploy wipes. Published image of the current
+# release, with uploads, logs and the Redis view cache on named volumes.
+services:
+  app:
+    image: hascheksolutions/pictshare:3.7.0
+    restart: unless-stopped
+    environment:
+      # Base for the links PictShare hands out; it needs the trailing slash.
+      URL: ${PA_PUBLIC_URL}/
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-20}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      UPLOAD_CODE: ${UPLOAD_CODE:-}
+      ALLOWED_SUBNET: ${ALLOWED_SUBNET:-}
+      CONTENTCONTROLLERS: ${CONTENTCONTROLLERS:-}
+      REDIS_CACHING: "true"
+      REDIS_SERVER: localhost
+      REDIS_PORT: "6379"
+    volumes:
+      - data:/app/public/data
+      - logs:/app/public/logs
+      - redis:/var/lib/redis
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 512m
+
+  # `compose up -d` returns only once PictShare answers.
+  ready:
+    image: hascheksolutions/pictshare:3.7.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  logs: {}
+  redis: {}

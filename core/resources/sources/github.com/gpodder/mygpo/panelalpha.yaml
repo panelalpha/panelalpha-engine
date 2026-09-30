@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  mygpo, the Django web service behind gpodder.net (podcast directory and
+  subscription sync API). The repository ships no Dockerfile or compose file,
+  and the engine's Django platform left SECRET_KEY empty and pointed the app at
+  a PostgreSQL on localhost. This recipe runs the checkout on
+  python:3.12-bookworm (requirements.txt installed into a venv volume on first
+  boot, migrate and collectstatic on every start, gunicorn), with PostgreSQL 16,
+  Redis and a Celery worker with beat, behind nginx serving the static files.
+  SECRET_KEY and the database password are generated once into
+  ~/.panelalpha/mygpo/.

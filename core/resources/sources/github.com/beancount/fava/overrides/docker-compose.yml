@@ -1,0 +1,48 @@
+# Build upstream's contrib/docker/Dockerfile (pip install fava) and point it at
+# a ledger on a volume; fava refuses to start without a file.
+services:
+  # One-shot: create an empty ledger on first start, keep an existing one.
+  ledger:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "[ -f /data/main.beancount ] || printf '; Beancount ledger opened by Fava\\n' > /data/main.beancount"]
+    volumes:
+      - data:/data
+    mem_limit: 32m
+
+  app:
+    build:
+      context: contrib/docker
+    image: panelalpha/fava:local
+    restart: unless-stopped
+    environment:
+      BEANCOUNT_FILE: /data/main.beancount
+      FAVA_HOST: 0.0.0.0
+      FAVA_PORT: "5000"
+    volumes:
+      - data:/data
+    ports:
+      - "8080:5000"
+    depends_on:
+      ledger:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/')"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Fava answers.
+  ready:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  EverShop is an e-commerce platform (Node.js, Express, React, GraphQL) with a
+  storefront and an admin panel, backed by PostgreSQL.
+
+  IMAGE OF THE CURRENT RELEASE. The repo's docker-compose.yml runs
+  evershop/evershop:latest with postgres/postgres credentials and publishes
+  Postgres on 5432; the root Dockerfile builds the monorepo for development.
+  overrides/docker-compose.yml runs the official release image 2.2.1 (the npm
+  @evershop/evershop package it is built from) with Postgres 16 on named
+  volumes; only the store publishes a port.
+
+  CLOSED FIRST RUN. The interactive `evershop install` defaults the admin
+  password to 123456 and the README advertises a demo login; neither is used.
+  A one-shot `seed` service runs before the store on every boot: a private
+  loopback `evershop start` applies the release's migrations, then, only while
+  admin_user is empty, EverShop's own `user:create` adds the administrator
+  with a generated password. The published store starts after the seed.
+
+  SECRETS. hooks/prepare.sh writes the Postgres password, the session cookie
+  secret (otherwise the built-in "keyboard cat"), the admin/customer JWT
+  secrets, the order-tracking token secret and the admin password once to
+  ~/.panelalpha/evershop/ (0600 in 0700) with a credentials.txt note.
+  TRUST_PROXY_HOPS=1 so rate limiting reads the proxy-appended client address.

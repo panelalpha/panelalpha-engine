@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kyoo is a self-hosted media server (movies, series, anime) with on-the-fly
+  transcoding: front (nginx), auth (keibi), api, scanner, transcoder and
+  PostgreSQL, glued together by a router doing path routing and "phantom
+  token" forward auth. The repository's docker-compose.yml builds every
+  service from source under `:edge` tags, reads host paths from .env and runs
+  that router as Traefik on the Docker socket; the engine drops any traefik
+  service (engine#334), which leaves the stack with no entry point.
+
+  This recipe runs the published images of the current release, v5.2.1
+  (pinned by digest), as upstream's release compose does, with upstream's
+  Traefik routing carried over to Caddy 2.11.4 on port 8901 (same paths, same
+  forward auth to auth:4568/auth/jwt, same CORS headers). The PostgreSQL
+  password and the scanner API key, which upstream's .env.example ships as
+  fixed values, are generated once into ~/.panelalpha/kyoo/secrets.env by
+  hooks/prepare.sh; the other .env.example defaults are in
+  files/panelalpha/kyoo-defaults.env, and the project's own .env (optional
+  settings such as THEMOVIEDB_API_ACCESS_TOKEN or OIDC_*) sits between the
+  two. The database, images, profile pictures, transcoder cache/metadata and
+  the video library (/video) are on named volumes. Hardware-transcoding
+  profiles are left out. First run is upstream's: the first account
+  registered gets the admin claims.

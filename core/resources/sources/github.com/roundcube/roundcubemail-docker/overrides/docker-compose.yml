@@ -1,0 +1,38 @@
+# Compose-replace: the repository builds the image, it is not an app checkout.
+# Runs the published image of the current release; web root and SQLite
+# database live on named volumes.
+services:
+  app:
+    image: roundcube/roundcubemail:1.7.4-apache
+    restart: unless-stopped
+    # The project's env vars (ROUNDCUBEMAIL_DEFAULT_HOST, ..._SMTP_SERVER, ...)
+    env_file:
+      - .env
+    environment:
+      ROUNDCUBEMAIL_DB_TYPE: sqlite
+    volumes:
+      - html:/var/www/html
+      - db:/var/roundcube/db
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 512m
+
+  # `compose up -d` returns only once Roundcube answers.
+  ready:
+    image: roundcube/roundcubemail:1.7.4-apache
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  html: {}
+  db: {}

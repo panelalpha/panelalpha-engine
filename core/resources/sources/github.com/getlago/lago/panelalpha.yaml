@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Lago, open-source metering and usage-based billing (Rails API + React
+  front, PostgreSQL, Redis). The repository's docker-compose.yml runs the
+  published release images but fails to start: "Private key is blank, you
+  must provide a private key to start the application" (LAGO_RSA_PRIVATE_KEY
+  and the encryption keys have no defaults), and it publishes the API on a
+  second port (3000) that the front's browser code calls. This recipe runs the
+  same services on getlago/api and getlago/front v1.53.0 (the latest release)
+  with one public port: the front's nginx serves the API by path through its
+  own extra-conf.d include (/graphql, /api/, /cable, /webhooks/,
+  /rails/active_storage/, /health), so API_URL is the account's domain.
+  hooks/prepare.sh generates the database password, SECRET_KEY_BASE, the RSA
+  key and the three encryption keys once into ~/.panelalpha/lago. Database,
+  Redis and uploaded files are named volumes. First run is upstream's own
+  sign-up page (create the organization and first user).

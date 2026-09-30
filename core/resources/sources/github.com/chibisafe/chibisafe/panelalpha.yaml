@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Chibisafe, a file uploader with shareable links: a Next.js frontend
+  (:8001), a Fastify/Prisma API on SQLite (:8000) and Caddy in front. The
+  repository has no root compose file, so the plain deploy built
+  docker/Dockerfile and ran out of memory in `yarn workspaces focus
+  @chibisafe/next` (ResourceExhausted: cannot allocate memory). This recipe
+  runs upstream's docker-compose.example.yml on the published release images
+  chibisafe/chibisafe and chibisafe/chibisafe-server at v6.5.5 (the current
+  release) with upstream's own Caddyfile, Caddy publishing :80. The SQLite
+  database, uploads and logs are named volumes, so they survive a redeploy;
+  Caddy serves the uploads volume read-only. Caddy waits for the API to answer
+  /api/health (it runs its migrations on start), so the deploy finishes with
+  the site serving. ADMIN_PASSWORD is left unset: the server's own default
+  applies, as upstream ships it.
+  Upload links are built from the request Host, which upstream's Caddyfile
+  rewrites to chibisafe_server:8000; upstream's own settings text says to set
+  "Serve Uploads From" to the site's domain when running on Docker, which the
+  admin does in the dashboard.
+
+  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
+
+  Create: deployment_status success in 79s, health :80 ok. / is 292 KB with
+  its _next chunks 200 (title is the default service name "change-me");
+  /api/version {"version":"6.5.5"}; login with the default admin and an
+  upload both worked, and Caddy served the uploaded file. Rebuild: success,
+  the file still served and listed (volumes kept). /.env and /.git/config
+  404. Idle memory: server 122 MiB, frontend 46 MiB, caddy 11 MiB.

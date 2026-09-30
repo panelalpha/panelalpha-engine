@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Supysonic is a Python (Flask) implementation of the Subsonic server API with
+  a small web UI for users, folders and playlists. The python platform
+  installs it correctly (`pip install .`), but the plain deploy serves the
+  engine placeholder: the only entry points are the console scripts in
+  [project.scripts] (supysonic-server, -cli, -daemon), none of the root files
+  the platform looks for, and supysonic-server needs a WSGI server that the
+  package does not depend on (docs/setup/deploying: gevent, gunicorn or
+  waitress).
+
+  The recipe adds waitress to the venv at build time and starts
+  `supysonic-server -S waitress -h 0.0.0.0 -p 8000`. files/supysonic.conf
+  (read from the working directory, one of Supysonic's own config paths)
+  moves the SQLite database and caches from /tmp/supysonic, which a restart
+  loses, to /var/lib/supysonic on a named volume; the library goes in the
+  music volume at /music.
+
+  First run is upstream's: the web UI shows its login page and there is no
+  sign-up; create the first admin in the app container
+  (`docker compose -p project exec app sh`) with
+  `.venv/bin/supysonic-cli user add <name> -p <password>` and
+  `.venv/bin/supysonic-cli user setroles -A <name>`, then add the library
+  with `.venv/bin/supysonic-cli folder add Music /music` and scan it.
+extends: python
+commands:
+  - id: pip-install
+    stage: build
+    role: dependencies
+    run: 'python -m venv .venv && .venv/bin/pip install .'
+  - id: wsgi-server
+    stage: build
+    description: supysonic-server needs a WSGI server; the package depends on none.
+    run: '.venv/bin/pip install waitress'
+  - id: supysonic
+    stage: start
+    serve: true
+    run: '.venv/bin/supysonic-server -S waitress -h 0.0.0.0 -p 8000'
+commands_from:
+  pip-install: python.install

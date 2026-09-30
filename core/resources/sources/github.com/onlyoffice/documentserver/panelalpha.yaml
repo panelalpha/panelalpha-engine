@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ONLYOFFICE Docs (Document Server), the online editors for documents,
+  spreadsheets and presentations that storage apps such as Nextcloud, Seafile
+  or ownCloud connect to.
+
+  The repository is the source meta-repository (submodules, no deployable
+  build), so a plain deploy detects nothing and serves the placeholder. This
+  recipe runs upstream's published all-in-one image of the current release,
+  onlyoffice/documentserver:9.4.0.1 (nginx, the converter and its own
+  PostgreSQL, RabbitMQ and Redis inside), serving the welcome page at the
+  site root. hooks/prepare.sh generates JWT_SECRET once into
+  ~/.panelalpha/onlyoffice/ (0600 file in 0700) so connected storage apps keep
+  working across redeploys; read it there to configure an integration. The
+  file cache, the internal database and custom fonts are on named volumes. A
+  `ready` gate makes the deploy finish only once /healthcheck answers.
+  Upstream asks for 4 GB of RAM: give the project a memory limit of 4096.

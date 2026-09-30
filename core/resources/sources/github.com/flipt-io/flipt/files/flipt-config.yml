@@ -1,0 +1,7 @@
+# Flipt's default storage is in memory; keep flags in a local git
+# repository on the data volume instead so they survive a restart.
+storage:
+  default:
+    backend:
+      type: local
+      path: /var/opt/flipt/features

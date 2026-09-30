@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SparkyFitness, a self-hosted food, exercise, water and health tracker
+  (React frontend on nginx, Node server, PostgreSQL). The repository root is a
+  pnpm workspace with no start script, so the generic Node path builds
+  nothing that runs; the real deployment is docker/docker-compose.prod.yml.
+  This recipe runs that topology on upstream's published images of the
+  current release (codewithcj/sparkyfitness and sparkyfitness_server v1.7.3,
+  postgres:18.3-alpine), with the database passwords,
+  SPARKY_FITNESS_API_ENCRYPTION_KEY and BETTER_AUTH_SECRET generated once into
+  ~/.panelalpha/sparkyfitness. Sign-up is left open as upstream ships it.

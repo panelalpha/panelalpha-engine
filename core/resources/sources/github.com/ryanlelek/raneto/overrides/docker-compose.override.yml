@@ -1,0 +1,30 @@
+# Layered over the compose the dockerfile strategy generates (service `app`).
+services:
+  # One-shot: copy the repo's sample content into the volume on first deploy
+  # (the image has none), owned by the app's uid 1000.
+  content-seed:
+    image: alpine:3.22
+    restart: "no"
+    volumes:
+      - ./content:/src:ro
+      - content:/dst
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        [ -d /dst/pages ] || cp -a /src/. /dst/
+        chown -R 1000:1000 /dst
+    mem_limit: 32m
+
+  app:
+    depends_on:
+      content-seed:
+        condition: service_completed_successfully
+    volumes:
+      - content:/opt/raneto/content
+    # Raneto will not start without a session secret; default it to the
+    # per-account instance secret the engine injects.
+    command: ["/bin/sh", "-c", "export SESSION_SECRET=\"$${SESSION_SECRET:-$$PA_INSTANCE_SECRET}\"; exec node server.js"]
+    mem_limit: 512m
+
+volumes:
+  content: {}

@@ -2,4 +2,7 @@
 description: >-
   Cal.diy on a prebuilt image rather than the repository's source build,
   with Postgres and Redis beside it. The prepare hook generates the secrets
-  the app refuses to start without; migrations run on first boot.
+  the app refuses to start without once into ~/.panelalpha/caldiy/ and writes
+  .env from them on every deploy, because ~/project is emptied each time while
+  the Postgres volume and the encrypted credentials outlive it; migrations run
+  on first boot.

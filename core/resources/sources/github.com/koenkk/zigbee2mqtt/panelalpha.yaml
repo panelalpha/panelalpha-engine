@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Zigbee2MQTT bridges Zigbee devices to MQTT and has its own web frontend
+  (devices, groups, network map) on port 8080.
+
+  A plain deploy builds the checkout and serves the onboarding page, but
+  /app/data (configuration.yaml, the device database and the coordinator
+  backup) lives in the container and is gone after a redeploy, and there is
+  no MQTT broker for the bridge to connect to once onboarding is done. This
+  recipe runs upstream's image of the current release,
+  koenkk/zigbee2mqtt:2.14.1, with /app/data on a named volume, plus an
+  internal Eclipse Mosquitto broker (no published port) that Zigbee2MQTT is
+  pointed at through ZIGBEE2MQTT_CONFIG_MQTT_SERVER. The broker's config is
+  written to /etc/mosquitto because a host AppArmor profile for
+  /usr/sbin/mosquitto blocks the image's /mosquitto/config (engine#366).
+
+  First run is upstream's onboarding page: pick the Zigbee adapter and
+  save. The account has no USB, so the coordinator must be network-attached
+  (e.g. `tcp://192.168.1.20:6638` for an Ethernet/Wi-Fi coordinator
+  reachable from this server). If the adapter cannot be reached the bridge
+  exits and comes back on the onboarding page with the saved settings. The
+  redirect to `http://localhost:8080` after onboarding is switched off;
+  reload the page instead.

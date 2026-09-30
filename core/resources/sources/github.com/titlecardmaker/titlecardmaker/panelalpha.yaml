@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  TitleCardMaker, a title-card generator for Plex/Jellyfin/Emby with a web UI:
+  one FastAPI/uvicorn server on :4242 with a SQLite database. The repository's
+  own Dockerfile builds fine (HEAD is the v2.16.1 release; upstream publishes
+  only :latest/:main tags, no versioned image), but the app hardcodes its data
+  directory to /config when running in Docker and upstream's instructions
+  mount a volume there. The plain deploy has none, so the container
+  crash-loops on "PermissionError: [Errno 13] Permission denied: '/config'".
+
+  This recipe keeps the repository's Dockerfile build and layers a named
+  volume at /config (database, logs, generated cards survive redeploys), a
+  healthcheck on the app's own /api/healthcheck, and a gate service so the
+  deploy finishes once the UI answers. First run is as upstream ships it.
+extends: dockerfile
+extra:
+  # A source recipe is applied without the probes; state the file and port.
+  dockerfile: Dockerfile
+  port_hint: 4242

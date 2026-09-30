@@ -1,0 +1,35 @@
+# Upstream's examples/docker-compose.yml with a generated database password,
+# and the Postgres volume at the image's real data path.
+services:
+  app:
+    image: ghcr.io/kassner/whattocook:0.4.3
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/whattocook/app.env
+    environment:
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/whattocook"
+      SPRING_DATASOURCE_USERNAME: whattocook
+    ports:
+      - "12393:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 768m
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/whattocook/db.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U whattocook -d whattocook"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+volumes:
+  pgdata: {}

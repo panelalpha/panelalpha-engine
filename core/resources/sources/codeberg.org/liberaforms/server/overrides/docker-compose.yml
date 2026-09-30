@@ -1,0 +1,117 @@
+# The repo ships no compose file (only docker-compose.yml.example, which expects
+# a hand-built image and a hand-written .env) and no published image. This
+# builds the repo's own Dockerfile and runs it beside PostgreSQL, as
+# docs/container.md describes.
+services:
+  # Builds the app image from the repo Dockerfile and exits (no bind mount).
+  build:
+    image: liberaforms-local:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    mem_limit: 64m
+
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/liberaforms/db.env
+    environment:
+      POSTGRES_USER: liberaforms
+      POSTGRES_DB: liberaforms
+    volumes:
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -U liberaforms -d liberaforms"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 256m
+
+  # One-shot: fails the deploy when ROOT_USER is missing, then creates the
+  # schema on a fresh database (docs/container.md) or migrates an existing one.
+  init:
+    image: liberaforms-local:latest
+    restart: "no"
+    depends_on:
+      build:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    env_file:
+      - ./panelalpha/liberaforms/defaults.env
+      - ../.panelalpha/liberaforms/app.env
+      - .env
+    environment:
+      BASE_URL: ${PA_PUBLIC_URL}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$$ROOT_USER" ]; then
+          echo "Error: set ROOT_USER in the project's environment variables (the email address that becomes the LiberaForms admin when it signs up)"
+          exit 1
+        fi
+        set -e
+        if python -c "import os,sys,psycopg2; c=psycopg2.connect(host=os.environ['DB_HOST'],dbname=os.environ['DB_NAME'],user=os.environ['DB_USER'],password=os.environ['DB_PASSWORD']); k=c.cursor(); k.execute(\"select to_regclass('public.alembic_version')\"); sys.exit(0 if k.fetchone()[0] else 1)"; then
+          flask db upgrade
+        else
+          flask database create-tables
+          flask db stamp
+        fi
+    mem_limit: 512m
+
+  app:
+    image: liberaforms-local:latest
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - ./panelalpha/liberaforms/defaults.env
+      - ../.panelalpha/liberaforms/app.env
+      - .env
+    environment:
+      BASE_URL: ${PA_PUBLIC_URL}
+    ports:
+      - "5000:5000"
+    volumes:
+      - uploads:/app/uploads
+      - logs:/app/logs
+    healthcheck:
+      # SERVER_NAME is the public host, so ask with that Host header; any
+      # non-5xx answer means gunicorn and the app are up.
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import os, sys, urllib.request as u, urllib.parse as p
+          class N(u.HTTPRedirectHandler):
+              def redirect_request(self, *a): return None
+          try:
+              u.build_opener(N).open(u.Request("http://127.0.0.1:5000/", headers={"Host": p.urlparse(os.environ["BASE_URL"]).netloc}), timeout=5)
+          except u.HTTPError as e:
+              sys.exit(0 if e.code < 500 else 1)
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns only once the app answers.
+  ready:
+    image: postgres:18-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db_data: {}
+  uploads: {}
+  logs: {}

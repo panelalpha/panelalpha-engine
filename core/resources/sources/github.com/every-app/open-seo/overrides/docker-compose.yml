@@ -1,0 +1,42 @@
+# Upstream's compose.yaml on the v0.1.9 release image. Replaced rather than
+# layered because ALLOWED_HOST must be the project's host (vite preview answers
+# 403 "Blocked request" otherwise), and ${PA_PUBLIC_HOST} is only substituted
+# in the compose file the engine runs.
+services:
+  open-seo:
+    image: ghcr.io/every-app/open-seo:v0.1.9
+    restart: unless-stopped
+    environment:
+      CLOUDFLARE_INCLUDE_PROCESS_ENV: "true"
+      PORT: "3001"
+      ALLOWED_HOST: ${PA_PUBLIC_HOST}
+      # Upstream's Docker self-host mode.
+      AUTH_MODE: local_noauth
+      OPENSEO_TELEMETRY_DISABLED: ${OPENSEO_TELEMETRY_DISABLED:-}
+      DO_NOT_TRACK: ${DO_NOT_TRACK:-}
+      # Customer settings, as upstream forwards them (SEO data needs DataForSEO).
+      DATAFORSEO_API_KEY: ${DATAFORSEO_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      VITE_SHOW_DEVTOOLS: "false"
+    ports:
+      - "3001:3001"
+    volumes:
+      # Local D1 (SQLite) and KV state.
+      - open_seo_data:/app/.wrangler
+
+  # The container runs the vite build at every start (~4 min, ~2.5 GB peak);
+  # hold the deploy until the image's own health check answers.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      open-seo:
+        condition: service_healthy
+
+volumes:
+  open_seo_data: {}

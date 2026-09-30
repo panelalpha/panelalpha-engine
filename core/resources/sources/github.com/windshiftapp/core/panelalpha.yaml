@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Windshift, a self-hosted work-management app (Go server, Svelte UI,
+  SQLite). The plain deploy builds the repository's root Dockerfile, whose
+  frontend `vite build` runs out of memory in a 2000 MB account ("cannot
+  allocate memory"). This recipe runs upstream's deploy/docker-compose.yml
+  (SQLite) on the release image ghcr.io/windshiftapp/windshift:v0.8.9 on
+  :8080, with BASE_URL set to the site's address and the process budget
+  (WINDSHIFT_MEMORY_LIMIT_MB, upstream default 2048) lowered to 768 under a
+  1 GB container limit. SSO_SECRET, which the server refuses to start
+  without, is generated once by hooks/prepare.sh into
+  ~/.panelalpha/windshift/secrets.env. /data (database, attachments,
+  plugins) is a named volume that survives redeploys. The first-run setup
+  wizard (admin account) is left as upstream ships it.

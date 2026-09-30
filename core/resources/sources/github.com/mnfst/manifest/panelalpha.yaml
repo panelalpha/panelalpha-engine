@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Manifest, an open-source LLM gateway and router (NestJS backend serving the
+  dashboard and the OpenAI-compatible API) on port 2099, with PostgreSQL.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repository root only has
+  Dockerfile.heroku (`FROM manifestdotbuild/manifest:6`, no database), so the
+  plain deploy builds the image, the app finds no PostgreSQL and never answers.
+  Upstream's own stack is docker/docker-compose.yml (app + Postgres). This
+  recipe runs the same published manifestdotbuild/manifest image of the
+  current release (6.27.0) with postgres:16-alpine on a named volume.
+
+  hooks/prepare.sh generates BETTER_AUTH_SECRET and the database password
+  once into ~/.panelalpha/manifest/ (0600), so sessions and stored provider
+  credentials (encrypted with that secret) survive a redeploy. BETTER_AUTH_URL
+  is the site's address. The first visitor creates the admin account through
+  the app's own /setup wizard, as upstream ships it.

@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LiteLLM, the self-hosted AI gateway (OpenAI-compatible proxy with an admin
+  UI, virtual keys and spend tracking). The repository's Dockerfile builds the
+  Next.js UI and resolves the full uv extras set, which stalled for 15 minutes
+  and was stopped in an account. This recipe runs upstream's published image
+  ghcr.io/berriai/litellm of the current release (v1.103.0) with
+  postgres:16-alpine, as upstream's docker/docker-compose.quickstart.yml does,
+  with LITELLM_MASTER_KEY and LITELLM_SALT_KEY generated once into
+  ~/.panelalpha/litellm (the quickstart's own setup step).

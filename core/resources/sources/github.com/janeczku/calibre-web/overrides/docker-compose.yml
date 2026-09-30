@@ -1,0 +1,67 @@
+# Compose-replace: the repo ships no compose file or Dockerfile.
+# Runs the LinuxServer image upstream recommends; settings and library on named
+# volumes, behind a small nginx front for engine#323.
+services:
+  app:
+    image: linuxserver/calibre-web:0.6.27
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+    volumes:
+      - config:/config
+      - books:/books
+    depends_on:
+      library-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8083/login"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # Puts the repo's empty Calibre library into /books once, so setup has a database to open.
+  library-init:
+    image: linuxserver/calibre-web:0.6.27
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "[ -f /books/metadata.db ] || { cp /seed/metadata.db /books/ && chown -R 1000:1000 /books; }"]
+    volumes:
+      - ./library:/seed:ro
+      - books:/books
+    mem_limit: 64m
+
+  # The only published port. The engine's vhost sends `Connection: upgrade` on
+  # every request and gevent then never finishes a POST (engine#323); drop once fixed.
+  web:
+    image: nginx:1-alpine
+    restart: unless-stopped
+    volumes:
+      - ./panelalpha/front.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8083:8083"
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8083/login || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    mem_limit: 64m
+
+  # No-op gate: `compose up -d` returns only once the site answers.
+  ready:
+    image: nginx:1-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  books: {}

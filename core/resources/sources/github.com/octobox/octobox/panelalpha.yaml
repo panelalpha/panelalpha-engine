@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Octobox, a GitHub notifications inbox (Rails, Postgres, Redis). The plain
+  deploy runs the repo's docker-compose.yml, a development configuration that
+  starts the published image with RAILS_ENV=development; the image is built
+  without development gems, so `rake db:migrate` aborts with `listen is not
+  part of the bundle` and the app restarts forever.
+
+  Compose-REPLACE on the current release image octoboxio/octobox:september-2026
+  in production mode (as docs/INSTALLATION.md describes) with postgres:16 and
+  redis:7 on named volumes. The customer supplies a GitHub OAuth app in the
+  project's environment variables, GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET
+  (callback <site>/auth/github/callback); a one-shot check service fails the
+  deploy naming each one that is missing. SECRET_KEY_BASE,
+  OCTOBOX_ATTRIBUTE_ENCRYPTION_KEY and the Postgres password are generated once
+  by hooks/prepare.sh into ~/.panelalpha/octobox. Other upstream settings
+  (ADMIN_GITHUB_IDS, OCTOBOX_BACKGROUND_JOBS_ENABLED, ...) can be set as
+  project env vars.

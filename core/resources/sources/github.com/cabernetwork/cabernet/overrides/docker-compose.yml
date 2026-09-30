@@ -1,0 +1,27 @@
+# Upstream's compose publishes 6077 (web UI) and 5004 (streams) with
+# placeholder bind mounts; only the web UI is published here.
+services:
+  app:
+    # 0.9.16.02 (revision 08a1df28); upstream publishes latest/master only
+    image: ghcr.io/cabernetwork/cabernet:latest@sha256:b71e006cd3e7043098d862b4de369446b162167dcd756639d5d60a3cae8fe0d9
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      - data:/app/data
+      - plugins_ext:/app/plugins_ext
+      - secrets:/app/.cabernet
+    ports:
+      - "6077:6077"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:6077/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+volumes:
+  data: {}
+  plugins_ext: {}
+  secrets: {}

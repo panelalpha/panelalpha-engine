@@ -1,0 +1,33 @@
+# The repo's Dockerfile bakes config.json with the web UI on :8083 and RTSP on
+# :5541, and the engine picks the wrong one. This runs upstream's image of the
+# current release and publishes only the web UI.
+services:
+  app:
+    image: ghcr.io/deepch/rtsptoweb:v2.4.3
+    restart: unless-stopped
+    volumes:
+      # config.json holds server settings and every stream added in the UI;
+      # the image's copy seeds the volume on first start.
+      - config:/config
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8083/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the web UI answers.
+  ready:
+    image: ghcr.io/deepch/rtsptoweb:v2.4.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}

@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PhotoPrism, an AI-powered photo library (Go, TensorFlow; web UI and API on
+  :2342). The repository's root Dockerfile builds the developer image
+  (photoprism/develop, no server command) and its compose.yaml is the
+  developer stack (traefik, dummy OIDC/LDAP/WebDAV, a MariaDB on port 4001
+  whose healthcheck interpolates an unset root password), so a plain deploy
+  fails with the MariaDB sidecar unhealthy.
+
+  This recipe follows upstream's production compose
+  (dl.photoprism.app/docker/compose.yaml): the published
+  photoprism/photoprism image of the current release (260919) and
+  mariadb:12.3, with TLS left to the engine (PHOTOPRISM_DISABLE_TLS) and
+  PHOTOPRISM_SITE_URL set to the site's address. The initial admin password
+  is the customer's: PHOTOPRISM_ADMIN_PASSWORD (8-72 characters, and
+  optionally PHOTOPRISM_ADMIN_USER, default admin) comes from the project env
+  vars, and a one-shot check fails the deploy naming it when it is unset.
+  hooks/prepare.sh generates the database password once into
+  ~/.panelalpha/photoprism. Originals, storage (cache, thumbnails, sidecars)
+  and the database live on named volumes that survive redeploys.

@@ -1,0 +1,16 @@
+# The repo's Dockerfile needs git tags (scripts/version.sh runs git describe),
+# which the shallow clone lacks. This runs upstream's published image of the
+# current release (v0.6.0), as the README's docker instructions do.
+services:
+  app:
+    image: hrfee/jfa-go:latest@sha256:701cfca823f9278b65f4cf7706b0c7f89b3be33e17ca077f11d89dc119e9f307
+    restart: unless-stopped
+    volumes:
+      # config.ini, the database and backups.
+      - data:/data
+    ports:
+      - "8056:8056"
+    mem_limit: 512m
+
+volumes:
+  data: {}

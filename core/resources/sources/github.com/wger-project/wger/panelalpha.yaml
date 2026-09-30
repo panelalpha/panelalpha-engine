@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  wger, workout, nutrition and body-weight manager (Django). A plain deploy
+  builds the checkout with the django recipe and restart-loops on "Set the
+  DJANGO_DB_ENGINE environment variable": the repository is the source tree
+  and its deployment lives in github.com/wger-project/docker. This recipe
+  runs that production stack on the release image (wger/server:2.7.0):
+  nginx serving /static and /media in front of gunicorn, Postgres 15, Redis,
+  and the Celery worker and beat that sync exercises and ingredients from
+  wger.de. The optional PowerSync service (mobile offline mode) is left out.
+  hooks/prepare.sh generates SECRET_KEY, the database password and an RS256
+  JWT keypair once into ~/.panelalpha/wger/wger.env (upstream's prod.env
+  ships a fixed, public keypair). Database, media, static and Redis are named
+  volumes. First run is upstream's: `wger bootstrap` creates the default
+  admin account.

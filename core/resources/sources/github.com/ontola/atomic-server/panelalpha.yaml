@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Atomic Server is a knowledge graph database with documents, tables and
+  search: one Rust binary (embedded store, bundled browser UI) on port 80,
+  data in /atomic-storage.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE of the repo's docker-compose.yml, which names
+  ghcr.io/ontola/atomic-server without a tag; :latest was never published on
+  GHCR, so the plain deploy fails pulling it. Upstream no longer publishes
+  versioned images (the release workflow ships binaries, crates and npm only;
+  the last versioned image is v0.38.0 from 2024): its CI publishes :develop,
+  built from the default branch the engine clones, so that is the tag used.
+
+  Configured as upstream's "external HTTPS proxy" section says: ATOMIC_DOMAIN
+  is the site's host, ATOMIC_PORT=80, ATOMIC_HTTPS=false (no built-in
+  Let's Encrypt). Data is on a named volume. First run is as upstream ships
+  it: an open server where anyone can create an account; set
+  ATOMIC_OWNER_AGENT (or ATOMIC_HOST_MODE) in the project's environment
+  variables to restrict it, as upstream's docs describe.

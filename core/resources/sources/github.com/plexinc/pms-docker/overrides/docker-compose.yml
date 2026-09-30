@@ -1,0 +1,75 @@
+# Replaces the repo's compose templates (host/macvlan/bridge examples with
+# placeholders). Runs the official image of the current release behind a
+# small nginx that decides which client address and Host Plex gets to see.
+services:
+  # Front proxy, the only published port. Plex treats a request as local
+  # (and an unclaimed server as open to it) from the first X-Forwarded-For
+  # entry and the Host; files/plex-front.conf makes neither spoofable.
+  app:
+    image: nginx:1-alpine
+    restart: unless-stopped
+    volumes:
+      - ./plex-front.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./plex-trusted-proxy.conf:/etc/nginx/plex-trusted-proxy.conf:ro
+    ports:
+      - "32400:32400"
+    depends_on:
+      pms:
+        condition: service_healthy
+    mem_limit: 64m
+
+  pms:
+    image: plexinc/pms-docker:1.43.4.10903-e5521bd8c
+    restart: unless-stopped
+    # PLEX_CLAIM comes from the project's environment variables.
+    env_file:
+      - .env
+    environment:
+      TZ: Etc/UTC
+      # First-run only (a new container): published to plex.tv as a
+      # connection, so Plex apps find the server at its public address.
+      ADVERTISE_IP: "https://${PA_PUBLIC_HOST}:443"
+    volumes:
+      # Preferences.xml (server token), the library database and metadata.
+      - plex-config:/config
+      - plex-transcode:/transcode
+      # Media library root, for libraries added in Settings.
+      - plex-media:/data
+    healthcheck:
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 2g
+
+  # Fails the deploy while the server is not signed in to a Plex account.
+  plex-claim:
+    image: plexinc/pms-docker:1.43.4.10903-e5521bd8c
+    restart: "no"
+    entrypoint: ["/bin/sh", "/plex-claim-check.sh"]
+    env_file:
+      - .env
+    volumes:
+      - ./plex-claim-check.sh:/plex-claim-check.sh:ro
+    depends_on:
+      pms:
+        condition: service_healthy
+    mem_limit: 64m
+
+  # No-op gate: `up -d` returns only once the server is claimed and fronted.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_started
+      plex-claim:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  plex-config: {}
+  plex-transcode: {}
+  plex-media: {}

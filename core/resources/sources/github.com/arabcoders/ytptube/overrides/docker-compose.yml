@@ -1,0 +1,29 @@
+# Upstream compose bind-mounts root-owned dirs into a uid-1000 container and
+# restart-loops; this runs the release image on named volumes instead.
+services:
+  app:
+    image: ghcr.io/arabcoders/ytptube:v2.7.4@sha256:8f099c5d9426521fa7307d5137be1b219eac4ef429091ee63f63297fce606bd7
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      # Settings, SQLite queue/history, cookies and presets.
+      - config:/config
+      - downloads:/downloads
+    ports:
+      - "8081:8081"
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once the image's own healthcheck passes.
+  ready:
+    image: ghcr.io/arabcoders/ytptube:v2.7.4@sha256:8f099c5d9426521fa7307d5137be1b219eac4ef429091ee63f63297fce606bd7
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  downloads: {}

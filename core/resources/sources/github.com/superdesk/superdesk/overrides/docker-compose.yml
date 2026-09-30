@@ -1,0 +1,120 @@
+# Compose-replace of the repo's docker-compose.yml: the same published images
+# and datastores, without the `build:` keys, host-published datastore ports and
+# the external newsroom network, with the site's own address and named volumes.
+services:
+  mongodb:
+    image: mongo:6
+    restart: unless-stopped
+    volumes:
+      - mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+    mem_limit: 512m
+
+  redis:
+    image: redis:8
+    restart: unless-stopped
+    volumes:
+      - redis:/data
+    mem_limit: 128m
+
+  elastic:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.29
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      # A fixed heap instead of half the account's memory.
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - elastic:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs 'http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+    mem_limit: 1280m
+
+  superdesk-server:
+    image: sourcefabricoss/superdesk-server:latest
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/superdesk/app.env
+    environment:
+      SUPERDESK_URL: ${PA_PUBLIC_URL}/api
+      SUPERDESK_CLIENT_URL: ${PA_PUBLIC_URL}
+      CONTENTAPI_URL: ${PA_PUBLIC_URL}/capi
+      DEMO_DATA: "1"
+      WEB_CONCURRENCY: "2"
+      # Celery otherwise forks one worker per host CPU (~170 MB each).
+      CELERY_WORKER_CONCURRENCY: "2"
+      MONGO_URI: mongodb://mongodb/superdesk
+      CONTENTAPI_MONGO_URI: mongodb://mongodb/superdesk_capi
+      PUBLICAPI_MONGO_URI: mongodb://mongodb/superdesk_papi
+      LEGAL_ARCHIVE_URI: mongodb://mongodb/superdesk_legal
+      ARCHIVED_URI: mongodb://mongodb/superdesk_archive
+      ELASTICSEARCH_URL: http://elastic:9200
+      ELASTICSEARCH_INDEX: superdesk
+      CELERY_BROKER_URL: redis://redis:6379/1
+      REDIS_URL: redis://redis:6379/1
+      DEFAULT_TIMEZONE: UTC
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      elastic:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs -o /dev/null http://127.0.0.1:5000/api || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+
+  # The published client image has http://localhost:8080 compiled in, and its
+  # start.sh only rewrites localhost:5000, so it is built from the repo's own
+  # Dockerfile with this site's address (PUBLIC_URL, filled into .env by the
+  # engine from files/.env.example) as upstream's compose does for localhost.
+  superdesk-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        SUPERDESK_URL: ${PUBLIC_URL}/api
+        # Same-origin websocket; browsers resolve a relative ws URL.
+        SUPERDESK_WS_URL: /ws
+    restart: unless-stopped
+    environment:
+      SUPERDESK_URL: ${PA_PUBLIC_URL}/api
+      SUPERDESK_WS_URL: /ws
+      IFRAMELY_KEY: ""
+    ports:
+      - "8080:80"
+    depends_on:
+      superdesk-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs -o /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  # No-op gate: `up` returns only once the site answers (engine#204).
+  ready:
+    image: nginx:1-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      superdesk-client:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  mongo: {}
+  redis: {}
+  elastic: {}

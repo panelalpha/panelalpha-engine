@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Spoolman tracks 3D-printer filament spools: one FastAPI (uvicorn) process
+  serving the REST API and the web UI on :8000, SQLite in its data directory.
+  The repository's Dockerfile copies prebuilt web clients (client/dist,
+  client_v2/build) that only the release pipeline produces, so it cannot build
+  from a checkout; a plain deploy falls to the Python recipe, which installs
+  the requirements but finds no entry point and serves the engine placeholder.
+
+  This recipe runs upstream's official image of the current release,
+  ghcr.io/donkie/spoolman:0.27.0, as the Spoolman docs do, with the data
+  directory (spoolman.db, backups) on a named volume that survives redeploys.
+  Spoolman has no login; that is left as upstream ships it.

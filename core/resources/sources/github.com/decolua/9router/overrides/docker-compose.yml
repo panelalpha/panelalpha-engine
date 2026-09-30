@@ -1,0 +1,51 @@
+# Compose-replace: upstream's two services at their current release images, with
+# only the app publishing a port. Upstream also publishes headroom's 8787, and
+# the engine routes the domain to it (engine#425), which answers 421.
+services:
+  9router:
+    image: decolua/9router:0.5.91
+    restart: unless-stopped
+    # The project's env vars; the engine seeds them from .env.example
+    # (INITIAL_PASSWORD etc.), as upstream's compose expects.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATA_DIR: /app/data
+      PORT: "20128"
+      HOSTNAME: "0.0.0.0"
+      NODE_ENV: production
+      HEADROOM_URL: http://headroom:8787
+      # Empty: the app generates its own and keeps it in /app/data/jwt-secret,
+      # instead of the example's "change-me-to-a-long-random-secret".
+      JWT_SECRET: ""
+    volumes:
+      - 9router_data:/app/data
+    ports:
+      - "20128:20128"
+    depends_on:
+      - headroom
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:20128/api/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  # Optional context-compression proxy the app calls; internal only.
+  headroom:
+    image: ghcr.io/chopratejas/headroom:0.27.0
+    restart: unless-stopped
+
+  # No-op: `compose up -d` returns once the app is healthy.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      9router:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  9router_data: {}

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Shaarli is a minimalist bookmarking service: PHP with flat-file storage, no
+  database, served by nginx + php-fpm on :80 in the official image. The
+  repository's docker-compose.yml is a self-host stack for an operator with a
+  .env: `ghcr.io/shaarli/shaarli:${SHAARLI_DOCKER_TAG}` has no default, so a
+  plain deploy fails with "invalid reference format", and the traefik service
+  next to it is an edge proxy the engine replaces.
+
+  This recipe runs the official image of the current release, v0.16.7, with
+  data/ (config, bookmarks) and cache/ on named volumes that survive redeploys.
+  On first visit Shaarli shows its own install form (login, password, title),
+  as upstream ships it. Every visitor reaches Shaarli from the engine's proxy
+  address; until `security.trusted_proxies` is set in data/config.json.php,
+  Shaarli's login ban applies to that one address.

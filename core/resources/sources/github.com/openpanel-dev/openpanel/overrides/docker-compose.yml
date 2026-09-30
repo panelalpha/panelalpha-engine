@@ -1,0 +1,160 @@
+# Compose-replace: upstream's self-hosting/docker-compose.template.yml on the
+# 2.3.0 images, rendered the way its setup script would for one domain.
+x-op-env: &op-env
+  NODE_ENV: production
+  SELF_HOSTED: "true"
+  BATCH_SIZE: "5000"
+  BATCH_INTERVAL: "10000"
+  ALLOW_REGISTRATION: "false"
+  ALLOW_INVITATION: "true"
+  REDIS_URL: redis://op-kv:6379
+  CLICKHOUSE_URL: http://op-ch:8123/openpanel
+  DASHBOARD_URL: ${PA_PUBLIC_URL}
+  API_URL: ${PA_PUBLIC_URL}/api
+  # Upstream derives the session cookie's domain from DASHBOARD_URL's parent
+  # (.panelalpha.online, shared by every account); keep it on this site.
+  CUSTOM_COOKIE_DOMAIN: ${PA_PUBLIC_HOST}
+  # Optional mail (invites, reports): set both in the project's env vars.
+  EMAIL_SENDER: ${EMAIL_SENDER:-}
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+
+services:
+  op-proxy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./panelalpha/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      op-dashboard:
+        condition: service_healthy
+      op-api:
+        condition: service_healthy
+    mem_limit: 64m
+
+  op-db:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    volumes:
+      - op-db-data:/var/lib/postgresql/data
+    # POSTGRES_PASSWORD, generated once by hooks/prepare.sh.
+    env_file:
+      - ../.panelalpha/openpanel/db.env
+    environment:
+      POSTGRES_USER: openpanel
+      POSTGRES_DB: openpanel
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openpanel -d openpanel"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  op-kv:
+    image: redis:7.2.5-alpine
+    restart: unless-stopped
+    volumes:
+      - op-kv-data:/data
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  op-ch:
+    image: clickhouse/clickhouse-server:25.10.2.65
+    restart: unless-stopped
+    volumes:
+      - op-ch-data:/var/lib/clickhouse
+      - ./self-hosting/clickhouse/clickhouse-config.xml:/etc/clickhouse-server/config.d/op-config.xml:ro
+      - ./self-hosting/clickhouse/clickhouse-user-config.xml:/etc/clickhouse-server/users.d/op-user-config.xml:ro
+      - ./self-hosting/clickhouse/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    environment:
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    healthcheck:
+      test: ["CMD-SHELL", 'clickhouse-client --query "SELECT 1"']
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    mem_limit: 1g
+
+  op-api:
+    image: lindesvard/openpanel-api:2.3.0
+    restart: unless-stopped
+    command: ["sh", "-c", "CI=true pnpm -r run migrate:deploy && pnpm start"]
+    env_file:
+      - ../.panelalpha/openpanel/app.env
+    environment:
+      <<: *op-env
+    depends_on:
+      op-db:
+        condition: service_healthy
+      op-ch:
+        condition: service_healthy
+      op-kv:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/healthcheck || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 768m
+
+  op-dashboard:
+    image: lindesvard/openpanel-dashboard:2.3.0
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/openpanel/app.env
+    environment:
+      <<: *op-env
+    depends_on:
+      op-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/healthcheck || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    mem_limit: 384m
+
+  op-worker:
+    image: lindesvard/openpanel-worker:2.3.0
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/openpanel/app.env
+    environment:
+      <<: *op-env
+    depends_on:
+      op-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/healthcheck || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns once the proxy is up in front of both.
+  ready:
+    image: redis:7.2.5-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      op-proxy:
+        condition: service_started
+      op-worker:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  op-db-data: {}
+  op-kv-data: {}
+  op-ch-data: {}

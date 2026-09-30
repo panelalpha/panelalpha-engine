@@ -1,0 +1,48 @@
+# The repo root is the CLI client; plikd needs the webapp built next to it.
+# Runs the official image of the current release with data on a named volume.
+services:
+  # The image has no /data, so a fresh volume is root-owned and plikd (uid
+  # 1000) cannot create plik.db. Hand it to the plik user once per start.
+  init:
+    image: rootgg/plik:1.4.2
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "chown 1000:1000 /data"]
+    volumes:
+      - data:/data
+    mem_limit: 32m
+
+  app:
+    image: rootgg/plik:1.4.2
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      PLIKD_PLIK_DOMAIN: ${PA_PUBLIC_URL}
+      PLIKD_DATA_BACKEND_CONFIG: '{"Directory":"/data/files"}'
+      PLIKD_METADATA_BACKEND_CONFIG: '{"Driver":"sqlite3","ConnectionString":"/data/plik.db"}'
+    volumes:
+      - data:/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once plikd answers /health.
+  ready:
+    image: rootgg/plik:1.4.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

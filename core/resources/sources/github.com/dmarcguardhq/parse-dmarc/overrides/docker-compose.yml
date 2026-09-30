@@ -1,0 +1,46 @@
+# The repo's compose.yml only runs a seeded Dovecot for development; this runs
+# the published app image the way the upstream README's `docker run` does.
+services:
+  # One-shot: parse-dmarc exits without its IMAP mailbox. Values are read from
+  # .env (the project's env vars), not interpolated (engine#336). Also hands
+  # the data volume to the image's nonroot user (65532); it is created
+  # root-owned and the release image does not ship /data.
+  init:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        missing=""
+        [ -n "$$IMAP_HOST" ] || missing="$$missing IMAP_HOST (e.g. imap.gmail.com)"
+        [ -n "$$IMAP_USERNAME" ] || missing="$$missing IMAP_USERNAME (the mailbox DMARC reports are sent to)"
+        [ -n "$$IMAP_PASSWORD" ] || missing="$$missing IMAP_PASSWORD (its password or app password)"
+        if [ -n "$$missing" ]; then
+          echo "Error: set in the project's environment variables:$$missing"
+          exit 1
+        fi
+        chown 65532:65532 /data
+    volumes:
+      - data:/data
+    mem_limit: 32m
+
+  parse-dmarc:
+    image: docker.io/dmarcguard/parse-dmarc:v1.7.0
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    # IMAP_* settings from the project's environment variables.
+    env_file: .env
+    environment:
+      DATABASE_PATH: /data/parse-dmarc.db
+      SERVER_PORT: "8080"
+    ports:
+      - "8080:8080"
+    volumes:
+      - data:/data
+    mem_limit: 256m
+
+volumes:
+  data: {}

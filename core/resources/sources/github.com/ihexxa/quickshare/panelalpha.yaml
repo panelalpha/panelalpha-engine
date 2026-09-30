@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  QuickShare, simple file sharing between devices (Go server with an embedded
+  web UI and SQLite, port 8686). The repository has no compose file and its
+  Dockerfile builds the frontend with yarn and webpack from source; the plain
+  deploy failed in that image build. This recipe runs the published image of
+  the current release (hexxa/quickshare:v0.11.4) as upstream's `docker run`
+  example does, with uploads and the database on a named volume. On first
+  start the app creates its admin from DEFAULTADMIN (project env var, default
+  `admin`) and DEFAULTADMINPWD; when the password is unset the app generates
+  one and prints it to its log.

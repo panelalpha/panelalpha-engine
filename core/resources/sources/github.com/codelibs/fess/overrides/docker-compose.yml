@@ -1,0 +1,67 @@
+# Compose-replace: the repository is the Maven source of Fess with no compose
+# file. This runs upstream's published images (codelibs/docker-fess compose.yaml
+# + compose-opensearch3.yaml) of the current release instead.
+services:
+  search:
+    image: ghcr.io/codelibs/fess-opensearch:3.8.0
+    restart: unless-stopped
+    environment:
+      node.name: search
+      discovery.type: single-node
+      node.roles: cluster_manager,data,ingest,ml
+      # A fixed 1 GB heap, as upstream ships it, instead of half the account.
+      OPENSEARCH_JAVA_OPTS: -Xms1g -Xmx1g
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+      FESS_DICTIONARY_PATH: /usr/share/opensearch/config/dictionary
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    volumes:
+      - search-data:/usr/share/opensearch/data
+      - search-dictionary:/usr/share/opensearch/config/dictionary
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs 'http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 2g
+
+  app:
+    image: ghcr.io/codelibs/fess:15.8.0
+    restart: unless-stopped
+    environment:
+      SEARCH_ENGINE_HTTP_URL: http://search:9200
+      FESS_DICTIONARY_PATH: /usr/share/opensearch/config/dictionary/
+    volumes:
+      - fess-var:/var/lib/fess
+    ports:
+      - "8080:8080"
+    depends_on:
+      search:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://127.0.0.1:8080/api/v2/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+    # 512 MB heap for the web app plus a crawler JVM forked per crawl job.
+    mem_limit: 1536m
+
+  # No-op gate: `up` returns only once Fess answers its health endpoint.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  search-data: {}
+  search-dictionary: {}
+  fess-var: {}

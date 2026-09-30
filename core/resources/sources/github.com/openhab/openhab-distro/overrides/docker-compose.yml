@@ -1,0 +1,41 @@
+# Compose-replace: the repository is the Maven build of the distribution and
+# ships no compose file. This runs upstream's published image of the release.
+services:
+  app:
+    image: docker.io/openhab/openhab:5.2.1
+    restart: unless-stopped
+    environment:
+      CRYPTO_POLICY: unlimited
+      TZ: UTC
+      # Heap cap inside the container limit below.
+      EXTRA_JAVA_OPTS: -Xms192m -Xmx768m
+    volumes:
+      - conf:/openhab/conf
+      - userdata:/openhab/userdata
+      - addons:/openhab/addons
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # The first boot restarts Karaf once and /rest/ answers briefly in
+      # between, so require it twice, 20 s apart.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/rest/ | grep -q runtimeInfo && sleep 20 && curl -fsS http://127.0.0.1:8080/rest/ | grep -q runtimeInfo"]
+      interval: 10s
+      timeout: 40s
+      retries: 90
+      start_period: 60s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once openHAB answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  conf: {}
+  userdata: {}
+  addons: {}

@@ -1,0 +1,39 @@
+# Compose-replace: the repo's root Dockerfile builds the Svelte frontend, which
+# runs out of memory in an account. This is upstream's deploy/docker-compose.yml
+# (SQLite) on the release image, with its memory budget sized for the plan.
+services:
+  windshift:
+    image: ghcr.io/windshiftapp/windshift:v0.8.9
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "8080:8080"
+    env_file:
+      # SSO_SECRET, generated once by hooks/prepare.sh.
+      - ../.panelalpha/windshift/secrets.env
+    environment:
+      BASE_URL: ${PA_PUBLIC_URL}
+      PORT: "8080"
+      USE_PROXY: "true"
+      SESSION_IP_BINDING: log
+      ATTACHMENT_PATH: /data/attachments
+      DB_PATH: /data/windshift.db
+      PLUGIN_DIR: /data/plugins
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      # Upstream defaults to a 2048 MiB budget; keep it under mem_limit.
+      WINDSHIFT_MEMORY_LIMIT_MB: "768"
+      # The scratch image has no /tmp; SQLite needs it for WAL.
+      TMPDIR: /tmp
+      SQLITE_TMPDIR: /tmp
+    volumes:
+      - windshift-data:/data
+    tmpfs:
+      - /tmp:exec,size=64M
+    mem_limit: 1g
+
+volumes:
+  windshift-data: {}

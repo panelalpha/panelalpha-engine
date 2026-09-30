@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Websurfx, a privacy-respecting metasearch engine (Rust, actix-web) on port
+  8080. The plain deploy built the repository's Dockerfile and restart-looped:
+  that image is `FROM scratch` with the config expected in /etc/xdg/websurfx/
+  (a VOLUME), which the Dockerfile strategy leaves empty. Upstream's
+  docker-compose.yml mounts the repo's websurfx/ directory there, and its
+  config.lua binds 127.0.0.1, which nothing outside the container reaches.
+
+  This recipe builds the repository's own Dockerfile (in-memory cache, the
+  default) and a one-shot busybox service copies websurfx/ (config.lua,
+  allowlist.txt, blocklist.txt) into a named volume on every deploy, changing
+  only binding_ip to 0.0.0.0. Everything else is upstream's config. The app
+  keeps no data.

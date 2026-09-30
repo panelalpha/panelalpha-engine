@@ -1,0 +1,58 @@
+# Compose-replace: the repository's Dockerfile copies a prebuilt binary that only
+# CI produces, so it cannot build from a checkout. This runs the official slim
+# image of the current release (no Chromium, so no Runtime API):
+#   - /data (users.json, spaces.json, the space's pages) on a named volume
+#   - `init` provisions the admin and a space at / with `silverbullet setup`
+#     before the server starts, so the first-visitor /.setup wizard never runs
+services:
+  init:
+    image: zefhemel/silverbullet:2.11.1-slim
+    restart: "no"
+    env_file:
+      # Missing file aborts `up` rather than leaving setup open.
+      - ../.panelalpha/silverbullet/admin.env
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        [ -f /data/users.json ] && exit 0
+        exec /silverbullet setup /data --admin "$${PA_SB_ADMIN_USER}:$${PA_SB_ADMIN_PASSWORD}" --space Notes --at /
+    volumes:
+      - data:/data
+    mem_limit: 128m
+
+  app:
+    image: zefhemel/silverbullet:2.11.1-slim
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SB_HOSTNAME: 0.0.0.0
+      SB_PORT: "3000"
+    volumes:
+      - data:/data
+    ports:
+      - "3000:3000"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/.ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once SilverBullet answers /.ping.
+  ready:
+    image: zefhemel/silverbullet:2.11.1-slim
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

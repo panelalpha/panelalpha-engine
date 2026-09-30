@@ -1,0 +1,44 @@
+# Compose-replace from Jeedom's official all-in-one image (MariaDB inside).
+# The repo's compose publishes 80 and 443 straight away, so the install-time
+# admin/admin would be live; here only `proxy` publishes, after seeding.
+services:
+  jeedom:
+    # "http-" tags are the variant WITH the internal MariaDB (DATABASE=1).
+    image: jeedom/jeedom:4.6-http-bookworm
+    restart: unless-stopped
+    entrypoint: ["bash", "/panelalpha/start.sh"]
+    env_file:
+      # JEEDOM_ADMIN_PASSWORD, read only by /panelalpha/seed.php.
+      - ../.panelalpha/jeedom/admin.env
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      # Code, config, plugins, backups (the image installs into it on first boot).
+      - jeedom-html:/var/www/html
+      - jeedom-db:/var/lib/mysql
+      - ./panelalpha/jeedom:/panelalpha:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /run/panelalpha-seeded && curl -fsS -o /dev/null http://127.0.0.1/here.html"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      # First boot downloads Jeedom and runs composer + install.php.
+      start_period: 1200s
+    stop_grace_period: 60s
+    mem_limit: 1536m
+
+  proxy:
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./panelalpha/jeedom/proxy.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      jeedom:
+        condition: service_healthy
+    mem_limit: 48m
+
+volumes:
+  jeedom-html: {}
+  jeedom-db: {}

@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  openHAB, the vendor-neutral home automation platform (Java, Karaf/OSGi)
+  with its Main UI and REST API on port 8080.
+
+  The repository is the Maven build of the distribution and ships no compose
+  file; a plain deploy was detected as `java`, spent about 15 minutes in the
+  Maven build and never answered. This recipe runs the image upstream
+  publishes for the current release, openhab/openhab:5.2.1 (Debian), as its
+  Docker guide does. conf, userdata and addons are named volumes, so things,
+  items, rules, users and installed add-ons survive a redeploy. The heap is
+  capped with EXTRA_JAVA_OPTS=-Xmx768m inside a 1.5 GB container (about
+  390 MB resident after boot). A `ready` gate makes the deploy finish only
+  once the REST API answers; the first boot restarts Karaf once and the API
+  answers briefly in between, so the check requires two answers 20 s apart.
+  No hardware bindings are configured; USB/serial devices are out of scope.
+
+  First run is upstream's: the Main UI asks the first visitor to create the
+  administrator account.

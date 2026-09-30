@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  BookLogr is a personal book library: a Flask API (gunicorn on :5000, SQLite)
+  and a React frontend served by nginx on :80 that calls the API from the
+  browser at BL_API_ENDPOINT. The repository's docker-compose.yml publishes both
+  ports and needs AUTH_SECRET_KEY, which .env.example leaves empty, so the plain
+  compose deploy has the API exit on "NO SECRET KEY SET!" and the engine proxies
+  the API port, which never answers. This recipe runs the official
+  mozzo/booklogr and mozzo/booklogr-web images of the current release, v1.12.0,
+  publishes only the frontend, and gives it an nginx config that also proxies
+  /v1/ to the API, so the browser reaches both on the site's own origin
+  (BL_API_ENDPOINT=${PA_PUBLIC_URL}/). hooks/prepare.sh generates
+  AUTH_SECRET_KEY once into ~/.panelalpha/booklogr/secret.env. The SQLite
+  database (/app/instance) and profile pictures are on named volumes.
+  Registration and login stay as upstream ships them.

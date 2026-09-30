@@ -1,0 +1,66 @@
+# Compose-replace of the repo's example compose: named volumes instead of host
+# paths, a generated secret, and pinned release images.
+services:
+  server:
+    image: szurubooru/server:2.5
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/szurubooru/db.env
+    environment:
+      POSTGRES_HOST: sql
+      THREADS: 4
+    depends_on:
+      sql:
+        condition: service_healthy
+    volumes:
+      - data:/data
+      - ../.panelalpha/szurubooru/config.yaml:/opt/app/config.yaml:ro
+    mem_limit: 512m
+
+  client:
+    image: szurubooru/client:2.5
+    restart: unless-stopped
+    environment:
+      BACKEND_HOST: server
+      BASE_URL: /
+    depends_on:
+      - server
+    volumes:
+      - data:/data:ro
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ && wget -q -O /dev/null --header 'Accept: application/json' http://127.0.0.1/api/info || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    mem_limit: 64m
+
+  sql:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/szurubooru/db.env
+    volumes:
+      - sql:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U szuru -d szuru"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  # No-op gate: `up` returns only once the UI and the API answer (engine#204).
+  ready:
+    image: postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      client:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  sql: {}

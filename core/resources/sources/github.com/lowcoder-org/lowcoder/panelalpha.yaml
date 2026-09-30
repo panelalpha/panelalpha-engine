@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Lowcoder, the low-code builder for internal tools (Java API service, Node
+  service, React frontend) on :3000.
+
+  The repository is a monorepo with no single entry point, so a plain deploy
+  went to Railpack, which found no start command and restart-looped. This
+  recipe runs upstream's published all-in-one image of the current release,
+  lowcoderorg/lowcoder-ce:2.7.6, as deploy/docker/docker-compose.yaml does:
+  one container running MongoDB, Redis, the API service, the Node service and
+  nginx under supervisord. hooks/prepare.sh generates the encryption password
+  and salt, the API key secret and the Node service secret once into
+  ~/.panelalpha/lowcoder/secrets.env (0600 in 0700), since upstream's
+  defaults are public constants. LOWCODER_PUBLIC_URL is the account's URL.
+  /lowcoder-stacks (MongoDB and Redis data, logs) and /lowcoder/assets are on
+  named volumes. A `ready` gate makes the deploy finish only once
+  /api/status/health (MongoDB and Redis included) answers.
+
+  First run is upstream's: the site opens on the sign-in page and the first
+  account registered becomes the workspace admin.

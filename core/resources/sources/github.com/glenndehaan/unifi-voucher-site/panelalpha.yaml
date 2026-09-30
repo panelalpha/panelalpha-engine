@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  UniFi Voucher Site, a Node/Express web page for creating and printing UniFi
+  guest Wi-Fi vouchers through the UniFi Network Integration API, on :3000.
+
+  Upstream's docker-compose.yml builds the repo and hardcodes every setting as
+  a literal, including `UNIFI_TOKEN: ''`, and the app exits at boot with
+  "Integration API Key is not set within UNIFI_TOKEN environment variable!".
+  Setting UNIFI_TOKEN as a project env var cannot help: the literal wins, so
+  the plain deploy restart-loops (it also sets UNIFI_SITE_MANAGER: 'false',
+  which the app reads as a non-empty string and so switches to cloud mode).
+
+  overrides/docker-compose.yml runs the published image of the current
+  release (glenndehaan/unifi-voucher-site:8.13.1) and passes the project's
+  env vars (.env) to it; everything unset keeps the app's own default, which
+  is what upstream's compose spells out. The customer supplies UNIFI_TOKEN
+  and points the app at a controller reachable from the host (UNIFI_IP,
+  UNIFI_PORT, UNIFI_SITE_ID), or at the cloud with UNIFI_SITE_MANAGER=true
+  and UNIFI_SITE_MANAGER_CONSOLE_ID. A one-shot env-check service fails the
+  deploy naming each missing variable. The app keeps no state on disk.
+  Login is upstream's default internal password (AUTH_INTERNAL_PASSWORD,
+  default 0000), left as upstream ships it.

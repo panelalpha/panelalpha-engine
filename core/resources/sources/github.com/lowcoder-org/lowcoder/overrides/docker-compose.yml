@@ -1,0 +1,40 @@
+# The repository is a monorepo with no single start command; this runs
+# upstream's published all-in-one image of the current release, as
+# deploy/docker/docker-compose.yaml does.
+services:
+  app:
+    image: docker.io/lowcoderorg/lowcoder-ce:2.7.6
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/lowcoder/secrets.env
+    environment:
+      LOWCODER_PUBLIC_URL: ${PA_PUBLIC_URL}/
+    volumes:
+      # MongoDB and Redis data plus service logs.
+      - stacks:/lowcoder-stacks
+      - assets:/lowcoder/assets
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/status/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 90
+      start_period: 60s
+    # MongoDB, Redis, a JVM (upstream's -Xmx2G), Node and nginx in one container.
+    mem_limit: 3584m
+    pids_limit: 2048
+
+  # No-op gate: `compose up -d` returns only once the API answers.
+  ready:
+    image: docker.io/lowcoderorg/lowcoder-ce:2.7.6
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  stacks: {}
+  assets: {}

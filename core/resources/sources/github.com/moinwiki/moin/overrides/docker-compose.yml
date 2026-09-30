@@ -1,0 +1,42 @@
+# Compose-replace: the repository has no compose file, its .dockerignore
+# excludes src/, and contrib/docker/Dockerfile expects a release wheel and a
+# prepared wiki in the build context. This installs the current release
+# (2.0.0b5) from PyPI on first boot and serves it like contrib/docker does.
+services:
+  app:
+    image: python:3.14-slim-trixie
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    entrypoint: ["/bin/sh", "/usr/local/bin/moin-start.sh"]
+    volumes:
+      - ./moin-start.sh:/usr/local/bin/moin-start.sh:ro
+      # upstream's hypercorn settings (bind 0.0.0.0:8000)
+      - ./contrib/docker/config.toml:/etc/moin/config.toml:ro
+      # wikiconfig.py, the wiki data and the search index
+      - moin-wiki:/srv/moin
+      # the installed release, so a restart does not reinstall it
+      - moin-venv:/opt/moin-venv
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/Home')"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 512m
+
+  # Holds `compose up` (and so the deploy) until the first-boot install is done.
+  ready:
+    image: busybox:1.37
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  moin-wiki: {}
+  moin-venv: {}

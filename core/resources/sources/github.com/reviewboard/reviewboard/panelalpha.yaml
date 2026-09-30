@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Review Board, the code review tool (Django on gunicorn) with PostgreSQL 17
+  and memcached. The plain deploy detected the repository's Vite front-end
+  tooling and failed in npm: the repository is the Python package, not a
+  deployment. This recipe is upstream's
+  contrib/docker/examples/docker-compose.postgres.yaml on the official
+  beanbag/reviewboard image of the current release (8.1), without the
+  optional RabbitMQ / Doc Converter services (Power Pack only). Upstream's
+  nginx front serves static media from the site directory and proxies the
+  rest; it forwards the engine proxy's X-Forwarded-Proto so Django sees
+  HTTPS (the site URL Review Board prints in e-mails stays upstream's
+  http:// default until changed under Admin UI > General Settings).
+  hooks/prepare.sh generates the database password once into
+  ~/.panelalpha/reviewboard/ (0600 in 0700). The site directory (settings,
+  uploads) and the database are named volumes, so reviews survive a
+  redeploy; the image runs `rb-site upgrade` on every start. DOMAIN is the
+  site's address. A `ready` gate makes the deploy finish only once
+  Review Board's /health/ answers. First run is upstream's: the image's
+  rb-site install creates the documented administrator admin / admin.

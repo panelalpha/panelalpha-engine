@@ -1,0 +1,16 @@
+# Compose-replace: the repository's compose is a dev container that runs the
+# Node REPL. Upstream's published image of the current release serves on :3000.
+services:
+  app:
+    image: lymphatus/caesium-app-web:v2.2.3
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 256m

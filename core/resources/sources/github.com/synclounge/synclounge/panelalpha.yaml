@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SyncLounge keeps a group's Plex playback in sync: one Node process
+  (syncloungeserver) serving the Vue web client and its socket.io rooms on
+  :8088. It keeps no data of its own; Plex sign-in happens in the browser.
+
+  The repository's Dockerfile builds the Vue client with
+  `vue-cli-service build --modern`, which is OOM-killed at 2500 MB
+  ("npm run build" ... "cannot allocate memory"). This recipe runs the
+  published image of the current release, synclounge/synclounge:5.2.35
+  (pinned by digest; the same image as `latest`), as the README's Docker
+  instructions do. Settings from config/defaults.js can be overridden with the
+  project's environment variables (e.g. AUTHENTICATION__MECHANISM).

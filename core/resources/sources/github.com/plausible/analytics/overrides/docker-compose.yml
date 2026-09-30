@@ -16,11 +16,12 @@ services:
     # DATABASE_URL points at. postgres:16-alpine is upstream's pin.
     image: postgres:16-alpine
     restart: unless-stopped
+    # Upstream keeps the image's default `postgres` role and lets
+    # `plausible db createdb` create the database; only the password is this
+    # account's own, written once by hooks/prepare.sh where a redeploy keeps it.
+    env_file:
+      - ../.panelalpha/plausible/db.env
     environment:
-      # Upstream keeps the image's default `postgres` role and lets
-      # `plausible db createdb` create the database; only the password is this
-      # account's own.
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       PGDATA: /var/lib/postgresql/data/pgdata
     # Sized for one account rather than for a dedicated host: this Postgres
     # holds users, sites and goals, not the event stream — that is ClickHouse.
@@ -95,19 +96,19 @@ services:
       - mkdir -p /var/lib/plausible/tmp && /entrypoint.sh db createdb && /entrypoint.sh db migrate && /entrypoint.sh run
     ports:
       - "8000:8000"
+    # SECRET_KEY_BASE, TOTP_VAULT_KEY and DATABASE_URL, written once by
+    # hooks/prepare.sh outside ~/project so a redeploy does not regenerate them.
+    env_file:
+      - ../.panelalpha/plausible/app.env
     environment:
       # Not a real address, and not meant to survive: ComposePlaceholders
       # rewrites a bare http://localhost under a *_URL-shaped key to the
       # account's public https URL before the stack starts. BASE_URL is
       # required — runtime.exs raises without it — and it is the one value the
       # recipe cannot generate, because the domain does not exist yet when the
-      # prepare hook runs. DATABASE_URL and CLICKHOUSE_DATABASE_URL match the
-      # same key pattern but their values are not localhost, so they are left
-      # alone.
+      # prepare hook runs. CLICKHOUSE_DATABASE_URL matches the same key
+      # pattern but its value is not localhost, so it is left alone.
       BASE_URL: http://localhost
-      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
-      TOTP_VAULT_KEY: ${TOTP_VAULT_KEY}
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@plausible_db:5432/plausible_db
       CLICKHOUSE_DATABASE_URL: http://plausible_events_db:8123/plausible_events_db
       # Exports and the certbot helper write here; /tmp in the container's
       # writable layer would do, but upstream puts it on the data volume and

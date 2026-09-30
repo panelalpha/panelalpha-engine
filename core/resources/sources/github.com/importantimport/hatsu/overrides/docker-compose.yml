@@ -1,0 +1,55 @@
+# The repo's Dockerfile copies a binary CI builds beforehand (target_<arch>/hatsu),
+# and its compose is a debug build; run the published image of the current release.
+services:
+  # One-shot: Hatsu panics at startup without HATSU_PRIMARY_ACCOUNT (the static
+  # site it speaks for), so the deploy fails here naming it. Read from .env.
+  check:
+    image: ghcr.io/importantimport/hatsu:0.3.4
+    restart: "no"
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$$HATSU_PRIMARY_ACCOUNT" ]; then
+          echo "Error: set HATSU_PRIMARY_ACCOUNT in the project's environment variables (the domain of your static site, e.g. blog.example.com; it must serve a feed)"
+          exit 1
+        fi
+    mem_limit: 32m
+
+  hatsu:
+    image: ghcr.io/importantimport/hatsu:0.3.4
+    restart: unless-stopped
+    depends_on:
+      check:
+        condition: service_completed_successfully
+    # HATSU_PRIMARY_ACCOUNT and optional HATSU_ACCESS_TOKEN / HATSU_NODE_* come from here.
+    env_file: .env
+    environment:
+      HATSU_DOMAIN: ${PA_PUBLIC_HOST}
+      HATSU_LISTEN_HOST: 0.0.0.0
+      HATSU_LISTEN_PORT: "3939"
+      HATSU_DATABASE_URL: sqlite:///data/hatsu.sqlite3?mode=rwc
+    volumes:
+      - data:/data
+    ports:
+      - "3939:3939"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3939/api/v0/generate_204"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once Hatsu answers.
+  ready:
+    image: ghcr.io/importantimport/hatsu:0.3.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      hatsu:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

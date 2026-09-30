@@ -11,7 +11,15 @@ Upstream: <https://github.com/Kovah/LinkAce>
 a three-service stack: `linkace/linkace:<major>.x` from Docker Hub, MariaDB
 12, and a no-op `ready` service that holds `docker compose up -d` open until
 LinkAce answers. `hooks/prepare.sh` generates `APP_KEY` and the database
-passwords into `.env`, which is read for compose interpolation only.
+passwords once into `~/.panelalpha/linkace/secrets.env` (0600 in a 0700 dir)
+and rebuilds `.env` from it on every deploy; `.env` is read for compose
+interpolation only.
+
+The secrets cannot live only in `.env`: the engine empties `~/project` on every
+deploy. An earlier version did keep them there, and a rebuild generated new
+ones: MariaDB logged `Access denied for user 'linkace'` against the volume
+created with the old password, and every page redirected back to
+`/setup/start` with the saved bookmarks unreachable.
 
 ## First run
 

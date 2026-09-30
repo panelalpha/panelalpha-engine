@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Collabora Online Development Edition (CODE), the LibreOffice-based online
+  office that a WOPI host (Nextcloud, Seafile, ownCloud...) embeds. The GitHub
+  repository holds only the Helm chart and the image build; the source lives
+  on Gerrit, so a plain deploy serves the placeholder. This recipe runs
+  upstream's published collabora/code image of the current release
+  (26.04.4.2.1) on port 9980, plain HTTP behind the engine's TLS. The WOPI
+  host allowlist (aliasgroup1) and admin console login (username, password)
+  are read from the project's env vars when set, as upstream's image does.

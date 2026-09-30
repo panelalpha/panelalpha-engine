@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Calibre-Web, a Flask web app for browsing, reading and downloading e-books
+  from a Calibre library (metadata.db plus the book folders). The repository
+  ships no compose file or Dockerfile, so the engine runs it as a generic
+  Python app, installs the requirements and finds no start command: the site
+  serves the engine placeholder. Upstream points Docker users at the
+  LinuxServer image, so this recipe runs linuxserver/calibre-web of the current
+  release, 0.6.27, with its settings (/config) and the library (/books) on
+  named volumes that survive redeploys. A one-shot service copies the
+  repository's empty Calibre library (library/metadata.db) into /books when the
+  volume holds none, so the database step of the first-run setup can point at
+  /books. Login, the default account and the setup flow are left as upstream
+  ships them.
+
+  NGINX FRONT (engine#323). The engine's account vhost sends `Connection:
+  upgrade` on every request; Calibre-Web is served by gevent's pywsgi, which
+  then reads a POST body until EOF, so every form POST, the login included,
+  hangs until the proxy gives up. A small nginx:1-alpine `web` service
+  (files/panelalpha/front.conf) sends `upgrade` only when the client sent an
+  Upgrade header and is the only service publishing a port (8083). It can be
+  dropped once engine#323 is fixed.

@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MediaManager manages TV and movie libraries (search, download through
+  torrent/usenet clients, import): a FastAPI backend serving the SvelteKit UI
+  under /web and the REST API on :8000, with PostgreSQL.
+
+  The repository's own docker-compose.yaml already runs the published image,
+  but keeps PostgreSQL, config.toml and /data in bind mounts under the
+  project directory, which the engine replaces on every deploy: a rebuild
+  started from an empty database. This recipe runs the same stack from the
+  image of the current release (1.12.3) with the database, /app/config and
+  /data on named volumes that survive redeploys.
+
+  hooks/prepare.sh generates auth.token_secret once into
+  ~/.panelalpha/mediamanager/secret.env; the shipped config.example.toml
+  carries a fixed "CHANGE_ME" value that would sign every instance's session
+  tokens with the same key. frontend_url is set to the site's address.
+
+  First run is left as upstream ships it: on an empty database MediaManager
+  creates admin@example.com and prints its password in the app's log
+  (`docker compose -p project logs app`). Libraries, download clients and
+  indexers are configured in /app/config/config.toml on the config volume.

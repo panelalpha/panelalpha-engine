@@ -1,0 +1,32 @@
+# Jellysweep starter config (upstream README example). URLs and API keys come from
+# the project's JELLYSWEEP_* env vars. Library names must match your Jellyfin libraries.
+# dry_run defaults to true: nothing is deleted until JELLYSWEEP_DRY_RUN=false is set.
+cleanup_mode: "keep_seasons"
+keep_count: 1
+
+auth:
+  jellyfin:
+    enabled: true
+
+libraries:
+  "Movies":
+    enabled: true
+    cleanup_delay: 60
+    protection_period: 90
+    filter:
+      content_age_threshold: 120
+      last_stream_threshold: 90
+      exclude_tags:
+        - "jellysweep-exclude"
+        - "keep"
+  "TV Shows":
+    enabled: true
+    cleanup_delay: 60
+    protection_period: 90
+    filter:
+      content_age_threshold: 120
+      last_stream_threshold: 90
+      exclude_tags:
+        - "jellysweep-exclude"
+        - "ongoing"
+        - "keep"

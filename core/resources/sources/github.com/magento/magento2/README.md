@@ -23,15 +23,39 @@ not one.
 
 **An install that needs credentials.** `bin/magento setup:install` wants an
 admin username, password and email, and there is nowhere for a customer to
-type them. `hooks/prepare.sh` generates them before anything is built and
-leaves them in `.env`, which the generated compose loads — so the install
-command inside the container reads the same values. It generates the admin
+type them. `hooks/prepare.sh` generates them once into
+`~/.panelalpha/magento/admin.env` and copies them into `.env` on every deploy;
+the generated compose loads `.env`, so the install command inside the
+container reads the same values. It generates the admin
 path too: left alone Magento invents one (`Magento Admin URI: /admin_inabui6`)
 and prints it once, into a build log nobody keeps.
 
-The hook is a no-op on a rebuild. The store already holds these credentials in
-its database, and regenerating them would lock the owner out of their own
-admin.
+They are never regenerated. The store already holds these credentials in its
+database, and a new set would only be a record of credentials that do not work.
+
+## What survives a redeploy
+
+`~/project` is `/app` in the container (a bind mount) and the engine empties it
+before every deploy. Everything Magento writes that matters is kept in
+`~/.panelalpha/magento/`, mounted at `/pa-data`:
+
+| Kept | How |
+|---|---|
+| `app/etc/env.php` (crypt key, DB, install date), `app/etc/config.php` | `hooks/prepare.sh` links both to `/pa-data/etc/` on every deploy; `setup:install` writes through the links |
+| `pub/media` (catalogue images, uploads) | bind-mounted from `~/.panelalpha/magento/media`, seeded once from the checkout so its `.htaccess` files stay |
+| the OpenSearch index | the `opensearch-data` named volume |
+
+Before this, a redeploy lost `env.php`: the upgrade stage found none and exited
+0, and the store answered as uninstalled over a database that still held every
+table. `generated/`, `var/` and `pub/static` are not kept — `setup:upgrade`,
+`setup:di:compile` and on-demand static content rebuild them.
+
+Verified 2026-09-29 on mariusz.panelalpha.tools (engine 705f250a, 4096 MB):
+fresh deploy 165s, a product and a media file created, `POST
+/projects/<name>/rebuild` (122s, re-clones into an emptied `~/project`). After
+it the crypt key and install date were unchanged, the product page answered 200,
+the media file 200, `setup:db:status` said "All modules are up to date." and the
+stored admin credentials reached the dashboard.
 
 ## The install itself
 

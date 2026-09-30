@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  NZBHydra2 is a meta search for Usenet indexers and torrent trackers: it
+  queries every configured indexer at once and offers the *arr applications a
+  single Newznab/Torznab API, with a web UI on 5076. Spring Boot shipped as a
+  native binary, embedded H2 database; everything lives in its data folder.
+
+  The repository is the Maven/React source tree with no deployment compose
+  file, so overrides/docker-compose.yml runs the linuxserver.io image the
+  README points Docker users to, pinned to the current release, with /config
+  on a named volume (nzbhydra.yml, the H2 database, backups).
+
+  Security: upstream starts with auth type NONE, so the web UI, indexer
+  credentials and the API key would be open to anyone with the address.
+  hooks/prepare.sh generates an admin password (bcrypt-hashed as Spring's
+  delegating encoder expects, {bcrypt}$2a$...) and an API key once into
+  ~/.panelalpha/nzbhydra/nzbhydra.env; a one-shot `init` service writes
+  nzbhydra.yml from the image's own default before the first boot, only if it
+  is absent, with form login, every area restricted to the admin, the API key
+  and the welcome dialog marked shown. A password or key changed later in the
+  UI is never reset by a redeploy. `ready` gates `compose up -d` on the app's
+  health endpoint.

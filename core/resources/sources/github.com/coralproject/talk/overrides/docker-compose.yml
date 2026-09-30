@@ -1,0 +1,65 @@
+# Compose-replace: the release image instead of the repo's source build; the
+# repo compose is a dev file with MongoDB 8.0.3 (engine#146), so mongo:7.0.
+services:
+  talk:
+    image: coralproject/talk:9.11.8
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - ../.panelalpha/coral/app.env
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      MONGODB_URI: mongodb://mongo:27017/coral
+      MONGODB_ARCHIVE_URI: mongodb://mongo:27017/coral
+      REDIS_URI: redis://redis:6379
+      # Trust only the engine's hop: https URLs, proxy-added client address.
+      TRUST_PROXY: "1"
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1024m
+
+  mongo:
+    image: mongo:7.0
+    restart: unless-stopped
+    command: ["mongod", "--wiredTigerCacheSizeGB", "0.25"]
+    volumes:
+      - coral_mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  redis:
+    image: redis:7.2
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - coral_redis:/data
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns once Coral answers /api/health.
+  ready:
+    image: redis:7.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      talk:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  coral_mongo: {}
+  coral_redis: {}

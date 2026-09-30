@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Domoticz is a home automation system: one C++ process serving its web UI
+  and JSON API on :8080, settings, devices and history in an SQLite database
+  under /opt/domoticz/userdata. The repository is the CMake source tree, so a
+  plain deploy finds nothing to run and serves the engine placeholder.
+
+  This recipe runs the image upstream publishes (domoticz/domoticz, current
+  stable release 2026.3) with /opt/domoticz/userdata on a named volume kept
+  across redeploys. First run is left as upstream ships it (no login until one
+  is set in Setup > Settings). Local hardware (USB/serial sticks, Bluetooth)
+  is not available in the account; network-based hardware and dummy devices
+  work.

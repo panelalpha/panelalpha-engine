@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  NeonLink, a self-hosted bookmark service (Node/Fastify, SQLite). The
+  repository's docker-compose.yml bind-mounts ./data and ./background into
+  ~/project, which every deploy empties, and the image runs as `node` (uid
+  1000), which cannot write the account-owned bind mount, so the app
+  crash-looped on EACCES /app/data/secrets.json. This recipe runs the published
+  alexscifier/neonlink image of the current release (v1.4.21) on port 3333 with
+  both directories on named volumes, chowned to uid 1000 by a one-shot service.

@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Papra is a minimalist document storage and archiving platform: one Node
+  (Hono) server that also serves the built SolidJS client on port 1221, with
+  an embedded SQLite (libsql) database and documents on the local filesystem.
+
+  OFFICIAL IMAGE, NOT A BUILD. The repository is a pnpm monorepo with no
+  compose file, so bare detection sends it to Railpack, which builds for four
+  minutes and serves nothing. Upstream publishes the app on Docker Hub
+  (corentinth/papra) and GHCR (ghcr.io/papra-hq/papra) from the same workflow;
+  this recipe runs the Docker Hub rootless tag of the current release, 26.6.2,
+  via overrides/docker-compose.yml.
+
+  CLOSED FIRST RUN. Papra's defaults leave registration open and make the
+  first account to sign up the platform admin (AUTH_IS_REGISTRATION_ENABLED
+  and AUTH_FIRST_USER_AS_ADMIN both default true) -- first visitor wins. The
+  published app runs with registration disabled. A one-shot `seed` service
+  runs only on the first boot: it migrates, starts Papra on loopback inside
+  its own container with registration enabled, creates the owner
+  (admin@<domain>, generated password) through Papra's own sign-up API, and
+  exits; a marker on the data volume makes later boots a no-op. Email
+  verification is off by default, so the owner can log in without SMTP.
+
+  SECRETS AND PERSISTENCE. hooks/prepare.sh generates AUTH_SECRET (which
+  signs sessions; left unset Papra falls back to a built-in default) and the
+  owner password once into ~/.panelalpha/papra/ (0600 in 0700). The SQLite
+  database and uploaded documents live on the papra-data named volume, so both
+  survive a redeploy. APP_BASE_URL is the account's public URL, which Papra
+  also trusts as the auth origin.

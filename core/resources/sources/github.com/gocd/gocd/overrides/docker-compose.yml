@@ -1,0 +1,36 @@
+# Compose-replace: the repository is the Gradle source. Runs the published
+# server image of the current release.
+services:
+  app:
+    image: gocd/gocd-server:v26.1.0
+    restart: unless-stopped
+    environment:
+      GOCD_SERVER_JVM_OPTS: -Xms256m -Xmx1g
+    volumes:
+      # cruise-config.xml, H2 database, artifacts, plugins, logs.
+      - godata:/godata
+      # SSH keys and known_hosts for material checkouts.
+      - gohome:/home/go
+    ports:
+      - "8153:8153"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8153/go/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1800m
+
+  # No-op gate: `compose up -d` returns once the server reports healthy.
+  ready:
+    image: gocd/gocd-server:v26.1.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  godata: {}
+  gohome: {}

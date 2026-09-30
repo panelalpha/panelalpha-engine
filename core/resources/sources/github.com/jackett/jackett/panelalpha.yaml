@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Jackett is a Torznab/TorrentPotato proxy for the *arr applications (Sonarr,
+  Radarr, Lidarr, ...): it translates their queries into searches on tracker
+  sites and serves a web UI on 9117 for configuring indexers. .NET, no
+  database; everything lives in JSON files under its data folder.
+
+  The repository has no Dockerfile and no compose file (a .NET solution,
+  installers and service scripts), so overrides/docker-compose.yml runs the
+  linuxserver.io image the README points Docker users to, pinned to the
+  current release, with /config on a named volume (ServerConfig.json, indexer
+  configs and the DataProtection keys that sign login cookies).
+
+  Security: upstream starts with no admin password. SecurityService
+  .CheckAuthorised() returns true for everyone while AdminPassword is empty,
+  so the whole UI, indexer credentials and the API key would be open to
+  anyone with the address. hooks/prepare.sh generates a password and API key
+  once into ~/.panelalpha/jackett/jackett.env; a one-shot `init` service
+  writes ServerConfig.json before Jackett's first boot, only if it is absent,
+  with AdminPassword in the form Jackett stores it (SHA512 over UTF-16LE of
+  password + APIKey, lowercase hex; SecurityService.HashPassword()) and
+  BaseUrlOverride set to the public URL for Torznab links. A password changed
+  later in the UI is never reset by a redeploy. `ready` gates `compose up -d`
+  on the app's healthcheck.

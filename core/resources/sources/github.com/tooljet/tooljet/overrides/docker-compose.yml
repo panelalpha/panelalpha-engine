@@ -1,0 +1,80 @@
+# The repository's compose is a development stack building the checkout. This
+# is upstream's deploy/docker/docker-compose-db.yaml of v3.20.235-lts on the
+# release image (Postgres 13, PostgREST for ToolJet Database), with the
+# internal.sh secrets from ~/.panelalpha and a named Postgres volume.
+x-tooljet-env: &tooljet-env
+  TOOLJET_HOST: ${PA_PUBLIC_URL}
+  SERVE_CLIENT: "true"
+  PORT: "3000"
+  PG_DB: tooljet_production
+  PG_USER: postgres
+  PG_HOST: postgresql
+  TOOLJET_DB: tooljet_db
+  TOOLJET_DB_USER: postgres
+  TOOLJET_DB_HOST: postgresql
+  PGRST_HOST: postgrest
+  CHECK_FOR_UPDATES: "true"
+  USER_SESSION_EXPIRY: "2880"
+  DEPLOYMENT_PLATFORM: docker
+
+services:
+  tooljet:
+    image: tooljet/tooljet-ce:v3.20.235-lts
+    restart: always
+    env_file:
+      - ../.panelalpha/tooljet/tooljet.env
+    environment: *tooljet-env
+    command: npm run start:prod
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 120s
+    mem_limit: 1536m
+
+  postgresql:
+    image: postgres:13
+    restart: always
+    env_file:
+      - ../.panelalpha/tooljet/tooljet.env
+    environment:
+      POSTGRES_USER: postgres
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    mem_limit: 384m
+
+  postgrest:
+    image: postgrest/postgrest:v12.0.2
+    restart: always
+    env_file:
+      - ../.panelalpha/tooljet/tooljet.env
+    environment:
+      PGRST_SERVER_PORT: "80"
+      PGRST_DB_PRE_CONFIG: postgrest.pre_config
+    depends_on:
+      tooljet:
+        condition: service_healthy
+    mem_limit: 128m
+
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      tooljet:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  postgres: {}

@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Pinchflat downloads YouTube channels and playlists with yt-dlp on a
+  schedule, for media servers such as Plex or Jellyfin: one Elixir/Phoenix
+  release serving its web UI on :8945, SQLite in /config, media in
+  /downloads.
+
+  The repository's docker-compose.yml is the development environment
+  (docker/dev.Dockerfile with the source bind-mounted over /app), and a
+  Railpack build of the checkout crashes at boot with "environment variable
+  SECRET_KEY_BASE is missing". This recipe runs the published image of the
+  current release 2025.9.26 (tagged only as `latest`, so pinned by digest),
+  as the README's compose example does, with /config and /downloads on named
+  volumes that survive redeploys.
+
+  hooks/prepare.sh generates SECRET_KEY_BASE once into
+  ~/.panelalpha/pinchflat/app.env; otherwise the image signs sessions with a
+  key hard-coded in config/runtime.exs, the same on every install.
+
+  First run is left as upstream ships it: Pinchflat has no login unless
+  BASIC_AUTH_USERNAME and BASIC_AUTH_PASSWORD are set in the project's
+  environment variables. Downloaded media is in the downloads volume, e.g.
+  `docker compose -p project cp app:/downloads <dir>`.

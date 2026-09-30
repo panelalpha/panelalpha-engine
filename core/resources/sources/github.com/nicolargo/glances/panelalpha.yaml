@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Glances is a system monitoring tool (CPU, memory, load, disks, network,
+  processes) with a web UI and REST API served by its own Python web server
+  on :61208; it keeps no database. A plain deploy detects the repository as a
+  Python project, installs it and serves the engine placeholder, because
+  nothing starts `glances -w`. The repository's docker-compose/ directory is
+  not picked up, and its compose relies on the host PID and network
+  namespaces and the host docker socket.
+
+  This recipe runs upstream's published image of the current release
+  (nicolargo/glances:4.5.7) in web server mode on its own namespaces, so it
+  reports the account's own container. There is no login, as upstream ships
+  it (the --password option is the customer's choice).

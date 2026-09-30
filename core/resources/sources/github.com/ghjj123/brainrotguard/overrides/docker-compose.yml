@@ -1,0 +1,39 @@
+# Published release image; no ./config.yaml bind mount (the repo has none, so
+# Docker made it a directory). Without it the app reads its BRG_* env vars.
+services:
+  brainrotguard:
+    image: ghcr.io/ghjj123/brainrotguard:1.33.0
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Telegram is optional: without a token and chat id the web UI runs alone.
+      BRG_BOT_TOKEN: ${BRG_BOT_TOKEN:-}
+      BRG_ADMIN_CHAT_ID: ${BRG_ADMIN_CHAT_ID:-}
+      BRG_TELEGRAM_API_URL: ${BRG_TELEGRAM_API_URL:-}
+      BRG_PIN: ${BRG_PIN:-}
+      # Links in Telegram notifications point here.
+      BRG_BASE_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # SQLite: videos, channels, profiles, persisted session secret.
+      - brg_db:/app/db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=5)"]
+      interval: 10s
+      timeout: 8s
+      retries: 30
+      start_period: 15s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns once the web UI answers.
+  ready:
+    image: ghcr.io/ghjj123/brainrotguard:1.33.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      brainrotguard:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  brg_db: {}

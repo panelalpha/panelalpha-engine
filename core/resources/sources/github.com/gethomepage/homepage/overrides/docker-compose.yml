@@ -1,0 +1,33 @@
+# Compose-replace: the repository ships only a Dockerfile. This runs the
+# official image of the current release with the site's domain allowed and
+# the YAML config on a named volume.
+services:
+  app:
+    image: ghcr.io/gethomepage/homepage:v2.4.0
+    restart: unless-stopped
+    environment:
+      HOMEPAGE_ALLOWED_HOSTS: ${PA_PUBLIC_HOST}
+    volumes:
+      - config:/app/config
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Homepage answers its healthcheck.
+  ready:
+    image: ghcr.io/gethomepage/homepage:v2.4.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}

@@ -1,0 +1,55 @@
+# The repo Dockerfile starts the binary with no collection and no secret, and
+# it exits; this runs the release image (v0.30.1) with both supplied.
+services:
+  app:
+    image: izderadicka/audioserve:latest@sha256:aac13420d5ef2cf322fdffecd49108708b82096d6a04b1db88ec7e7e9fc39fb3
+    restart: unless-stopped
+    command: ["/audiobooks"]
+    ports:
+      - "3000:3000"
+    # Any other AUDIOSERVE_* setting from the project's env vars.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AUDIOSERVE_SHARED_SECRET: ${AUDIOSERVE_SHARED_SECRET:-}
+    volumes:
+      # Audio files go here; audioserve only reads them.
+      - audiobooks:/audiobooks
+      # ~/.audioserve: server secret, collection cache, playback positions.
+      - data:/home/audioserve
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    mem_limit: 512m
+
+  # Fails `compose up` (and so the deploy) while the shared secret is unset.
+  env-check:
+    image: izderadicka/audioserve:latest@sha256:aac13420d5ef2cf322fdffecd49108708b82096d6a04b1db88ec7e7e9fc39fb3
+    restart: "no"
+    entrypoint: ["/bin/sh", "/audioserve-env-check.sh"]
+    environment:
+      AUDIOSERVE_SHARED_SECRET: ${AUDIOSERVE_SHARED_SECRET:-}
+    volumes:
+      - ./audioserve-env-check.sh:/audioserve-env-check.sh:ro
+    mem_limit: 32m
+
+  # No-op: `compose up -d` returns once audioserve answers.
+  ready:
+    image: izderadicka/audioserve:latest@sha256:aac13420d5ef2cf322fdffecd49108708b82096d6a04b1db88ec7e7e9fc39fb3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  audiobooks: {}
+  data: {}

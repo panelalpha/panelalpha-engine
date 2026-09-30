@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LinkStack: a self-hosted link-in-bio page (Linktree alternative), PHP 8.3 on
+  Apache. The plain deploy built the repository as a Laravel app and failed in
+  the dependency stage. This recipe runs upstream's own Docker image
+  (linkstackorg/linkstack, v4.8.6, pinned by digest because upstream only
+  publishes `latest`) with /htdocs on a named volume, so the setup wizard's
+  database and settings survive redeploys. FORCE_HTTPS makes the app emit
+  https:// links behind the engine's TLS proxy.

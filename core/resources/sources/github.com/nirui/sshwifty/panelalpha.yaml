@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Sshwifty is a web SSH and Telnet client: one Go binary serving the UI on
+  :8182 and a websocket (/sshwifty/socket) through which the server dials the
+  SSH/Telnet host the browser names. It is a relay by design: whoever can use
+  the socket can reach any host the account's network can reach.
+
+  The repository ships a source-build Dockerfile and docker-compose.example.yaml
+  with SSHWIFTY_SHAREDKEY commented out. With no shared key the relay is open to
+  every visitor (the automated test that first passed this app deployed exactly
+  that). This recipe replaces the compose file with the official image of the
+  current release, niruix/sshwifty:0.4.11-beta-release, and
+  hooks/prepare.sh generates a long random shared key once into
+  ~/.panelalpha/sshwifty/sharedkey.env (0600 in 0700), delivered as an
+  env_file. The app entrypoint refuses to start when the key is missing or
+  shorter than 32 characters, so a lost key file fails closed instead of opening
+  the relay.
+
+  The key is enforced on the socket itself, not only on the page: /verify
+  answers 403 without it, and the socket's AES-GCM framing is keyed from it, so
+  a keyless client is dropped with "cipher: message authentication failed"
+  before any command runs. Destinations are deliberately not restricted
+  (no SSHWIFTY_PRESETS / SSHWIFTY_ONLYALLOWPRESETREMOTES): reaching arbitrary
+  hosts is the app's purpose for the key holder. Sshwifty has no state to
+  persist; the key is the only thing that must survive a redeploy.

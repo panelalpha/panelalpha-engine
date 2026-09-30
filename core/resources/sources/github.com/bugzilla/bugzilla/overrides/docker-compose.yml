@@ -1,0 +1,79 @@
+# Upstream's compose without the dev bits: the app image is the repo's own
+# Dockerfile, but its CMD points at docker/startup.sh, which that same
+# Dockerfile deletes (exit 127), so the command is set as upstream's compose does.
+# No `./` bind mount; data dir and database on named volumes.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: /root/docker/startup.sh
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - bugzilla-data:/var/www/html/data
+    tmpfs:
+      - /tmp
+      - /run/lock
+    environment:
+      BZ_ADMIN_EMAIL: ${BZ_ADMIN_EMAIL:-admin@bugzilla.test}
+      # Upstream's compose default; set BZ_ADMIN_PASSWORD before the first deploy to choose one.
+      BZ_ADMIN_PASSWORD: ${BZ_ADMIN_PASSWORD:-password01!}
+      BZ_ADMIN_REALNAME: ${BZ_ADMIN_REALNAME:-Administrator}
+      BZ_URLBASE: ${PA_PUBLIC_URL}/
+      BZ_DB_HOST: db
+      BZ_DB_PORT: "3306"
+      BZ_DB_USER: bugs
+      BZ_DB_NAME: bugs
+      BZ_DB_PASS: ${BZ_DB_PASS:?BZ_DB_PASS is required}
+      BZ_ALLOW_UNSAFE_UTF8_CONVERSION: "0"
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?MARIADB_ROOT_PASSWORD is required}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # checksetup.pl runs after Apache starts; index.cgi answers 200 once it is done.
+      # The image has no curl; plain HTTP over bash's /dev/tcp.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/80 && printf 'GET /index.cgi HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1g
+
+  db:
+    build:
+      context: .
+      dockerfile: Dockerfile.mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_HOST: "%"
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?MARIADB_ROOT_PASSWORD is required}
+    volumes:
+      - bugzilla-db:/var/lib/mysql
+    tmpfs:
+      - /tmp
+      - /var/lock
+    healthcheck:
+      # TCP only: the init-time server runs with networking off.
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -uroot -p\"$$MARIADB_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once checksetup.pl has finished.
+  ready:
+    image: mariadb:10.6
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  bugzilla-data: {}
+  bugzilla-db: {}

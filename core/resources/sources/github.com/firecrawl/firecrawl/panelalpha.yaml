@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Firecrawl, a web scraping and crawling API (Node API + workers, Playwright,
+  Redis, RabbitMQ, NuQ Postgres). The repository's compose builds three images
+  from source, asks for 12 GB of memory limits and gives RabbitMQ a ~20 s
+  health budget it misses here (27 s to start), so the plain deploy failed with
+  "firecrawl-rabbitmq-1 is unhealthy". This recipe replaces it with the
+  published images of the current build (firecrawl 2.11.426, playwright-service
+  and nuq-postgres pinned by digest), account-sized memory limits and a longer
+  RabbitMQ health budget. The API is unauthenticated, as upstream ships it.
+  Needs memory_limit 4096.

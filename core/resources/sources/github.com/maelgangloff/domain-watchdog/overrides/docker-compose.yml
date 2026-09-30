@@ -1,0 +1,95 @@
+# Upstream's docker-compose.yml, pinned to the current release, with the
+# worker's healthcheck disabled without the empty `test: [ ]` the engine
+# rewrites into an invalid map. Secrets come from ~/.panelalpha (prepare.sh).
+x-app-env: &app-env
+  APP_ENV: prod
+  MESSENGER_ASYNC_TRANSPORT_DSN: redis://valkey:6379/messages
+  MESSENGER_RDAP_LOW_TRANSPORT_DSN: redis://valkey:6379/messages-rdap-low
+  MESSENGER_RDAP_HIGH_TRANSPORT_DSN: redis://valkey:6379/messages-rdap-high
+  LOCK_DSN: redis://valkey:6379
+
+services:
+  domainwatchdog:
+    image: maelgangloff/domain-watchdog:v1.4.5
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/domain-watchdog/secrets.env
+    environment:
+      <<: *app-env
+      SERVER_NAME: ":80"
+      HTTP_SECURE_COOKIE: "true"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - content:/app/public/content
+    ports:
+      - "8080:80"
+    depends_on:
+      database:
+        condition: service_healthy
+      valkey:
+        condition: service_started
+    # The image's own check, polled faster: FrankenPHP (and its :2019 metrics)
+    # starts only after the entrypoint has run the migrations.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:2019/metrics"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  php-worker:
+    image: maelgangloff/domain-watchdog:v1.4.5
+    restart: unless-stopped
+    command: php /app/bin/console messenger:consume --all --time-limit=3600 -vvv
+    env_file:
+      - ../.panelalpha/domain-watchdog/secrets.env
+    environment:
+      <<: *app-env
+      MESSENGER_CONSUMER_NAME: worker
+    depends_on:
+      domainwatchdog:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    mem_limit: 384m
+
+  database:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/domain-watchdog/secrets.env
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+    healthcheck:
+      test: ["CMD", "pg_isready", "-d", "app", "-U", "app"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    volumes:
+      - database_data:/var/lib/postgresql/data
+    mem_limit: 256m
+
+  valkey:
+    image: valkey/valkey:9.0-alpine
+    restart: unless-stopped
+    mem_limit: 64m
+
+  # No-op gate: `compose up -d` returns only once the app answers.
+  ready:
+    image: valkey/valkey:9.0-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      domainwatchdog:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}
+  content: {}
+  database_data: {}

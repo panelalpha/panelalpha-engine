@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OpenSEO, self-hosted SEO research (keywords, backlinks, site audits) on
+  TanStack Start served by vite preview with a local Cloudflare D1/KV
+  emulation. The repository's compose.yaml runs the published image but
+  leaves ALLOWED_HOST empty, so every request answers 403 "Blocked request.
+  This host ... is not allowed", and it tracks :latest. This recipe is that
+  compose on the v0.1.9 release image with ALLOWED_HOST set to the project's
+  host, and a no-op `ready` service that holds the deploy until the image's
+  health check passes: the container runs the vite build at every start
+  (upstream's docker-entrypoint.sh), about 4 minutes and ~2.5 GB peak, so the
+  account needs a 4096 MB memory limit (it is OOM-killed at 2900 MB). Data
+  (/app/.wrangler) is on a named volume. Auth is upstream's Docker default,
+  AUTH_MODE=local_noauth. SEO data needs the customer's DATAFORSEO_API_KEY
+  (optional OPENROUTER_API_KEY for the AI agent) as project env vars; the app
+  starts without them and asks for the key in its UI.

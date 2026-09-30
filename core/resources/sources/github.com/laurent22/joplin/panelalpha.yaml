@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Joplin Server, the sync and sharing server for the Joplin note-taking apps,
+  with its own web UI (login, admin, shared notes): a Node server on :22300
+  with PostgreSQL. The repository is the whole Joplin monorepo; a plain deploy
+  builds Dockerfile.server, whose `yarn install` of every workspace runs out
+  of memory ("cannot allocate memory") even in a 4096 MB account.
+
+  This recipe runs upstream's published image of the current release
+  (joplin/server:3.7.2) with PostgreSQL 16, as upstream's
+  docker-compose.server.yml does. APP_BASE_URL is the site's address and the
+  database password is generated once per account by the engine. Notes and
+  attachments are stored in the database (the default storage driver), on a
+  named volume kept across redeploys. The first login is the one upstream
+  ships (admin@localhost / admin); changing it is the customer's job.

@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ILIAS 11, a learning management system (PHP 8.3/8.4, MySQL). The plain
+  deploy is detected as php, but ILIAS's composer post-autoload-dump builds
+  public/ from the npm packages in package.json, which nothing installs, so
+  the build stops at "Cannot copy /app/node_modules/linkifyjs/...", there is
+  no public/index.php and / answers 403. ILIAS also has no web installer: it
+  is installed with `php cli/setup.php install <config.json>`. This recipe
+  serves public/ on the engine's php platform with the account's MySQL
+  (database: mysql). A one-shot node service runs upstream's `npm
+  clean-install --omit=dev --ignore-scripts` into the checkout; the app then
+  runs `setup.php build`, and `setup.php install` on the first boot (update
+  afterwards) with a config generated from the account's DB_* and APP_URL
+  (files/panelalpha-ilias/setup-config.php, outside the docroot); before the
+  install the database is switched to utf8mb3, the only charset ILIAS supports
+  (utf8mb4 stops the schema at "Row size too large"). install.md's php.ini
+  settings are mounted into conf.d. ilias.ini.php
+  (written to the ILIAS root) is a symlink onto the ilias-config volume;
+  the external data dir, logs and public/data are named volumes, handed to
+  the account user by a one-shot service. First login is upstream's: `root`
+  / `homer`, and ILIAS forces a new password.
+extends: php
+docroot: public
+database: mysql
+commands:
+  - id: ilias-setup
+    stage: [install, upgrade, start]
+    before: true
+    timeout: 900
+    description: 'Every boot: link ilias.ini.php onto its volume, build public/ now that node_modules exists, then install once (marker .installed on the config volume) or update.'
+    run: 'mkdir -p /var/lib/ilias/data /var/lib/ilias/logs && ln -sfn /var/lib/ilias-config/ilias.ini.php /app/ilias.ini.php && php cli/setup.php build --yes && (umask 077; php panelalpha-ilias/setup-config.php > /tmp/ilias-setup.json) && if [ -f /var/lib/ilias-config/.installed ]; then php cli/setup.php update --yes /tmp/ilias-setup.json; else php panelalpha-ilias/db-charset.php && php cli/setup.php install --yes /tmp/ilias-setup.json && touch /var/lib/ilias-config/.installed; fi && rm -f /tmp/ilias-setup.json'

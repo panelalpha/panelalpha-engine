@@ -1,0 +1,75 @@
+# Upstream docker/docker-compose.example.yml, pinned to a release. MASTER_KEY
+# and the DB password are required variables; the engine generates them per account.
+services:
+  norish:
+    image: norishapp/norish:v0.24.0-beta
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      AUTH_URL: ${PA_PUBLIC_URL}
+      DATABASE_URL: postgres://norish:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/norish
+      MASTER_KEY: ${MASTER_KEY:?MASTER_KEY is required}
+      OBSCURA_ENDPOINT: ws://obscura:9222
+      REDIS_URL: redis://redis:6379
+      UPLOADS_DIR: /app/uploads
+    volumes:
+      - norish_data:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      obscura:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/api/v1/health', r => process.exit(r.statusCode===200?0:1)).on('error', () => process.exit(1))\""]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: norish
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: norish
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "norish", "-d", "norish"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  # Headless browser used for recipe URL imports; no host port, as upstream.
+  obscura:
+    image: norishapp/obscura:0.2.2-norish.1
+    restart: unless-stopped
+    mem_limit: 512m
+
+  redis:
+    image: redis:8.10.1
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once Norish answers its health endpoint.
+  ready:
+    image: redis:8.10.1
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      norish:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db_data: {}
+  norish_data: {}
+  redis_data: {}

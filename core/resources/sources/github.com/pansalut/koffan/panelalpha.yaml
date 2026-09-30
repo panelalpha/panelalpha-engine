@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Koffan is a shared grocery list for a household (Go + SQLite, one shared
+  password, no user accounts). The repository's compose builds from source
+  and starts with the README's default password `shopping123` whenever
+  APP_PASSWORD is unset. This recipe runs the published
+  ghcr.io/pansalut/koffan image of the current release, v2.15.0, with
+  APP_PASSWORD taken from ~/.panelalpha/koffan/app.env (generated once by
+  hooks/prepare.sh, so it survives redeploys) and /data on a named volume.
+  Koffan reads the password from the environment on every login and never
+  stores it, so the default cannot come back. The built-in login limiter is
+  turned off (LOGIN_MAX_ATTEMPTS=0): it keys on the client IP, behind the proxy
+  every visitor shares one address, so six wrong guesses by anyone locked the
+  whole household out for 30 minutes, while the generated password is 128-bit
+  random and needs no guess limit. The token REST API stays off
+  (API_TOKEN unset) and authentication stays on (DISABLE_AUTH unset); there
+  is no registration.

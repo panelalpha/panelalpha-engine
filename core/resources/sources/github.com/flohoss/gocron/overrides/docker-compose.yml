@@ -1,0 +1,31 @@
+# The repo's compose.yml is a dev environment; run the published image of the
+# current release instead (upstream's README quick start).
+services:
+  gocron:
+    image: ghcr.io/flohoss/gocron:v0.13.1
+    restart: unless-stopped
+    ports:
+      - "8080:8156"
+    volumes:
+      # config.yaml (written with example jobs on first start) and db.sqlite
+      - config:/app/config
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8156/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once /health answers.
+  ready:
+    image: ghcr.io/flohoss/gocron:v0.13.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      gocron:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}

@@ -1,0 +1,75 @@
+# Compose-replace: the repository is Kong's Lua/Bazel source with no deployment
+# compose. Runs the official image of the current OSS release on PostgreSQL.
+x-kong-env: &kong-env
+  KONG_DATABASE: postgres
+  KONG_PG_HOST: db
+  KONG_PG_USER: kong
+  KONG_PG_DATABASE: kong
+  KONG_PROXY_ACCESS_LOG: /dev/stdout
+  KONG_PROXY_ERROR_LOG: /dev/stderr
+  KONG_ADMIN_ACCESS_LOG: /dev/stdout
+  KONG_ADMIN_ERROR_LOG: /dev/stderr
+  # "auto" counts every host core (engine#426); two workers fit the memory cap.
+  KONG_NGINX_WORKER_PROCESSES: "2"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/kong/db.env
+    environment:
+      POSTGRES_USER: kong
+      POSTGRES_DB: kong
+    volumes:
+      - kong-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "kong", "-d", "kong"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  # One-shot: creates the schema on first deploy, applies pending migrations after.
+  migrations:
+    image: kong:3.9.3
+    restart: "no"
+    env_file:
+      - ../.panelalpha/kong/db.env
+    environment: *kong-env
+    command: ["sh", "-c", "kong migrations bootstrap && kong migrations up && kong migrations finish"]
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 512m
+
+  app:
+    image: kong:3.9.3
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/kong/db.env
+    environment: *kong-env
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    ports:
+      # The proxy. The Admin API stays on the container's 127.0.0.1:8001 (image default).
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+    mem_limit: 1g
+
+  ready:
+    image: kong:3.9.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  kong-db: {}

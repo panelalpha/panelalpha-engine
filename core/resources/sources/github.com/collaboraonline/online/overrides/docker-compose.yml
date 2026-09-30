@@ -1,0 +1,35 @@
+# Compose-replace: the GitHub repo is the Helm chart + image build, not the
+# server source. Runs upstream's published CODE image of the current release.
+services:
+  app:
+    image: collabora/code:26.04.4.2.1
+    restart: unless-stopped
+    ports:
+      - "9980:9980"
+    environment:
+      # TLS ends at the engine's proxy; coolwsd must still emit https:// URLs.
+      extra_params: "--o:ssl.enable=false --o:ssl.termination=true"
+      server_name: ${PA_PUBLIC_HOST}
+      # Optional, from the project's env vars (upstream's image variables).
+      aliasgroup1: ${aliasgroup1:-}
+      username: ${username:-}
+      password: ${password:-}
+    healthcheck:
+      # The image has no shell or curl; coolwsd probes itself.
+      test: ["CMD", "/usr/bin/coolwsd", "--probe", "--use-env-vars"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once coolwsd answers.
+  ready:
+    image: collabora/code:26.04.4.2.1
+    restart: "no"
+    # No shell in the image: a command that prints and exits 0.
+    entrypoint: ["/usr/bin/coolwsd", "--version-hash"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m

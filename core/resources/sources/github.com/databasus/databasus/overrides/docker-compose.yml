@@ -1,0 +1,30 @@
+# Upstream's README compose (Option 3), pinned to the current release. The image
+# runs its own embedded PostgreSQL; everything lives in /databasus-data.
+services:
+  databasus:
+    image: databasus/databasus:v3.60.0
+    restart: unless-stopped
+    ports:
+      - "4005:4005"
+    volumes:
+      - databasus-data:/databasus-data
+    healthcheck:
+      test: ["CMD", "databasus", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Databasus reports healthy.
+  ready:
+    image: databasus/databasus:v3.60.0
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      databasus:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  databasus-data: {}

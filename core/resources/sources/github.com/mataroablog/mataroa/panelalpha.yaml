@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mataroa, a minimalist blogging platform (Django 6 + PostgreSQL). The
+  repository's Dockerfile installs dependencies but has no CMD and its
+  docker-compose.yml is the dev stack (runserver, DEBUG, bind-mounted tree),
+  so the plain deploy never answers. Upstream publishes no image or release
+  build; the repo's own Dockerfile is built.
+
+  This recipe runs upstream's production shape from deploy/: the repo's
+  Dockerfile under gunicorn (after migrate and collectstatic), postgres:17,
+  and caddy:2.11.4-alpine serving /static and proxying the rest on :8080 with
+  X-Forwarded-Proto https (upstream's Caddy terminates TLS itself; without it
+  Django's CSRF Origin check rejects every form). DOMAIN is the project's
+  host, where the landing page, sign-up and dashboard live. Blogs are served
+  on <user>.<DOMAIN>, which the app only recognises when DOMAIN has exactly
+  two labels (example.com with a wildcard record), or on a user's custom
+  domain routed to the project. SECRET_KEY and the DB password are generated
+  once into ~/.panelalpha/mataroa/; the database is on a named volume.

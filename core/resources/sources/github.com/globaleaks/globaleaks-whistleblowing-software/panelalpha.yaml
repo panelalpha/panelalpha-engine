@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  GlobaLeaks whistleblowing platform (Python/Twisted, :8080 HTTP, :8443
+  HTTPS). The plain deploy runs upstream's docker/docker-compose.yml and
+  succeeds, but the site never loads: GlobaLeaks answers every plain-HTTP
+  request with `301 https://<same host><path>` (api.py
+  should_redirect_https), and the engine proxy talks plain HTTP to the
+  container, so the browser loops on its own URL.
+
+  Compose-REPLACE on the published globaleaks/globaleaks:v5.0.99 image with
+  upstream's hardening (cap_drop ALL, read-only root, tmpfs) and data on a
+  named volume, fronted by an nginx:1.30-alpine TLS bridge that forwards to
+  https://globaleaks:8443 with the original Host, so GlobaLeaks sees a
+  secure request. The first visit opens GlobaLeaks' own setup wizard, as
+  upstream ships it.

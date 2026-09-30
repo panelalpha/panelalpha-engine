@@ -1,0 +1,17 @@
+# Compose-replace: the repo ships only a contributor dev image (no server CMD).
+# Official Docker Stacks image of the current JupyterLab release.
+services:
+  app:
+    image: quay.io/jupyter/minimal-notebook:lab-4.6.4
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    environment:
+      # Optional; empty means JupyterLab generates a token and logs it.
+      JUPYTER_TOKEN: ${JUPYTER_TOKEN:-}
+    volumes:
+      # Notebooks, ~/.local installs and settings survive a redeploy.
+      - jupyter-home:/home/jovyan
+
+volumes:
+  jupyter-home: {}

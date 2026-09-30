@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  RapidBay, a self-hosted torrent video service: search (through Jackett
+  and/or Prowlarr) or paste a magnet link, pick a video file, and it is
+  downloaded, converted with ffmpeg and played in the browser or cast. Web
+  UI on port 5000 (nginx in front of uvicorn).
+
+  The repository's docker-compose.yml uses the v1 layout, so the engine
+  builds the Dockerfile instead and mines docker-compose.example.with.jackett.yml
+  for a Jackett sidecar. That Jackett has no reachable UI (only one port is
+  proxied), no API key, and its config on a bind mount inside ~/project that
+  every deploy wipes; the app gets `JACKETT_HOST=jackett` (no scheme), so
+  every search silently returns nothing instead of the app's own "Please
+  connect Jackett or Prowlarr" hint. This recipe builds the repository's own
+  Dockerfile (HEAD; the only published image, hauxir/rapidbay:latest, is
+  older than HEAD) as a single service with port 5000 published.
+
+  Searching needs an indexer the customer runs elsewhere: set
+  JACKETT_HOST (e.g. `http://jackett.example:9117`) and JACKETT_API_KEY,
+  and/or PROWLARR_HOST and PROWLARR_API_KEY, in the project's environment
+  variables. Magnet links pasted into the search bar work without one.
+  Optional: PASSWORD, RD_TOKEN, OPENSUBTITLES_USERNAME/PASSWORD. Downloads
+  are temporary by design (DATA_DIR=/tmp, cleaned after
+  MAX_TORRENT_AGE_HOURS); nothing needs a volume. The BitTorrent listening
+  port (6881) is not published, so peers are reached outbound only.

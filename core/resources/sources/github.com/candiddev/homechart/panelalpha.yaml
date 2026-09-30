@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Homechart, a household organizer (budgets, calendar, recipes, tasks): one Go
+  server on :3000 with all data in PostgreSQL. The repository holds only the
+  README and docs, so the plain deploy found nothing to build and served the
+  engine's placeholder. This recipe runs upstream's documented Docker Compose
+  setup with the published ghcr.io/candiddev/homechart image of the current
+  release (v2026.09.24) and PostgreSQL 16 on a named volume, the database
+  password generated once into ~/.panelalpha/homechart/ by hooks/prepare.sh
+  and app_baseURL set to the site's address. The first visit shows
+  Homechart's own sign-in/sign-up page.

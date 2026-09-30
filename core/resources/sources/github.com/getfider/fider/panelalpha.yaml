@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Fider, a feedback and feature-voting board: one Go server (with server-side
+  rendered React) on :3000 and PostgreSQL. The repository's docker-compose.yml
+  is a developer environment (MailHog, two Postgres instances, MinIO) with no
+  Fider service in it, so the plain deploy has nothing of the app to run.
+
+  This recipe runs the published image of the current release
+  (getfider/fider:v0.38.0) with PostgreSQL 17 on a named volume; uploads use
+  Fider's default SQL blob storage, so they live in the database too. BASE_URL
+  is the site's address, and JWT_SECRET and the database password are
+  generated once per account by the engine. Fider refuses to start without a
+  mail transport (it signs users in with e-mailed links): the customer sets
+  EMAIL_NOREPLY plus EMAIL_SMTP_HOST / EMAIL_SMTP_PORT (or the Mailgun / AWS
+  SES variables) as project environment variables, and a one-shot check
+  service fails the deploy naming each one that is missing. Every other
+  project env var is passed to Fider as well. First run is as upstream ships
+  it: the site opens Fider's "create your feedback site" page.

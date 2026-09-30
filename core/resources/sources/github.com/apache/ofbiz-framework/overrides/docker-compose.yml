@@ -1,0 +1,43 @@
+# Compose-replace: the repository's Dockerfile builds OFBiz from source with
+# Gradle. This runs upstream's published image of the current release instead.
+services:
+  app:
+    image: ghcr.io/apache/ofbiz:24.09.07
+    restart: unless-stopped
+    environment:
+      # First run only: load the seed data and create upstream's admin user.
+      OFBIZ_DATA_LOAD: seed
+      # OFBiz rejects requests whose Host is not listed here.
+      OFBIZ_HOST: localhost,127.0.0.1,${PA_PUBLIC_HOST}
+    volumes:
+      - config:/ofbiz/config
+      - runtime:/ofbiz/runtime
+      - lib-extra:/ofbiz/lib-extra
+    # Plain HTTP connector; TLS ends at the engine's proxy, which sends
+    # X-Forwarded-Proto so OFBiz does not redirect to its own :8443.
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # The login view (HTTP 401 until signed in) renders only once the seed
+      # data is loaded and OFBiz runs.
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' http://127.0.0.1:8080/partymgr/control/main | grep -qE '^(200|401)$'"]
+      interval: 15s
+      timeout: 10s
+      retries: 100
+      start_period: 120s
+    mem_limit: 2048m
+
+  # No-op gate: `compose up -d` returns only once OFBiz answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  runtime: {}
+  lib-extra: {}

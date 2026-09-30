@@ -1,0 +1,35 @@
+# The repository ships no compose file, and its Dockerfile copies prebuilt
+# release binaries that are not in the checkout. This runs the published
+# image of the current release, with media and index/thumbnails on volumes.
+services:
+  app:
+    image: ghcr.io/gbbirkisson/spis:v0.15.0
+    restart: unless-stopped
+    environment:
+      RUST_LOG: error,spis=info
+    volumes:
+      - media:/var/lib/spis/media
+      - data:/var/lib/spis/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the gallery answers.
+  ready:
+    image: ghcr.io/gbbirkisson/spis:v0.15.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  media: {}
+  data: {}

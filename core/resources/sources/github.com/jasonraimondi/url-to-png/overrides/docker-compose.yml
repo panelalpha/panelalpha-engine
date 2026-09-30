@@ -1,0 +1,33 @@
+# Compose-replace: the repo's compose is a dev stack (source build, CouchDB, MinIO
+# on minio/mc:latest, which no longer exists). Runs the published release image.
+services:
+  app:
+    image: ghcr.io/jasonraimondi/url-to-png:v2.1.4
+    restart: unless-stopped
+    ports:
+      - "3089:3089"
+    # Optional project env vars: ALLOW_LIST/BLOCK_LIST, CRYPTO_KEY, STORAGE_PROVIDER (s3/couchdb)...
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3089/ping').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    # Headless Chromium pool (2-10 browsers).
+    mem_limit: 2g
+
+  # No-op: `compose up -d` returns once /ping answers.
+  ready:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m

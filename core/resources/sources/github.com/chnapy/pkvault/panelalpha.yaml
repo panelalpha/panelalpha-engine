@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PKVault, a Pokemon storage and save-file manager with a Pokedex, built on
+  PKHeX (ASP.NET backend and a React frontend behind nginx on :3000, run by
+  supervisord). The repository's Dockerfile has many stages (desktop, mobile
+  and web). The web image is the `monolith` stage, but the last stage is
+  `convert-view-builder`, a bare .NET SDK helper with no CMD. The repo's
+  compose sets no build target, so building from source produces that helper
+  and the container exits and restarts running /bin/bash. Upstream's release
+  workflow builds `target: monolith` and publishes it.
+
+  This recipe runs that published image at the current release
+  (ghcr.io/chnapy/pkvault:2.3.4), as the README's Docker setup does. /pkvault
+  (settings, database, backups, logs) and /data/saves (the save files to
+  manage; enter /data/saves/ as a save location in PKVault's settings) are on
+  named volumes. The project's env vars (LOG_FILE_COUNT_LIMIT,
+  BACKUP_FILE_COUNT_LIMIT) reach the container. The clone still pulls the
+  repository's PokeAPI submodules, so the first deploy spends most of its
+  time cloning.
+
+  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
+
+  Fresh create: success, 693 s, of which cloning (the submodules) was 642 s
+  and start_to_answer 14 s. / 200 <title>PKVault; /api/settings 200 reports
+  version 2.3.4 with canUploadSaves (uploads land in /pkvault). /.env and
+  /.git/config return the SPA shell. Settings changed with POST
+  /api/settings (language fr, a /data/saves/*.sav glob) were still in effect
+  after POST /rebuild (641 s, again mostly cloning).

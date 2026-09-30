@@ -1,0 +1,63 @@
+# Compose-replace: the 3.5.2 release built from its own Dockerfile (HEAD's
+# node:21 image cannot load its ESM-only htmlparser2 12), generated secrets,
+# named volumes, and only the app port published.
+services:
+  anchr:
+    image: anchr:3.5.2
+    build:
+      context: https://github.com/muety/anchr.git#7138354b4575d9d73fd1e57365ff8e4ad2ae4e53
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/anchr/app.env
+    environment:
+      PORT: "3000"
+      LISTEN_ADDR: 0.0.0.0
+      ANCHR_PUBLIC_URL: ${PA_PUBLIC_URL}
+      ANCHR_DB_HOST: mongo
+      ANCHR_DB_PORT: "27017"
+      ANCHR_DB_USER: anchr
+      ANCHR_DB_NAME: anchr
+      ANCHR_UPLOAD_DIR: /app/data
+    ports:
+      - "3000:3000"
+    volumes:
+      - anchr_data:/app/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    mem_limit: 512m
+
+  mongo:
+    image: mongo:7.0
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/anchr/mongo.env
+    volumes:
+      - anchr_db_data:/data/db
+      - ./scripts/mongo-init.sh:/docker-entrypoint-initdb.d/mongo-init.sh:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  # No-op gate: `up` returns only once the app answers.
+  ready:
+    image: mongo:7.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      anchr:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  anchr_data: {}
+  anchr_db_data: {}

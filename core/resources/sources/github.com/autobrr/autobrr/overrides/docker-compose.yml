@@ -1,0 +1,65 @@
+# Compose-replace: the repository's compose file is a dev environment (source
+# build, two Postgres services, ./config bind mount wiped on every deploy).
+# This runs the official image of the current release:
+#   - /config (config.toml, autobrr.db with users, sessions, filters) on a
+#     named volume
+#   - the one login user is created by `seed` BEFORE the app publishes its
+#     port, so /onboard is never open to the first visitor
+services:
+  # Starts autobrr on loopback (no published port) against the same volume,
+  # creates the user through its own /api/auth/onboard, then exits.
+  seed:
+    image: ghcr.io/autobrr/autobrr:v1.87.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/autobrr/admin.env
+    environment:
+      AUTOBRR__HOST: 127.0.0.1
+      AUTOBRR__PORT: "7474"
+      AUTOBRR__CHECK_FOR_UPDATES: "false"
+    volumes:
+      - config:/config
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    mem_limit: 256m
+
+  app:
+    image: ghcr.io/autobrr/autobrr:v1.87.0
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # config.toml may default to 127.0.0.1; env wins over the file.
+      AUTOBRR__HOST: 0.0.0.0
+      AUTOBRR__PORT: "7474"
+      AUTOBRR__BASE_URL: /
+      # The UI is same-origin; no other site gets credentialed CORS.
+      AUTOBRR__CORS_ALLOWED_ORIGINS: ${PA_PUBLIC_URL}
+      TZ: Etc/UTC
+    volumes:
+      - config:/config
+    ports:
+      - "7474:7474"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:7474/api/healthz/liveness"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once autobrr answers.
+  ready:
+    image: ghcr.io/autobrr/autobrr:v1.87.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}

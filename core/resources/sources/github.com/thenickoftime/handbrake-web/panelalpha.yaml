@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  HandBrake Web runs the HandBrake video transcoder headless behind a web UI:
+  a server (UI, job queue, presets; :9999) and one or more workers running
+  HandBrakeCLI. The repository is the pnpm monorepo for both; the plain deploy
+  builds it with Railpack and the resulting container exits and restarts
+  without ever listening.
+
+  This recipe runs upstream's published images of the current release,
+  ghcr.io/thenickoftime/handbrake-web-server:0.8.1 and
+  handbrake-web-worker:0.8.1, laid out as in compose/compose.base.yaml: one
+  server and one worker sharing the /video volume (inputs and outputs), with
+  the server's /data (settings, presets, queue) on its own volume. Both
+  survive redeploys. Both images run as 1000:1000 as upstream's compose
+  does; a one-shot busybox service chowns the fresh volumes, since the server
+  refuses to start when it cannot write /data and /video. The UI has no media
+  upload (only presets): source files go into the `video` volume. Transcoding
+  is CPU only; the worker is capped at 1.5 GB.

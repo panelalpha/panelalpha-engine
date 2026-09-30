@@ -1,0 +1,61 @@
+# Replaces the source build (default branch develop, a .NET + yarn build that
+# fails under the engine). Servarr publishes no image of its own; this runs the
+# LinuxServer.io build of the current stable release.
+services:
+  app:
+    image: linuxserver/prowlarr:2.6.5
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+      # Env wins over config.xml and the UI. Forms login is always on, and never
+      # relaxed for "local addresses": behind the proxy every client is local.
+      PROWLARR__AUTH__METHOD: Forms
+      PROWLARR__AUTH__REQUIRED: Enabled
+      PROWLARR__SERVER__PORT: "9696"
+      PROWLARR__SERVER__BINDADDRESS: "*"
+      PROWLARR__SERVER__URLBASE: ""
+    volumes:
+      # config.xml (API key) and prowlarr.db (login user, indexers, apps).
+      - prowlarr-config:/config
+    ports:
+      - "9696:9696"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:9696/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1g
+
+  # Sets the login user once through Prowlarr's own API, then exits. Same
+  # image: it already has curl, jq and xmlstarlet.
+  seed:
+    image: linuxserver/prowlarr:2.6.5
+    restart: "no"
+    entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/prowlarr/admin.env
+    volumes:
+      - prowlarr-config:/config:ro
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 128m
+
+  # No-op gate: `up -d` returns only after the app is healthy and seeded.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  prowlarr-config: {}

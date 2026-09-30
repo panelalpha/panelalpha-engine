@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tuwunel, a Matrix homeserver in Rust (successor to conduwuit) with an
+  embedded RocksDB. The plain deploy compiles the workspace from source with
+  the engine's Rust recipe and fails building the jevmalloc-sys C dependency.
+
+  This recipe runs upstream's release image ghcr.io/matrix-construct/tuwunel
+  v1.9.3 as in upstream's docs/deploying/docker-compose.yml: listening on
+  0.0.0.0:8008, the server name set to the site's domain, the database on a
+  named volume, and the well-known delegation pointing federation at port 443
+  (the engine's proxy) instead of 8448. Registration stays upstream's default
+  (closed); TUWUNEL_* settings such as TUWUNEL_ALLOW_REGISTRATION and
+  TUWUNEL_REGISTRATION_TOKEN can be set as project env vars. A `ready` gate
+  waits for the image's own health check.

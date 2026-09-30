@@ -1,0 +1,50 @@
+# Upstream docker/docker-compose.yaml pinned to the current release. JWT_SECRET is
+# a required variable the engine generates per account; mongo:7.0 (engine#146).
+services:
+  checkmate:
+    image: ghcr.io/bluewave-labs/checkmate:3.12.0
+    restart: unless-stopped
+    ports:
+      - "52345:52345"
+    environment:
+      DB_CONNECTION_STRING: mongodb://mongodb:27017/uptime_db
+      CLIENT_HOST: ${PA_PUBLIC_URL}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:52346/livez',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      start_period: 60s
+      retries: 60
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    mem_limit: 768m
+
+  mongodb:
+    image: mongo:7.0
+    restart: unless-stopped
+    command: ["mongod", "--quiet", "--bind_ip_all"]
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      interval: 5s
+      timeout: 30s
+      retries: 30
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Checkmate answers /livez.
+  ready:
+    image: mongo:7.0
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      checkmate:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  mongo-data: {}

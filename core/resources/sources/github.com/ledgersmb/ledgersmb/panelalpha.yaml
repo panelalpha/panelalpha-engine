@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LedgerSMB, double-entry accounting and ERP (Perl/Starman behind the image's
+  own nginx on :80, PostgreSQL). The repository is the Perl source with no
+  Dockerfile or compose, so the plain deploy detects "Unknown" and serves the
+  engine placeholder; upstream ships its container build and compose in the
+  separate ledgersmb/ledgersmb-docker repository.
+
+  This recipe runs upstream's 1.13 compose from the published release image
+  (ghcr.io/ledgersmb/ledgersmb:1.13.8) with postgres:15-alpine, the major that
+  compose pins, on a named volume. The database service is named `postgres`
+  because that is the image's POSTGRES_HOST default. All LedgerSMB data lives
+  in PostgreSQL. Instead of upstream's example password `abc`, the postgres
+  superuser password is generated once by hooks/prepare.sh into
+  ~/.panelalpha/ledgersmb/ (db.env, plus credentials.txt for the owner): it is
+  what /setup.pl asks for to create the first company database and admin user,
+  which stays upstream's first-run flow. A `ready` gate waits for /login.pl.

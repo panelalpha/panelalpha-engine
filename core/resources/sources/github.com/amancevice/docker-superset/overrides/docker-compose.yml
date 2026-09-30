@@ -1,0 +1,51 @@
+# Compose-replace: the published release image instead of building the repo
+# Dockerfile (upstream README advises against building it), SQLite metadata DB
+# on a named volume, and upstream's `superset db upgrade` + `superset init`
+# run once before the web server.
+x-superset: &superset
+  image: amancevice/superset:6.1.0
+  env_file:
+    - ../.panelalpha/superset/secrets.env
+  volumes:
+    - superset-data:/var/lib/superset
+
+services:
+  init:
+    <<: *superset
+    restart: "no"
+    command: ["sh", "-c", "superset db upgrade && superset init"]
+    mem_limit: 1g
+
+  app:
+    <<: *superset
+    restart: unless-stopped
+    ports:
+      - "8088:8088"
+    environment:
+      # The image bakes 10 gevent workers into GUNICORN_CMD_ARGS; 3 fit the account.
+      GUNICORN_CMD_ARGS: >-
+        --bind 0.0.0.0:8088 --limit-request-field_size 8190 --limit-request-line 4094
+        --threads 4 --timeout 120 --workers 3 --worker-class gevent
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8088/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1536m
+
+  # No-op: `compose up -d` returns once the web server answers /health.
+  ready:
+    image: amancevice/superset:6.1.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  superset-data: {}

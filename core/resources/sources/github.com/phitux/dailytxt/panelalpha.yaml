@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DailyTxT is an encrypted diary (PhiTux/DailyTxT, MIT): a Go backend on :8000
+  behind nginx serving the SvelteKit frontend on :80, in one image. Entries
+  and uploaded files are encrypted per user with a key derived from the
+  user's password; users.json and the encrypted month files live under /data.
+
+  == Why compose-replace from the published image ==
+
+  The repo's docker-compose.yml is a template: it names the placeholder tag
+  phitux/dailytxt:2.x.x (so the pull fails), a ./data bind mount and
+  SECRET_TOKEN=... / ADMIN_PASSWORD=your_admin_password. This recipe runs the
+  image upstream publishes for the current release, phitux/dailytxt:2.6.3,
+  with /data on the named volume dailytxt-data.
+
+  == What the recipe supplies ==
+
+  1. hooks/prepare.sh writes, once, to ~/.panelalpha/dailytxt/ (0600 in 0700):
+     secret.env (SECRET_TOKEN, which signs the login cookie - without it the
+     backend picks a random one per start and every restart logs everyone
+     out; ADMIN_PASSWORD for the admin panel), user.env (the first user) and
+     credentials.txt.
+  2. Registration closed, no first-visitor-wins. Upstream's compose ships
+     ALLOW_REGISTRATION=true "for the first user", and the admin panel that
+     can reopen it needs a logged-in user. The public app runs with
+     ALLOW_REGISTRATION=false. A one-shot `seed` (same image, entrypoint
+     files/panelalpha/dailytxt/seed.sh, no port published) runs before it:
+     while users.json holds no user it starts the backend on loopback with
+     registration open, creates `admin` through DailyTxT's own
+     POST /api/users/register, checks the login, and exits. `app` waits on
+     `seed: service_completed_successfully`; on later deploys seed sees a user
+     and does nothing, so a password changed in the UI is kept.
+  3. PUBLIC_DEMO_MODE=false: upstream's entrypoint substitutes it into
+     index.html as a JS literal. `ready` waits on the app's /api/version
+     healthcheck so `up -d` returns only once the app answers (engine#204).
+
+  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
+
+  Deploy 59s. `/` title "DailyTxT" (SPA shell 1907 B), /api/version
+  current_version 2.6.3. isRegistrationAllowed false; anonymous register 403
+  "Registration is not allowed"; anonymous getLog 401. admin login 200,
+  entry saved via POST /api/logs/saveLog and read back via getLog; no
+  plaintext of it anywhere under /data. Admin panel accepts the generated
+  ADMIN_PASSWORD only. Rebuild 45s: seed "users.json already has a user;
+  nothing to do", users.json and the month file byte-identical, a cookie
+  issued before the rebuild still valid and the entry still decrypts.
+  /.env, /.git/config, /users.json, /data/users.json serve only the SPA
+  shell. App ~139 MiB after logins (Argon2id, 64 MiB per hash).
+
+  Note: upstream prints SECRET_TOKEN in the container log at start.
+
+  Credentials: ~/.panelalpha/dailytxt/credentials.txt. More users: admin panel
+  (Settings), which opens registration for a few minutes.

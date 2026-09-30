@@ -23,15 +23,30 @@ fi
 
 # The repository ships a root .env of its own (COMPOSE_PROJECT_NAME=paperless),
 # which compose reads for interpolation -- so append to it rather than replace
-# it. Each secret is written once and only once: the data volume outlives the
-# checkout, so regenerating PAPERLESS_SECRET_KEY would log every session out
+# it. The values come from ~/.panelalpha/paperless/secrets.env, generated once:
+# ~/project, .env included, is emptied on every deploy, while the data volume
+# outlives it. A regenerated PAPERLESS_SECRET_KEY would log every session out,
 # and a regenerated admin password would be one the database never learns
 # (manage_superuser refuses to touch a user that already exists).
-touch .env
-keep() { grep -q "^$1=" .env || printf '%s=%s\n' "$1" "$2" >> .env; }
-keep PAPERLESS_SECRET_KEY "$(openssl rand -hex 32)"
-keep PAPERLESS_ADMIN_USER admin
-keep PAPERLESS_ADMIN_PASSWORD "$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)"
+STORE="${HOME}/.panelalpha/paperless"
+mkdir -p "${STORE}"
+chmod 700 "${HOME}/.panelalpha" "${STORE}"
+touch "${STORE}/secrets.env" .env
+chmod 600 "${STORE}/secrets.env"
+# First a value an older deploy left in .env (a rebuild that did not wipe),
+# then a new one; either way the store has it from now on.
+store() {
+    grep -q "^$1=" "${STORE}/secrets.env" && return 0
+    ( umask 077
+      grep -m1 "^$1=." .env >> "${STORE}/secrets.env" || printf '%s=%s\n' "$1" "$2" >> "${STORE}/secrets.env" )
+}
+store PAPERLESS_SECRET_KEY "$(openssl rand -hex 32)"
+store PAPERLESS_ADMIN_USER admin
+store PAPERLESS_ADMIN_PASSWORD "$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)"
+for key in PAPERLESS_SECRET_KEY PAPERLESS_ADMIN_USER PAPERLESS_ADMIN_PASSWORD; do
+    sed -i "/^${key}=/d" .env
+    grep -m1 "^${key}=" "${STORE}/secrets.env" >> .env
+done
 
 # The image tag is the one line that is rewritten every deploy, so a redeploy
 # after an upstream release actually moves. Secrets above never do.

@@ -1,0 +1,33 @@
+# config.example.toml with the two values a hosted instance needs: the site's
+# domain (from the compose environment) and the MongoDB service's address.
+[general]
+domain = "${GATHIO_DOMAIN}"
+port = "3000"
+email = "contact@example.com"
+site_name = "Gathio"
+is_federated = true
+delete_after_days = 7
+email_logo_url = ""
+show_kofi = false
+show_public_event_list = false
+max_comment_length = 5000
+# Set to "nodemailer" and fill [nodemailer] to send emails.
+mail_service = "none"
+creator_email_addresses = []
+
+[database]
+mongodb_url = "mongodb://mongo:27017/gathio"
+
+[nodemailer]
+smtp_server = ""
+smtp_port = ""
+smtp_username = ""
+smtp_password = ""
+
+[sendgrid]
+api_key = ""
+
+[mailgun]
+domain = ""
+api_key = ""
+api_url = "https://api.mailgun.net"

@@ -1,0 +1,113 @@
+# Upstream's production compose (PostgreSQL) on named volumes instead of the
+# ./data bind mount: the image runs as uid 1000 and cannot write a root-owned
+# bind directory, while a named volume starts with the image's own ownership.
+x-journiv-env: &journiv-env
+  DB_DRIVER: postgres
+  POSTGRES_HOST: postgres
+  POSTGRES_USER: journiv
+  POSTGRES_DB: journiv_prod
+  POSTGRES_PASSWORD: ${JOURNIV_DB_PASSWORD:?JOURNIV_DB_PASSWORD is required}
+  SECRET_KEY: ${JOURNIV_SECRET_KEY:?JOURNIV_SECRET_KEY is required}
+  REDIS_URL: redis://valkey:6379/0
+  CELERY_BROKER_URL: redis://valkey:6379/0
+  CELERY_RESULT_BACKEND: redis://valkey:6379/0
+  ENVIRONMENT: production
+  # The engine terminates TLS; Journiv builds its public URLs from these.
+  DOMAIN_NAME: ${PA_PUBLIC_HOST}
+  DOMAIN_SCHEME: https
+
+x-journiv: &journiv
+  image: swalabtech/journiv-app:0.1.0-beta.26
+  restart: unless-stopped
+  # Any other Journiv setting from the project's env vars (DISABLE_SIGNUP, OIDC_*, ...).
+  env_file:
+    - path: .env
+      required: false
+  volumes:
+    - journiv-data:/data
+  depends_on:
+    postgres:
+      condition: service_healthy
+    valkey:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:18.1
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: journiv
+      POSTGRES_PASSWORD: ${JOURNIV_DB_PASSWORD:?JOURNIV_DB_PASSWORD is required}
+      POSTGRES_DB: journiv_prod
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U journiv -d journiv_prod"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  valkey:
+    image: valkey/valkey:9.0-alpine
+    restart: unless-stopped
+    volumes:
+      - valkey-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  app:
+    <<: *journiv
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *journiv-env
+      SERVICE_ROLE: app
+      RATE_LIMIT_STORAGE_URI: redis://valkey:6379/1
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1g
+
+  # The image's entrypoint picks the command from SERVICE_ROLE and ignores
+  # `command:`; Celery reads CELERY_WORKER_* instead. Without a cap it forks
+  # one child per host CPU and restart-loops at its memory limit.
+  celery-worker:
+    <<: *journiv
+    environment:
+      <<: *journiv-env
+      SERVICE_ROLE: celery-worker
+      CELERY_WORKER_CONCURRENCY: "1"
+      CELERY_WORKER_MAX_MEMORY_PER_CHILD: "300000"
+      CELERY_WORKER_MAX_TASKS_PER_CHILD: "200"
+    mem_limit: 512m
+
+  celery-beat:
+    <<: *journiv
+    environment:
+      <<: *journiv-env
+      SERVICE_ROLE: celery-beat
+      REDBEAT_REDIS_URL: redis://valkey:6379/2
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once the app answers its health check.
+  ready:
+    image: valkey/valkey:9.0-alpine
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  valkey-data: {}
+  journiv-data: {}

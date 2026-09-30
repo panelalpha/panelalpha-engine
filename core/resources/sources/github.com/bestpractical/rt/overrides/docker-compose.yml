@@ -1,0 +1,57 @@
+# The repo's Dockerfile is a test harness (`CMD tail -f /dev/null`) and upstream
+# ships no deployment image. This installs the current release (6.0.3) the way
+# the README does, on the Best Practical base image that Dockerfile builds FROM.
+services:
+  rt:
+    image: bpssysadmin/rt-base-debian:RT-6.0.3-trixie-20260723
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/panelalpha/start.sh"]
+    env_file:
+      - ../.panelalpha/rt/secrets.env
+    environment:
+      PA_PUBLIC_HOST: ${PA_PUBLIC_HOST}
+    volumes:
+      - ./panelalpha/rt/start.sh:/panelalpha/start.sh:ro
+      - ./panelalpha/rt/RT_SiteConfig.pm:/panelalpha/RT_SiteConfig.pm:ro
+      # The installed tree: local/ customisations, extensions, var/ state.
+      - rt:/opt/rt6
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 300s
+    mem_limit: 1024m
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/rt/secrets.env
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once RT answers.
+  ready:
+    image: postgres:16-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      rt:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  rt: {}
+  pg_data: {}

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Isso, a lightweight commenting server (Python/WSGI under gunicorn on :8080,
+  SQLite). The plain deploy builds the repository's Dockerfile, whose image
+  expects a config file at /config/isso.cfg (ISSO_SETTINGS) that nothing
+  provides, so gunicorn exits with `FileNotFoundError: '/config/isso.cfg'` and
+  the container restart-loops. The repository's docker-compose.yml is a test
+  environment (dev config plus a puppeteer runner).
+
+  Compose-REPLACE from the published image of the current release
+  (ghcr.io/isso-comments/isso:0.14.0). files/isso.cfg is mounted as
+  /config/isso.cfg: database on the isso-db volume, the site's address as
+  public-endpoint and as an allowed embedding host (so /demo/ works), plus the
+  customer's own site from the ISSO_HOST project env var. Everything else is
+  upstream's defaults: moderation and the admin page off, X-Forwarded-For not
+  trusted unless ISSO_TRUSTED_PROXIES is set.

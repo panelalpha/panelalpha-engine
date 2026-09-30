@@ -1,0 +1,26 @@
+# Compose-replace: the repository is Nagios Core's C source (configure/make,
+# CGIs), which no generic recipe builds; the php recipe finds no front page.
+# This runs manios/nagios, which packages the current release (4.5.14) with
+# the official plugins and Apache on :80.
+services:
+  app:
+    image: manios/nagios:4.5.14
+    restart: unless-stopped
+    env_file:
+      # Project env vars, e.g. NAGIOSADMIN_USER / NAGIOSADMIN_PASS, TZ.
+      - path: .env
+        required: false
+    volumes:
+      # Object config and htpasswd; seeded from the image on first start.
+      - etc:/opt/nagios/etc
+      # Status, retention and logs.
+      - var:/opt/nagios/var
+      - plugins:/opt/Custom-Nagios-Plugins
+    ports:
+      - "8080:80"
+    mem_limit: 384m
+
+volumes:
+  etc: {}
+  var: {}
+  plugins: {}

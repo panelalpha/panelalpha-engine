@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Anchr is a toolbox for bookmark collections, URL shortening and image
+  uploads: a Node/Express app backed by MongoDB. Upstream publishes no image.
+
+  LATEST RELEASE, not HEAD: HEAD's Dockerfile still builds on node:21-alpine
+  while its package.json moved to htmlparser2 ^12 (ESM-only) and engines
+  node >=24, so the app dies with `Error [ERR_REQUIRE_ESM]: require() of ES
+  Module .../htmlparser2/dist/index.js`. The recipe builds release 3.5.2
+  (tag commit 7138354) from that release's own Dockerfile via a git build
+  context, as the r3 recipe does.
+
+  COMPOSE-REPLACE of the repo's docker-compose.yml, which reads every value
+  from a .env the user is expected to fill in (`source env.sh`): with the
+  engine's copy of .env.example the app exits with `Missing required
+  environment variable ANCHR_SECRET` and mongo with `missing
+  'MONGO_INITDB_ROOT_USERNAME' or 'MONGO_INITDB_ROOT_PASSWORD'`, while the
+  deploy still reports success. The replacement builds the release,
+  publishes only the app port (3000), sets ANCHR_PUBLIC_URL to the site's
+  address and keeps uploads (/app/data) and the database on named volumes.
+  Upstream's EOL mongo:6.0 becomes mongo:7.0 (8.x fails on this kernel,
+  engine#146); the repo's scripts/mongo-init.sh still creates the app user.
+
+  hooks/prepare.sh writes, once, ~/.panelalpha/anchr/app.env (JWT secret and
+  database password) and mongo.env (root and app credentials), 0600 in a
+  0700 dir, so logins and the database survive a redeploy. Everything else
+  is upstream's code default: sign-up open, e-mail verification off (it
+  needs SMTP the customer can add as ANCHR_SMTP_* variables).

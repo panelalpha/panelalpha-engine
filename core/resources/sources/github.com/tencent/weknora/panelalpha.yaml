@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  WeKnora, Tencent's LLM knowledge base / RAG platform (Go API, Vue UI served
+  by nginx, Python document reader over gRPC, ParadeDB Postgres, Redis). The
+  repository's compose builds all images from source and the frontend's Vite
+  build is OOM-killed even with a 4 GB account ("npm run build ... cannot
+  allocate memory"). This recipe runs the same stack on the images upstream
+  publishes for the v0.8.2 release (wechatopenai/weknora-ui, -app, -docreader),
+  without the optional profiled services (sandbox, searxng, minio, neo4j,
+  qdrant, milvus). Uploads, database and Redis live on named volumes.
+  hooks/prepare.sh generates the database and Redis passwords, SYSTEM_AES_KEY,
+  SYSTEM_SIGNING_KEY and JWT_SECRET once into ~/.panelalpha/weknora/. First run
+  is upstream's: open registration on the login page; models (LLM, embedding)
+  are configured in the UI.

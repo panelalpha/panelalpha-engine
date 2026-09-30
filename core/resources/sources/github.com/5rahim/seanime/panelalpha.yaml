@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Seanime is a media server for anime and manga (library, streaming,
+  AniList tracking, manga reader): one Go binary serving the web UI and API
+  on :43211, settings and SQLite database in its data directory.
+
+  The binary embeds the web UI with `//go:embed all:web`, and web/ is the
+  output of a separate Vite build of seanime-web that the repository does
+  not ship; the engine's Go build stops with "pattern all:web: no matching
+  files found". Upstream publishes release binaries, no image. This recipe
+  runs umagistr/seanime:v3.10.3, the community image of the current release
+  (built from upstream's tag) used by the Unraid and Dokploy templates, with
+  the data directory and the library folders /anime and /downloads on named
+  volumes that survive redeploys. SEANIME_SERVER_HOST=0.0.0.0 because the
+  server binds 127.0.0.1 by default.
+
+  Without a server password Seanime serves only loopback and private-network
+  hosts: from the public domain every API call answers 403 "this action
+  requires either a server password or a trusted local origin" and the UI
+  never gets past "Connecting...". The project env var SEANIME_PASSWORD is
+  therefore required and passed as `--password`; a one-shot env-check
+  service fails the deploy naming it while it is unset. server.trustedProxies
+  is left empty on purpose: Seanime would take the first X-Forwarded-For
+  entry, which a visitor can spoof through the account vhost.
+
+  First run is left as upstream ships it: after the password page the
+  visitor goes through the setup screen (library path, AniList login).
+  Adding media: copy files into the anime volume, e.g.
+  `docker compose -p project cp <dir> app:/anime/`.

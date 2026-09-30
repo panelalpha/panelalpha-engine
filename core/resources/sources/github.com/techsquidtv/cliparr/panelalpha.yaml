@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Cliparr, a web app that makes clips from media on a Plex or Jellyfin server
+  (Node/Express, SQLite in /data, port 7171).
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repository has no root compose file, so
+  the engine builds it as a Node monorepo and `pnpm run build` runs out of
+  memory even at 4096 MB. This recipe runs the published
+  ghcr.io/techsquidtv/cliparr image of the current release (2.0.2) with /data
+  on a named volume.
+
+  hooks/prepare.sh generates APP_KEY (required, encrypts stored media-server
+  credentials, must never change) once into ~/.panelalpha/cliparr/app.env.
+  The media server is connected from the web UI after the first visit.

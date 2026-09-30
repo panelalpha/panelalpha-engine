@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Vane (formerly Perplexica), an AI answer engine with a bundled SearXNG
+  (Next.js + Python). The repository's compose file builds the image from
+  source (~17 minutes, 41 layers) on every deploy. This recipe runs the
+  published image of the current release (itzcrazykns1337/vane:v1.12.2, SearXNG
+  included) on port 3000 with /home/vane/data on a named volume. The model
+  provider (OpenAI, Ollama, ...) is chosen in the app's own first-run setup screen.

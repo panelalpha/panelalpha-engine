@@ -1,0 +1,56 @@
+# The repository's compose file runs dumbwareio/dumbdrop:latest with a
+# hardcoded PIN (123456), BASE_URL http://localhost:3000 and uploads in a
+# ./local_uploads bind mount. This runs the image of the current commit, keeps
+# /app/uploads on a named volume, and sets the PIN from ~/.panelalpha.
+#
+# DumbDrop accepts the PIN cookie or an X-Pin header on /api/upload and
+# /api/files with no lockout, so the app publishes nothing: `proxy` is the only
+# thing on the account's port.
+services:
+  app:
+    image: dumbwareio/dumbdrop:sha-ff8f813f493e89c7da056e7a3101ce2ef48e3960
+    restart: unless-stopped
+    env_file:
+      # Missing file aborts `up` rather than starting without a PIN.
+      - ../.panelalpha/dumbdrop/pin.env
+    environment:
+      UPLOAD_DIR: /app/uploads
+      DUMBDROP_TITLE: DumbDrop
+      MAX_FILE_SIZE: "1024"
+      AUTO_UPLOAD: "true"
+      BASE_URL: ${PA_PUBLIC_URL}/
+      # A request with no Origin/Referer is checked as <protocol>://<host>.
+      ALLOWED_ORIGINS: ${PA_PUBLIC_URL},http://${PA_PUBLIC_HOST}
+      NODE_ENV: production
+      # Only `proxy` reaches the app; it sets X-Forwarded-For to the visitor,
+      # so the app's rate limits and lockout are per visitor.
+      TRUST_PROXY: "true"
+    volumes:
+      - uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/login.html"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    mem_limit: 384m
+
+  proxy:
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../.panelalpha/dumbdrop/pin.env
+    environment:
+      # Only the PIN is substituted into the template; nginx's own $vars stay.
+      NGINX_ENVSUBST_FILTER: DUMBDROP_PIN
+    volumes:
+      - ./panelalpha/dumbdrop-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 48m
+
+volumes:
+  uploads: {}

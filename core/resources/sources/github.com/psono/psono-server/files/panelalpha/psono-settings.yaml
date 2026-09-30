@@ -1,0 +1,4 @@
+# The server refuses to start unless ~/.psono_server/settings.yaml exists and
+# holds a mapping. Everything else, secrets included, comes from PSONO_*
+# environment variables (overrides/docker-compose.yml, ~/.panelalpha/psono).
+ALLOW_REGISTRATION: true

@@ -1,0 +1,57 @@
+# Compose-replace: the repository is a pnpm monorepo (client, server, worker)
+# whose images upstream builds on a separate HandBrake build image. This runs
+# upstream's published server and worker images of the current release, as in
+# compose/compose.base.yaml (both as user 1000:1000).
+services:
+  app:
+    image: ghcr.io/thenickoftime/handbrake-web-server:0.8.1
+    restart: unless-stopped
+    user: "1000:1000"
+    ports:
+      - "9999:9999"
+    volumes:
+      # Settings, presets, the job queue database and logs.
+      - data:/data
+      # Input and output media; must be the same volume in server and worker.
+      - video:/video
+    healthcheck:
+      # distroless image: node is the only binary available
+      test: ["CMD", "/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:9999/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    depends_on:
+      volumes-init:
+        condition: service_completed_successfully
+    mem_limit: 512m
+
+  worker:
+    image: ghcr.io/thenickoftime/handbrake-web-worker:0.8.1
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      WORKER_ID: handbrake-worker
+      SERVER_URL: app
+      SERVER_PORT: "9999"
+    volumes:
+      - video:/video
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 1536m
+
+  # Named volumes start root-owned; the server refuses to start unless it can
+  # write /data and /video.
+  volumes-init:
+    image: busybox:1.37
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "chown 1000:1000 /data /video"]
+    volumes:
+      - data:/data
+      - video:/video
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  video: {}

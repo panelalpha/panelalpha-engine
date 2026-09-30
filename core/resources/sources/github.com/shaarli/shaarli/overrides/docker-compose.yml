@@ -1,0 +1,34 @@
+# Compose-replace: the repo's compose needs SHAARLI_DOCKER_TAG from a .env and
+# brings its own traefik. This runs the official image of the current release.
+services:
+  app:
+    image: ghcr.io/shaarli/shaarli:v0.16.7
+    restart: unless-stopped
+    volumes:
+      - data:/var/www/shaarli/data
+      - cache:/var/www/shaarli/cache
+    ports:
+      - "8080:80"
+    healthcheck:
+      # / redirects into the install cookie test, which loops without cookies;
+      # any 200/302 from PHP (not a 502) means nginx + php-fpm are up.
+      test: ["CMD", "php84", "-r", "$$c=stream_context_create(['http'=>['follow_location'=>0,'ignore_errors'=>true]]); @file_get_contents('http://127.0.0.1/',false,$$c); exit(preg_match('# (200|302) #',$$http_response_header[0]??'')?0:1);"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once Shaarli answers.
+  ready:
+    image: ghcr.io/shaarli/shaarli:v0.16.7
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  cache: {}

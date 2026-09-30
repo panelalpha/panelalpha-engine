@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Prismarr is a dashboard over Radarr, Sonarr, Prowlarr, Jellyseerr,
+  qBittorrent and friends: a Symfony app on FrankenPHP (s6 runs migrations,
+  the web server and a messenger worker) on :7070, SQLite plus its generated
+  secrets and sessions in /var/www/html/var/data. The repository's
+  docker-compose.yml builds the image from source; this recipe runs the
+  published shoshuo/prismarr image of the current release, 1.2.0, with the
+  same named volume.
+
+  With no user Prismarr sends every visitor into its setup wizard, whose
+  admin step creates the only account, and until the wizard is finished its
+  later steps stay reachable anonymously. A one-shot `seed` service runs the
+  image privately (no published port) against the same volume and walks the
+  wizard's own admin and finish forms from ~/.panelalpha/prismarr/admin.env
+  (login e-mail admin@prismarr.local and a password generated once by
+  hooks/prepare.sh); the app service publishes its port only after that.
+  Radarr/Sonarr/TMDb and the rest are then configured under Settings.
+
+  After seeding every wizard step redirects away (setup_completed=1) except
+  /setup/welcome, a static language picker. Login throttling (5 per 15
+  minutes) keys on the proxy-added address: rotating a spoofed
+  X-Forwarded-For does not get past it. The built-in Mercure hub answers
+  anonymous subscribers, but the app publishes nothing to it.
+
+  Measured on 10.10.10.25 (2026-09-29, engine 705f250a): deploy 64s, rebuild
+  47s; app 124 MiB. Anonymous /, /admin/settings, /admin/settings/export ->
+  302 /login, /setup/admin -> 302, /setup/tmdb|managers|finish -> 302 /, and
+  an anonymous POST /setup/admin creates nobody (one user in the database).
+  The generated admin logs in ("Dashboard - Prismarr", 157 kB); a Radarr
+  instance added under Settings reads back from the page and the database,
+  and admin and instance survive a rebuild with the seed reporting "setup
+  already complete".

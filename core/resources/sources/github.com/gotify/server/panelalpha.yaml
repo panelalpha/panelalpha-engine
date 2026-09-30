@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gotify is a self-hosted push-notification server: one Go binary serving a web
+  UI, a REST API and a websocket stream on :80, SQLite in /app/data. The
+  repository ships no compose file and its Dockerfile needs build arguments
+  (GO_VERSION selecting a gotify/build image) that detection cannot provide, so
+  the plain dockerfile deploy fails pulling its base image. This recipe runs the
+  official gotify/server image of the current release, 3.1.1, with /app/data on
+  a named volume that survives redeploys.
+
+  Gotify creates an admin user whenever the database holds no users, and the
+  upstream default is admin/admin. hooks/prepare.sh generates the password once
+  into ~/.panelalpha/gotify/admin.env (0600 in 0700), fed to the container as an
+  env_file, so the first start seeds `admin` with that password and admin/admin
+  never exists. The value is only read while the user table is empty; a password
+  changed later in the UI is not reset by a redeploy. Public registration is
+  off (GOTIFY_REGISTRATION=false), so only the admin creates users; session
+  cookies are marked Secure since the site is served over HTTPS.

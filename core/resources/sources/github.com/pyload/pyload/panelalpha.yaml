@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  pyLoad is a download manager with a web UI (Python, SQLite, config in
+  /config). A plain deploy builds the repository's Dockerfile and pyLoad
+  starts, but its default webui host is `localhost`
+  ("Starting webserver: http://localhost:8000"), so nothing outside the
+  container can reach it and the deploy ends partial.
+
+  This recipe runs the image upstream's README lists
+  (linuxserver/pyload-ng, current release 0.5.0b3.dev101-ls255), which
+  serves the web UI on 0.0.0.0:8000. /config (settings, database, accounts)
+  and /downloads are named volumes kept across redeploys. The login is the
+  one upstream ships (pyload/pyload); changing it is the customer's job.

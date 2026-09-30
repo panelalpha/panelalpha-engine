@@ -1,0 +1,45 @@
+# Compose-replace: the repo's compose runs :latest from .env, i.e. the
+# .env.example defaults (admin/supersecret, a published JWT_SECRET). This pins
+# the current release and takes every secret from ~/.panelalpha/invio/.
+services:
+  app:
+    image: ghcr.io/kittendevv/invio:v2.2.0
+    restart: unless-stopped
+    env_file:
+      # ADMIN_USER, ADMIN_PASS, JWT_SECRET, generated once by hooks/prepare.sh.
+      - ../.panelalpha/invio/secret.env
+    environment:
+      ORIGIN: ${PA_PUBLIC_URL}
+      BASE_URL: ${PA_PUBLIC_URL}
+      # Same container; the service name, because the engine rewrites any
+      # *_URL of localhost to the public address.
+      BACKEND_URL: http://app:3000
+      BACKEND_PORT: "3000"
+      FRONTEND_PORT: "8000"
+      DATABASE_PATH: /app/data/invio.db
+      DEMO_MODE: "false"
+    volumes:
+      # invio.db, logos and pre-upgrade backups; survives redeploys.
+      - invio_data:/app/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:3000/health && curl -fsS -o /dev/null http://127.0.0.1:8000/login"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 1g
+
+  # `up -d` runs without --wait (engine#204); this blocks it until Invio answers.
+  ready:
+    image: ghcr.io/kittendevv/invio:v2.2.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  invio_data: {}

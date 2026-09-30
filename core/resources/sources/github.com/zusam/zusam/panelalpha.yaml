@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Zusam is a private forum for friends and family groups (PHP/Symfony API with
+  a prebuilt web app, SQLite, nginx and php-fpm under s6 in one image).
+
+  The repository has no Dockerfile or compose file to deploy: upstream
+  assembles its Dockerfile with the C preprocessor (`cpp -o Dockerfile
+  container/dockerfile/prod.docker`) and builds the web app into public/ in a
+  separate `make` step, so a plain deploy detects PHP and answers 403 (no
+  index.php anywhere in the checkout). overrides/docker-compose.yml runs the
+  image upstream publishes for the current release, zusam/zusam:0.6.1, with
+  its data directory (SQLite database, config with the generated APP_SECRET,
+  uploaded files) on the named volume `data`.
+
+  First run is upstream's: container/run.sh creates the first user and group
+  from INIT_USER / INIT_GROUP / INIT_PASSWORD, which default to zusam / zusam
+  / zusam. Set them in the project's environment variables before the first
+  deploy to choose your own; they are read only while the database is empty.

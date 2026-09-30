@@ -24,8 +24,13 @@ What the recipe adds:
 - `hooks/prepare.sh` writes `.env` (the generated app service already reads it
   through `env_file:`) with one generated password shared by `DATABASE_PASS` and
   `POSTGRES_PASSWORD`, plus `ENCRYPTION_KEY`, `SECRET_KEY_BASE` and
-  `SIGNING_SALT`. Guarded by `[ ! -f .env ]`: a redeploy must not roll the
-  password out from under the existing postgres volume.
+  `SIGNING_SALT`. The secrets are generated once into
+  `~/.panelalpha/teslamate/secrets.env` (0600 in a 0700 dir) and `.env` is
+  rebuilt from it on every deploy. They cannot live only in `.env`: the engine
+  empties `~/project` on every deploy, and an earlier version that guarded on
+  `[ ! -f .env ]` generated new ones on each rebuild — the app then failed with
+  `FATAL 28P01 (invalid_password)` against the existing postgres volume, and a
+  new `ENCRYPTION_KEY` would have left the stored Tesla tokens undecryptable.
 - `overrides/docker-compose.override.yml` adds the `database` service
   (postgres:17-alpine, named volume, healthcheck, account-sized settings) and
   makes `app` wait on it. `mem_limit: 768m` on `app` replaces the hardener's

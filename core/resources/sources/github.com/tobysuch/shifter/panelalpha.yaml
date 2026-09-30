@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Shifter is a self-hosted file-sharing web app: Django served by gunicorn on
+  :8000, SQLite database, uploads on disk.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repository has no root compose file, so
+  the engine builds docker/Dockerfile and probes port 8080, while the image
+  listens on 8000 and its entrypoint exits at once with "SHIFTER_URL
+  environment variable is not set". This recipe runs the published
+  ghcr.io/tobysuch/shifter image of the current release (0.7.0), sets
+  SHIFTER_URL to the site's address (it also feeds ALLOWED_HOSTS and
+  CSRF_TRUSTED_ORIGINS), and keeps the database and uploaded files on named
+  volumes.
+
+  hooks/prepare.sh generates SECRET_KEY once into ~/.panelalpha/shifter/app.env,
+  so sessions and signed links survive a redeploy. Create the first user with
+  `python manage.py createsuperuser` in the app container, as upstream's
+  README describes.

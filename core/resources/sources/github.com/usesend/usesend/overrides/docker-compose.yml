@@ -1,0 +1,90 @@
+# Upstream's docker/prod/compose.yml with the v1.9.8 release image; the repo's
+# own compose is a dev stack and its Dockerfile build needs over 2 GB.
+services:
+  # One-shot: useSend refuses to start without a sign-in provider, and on a
+  # fresh install only GitHub or Google can sign the first user in (e-mail
+  # sign-in sends through a domain that does not exist yet). Values are read
+  # from .env (the project's env vars), not interpolated: the engine would
+  # generate a value for a required variable named *_SECRET.
+  check:
+    image: usesend/usesend:v1.9.8
+    restart: "no"
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -n "$$GITHUB_ID" ] && [ -n "$$GITHUB_SECRET" ]; then exit 0; fi
+        if [ -n "$$GOOGLE_CLIENT_ID" ] && [ -n "$$GOOGLE_CLIENT_SECRET" ]; then exit 0; fi
+        echo "Error: set a sign-in provider in the project's environment variables: GITHUB_ID and GITHUB_SECRET (a GitHub OAuth app, callback <site>/api/auth/callback/github), or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (callback <site>/api/auth/callback/google)"
+        exit 1
+    mem_limit: 64m
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/usesend/app.env
+    environment:
+      POSTGRES_USER: usesend
+      POSTGRES_DB: usesend
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U usesend -d usesend"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - cache:/data
+    mem_limit: 256m
+
+  usesend:
+    image: usesend/usesend:v1.9.8
+    restart: unless-stopped
+    depends_on:
+      check:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    # Customer settings (GITHUB_*, GOOGLE_*, AWS_*, FROM_EMAIL, ...); the
+    # generated DATABASE_URL / NEXTAUTH_SECRET come last and win.
+    env_file:
+      - .env
+      - ../.panelalpha/usesend/app.env
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      NEXTAUTH_URL: ${PA_PUBLIC_URL}
+      REDIS_URL: redis://redis:6379
+      NEXT_PUBLIC_IS_CLOUD: "false"
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns once migrations ran and the app answers.
+  ready:
+    image: redis:7
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      usesend:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  database: {}
+  cache: {}

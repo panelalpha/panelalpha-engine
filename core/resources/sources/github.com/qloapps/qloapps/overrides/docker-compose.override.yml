@@ -1,0 +1,66 @@
+# Keeps what QloApps writes at runtime across redeploys; layered over the
+# engine-generated php `app` service. Each volume is an upload directory of the
+# core (img/, upload/, download/) or of a bundled hotel module.
+services:
+  # One-shot: seed each volume with the checkout's own files (never
+  # overwriting), then hand it to the account user Apache runs as.
+  qlo-volumes:
+    image: busybox:1.37
+    restart: "no"
+    user: "0"
+    command:
+      - sh
+      - -c
+      - >-
+        for e in img:img upload:upload download:download hotel-img:modules/hotelreservationsystem/views/img/hotel_img hotel-amenities:modules/hotelreservationsystem/views/img/hotel_amenities hotel-prod-imgs:modules/hotelreservationsystem/views/img/prod_imgs hotel-interior:modules/wkabouthotelblock/views/img/hotel_interior hotel-features:modules/wkhotelfeaturesblock/views/img/hotels_features_img payment-img:modules/wkfooterpaymentblock/views/img/payment_img testimonials-img:modules/wktestimonialblock/views/img/hotels_testimonials_img review-img:modules/qlohotelreview/views/img/review; do
+        v=/v/$${e%%:*}; s=/src/$${e#*:};
+        [ -d "$$s" ] && (cd "$$s" && find . -type f | while read -r f; do
+        [ -e "$$v/$$f" ] || { mkdir -p "$$v/$${f%/*}"; cp -p "$$f" "$$v/$$f"; };
+        done); chown -R $$(stat -c %u:%g /src) "$$v";
+        done
+    volumes:
+      - ./:/src:ro
+      - qlo-img:/v/img
+      - qlo-upload:/v/upload
+      - qlo-download:/v/download
+      - qlo-hotel-img:/v/hotel-img
+      - qlo-hotel-amenities:/v/hotel-amenities
+      - qlo-hotel-prod-imgs:/v/hotel-prod-imgs
+      - qlo-hotel-interior:/v/hotel-interior
+      - qlo-hotel-features:/v/hotel-features
+      - qlo-payment-img:/v/payment-img
+      - qlo-testimonials-img:/v/testimonials-img
+      - qlo-review-img:/v/review-img
+    mem_limit: 64m
+
+  app:
+    depends_on:
+      qlo-volumes:
+        condition: service_completed_successfully
+    volumes:
+      # settings.inc.php and .htaccess, symlinked in by the start command.
+      - ../.panelalpha/qloapps:/var/lib/qloapps
+      - qlo-img:/app/img
+      - qlo-upload:/app/upload
+      - qlo-download:/app/download
+      - qlo-hotel-img:/app/modules/hotelreservationsystem/views/img/hotel_img
+      - qlo-hotel-amenities:/app/modules/hotelreservationsystem/views/img/hotel_amenities
+      - qlo-hotel-prod-imgs:/app/modules/hotelreservationsystem/views/img/prod_imgs
+      - qlo-hotel-interior:/app/modules/wkabouthotelblock/views/img/hotel_interior
+      - qlo-hotel-features:/app/modules/wkhotelfeaturesblock/views/img/hotels_features_img
+      - qlo-payment-img:/app/modules/wkfooterpaymentblock/views/img/payment_img
+      - qlo-testimonials-img:/app/modules/wktestimonialblock/views/img/hotels_testimonials_img
+      - qlo-review-img:/app/modules/qlohotelreview/views/img/review
+
+volumes:
+  qlo-img: {}
+  qlo-upload: {}
+  qlo-download: {}
+  qlo-hotel-img: {}
+  qlo-hotel-amenities: {}
+  qlo-hotel-prod-imgs: {}
+  qlo-hotel-interior: {}
+  qlo-hotel-features: {}
+  qlo-payment-img: {}
+  qlo-testimonials-img: {}
+  qlo-review-img: {}

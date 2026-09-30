@@ -1,0 +1,88 @@
+# Compose-replace: the official eduardolat/pgbackweb image (release 0.5.2) plus
+# a PostgreSQL sidecar for its own metadata. The repo ships only a dev Dockerfile.
+services:
+  app:
+    image: eduardolat/pgbackweb:0.5.2
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/pgbackweb/secrets.env
+    environment:
+      PBW_LISTEN_HOST: 0.0.0.0
+      PBW_LISTEN_PORT: "8085"
+      TZ: UTC
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # "Local" backup destination; survives redeploys
+      - pgbackweb-backups:/backups
+    ports:
+      - "8085:8085"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8085/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 768m
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/pgbackweb/secrets.env
+    environment:
+      POSTGRES_USER: pgbackweb
+      POSTGRES_DB: pgbackweb
+    volumes:
+      - pgbackweb-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgbackweb -d pgbackweb"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  # Claims the "create first user" form (first visitor wins) with the generated
+  # password before the site is public, then proves the login. Idempotent.
+  bootstrap:
+    image: curlimages/curl:8.11.1
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/pgbackweb/admin.env
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -u
+        B="http://app:8085"
+        login() {
+          curl -s -o /dev/null -D - -X POST "$$B/auth/login" -H "HX-Request: true" \
+            --data-urlencode "email=$$PBW_ADMIN_EMAIL" --data-urlencode "password=$$PBW_ADMIN_PASSWORD" \
+            | grep -qi '^hx-redirect: .*/dashboard'
+        }
+        if login; then echo "[bootstrap] admin already provisioned"; exit 0; fi
+        curl -s -o /dev/null -X POST "$$B/auth/create-first-user" -H "HX-Request: true" \
+          --data-urlencode "name=$$PBW_ADMIN_NAME" --data-urlencode "email=$$PBW_ADMIN_EMAIL" \
+          --data-urlencode "password=$$PBW_ADMIN_PASSWORD" \
+          --data-urlencode "password_confirmation=$$PBW_ADMIN_PASSWORD"
+        if login; then echo "[bootstrap] seeded admin"; exit 0; fi
+        echo "[bootstrap] ERROR: admin could not be seeded or logged in"; exit 1
+    mem_limit: 64m
+
+  # Lets `compose up -d` return only once the admin exists (engine#204).
+  ready:
+    image: curlimages/curl:8.11.1
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  pgbackweb-db: {}
+  pgbackweb-backups: {}

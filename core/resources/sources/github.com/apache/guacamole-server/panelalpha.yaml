@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Apache Guacamole, the clientless remote desktop gateway. This repository
+  is only guacd, the native proxy daemon; the web application a visitor
+  opens lives in apache/guacamole-client. Deployed on its own, the
+  repository's Dockerfile builds guacd from source and nothing answers
+  HTTP. This recipe runs the same gateway as the guacamole-client recipe:
+  the images upstream publishes for the current release,
+  guacamole/guacd:1.6.0 and guacamole/guacamole:1.6.0, with PostgreSQL 17.
+
+  A one-shot `initdb` service writes upstream's schema script
+  (/opt/guacamole/bin/initdb.sh --postgresql, as the image's README
+  documents) into PostgreSQL's first-init directory. hooks/prepare.sh
+  generates the database password once into ~/.panelalpha/guacamole/
+  (0600 files in 0700). The database and the web application read it from
+  separate files: the guacamole image renames every POSTGRES_* variable it
+  sees and blanks POSTGRESQL_PASSWORD in the process. The web application is
+  served at the site root (WEBAPP_CONTEXT=ROOT). TLS ends at the engine's
+  proxy; Tomcat's RemoteIpValve takes the client address from the right-most
+  forwarded hop, not a spoofable left-most entry. The database is a named
+  volume, so users and connections survive a redeploy. A `ready` gate makes
+  the deploy finish only once the web application answers.
+
+  First run is upstream's: the schema creates the documented default
+  administrator guacadmin / guacadmin.

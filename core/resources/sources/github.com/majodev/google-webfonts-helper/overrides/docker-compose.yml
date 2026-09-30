@@ -1,0 +1,42 @@
+# Compose-replace: the repo compose is a dev container; run the published
+# image of the current release. Stateless (font list and zips are cached in memory/tmp).
+services:
+  app:
+    image: ghcr.io/majodev/google-webfonts-helper:v1.7.1
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # From the project's env vars; the check below refuses an empty value.
+      GOOGLE_FONTS_API_KEY: ${GOOGLE_FONTS_API_KEY:-}
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/fonts"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 5s
+    mem_limit: 512m
+
+  # Fails `compose up` (and so the deploy) while GOOGLE_FONTS_API_KEY is unset or rejected.
+  env-check:
+    image: ghcr.io/majodev/google-webfonts-helper:v1.7.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "/gwfh-env-check.sh"]
+    environment:
+      GOOGLE_FONTS_API_KEY: ${GOOGLE_FONTS_API_KEY:-}
+    volumes:
+      - ./gwfh-env-check.sh:/gwfh-env-check.sh:ro
+    mem_limit: 32m
+
+  # No-op: `compose up -d` returns once the server has loaded the font list.
+  ready:
+    image: ghcr.io/majodev/google-webfonts-helper:v1.7.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Azimutt, a database schema explorer (Elixir/Phoenix backend with an Elm
+  frontend) on PostgreSQL. The repository's docker-compose.yml builds the
+  repo Dockerfile, whose debian bullseye runner stage fails at
+  `apt-get install` (security packages 404, exit code 100), and reads a .env
+  the checkout does not ship.
+
+  This recipe runs upstream's published image ghcr.io/azimuttapp/azimutt:main
+  (the only tag upstream publishes; built from the same HEAD) on :4000 with
+  postgres:17-alpine. hooks/prepare.sh generates the database password and
+  SECRET_KEY_BASE once into ~/.panelalpha/azimutt/. PHX_HOST is the site's
+  host, email/password sign-up is on (AUTH_PASSWORD), project files use the
+  local storage adapter on a named volume that a one-shot service hands to
+  the image's `nobody` user. The image runs its own migrations on start. A
+  health gate makes the deploy wait until the server accepts connections.

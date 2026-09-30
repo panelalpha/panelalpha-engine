@@ -1,0 +1,42 @@
+# Compose-replace: the repo's Dockerfile needs a jar (with the UI inside)
+# built beforehand by CI. Runs the published image of the current release.
+services:
+  app:
+    image: wabayang/jelu:0.87.3
+    restart: unless-stopped
+    ports:
+      - "11111:11111"
+    environment:
+      # Bound the heap to the container limit below.
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60"
+    volumes:
+      # SQLite database and logs.
+      - jelu-database:/database
+      # Book covers and import files.
+      - jelu-images:/files/images
+      - jelu-imports:/files/imports
+      # Optional application.yml overrides.
+      - jelu-config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:11111/api/v1/setup/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    mem_limit: 1024m
+
+  # No-op: `compose up -d` returns once Jelu answers (first boot runs migrations).
+  ready:
+    image: wabayang/jelu:0.87.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  jelu-database: {}
+  jelu-images: {}
+  jelu-imports: {}
+  jelu-config: {}

@@ -1,0 +1,48 @@
+# Compose-replace: the repository ships no root compose file or Dockerfile; its
+# images are built from deployment/docker/ with a frontend step the go recipe
+# cannot run. This runs the official image of the current release:
+#   - SQLite database and the generated config.json on named volumes
+#   - admin, password and encryption/cookie keys from ~/.panelalpha/semaphore,
+#     generated once by hooks/prepare.sh
+#   - no self-registration exists; only the admin creates users
+services:
+  app:
+    image: semaphoreui/semaphore:v2.19.14
+    restart: unless-stopped
+    env_file:
+      - .env
+      # Missing file aborts `up` rather than starting without an admin.
+      - ../.panelalpha/semaphore/secrets.env
+    environment:
+      SEMAPHORE_DB_DIALECT: sqlite
+      SEMAPHORE_WEB_ROOT: ${PA_PUBLIC_URL}
+      SEMAPHORE_ADMIN_NAME: Administrator
+      SEMAPHORE_ADMIN_EMAIL: admin@localhost
+      TZ: Etc/UTC
+    volumes:
+      - data:/var/lib/semaphore
+      - config:/etc/semaphore
+    ports:
+      - "8080:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/api/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    # Playbooks run inside this container, so leave room for ansible.
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Semaphore answers /api/ping.
+  ready:
+    image: semaphoreui/semaphore:v2.19.14
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  config: {}

@@ -1,0 +1,26 @@
+# The repo root is lint tooling; the server is backend/, published by upstream
+# as vallezw/sheetable. Data (SQLite + sheets) lives in /app/config.
+services:
+  app:
+    image: vallezw/sheetable:v0.8.1
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "8080"
+      SERVER_URL: ${PA_PUBLIC_URL}
+      # Generated once per account by the engine (upstream default is public).
+      API_SECRET: ${SHEETABLE_API_SECRET:?generated per account}
+    volumes:
+      - config:/app/config
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 256m
+
+volumes:
+  config: {}

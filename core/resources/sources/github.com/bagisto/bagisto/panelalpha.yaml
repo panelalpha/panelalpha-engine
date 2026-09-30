@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bagisto, a Laravel e-commerce platform (storefront + admin, MySQL). The
+  shipped laravel recipe builds it (Composer and Vite on the host) and keeps
+  the MySQL and Redis services of the repo's Laravel Sail workstation compose;
+  the plain deploy then fails at start because it also keeps Sail's
+  Elasticsearch, whose memlock ulimit the account's Docker refuses
+  (engine#346), and Sail's MySQL mounts a script from the dev-only
+  laravel/sail package, which is not installed (engine#439).
+
+  overrides/docker-compose.override.yml mounts only the data volume on MySQL,
+  turns Elasticsearch into a no-op (Bagisto's catalog search defaults to the
+  database) and keeps storage/app (product, category and theme images) on a
+  named volume. The first visit opens Bagisto's own web installer as
+  upstream ships it; its database step wants host `mysql`, port 3306,
+  database and user `app`, and the password the engine generated for the
+  sidecar (DB_PASSWORD in the app container's environment, also in
+  ~/project/docker-compose.panelalpha.yml). APP_DEBUG is off, since
+  .env.example is a development template and Laravel's debug page prints the
+  environment.
+extends: laravel
+env:
+  APP_ENV: production
+  APP_DEBUG: 'false'
+  LOG_CHANNEL: stderr
+commands:
+  - id: composer-install
+    stage: build
+    role: dependencies
+    run: 'composer install --no-dev --no-interaction --no-scripts --no-plugins --optimize-autoloader'
+  - id: package-discover
+    stage: build
+    run: 'composer run-script --no-interaction post-autoload-dump'
+    optional: true
+  - id: asset-publish
+    stage: build
+    run: 'true'
+    optional: true
+  - id: key-generate
+    stage: install
+    run: 'case "${APP_KEY:-}" in base64:?*) echo "APP_KEY is already set; not generating one" ;; *) php artisan key:generate --force --no-interaction ;; esac'
+  - id: storage-link
+    stage: start
+    description: 'Every boot: the public/storage symlink lives in ~/project, which each deploy re-clones, so uploaded images would 404 after a rebuild.'
+    run: 'test -e public/storage || php artisan storage:link'
+    optional: true
+  - id: migrate
+    stage:
+      - install
+      - upgrade
+    run: 'php artisan migrate --force --no-interaction'
+    timeout: 600
+  - id: optimize
+    stage: start
+    run: 'php artisan optimize'
+    optional: true

@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Yamtrack is a self-hosted media tracker (movies, TV, anime, manga, games,
+  books): a Django app behind nginx + gunicorn in one container, with Celery
+  worker and beat under supervisord and Redis as cache and broker. Every page
+  is behind a login (LoginRequiredMiddleware) and each user's lists are
+  private, so this is the access-controlled case.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. Upstream publishes
+  ghcr.io/fuzzygrim/yamtrack per release; this recipe pins 0.26.3, the current
+  release. The repository's own compose files use that same image.
+
+  WHY COMPOSE-REPLACE. The repo's docker-compose.yml is a sample meant to be
+  edited: SECRET=longstring, a ./db bind mount, a Berlin TZ and no public URL,
+  so Django rejects every login POST (CSRF) over the account's domain. This
+  override runs the same image on SQLite (the default) on a named volume, Redis
+  on a named volume, URLS/ALLOWED_HOSTS from ${PA_PUBLIC_URL}/${PA_PUBLIC_HOST}
+  (Yamtrack adds URLS to CSRF_TRUSTED_ORIGINS), and only the app publishes a
+  port. BASE_URL is deliberately unset: in Yamtrack it is a path prefix
+  (FORCE_SCRIPT_NAME), not the site address.
+
+  FIRST RUN CLOSED. Registration is open by default upstream (REGISTRATION=True
+  lets the first visitor create an account). It is set to False here, and a
+  one-shot seed-admin service creates `admin` with a generated password once
+  the app is healthy (the manage.py shell route upstream documents in
+  docs/administration.md). SECRET and the admin password are written once into
+  ~/.panelalpha/yamtrack/ (0600 in 0700) and reused on every redeploy; the
+  login is in credentials.txt there. A `ready` gate makes the deploy finish
+  only after /health/ (DB, cache, Redis, Celery ping) answers and the admin
+  exists.
+
+  Metadata providers (TMDB, MAL, IGDB, ...) use upstream's bundled default keys;
+  operators can set their own (TMDB_API etc.) in the account env.

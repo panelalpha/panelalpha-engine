@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Whatomate, a WhatsApp Business messaging platform (Go server with the Vue
+  front end embedded, PostgreSQL, Redis). The repository has no root compose,
+  so a plain deploy builds docker/Dockerfile alone and the server exits on
+  every start: "Failed to connect to database ... lookup db ... no such host".
+  Upstream's deployment is docker/docker-compose.yml with a copied
+  config.toml.
+
+  Compose-REPLACE with those services on the official image of the current
+  release (shridh0r/whatomate:0.1.1-beta-0.17), configured through
+  WHATOMATE_* variables instead of a config file. hooks/prepare.sh generates
+  the JWT secret, the encryption key for stored secrets and the database
+  password once into ~/.panelalpha/whatomate/app.env. The server runs in
+  production mode with the site's address as the allowed origin. Uploads,
+  IVR audio, the database and Redis are on named volumes. First run is as
+  upstream ships it: the default admin (admin@admin.com / admin) is created
+  when no user exists.

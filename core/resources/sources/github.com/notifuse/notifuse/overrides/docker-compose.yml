@@ -1,0 +1,60 @@
+# Compose-replace: the repo's compose.yaml builds the Dockerfile, whose console
+# `vite build` is OOM-killed in an account, and bind-mounts ./data. Same
+# topology on the published image of the current release, data on volumes.
+services:
+  postgres:
+    # 17 as upstream pins it (18 moves PGDATA).
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file: ../.panelalpha/notifuse/secrets.env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  app:
+    image: notifuse/notifuse:v41.0
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports:
+      - "8080:8080"
+    # DB_PASSWORD, SECRET_KEY (hooks/prepare.sh). Notifuse creates its system
+    # and per-workspace databases itself, so it connects as the superuser.
+    env_file: ../.panelalpha/notifuse/secrets.env
+    environment:
+      SERVER_PORT: "8080"
+      ENVIRONMENT: production
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_SSLMODE: disable
+    volumes:
+      - app_data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 1024m
+
+  # No-op: `compose up -d` returns once Notifuse answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app: { condition: service_healthy }
+    mem_limit: 32m
+
+volumes:
+  postgres_data: {}
+  app_data: {}

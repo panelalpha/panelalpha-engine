@@ -1,0 +1,52 @@
+# Compose-replace: the repo's root compose is a developer stack (Postgres,
+# emulators, mailpit) with no app service. This runs the published image in
+# upstream's single-container mode: no DATABASE_URL, so the image starts its
+# own PostgreSQL under /data, which is a named volume with the uploads.
+services:
+  app:
+    image: portabase/portabase:1.31.0
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+      - ../.panelalpha/portabase/app.env
+    # The engine seeds .env from upstream's development .env.example; the
+    # values below win over it and restore the image's production behaviour.
+    environment:
+      TZ: "UTC"
+      NODE_ENV: "production"
+      PROJECT_URL: "${PA_PUBLIC_URL}"
+      TRUSTED_DOMAINS: "${PA_PUBLIC_URL}"
+      # Empty: use the bundled PostgreSQL (the entrypoint checks -z).
+      DATABASE_URL: ""
+      # The example's sample admin (user@example.com); unset, the first visit
+      # gets upstream's onboarding, as in its Helm chart.
+      AUTH_DEFAULT_USER: ""
+      AUTH_DEFAULT_PASSWORD: ""
+      # The image's production default; the example runs it every minute.
+      RETENTION_CRON: "0 7 * * *"
+      # tusd sits behind the engine's HTTPS proxy.
+      TUSD_BEHIND_PROXY: "true"
+    volumes:
+      - portabase_data:/data
+    ports:
+      - "8887:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # No-op: `compose up -d` returns once the app is healthy.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  portabase_data: {}

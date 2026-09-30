@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  UISP (formerly UNMS) is Ubiquiti's network management system for their
+  routers, switches and airMAX/UniFi devices, with the UCRM billing module
+  alongside. It is closed-source freeware: it runs from its image without a
+  paid licence key, which the owner ruled in scope on 2026-09-28. This
+  repository packages the official ubnt/unms-* images into one all-in-one
+  container (Node API and device websocket, UCRM on PHP, Postgres +
+  TimescaleDB, RabbitMQ, SiriDB and OpenResty under s6).
+
+  OFFICIAL IMAGE, NOT A SOURCE BUILD. The repo's Dockerfile compiles PHP,
+  OpenResty and SiriDB from source (~18 min cold) and ships no compose file.
+  overrides/docker-compose.yml runs the maintainer's published image of the
+  current release, docker.io/nico640/docker-unms:3.1.65, with /config (all
+  databases, certificates, logs) on the uisp-config named volume.
+  PUBLIC_HTTPS_PORT/PUBLIC_WS_PORT are 443, so the device connection string
+  is wss://<domain>:443 through the engine's TLS.
+
+  HTTPS-ONLY BACKEND. UISP's OpenResty serves the UI, the API and the device
+  websocket on 443 with a self-signed certificate; its port 80 only redirects.
+  The engine's generated account rule is always an http upstream
+  (panelalpha/engine#317), so `uisp` publishes nothing and a small nginx `app`
+  service takes plain HTTP on 80 and re-encrypts to https://uisp:443
+  (websocket upgrade forwarded, 1 GB uploads for firmware and backups).
+
+  CLOSED FIRST RUN. UISP's POST /nms/api/v2.1/nms/setup is unauthenticated
+  until the first admin exists (first visitor wins). A one-shot `setup`
+  service waits for UISP to be healthy, then completes it over the compose
+  network with user `admin` and the password hooks/prepare.sh wrote once to
+  ~/.panelalpha/uisp/ (0600 in 0700), hostname = the account domain, no
+  Let's Encrypt (TLS is the engine's), Sentry/Logentries reporting off, EULA
+  not accepted on the operator's behalf. Only then does `app` start, and a
+  `ready` gate ends the deploy when the proxy answers. UISP's vault/backup
+  passphrase from that call is kept in /config/panelalpha/setup.json.
+
+  Measured on an account with memory_limit 2500: the uisp container ~1.0 GB
+  (826 MB anon in the account cgroup), capped at 2 GB. NetFlow (UDP 2055) is
+  not published; it is optional.

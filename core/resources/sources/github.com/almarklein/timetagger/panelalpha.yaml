@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  TimeTagger, a self-hosted time tracker (Python/uvicorn, per-user SQLite files).
+  The repository has no root compose file, so the engine used to run it as a
+  generic Python app and served its own placeholder. This recipe runs the
+  published ghcr.io/almarklein/timetagger image of the current release
+  (v26.1.3) with the data directory on a named volume. Login needs
+  TIMETAGGER_CREDENTIALS (user:bcrypt-hash pairs from https://timetagger.app/cred);
+  a one-shot check service fails the deploy with a clear message while it is
+  unset or its hashes were mangled by compose interpolation.

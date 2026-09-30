@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  NetBox, network source of truth (IPAM, DCIM, circuits), Django. A plain
+  deploy builds the checkout with the django recipe and restart-loops on
+  "Specified configuration module (netbox.configuration) not found": the
+  repository ships no configuration and its supported container is the
+  netbox-docker image. This recipe runs that image
+  (netboxcommunity/netbox:v4.7.1-5.1.1) with Postgres 18, Valkey and the
+  rqworker, as netbox-docker's docker-compose.yml does. hooks/prepare.sh
+  generates SECRET_KEY, API_TOKEN_PEPPER_1 and the database/Valkey passwords
+  once into ~/.panelalpha/netbox/netbox.env; database, media, reports and
+  scripts are named volumes. First run is upstream's: no superuser is created
+  (SKIP_SUPERUSER=true); make one with manage.py createsuperuser.

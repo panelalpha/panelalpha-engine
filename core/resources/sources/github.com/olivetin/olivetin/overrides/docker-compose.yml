@@ -1,0 +1,30 @@
+# The repo builds from a prebuilt release binary; run the published image of
+# the current release instead. /config (config.yaml, entities) on a volume.
+services:
+  olivetin:
+    image: jamesread/olivetin:3000.20.0
+    restart: unless-stopped
+    ports:
+      - "8080:1337"
+    volumes:
+      - config:/config
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:1337/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once /readyz answers.
+  ready:
+    image: jamesread/olivetin:3000.20.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      olivetin:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}

@@ -1,0 +1,34 @@
+# Compose-replace: the repo root is the Studio's Tycho build, not the server.
+# Runs upstream's published server image of the current release.
+services:
+  app:
+    image: convertigo/convertigo:8.4.5
+    restart: unless-stopped
+    ports:
+      - "28080:28080"
+    environment:
+      # Heap well under mem_limit; the image defaults to 80% of the container.
+      JXMX: "1024"
+    volumes:
+      # Projects, engine configuration and logs.
+      - workspace:/workspace
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:28080/convertigo/index.html"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once Convertigo answers.
+  ready:
+    image: convertigo/convertigo:8.4.5
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  workspace: {}

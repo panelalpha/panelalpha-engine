@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Instatic is a self-hosted visual CMS / static-site builder (Bun server and
+  React editor on :3001). The plain deploy builds the repo's Dockerfile, whose
+  `tsc -b && vite build` step is OOM-killed (exit 137); the repo's
+  docker-compose.yml is only a development Postgres.
+
+  This recipe is upstream's image-pull SQLite install (compose.prod.yml +
+  compose.sqlite.yml) on the image of the current release,
+  ghcr.io/corebunch/instatic:0.0.20. Nothing is built. PUBLIC_ORIGIN is the
+  site's address (TLS ends at the proxy) and TRUSTED_PROXY_CIDRS the Docker
+  range, as upstream's compose.tls.yml sets them. INSTATIC_SECRET_KEY is
+  generated once into ~/.panelalpha/instatic/. The SQLite database (/app/data)
+  and uploads are named volumes. The app's own first-run setup is untouched.

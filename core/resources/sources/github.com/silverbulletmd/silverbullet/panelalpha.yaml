@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SilverBullet is a markdown notes and knowledge-base server (a Rust binary
+  since 2.x) serving its web client and a file API on :3000, with every page a
+  plain .md file on disk. The repository's Dockerfile only packages a static
+  binary that CI builds beforehand, so a plain dockerfile deploy of a checkout
+  fails. This recipe runs the official zefhemel/silverbullet image of the
+  current release, 2.11.1-slim, with /data on a named volume that survives
+  redeploys.
+
+  A fresh data folder boots multi-space mode's /.setup wizard, whose first
+  visitor becomes the administrator. hooks/prepare.sh generates the admin
+  password once into ~/.panelalpha/silverbullet/admin.env (0600 in 0700), and a
+  one-shot `init` service runs the upstream `silverbullet setup` command with it
+  before the server starts, creating the admin account and a private space
+  "Notes" bound to /. Anonymous access to the space is `none`, so every page
+  and the /.fs API need a login. Setup is skipped once users.json exists, so a
+  redeploy keeps the pages, accounts and a password changed in the Dashboard.

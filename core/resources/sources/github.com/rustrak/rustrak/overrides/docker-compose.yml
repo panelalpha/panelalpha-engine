@@ -1,0 +1,23 @@
+# Compose-replace: upstream's docker-compose.yml with the release image pinned
+# and SESSION_SECRET_KEY from ~/.panelalpha (the engine's generated one is too short).
+services:
+  server:
+    image: rustrak/rustrak-server:v0.15.1
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../.panelalpha/rustrak/secrets.env
+    environment:
+      # The address SDKs reach; written into every DSN.
+      PUBLIC_URL: ${PA_PUBLIC_URL}
+      # Optional, from the project's env vars: "email:password" of the first
+      # user (registration is invite-only). Ignored once any user exists.
+      CREATE_SUPERUSER: ${CREATE_SUPERUSER:-}
+    volumes:
+      # SQLite database and uploaded source maps.
+      - rustrak-data:/data
+    mem_limit: 512m
+
+volumes:
+  rustrak-data: {}

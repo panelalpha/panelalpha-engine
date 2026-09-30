@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Grimmory (the community continuation of BookLore) is a multi-user library
+  for ebooks, comics and audiobooks: a Spring Boot app with an Angular UI on
+  :6060, backed by MariaDB. A plain deploy builds the root Dockerfile (a
+  Gradle + Angular multi-stage build, minutes of CPU) and still has no
+  database, so the app cannot start.
+
+  This recipe runs the image upstream publishes
+  (ghcr.io/grimmory-tools/grimmory, current release v3.5.0) with MariaDB 11.4,
+  as deploy/compose/docker-compose.yml does. hooks/prepare.sh generates the
+  database password once into ~/.panelalpha/grimmory/db.env. App data, the
+  books library, the BookDrop import folder and the database are named
+  volumes kept across redeploys. First run is left as upstream ships it: the
+  first visit opens Grimmory's own setup page to create the admin account.

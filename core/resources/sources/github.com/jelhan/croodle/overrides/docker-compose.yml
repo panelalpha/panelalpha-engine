@@ -1,0 +1,67 @@
+# The repo's build script shells out to composer from the pnpm build, so this
+# runs upstream's prebuilt release tarball on the official PHP 8.3 Apache image.
+x-croodle: &release
+  CROODLE_VERSION: "v0.7.0"
+  CROODLE_SHA256: 58388ced6ee347ee841529d8274db8145aafb3b51f5b23dfa5e159d106374c89
+
+services:
+  # Unpacks the release into the web volume once per version.
+  fetch:
+    image: php:8.3-apache-bookworm
+    restart: "no"
+    environment: *release
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        if [ "$$(cat /srv/web/.croodle-version 2>/dev/null)" != "$$CROODLE_VERSION" ]; then
+          curl -fsSL -o /tmp/croodle.tar.gz "https://github.com/jelhan/croodle/releases/download/$$CROODLE_VERSION/croodle-$$CROODLE_VERSION.tar.gz"
+          echo "$$CROODLE_SHA256  /tmp/croodle.tar.gz" | sha256sum -c -
+          find /srv/web -mindepth 1 -delete
+          tar xzf /tmp/croodle.tar.gz -C /srv/web
+          echo "$$CROODLE_VERSION" > /srv/web/.croodle-version
+        fi
+        echo "croodle: $$CROODLE_VERSION ready"
+    volumes:
+      - web:/srv/web
+    mem_limit: 128m
+
+  app:
+    image: php:8.3-apache-bookworm
+    restart: unless-stopped
+    environment:
+      # Polls are stored as files here, outside the web root.
+      CROODLE__DATA_DIR: /data/
+    # The image ships no php.ini, so PHP 8 deprecation notices from Slim 3 would
+    # be printed into the API's JSON; use upstream's production ini. The volume
+    # root is created root-owned; Apache's workers run as www-data.
+    command: ["sh", "-c", "cp $$PHP_INI_DIR/php.ini-production $$PHP_INI_DIR/php.ini && chown www-data:www-data /data && exec apache2-foreground"]
+    volumes:
+      - web:/var/www/html:ro
+      - data:/data
+    ports:
+      - "8080:80"
+    depends_on:
+      fetch:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once Croodle answers.
+  ready:
+    image: php:8.3-apache-bookworm
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  web: {}
+  data: {}

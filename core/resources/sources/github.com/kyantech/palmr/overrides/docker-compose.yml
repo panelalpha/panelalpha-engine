@@ -1,0 +1,35 @@
+# The repo's compose publishes API, web and storage ports; only the web UI is
+# published here so the domain is routed to it. Data on a named volume.
+services:
+  palmr:
+    image: kyantech/palmr:v3.3.2-beta
+    restart: unless-stopped
+    # Optional ENABLE_S3 / S3_* from the project's env vars (external storage).
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      STORAGE_URL: ${PA_PUBLIC_URL}
+      SECURE_SITE: "true"
+    ports:
+      - "5487:5487"
+    volumes:
+      - palmr_data:/app/server
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:5487/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  # No-op gate: `compose up -d` returns only once the web UI answers.
+  ready:
+    image: kyantech/palmr:v3.3.2-beta
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      palmr:
+        condition: service_healthy
+
+volumes:
+  palmr_data: {}

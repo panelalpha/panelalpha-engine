@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  BookStack is a Laravel wiki (books, chapters, pages) on MySQL. The shipped
+  laravel recipe already deploys it: composer and the frontend build on the
+  host, the MySQL service from the repo's docker-compose.yml on its named
+  volume, key:generate, migrate, and the login page answers.
+
+  The one thing it gets wrong: that docker-compose.yml is the developers'
+  workstation stack, and its `node` service (node:22-alpine running
+  dev/docker/entrypoint.node.sh, an asset watcher over a bind of the project)
+  is kept as a runtime service. It cannot write the host-built node_modules,
+  exits 243 on EACCES and restart-loops forever, so every deploy ends
+  `partial`. overrides/docker-compose.override.yml turns it into a no-op that
+  exits 0 once; the assets are already built on the host.
+
+  Everything else is upstream's default, including the first login
+  admin@admin.com / password from BookStack's own migrations.
+extends: laravel

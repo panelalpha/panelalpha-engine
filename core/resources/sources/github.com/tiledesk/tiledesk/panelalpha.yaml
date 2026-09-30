@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tiledesk Community, a live-chat and chatbot customer engagement platform:
+  Node server, Angular dashboard, design studio, web widget, chat21 MQTT chat
+  over RabbitMQ, LLM knowledge-base backends, MongoDB, Redis and Qdrant, all
+  behind upstream's nginx proxy on one port. The repository keeps its compose
+  in docker-compose/; a plain deploy runs it but publishes every service's
+  port (the site lands on the API on 3000) and fails because upstream's
+  rabbitmq health check allows a single 5-second probe. This recipe runs the
+  same stack and images with only the proxy published, the public URLs
+  (EXTERNAL_BASE_URL, wss MQTT endpoint) set to the site, a start period on
+  the rabbitmq check, the two unpinned images pinned and one worker per LLM
+  backend (about 2 GB at idle). Sign in with
+  upstream's default admin (admin@tiledesk.com / superadmin) and change it.

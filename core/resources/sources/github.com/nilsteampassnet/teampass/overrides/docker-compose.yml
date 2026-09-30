@@ -1,0 +1,82 @@
+# Compose-replace: upstream's docker/docker-compose/docker-compose.yml with the
+# release image, the DB passwords from ~/.panelalpha and a ready gate. The
+# repo Dockerfile alone has no database, so the plain deploy never answers.
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_allowed_packet=64M
+      - --innodb_buffer_pool_size=128M
+      # From upstream's docker/mariadb/custom.cnf: the installer needs non-strict mode.
+      - --sql-mode=NO_ENGINE_SUBSTITUTION
+    env_file:
+      - ../.panelalpha/teampass/db.env
+    environment:
+      MARIADB_DATABASE: teampass
+      MARIADB_USER: teampass
+      MARIADB_AUTO_UPGRADE: "1"
+      MARIADB_INITDB_SKIP_TZINFO: "1"
+    volumes:
+      - teampass-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+    mem_limit: 512m
+
+  app:
+    image: teampass/teampass:3.2.2.5
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    env_file:
+      - ../.panelalpha/teampass/app.env
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: teampass
+      DB_USER: teampass
+      DB_PREFIX: teampass_
+      # Upstream default: the web installer at /install/install.php.
+      INSTALL_MODE: manual
+      TEAMPASS_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - teampass-sk:/var/www/html/storage/sk
+      - teampass-files:/var/www/html/storage/files
+      - teampass-upload:/var/www/html/storage/upload
+      # settings.php + csrfp.config.php and the master key: the install state.
+      - teampass-config:/var/www/html/storage/config
+      - teampass-secrets:/var/www/html/secrets
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns only once nginx + PHP-FPM answer.
+  ready:
+    image: teampass/teampass:3.2.2.5
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  teampass-db: {}
+  teampass-sk: {}
+  teampass-files: {}
+  teampass-upload: {}
+  teampass-config: {}
+  teampass-secrets: {}

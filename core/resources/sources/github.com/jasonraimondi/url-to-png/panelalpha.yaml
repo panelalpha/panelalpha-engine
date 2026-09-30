@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  URL-to-PNG, an HTTP screenshot service: GET /?url=<page> renders the page in
+  a pool of headless Chromium (Playwright) and returns a PNG (Node/Hono). The
+  repository's docker-compose.yml is a development stack - it builds from
+  source and adds CouchDB and MinIO, and the plain deploy fails because
+  minio/mc:latest no longer exists on Docker Hub. This recipe runs the
+  published image of the current release (ghcr.io/jasonraimondi/url-to-png:v2.1.4)
+  on port 3089 with upstream's default stub storage (no image cache), as the
+  getting-started `docker run` does. Other settings (ALLOW_LIST, BLOCK_LIST,
+  CRYPTO_KEY, STORAGE_PROVIDER=s3/couchdb and its credentials) are optional
+  project env vars. A health-check gate makes the deploy wait until /ping
+  answers.

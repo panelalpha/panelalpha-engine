@@ -1,0 +1,62 @@
+# Compose-replace: building the repo fails (phantomjs-prebuilt needs bzip2).
+# Runs the release image with the stack of upstream's deployments/ compose,
+# on named volumes and with secrets from ~/.panelalpha/codimd/.
+services:
+  database:
+    # Postgres cannot open a datadir from a newer major; keep this pinned.
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/codimd/db.env
+    environment:
+      POSTGRES_USER: codimd
+      POSTGRES_DB: codimd
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - database-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codimd -d codimd -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  app:
+    image: docker.io/hackmdio/hackmd:2.6.1
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/codimd/app.env
+    environment:
+      CMD_DOMAIN: ${PA_PUBLIC_HOST}
+      CMD_PROTOCOL_USESSL: "true"
+      CMD_URL_ADDPORT: "false"
+      CMD_USECDN: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - upload-data:/home/hackmd/app/public/uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/status', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 768m
+
+  # No-op: `compose up -d` returns once CodiMD answers (it migrates first).
+  ready:
+    image: docker.io/library/postgres:16-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  database-data: {}
+  upload-data: {}

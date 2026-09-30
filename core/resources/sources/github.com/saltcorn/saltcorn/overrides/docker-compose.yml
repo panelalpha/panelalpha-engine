@@ -1,0 +1,62 @@
+# The repo has no deployment compose; the plain deploy builds Dockerfile.isolated.release
+# (a CLI image whose default command prints help). Upstream's docker quickstart instead:
+# the release image running `serve` against Postgres, with generated credentials.
+services:
+  app:
+    image: saltcorn/saltcorn:1.6.2
+    restart: unless-stopped
+    # -a adds the Saltcorn schema to an empty database on first start.
+    command: ["serve", "-a"]
+    # Not .env: the engine seeds it from upstream's .env.example, a local-testing
+    # file with SQLITE_FILEPATH and a fixed session secret (engine#218).
+    env_file:
+      - ../.panelalpha/saltcorn/db.env
+      - ../.panelalpha/saltcorn/app.env
+    environment:
+      PGHOST: db
+      # Saltcorn forks one worker per CPU (~200 MB each); two fit the account.
+      SALTCORN_NWORKERS: ${SALTCORN_NWORKERS:-2}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # File store (saltcorn) and installed plugins (saltcorn-plugins).
+      - data:/root/.local/share
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 10s
+    mem_limit: 1g
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/saltcorn/db.env
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U saltcorn -d saltcorn"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  # No-op gate: `compose up -d` returns only once Saltcorn answers.
+  ready:
+    image: postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  db: {}

@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Apache OFBiz, the ERP suite (Java, embedded Tomcat, embedded H2):
+  accounting, orders, catalog, manufacturing and party management as
+  separate web applications (/partymgr, /accounting, /webtools, ...).
+
+  The repository's Dockerfile builds OFBiz from source with Gradle; a plain
+  deploy spent about 6 minutes building and never answered, because the
+  image only listens on HTTPS 8443 and the engine proxies plain HTTP. This
+  recipe runs the image upstream publishes for the current release,
+  ghcr.io/apache/ofbiz:24.09.07, on its plain HTTP connector (8080). TLS
+  ends at the engine's proxy, which sends X-Forwarded-Proto, so OFBiz does
+  not redirect to its own :8443. OFBIZ_HOST lists the account's host:
+  OFBiz answers only Host headers on that list. The first boot loads the
+  seed data into the embedded H2 database (about 5 minutes); a `ready` gate
+  makes the deploy finish only once the Party Manager login renders.
+  config, runtime (database, logs, first-run flags) and lib-extra are named
+  volumes, so a redeploy skips the data load. About 0.9 GB resident with
+  upstream's -Xmx1024M.
+
+  First run is upstream's: the seed data and its documented admin account
+  (admin / ofbiz). The site root is a 404 upstream (the ROOT webapp is
+  commented out); the applications start at /partymgr/control/main.

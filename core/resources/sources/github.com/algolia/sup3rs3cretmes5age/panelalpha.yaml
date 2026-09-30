@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Sup3rS3cretMes5age (algolia/sup3rS3cretMes5age, MIT) is a one-time secret
+  message service: a Go binary serving the web UI and API on :8082 that stores
+  each message in a HashiCorp Vault cubbyhole. It needs a Vault to start.
+
+  A plain deploy detects Go, compiles cmd/ and starts the binary with no
+  configuration; it exits at once with "HTTP binding address
+  (SUPERSECRETMESSAGE_HTTP_BINDING_ADDRESS) must be set". The repository's
+  runnable stack is deploy/docker-compose.yml: Vault in dev mode plus the app.
+  This recipe replaces the compose with that shape, running the official
+  algolia/supersecretmessage:0.4.4 image of the current release and
+  hashicorp/vault:2.1.1.
+
+  Vault runs in dev mode exactly as upstream ships it, so messages are held in
+  memory: a restart or rebuild drops unread messages, which for self-destructing
+  secrets is upstream's design. Upstream's hardcoded root token "supersecret" is
+  replaced by one generated per account by hooks/prepare.sh into
+  ~/.panelalpha/sup3rs3cretmes5age/vault.env (0600 in 0700). Vault publishes no
+  port; only the app is on the web.

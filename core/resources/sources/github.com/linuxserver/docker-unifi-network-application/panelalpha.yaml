@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  UniFi Network Application is Ubiquiti's controller for UniFi access points,
+  switches and gateways: a Java server with a web UI and API on 8443 (HTTPS,
+  self-signed) and a MongoDB database. It is closed-source freeware that runs
+  without any licence key; the repository is LinuxServer.io's image build,
+  and the owner ruled such apps in scope (2026-09-28).
+
+  The image needs an external MongoDB that the repository does not ship, so
+  overrides/docker-compose.yml runs the published
+  linuxserver/unifi-network-application image of the current release with a
+  mongo:7.0 sidecar (8.x refuses to start on Linux 6.19+, SERVER-121912; 7.0
+  is supported since controller 8.1). The controller user is created by
+  LinuxServer's documented init-mongo.sh on the first start of the empty
+  volume. hooks/prepare.sh generates the Mongo root and controller passwords
+  and the admin login once into ~/.panelalpha/unifi/ (0600 in 0700). /config
+  and the database are named volumes.
+
+  The engine's proxy speaks plain HTTP to the account, and the controller
+  only serves HTTPS, so an nginx `proxy` service owns the account port and
+  re-encrypts to unifi:8443 without verifying the self-signed certificate,
+  websockets included (101 through the host nginx; the *.panelalpha.online
+  test edge strips Upgrade, engine#170). engine#317 would let a manifest ask
+  for an https upstream instead.
+
+  Security: until its setup wizard is finished the controller answers every
+  API call anonymously as a super admin ("factory_default"). A one-shot
+  `setup` service makes the wizard's own calls (add-default-admin, controller
+  name, random device SSH credentials, set-installed) with the generated
+  admin, checks that anonymous /api/self is then 401, and the proxy starts
+  only after it succeeds, so the port never opens on an open wizard. On a
+  redeploy it sees 401 and does nothing.
+
+  Device adoption is network configuration: devices inform on port 8080 of an
+  address they can reach (Settings, Inform Host override), which this recipe
+  does not publish.

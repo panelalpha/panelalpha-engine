@@ -1,0 +1,57 @@
+# Compose-replace: the repo ships only a source-build Dockerfile (npm ci + a Go
+# build, ~5 min). This runs the official release image with named volumes and
+# creates the admin before the port is published.
+services:
+  # One-shot: closes the "Create Admin User" first-run page (see init.sh).
+  init:
+    image: deluan/navidrome:0.64.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    env_file:
+      - ../.panelalpha/navidrome/secret.env
+      - ../.panelalpha/navidrome/admin.env
+    volumes:
+      - ./panelalpha/navidrome:/pa:ro
+      - navidrome-data:/data
+      - navidrome-music:/music
+    mem_limit: 512m
+
+  app:
+    image: deluan/navidrome:0.64.2
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    env_file:
+      # ND_PASSWORDENCRYPTIONKEY only; the admin login is not given to the app.
+      - ../.panelalpha/navidrome/secret.env
+    environment:
+      # No anonymous usage reports to navidrome.org from a customer's server.
+      ND_ENABLEINSIGHTSCOLLECTOR: "false"
+    volumes:
+      # navidrome.db, cache and plugins; survives redeploys.
+      - navidrome-data:/data
+      - navidrome-music:/music
+    ports:
+      - "8000:4533"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:4533/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 1g
+
+  # `up -d` runs without --wait (engine#204); this blocks it until Navidrome answers.
+  ready:
+    image: deluan/navidrome:0.64.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  navidrome-data: {}
+  navidrome-music: {}

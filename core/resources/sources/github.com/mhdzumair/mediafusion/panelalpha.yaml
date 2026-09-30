@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MediaFusion, a Stremio/Kodi add-on server with its own web UI for configuring
+  catalogs, scrapers and debrid providers (Rust API and worker, PostgreSQL,
+  Redis). The repository root holds a Rust workspace (backend/), a deprecated
+  Python tree and a pyproject.toml for tooling, so a plain deploy picks the
+  python recipe, finds no entry point and serves the PanelAlpha placeholder.
+  Upstream deploys it from deployment/docker-compose with the published image.
+
+  This recipe runs that stack at the current release
+  (mhdzumair/mediafusion:6.1.6): the API on :8000 with HOST_URL and
+  POSTER_HOST_URL set to the site address, the background worker, PostgreSQL 18
+  and Redis on named volumes. It leaves out upstream's nginx/mkcert TLS front
+  (the engine terminates TLS), TRAWL and Prowlarr, which are optional.
+  hooks/prepare.sh generates SECRET_KEY and the database password once into
+  ~/.panelalpha/mediafusion/app.env. API_PASSWORD, CONTACT_EMAIL and provider
+  keys are optional and come from the project's env vars. ENABLE_RATE_LIMIT
+  defaults to false, as in upstream's .env-sample, because every visitor
+  arrives from the same proxy address. A `ready` gate waits for /health.

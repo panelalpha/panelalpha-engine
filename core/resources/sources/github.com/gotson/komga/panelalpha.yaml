@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Komga is a media server for comics, manga, BDs, magazines and eBooks: one
+  Spring Boot (Kotlin) process serving the web reader, admin UI, REST API,
+  OPDS and Kobo sync on :25600, SQLite and the search index in /config.
+
+  The repository is a Gradle multi-project (the server in komga/, a desktop
+  tray app, two web UIs). The engine's Java build runs it but starts the
+  root project's empty jar ("no main manifest attribute, in
+  build/libs/app-1.27.1.jar") instead of komga/build/libs, and a jar built
+  that way would lack the web UI. This recipe runs the official image of the
+  current release gotson/komga:1.27.1, as the Komga docs do, with /config
+  and the library folder /data on named volumes that survive redeploys.
+
+  First run is left as upstream ships it: the first visitor creates the
+  admin account. Adding books: copy files into the data volume, e.g.
+  `docker compose -p project cp <dir> app:/data/`, then add /data/<dir> as
+  a library in the web UI.

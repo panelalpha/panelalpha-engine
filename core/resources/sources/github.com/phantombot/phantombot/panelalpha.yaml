@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PhantomBot, a Twitch chat bot with a built-in web panel (Java, embedded H2
+  database). Upstream's docker-compose.yml runs the published image and
+  publishes the panel port 25000 with the long `ports:` syntax
+  (target/published), which the engine's compose port scan skips, so the
+  domain was proxied to 8080 and answered 502 while the bot ran fine.
+
+  This recipe replaces that compose with the same service: the published
+  ghcr.io/phantombot/phantombot image pinned to the current release
+  (3.21.1.0), port 25000 in short syntax, and /opt/PhantomBot_data on a named
+  volume. The profile-gated ouroboros auto-updater (mounts docker.sock) is
+  left out. First run is as upstream ships it: the panel opens the "Bot Setup
+  and OAuth" page, and the generated panel login is printed in the container
+  log. PhantomBot's own HTTP-to-HTTPS redirect is skipped for requests carrying
+  X-Forwarded-Host, which the engine's proxy sends, so no TLS setting is changed.

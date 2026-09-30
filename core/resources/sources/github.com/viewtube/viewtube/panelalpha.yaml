@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ViewTube is a privacy-friendly web front end for YouTube (NestJS API and a
+  Nuxt client served from one port, MongoDB and Redis).
+
+  The repository's Dockerfile cannot build from a plain checkout: the client
+  imports `buildMetadata.json`, which upstream's CI writes with `git log`
+  before `docker build`, and `.dockerignore` excludes `.git`, so a plain
+  deploy failed at `RUN pnpm run build` with "Cannot find module
+  '~~/buildMetadata.json'". The repo compose is the same build plus an
+  unpinned `mongo` and a `./data` bind mount. This recipe runs upstream's
+  published image of the current release, mauriceo/viewtube:0.17.0, with
+  MongoDB 7.0 and Redis, and keeps /data (the generated JWT and VAPID keys
+  in config.json, profile pictures) and the database on named volumes, so
+  accounts and sessions survive a redeploy. VIEWTUBE_SECURE is on because
+  the site is served over HTTPS. The user named `admin` gets the admin
+  pages, as in upstream's compose. A `ready` gate makes the deploy finish
+  once the web app answers. MongoDB is 7.0 because 8.0 and newer refuse to
+  start on Linux 6.19+ (SERVER-121912). Search, video and channel pages
+  work on 0.17.0; its home feed answers 500 because YouTube's browse API
+  has changed since that release, which only a newer upstream release fixes.

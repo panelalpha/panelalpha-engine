@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Automad, a flat-file CMS (PHP). The plain deploy runs the php strategy and
+  fails in the host asset build: upstream's package-lock.json does not match
+  package.json ("npm: Missing: yaml@2.9.1 from lock file"), so `npm ci`
+  refuses. The repository is the development tree; releases ship as the
+  official image, which installs the release into /app on first start
+  (composer create-project) and serves it with nginx + php-fpm on :80.
+
+  Compose-REPLACE from that image of the current release
+  (automad/automad:2.0.0-beta.59). /app (pages, shared files, config, users)
+  is a named volume, so content survives redeploys. Automad's own first-run
+  setup is left as upstream ships it.

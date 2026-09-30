@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gameyfin, a video game library manager (Spring Boot + Vaadin on :8080, H2
+  database in /opt/gameyfin/db). The repository has no root Dockerfile or
+  compose file, so the plain deploy compiles it with Gradle (Java strategy)
+  and the build dies ("Gradle build daemon disappeared unexpectedly");
+  upstream deploys the published image instead (docker/docker-compose.example.yml).
+
+  overrides/docker-compose.yml runs that image at the current release
+  (ghcr.io/gameyfin/gameyfin:2.4.0). The app refuses to boot without APP_KEY,
+  a base64 AES key of 16/24/32 bytes; hooks/prepare.sh generates one once into
+  ~/.panelalpha/gameyfin. db, data, plugindata and logs sit on named volumes,
+  plus a `library` volume at /library to add as a library path. A readiness
+  healthcheck and a no-op `ready` service gate the deploy. First run is
+  upstream's setup page that creates the admin account.

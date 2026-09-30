@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Telegram Archive, a Telegram history archiver (telegram-backup) with a web
+  viewer (telegram-viewer, :8000), from the release images the repository's
+  own docker-compose.yml pins. That file bind-mounts ./data, which is
+  root-owned in the account, so both uid-1000 services crash-looped on
+  "Permission denied: '/data/backups'". The recipe layers a
+  docker-compose.override.yml that puts /data (SQLite database, media,
+  Telegram session) on a named volume that survives redeploys, and a one-shot
+  check that fails the deploy naming whichever of TELEGRAM_API_ID,
+  TELEGRAM_API_HASH and TELEGRAM_PHONE is unset (the .env.example placeholders
+  count as unset). First-run behaviour is upstream's: the viewer asks for
+  VIEWER_USERNAME/VIEWER_PASSWORD (or ALLOW_ANONYMOUS_VIEWER=true) from the
+  project env vars, and telegram-backup restarts with "Session not
+  authorized" until the one interactive login is done in the account's
+  ~/project (with the engine's compose files, not the repo's):
+  `docker compose -p project -f docker-compose.panelalpha.yml -f
+  docker-compose.panelalpha.override.yml run --rm telegram-backup python -m
+  telegram_archive auth`.

@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kutt is a URL shortener with a web UI, user accounts, link statistics and a
+  REST API: one Node/Express server on :3000, SQLite by default. The
+  repository's docker-compose.yml builds the checkout and sets only
+  DB_FILENAME, but the server refuses to start without JWT_SECRET (its example
+  env file is `.example.env`, which nothing loads), so the plain deploy
+  restart-loops on "Missing environment variables: JWT_SECRET: undefined".
+
+  This recipe is the upstream SQLite compose running the official kutt/kutt
+  image of the current release (v3.2.6) instead of a build. JWT_SECRET is a
+  required compose variable the engine generates once per account (stable
+  across redeploys, so sessions and API keys survive a rebuild);
+  DEFAULT_DOMAIN is the account's domain, so short links are printed with it.
+  The SQLite database and the `custom` theme directory stay on named volumes,
+  as upstream declares them. Everything else is Kutt's own default: the first
+  visitor creates the admin account, registration and anonymous links are
+  disabled, TRUST_PROXY stays on (Kutt sits behind the engine's proxy) and
+  rate limiting stays off.

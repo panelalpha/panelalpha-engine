@@ -1,0 +1,100 @@
+# Compose-replace: every upstream service is profile-gated and built from
+# source. Runs the release AIO image in subpath mode on one port.
+x-hoppscotch-env: &hopp-env
+  ENABLE_SUBPATH_BASED_ACCESS: "true"
+  HOPP_ALTERNATE_PORT: "8000"
+  VITE_BASE_URL: ${PA_PUBLIC_URL}
+  VITE_SHORTCODE_BASE_URL: ${PA_PUBLIC_URL}
+  VITE_ADMIN_URL: ${PA_PUBLIC_URL}/admin
+  VITE_BACKEND_GQL_URL: ${PA_PUBLIC_URL}/backend/graphql
+  VITE_BACKEND_WS_URL: wss://${PA_PUBLIC_HOST}/backend/graphql
+  VITE_BACKEND_API_URL: ${PA_PUBLIC_URL}/backend/v1
+  WHITELISTED_ORIGINS: ${PA_PUBLIC_URL},${PA_PUBLIC_URL}/backend,${PA_PUBLIC_URL}/admin,app://localhost_3200,app://hoppscotch
+  VITE_APP_TOS_LINK: https://docs.hoppscotch.io/support/terms
+  VITE_APP_PRIVACY_POLICY_LINK: https://docs.hoppscotch.io/support/privacy
+  TRUST_PROXY: "false"
+
+services:
+  db:
+    image: docker.io/library/postgres:15
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/hoppscotch/secrets.env
+    environment:
+      POSTGRES_USER: hoppscotch
+      POSTGRES_DB: hoppscotch
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hoppscotch -d hoppscotch -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 384m
+
+  # One-shot, every boot: upstream's hoppscotch-migrate step.
+  migrate:
+    image: hoppscotch/hoppscotch:2026.8.2
+    restart: "no"
+    entrypoint: ["sh", "-c", "cd /dist/backend && pnpm exec prisma migrate deploy"]
+    env_file:
+      - .env
+      - ../.panelalpha/hoppscotch/secrets.env
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 512m
+
+  # One-shot, every boot: the backend's own first-run config fill (see the script).
+  init:
+    image: hoppscotch/hoppscotch:2026.8.2
+    restart: "no"
+    entrypoint: ["sh", "/hoppscotch-init.sh"]
+    env_file:
+      - .env
+      - ../.panelalpha/hoppscotch/secrets.env
+    environment: *hopp-env
+    volumes:
+      - ./hoppscotch-init.sh:/hoppscotch-init.sh:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    mem_limit: 768m
+
+  app:
+    image: hoppscotch/hoppscotch:2026.8.2
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+      - ../.panelalpha/hoppscotch/secrets.env
+    environment: *hopp-env
+    volumes:
+      # webapp-server signing key.
+      - appdata:/data
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "-o", "/dev/null", "http://127.0.0.1:8000/backend/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1280m
+
+  # No-op: `compose up -d` returns once the backend answers.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  appdata: {}

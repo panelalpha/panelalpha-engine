@@ -1,0 +1,49 @@
+# The repository's compose file runs dumbwareio/dumbdo:latest with the list in a
+# ./data bind mount and whatever PIN .env holds (.env.example: 1234). This runs
+# the image built from the current commit, keeps /app/data on a named volume,
+# and always sets the PIN from ~/.panelalpha.
+#
+# DumbDo accepts the PIN on every request (cookie or X-Pin header) with no
+# lockout outside /api/verify-pin, so the app publishes nothing: `proxy` is the
+# only thing on the account's port.
+services:
+  app:
+    image: dumbwareio/dumbdo:d4dff81e4eab16de0974a94742e1cd3bc51a369a
+    restart: unless-stopped
+    env_file:
+      # Missing file aborts `up` rather than starting without a PIN.
+      - ../.panelalpha/dumbdo/pin.env
+    environment:
+      DUMBDO_SITE_TITLE: DumbDo
+      ALLOWED_ORIGINS: ${PA_PUBLIC_URL}
+      NODE_ENV: production
+      SINGLE_LIST: "false"
+    volumes:
+      - data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/login"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    mem_limit: 256m
+
+  proxy:
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../.panelalpha/dumbdo/pin.env
+    environment:
+      # Only the PIN is substituted into the template; nginx's own $vars stay.
+      NGINX_ENVSUBST_FILTER: DUMBDO_PIN
+    volumes:
+      - ./panelalpha/dumbdo-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 48m
+
+volumes:
+  data: {}

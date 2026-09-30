@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Algernon, a single-binary Go web server with Lua, Markdown and templates.
+  The go platform builds it correctly; what the plain deploy gets wrong is the
+  start: `./app` with no arguments serves HTTPS on :3000 from the checkout and
+  opens an interactive Lua REPL, which exits at once without a terminal
+  ("bye"), so the container restart-loops. The override runs it as a plain
+  HTTP server on :8080 (--httponly --noninteractive --addr :8080), serving a
+  named volume seeded once from the repository's samples/ site, with the Bolt
+  database (users/permissions) on a second volume. --nolimit, because
+  Algernon's per-visitor rate limit keys on RemoteAddr, which behind the
+  engine's proxy is one address for every visitor: 19 of 30 simultaneous
+  requests from different clients got HTTP 429.
+extends: go

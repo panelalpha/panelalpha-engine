@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Chamilo, an e-learning / learning management system (PHP, Symfony + Vue,
+  MariaDB). The git tree ships no compiled frontend: a plain deploy resolves
+  Composer and then runs the Encore/webpack build on the host, which the
+  kernel OOM-kills at ~5 GB (host build container 5202 MB), so the deploy
+  fails.
+
+  Upstream publishes release packages with vendor/ and public/build/ already
+  built. This recipe downloads the current release, 3.0.1, checks its
+  sha256, unpacks it once per version into a named volume and serves
+  public/ with webdevops/php-apache:8.3 (PHP 8.3 with every extension
+  composer.json requires) on port 8080, next to mariadb:11.8, with a `ready`
+  gate. The first visit opens Chamilo's own web installer as upstream ships
+  it: database host `db`, user `chamilo`, database `chamilo`, password
+  MARIADB_PASSWORD from ~/.panelalpha/chamilo/db.env (generated once there).
+  The installation (.env, config/jwt, var/ with uploads) and the database
+  live on named volumes and survive redeploys.

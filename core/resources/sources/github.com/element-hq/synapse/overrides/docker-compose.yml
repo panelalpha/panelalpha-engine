@@ -1,0 +1,49 @@
+# The repo's Dockerfile builds Synapse from source (Rust + Python, minutes) and
+# the image then exits for want of /data/homeserver.yaml. This runs upstream's
+# release image and generates that config once, as docker/README.md describes.
+services:
+  app:
+    image: matrixdotorg/synapse:v1.162.0
+    restart: unless-stopped
+    volumes:
+      # homeserver.yaml, signing key, SQLite database and media store.
+      - data:/data
+    ports:
+      - "8008:8008"
+    depends_on:
+      generate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fSs", "http://127.0.0.1:8008/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # One-shot `generate`: writes homeserver.yaml and the signing key on first
+  # boot; on later deploys it only fills in missing files, never overwrites.
+  generate:
+    image: matrixdotorg/synapse:v1.162.0
+    restart: "no"
+    command: ["generate"]
+    environment:
+      # The Matrix server name is permanent (it is part of every user id).
+      SYNAPSE_SERVER_NAME: ${PA_PUBLIC_HOST}
+      SYNAPSE_REPORT_STATS: "no"
+    volumes:
+      - data:/data
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Synapse answers.
+  ready:
+    image: matrixdotorg/synapse:v1.162.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

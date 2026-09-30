@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Palmr, a self-hosted file-sharing platform: one image running the Fastify
+  API (:3333), the Next.js web UI (:5487) and a bundled S3-compatible storage
+  server (:9379) under supervisord, with SQLite. The repo's compose publishes
+  all three ports and the engine routes the domain to the lowest one, the
+  optional API, so the site answers 404 (engine#352).
+
+  This recipe runs the published image of the current release
+  (kyantech/palmr:v3.3.2-beta) and publishes only the web interface, with the
+  data directory (database and stored files) on a named volume. STORAGE_URL is
+  set to the site's address and SECURE_SITE on, since the account is served
+  over HTTPS.
+
+  Limitation: with the bundled storage, browsers upload and download files
+  straight to presigned URLs on port 9379, and an account exposes one port per
+  domain, so file transfers need external S3. Set ENABLE_S3=true and the S3_*
+  variables (S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET_NAME, ...)
+  in the project's environment variables; they are passed through from .env.

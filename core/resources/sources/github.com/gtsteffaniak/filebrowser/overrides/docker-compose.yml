@@ -1,0 +1,29 @@
+# The repository's _docker/docker-compose.yaml is Playwright test tooling.
+# This runs upstream's published image of the current stable release.
+services:
+  app:
+    image: gtstef/filebrowser:1.5.6-stable
+    restart: unless-stopped
+    volumes:
+      - data:/home/filebrowser/data
+      - files:/srv
+    ports:
+      - "8080:80"
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    mem_limit: 512m
+
+  # /srv is root-owned in the image and the app runs as uid 1000.
+  volume-init:
+    image: gtstef/filebrowser:1.5.6-stable
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["chown", "1000:1000", "/srv"]
+    volumes:
+      - files:/srv
+    mem_limit: 64m
+
+volumes:
+  data: {}
+  files: {}

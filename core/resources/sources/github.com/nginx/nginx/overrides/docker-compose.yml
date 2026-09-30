@@ -1,0 +1,22 @@
+# Compose-replace: the repository is nginx's C source with no deployment files.
+# Runs the official image of the current release (1.31.6, mainline).
+services:
+  app:
+    image: nginx:1.31.6-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      # Site content and server config; seeded from the image on first start.
+      - nginx-html:/usr/share/nginx/html
+      - nginx-conf:/etc/nginx/conf.d
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    mem_limit: 128m
+
+volumes:
+  nginx-html: {}
+  nginx-conf: {}

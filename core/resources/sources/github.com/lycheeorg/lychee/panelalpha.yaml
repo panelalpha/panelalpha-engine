@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Lychee, a self-hosted photo-management app (Laravel on FrankenPHP, port
+  8000). The repository's docker-compose.yaml leaves APP_KEY empty (the image
+  refuses to start without it), adds the optional AI face-recognition service,
+  and gives MariaDB `cap_drop: [ALL]` plus a `cap_add` list; the engine strips
+  the cap_add half (engine#349), so a plain deploy fails with MariaDB's
+  "failed switching to 'mysql': operation not permitted".
+
+  This recipe runs upstream's own shape on the current release
+  (ghcr.io/lycheeorg/lychee:v7.10.0): the web service, the queue worker
+  (LYCHEE_MODE=worker) and mariadb:11, without capability lists and without
+  face recognition (AI_VISION_ENABLED=false). hooks/prepare.sh generates
+  APP_KEY and the database password once into ~/.panelalpha/lychee (0600 in
+  0700), passed as env_files. Photos, logs, the upload temp dir and the
+  database live on named volumes that survive redeploys. Lychee's own
+  first-run page creates the admin account.

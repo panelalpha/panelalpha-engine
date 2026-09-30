@@ -1,0 +1,61 @@
+# Upstream's self-hosting quick start from the 20260626 release image, with
+# generated secrets from ~/.panelalpha (hooks/prepare.sh) and named volumes.
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/asciinema/app.env
+    environment:
+      POSTGRES_USER: asciinema
+      POSTGRES_DB: asciinema
+    volumes:
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -U asciinema -d asciinema"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 256m
+
+  app:
+    image: ghcr.io/asciinema/asciinema-server:20260626
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      # Optional SMTP_* for login e-mails, from the project's env vars.
+      - path: .env
+        required: false
+      # DATABASE_URL and SECRET_KEY_BASE, generated once by hooks/prepare.sh.
+      - ../.panelalpha/asciinema/app.env
+    environment:
+      URL_HOST: ${PA_PUBLIC_HOST}
+      URL_SCHEME: https
+    volumes:
+      - data:/var/lib/asciinema
+    ports:
+      - "4000:4000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4000/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns only once the server answers.
+  ready:
+    image: postgres:18-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db_data: {}
+  data: {}

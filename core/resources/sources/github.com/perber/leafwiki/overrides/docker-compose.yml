@@ -1,0 +1,56 @@
+# Compose-replace: runs the published image of the current release instead of
+# building the repo's Dockerfile (Node + Go build, ~160s per deploy).
+services:
+  app:
+    image: ghcr.io/perber/leafwiki:v0.13.0
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      # LEAFWIKI_JWT_SECRET; a missing file aborts `up`.
+      - ../.panelalpha/leafwiki/app.env
+    environment:
+      LEAFWIKI_HOST: 0.0.0.0
+      LEAFWIKI_PORT: "8080"
+      LEAFWIKI_DATA_DIR: /app/data
+      # Initial admin login, from the project's env vars (checked below);
+      # applied only while no admin exists.
+      LEAFWIKI_ADMIN_USERNAME: ${LEAFWIKI_ADMIN_USERNAME:-admin}
+      LEAFWIKI_ADMIN_PASSWORD: ${LEAFWIKI_ADMIN_PASSWORD:-}
+    volumes:
+      # Pages (Markdown), assets, users and snapshots.
+      - leafwiki-data:/app/data
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 512m
+
+  # Fails `compose up` (and so the deploy) while the admin password is unset.
+  env-check:
+    image: ghcr.io/perber/leafwiki:v0.13.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "/leafwiki-env-check.sh"]
+    environment:
+      LEAFWIKI_ADMIN_PASSWORD: ${LEAFWIKI_ADMIN_PASSWORD:-}
+    volumes:
+      - ./leafwiki-env-check.sh:/leafwiki-env-check.sh:ro
+    mem_limit: 32m
+
+  # No-op: `compose up -d` returns once LeafWiki answers.
+  ready:
+    image: ghcr.io/perber/leafwiki:v0.13.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  leafwiki-data: {}

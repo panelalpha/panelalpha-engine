@@ -1,0 +1,37 @@
+# The repo's compose.yaml is a developer stack and the source build does not
+# serve; this runs the official image of the current release (2.6.14).
+services:
+  app:
+    image: wallabag/wallabag:2.6.14
+    restart: unless-stopped
+    environment:
+      # Absolute URLs (assets, links, API) use the account's domain.
+      SYMFONY__ENV__DOMAIN_NAME: ${PA_PUBLIC_URL}
+    volumes:
+      # SQLite database (data/db/wallabag.sqlite); created on first start.
+      - wallabag-data:/var/www/wallabag/data
+      # Images downloaded with saved articles.
+      - wallabag-images:/var/www/wallabag/web/assets/images
+    ports:
+      - "8000:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/api/info"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once wallabag answers /api/info.
+  ready:
+    image: wallabag/wallabag:2.6.14
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  wallabag-data: {}
+  wallabag-images: {}

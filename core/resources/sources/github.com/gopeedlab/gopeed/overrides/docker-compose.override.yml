@@ -1,0 +1,13 @@
+# Pins the current release and keeps settings, the task list and finished
+# downloads on named volumes (upstream: an anonymous volume and a bind into
+# the account container, both lost on redeploy).
+services:
+  gopeed:
+    image: liwei2633/gopeed:v1.9.3
+    volumes:
+      - storage:/app/storage
+      - downloads:/app/Downloads
+
+volumes:
+  storage: {}
+  downloads: {}

@@ -1,0 +1,36 @@
+# Compose-replace: upstream's self-hosting compose (deploy/docker/README.md) on
+# the published release image instead of the monorepo source.
+services:
+  app:
+    image: appsmith/appsmith-ce:v2.4.2
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    # Optional APPSMITH_* settings (mail, OAuth, ...) from the project env.
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # Config (incl. the generated encryption keys), MongoDB, Postgres, Redis data.
+      - stacks:/appsmith-stacks
+    # The image's own process check, plus the backend's health endpoint.
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/appsmith/healthcheck.sh >/dev/null && curl -fsS -o /dev/null http://localhost/api/v1/health"]
+      interval: 10s
+      timeout: 15s
+      retries: 60
+      start_period: 60s
+    mem_limit: 3500m
+
+  # No-op gate: `compose up -d` returns once the backend is up.
+  ready:
+    image: appsmith/appsmith-ce:v2.4.2
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  stacks: {}

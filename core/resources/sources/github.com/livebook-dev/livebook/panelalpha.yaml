@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Livebook, a collaborative Elixir notebook server (Phoenix LiveView), port
+  8080, notebooks in /data.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repository's Dockerfile takes
+  BASE_IMAGE and VARIANT build args that upstream's CI supplies from the
+  `versions` file, so the engine's plain build fails at "Image project-app
+  Building". This recipe runs the published ghcr.io/livebook-dev/livebook
+  image of the current release (0.19.10) with notebooks (/data) and Livebook's
+  settings on named volumes.
+
+  Upstream's default auth applies: a token printed in the app's log at each
+  start. Set the project env var LIVEBOOK_PASSWORD (at least 12 characters) to
+  use password auth instead.

@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  solidtime is a time tracker for freelancers and agencies: Laravel Octane
+  (FrankenPHP) in upstream's solidtime/solidtime image, with Postgres, a
+  scheduler, a queue worker and Gotenberg for PDF reports. The repository's
+  docker-compose.yml is Laravel Sail's development stack, so
+  overrides/docker-compose.yml replaces it with upstream's self-hosting
+  example (solidtime-io/self-hosting-examples) pinned to the current release
+  image (0.21.0).
+
+  hooks/prepare.sh generates APP_KEY, the Passport RSA key pair, the Postgres
+  password and the owner's password once into ~/.panelalpha/solidtime/, so
+  they survive redeploys alongside the Postgres and storage volumes. APP_URL
+  is the engine's public URL and only private-network proxies are trusted.
+
+  A one-shot `setup` service runs the migrations and creates the owner with
+  upstream's `admin:user:create --verify-email` (admin@<domain> / the
+  password in ~/.panelalpha/solidtime/admin.env); that address is also the
+  only SUPER_ADMINS entry, for the /admin panel. Public registration is off
+  (APP_ENABLE_REGISTRATION=off). Mail goes to the log; configure MAIL_* in
+  the account env to send invitations and reminders. A no-op `ready`
+  service waits for the app's health check, so the deploy finishes only once
+  solidtime answers.

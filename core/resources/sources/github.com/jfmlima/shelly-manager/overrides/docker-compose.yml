@@ -1,0 +1,60 @@
+# The repo's compose is a hot-reload dev environment. This is upstream's README
+# "Web UI + API Stack" with the published images of the current release (1.10.0).
+# Only the web UI is published; its nginx also proxies /api to the API, so the
+# browser calls the API on the site's own address.
+services:
+  api:
+    image: ghcr.io/jfmlima/shelly-manager-api:1.10.0
+    restart: unless-stopped
+    # .env: optional SHELLY_* settings (project env vars, e.g. SHELLY_AUTH_TOKEN);
+    # app.env: SHELLY_SECRET_KEY, generated once by hooks/prepare.sh.
+    env_file:
+      - .env
+      - ../.panelalpha/shelly-manager/app.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8000"
+    volumes:
+      # SQLite database (device credentials, backups, schedules) and firmware.
+      - shelly-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  web:
+    image: ghcr.io/jfmlima/shelly-manager-web:1.10.0
+    restart: unless-stopped
+    environment:
+      # Written into config.js at start; the UI appends /api itself.
+      VITE_BASE_API_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - ./panelalpha/shelly-manager/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once the UI and the API answer.
+  ready:
+    image: ghcr.io/jfmlima/shelly-manager-web:1.10.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  shelly-data: {}

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ZITADEL, the identity and access management platform (OIDC, OAuth2, SAML),
+  with its console and login UI. The repository root is the Go/TypeScript
+  monorepo; the plain deploy detected Next.js and the login app's build failed
+  on generated modules that are not in the checkout. This recipe runs
+  upstream's deploy/compose stack in external-TLS mode on the published
+  v4.19.3 images: zitadel (API and console), zitadel-login (login v2), Postgres
+  17 on a named volume and Caddy routing /, /ui/v2/login, /api and the rest
+  exactly as upstream's Traefik labels do (the engine drops a traefik service
+  from a compose file, engine#334). The external domain is the project's domain.
+  hooks/prepare.sh generates the masterkey, the login cookie secret and the
+  database password once into ~/.panelalpha/zitadel/, fed as env_files. The
+  first instance and its admin are created by ZITADEL's own first start, with
+  upstream's defaults.

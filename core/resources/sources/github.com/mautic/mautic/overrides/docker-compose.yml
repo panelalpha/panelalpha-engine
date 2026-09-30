@@ -1,0 +1,101 @@
+# Compose-replace: the repo is the Mautic source (composer + npm build, needs
+# ext-imap) with no compose file. Runs upstream's docker-mautic "basic" shape
+# on the current release: web + cron + worker + MySQL.
+x-mautic: &mautic
+  image: mautic/mautic:7.2.1-apache
+  restart: unless-stopped
+  env_file:
+    # MAUTIC_DB_PASSWORD; a missing file aborts `up`.
+    - ../.panelalpha/mautic/app.env
+  volumes:
+    - config:/var/www/html/config
+    - logs:/var/www/html/var/logs
+    - files:/var/www/html/docroot/media/files
+    - images:/var/www/html/docroot/media/images
+    # trusted_proxies for the engine's HTTPS proxy (files/).
+    - ./mautic-parameters_local.php:/var/www/html/config/parameters_local.php:ro
+
+x-mautic-env: &mautic-env
+  MAUTIC_DB_HOST: db
+  MAUTIC_DB_PORT: "3306"
+  MAUTIC_DB_DATABASE: mautic
+  MAUTIC_DB_USER: mautic
+  MAUTIC_MESSENGER_DSN_EMAIL: doctrine://default
+  MAUTIC_MESSENGER_DSN_HIT: doctrine://default
+
+services:
+  app:
+    <<: *mautic
+    environment:
+      <<: *mautic-env
+      DOCKER_MAUTIC_ROLE: mautic_web
+    ports:
+      - "8080:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 768m
+
+  cron:
+    <<: *mautic
+    environment:
+      <<: *mautic-env
+      DOCKER_MAUTIC_ROLE: mautic_cron
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 384m
+
+  worker:
+    <<: *mautic
+    environment:
+      <<: *mautic-env
+      DOCKER_MAUTIC_ROLE: mautic_worker
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 512m
+
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/mautic/db.env
+    environment:
+      MYSQL_DATABASE: mautic
+      MYSQL_USER: mautic
+    command:
+      - --innodb-buffer-pool-size=128M
+      - --performance-schema=OFF
+    volumes:
+      - mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Mautic answers.
+  ready:
+    image: mysql:8.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  logs: {}
+  files: {}
+  images: {}
+  mysql: {}

@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Open Journal Systems (OJS), PKP's journal management and publishing
+  platform: PHP on Apache with MariaDB.
+
+  A plain deploy detects the checkout as a Vite site (root package.json, no
+  composer.json) and fails with "Static build finished but dist/index.html is
+  missing": the Vite builds only produce assets for the PHP backend, and the
+  main branch is the unreleased 3.6 development line with its PHP
+  dependencies spread over 18 submodules. This recipe runs PKP's official
+  image of the current release, pkpofficial/ojs:3_5_0-5, with MariaDB 11.8.
+  The uploaded files (/var/www/files), the public directory and the database
+  live on named volumes; config.inc.php, which OJS's web installer writes, is
+  bind-mounted from ~/.panelalpha/ojs, where a one-shot `config-init` service
+  fills it from the image's own template on the first deploy (base_url set to
+  the site, RESTful URLs on, CDN off, as the image's start script sets them).
+  Apache marks requests the engine's proxy received over HTTPS
+  (X-Forwarded-Proto) as HTTPS, since OJS builds its links from
+  $_SERVER['HTTPS'] and otherwise emits http:// asset URLs on the https
+  site. A redeploy keeps the installed journal. The database passwords are
+  generated once into ~/.panelalpha/ojs/secrets.env.
+
+  The first visit opens OJS's own installer, as upstream ships it. In its
+  database section enter host `db`, username `ojs`, database name `ojs` and
+  the MARIADB_PASSWORD from ~/.panelalpha/ojs/secrets.env; keep the files
+  directory /var/www/files.

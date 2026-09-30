@@ -1,0 +1,16 @@
+# Compose-replace: upstream's compose publishes the panel with the long `ports:`
+# syntax (target/published), which the engine's port scan does not read, so the
+# domain was routed to 8080. Same service, short syntax, current release pinned;
+# the profile-gated ouroboros auto-updater (docker.sock) is left out.
+services:
+  phantombot:
+    image: ghcr.io/phantombot/phantombot:3.21.1.0
+    restart: unless-stopped
+    ports:
+      - "25000:25000"
+    volumes:
+      # botlogin.txt, the H2 database and logs.
+      - PhantomBot_data:/opt/PhantomBot_data
+
+volumes:
+  PhantomBot_data: {}

@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Drawnix is a whiteboard (mind maps, flowcharts, freehand drawing) built as a
+  React single-page app; boards are kept in the visitor's browser, and the
+  server only hands out static files. The repository's Dockerfile builds it
+  with `npm install`, but the committed package-lock.json resolves 47
+  packages from registry.npmmirror.com, which resets the connection from our
+  hosts every time (ECONNRESET on oxlint-1.69.0.tgz), so the build never
+  finishes.
+
+  This recipe runs upstream's published image of the current release
+  (pubuzhixing/drawnix:v0.4.1, built by the repository's own publish
+  workflow from the same Dockerfile). Nothing is stored server-side, so there
+  is no volume.

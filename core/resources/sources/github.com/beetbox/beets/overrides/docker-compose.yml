@@ -1,0 +1,55 @@
+# Compose-replace: the repository is the Python package with no server entry
+# point. This runs the LinuxServer image of the current release, whose service
+# is `beet web` (the web plugin) on :8337.
+services:
+  app:
+    image: lscr.io/linuxserver/beets:2.14.1-ls354
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+    volumes:
+      # config.yaml and the library database; survive redeploys.
+      - config:/config
+      # The music library and the import folder.
+      - music:/music
+      - downloads:/downloads
+    ports:
+      - "8337:8337"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8337/"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    depends_on:
+      volumes-init:
+        condition: service_completed_successfully
+    mem_limit: 512m
+
+  # The image chowns only /config; named volumes start root-owned, so `beet
+  # import` (run as abc, PUID 1000) could not write the library or import dir.
+  volumes-init:
+    image: lscr.io/linuxserver/beets:2.14.1-ls354
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "chown 1000:1000 /music /downloads"]
+    volumes:
+      - music:/music
+      - downloads:/downloads
+    mem_limit: 32m
+
+  # No-op gate: `compose up -d` returns only once the web UI answers.
+  ready:
+    image: lscr.io/linuxserver/beets:2.14.1-ls354
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  music: {}
+  downloads: {}

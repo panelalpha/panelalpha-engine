@@ -1,0 +1,13 @@
+# The repo's compose bind-mounts ./data, which Docker creates root-owned while
+# the image runs as 1000:1000, so the app cannot write config.json and
+# restart-loops. A named volume inherits the image's 1000-owned /updater/data.
+# Also pins the current release instead of the untagged (latest) image.
+services:
+  ddns-updater:
+    image: ghcr.io/qdm12/ddns-updater:v2.10.0@sha256:3e2aa558946b5a293def4d73008fa4651c072b2c12932cecd02126fb23979831
+    volumes:
+      # config.json, updates.json and backups.
+      - data:/updater/data
+
+volumes:
+  data: {}

@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Fedora Commons Repository (fcrepo), a Linked Data Platform repository for
+  digital libraries and archives (Java, Tomcat). The repository is the Maven
+  source of a WAR; the generic Java strategy runs a test jar and restart-loops.
+  This recipe runs upstream's published fcrepo/fcrepo image of the current
+  release (7.0.0, Tomcat 10) on port 8080, with fcrepo.home (OCFL storage and
+  the embedded database) on a named volume that survives redeploys. The REST
+  API is at /fcrepo/rest with upstream's default fedoraAdmin login.

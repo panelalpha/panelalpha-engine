@@ -1,0 +1,20 @@
+# CookCLI 0.37.0 release image; recipes on a named volume.
+services:
+  cookcli:
+    image: ghcr.io/cooklang/cookcli:0.37.0
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Pages served on the domain can save only when the origin is named.
+      COOK_CORS_ORIGIN: ${PA_PUBLIC_URL}
+    ports:
+      - "9080:9080"
+    # A fresh volume starts as a copy of the image's seed recipes (owned by 1000).
+    volumes:
+      - cook_recipes:/recipes
+    mem_limit: 256m
+
+volumes:
+  cook_recipes: {}

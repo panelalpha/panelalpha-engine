@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Lingarr translates subtitle files for the *arr applications (Sonarr, Radarr,
+  Bazarr) through LibreTranslate, DeepL or an AI provider. .NET 10 server with
+  a Vue UI, SQLite here.
+
+  The repository ships only docker-compose.dev.yml (a Debug build behind
+  Traefik with MySQL), and a .NET-only detection built a container that
+  restart-looped. overrides/docker-compose.yml runs the published
+  lingarr/lingarr image pinned to the current release (1.3.0) with
+  DB_CONNECTION=sqlite and /app/config (database, Hangfire store, the
+  DataProtection keys signing the login cookie) on a named volume.
+
+  Security: a fresh Lingarr shows an onboarding wizard to the first visitor,
+  who picks whether authentication exists at all. Worse, POST
+  /api/auth/signup and POST /api/auth/onboarding are [AllowAnonymous] and never
+  check whether an admin already exists (AuthController.cs), so even after
+  setup anyone can add a user or set enableUserAuth=false; the SignalR hubs
+  have no authorization either. hooks/prepare.sh generates the admin password
+  once into ~/.panelalpha/lingarr/admin.env; a one-shot `seed` service creates
+  `admin` and completes onboarding with authentication on through the app's
+  own API, before anything is published. The app publishes no port: `proxy`
+  (nginx) is the only thing on the account's port and requires a valid
+  session (auth_request against /api/auth/authenticated) for signup,
+  onboarding and /signalr, so an admin can still add users from the UI.
+  AUTH_ENABLED=true is re-applied on every start. Sonarr/Radarr URLs and API
+  keys and translation-provider keys are runtime settings, stored encrypted
+  in the database. No media is mounted: point Bazarr at Lingarr, or add a
+  media volume yourself.
+
+  Measured on mariusz.panelalpha.tools (2026-09-28): deploy 40s, rebuild 24s;
+  app 70 MiB, proxy 8 MiB. Anonymous POST signup/onboarding (also as
+  /api/Auth/SignUp, //api//auth//signup, /api/auth/%73ignup) and /signalr
+  negotiate or websocket -> 401 at the proxy; the same signup sent straight to
+  app:9876 -> 200, which is what the proxy exists to stop. Websockets pass
+  through the engine's webserver (101 authed); the *.panelalpha.online test
+  edge strips Upgrade (engine#170) and SignalR falls back to long polling.

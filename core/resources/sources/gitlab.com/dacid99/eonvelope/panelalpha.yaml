@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Eonvelope is a Django email archiver: it pulls mail from IMAP/POP/Exchange
+  accounts on a schedule (Celery + a bundled RabbitMQ) and keeps it searchable
+  in MariaDB. The repository's compose files live under docker/ and pull the
+  published image; the plain deploy instead built docker/Dockerfile, which
+  serves gunicorn only over HTTPS on 443 with a self-signed certificate, so
+  the engine's plain-HTTP proxy got no answer (502).
+
+  This recipe runs the published release image dacid99/eonvelope:0.8.0 with a
+  MariaDB 11.8 sidecar, as upstream's docker/docker-compose.yml does. The
+  engine proxy speaks plain HTTP and cannot use an https upstream
+  (engine#317), so an nginx `proxy` service owns the account port and
+  re-encrypts to web:443 without verifying the self-signed certificate.
+  ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS come from the account's address.
+  hooks/prepare.sh generates SECRET_KEY and the database passwords once into
+  ~/.panelalpha/eonvelope/. The image creates user `admin` on first start
+  with upstream's default DJANGO_SUPERUSER_PASSWORD `rootqwertz123` (from
+  upstream's docker/docker-compose.yml); change it after the first login. The
+  database, the archive (/mnt/archive) and logs are named volumes.

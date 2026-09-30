@@ -1,0 +1,69 @@
+# Replaces the repo's compose.yml, a source build that reads its secrets from
+# the host shell's environment and runs PostgreSQL. This runs upstream's own
+# published image (n1try/wakapi is pushed by the same workflow as
+# ghcr.io/muety/wakapi) on its default SQLite, in a named volume.
+services:
+  app:
+    image: n1try/wakapi:2.18.0
+    restart: unless-stopped
+    env_file:
+      - .env
+      # WAKAPI_PASSWORD_SALT, generated once by hooks/prepare.sh.
+      - ../.panelalpha/wakapi/wakapi.env
+    environment:
+      WAKAPI_PUBLIC_URL: ${PA_PUBLIC_URL}
+      WAKAPI_DB_TYPE: sqlite3
+      WAKAPI_DB_NAME: /data/wakapi.db
+      WAKAPI_LISTEN_IPV4: 0.0.0.0
+      WAKAPI_PORT: "3000"
+      # Closed server: the owner is seeded below; further users by invite code.
+      WAKAPI_ALLOW_SIGNUP: "false"
+      WAKAPI_INVITE_CODES: "true"
+      # Served over https by the proxy, so cookies can be Secure.
+      WAKAPI_INSECURE_COOKIES: "false"
+      # Account addresses have no MX record; do not reject signups over it.
+      WAKAPI_MAIL_SKIP_VERIFY_MX_RECORD: "true"
+    volumes:
+      # The image pre-creates /data owned by nonroot, so the volume inherits it.
+      - wakapi-data:/data
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "/app/healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # Creates the owner account once, while signup stays closed: writes a
+  # one-time invite code into Wakapi's key/value table and signs up with it
+  # over the compose network. The first user Wakapi creates is its admin.
+  seed:
+    image: keinos/sqlite3:3.53.4
+    restart: "no"
+    # Same uid as the app, so SQLite's -wal/-shm files stay writable for it.
+    user: "65532:65532"
+    entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/wakapi/admin.env
+    volumes:
+      - wakapi-data:/data
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+  # No-op gate: `up -d` returns only after the app is healthy and seeded.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  wakapi-data: {}

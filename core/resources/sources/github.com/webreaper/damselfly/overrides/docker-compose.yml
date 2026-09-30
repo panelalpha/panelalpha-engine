@@ -1,0 +1,35 @@
+# The repo compose builds a Dockerfile that copies CI output (publish/, Models/)
+# absent from a checkout; run the published release image as docs/Installation.md does.
+services:
+  damselfly:
+    image: webreaper/damselfly:4.5.3
+    restart: unless-stopped
+    ports:
+      - "6363:6363"
+    volumes:
+      - damselfly-config:/config
+      - damselfly-thumbs:/thumbs
+      - damselfly-pictures:/pictures
+    healthcheck:
+      # No curl/wget in the image: check the port with bash.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6363"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 2g
+
+  # No-op gate: `compose up -d` returns only once the server listens.
+  ready:
+    image: webreaper/damselfly:4.5.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      damselfly:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  damselfly-config: {}
+  damselfly-thumbs: {}
+  damselfly-pictures: {}

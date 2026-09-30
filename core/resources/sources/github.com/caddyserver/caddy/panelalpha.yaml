@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Caddy, the web server with automatic HTTPS. The repository is the Go
+  source; the plain deploy built it with the go strategy and the result is
+  the caddy CLI, which printed its usage and exited, so the container
+  restarted and nothing answered. This recipe runs the official caddy image
+  of the current release (2.11.4, alpine) with the image's own Caddyfile
+  (":80", file_server over /usr/share/caddy) on container port 80; the
+  account's domain already has TLS, so Caddy serves plain HTTP behind it.
+  /etc/caddy, the site root, /data and /config are named volumes kept across
+  redeploys. The admin API stays on the container's localhost:2019 as
+  upstream ships it.

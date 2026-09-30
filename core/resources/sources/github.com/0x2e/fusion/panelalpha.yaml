@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Fusion, a lightweight RSS aggregator and reader (Go, SQLite). The repository's
+  Dockerfile only packages a binary that CI builds, so the engine found no
+  recipe and served its own placeholder. This recipe runs the published
+  ghcr.io/0x2e/fusion image of the current release (1.2.1) on port 8080 with
+  the SQLite database on a named volume. Login needs FUSION_PASSWORD from the
+  project env vars; a one-shot check fails the deploy while it is unset.

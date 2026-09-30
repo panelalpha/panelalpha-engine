@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hoodik, an end-to-end encrypted file storage server (Rust/actix with a Vue
+  frontend): one `hoodik` binary serving the web app and API, with SQLite and
+  the encrypted chunks under DATA_DIR. The repository's docker-compose.yml is
+  a development environment (bitnami/postgresql:latest, a tmpfs test
+  postgres, MinIO from quay.io) with no Hoodik service at all; its MinIO
+  images are no longer anonymously pullable, so the plain deploy fails with
+  "quay.io/minio/minio:latest could not be downloaded". This recipe runs the
+  official hudik/hoodik image of the current release (v2.5.5) as upstream's
+  README `docker run` does: SQLite and chunks on a named volume at /data,
+  APP_URL the site's address, and SSL_DISABLED=true because the engine
+  terminates TLS (Hoodik otherwise serves only HTTPS with a self-signed
+  certificate). JWT_SECRET, which upstream says to set so sessions survive a
+  restart, is generated once by hooks/prepare.sh into ~/.panelalpha/hoodik/.
+  Hoodik's first-run behaviour (open registration, the first account becomes
+  admin) is left as upstream ships it.

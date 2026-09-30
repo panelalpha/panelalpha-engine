@@ -1,0 +1,19 @@
+# Plain HTTP on the published port, no REPL; site and Bolt DB on volumes.
+# --nolimit: the per-visitor limiter keys on RemoteAddr, which behind the
+# engine's proxy is the same for everyone (one shared 10 req/s budget).
+services:
+  app:
+    working_dir: /srv/algernon
+    command:
+      - sh
+      - -c
+      - |
+        [ -n "$$(ls -A /srv/algernon)" ] || cp -a /app/samples/. /srv/algernon/
+        exec /app/app --httponly --noninteractive --nolimit --addr :8080 --boltdb /data/algernon.db /srv/algernon
+    volumes:
+      - site:/srv/algernon
+      - data:/data
+
+volumes:
+  site: {}
+  data: {}

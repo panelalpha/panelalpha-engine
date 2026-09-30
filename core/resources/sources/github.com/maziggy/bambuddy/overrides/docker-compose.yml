@@ -1,0 +1,36 @@
+# Compose-replace: the repo compose uses network_mode: host with its ports
+# commented out; run the release image in bridge mode with the web UI only.
+services:
+  app:
+    image: ghcr.io/maziggy/bambuddy:1.2.5.6
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      TZ: ${TZ:-UTC}
+    volumes:
+      - bambuddy_data:/app/data
+      - bambuddy_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    stop_grace_period: 30s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns once the UI answers.
+  ready:
+    image: ghcr.io/maziggy/bambuddy:1.2.5.6
+    restart: "no"
+    entrypoint: ["/bin/true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  bambuddy_data: {}
+  bambuddy_logs: {}

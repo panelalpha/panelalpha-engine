@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ZoneMinder is a CCTV / video surveillance server (PHP web console, Perl and
+  C++ capture daemons, MySQL). The repository is the C++/PHP source tree built
+  with CMake into distribution packages; the plain PHP deploy serves web/
+  without the CMake-generated includes/config.php and answers HTTP 500.
+
+  This recipe runs the zoneminder-containers image of the current release
+  (yaoa/zoneminder-base:1.38.4, the same tag as upstream's 1.38.4 release;
+  nginx, php-fpm and the zm daemons under s6-overlay) with mariadb:11.8, as
+  that project's own docker-compose.yml does. The image creates the zm schema
+  on the first start and runs zmupdate.pl on every start. The database
+  passwords are generated once by hooks/prepare.sh into
+  ~/.panelalpha/zoneminder/. Events and images (/data), the zm config
+  (/config) and the database are on named volumes. The first page is
+  ZoneMinder's own privacy prompt, then the console, without a login as
+  upstream ships it (OPT_USE_AUTH is off until enabled under Options > System). Cameras are added from the console; RTSP/HTTP sources
+  are pulled outbound, nothing needs an inbound port.

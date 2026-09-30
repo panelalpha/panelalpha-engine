@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Cloud Commander is a two-panel web file manager with a built-in editor and
+  terminal, one Node process on :8000. The repository's docker-compose.yml
+  runs coderaiser/cloudcmd with `~:/root` and `/:/mnt/fs`; the engine drops
+  the host-root mount. This recipe layers an override that pins the current
+  release 19.21.0 and puts /root (Cloud Commander's home: its
+  ~/.cloudcmd.json config and the user's files) on a named volume. Upstream's
+  `~` resolves to /root of the account container, which is outside the
+  account's persistent storage and holds the account container's own files.
+
+  Authentication is left as upstream ships it: off. The file manager, its
+  API and terminal are open to anyone with the URL until the customer turns
+  on Cloud Commander's own auth (Config panel, or `CLOUDCMD_AUTH=true` with
+  `CLOUDCMD_USERNAME` / `CLOUDCMD_PASSWORD`).

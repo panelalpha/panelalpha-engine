@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hypermind, a Node/Express page that counts live Hypermind nodes over a
+  Hyperswarm P2P topic (optional chat and map add-ons), listening on :3000.
+
+  Upstream's docker-compose.yml runs ghcr.io/lklynet/hypermind with
+  `network_mode: host` and publishes no port. The engine strips host
+  networking from an account, so the plain deploy left the container on
+  3000/tcp with nothing published and the domain answered 502.
+  overrides/docker-compose.yml runs the published image of the current
+  release (1.0.1) with port 3000 published. The app keeps no state on disk:
+  its node identity and peer list live in memory and are rebuilt on start.
+  The add-ons stay off as upstream ships them; ENABLE_CHAT, ENABLE_MAP and
+  ENABLE_THEMES can be added to the compose environment to turn them on.

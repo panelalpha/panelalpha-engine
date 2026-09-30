@@ -1,0 +1,40 @@
+# Compose-replace: the repo is an Ant/Maven EJB source tree with no container
+# build. Runs the official image of the current release.
+services:
+  app:
+    image: keyfactor/signserver-ce:7.7.1
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      # Upstream's behind-a-proxy mode: plain HTTP back-end on :8081 that honours
+      # X-Forwarded-Proto; the engine's front proxy terminates TLS.
+      PROXY_HTTP_BIND: "0.0.0.0"
+      # The image's own default for this redirect resolves to "-/signserver"
+      # (a relative redirect loop on "/"); name the target explicitly.
+      REDIRECT_PATH: /signserver/
+    volumes:
+      # Bundled H2 database (workers, keys, audit log).
+      - signserver-data:/mnt/persistent
+    healthcheck:
+      # The Public Web, not /healthcheck/signserverhealth: that one turns 500
+      # while any configured worker is offline, which would fail a redeploy.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8081/signserver/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1536m
+
+  # No-op: `compose up -d` returns once WildFly has deployed SignServer (~70s).
+  ready:
+    image: keyfactor/signserver-ce:7.7.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  signserver-data: {}

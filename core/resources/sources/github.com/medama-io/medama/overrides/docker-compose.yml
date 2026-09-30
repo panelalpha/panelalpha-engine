@@ -1,0 +1,18 @@
+# Compose-replace: the repo's Dockerfile never creates /app/data (distroless,
+# no VOLUME), so a plain build restart-loops. Official image + a named volume.
+services:
+  app:
+    image: ghcr.io/medama-io/medama:v0.6.2
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      APP_DATABASE_HOST: /app/data/me_app.db
+      ANALYTICS_DATABASE_HOST: /app/data/me_analytics.db
+    volumes:
+      - data:/app/data
+    ports:
+      - "8080:8080"
+    mem_limit: 512m
+
+volumes:
+  data: {}

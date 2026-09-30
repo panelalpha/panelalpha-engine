@@ -1,0 +1,32 @@
+# Compose-replace: the repo's compose.yaml gates both GoatCounter services behind
+# profiles, so `up -d` starts only its dev PostgreSQL. This runs the official
+# image of the current release on SQLite, data on a named volume.
+services:
+  app:
+    image: arp242/goatcounter:2.7.0
+    restart: unless-stopped
+    command: ["serve", "-automigrate", "-listen", ":8080", "-tls", "http"]
+    volumes:
+      - data:/home/goatcounter/goatcounter-data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once GoatCounter answers /status.
+  ready:
+    image: arp242/goatcounter:2.7.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

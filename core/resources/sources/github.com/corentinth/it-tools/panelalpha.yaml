@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  IT-Tools is a collection of developer utilities (encoders, converters,
+  generators, formatters) in one Vue single-page app that runs entirely in the
+  browser; the server only hands out static files, and there is no database
+  or login. The repository ships a Dockerfile, but at HEAD it no longer
+  builds: `npm install -g pnpm` installs pnpm 12, which cannot run the
+  pnpm@9 pinned by package.json (ERR_PNPM_PNPM_ENGINE_NO_NATIVE_BINARY).
+
+  This recipe runs upstream's published nginx image of the current release
+  (2024.10.22-7ca5933) instead. Nothing is stored server-side, so there is no
+  volume.

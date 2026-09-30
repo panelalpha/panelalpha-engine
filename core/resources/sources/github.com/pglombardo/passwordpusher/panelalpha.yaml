@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Password Pusher shares passwords and other secrets through links that expire
+  after a number of views or days. The repository's docker-compose.yml runs the
+  image with Thruster terminating TLS itself on 443, which the engine's HTTPS
+  proxy makes unusable. This recipe runs the official pglombardo/pwpush image
+  of the current release, 2.14.1, on plain HTTP behind the proxy, with the
+  SQLite database and file uploads in /opt/PasswordPusher/storage on a named
+  volume that survives redeploys.
+
+  With no users the upstream app redirects every page to a first-run form
+  gated by a boot code printed in the container log. hooks/prepare.sh
+  generates SECRET_KEY_BASE, the push encryption key (PWPUSH_MASTER_KEY,
+  replacing the public default in the source) and an admin password once into
+  ~/.panelalpha/pwpush/ (0600 in 0700); a one-shot init service migrates and
+  seeds admin@example.com with that password before the app serves, so the
+  first-run form never appears. The admin is only seeded while the user table
+  is empty. Anonymous push creation stays on, which is the app's purpose: each
+  push is readable only through its secret URL. Open signup is disabled, so
+  accounts (needed for file pushes and the /admin dashboard) exist only for the
+  seeded admin. Secret URLs are built from the public address and session
+  cookies are marked Secure.

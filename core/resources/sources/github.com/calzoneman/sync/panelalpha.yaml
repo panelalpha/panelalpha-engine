@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  CyTube, a synchronized media-watching and chat server: a Node app
+  (index.js -> lib/main.js, built from src/ by the package's own postinstall)
+  on MySQL/MariaDB, serving pages and socket.io. The express platform builds
+  it fine; the plain deploy restart-looped on "Failed to load configuration:
+  Error: No such file: /app/config.yaml", because upstream expects the
+  operator to copy config.template.yaml and fill in a database.
+
+  This recipe gives the app the account's own MySQL database and, at start,
+  writes config.yaml from it: the DB_* credentials the engine provides, one
+  listener on the published port 3000 carrying both HTTP and socket.io with
+  the public https URL as the socket.io address, the account's domain as
+  root-domain, PA_INSTANCE_SECRET as cookie-secret, and the private proxy hops
+  trusted so visitors are told apart. The file lives in /tmp inside the
+  container, symlinked to /app/config.yaml, so no credential is written into
+  ~/project. Accounts, channels and playlists are in the database and survive
+  redeploys. Everything else is upstream's default (no YouTube API key, so
+  YouTube links need one set in config as upstream documents).
+extends: express
+database: mysql
+commands:
+  - id: npm-install
+    stage: build
+    role: dependencies
+    # {{js.install}} is not resolved in a recipe (engine#351). postinstall builds lib/ and the player.
+    run: 'npm ci --no-audit --no-fund'
+  # Not `serve`: under that id the node platform may swap in package.json's own start.
+  - id: cytube-serve
+    stage: start
+    serve: true
+    run: 'sh /app/panelalpha/cytube-start.sh'

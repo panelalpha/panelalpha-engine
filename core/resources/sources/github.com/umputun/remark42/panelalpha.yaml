@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  remark42, a self-hosted comment engine embedded into blogs and sites: one Go
+  server on :8080 (API plus the comment widget's static files) with its BoltDB
+  data under /srv/var. The repository's docker-compose.yml builds the image
+  from source, running the frontend and backend test suites inside the build,
+  which runs out of memory in an account ("cannot allocate memory" in
+  `pnpm lint type-check translation-check test`), and it sets neither
+  REMARK_URL nor SECRET, both of which the server requires.
+
+  This recipe runs the published image of the current release
+  (ghcr.io/umputun/remark42:v1.17.1) with /srv/var on a named volume.
+  REMARK_URL is the site's address and SECRET (the JWT signing key) is
+  generated once per account by the engine. Every project env var reaches
+  remark42, so the customer adds login providers (AUTH_GITHUB_CID /
+  AUTH_GITHUB_CSEC, AUTH_ANON=true, ...), SITE or ADMIN_PASSWD there. Without
+  any it starts as upstream ships it, with no login providers; the demo page
+  is at /web/.

@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  RStudio Server, the browser IDE for R, on :8787. The repository is the IDE's
+  C++/Java source tree; its only root Dockerfile (Dockerfile.dispatcher) is a
+  CI helper whose command is a bare /bin/bash, so the plain deploy
+  restart-looped. Posit publishes no open-source server image, so this recipe
+  runs rocker/rstudio 4.6.1, the community image that installs the released
+  RStudio Server package, with /home/rstudio (projects, the user R library) on
+  a named volume. RUNROOTLESS=false stops the image mistaking the account's
+  user namespace for rootless Docker, which deletes the rstudio user. Login is
+  the `rstudio` user; PASSWORD from the project env sets its password, and
+  without it the image generates one on every start and prints it in the
+  container log (upstream default).

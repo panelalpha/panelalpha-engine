@@ -1,0 +1,89 @@
+# Compose-replace: the repository is the Maven source tree (it compiles for
+# Java 25) with only development compose files under docker/. This is the
+# single-node stack upstream documents for Docker (tb-node on PostgreSQL,
+# in-memory queue) at the current release.
+services:
+  postgres:
+    # Pinned major: Postgres cannot open a datadir from a newer major.
+    image: docker.io/library/postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: thingsboard
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${TB_DB_PASSWORD:?generated per account}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d thingsboard -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  # One-shot: upstream's install step (`INSTALL_TB=true`: schema and system
+  # data, no demo data), once per account; a marker on /data skips it later.
+  install:
+    image: docker.io/thingsboard/tb-node:4.4.0
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TB_SERVICE_ID: tb-ce-node
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/thingsboard
+      SPRING_DATASOURCE_PASSWORD: ${TB_DB_PASSWORD:?generated per account}
+      JAVA_OPTS: -Xmx1024m
+    volumes:
+      - data:/data
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        if [ -f /data/.panelalpha-installed ]; then echo "already installed"; exit 0; fi
+        INSTALL_TB=true start-tb-node.sh && touch /data/.panelalpha-installed
+    mem_limit: 2g
+
+  app:
+    image: docker.io/thingsboard/tb-node:4.4.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      install:
+        condition: service_completed_successfully
+    environment:
+      TB_SERVICE_ID: tb-ce-node
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/thingsboard
+      SPRING_DATASOURCE_PASSWORD: ${TB_DB_PASSWORD:?generated per account}
+      JAVA_OPTS: -Xmx1536m
+    volumes:
+      - data:/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # The image has bash but no curl.
+      test:
+        - CMD
+        - bash
+        - -c
+        - exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /login HTTP/1.0\r\n\r\n' >&3 && head -n1 <&3 | grep -q ' 200'
+      interval: 10s
+      timeout: 10s
+      retries: 90
+      start_period: 60s
+    mem_limit: 3g
+
+  # No-op gate: `compose up -d` returns only once ThingsBoard serves its UI.
+  ready:
+    image: docker.io/library/postgres:18-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  data: {}

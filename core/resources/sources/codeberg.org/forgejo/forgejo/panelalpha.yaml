@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Forgejo is a self-hosted software forge (Git hosting, issues, pull requests,
+  packages, CI), a Go binary with SQLite here.
+
+  Compose-REPLACE from the official image
+  codeberg.org/forgejo/forgejo:16.0.5-rootless (current release). The repo's
+  own Dockerfile is a full Go + npm source build. Everything Forgejo writes
+  (app.ini, SQLite database, repositories, LFS, avatars) is the named volume
+  forgejo-data.
+
+  CLOSING THE INSTALLER. A stock image serves the web installer ("Installation
+  - Forgejo") to the first visitor. Here the config is locked from the start:
+  INSTALL_LOCK=true, DISABLE_REGISTRATION=true, ROOT_URL/DOMAIN from the
+  account's public address, and SECRET_KEY, INTERNAL_TOKEN and the OAuth2/LFS
+  JWT secrets generated once by hooks/prepare.sh into
+  ~/.panelalpha/forgejo/secrets.env (0600 in 0700), applied by the image's
+  environment-to-ini on every start. A one-shot `init` service runs
+  `forgejo migrate` and `forgejo admin user create --admin` with a generated
+  password (~/.panelalpha/forgejo/credentials.txt, user `forgeadmin`), and
+  `app` (the only service with a published port) starts only after it exits 0.
+  A redeploy reuses the secrets and never resets the admin.
+
+  SSH IS DISABLED (DISABLE_SSH, START_SSH_SERVER=false): port 22 does not
+  reach an account, so the UI offers HTTPS clone URLs only. Clone and push over
+  HTTPS with the password or an access token. Mail is off; there is no
+  password-reset mail.
+
+  Behind the engine every request arrives from the proxy address; Forgejo
+  trusts X-Forwarded-For only from loopback (REVERSE_PROXY_TRUSTED_PROXIES
+  default), which is left as is (engine#319), and reverse-proxy header login
+  stays disabled.

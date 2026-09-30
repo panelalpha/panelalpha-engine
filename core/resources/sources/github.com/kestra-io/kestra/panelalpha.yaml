@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kestra, the event-driven workflow orchestrator (Java) with its web UI and
+  API on port 8080.
+
+  The repository's docker-compose.yml is upstream's quick start: it runs
+  kestra/kestra:latest as root with the host Docker socket and /tmp
+  bind-mounted, and a hardcoded database password; on the engine it never
+  answered. This recipe replaces it with the same stack, `server standalone`
+  on PostgreSQL, pinned to the current release kestra/kestra:v2.0.3 (the
+  image with the bundled plugins) on postgres:18-alpine, without the host
+  mounts (still as root, as upstream runs it: the image's own user cannot
+  write the root-owned storage volume). The database password is
+  generated per account by the engine (KESTRA_DB_PASSWORD) and kept across
+  redeploys; kestra.url is the public address. Internal storage
+  (/app/storage) and the database are named volumes. Task runners that need
+  a Docker socket are therefore unavailable; the process runner works. The
+  JVM gets 60% of a 3 GB container. A `ready` gate makes the deploy finish
+  only once the management endpoint /health (port 8081, not published)
+  answers.
+
+  First run is upstream's: the UI asks the first visitor to create the
+  basic-auth user.

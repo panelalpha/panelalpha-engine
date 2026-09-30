@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  HASS Configurator is a browser file editor for Home Assistant configuration
+  (danielperna84/hass-configurator, MIT, release 0.6.0 of 2026-04-07): one
+  Python process on :3218 with a YAML editor, file manager, git integration
+  and an /api/exec_command endpoint that runs any command in the container.
+
+  == Why compose-replace ==
+
+  The repository ships only a Dockerfile (python:3-alpine, pip install
+  hass-configurator) that starts with no USERNAME/PASSWORD. In that mode every
+  route is open, file writes and /api/exec_command included, which is how the
+  unattended test that first marked it Supported left it. This recipe builds
+  that Dockerfile unchanged and adds the login and the settings below through
+  HC_* environment variables, which the app reads on top of its settings file.
+  The published causticlab/hass-configurator-docker:0.6.0 was not used: it
+  runs Python 3.9, which is end of life.
+
+  == What the recipe supplies ==
+
+  1. HTTP Basic login admin / generated password, created once by
+     hooks/prepare.sh into ~/.panelalpha/hassconf/ (credentials.txt holds the
+     password; auth.env holds only HC_PASSWORD={sha256}<hash>, so the plaintext
+     never enters the container). With both set the app installs its
+     AuthHandler for every GET and POST; other methods answer 501.
+  2. HC_BASEPATH=/config on the named volume hassconf-config, which survives
+     redeploys, and HC_ENFORCE_BASEPATH=true.
+  3. HC_HASS_API=none: there is no Home Assistant next to it, so the app does
+     not call 127.0.0.1:8123 on every page load. Pointing it at a real
+     instance (HC_HASS_API, HC_HASS_API_PASSWORD) is left to the user.
+  4. HC_BANLIMIT=0 and no ALLOWED_NETWORKS/BANNED_IPS: behind the engine's
+     proxy every client arrives from the proxy's address, so a ban or an
+     allow-list would lock out everyone at once. Brute force is limited only
+     by the 28-character random password.
+  5. A `ready` service waits on the app's healthcheck so `up -d` returns only
+     once it listens (engine#204).
+
+  == What the login protects, and what it does not limit ==
+
+  There is no setting to turn off /api/exec_command, so a logged-in user runs
+  any command as root inside the app container (which holds nothing but the
+  password hash). ENFORCE_BASEPATH confines only reading and listing
+  (/api/file, /api/download, /api/listdir); save, upload, rename and delete
+  accept any path. Treat the login as a shell login to this one container.
+  SESAME/TOTP IP-whitelisting is not configured and should not be: it
+  whitelists the proxy's address, i.e. everyone.
+
+  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
+
+  Deploy success in 46s (image build 9.6s). Anonymous and wrong-password
+  requests get 401 on all 27 probed routes through the public domain,
+  including /api/save, /api/upload, /api/exec_command, /api/delete, /api/push
+  and /api/banned_ips, and on the container port from inside the account.
+  With the login: `/` 200, 152 KB, title "HASS Configurator"; newfile + save
+  of /config/configuration.yaml read back byte for byte; /api/file of
+  /etc/passwd "Access denied.". Rebuild 36s: auth.env unchanged, the file
+  still there, the same 401s. App ~18 MiB, account ~100 MiB.

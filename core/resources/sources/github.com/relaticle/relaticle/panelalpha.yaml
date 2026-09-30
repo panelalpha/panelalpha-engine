@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Relaticle, an open-source CRM (Laravel + Filament on serversideup/php, with
+  Horizon, a scheduler, PostgreSQL and Redis). A plain deploy runs the
+  repository's compose.yml on ghcr.io/relaticle/relaticle:latest, but its
+  `${APP_KEY:?}` is filled with a generated hex string that is not a valid
+  Laravel key ("Unsupported cipher or incorrect key length", engine#336), and
+  APP_URL falls back to http://localhost, so every page redirects there.
+
+  Compose-REPLACE with the same services on the current release image
+  (3.5.11): APP_KEY (base64, 32 bytes) and the database password are
+  generated once by hooks/prepare.sh into ~/.panelalpha/relaticle/app.env and
+  delivered through env_file, APP_URL is the site's address. Horizon runs
+  its "local" supervisor set (same queues, 2+2+1 workers) with CLI opcache
+  off: the "production" set started 28 PHP processes and the account's
+  memory cgroup OOM-killed its dockerd a minute after deploy. The database,
+  Redis and uploads (storage/app) are on named volumes. First run is as
+  upstream ships it (email-first login at /app/login).

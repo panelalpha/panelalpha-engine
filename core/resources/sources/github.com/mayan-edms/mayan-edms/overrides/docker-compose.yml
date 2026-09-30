@@ -1,0 +1,132 @@
+# The repository is the Django source tree (a mirror of gitlab.com/mayan-edms).
+# This follows upstream's docker/docker-compose.yml with its default profiles
+# (all_in_one, postgresql, rabbitmq, redis) on the current release image.
+# Passwords come from ~/.panelalpha/mayan/mayan.env (hooks/prepare.sh).
+services:
+  app:
+    image: docker.io/mayanedms/mayanedms:v4.12.2
+    restart: unless-stopped
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/mayan/mayan.env
+    environment:
+      MAYAN_DOCKER_WAIT: "postgresql:5432 rabbitmq:5672 redis:6379"
+      # TLS ends at the engine's proxy, so Django sees http; without this the
+      # login form fails its CSRF origin check ("Session expired").
+      MAYAN_CSRF_TRUSTED_ORIGINS: "['${PA_PUBLIC_URL}']"
+      MAYAN_LOCK_MANAGER_BACKEND: mayan.apps.lock_manager.backends.redis_lock.RedisLock
+      MAYAN_SERVER_SIDE_EVENTS_BACKEND: mayan.apps.server_side_events.sse_backends.redis.RedisServerEventStreamBackend
+      # Upstream defaults start 23 Celery children and 3 gunicorn workers; all
+      # of them booting at once peak above 3.2 GB (OOM-killed). Documented knobs.
+      MAYAN_GUNICORN_WORKERS: "2"
+      MAYAN_WORKER_A_CONCURRENCY: "1"
+      MAYAN_WORKER_B_CONCURRENCY: "2"
+      MAYAN_WORKER_C_CONCURRENCY: "1"
+      MAYAN_WORKER_D_CONCURRENCY: "1"
+      MAYAN_WORKER_E_CONCURRENCY: "1"
+      MAYAN_WORKER_F_CONCURRENCY: "1"
+    volumes:
+      - app:/var/lib/mayan
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # Upstream's check; the first boot runs the initial setup (migrations).
+      test: ["CMD-SHELL", "/opt/mayan-edms/bin/python -c \"import sys,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5); sys.exit(0 if r.status<400 else 1)\""]
+      interval: 10s
+      timeout: 10s
+      retries: 90
+      start_period: 60s
+    mem_limit: 2560m
+
+  postgresql:
+    image: docker.io/library/postgres:15.17
+    restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - default_statistics_target=200
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_connections=150
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - work_mem=32MB
+    env_file:
+      - ../.panelalpha/mayan/mayan.env
+    environment:
+      POSTGRES_DB: mayan
+      POSTGRES_USER: mayan
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    shm_size: 128m
+    healthcheck:
+      test: ["CMD", "pg_isready", "--dbname", "mayan", "--username", "mayan"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  rabbitmq:
+    image: docker.io/library/rabbitmq:4.1.8-management
+    restart: unless-stopped
+    hostname: rabbitmq
+    env_file:
+      - ../.panelalpha/mayan/mayan.env
+    environment:
+      RABBITMQ_DEFAULT_USER: mayan
+      RABBITMQ_DEFAULT_VHOST: mayan
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -rabbit consumer_timeout 1800000
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 30s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  redis:
+    image: docker.io/library/redis:7.4.8
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/mayan/mayan.env
+    # Upstream's flags; the password is read from the env file at start.
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly no --databases 4 --maxmemory 100mb --maxclients 500 --maxmemory-policy noeviction --save "" --tcp-backlog 256 --requirepass "$$MAYAN_REDIS_PASSWORD"
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$MAYAN_REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 192m
+
+  # No-op gate: `compose up -d` returns only once Mayan answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  app: {}
+  postgres: {}
+  rabbitmq: {}
+  redis: {}

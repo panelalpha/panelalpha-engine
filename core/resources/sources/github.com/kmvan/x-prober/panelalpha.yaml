@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  X-Prober is a single-file PHP server probe (PHP, CPU, memory, disk and
+  network information in one page). Upstream commits the built release to
+  dist/prober.php (10.0.4 at HEAD, the same file the GitHub release ships) and
+  tells users to open /prober.php; the repository has no index.php anywhere,
+  so the generic PHP platform answered 403 on /.
+
+  This recipe serves dist/ as the document root and makes prober.php its
+  directory index via files/dist/.htaccess. Nothing else is configured: no
+  database, no persistent data, no accounts.
+extends: php
+# Only the built probe is served, not the sources at the repository root.
+docroot: dist

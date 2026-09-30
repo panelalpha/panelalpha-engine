@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  GoatCounter is a privacy-friendly web analytics server: one Go binary serving
+  the dashboard, the count endpoint and the tracking script on :8080, SQLite in
+  /home/goatcounter/goatcounter-data. The repository's compose.yaml is a menu,
+  not a stack: both GoatCounter services sit behind `profiles:` ("Don't start
+  GoatCounter by default"), so a plain deploy starts only the upstream
+  development PostgreSQL and nothing answers on 8080.
+
+  This recipe runs the official arp242/goatcounter image of the current
+  release, 2.7.0, on SQLite with its data directory on a named volume that
+  survives redeploys. On first visit GoatCounter shows its own "create site"
+  wizard (email, password, domain), as upstream ships it.

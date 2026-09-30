@@ -1,0 +1,44 @@
+# Verdaccio config for a private registry. Differs from the image default in
+# two places: no self-registration (max_users: -1) and no anonymous access.
+storage: /verdaccio/storage/data
+plugins: /verdaccio/plugins
+
+web:
+  title: Verdaccio
+  login: true
+
+auth:
+  htpasswd:
+    # Seeded with `admin` by the htpasswd-seed service; add users there.
+    file: /verdaccio/storage/htpasswd
+    max_users: -1
+
+uplinks:
+  npmjs:
+    url: https://registry.npmjs.org/
+
+# Reading, including public packages proxied from npmjs, needs a login too, so
+# the account is not an open npm mirror. Use $all under access to relax that.
+packages:
+  '@*/*':
+    access: $authenticated
+    publish: $authenticated
+    unpublish: $authenticated
+    proxy: npmjs
+  '**':
+    access: $authenticated
+    publish: $authenticated
+    unpublish: $authenticated
+    proxy: npmjs
+
+server:
+  keepAliveTimeout: 60
+
+middlewares:
+  audit:
+    enabled: true
+
+log:
+  type: stdout
+  format: pretty
+  level: http

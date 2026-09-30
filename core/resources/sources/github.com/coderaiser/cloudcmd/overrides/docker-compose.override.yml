@@ -1,0 +1,10 @@
+# Pins the current release and replaces upstream's `~:/root` (the account
+# container's own /root, not persistent) with a named volume.
+services:
+  web:
+    image: coderaiser/cloudcmd:19.21.0
+    volumes:
+      - home:/root
+
+volumes:
+  home: {}

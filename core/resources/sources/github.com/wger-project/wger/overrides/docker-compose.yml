@@ -1,0 +1,162 @@
+# The repository is the Django source tree; this is upstream's production
+# stack (github.com/wger-project/docker) on the release image, minus the
+# optional PowerSync service (mobile offline mode).
+x-wger-env: &wger-env
+  SITE_URL: ${PA_PUBLIC_URL}
+  # Django rejects form POSTs from the https origin without these.
+  CSRF_TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+  X_FORWARDED_PROTO_HEADER_SET: "True"
+  DJANGO_DB_ENGINE: django.db.backends.postgresql
+  DJANGO_DB_DATABASE: wger
+  DJANGO_DB_USER: wger
+  DJANGO_DB_HOST: db
+  DJANGO_DB_PORT: "5432"
+  DJANGO_DEBUG: "False"
+  DJANGO_PERFORM_MIGRATIONS: "True"
+  DJANGO_COLLECTSTATIC_ON_STARTUP: "True"
+  DJANGO_CLEAR_STATIC_FIRST: "False"
+  DJANGO_CACHE_BACKEND: django_redis.cache.RedisCache
+  DJANGO_CACHE_LOCATION: redis://cache:6379/1
+  DJANGO_CACHE_TIMEOUT: "1296000"
+  DJANGO_CACHE_CLIENT_CLASS: django_redis.client.DefaultClient
+  WGER_INSTANCE: https://wger.de
+  ALLOW_REGISTRATION: "True"
+  ALLOW_GUEST_USERS: "False"
+  ALLOW_UPLOAD_VIDEOS: "True"
+  MIN_ACCOUNT_AGE_TO_TRUST: "21"
+  USE_CELERY: "True"
+  CELERY_BROKER: redis://cache:6379/2
+  CELERY_BACKEND: redis://cache:6379/2
+  CELERY_WORKER_CONCURRENCY: "4"
+  SYNC_EXERCISES_CELERY: "True"
+  SYNC_EXERCISE_IMAGES_CELERY: "True"
+  SYNC_EXERCISE_VIDEOS_CELERY: "True"
+  SYNC_INGREDIENTS_CELERY: "True"
+  SYNC_INGREDIENTS_DUMP_URL: https://wger.de/media/ingredients/ingredients.jsonl.gz
+  DOWNLOAD_INGREDIENTS_FROM: WGER
+  CACHE_API_EXERCISES_CELERY: "True"
+  CACHE_API_EXERCISES_CELERY_FORCE_UPDATE: "True"
+  AXES_ENABLED: "True"
+  AXES_FAILURE_LIMIT: "10"
+  AXES_COOLOFF_TIME: "30"
+  AXES_HANDLER: axes.handlers.cache.AxesCacheHandler
+  AXES_LOCKOUT_PARAMETERS: ip_address
+  # nginx passes a single X-Forwarded-For entry (see wger-nginx.conf); with
+  # upstream's count of 1, ipware returns None for it and every failed login
+  # lands in one shared lockout bucket.
+  AXES_IPWARE_PROXY_COUNT: "0"
+  AXES_IPWARE_META_PRECEDENCE_ORDER: HTTP_X_FORWARDED_FOR,REMOTE_ADDR
+  NUMBER_OF_PROXIES: "1"
+  WGER_USE_GUNICORN: "True"
+  WGER_PORT: "8000"
+  # Upstream runs 3 workers; 2 fit a 2.5 GB account.
+  GUNICORN_CMD_ARGS: --workers 2 --threads 2 --worker-class gthread --timeout 240
+  USE_RECAPTCHA: "False"
+  EXPOSE_PROMETHEUS_METRICS: "False"
+
+services:
+  app:
+    image: nginx:1.30-alpine
+    restart: unless-stopped
+    volumes:
+      - ./panelalpha/wger-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - static:/wger/static:ro
+      - media:/wger/media:ro
+    ports:
+      - "80:80"
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 64m
+
+  web:
+    image: wger/server:2.7.0
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/wger/wger.env
+    environment: *wger-env
+    volumes:
+      - static:/home/wger/static
+      - media:/home/wger/media
+    stop_grace_period: 60s
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    # First boot loads fixtures and runs every migration before gunicorn binds.
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "-O", "/dev/null", "http://localhost:8000/api/v2/version/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 900s
+    mem_limit: 1g
+
+  celery_worker:
+    image: wger/server:2.7.0
+    restart: unless-stopped
+    command: /start-worker
+    env_file:
+      - ../.panelalpha/wger/wger.env
+    environment: *wger-env
+    volumes:
+      - media:/home/wger/media
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 512m
+
+  celery_beat:
+    image: wger/server:2.7.0
+    restart: unless-stopped
+    command: /start-beat
+    env_file:
+      - ../.panelalpha/wger/wger.env
+    environment: *wger-env
+    volumes:
+      - celery-beat:/home/wger/beat/
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 256m
+
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/wger/wger.env
+    environment:
+      POSTGRES_USER: wger
+      POSTGRES_DB: wger
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=30"]
+    shm_size: 128mb
+    volumes:
+      - postgres-data:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U wger"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 384m
+
+  cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "3600", "1", "300", "100", "--maxmemory-policy", "volatile-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 192m
+
+volumes:
+  postgres-data: {}
+  celery-beat: {}
+  redis-data: {}
+  media: {}
+  static: {}

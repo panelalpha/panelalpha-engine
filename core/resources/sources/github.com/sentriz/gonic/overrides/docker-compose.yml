@@ -1,0 +1,46 @@
+# The repo Dockerfile leaves /playlists missing and gonic refuses to start
+# without it; this runs the release image with every path on a named volume.
+services:
+  app:
+    image: sentriz/gonic:v0.22.0@sha256:516fd9645614ba3a596d86174216c3e944808b9ec970c581678713be4c8b1d49
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+      GONIC_LISTEN_ADDR: ":80"
+      GONIC_DB_PATH: /data/gonic.db
+      GONIC_MUSIC_PATH: /music
+      GONIC_PODCAST_PATH: /podcasts
+      GONIC_PLAYLISTS_PATH: /playlists
+      GONIC_CACHE_PATH: /cache
+    volumes:
+      - data:/data
+      - music:/music
+      - podcasts:/podcasts
+      - playlists:/playlists
+      - cache:/cache
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/admin/login"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once gonic answers.
+  ready:
+    image: sentriz/gonic:v0.22.0@sha256:516fd9645614ba3a596d86174216c3e944808b9ec970c581678713be4c8b1d49
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  music: {}
+  podcasts: {}
+  playlists: {}
+  cache: {}

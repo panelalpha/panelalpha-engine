@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Portabase, a self-hosted dashboard for scheduling and restoring database
+  backups through agents (Next.js with tusd uploads behind nginx, one image).
+  The repository's root docker-compose.yml is a developer stack (Postgres,
+  storage emulators, mailpit, apprise) with no service for the app itself, so
+  the plain deploy routes the domain to RustFS (HTTP 403). The real definition,
+  docker-compose.prod.yml, builds the image from source with a dev Postgres.
+
+  This recipe runs the published image at the current release
+  (portabase/portabase:1.31.0) in upstream's single-container mode: without
+  DATABASE_URL the image initialises and starts its own PostgreSQL under /data,
+  which is a named volume together with the uploads. PROJECT_SECRET (the auth
+  secret) is generated once into ~/.panelalpha/portabase/app.env, PROJECT_URL is
+  the site address, and tusd runs in proxy mode. A `ready` gate waits for
+  /api/health. First-run onboarding, sign-up and SMTP/OIDC stay upstream's
+  defaults and come from the project's env vars.
+
+  The engine seeds .env from upstream's development .env.example
+  (NODE_ENV=development, DATABASE_URL on localhost:5433, a sample admin
+  user@example.com, retention every minute); the compose spells out the
+  production values so those cannot leak in. The server renders by fetching
+  PROJECT_URL/api/config, so the site address must carry a certificate the
+  container trusts (a real one; the self-signed panelalpha.direct fallback
+  makes every page 500 with DEPTH_ZERO_SELF_SIGNED_CERT).
+
+  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
+
+  Trusted certificate, no TLS override. Fresh create: success, health :8887
+  200. / answers 200 with a redirect to the onboarding at /welcome (<title>Portabase</title>);
+  /api/config reports the https site address. Signed up over https (first
+  user got role superadmin) and signed in with a session. /.env and
+  /.git/config are the app's 404 page. Rebuild: success in 31 s, the same
+  user signed in again (bundled PostgreSQL on the /data volume). Also
+  verified on 10.10.10.25, which needed NODE_TLS_REJECT_UNAUTHORIZED=0 for
+  its self-signed name.

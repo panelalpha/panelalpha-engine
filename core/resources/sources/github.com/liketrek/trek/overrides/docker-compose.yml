@@ -1,0 +1,45 @@
+# Compose-replace: upstream's compose, with data/uploads on named volumes (not
+# ./ binds, which a redeploy wipes) and without cap_drop/cap_add (engine#349
+# keeps the drop but strips the add, so gosu cannot switch to `node`).
+services:
+  app:
+    image: mauriceboe/trek:4.3.3
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=128m
+    # The project's env vars (ENCRYPTION_KEY, ALLOWED_ORIGINS, OIDC_*, ...).
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - trek_data:/app/data
+      - trek_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1g
+
+  # No-op: `compose up -d` returns once the app is healthy.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  trek_data: {}
+  trek_uploads: {}

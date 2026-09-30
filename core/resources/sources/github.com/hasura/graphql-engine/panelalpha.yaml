@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hasura GraphQL Engine, instant GraphQL APIs over PostgreSQL with a web
+  console. The repository's root docker-compose.yaml is a developer test
+  harness (PostgreSQL, Citus, CockroachDB, SQL Server and two data-connector
+  agents, no graphql-engine at all), so a plain deploy answered on no HTTP
+  port. This recipe runs the official hasura/graphql-engine image of the
+  current release (v2.50.3) on port 8080 with PostgreSQL 15, the stack of
+  upstream's install-manifests/docker-compose, minus the optional Java
+  data-connector agent (only needed for Athena/MySQL/Oracle/Snowflake
+  sources). PostgreSQL holds both the Hasura metadata and the default data
+  source; its password is generated once into ~/.panelalpha/hasura and its data
+  is on a named volume. The console is served from the image's own assets. As
+  upstream's quickstart ships it, no admin secret is set.

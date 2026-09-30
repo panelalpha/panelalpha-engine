@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tianji combines website analytics, uptime monitoring and server status in
+  one Node.js server on :12345 backed by PostgreSQL. The repo's compose names
+  the published image but also a build: section, so the engine builds the
+  Dockerfile, whose `pnpm build:static` step asks for a 4 GB V8 heap
+  (NODE_OPTIONS=--max-old-space-size=4096) and is killed on the account's
+  memory ceiling.
+
+  This recipe is the repo's own compose without the build: it runs the
+  published image of the current release (moonrailgun/tianji:1.33.7) with
+  upstream's postgres:15.4-alpine sidecar on a named volume, the same
+  environment upstream ships, and PUBLIC_URL set to the site's address.
+  The image's start steps are run in sequence by `command:`: its CMD
+  backgrounds them and waits with `wait -n`, which returns 129 when the
+  ClickHouse migration script ends after the CMD's 10s sleep (every fresh
+  database here), so the first start dies and the deploy fails or ends
+  partial.
+  JWT_SECRET is left unset (the app then picks a random one per start, so
+  logins end on a restart). .env is deliberately not loaded: the engine seeds
+  it from .env.example, whose JWT_SECRET placeholder
+  (replace-with-random-string) the app does not recognise and would use as a
+  publicly known signing key. First login is upstream's default account.

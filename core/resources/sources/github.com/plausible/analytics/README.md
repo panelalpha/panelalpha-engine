@@ -41,7 +41,8 @@ version constant — `mix.exs` reads `APP_VERSION` from the environment — so t
 hook reads the first released `## vX.Y.Z` heading in `CHANGELOG.md` and uses
 `vX` when ghcr.io has it, falling back to `v3`. Plausible publishes `vX`, `vX.Y`
 and `vX.Y.Z`; the major keeps a redeploy on the same line without pinning a
-patch. That line of `.env` is rewritten on every deploy; the secrets are not.
+patch. That line of `.env` is rewritten on every deploy; the secrets are kept apart
+(see below).
 
 ## Both databases are required
 
@@ -105,17 +106,20 @@ against `background_pool_size * background_merges_mutations_concurrency_ratio`.
 
 ## Secrets and `BASE_URL`
 
-`hooks/prepare.sh` writes `.env`, each key only if absent — the data volumes
-outlive the checkout, so a regenerated password locks Plausible out of its own
-database and a regenerated `TOTP_VAULT_KEY` makes every enrolled second factor
-undecryptable:
+`hooks/prepare.sh` writes the secrets once into `~/.panelalpha/plausible/`
+(0600 files in a 0700 dir) and the compose file reads them with `env_file:`.
+They cannot live in `~/project/.env`: the engine empties `~/project` on every
+deploy, dotfiles included. An earlier version of this recipe did keep them in
+`.env`, and a rebuild regenerated all three — Plausible then failed with
+`FATAL 28P01 (invalid_password)` against the Postgres volume created with the
+old password.
 
-- `SECRET_KEY_BASE` — session and LiveView signing; `runtime.exs` raises below
-  32 bytes.
-- `TOTP_VAULT_KEY` — base64 of **exactly** 32 bytes. Any other shape is refused
-  at boot with the message that also tells you how to generate it.
-- `POSTGRES_PASSWORD` — hex, because it is embedded in `DATABASE_URL` and a
-  base64 `/` or `+` would have to be percent-encoded there.
+- `db.env`: `POSTGRES_PASSWORD` — hex, because it is embedded in `DATABASE_URL`
+  and a base64 `/` or `+` would have to be percent-encoded there.
+- `app.env`: `SECRET_KEY_BASE` (session and LiveView signing; `runtime.exs`
+  raises below 32 bytes), `TOTP_VAULT_KEY` (base64 of **exactly** 32 bytes; a
+  new one makes every enrolled second factor undecryptable) and `DATABASE_URL`
+  built from `db.env`'s password.
 
 `BASE_URL` is the value the recipe cannot generate: it has to be the account's
 public address, which does not exist when the prepare hook runs. The compose file
@@ -125,8 +129,8 @@ replaces it with the account's `https://…` URL before the stack starts. It is
 required outright — without it the app does not boot — and it also decides
 `secure_cookie`, which follows the scheme.
 
-`DATABASE_URL` and `CLICKHOUSE_DATABASE_URL` match the same key pattern, but
-their values are service names rather than localhost, so they are left alone.
+`CLICKHOUSE_DATABASE_URL` matches the same key pattern, but its value is a
+service name rather than localhost, so it is left alone.
 
 ## The command, and readiness
 

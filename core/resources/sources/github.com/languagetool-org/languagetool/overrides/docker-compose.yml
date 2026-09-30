@@ -1,0 +1,36 @@
+# Compose-replace: the repository is the Maven source and ships no compose
+# file; this runs the community image upstream's README lists first.
+services:
+  app:
+    image: docker.io/meyay/languagetool:6.8-11
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    # The image writes its generated config here and needs exec on it.
+    tmpfs:
+      - /tmp:exec
+    volumes:
+      # fastText model, downloaded on the first start and reused afterwards.
+      - fasttext:/fasttext
+    healthcheck:
+      # The image's own check: GET /v2/healthcheck.
+      test: ["CMD", "/entrypoint", "healthcheck"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+    # Heap 1536m (image default) plus metaspace and native memory.
+    mem_limit: 2560m
+
+  # No-op: `compose up -d` returns once LanguageTool answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  fasttext: {}

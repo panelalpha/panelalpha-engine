@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Indico, CERN's event and conference management system (Flask, uWSGI,
+  Celery, Postgres, Redis). The repository is the Python/JS source with no
+  deployment of its own; the plain deploy detected python, started nothing
+  and served the engine placeholder. This recipe runs upstream's production
+  setup from indico/indico-containers (indico-prod) on the published
+  getindico/indico image of the current release (3.3.13): uWSGI web, Celery
+  worker and beat, Redis, Postgres 15 and nginx serving the static files.
+  The containers' indico.conf, logging.yaml and nginx.conf are shipped in
+  files/panelalpha-indico/, with BASE_URL, SMTP and the secrets read from the
+  environment. hooks/prepare.sh generates the database password and
+  SECRET_KEY once into ~/.panelalpha/indico/. Attachments, customizations,
+  logs and all databases are on named volumes. LaTeX (PDF books) is not
+  enabled: upstream runs it through podman in a privileged container.

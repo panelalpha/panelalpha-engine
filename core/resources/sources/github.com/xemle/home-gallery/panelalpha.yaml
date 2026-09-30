@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  HomeGallery, a self-hosted photo and video gallery (Node) with an optional
+  AI api-server for object and face tagging. The repo's docker-compose.yml is
+  the right shape but cannot start unattended: the gallery exits with
+  `Configuration file /data/config/gallery.config.yml does not exist` until
+  the README's manual `run init --source ...` step has been run, it
+  bind-mounts ${HOME}/Pictures and runs as the unset ${CURRENT_USER}.
+
+  Compose-REPLACE with the release images (xemle/home-gallery:1.21.0 and the
+  api-server built with it): the gallery runs upstream's own `run init`
+  before `run server` (init skips an existing config), config/cache and the
+  photo source on named volumes, no auth as upstream ships it.

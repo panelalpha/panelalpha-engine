@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Keeper.sh, a calendar syncing tool (ICS/CalDAV/Google/Microsoft sources and
+  destinations). OFFICIAL IMAGE, COMPOSE-REPLACE. The repo's compose.yaml is
+  the developer environment: a Caddy with `tls internal` proxying to a Vite
+  server on the host, plus Postgres and Redis publishing 5432/6379, so a
+  plain deploy leaves Caddy crash-looping and nothing answers. This recipe
+  runs the upstream-recommended ghcr.io/ridafkih/keeper-standalone:2.24.6
+  (the current release; web, API, cron, worker, MCP, PostgreSQL, Redis and
+  Caddy under s6) on port 80, with the bundled database on a named volume.
+  BETTER_AUTH_SECRET and ENCRYPTION_KEY are generated once by
+  hooks/prepare.sh into ~/.panelalpha/keeper (0600 file in a 0700 dir);
+  BETTER_AUTH_URL and TRUSTED_ORIGINS are the site's address. Google and
+  Microsoft OAuth client ids/secrets are optional project env vars.

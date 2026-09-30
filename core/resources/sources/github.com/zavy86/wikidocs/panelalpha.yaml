@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Wiki|Docs 2 is a flat-file Markdown wiki: one NestJS backend on :3210 that
+  also serves the Angular web client, with every document, revision, account
+  and the wiki's settings as files under /var/lib/wikidocs/datasets. The
+  repository's docker/compose.yml builds both halves from source, and the
+  Angular build is killed for memory inside a 2.5 GB account; this recipe
+  runs the published image of the current release 2.0.1 instead, the
+  datasets on a named volume.
+
+  SECRET signs sessions and keys the password hashes, so it is generated once
+  into ~/.panelalpha/wikidocs/app.env and kept across redeploys (a new one
+  would lock every account out); upstream's compose otherwise falls back to a
+  fixed public default. MODE is public, as in upstream's compose; set MODE to
+  private in the project's environment variables to require a login for
+  reading. First run is left as upstream ships it: the first visit
+  configures the wiki and creates the administrator.

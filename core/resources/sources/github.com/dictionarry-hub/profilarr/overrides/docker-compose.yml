@@ -1,0 +1,84 @@
+# Compose-replace: the repository's compose.yml tracks the `develop` image
+# channel and bind-mounts ./config (wiped with ~/project on every deploy). This
+# runs the current stable release upstream documents, durable and closed:
+#   - ghcr.io/dictionarry-hub/profilarr + profilarr-parser pinned to 2.2.0
+#   - /config (SQLite db, linked databases, backups, logs) on a named volume
+#   - the one password account is created by `seed` BEFORE the app publishes
+#     its port, so /auth/setup is never open to the first visitor
+#   - only the app publishes a port
+services:
+  # Starts Profilarr privately (no published port) against the same volume,
+  # creates the password account through its own /auth/setup, then exits.
+  seed:
+    image: ghcr.io/dictionarry-hub/profilarr:2.2.0
+    restart: "no"
+    entrypoint: ["/bin/bash", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/profilarr/admin.env
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+      AUTH: "on"
+    volumes:
+      - config:/config
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    # The server alone passes 512 MB while starting (OOM-killed at 522 MB RSS).
+    mem_limit: 1g
+
+  profilarr:
+    image: ghcr.io/dictionarry-hub/profilarr:2.2.0
+    restart: unless-stopped
+    env_file:
+      # PROFILARR_API_KEY (full-access X-Api-Key), generated once.
+      - .env
+      - ../.panelalpha/profilarr/app.env
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      UMASK: "022"
+      TZ: Etc/UTC
+      # Login is always on. Every request reaches the app from the proxy's
+      # private address, so the "local bypass" setting must stay off.
+      AUTH: "on"
+      # Needed behind the proxy for the CSRF check and secure cookies.
+      ORIGIN: ${PA_PUBLIC_URL}
+      PARSER_HOST: parser
+      PARSER_PORT: "5000"
+    volumes:
+      - config:/config
+    ports:
+      - "6868:6868"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:6868/api/v1/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      parser:
+        condition: service_healthy
+    mem_limit: 1g
+
+  # C# release parser for custom format / quality profile testing only.
+  # Reached on the compose network at parser:5000. No `expose:` on purpose: the
+  # engine would take an exposed 5000 over the app's published 6868.
+  parser:
+    image: ghcr.io/dictionarry-hub/profilarr-parser:2.2.0
+    restart: unless-stopped
+    mem_limit: 384m
+
+  # No-op gate: `compose up -d` returns only once Profilarr answers.
+  ready:
+    image: ghcr.io/dictionarry-hub/profilarr:2.2.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      profilarr:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}

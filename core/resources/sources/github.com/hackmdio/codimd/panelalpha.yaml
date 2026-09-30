@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  CodiMD, the real-time collaborative markdown notes app (Node.js). Building
+  the repository fails in `npm install`: the deprecated phantomjs-prebuilt
+  dependency downloads a .tar.bz2 and the build image has no bzip2. This
+  recipe runs upstream's published image of the current release,
+  hackmdio/hackmd:2.6.1, with PostgreSQL as upstream's
+  deployments/docker-compose.yml does, on named volumes (database, uploads).
+  The image migrates the database on every start. hooks/prepare.sh writes the
+  database password and CMD_SESSION_SECRET once to ~/.panelalpha/codimd/
+  (0600 in 0700). CMD_DOMAIN is the account's domain over HTTPS.

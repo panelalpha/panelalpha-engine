@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Task Keeper (piga) is a Scala/Play list editor for power users, on MariaDB.
+  The repository's docker-compose.yml pulls the published image but only
+  works after the README's manual steps: export APPLICATION_SECRET, then run
+  `bin/server -DdropAndCreateNewDb` and `bin/server -DcreateAdminUser` once.
+  The plain deploy skipped them, so Play refused to start ("The application
+  secret has not been set") and restart-looped.
+
+  This recipe runs the current release image nymanjens/piga:v3.109 with a
+  MariaDB 10.11 sidecar. hooks/prepare.sh generates APPLICATION_SECRET, the
+  database password once into ~/.panelalpha/piga/. A one-shot `init` service runs the README's two
+  setup commands on the first deploy only (a marker on a named volume) and
+  the web service starts after it. The admin is created the way the README does it:
+  login `admin`, password `changeme` (upstream's default; change it after
+  the first login); new users are
+  added at /app/useradministration. The database is a named volume; the
+  pidfile goes to /dev/null so a restarted container is not blocked by a
+  stale RUNNING_PID. The UI syncs over a websocket, which the
+  *.panelalpha.online test edge strips (engine#170); on a real domain it
+  passes.

@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DataLens, a BI and dashboard platform, on the repository's own production
+  docker-compose.yaml (release images for the UI, the united-storage, auth,
+  control and data APIs, meta-manager, Temporal and Postgres). The compose
+  file falls back to RSA key pairs and master tokens published in the
+  repository; hooks/prepare.sh generates them once per account into
+  ~/.panelalpha/datalens the way upstream's init.sh does and copies them to
+  .env on every deploy. An override lowers the control and data API worker
+  counts so the stack fits a 2500 MB account. First run is upstream's: the
+  account admin / admin, open sign-up.

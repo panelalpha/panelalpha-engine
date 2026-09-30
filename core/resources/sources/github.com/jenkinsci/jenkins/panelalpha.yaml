@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Jenkins, the Java automation server. The repository is Jenkins core's Maven
+  source tree; its root package.json only builds the web UI bundles with
+  webpack, so detection chose the vite strategy and the deploy failed with
+  "Static build finished but dist/index.html is missing". Building the war
+  needs a full Maven build of the multi-module tree. This recipe runs the
+  official jenkins/jenkins image of the current LTS release (2.568.3, JDK 21)
+  on port 8080 with /var/jenkins_home on a named volume. First run is
+  upstream's own setup wizard, unlocked with the initialAdminPassword Jenkins
+  writes to its log and to secrets/initialAdminPassword.

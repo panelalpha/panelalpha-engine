@@ -1,0 +1,120 @@
+# Upstream's release compose (v5.2.1) with the release images pinned, state on
+# named volumes, generated secrets, and upstream's traefik routing done by
+# Caddy (engine#334). Hardware-transcoding profiles are left out (no GPU).
+x-kyoo-env: &kyoo-env
+  env_file:
+    - ./panelalpha/kyoo-defaults.env
+    - ./.env
+    - ../.panelalpha/kyoo/secrets.env
+
+services:
+  front:
+    image: ghcr.io/zoriya/kyoo_front:5.2.1@sha256:4c437289429167d93ba773e32e9a2476dde4198374e946461d92f8e110a3c9d3
+    restart: unless-stopped
+    environment:
+      KYOO_URL: http://api:5000/api
+
+  auth:
+    image: ghcr.io/zoriya/kyoo_auth:5.2.1@sha256:2654f232cc3b135cc1a2aa23ca469a08732cb4cba5ff048d385fb36e5a417e1e
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    <<: *kyoo-env
+    environment:
+      EXTRA_OIDC_REDIRECT_URLS: kyoo
+      PUBLIC_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - profile_pictures:/profile_pictures
+
+  api:
+    image: ghcr.io/zoriya/kyoo_api:5.2.1@sha256:6049a91aa3cc85cf172b8798c0080c21937606adce8e9b426756adfdd7fd72f3
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    <<: *kyoo-env
+    environment:
+      PUBLIC_URL: ${PA_PUBLIC_URL}
+      JWT_ISSUER: ${PA_PUBLIC_URL}
+      IMAGES_PATH: /images
+    volumes:
+      - images:/images
+
+  scanner:
+    image: ghcr.io/zoriya/kyoo_scanner:5.2.1@sha256:457191a6dd05caf4178bf1384feedea4eebee088d5b4b38210e81292703300f4
+    restart: unless-stopped
+    <<: *kyoo-env
+    environment:
+      KYOO_URL: http://proxy:8901/api
+      JWKS_URL: http://auth:4568/.well-known/jwks.json
+      PUBLIC_URL: ${PA_PUBLIC_URL}
+      JWT_ISSUER: ${PA_PUBLIC_URL}
+    volumes:
+      - library:/video:ro
+
+  transcoder:
+    image: ghcr.io/zoriya/kyoo_transcoder:5.2.1@sha256:04b69ec2300682df0e354284be69f8e13f9c07a667e98dc8ccbda9bc745ffbe8
+    restart: unless-stopped
+    <<: *kyoo-env
+    environment:
+      JWKS_URL: http://auth:4568/.well-known/jwks.json
+    volumes:
+      - library:/video:ro
+      - transcoder_cache:/cache
+      - transcoder_metadata:/metadata
+
+  # Upstream's router, as Caddy: the engine drops any traefik service (engine#334).
+  proxy:
+    image: docker.io/library/caddy:2.11.4-alpine
+    restart: unless-stopped
+    depends_on:
+      - front
+      - auth
+      - api
+    volumes:
+      - ./panelalpha/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "8901:8901"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8901/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 128m
+
+  postgres:
+    image: postgres:18.6
+    restart: unless-stopped
+    <<: *kyoo-env
+    environment:
+      POSTGRES_USER: kyoo
+      POSTGRES_DB: kyoo
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kyoo -d kyoo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # No-op gate: `compose up -d` returns only once the api answers through the router.
+  ready:
+    image: docker.io/library/caddy:2.11.4-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      proxy:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db: {}
+  images: {}
+  profile_pictures: {}
+  transcoder_metadata: {}
+  transcoder_cache: {}
+  # Video library (movies/shows) the scanner watches and the transcoder streams.
+  library: {}

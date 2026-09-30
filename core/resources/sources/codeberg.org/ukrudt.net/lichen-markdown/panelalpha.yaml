@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Lichen-Markdown (ukrudt.net/lichen-markdown, GPL-3.0) is a flat-file CMS for
+  small static websites: PHP under Apache renders the Markdown pages in src/,
+  and /cms/edit.php edits them and uploads files.
+
+  Upstream's Docker setup builds docker/Dockerfile (php:8.1-apache with gd,
+  mod_rewrite, mod_headers and an htpasswd file for /cms) from the docker/
+  directory alone and bind-mounts src/ at /var/www/html (run-dev.sh). A plain
+  deploy builds that Dockerfile with nothing mounted, so the docroot is empty
+  and every request is a bare Apache 403.
+
+  This recipe builds the same Dockerfile and keeps the site on a named volume
+  at /var/www/html, seeded once from the repository's src/ when the volume is
+  empty, because pages and uploads are written into that tree and a redeploy
+  wipes ~/project. The rendered copy the CMS writes on every save goes to
+  /var/www/dist (DIST_DIR is the docroot's sibling), which upstream's Docker
+  setup leaves root-owned, so each save answered with PHP warnings and the
+  editor reported it as failed; it is a second named volume owned by
+  www-data. Later code updates go through upstream's own
+  update/update_lichen.sh, as on any install. The /cms login is upstream's
+  baked htpasswd, left as shipped.

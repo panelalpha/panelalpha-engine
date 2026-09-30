@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Minus Games distributes games and their save files from a server to the
+  Minus Games client and GUI: minus_games_server is a Rust (axum) API on :8415
+  with a Swagger UI at /swagger-ui/, keeping games and metadata on disk. The
+  repository's compose.yml builds its own Dockerfile but configures the server
+  with IP, DATA_FOLDER and GAMES_FOLDER, while the binary reads MINUS_GAMES_IP,
+  MINUS_GAMES_DATA_FOLDER and MINUS_GAMES_GAMES_FOLDER, so the plain deploy
+  listens on 127.0.0.1 and never answers.
+
+  This recipe layers a compose override over the repository's compose: the
+  server listens on 0.0.0.0:8415, and the games and data folders sit in
+  /var/lib/minus_games_server on a named volume (instead of a host bind mount)
+  that survives redeploys. The image is still built from the repository's own
+  Dockerfile. Users and access rules are upstream's defaults: games are added
+  to the games folder and indexed through the finder endpoints.

@@ -1,0 +1,34 @@
+# The repo's Dockerfile needs CI-built artefacts and its compose is a Traefik
+# dev stack; this runs upstream's image of the current release instead.
+services:
+  app:
+    image: docker.io/zer0tonin/mikochi:1.12.0
+    restart: unless-stopped
+    environment:
+      HOST: "0.0.0.0:8080"
+      DATA_DIR: /data
+    volumes:
+      - data:/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # ubuntu base: no wget/curl, bash /dev/tcp instead
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once Mikochi listens.
+  ready:
+    image: docker.io/zer0tonin/mikochi:1.12.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

@@ -1,0 +1,72 @@
+# Compose-replace: the repo's compose files build a dev image of HEAD.
+# Published image of the current release beside PostgreSQL (3.5.3's async core
+# cannot use its SQLite default); database and media on named volumes.
+services:
+  app:
+    image: papermerge/papermerge:3.5.3
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      PAPERMERGE__SECURITY__SECRET_KEY: ${PAPERMERGE_SECRET_KEY:?PAPERMERGE_SECRET_KEY is required}
+      PAPERMERGE__AUTH__USERNAME: ${PAPERMERGE__AUTH__USERNAME:-admin}
+      # From the project's env vars; the check below refuses an empty value.
+      PAPERMERGE__AUTH__PASSWORD: ${PAPERMERGE__AUTH__PASSWORD:-}
+      PAPERMERGE__DATABASE__URL: postgresql://papermerge:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/papermerge
+      PAPERMERGE__MAIN__MEDIA_ROOT: /var/media/pmg
+    volumes:
+      - papermerge-media:/var/media/pmg
+    depends_on:
+      password-check:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    healthcheck:
+      # nginx answers / even while the core API is down; probe the core itself.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8000/openapi.json >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1g
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: papermerge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: papermerge
+    volumes:
+      - papermerge-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "papermerge", "-d", "papermerge"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  # Fails `compose up` (and so the deploy) while no admin password is set.
+  password-check:
+    image: papermerge/papermerge:3.5.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "/password-check.sh"]
+    environment:
+      PAPERMERGE__AUTH__PASSWORD: ${PAPERMERGE__AUTH__PASSWORD:-}
+    volumes:
+      - ./papermerge-password-check.sh:/password-check.sh:ro
+    mem_limit: 32m
+
+  # No-op gate: `compose up -d` returns only once nginx and the API answer.
+  ready:
+    image: papermerge/papermerge:3.5.3
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  papermerge-db: {}
+  papermerge-media: {}

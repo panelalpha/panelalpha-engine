@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Langfuse, the LLM engineering platform (tracing, prompt management,
+  evaluations): Next.js web app and worker with PostgreSQL, ClickHouse, Redis
+  and MinIO. A plain deploy of upstream's docker-compose.yml starts, but runs
+  with NEXTAUTH_URL=http://localhost:3000, so every sign-in redirects the
+  browser to localhost, and with the CHANGEME secrets from the file (NEXTAUTH_SECRET
+  "mysecret", an all-zero ENCRYPTION_KEY). This recipe keeps upstream's stack
+  and images, pinned to the current release (4.47.0), sets NEXTAUTH_URL to the
+  site's address, generates every password and secret once into
+  ~/.panelalpha/langfuse, and publishes only langfuse-web (3000). Data is on
+  the upstream named volumes. The first visitor signs up (upstream behaviour).
+  Browser media uploads to S3 are not configured: MinIO is not public here.
+  Needs about 2.6 GB of RAM at idle; give the account 4096 MB.

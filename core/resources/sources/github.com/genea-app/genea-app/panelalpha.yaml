@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Genea, a browser-only family-tree editor that reads and writes GEDCOM files
+  entirely client-side. The repository is the site as committed (index.html,
+  js/, css/, components/, modals/ at the root); package.json holds only jest
+  devDependencies for the tests -- no build, no server. The plain deploy let
+  that package.json send it to Railpack, which ran `node index.js` and
+  crash-looped on `Cannot find module '/app/index.js'` (HTTP 502). The recipe
+  serves the files as committed with the static platform's nginx.
+
+  output_directory is `.` because a package.json makes the engine host-run
+  `npm install` for an nginx recipe and then require <output>/index.html
+  (default dist/, which this repo never produces) (engine#341).
+extends: static
+output_directory: .

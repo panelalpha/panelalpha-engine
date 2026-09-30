@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OTOBO, a web-based help desk and IT service management system (Perl/Plack,
+  MariaDB, Elasticsearch, Redis). The source repository ships no compose
+  file and no root Dockerfile, so the plain deploy finds nothing it
+  recognises and serves the PanelAlpha placeholder.
+
+  This recipe runs upstream's own Docker setup (RotherOSS/otobo-docker,
+  branch rel-11_0: otobo-base.yml with the HTTP override) on the images of
+  the current stable release, rotheross/otobo:rel-11_0_18 and
+  rotheross/otobo-elasticsearch:rel-11_0_18, with mariadb:11.8 and
+  redis:8-bookworm; the web container serves on 8080 and the OTOBO daemon
+  runs alongside. The 11.1 line is still beta. The first visit opens OTOBO's
+  own web installer, as upstream ships it: in its database step choose
+  MariaDB, host `db`, user `root` and the MARIADB_ROOT_PASSWORD from
+  ~/.panelalpha/otobo/db.env (generated once there); in the Elasticsearch
+  step use host `elastic`, port 9200. The OTOBO installation (/opt/otobo,
+  including Kernel/Config.pm), the database and the search index are on
+  named volumes, so a redeploy keeps the installed system.

@@ -1,0 +1,69 @@
+# The official Odoo image of the current release (the repository's default
+# branch, 20.0) with PostgreSQL, as the image's own documentation runs it.
+# The checkout itself is not built: installing Odoo from source needs system
+# libraries (pg_config for psycopg2, wkhtmltopdf) the python strategy lacks.
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/odoo/db.env
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_DB: postgres
+    volumes:
+      - odoo_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+    mem_limit: 512m
+
+  app:
+    image: odoo:20.0
+    restart: unless-stopped
+    # Odoo 20 listens on 127.0.0.1 by default (odoo/tools/config.py
+    # --http-interface), which the image's odoo.conf does not change.
+    # --proxy-mode: trust the engine proxy's X-Forwarded-Proto/Host so
+    # generated URLs are https on the account's domain.
+    command: ["odoo", "--http-interface=0.0.0.0", "--proxy-mode"]
+    ports:
+      - "8069:8069"
+    env_file:
+      - ../.panelalpha/odoo/db.env
+    environment:
+      HOST: db
+      USER: odoo
+    volumes:
+      - odoo_data:/var/lib/odoo
+      - odoo_addons:/mnt/extra-addons
+      # Odoo saves the master password chosen on the first database creation
+      # into /etc/odoo/odoo.conf; a volume keeps it across a rebuild.
+      - odoo_config:/etc/odoo
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null --max-time 10 http://127.0.0.1:8069/web/health"]
+      interval: 5s
+      timeout: 15s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once Odoo answers.
+  ready:
+    image: postgres:17
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  odoo_db: {}
+  odoo_data: {}
+  odoo_addons: {}
+  odoo_config: {}

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Jellyswarrm is a reverse proxy that merges several Jellyfin servers into one
+  library: a single Rust binary serving the bundled Jellyfin web client on /
+  and its management UI on /ui, port 3000, with its SQLite database and
+  jellyswarrm.toml in /app/data.
+
+  The repository's docker-compose.yml builds the Dockerfile, which compiles
+  the Rust workspace and a webpack UI in parallel stages; the build is
+  OOM-killed in `npm run build:production` ("cannot allocate memory") at 2500
+  MB and at 4096 MB. This recipe runs the published image of the current
+  release, ghcr.io/llukas22/jellyswarrm:0.3.0 (pinned by digest), as the
+  README's compose example does, with /app/data on a named volume that
+  survives redeploys.
+
+  First run is left as upstream ships it: the /ui login is the built-in
+  default (admin / jellyswarrm) unless JELLYSWARRM_USERNAME and
+  JELLYSWARRM_PASSWORD are set in the project's environment variables. The
+  public address Jellyfin clients are handed (localhost:3000 by default) is
+  set in /ui settings: upstream reads env keys with "_" as the nesting
+  separator, so JELLYSWARRM_PUBLIC_ADDRESS does not reach public_address.

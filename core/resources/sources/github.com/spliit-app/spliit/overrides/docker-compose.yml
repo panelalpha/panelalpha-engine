@@ -1,0 +1,54 @@
+# Upstream's README compose with the published image of the current release.
+# The DB password is a required variable; the engine generates it per account.
+services:
+  app:
+    image: ghcr.io/spliit-app/spliit:1.28.0
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      BASE_URL: ${PA_PUBLIC_URL}
+      POSTGRES_PRISMA_URL: postgresql://spliit:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/spliit
+      POSTGRES_URL_NON_POOLING: postgresql://spliit:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/spliit
+    volumes:
+      - next_cache:/usr/app/.next/cache
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health/readiness >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: spliit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: spliit
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "spliit", "-d", "spliit"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once Spliit's readiness check passes.
+  ready:
+    image: postgres:17-alpine
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db_data: {}
+  next_cache: {}

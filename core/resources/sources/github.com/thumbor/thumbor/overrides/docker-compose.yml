@@ -1,0 +1,15 @@
+# Compose-replace: the repository has no compose file (docker/Dockerfile
+# needs a pre-built wheel in dist/), so the generic Python build served the
+# engine placeholder. This runs upstream's published image of the current release.
+services:
+  app:
+    image: ghcr.io/thumbor/thumbor:7.8.0-py-3.12
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8888/healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 512m

@@ -1,0 +1,56 @@
+# The repository's compose file builds from source with the PIN defaulting to
+# 1234 and ./config, ./data bind mounts. This runs the official image of the
+# current release (1.2.0), keeps the shell's config and data dirs on named
+# volumes, and always sets the PIN from ~/.panelalpha.
+#
+# DumbTerm compares its PIN cookie on every request and on the terminal
+# websocket without the lockout that guards /verify-pin, so the app publishes
+# nothing: `proxy` is the only thing on the account's port.
+services:
+  app:
+    image: dumbwareio/dumbterm:1.2.0
+    restart: unless-stopped
+    env_file:
+      # Missing file aborts `up` rather than starting without a PIN.
+      - ../.panelalpha/dumbterm/pin.env
+    environment:
+      BASE_URL: ${PA_PUBLIC_URL}
+      # Also the websocket's Origin check; unset means any origin.
+      ALLOWED_ORIGINS: ${PA_PUBLIC_URL}
+      NODE_ENV: production
+      SITE_TITLE: DumbTerm
+      TZ: UTC
+      ENABLE_STARSHIP: "true"
+      LOCKOUT_TIME: "15"
+      MAX_SESSION_AGE: "24"
+    volumes:
+      - config:/root/.config
+      - data:/root/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/login"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    mem_limit: 1g
+
+  proxy:
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../.panelalpha/dumbterm/pin.env
+    environment:
+      # Only the PIN is substituted into the template; nginx's own $vars stay.
+      NGINX_ENVSUBST_FILTER: DUMBTERM_PIN
+    volumes:
+      - ./panelalpha/dumbterm-proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 48m
+
+volumes:
+  config: {}
+  data: {}

@@ -1,0 +1,68 @@
+# Compose-replace: upstream's docker/docker-compose.yml with the release image
+# pinned, secrets from ~/.panelalpha, and only the app publishing a port.
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/medikeep/secrets.env
+    environment:
+      POSTGRES_DB: medical_records
+      POSTGRES_USER: medapp
+    volumes:
+      - medikeep-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medapp -d medical_records"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 384m
+
+  app:
+    image: ghcr.io/afairgiant/medikeep:v0.71.0
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.panelalpha/medikeep/secrets.env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: medical_records
+      DB_USER: medapp
+      DEBUG: "false"
+      ENABLE_API_DOCS: "false"
+      LOG_LEVEL: INFO
+      TZ: UTC
+      ENABLE_SSL: "false"
+      SSO_ENABLED: "false"
+    volumes:
+      - medikeep-uploads:/app/uploads
+      - medikeep-logs:/app/logs
+      - medikeep-backups:/app/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1g
+
+  # No-op: `compose up -d` returns once migrations ran and the app answers.
+  ready:
+    image: postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  medikeep-db: {}
+  medikeep-uploads: {}
+  medikeep-logs: {}
+  medikeep-backups: {}

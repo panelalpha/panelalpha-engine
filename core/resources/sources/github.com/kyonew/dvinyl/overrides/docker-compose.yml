@@ -1,0 +1,56 @@
+# Compose-replace: upstream binds data into ~/project and the engine's .env
+# fills BASE_URL (a path prefix here) with the site URL. Secrets from ~/.panelalpha.
+services:
+  app:
+    build: .
+    image: dvinyl-app:local
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/dvinyl/app.env
+    environment:
+      MONGODB_URL: mongodb://mongodb:27017/dvinyl
+      VINYL_PORT: "3099"
+      PROD: "true"
+    volumes:
+      - uploads:/app/public/uploads
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "3099:3099"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(3099, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 768m
+
+  mongodb:
+    # 7.0, not upstream's mongo:latest: every 8.x image exits on Linux 6.19+
+    # ("MongoDB cannot start ... SERVER-121912"). 8.x data cannot be opened by 7.0.
+    image: mongo:7.0
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once DVinyl listens.
+  ready:
+    image: mongo:7.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  uploads: {}
+  mongo_data: {}

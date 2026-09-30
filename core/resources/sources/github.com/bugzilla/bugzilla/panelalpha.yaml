@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bugzilla, Mozilla's bug tracker (Perl/mod_perl under Apache on :80, MariaDB).
+  The plain deploy builds the repository's Dockerfile on its own, whose CMD
+  runs docker/startup.sh after the same Dockerfile deleted /var/www/html/docker*,
+  so the container restart-loops with exit 127, and nothing starts MariaDB.
+  This recipe is upstream's docker-compose.yml without its dev bind mount:
+  the repo's own Dockerfile and Dockerfile.mariadb, the command upstream's
+  compose sets (/root/docker/startup.sh, which runs checksetup.pl
+  non-interactively), urlbase from the account's public URL, the data dir and
+  the database on named volumes, and the database and MariaDB root passwords
+  required compose variables the engine generates once per account. The
+  Dockerfile copies the whole build context into Apache's docroot, so a
+  .dockerignore keeps the engine's .env (those passwords, env_vars) and .git
+  out of it; without it both were served publicly. The admin login is
+  upstream's compose default (admin@bugzilla.test / password01!) unless
+  BZ_ADMIN_EMAIL / BZ_ADMIN_PASSWORD are set before the first deploy. A gate
+  service waits until index.cgi answers 200.

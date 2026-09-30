@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  GO Feature Flag's server is the relay proxy: one Go process on :1031
+  serving the flag evaluation API (OpenFeature/OFREP), /health and /info. It
+  refuses to start without a configuration naming a retriever (where the
+  flags file lives). The repository is the Go library with several commands
+  under cmd/, and the plain deploy builds the root as Go and runs the CLI,
+  which prints its help and exits, so nothing answers.
+
+  This recipe runs the published relay proxy image of the current release
+  (gofeatureflag/go-feature-flag:v1.55.3-trixie, the official Debian-based
+  variant, which has a shell for the init step and the healthcheck) the way
+  upstream's getting-started guide does: goff-proxy.yaml with a file
+  retriever reading /goff/flags.goff.yaml. Both files are on a named volume;
+  a one-shot init service writes them only when they are missing (an empty
+  flags file), so edits survive redeploys. Edit the flags with
+  `docker compose -p project exec -T app sh -c 'cat > /goff/flags.goff.yaml'
+  < flags.goff.yaml` (re-read every second), or point the relay proxy at another retriever with its own
+  environment variables (e.g. RETRIEVERS_0_KIND=github, RETRIEVERS_0_REPOSITORYSLUG,
+  RETRIEVERS_0_PATH) in the project's environment. The API is left as
+  upstream ships it: no API keys unless you set AUTHORIZEDKEYS_EVALUATION /
+  AUTHORIZEDKEYS_ADMIN.

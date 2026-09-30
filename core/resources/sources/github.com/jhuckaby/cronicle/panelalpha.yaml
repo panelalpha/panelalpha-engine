@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Cronicle, a multi-server task scheduler and runner with a web UI: a Node
+  server (lib/main.js) storing everything as JSON files on local disk. There
+  is no published image, compose file or Dockerfile. The plain deploy reached
+  Railpack, which ran `npm install` and then restart-looped on `ENOENT
+  conf/config.json`: package.json has no start script, and upstream's install
+  is `npm install`, `node bin/build.js dist` (writes conf/ and bundles the web
+  UI) and a one-time `bin/control.sh setup` before starting the daemon.
+
+  This recipe runs the express platform with those steps: npm ci and `node
+  bin/build.js dist` at build time; the start runs the storage setup
+  (upstream's own `storage-cli.js setup`, which refuses to run twice) and then the server in the foreground on port 3000 (upstream env
+  overrides CRONICLE_foreground / CRONICLE_WebServer__http_port). data/,
+  logs/ and queue/ sit on named volumes. The hostname (container and
+  $HOSTNAME, which Cronicle reads) is pinned to `cronicle` because setup
+  writes it into the "Primary Group" regexp; any other name after a redeploy
+  would leave no server eligible to become primary. First run is as upstream
+  ships it: login admin/admin, created by the setup.
+extends: express
+env:
+  CRONICLE_foreground: 'true'
+  CRONICLE_echo: 'true'
+  CRONICLE_WebServer__http_port: '3000'
+commands:
+  - id: npm-install
+    stage: build
+    role: dependencies
+    # {{js.install}} is not resolved in a recipe (engine#351); the repo ships package-lock.json.
+    run: 'npm ci --no-audit --no-fund'
+  - id: cronicle-build
+    stage: build
+    run: 'node bin/build.js dist'
+    description: "Upstream's own build: writes conf/ from sample_conf and bundles the web UI."
+  # Not `serve`: under that id the node platform swaps the command for
+  # package.json's `bin` (bin/control.sh, a shell script) - engine#350.
+  - id: cronicle-serve
+    stage: start
+    serve: true
+    # setup refuses to run twice ("Storage has already been set up") after the first start.
+    run: >-
+      sh -c 'export CRONICLE_base_app_url="$APP_URL";
+      node bin/storage-cli.js setup || true;
+      exec node lib/main.js'

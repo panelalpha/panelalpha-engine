@@ -115,11 +115,10 @@ own.
 with no wrapping, so an absolute path is used exactly as given and
 `PhpEnvironment::sqlitePath()`'s fallback would have been correct. What is not
 correct is the directory it names: `/app/database/` does not exist in a Winter
-checkout. `panelalpha.yaml` sets `DB_DATABASE: /app/storage/database.sqlite`
-instead — `storage/` is in the checkout and is Winter's own default location
-for the file. It has to be set in `env:` rather than in `.env`, because the
-generated service names `DB_DATABASE` under `environment:`, which outranks
-`env_file:`.
+checkout. `panelalpha.yaml` sets `DB_DATABASE: /pa-data/database.sqlite`
+instead (see "What survives a redeploy"). It has to be set in `env:` rather
+than in `.env`, because the generated service names `DB_DATABASE` under
+`environment:`, which outranks `env_file:`.
 
 **The file has to exist.** Laravel 9's `SQLiteConnector` will not create it:
 
@@ -130,6 +129,26 @@ Ensure this is an absolute path to the database.
 
 so the prepare hook creates an empty one, which is a valid SQLite database.
 `winter:up` builds the schema in it.
+
+## What survives a redeploy
+
+`~/project` is `/app` in the container (a bind mount) and the engine empties it
+before every deploy. The first version of this recipe kept the database in
+`storage/database.sqlite` and the key in `.env`, so every rebuild came back as a
+fresh, empty site with a new APP_KEY and a new admin password. Now
+`~/.panelalpha/winter/` holds the state, mounted at `/pa-data`:
+
+| File | What |
+|---|---|
+| `app.env` | `APP_KEY`, generated once; `.env` is written from it after a wipe |
+| `database.sqlite` | the whole site (`DB_DATABASE=/pa-data/database.sqlite`) |
+| `storage-app/` | mounted over `/app/storage/app`: uploads, media library, resized images |
+| `admin-password` | the admin credentials record |
+
+`DATABASE_TEMPLATES=true` is set as well. CMS pages, layouts and partials are
+theme files under `themes/`, which a redeploy replaces with the checkout;
+upstream's database layer keeps templates edited in the backend in the
+database instead, and reads untouched ones from the files.
 
 ## APP_KEY has to be generated on the host
 
@@ -159,9 +178,9 @@ into the container.
 
 So `hooks/prepare.sh` generates `base64:$(openssl rand -base64 32)` into `.env`
 before the container exists, and `panelalpha.yaml` has no `key:generate` at
-all. Guarded on the absence of `.env`, because regenerating APP_KEY on a
-redeploy would invalidate every session and encrypted value the account has
-written.
+all. The key itself is generated once into `~/.panelalpha/winter/app.env`,
+because regenerating APP_KEY on a redeploy would invalidate every session and
+encrypted value the account has written.
 
 This is the same shape as Bolt's `APP_SECRET` and LinkAce's `APP_KEY`: anything
 a repository ships as an empty `.env` placeholder cannot be filled in from
@@ -208,7 +227,7 @@ an anonymous client to the login form. But the only copy of that password is in
 the deploy log, which is not where an account's credentials live.
 
 `files/panelalpha/set-admin-password.sh` generates 20 base64url characters from
-`random_bytes`, writes them to `~/project/.panelalpha-admin-password` (0600)
+`random_bytes`, writes them to `~/.panelalpha/winter/admin-password` (0600)
 *before* setting them, and then sets them with Winter's own
 `php artisan winter:passwd admin <password>` — the app's own CLI, which hashes
 the password exactly the way the login form verifies it. If `winter:passwd`
@@ -277,11 +296,19 @@ routing table the CMS expects to rebuild.
 | File | Why |
 |---|---|
 | `panelalpha.yaml` | the manifest: `strategy: laravel`, `docroot: .`, SQLite, and `winter:up` in place of `migrate --force` |
-| `hooks/prepare.sh` | writes `.env` (SQLite, before the sidecar inference reads it) and creates the empty database file Laravel refuses to create |
+| `hooks/prepare.sh` | keeps APP_KEY, the SQLite database and `storage/app` in `~/.panelalpha/winter`, writes `.env` (SQLite, before the sidecar inference reads it) and creates the empty database file Laravel refuses to create |
 | `files/panelalpha/set-admin-password.sh` | replaces the seeded password that only the deploy log has, and records the new one |
-| `overrides/docker-compose.override.yml` | a two-request healthcheck plus a `ready` gate, so the deploy waits for the migration and the seeders |
+| `overrides/docker-compose.override.yml` | mounts `~/.panelalpha/winter` at `/pa-data` and over `storage/app`, plus a two-request healthcheck and a `ready` gate, so the deploy waits for the migration and the seeders |
 
 ## Verified
+
+**Redeploy survival** (2026-09-29, mariusz.panelalpha.tools, engine 705f250a).
+With the previous recipe a rebuild changed the APP_KEY hash, dropped a backend
+user, a CMS page and a media file created before it, and rotated the admin
+password. With this one, after `POST /projects/<name>/rebuild` (which re-clones
+into an emptied `~/project`): APP_KEY hash, admin-password hash, the backend
+user, the page (stored in `cms_theme_templates`, served 200 at its URL) and the
+media file are all unchanged, and the stored admin password still logs in.
 
 On a 2-core / 3.7 GB engine, account capped at 1800 MB: `deploy-ok`, deploy
 75.3s with the shared PHP base image already on the host, port probe HTTP 200

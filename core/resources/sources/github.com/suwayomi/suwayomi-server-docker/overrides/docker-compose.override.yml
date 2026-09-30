@@ -1,0 +1,28 @@
+# The repo's compose bind-mounts ./data, which the image's uid 1000 cannot
+# write, so it exits before listening. A named volume takes the image's own
+# 1000-owned directory. Also pins the current stable release, not `preview`.
+services:
+  suwayomi:
+    image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243@sha256:e59f212ccf91b26de8676a063a2db90256c148c6261535c7c477d47a43d9751b
+    volumes:
+      # SQLite, extensions, downloads, WebUI and server.conf.
+      - data:/home/suwayomi/.local/share/Tachidesk
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:4567/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  # No-op gate: `compose up -d` returns only once the server answers.
+  ready:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      suwayomi:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

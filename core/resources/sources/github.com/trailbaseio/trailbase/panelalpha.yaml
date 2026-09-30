@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  TrailBase, a single-executable Firebase alternative (Rust + SQLite): one
+  `trail` binary serving the REST/realtime APIs and the admin UI on :4000,
+  with all state in its depot directory /app/traildepot. The repository's
+  docker-compose.yml bind-mounts ./traildepot, which Docker creates owned by
+  root while the image runs as the unprivileged `trailbase` user, so the plain
+  deploy restart-loops on "Error: IO(Os { code: 13, kind: PermissionDenied })"
+  (upstream's own comment says to create the folder by hand first). This
+  recipe runs the same official docker.io/trailbase/trailbase image pinned to
+  the current release (0.34.0) with the depot on a named volume, which Docker
+  seeds with the image's trailbase-owned /app/traildepot, so it survives
+  redeploys. TrailBase's first-run behaviour (it creates an admin and prints
+  its credentials to the container log) is left as upstream ships it.

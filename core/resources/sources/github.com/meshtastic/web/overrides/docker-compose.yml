@@ -1,0 +1,15 @@
+# Compose-replace: the monorepo root has nothing to run; upstream's release image
+# is the production build of apps/web behind nginx on :8080.
+services:
+  app:
+    image: ghcr.io/meshtastic/web:v2.7.2
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    mem_limit: 64m

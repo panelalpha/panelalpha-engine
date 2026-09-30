@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  kiwix-serve serves ZIM archives (offline Wikipedia, Wiktionary, Stack
+  Exchange, Project Gutenberg and more) as a browsable website with full-text
+  search, on :8080. The repository's docker/Dockerfile is the kiwix-tools base
+  image: it needs a VERSION build-arg the engine cannot pass (the plain deploy
+  fails downloading "kiwix-tools_linux-x86_64-.tar.gz") and it serves nothing.
+  This recipe runs upstream's own ghcr.io/kiwix/kiwix-serve image of the
+  current release (3.8.2) with /data on a named volume.
+
+  kiwix-serve does not start without content, so the project must set
+  DOWNLOAD to a ZIM file URL (https://download.kiwix.org/zim/); a one-shot
+  check fails the deploy with a message naming it while it is unset.
+  Upstream's start.sh downloads that file into /data on every start, and every
+  *.zim in /data is served. The deploy waits up to ~10 minutes for the
+  download; larger archives need a longer wait than that.

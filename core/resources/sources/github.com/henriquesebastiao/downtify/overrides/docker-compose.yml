@@ -1,0 +1,44 @@
+# Compose-replace: upstream's README compose from the 3.2.0 image, with /data
+# and /downloads on named volumes.
+services:
+  app:
+    image: ghcr.io/henriquesebastiao/downtify:3.2.0
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    # The image's defaults; the engine's copy of .env.example points
+    # WEB_GUI_LOCATION at a path that does not exist in the image.
+    environment:
+      WEB_GUI_LOCATION: /downtify/frontend/dist
+      DOWNLOAD_DIR: /downloads
+      DATABASE_DIR: /data
+      DOWNTIFY_PORT: "8000"
+      # Believe X-Forwarded-For only from the engine's proxies; the limiter
+      # takes the last hop they did not add.
+      DOWNTIFY_TRUSTED_PROXIES: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8
+    volumes:
+      - downtify_data:/data
+      - downtify_downloads:/downloads
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  # No-op gate: `compose up -d` returns once Downtify answers.
+  ready:
+    image: ghcr.io/henriquesebastiao/downtify:3.2.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  downtify_data: {}
+  downtify_downloads: {}

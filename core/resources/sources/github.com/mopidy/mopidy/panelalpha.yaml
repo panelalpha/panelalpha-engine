@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mopidy is an extensible music server (Python, GStreamer) with an HTTP
+  frontend and JSON-RPC API that web clients build on. The python platform
+  detects it but the build fails: pip has to compile PyGObject and pycairo
+  (`Dependency "cairo" not found`), and Mopidy also needs the GStreamer
+  libraries and typelibs, which only the OS package manager provides; the
+  python platform cannot add Debian packages.
+
+  The recipe builds a small image with upstream's own install method for
+  Debian 13 (docs/installation/packages.md): `apt install mopidy` from the
+  Mopidy APT archive, which ships the current release with every GStreamer
+  dependency. Mopidy runs as the package's mopidy user with its home
+  /var/lib/mopidy on a named volume (config written on the first start,
+  data, cache, and ~/Music for the file backend), and Mopidy-HTTP listens on
+  0.0.0.0:6680 instead of 127.0.0.1. Everything else is upstream's default:
+  the page at /mopidy/ lists installed web clients (none until a client
+  extension such as Mopidy-Iris is added), audio goes to autoaudiosink,
+  which has no device in a container, so playback needs an output such as
+  an Icecast stream configured in mopidy.conf.

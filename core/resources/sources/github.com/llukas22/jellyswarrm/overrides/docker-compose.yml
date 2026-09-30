@@ -1,0 +1,35 @@
+# The repo compose builds the Dockerfile, which OOMs; this runs the release
+# image as in the README's example, on a named volume.
+services:
+  app:
+    image: ghcr.io/llukas22/jellyswarrm:0.3.0@sha256:1d61193d34035dee9acf6b5d9388721867dff74fc64ec0f2c7a87b7ff075b9f5
+    restart: unless-stopped
+    env_file:
+      # The project's environment variables (e.g. JELLYSWARRM_USERNAME/PASSWORD).
+      - path: .env
+        required: false
+    volumes:
+      # jellyswarrm.db (servers, user mappings) and jellyswarrm.toml (session key).
+      - data:/app/data
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/ui/login"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Jellyswarrm answers.
+  ready:
+    image: ghcr.io/llukas22/jellyswarrm:0.3.0@sha256:1d61193d34035dee9acf6b5d9388721867dff74fc64ec0f2c7a87b7ff075b9f5
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

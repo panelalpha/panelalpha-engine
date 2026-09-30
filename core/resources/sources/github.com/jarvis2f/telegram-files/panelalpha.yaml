@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Telegram Files downloads files from Telegram chats through a web dashboard:
+  one image (Java API on :8080 behind its own nginx on :80) with SQLite under
+  /app/data. It refuses to start without TELEGRAM_API_ID and TELEGRAM_API_HASH
+  (from my.telegram.org). The plain deploy runs the repo's compose, whose
+  profile-gated qBittorrent sidecar's 8080 is taken as the site (502), and
+  keeps the data in a ./data bind mount that a redeploy wipes.
+
+  This recipe runs the published image of the current release
+  (ghcr.io/jarvis2f/telegram-files:0.4.0) with the data on a named volume. The
+  customer supplies TELEGRAM_API_ID and TELEGRAM_API_HASH in the project's
+  environment variables; a one-shot check service fails the deploy naming each
+  one that is missing. Browser requests are allowed from the site's own
+  https origin and session cookies are marked secure. Everything else is
+  upstream's default: on first start the app prints a one-time bootstrap code
+  to its log, which the first visitor needs to create the admin account.

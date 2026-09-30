@@ -1,0 +1,262 @@
+# Upstream's osmanage template (openslides-cli contrib/docker-compose.yml.tmpl)
+# rendered for 4.3.4 with local HTTPS off: the engine terminates TLS in front
+# of the proxy. Secrets come from ~/.panelalpha via a one-shot `secrets` service.
+x-env: &env
+  ACTION_HOST: backendAction
+  ACTION_PORT: "9002"
+  AUTH_COOKIE_KEY_FILE: /run/secrets/auth_cookie_key
+  AUTH_HOST: auth
+  AUTH_PORT: "9004"
+  AUTH_TOKEN_KEY_FILE: /run/secrets/auth_token_key
+  AUTOUPDATE_HOST: autoupdate
+  AUTOUPDATE_PORT: "9012"
+  CACHE_HOST: redis
+  CACHE_PORT: "6379"
+  DATABASE_HOST: postgres
+  DATABASE_NAME: openslides
+  DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+  DATABASE_PORT: "5432"
+  DATABASE_USER: openslides
+  ICC_HOST: icc
+  ICC_PORT: "9007"
+  INTERNAL_AUTH_PASSWORD_FILE: /run/secrets/internal_auth_password
+  MEDIA_DATABASE_HOST: postgres
+  MEDIA_DATABASE_NAME: openslides
+  MEDIA_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+  MEDIA_DATABASE_PORT: "5432"
+  MEDIA_DATABASE_USER: openslides
+  MEDIA_HOST: media
+  MEDIA_PORT: "9006"
+  MESSAGE_BUS_HOST: redis
+  MESSAGE_BUS_PORT: "6379"
+  OPENSLIDES_DEVELOPMENT: "false"
+  OPENSLIDES_LOGLEVEL: info
+  PRESENTER_HOST: backendPresenter
+  PRESENTER_PORT: "9003"
+  PROJECTOR_HOST: projector
+  PROJECTOR_PORT: "9051"
+  RESTRICTER_URL: http://autoupdate:9012/internal/autoupdate
+  SEARCH_HOST: search
+  SEARCH_PORT: "9050"
+  SUPERADMIN_PASSWORD_FILE: /run/secrets/superadmin
+  VOTE_DATABASE_HOST: postgres
+  VOTE_DATABASE_NAME: openslides
+  VOTE_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+  VOTE_DATABASE_PORT: "5432"
+  VOTE_DATABASE_USER: openslides
+  VOTE_HOST: vote
+  VOTE_PORT: "9013"
+
+x-os: &os
+  restart: unless-stopped
+  volumes:
+    - secrets:/run/secrets:ro
+  depends_on: &after-secrets
+    secrets:
+      condition: service_completed_successfully
+
+services:
+  # Writes ~/.panelalpha/openslides/secrets.env into the files the services read.
+  secrets:
+    image: redis:8.2.2-alpine
+    restart: "no"
+    env_file: ../.panelalpha/openslides/secrets.env
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        w() { printf '%s' "$$2" > /run/secrets/$$1; chmod 444 /run/secrets/$$1; }
+        w auth_token_key "$$OS_AUTH_TOKEN_KEY"
+        w auth_cookie_key "$$OS_AUTH_COOKIE_KEY"
+        w internal_auth_password "$$OS_INTERNAL_AUTH_PASSWORD"
+        w postgres_password "$$OS_POSTGRES_PASSWORD"
+        w superadmin "$$OS_SUPERADMIN_PASSWORD"
+    volumes:
+      - secrets:/run/secrets
+    mem_limit: 32m
+
+  proxy:
+    <<: *os
+    image: ghcr.io/openslides/openslides/openslides-proxy:4.3.4
+    environment:
+      <<: *env
+    ports:
+      - "8000:8000"
+    depends_on:
+      <<: *after-secrets
+      client: {condition: service_started}
+      backendAction: {condition: service_started}
+      backendPresenter: {condition: service_started}
+      autoupdate: {condition: service_started}
+      search: {condition: service_started}
+      projector: {condition: service_started}
+      auth: {condition: service_started}
+      media: {condition: service_started}
+      icc: {condition: service_started}
+      vote: {condition: service_started}
+    mem_limit: 128m
+
+  client:
+    <<: *os
+    image: ghcr.io/openslides/openslides/openslides-client:4.3.4
+    environment:
+      <<: *env
+    mem_limit: 64m
+
+  backendAction:
+    <<: *os
+    image: ghcr.io/openslides/openslides/openslides-backend:4.3.4
+    environment:
+      <<: *env
+      OPENSLIDES_BACKEND_COMPONENT: action
+    depends_on:
+      <<: *after-secrets
+      postgres: {condition: service_healthy}
+    mem_limit: 512m
+
+  backendPresenter:
+    <<: *os
+    image: ghcr.io/openslides/openslides/openslides-backend:4.3.4
+    environment:
+      <<: *env
+      OPENSLIDES_BACKEND_COMPONENT: presenter
+    depends_on:
+      <<: *after-secrets
+      postgres: {condition: service_healthy}
+    mem_limit: 384m
+
+  # Creates the initial data and the `superadmin` account on an empty database,
+  # as upstream's example-config.yml sets it.
+  backendManage:
+    <<: *os
+    image: ghcr.io/openslides/openslides/openslides-backend:4.3.4
+    environment:
+      <<: *env
+      OPENSLIDES_BACKEND_COMPONENT: action
+      OPENSLIDES_BACKEND_CREATE_INITIAL_DATA: "1"
+      MIG0100_I_READ_DOCS: "1"
+      MIG0100_TIMEZONE: UTC
+    depends_on:
+      <<: *after-secrets
+      postgres: {condition: service_healthy}
+    mem_limit: 384m
+
+  postgres:
+    image: postgres:17.10
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: openslides
+      POSTGRES_USER: openslides
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - secrets:/run/secrets:ro
+    depends_on: *after-secrets
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openslides -d openslides"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+    mem_limit: 384m
+
+  autoupdate:
+    <<: *os
+    image: ghcr.io/openslides/openslides/openslides-autoupdate:4.3.4
+    environment:
+      <<: *env
+    depends_on:
+      <<: *after-secrets
+      redis: {condition: service_started}
+      postgres: {condition: service_healthy}
+    mem_limit: 256m
+
+  search:
+    <<: *os
+    image: ghcr.io/openslides/openslides/openslides-search:4.3.4
+    environment:
+      <<: *env
+    depends_on:
+      <<: *after-secrets
+      postgres: {condition: service_healthy}
+      autoupdate: {condition: service_started}
+    mem_limit: 256m
+
+  projector:
+    <<: *os
+    image: ghcr.io/openslides/openslides/openslides-projector:4.3.4
+    environment:
+      <<: *env
+    depends_on:
+      <<: *after-secrets
+      postgres: {condition: service_healthy}
+      autoupdate: {condition: service_started}
+      backendAction: {condition: service_started}
+    mem_limit: 128m
+
+  auth:
+    <<: *os
+    image: ghcr.io/openslides/openslides/openslides-auth:4.3.4
+    environment:
+      <<: *env
+    depends_on:
+      <<: *after-secrets
+      redis: {condition: service_started}
+      postgres: {condition: service_healthy}
+    mem_limit: 256m
+
+  vote:
+    <<: *os
+    image: ghcr.io/openslides/openslides/openslides-vote:4.3.4
+    environment:
+      <<: *env
+    depends_on:
+      <<: *after-secrets
+      redis: {condition: service_started}
+      postgres: {condition: service_healthy}
+      auth: {condition: service_started}
+      autoupdate: {condition: service_started}
+    mem_limit: 128m
+
+  redis:
+    image: redis:8.2.2-alpine
+    restart: unless-stopped
+    command: redis-server --save ""
+    mem_limit: 128m
+
+  media:
+    <<: *os
+    image: ghcr.io/openslides/openslides/openslides-media:4.3.4
+    environment:
+      <<: *env
+    depends_on:
+      <<: *after-secrets
+      postgres: {condition: service_healthy}
+    mem_limit: 256m
+
+  icc:
+    <<: *os
+    image: ghcr.io/openslides/openslides/openslides-icc:4.3.4
+    environment:
+      <<: *env
+    depends_on:
+      <<: *after-secrets
+      redis: {condition: service_started}
+      postgres: {condition: service_healthy}
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns once the backend has created its data.
+  ready:
+    image: redis:8.2.2-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      backendManage: {condition: service_healthy}
+      backendAction: {condition: service_healthy}
+      autoupdate: {condition: service_healthy}
+      proxy: {condition: service_healthy}
+    mem_limit: 32m
+
+volumes:
+  secrets: {}
+  postgres-data: {}

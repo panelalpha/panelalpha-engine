@@ -1,0 +1,66 @@
+# The only thing on the account's port. The image's entrypoint renders this
+# with ${DUMBDROP_PIN}; the rendered file stays inside the container.
+# DumbDrop compares the PIN cookie (and an X-Pin header) on /api/upload and
+# /api/files with no lockout, so a wrong cookie is throttled here and X-Pin
+# is never forwarded.
+
+map $cookie_DUMBDROP_PIN $dumbdrop_bad_cookie {
+    default           "bad";
+    ""                "";
+    "${DUMBDROP_PIN}" "";
+}
+
+# The app gets only the cookie value nginx judged, so a second spelling of the
+# cookie name cannot reach it unthrottled.
+map $cookie_DUMBDROP_PIN $dumbdrop_cookie {
+    ""      "";
+    default "DUMBDROP_PIN=$cookie_DUMBDROP_PIN";
+}
+
+# The engine's proxy sets X-Real-IP; the app trusts one hop and keys its
+# lockout and rate limits on it.
+map $http_x_real_ip $dumbdrop_client {
+    ""      $remote_addr;
+    default $http_x_real_ip;
+}
+
+# Shared buckets, whatever address a request claims: wrong PIN cookies, and
+# PIN submissions as a backstop to the per-visitor lockout.
+limit_req_zone $dumbdrop_bad_cookie zone=dumbdrop_bad:1m rate=10r/m;
+limit_req_zone $server_name zone=dumbdrop_login:1m rate=10r/m;
+
+server {
+    listen 8080 default_server;
+    server_name dumbdrop;
+    # Uploads arrive as 1 MB chunks.
+    client_max_body_size 10m;
+    limit_req_status 429;
+
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $dumbdrop app:3000;
+
+    # The app renders any *.html path relative to its public/ directory
+    # without the PIN check, so `..` would reach uploaded .html files.
+    if ($request_uri ~ "/\.\.(/|\?|$)") {
+        return 400;
+    }
+
+    proxy_http_version 1.1;
+    proxy_set_header Host              $http_host;
+    proxy_set_header Cookie            $dumbdrop_cookie;
+    proxy_set_header X-Pin             "";
+    proxy_set_header X-Forwarded-For   $dumbdrop_client;
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    proxy_read_timeout 600s;
+
+    location = /api/auth/verify-pin {
+        limit_req zone=dumbdrop_login burst=10 nodelay;
+        limit_req zone=dumbdrop_bad burst=10 nodelay;
+        proxy_pass http://$dumbdrop$request_uri;
+    }
+
+    location / {
+        limit_req zone=dumbdrop_bad burst=10 nodelay;
+        proxy_pass http://$dumbdrop$request_uri;
+    }
+}

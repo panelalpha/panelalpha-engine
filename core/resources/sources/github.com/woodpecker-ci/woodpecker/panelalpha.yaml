@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Woodpecker is a CI/CD server (a community fork of Drone): the Go server
+  serves the web UI and API on :8000 and waits for agents on gRPC :9000, with
+  SQLite in /var/lib/woodpecker. The repository is Woodpecker's source tree, so
+  a plain deploy builds it as a Go app whose containers restart-loop and never
+  answer.
+
+  This recipe runs the official woodpeckerci/woodpecker-server image of the
+  current release, v3.18.1, with WOODPECKER_HOST set to the site address and
+  the database on a named volume. Woodpecker has no local accounts: it exits
+  with "forge not configured" unless one forge is chosen, and logins go through
+  that forge's OAuth application. The customer sets these in the project's
+  environment variables (e.g. WOODPECKER_GITHUB=true, WOODPECKER_FORGE_CLIENT,
+  WOODPECKER_FORGE_SECRET, WOODPECKER_FORGE_URL for a self-hosted forge; any
+  upstream WOODPECKER_* setting such as WOODPECKER_ADMIN or WOODPECKER_OPEN is
+  passed through), and a one-shot check fails the deploy naming each missing
+  one. No agent is started: upstream's agent needs the Docker socket, and
+  pipelines run only once an agent is connected.

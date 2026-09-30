@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Shhh shares secrets through one-time links protected by a passphrase and an
+  expiry: a Flask app served by gunicorn on :8081 with PostgreSQL. The
+  repository has no docker-compose.yml, only dev variants
+  (docker-compose-postgres.yml runs the Flask debug server with adminer), so
+  the plain deploy falls to the python strategy with no database and no
+  FLASK_ENV, and wsgi.py raises "env=None specified in FLASK_ENV is not
+  supported".
+
+  This recipe builds the repository's own production Dockerfile
+  (dockerfiles/alpine.gunicorn.Dockerfile) beside postgres:17-alpine on a
+  named volume. FLASK_ENV is production, the database password is a required
+  compose variable the engine generates once per account, the tables come
+  from the app's own `flask db upgrade` before gunicorn starts, and SHHH_HOST
+  is the site's public address so generated links use it. Everything else is
+  upstream's default.

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Traccar, the GPS tracking server (Java), with its web interface on :8082.
+
+  The repository is the Gradle source tree; the React web UI is a git
+  submodule (traccar-web) and there is no compose file, so a plain deploy
+  builds the server with the generic java-gradle strategy and never answers.
+  This recipe runs upstream's published image of the current release,
+  traccar/traccar:6.16.0-alpine, with the image's default configuration:
+  the embedded H2 database under /opt/traccar/data on a named volume that
+  survives redeploys. A `ready` gate makes the deploy finish only once
+  /api/health answers.
+
+  First run is upstream's: the first account registered in the web UI
+  becomes the administrator. Only the web port is published; the device
+  protocol ports (5000-5500) are not reachable from outside the account.

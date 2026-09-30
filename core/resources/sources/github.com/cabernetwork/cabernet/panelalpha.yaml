@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Cabernet is an IPTV stream proxy/tuner (Pluto TV, XUMO, M3U/XMLTV plugins)
+  that presents channels to Plex, Jellyfin, Emby or Kodi, with a web
+  administration UI on :6077 and HTTP stream endpoints on :5004. The
+  repository's docker-compose.yml publishes both ports with placeholder
+  /path/to bind mounts, and a plain deploy routed the domain to 5004, which
+  answers `501 Unsupported method` to a browser.
+
+  This recipe runs upstream's own image of the current release (0.9.16.02,
+  ghcr.io/cabernetwork/cabernet:latest pinned by digest; upstream publishes
+  no version tags) and publishes only the web UI port, so the domain serves
+  the administration UI. data, plugins_ext and the encryption key directory
+  (/app/.cabernet) are named volumes that survive redeploys. The stream port
+  is not reachable from outside the account; the domain is the one public
+  entry point.

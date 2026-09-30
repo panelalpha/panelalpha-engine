@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PictShare is an image, video and text hosting service with a resizing and
+  upload API: PHP 8.4 on FrankenPHP (Caddy) on :80, flat files under
+  /app/public/data, and an in-container Redis caching view counts.
+
+  The repository's docker-compose.yml names the image `HaschekSolutions/pictshare:3`;
+  image names must be lowercase, so Docker reads `HaschekSolutions` as a registry
+  host and the plain deploy fails at the pull. It also binds ./data into the
+  checkout, which every deploy wipes. overrides/docker-compose.yml runs the
+  published hascheksolutions/pictshare:3.7.0 (the current release) with data,
+  logs and Redis on named volumes and URL set to the site's address.
+
+  First run is upstream's: anyone can upload, and the admin panel stays off,
+  until the project sets ADMIN_PASSWORD, UPLOAD_CODE or ALLOWED_SUBNET as
+  environment variables.
+
+  Measured on mariusz2.panelalpha.tools (2026-09-29, engine 705f250a): deploy
+  49s, rebuild 36s, app 28 MiB. / serves <title>PictShare - the smart CDN</title>
+  (17121 bytes); a JPEG POSTed to /api/upload returns its URL, serves back at
+  full size and as /50x50/, and still serves after a rebuild. The
+  *.panelalpha.online test edge drops multipart POSTs (engine#170), so uploads
+  were tested against the host directly.

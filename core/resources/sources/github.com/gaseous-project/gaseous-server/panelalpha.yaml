@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gaseous Server is a game ROM manager with in-browser emulation (EmulatorJS):
+  an ASP.NET app on :80 backed by MariaDB. The repository's default branch is
+  the unreleased 2.0 line and ships no database, so a plain deploy builds
+  build/Dockerfile and the app waits forever at "Startup - Waiting for
+  database...". This recipe runs upstream's image of the current release,
+  docker.io/gaseousgames/gaseousserver:v1.7.14 (2.0 is still a release
+  candidate), with MariaDB 11.4 as upstream's docker-compose.yml does. Library,
+  config and database live on named volumes that survive redeploys.
+
+  hooks/prepare.sh generates the database password once into
+  ~/.panelalpha/gaseous/db.env. Everything else is upstream's default: the
+  first visit opens Gaseous's own first-run page to create the admin account,
+  and IGDB metadata needs igdbclientid/igdbclientsecret (or
+  metadatasource=Hasheous) set in the project's environment.

@@ -1,0 +1,18 @@
+# Compose-replace: the repo has no compose file and its source build lacks the
+# frontend. Upstream's image of the latest release 0.2.0-beta.38 (the tag
+# beta-linux-x64 moves, so it is pinned by digest); settings and data on named volumes.
+services:
+  app:
+    image: uping/embystat:beta-linux-x64@sha256:d26fec3f86c2d3debd1ba29f6469d7657df50cd9ba6caf70dc5e073083a73363
+    restart: unless-stopped
+    ports:
+      - "6555:6555"
+    volumes:
+      # Settings (incl. the wizard state) live in /app/config, the database in /app/data.
+      - embystat-config:/app/config
+      - embystat-data:/app/data
+    mem_limit: 512m
+
+volumes:
+  embystat-config: {}
+  embystat-data: {}

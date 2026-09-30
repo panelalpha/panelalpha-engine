@@ -1,0 +1,35 @@
+# Compose-replace: upstream's compose builds from source (OOM in an account)
+# and adds an Ollama sidecar. Runs the published release image alone.
+services:
+  app:
+    image: ghcr.io/open-webui/open-webui:v0.11.4
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # start.sh generates the key once into this file; on the volume it survives recreates.
+      WEBUI_SECRET_KEY_FILE: /app/backend/data/.webui_secret_key
+      WEBUI_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # SQLite DB, uploads, vector store, cached embedding model and the secret key.
+      - open-webui:/app/backend/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 2g
+
+  # No-op: `compose up -d` returns once Open WebUI answers (first boot migrates and fetches the embedding model).
+  ready:
+    image: ghcr.io/open-webui/open-webui:v0.11.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  open-webui: {}

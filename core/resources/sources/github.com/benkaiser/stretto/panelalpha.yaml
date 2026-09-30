@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Stretto is a web-based music player that backs each track with a YouTube or
+  SoundCloud source, with playlist import and music discovery. It is an
+  Express + socket.io server with a webpack-built React frontend and MongoDB
+  for sessions and library sync. The repository's compose is a development
+  setup (nodemon + webpack --watch, unpinned `mongo`, whose current 8.x
+  release refuses to start on this kernel), and upstream publishes no image.
+
+  This recipe builds the repository's own Dockerfile.local (node:16 with the
+  locked dependencies), mounts the checkout next to those node_modules, and
+  runs what `npm start` does: a webpack build, then `node index.js` on :3000.
+  MongoDB is mongo:7.0 on a named volume.
+
+  Optional integrations read GOOGLE_CLIENT_ID, SPOTIFY_CLIENT_ID,
+  SPOTIFY_CLIENT_SECRET, SOUNDCLOUD_CLIENT_ID, SMTP_PASSWORD,
+  YOUTUBE_REDIRECT_ENDPOINT and SOUNDCLOUD_REDIRECT_ENDPOINT from the
+  project's environment; the player starts without them.
+
+  The image is built by a one-shot `deps` service and run by `app`, because
+  the engine refuses a service that both builds and mounts the checkout as a
+  workstation dev compose (engine#430).

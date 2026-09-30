@@ -1,0 +1,98 @@
+# Compose-replace: the repository root is the Go/TypeScript monorepo. This is
+# upstream's deploy/compose (external-TLS mode) on the published v4.19.3 images,
+# with Caddy doing upstream's Traefik routing (the engine drops traefik services).
+services:
+  proxy:
+    image: caddy:2.11.4
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./zitadel-caddy.Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      zitadel-api:
+        condition: service_healthy
+      zitadel-login:
+        condition: service_healthy
+    mem_limit: 128m
+
+  zitadel-api:
+    image: ghcr.io/zitadel/zitadel:v4.19.3
+    restart: unless-stopped
+    user: "0"
+    command: start-from-init --masterkeyFromEnv
+    env_file:
+      # ZITADEL_MASTERKEY and the database DSN; a missing file aborts `up`.
+      - ../.panelalpha/zitadel/api.env
+    environment:
+      ZITADEL_PORT: 8080
+      ZITADEL_EXTERNALDOMAIN: ${PA_PUBLIC_HOST}
+      ZITADEL_EXTERNALPORT: 443
+      ZITADEL_EXTERNALSECURE: "true"
+      ZITADEL_TLS_ENABLED: "false"
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"
+      ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH: /zitadel/bootstrap/login-client.pat
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME: login-client
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME: Automatically Initialized IAM_LOGIN_CLIENT
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE: "2099-01-01T00:00:00Z"
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "true"
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI: https://${PA_PUBLIC_HOST}/ui/v2/login/
+      ZITADEL_OIDC_DEFAULTLOGINURLV2: https://${PA_PUBLIC_HOST}/ui/v2/login/login?authRequest=
+      ZITADEL_OIDC_DEFAULTLOGOUTURLV2: https://${PA_PUBLIC_HOST}/ui/v2/login/logout?post_logout_redirect=
+      ZITADEL_SAML_DEFAULTLOGINURLV2: https://${PA_PUBLIC_HOST}/ui/v2/login/login?samlRequest=
+    healthcheck:
+      test: ["CMD", "/app/zitadel", "ready"]
+      interval: 10s
+      timeout: 30s
+      retries: 12
+      start_period: 20s
+    volumes:
+      # The login UI's service-account token, written on first init.
+      - zitadel-bootstrap:/zitadel/bootstrap:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 768m
+
+  zitadel-login:
+    image: ghcr.io/zitadel/zitadel-login:v4.19.3
+    restart: unless-stopped
+    user: "0"
+    env_file:
+      - ../.panelalpha/zitadel/login.env
+    environment:
+      ZITADEL_API_URL: http://zitadel-api:8080
+      NEXT_PUBLIC_BASE_PATH: /ui/v2/login
+      ZITADEL_SERVICE_USER_TOKEN_FILE: /zitadel/bootstrap/login-client.pat
+      CUSTOM_REQUEST_HEADERS: Host:${PA_PUBLIC_HOST},X-Forwarded-Proto:https
+    healthcheck:
+      test: ["CMD", "/bin/sh", "-c", "node /app/healthcheck.mjs http://localhost:3000/ui/v2/login/healthy"]
+      interval: 10s
+      timeout: 30s
+      retries: 12
+      start_period: 20s
+    volumes:
+      - zitadel-bootstrap:/zitadel/bootstrap:ro
+    depends_on:
+      zitadel-api:
+        condition: service_healthy
+    mem_limit: 512m
+
+  postgres:
+    image: postgres:17.10-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/zitadel/db.env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d zitadel -U postgres"]
+      interval: 10s
+      timeout: 30s
+      retries: 10
+      start_period: 20s
+    volumes:
+      - postgres-data:/var/lib/postgresql/data:rw
+    mem_limit: 512m
+
+volumes:
+  postgres-data: {}
+  zitadel-bootstrap: {}

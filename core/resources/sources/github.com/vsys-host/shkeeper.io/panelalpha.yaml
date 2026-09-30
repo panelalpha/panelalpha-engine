@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SHKeeper is a self-hosted crypto payment gateway (Flask, SQLite). This
+  recipe runs the gateway itself from upstream's published image
+  vsyshost/shkeeper:2.5.32, the version its Helm chart pins and the image of
+  the repository's HEAD, with the SQLite database and session files on the
+  shkeeper-instance named volume.
+
+  GATEWAY ONLY, NO COINS. Upstream installs with k3s + Helm; every coin is a
+  separate wallet server (e.g. vsyshost/bitcoin-shkeeper with a Celery worker
+  and MariaDB) talking to a full node or a remote RPC. None of that runs here:
+  hooks/prepare.sh defaults BTC_WALLET, LTC_WALLET and DOGE_WALLET (on unless
+  disabled) to `disabled` in .env, and every other coin is opt-in, so the
+  gateway starts with an empty wallet list (/api/v1/crypto answers
+  `"crypto":[]`) and accepts no payments until the owner points it at coin
+  backends they run elsewhere, through panel env vars such as
+  BTC_WALLET=enabled and BTC_API_SERVER_HOST / BTC_SERVER_PORT /
+  BTC_USERNAME / BTC_PASSWORD (shkeeper/modules/classes/btc.py).
+
+  CLOSED FIRST RUN. create_app() inserts a passwordless "admin", and /login
+  sends every visitor to /set-password until one sets it (shkeeper/auth.py),
+  so the first visitor would own the gateway. A one-shot `seed` service runs
+  create_app() and sets the generated password before the app is published.
+  /metrics uses HTTP Basic that defaults to shkeeper/shkeeper; METRICS_USERNAME
+  and METRICS_PASSWORD are generated. SECRET_KEY is fixed so a restart does
+  not log everyone out, and an instance config.py marks the session cookie
+  Secure (the engine serves HTTPS).
+
+  SECRETS. hooks/prepare.sh writes SECRET_KEY, the metrics credentials and the
+  admin password once to ~/.panelalpha/shkeeper/ (0600 in 0700) with a
+  credentials.txt note. A no-op `ready` service gates the deploy on /login.

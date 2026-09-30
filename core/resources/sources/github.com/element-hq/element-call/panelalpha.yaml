@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Element Call, the Matrix group video-call web app (a static SPA served by
+  nginx). The repository has no deployment compose, so the engine compiled it
+  on the host with Vite, where pnpm (under corepack) fails to prepare the
+  git-hosted matrix-js-sdk dependency. This recipe runs the published
+  ghcr.io/element-hq/element-call image of the current release (v0.26.1)
+  instead. The app needs a Matrix homeserver in its config.json: a one-shot
+  service fails the deploy while ELEMENT_CALL_HOMESERVER_URL is unset and
+  otherwise writes config.json onto a named volume that nginx serves.

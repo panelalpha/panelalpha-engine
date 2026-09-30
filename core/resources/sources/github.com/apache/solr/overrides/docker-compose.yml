@@ -1,0 +1,32 @@
+# The repo is a Gradle source tree with no container setup; this runs the
+# official image of the current release (10.0.0), as upstream's Docker docs do.
+services:
+  app:
+    image: solr:10.0.0
+    restart: unless-stopped
+    volumes:
+      # Cores/collections, logs and solr.xml (SOLR_HOME is /var/solr/data).
+      - solr:/var/solr
+    ports:
+      - "8983:8983"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8983/solr/admin/info/system"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    # 512 MB heap plus off-heap: ~705 MB measured with one collection.
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once Solr answers.
+  ready:
+    image: solr:10.0.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  solr: {}

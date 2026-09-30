@@ -1,0 +1,31 @@
+# Layers over the repo's compose: /data on a named volume instead of the ./data
+# bind mount (root-owned in the account, so both uid-1000 services died on
+# "Permission denied: '/data/backups'"), and a check for the Telegram API login.
+services:
+  telegram-backup:
+    volumes:
+      - tg_data:/data
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+
+  telegram-viewer:
+    volumes:
+      - tg_data:/data
+
+  # Fails `compose up` (and so the deploy) while the Telegram login is unset.
+  env-check:
+    image: drumsergio/telegram-archive-viewer:8.17.0
+    restart: "no"
+    user: "1000:1000"
+    entrypoint: ["/bin/sh", "/telegram-archive-env-check.sh"]
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_PHONE: ${TELEGRAM_PHONE:-}
+    volumes:
+      - ./telegram-archive-env-check.sh:/telegram-archive-env-check.sh:ro
+    mem_limit: 32m
+
+volumes:
+  tg_data: {}

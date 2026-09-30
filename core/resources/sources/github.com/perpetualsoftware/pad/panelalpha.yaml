@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Pad, a project-management / issue tracker for humans and AI agents: one Go
+  server with an embedded web UI on :7777, PostgreSQL and Redis. The
+  repository's docker-compose.yml builds the image from source (a Node web
+  build plus a Go build) and requires PAD_ENCRYPTION_KEY as a 64-character hex
+  string; the plain deploy fills it with the engine's 48-character generated
+  secret (engine#338), so Pad exits with "encryption key must be a
+  64-character hex string" and restarts forever.
+
+  This recipe runs upstream's three services on the published image of the
+  current release (ghcr.io/perpetualsoftware/pad:0.16.1, postgres:17-alpine,
+  redis:7-alpine). hooks/prepare.sh generates the 64-hex encryption key once
+  into ~/.panelalpha/pad/ (reused by every redeploy, since it encrypts stored
+  data); the database password is generated per account by the engine. PAD_URL
+  is the site's address. Data on the pad-data, pg-data and redis-data volumes.
+  A health-check gate makes the deploy wait until Pad answers. First run is as
+  upstream ships it: the first visit opens Pad's first-admin setup.

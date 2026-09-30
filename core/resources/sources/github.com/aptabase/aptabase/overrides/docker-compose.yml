@@ -1,0 +1,80 @@
+# Upstream's self-hosting compose (github.com/aptabase/self-hosting) with the
+# image pinned, BASE_URL set to the site's address and secrets from ~/.panelalpha.
+services:
+  aptabase_db:
+    image: postgres:15-alpine
+    restart: always
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    env_file:
+      - ../.panelalpha/aptabase/db.env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aptabase"]
+      interval: 5s
+      retries: 30
+
+  aptabase_events_db:
+    image: clickhouse/clickhouse-server:23.8.4.69-alpine
+    restart: always
+    volumes:
+      - events-db-data:/var/lib/clickhouse
+    env_file:
+      - ../.panelalpha/aptabase/events.env
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      retries: 30
+
+  aptabase:
+    # `main` at HEAD f5b48b28 (2026-09-13); upstream publishes no version tags.
+    image: ghcr.io/aptabase/aptabase@sha256:776a62e0f01384f1c18846d99c4198b7c4beb43fcd9e1c02243a07e992f4d099
+    restart: always
+    depends_on:
+      aptabase_db:
+        condition: service_healthy
+      aptabase_events_db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      # ASP.NET keys behind the login cookie; without this a redeploy signs everyone out.
+      - aspnet-keys:/root/.aspnet/DataProtection-Keys
+    env_file:
+      - ../.panelalpha/aptabase/app.env
+    environment:
+      BASE_URL: ${PA_PUBLIC_URL}
+      # Optional, passed through from the project's env vars.
+      SMTP_HOST:
+      SMTP_PORT:
+      SMTP_USERNAME:
+      SMTP_PASSWORD:
+      SMTP_FROM_ADDRESS:
+      OAUTH_GITHUB_CLIENT_ID:
+      OAUTH_GITHUB_CLIENT_SECRET:
+      OAUTH_GOOGLE_CLIENT_ID:
+      OAUTH_GOOGLE_CLIENT_SECRET:
+    healthcheck:
+      # The aspnet image has no curl/wget; bash's /dev/tcp probes /healthz.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /healthz HTTP/1.0\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
+      interval: 5s
+      retries: 60
+      start_period: 30s
+
+  # No-op gate: `compose up -d` returns only once the app answers.
+  ready:
+    image: postgres:15-alpine
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      aptabase:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db-data:
+  events-db-data:
+  aspnet-keys:

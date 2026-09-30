@@ -1,0 +1,92 @@
+# FlowFuse from its published image with Postgres (the image carries no SQLite
+# binding) and the localfs driver: Node-RED instances run as child processes of
+# the forge container instead of containers started over a Docker socket.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: forge
+      POSTGRES_DB: flowforge
+    env_file:
+      - ../.panelalpha/flowfuse/db.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forge -d flowforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  # Installs the Node-RED stack the localfs driver needs; the setup wizard
+  # fails with "No Stacks found" without one. Skipped once it is on the volume.
+  stack:
+    image: flowfuse/forge-docker:3.1.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        d=/usr/src/forge/var/stacks/$$NR_VERSION
+        [ -f "$$d/node_modules/node-red/package.json" ] && exit 0
+        rm -rf "$$d.tmp" && mkdir -p "$$d.tmp"
+        npm install --prefix "$$d.tmp" --no-audit --no-fund "node-red@$$NR_VERSION"
+        rm -rf "$$d" && mv "$$d.tmp" "$$d"
+    environment:
+      NR_VERSION: "4.1.15"
+    volumes:
+      - forge-var:/usr/src/forge/var
+    mem_limit: 768m
+
+  forge:
+    image: flowfuse/forge-docker:3.1.0
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    # The config file carries the public address, so it is written at start.
+    command:
+      - |
+        set -e
+        (umask 077; printf '%s\n' \
+          'port: 3000' 'host: 0.0.0.0' \
+          "base_url: $$PA_PUBLIC_URL" 'api_url: http://127.0.0.1:3000' \
+          'db:' '  type: postgres' '  host: postgres' '  user: forge' \
+          '  database: flowforge' "  password: $$FF_DB_PASSWORD" \
+          'driver:' '  type: localfs' \
+          'email:' '  enabled: false' \
+          > /usr/src/forge/etc/flowforge.yml)
+        exec ./node_modules/.bin/flowforge
+    environment:
+      PA_PUBLIC_URL: ${PA_PUBLIC_URL}
+    env_file:
+      - ../.panelalpha/flowfuse/forge.env
+    ports:
+      - "3000:3000"
+    volumes:
+      - forge-var:/usr/src/forge/var
+    depends_on:
+      postgres:
+        condition: service_healthy
+      stack:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/v1/settings || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1536m
+
+  # No-op: holds `compose up -d` until the forge answers.
+  ready:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      forge:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}
+  forge-var: {}

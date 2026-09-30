@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Notifuse, a self-hosted newsletter, email marketing and transactional email
+  platform (Go + PostgreSQL). The repository's compose builds the Dockerfile,
+  whose console `vite build` was killed for memory after ~17 minutes. This
+  recipe runs upstream's published image notifuse/notifuse of the current
+  release (v41.0) with postgres:17-alpine, as the repository's compose.yaml
+  lays it out, with SECRET_KEY and the database password generated once into
+  ~/.panelalpha/notifuse. Notifuse's own setup wizard (root email, API
+  endpoint, SMTP) is left as upstream ships it.

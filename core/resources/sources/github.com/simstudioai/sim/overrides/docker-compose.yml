@@ -1,0 +1,126 @@
+# Upstream's docker-compose.prod.yml pinned to the current release, with secrets
+# from ~/.panelalpha (hooks/prepare.sh) and an nginx front routing /socket.io/ to
+# realtime, so the browser's same-origin socket fallback works. Only nginx publishes.
+x-sim-env: &sim-env
+  NODE_ENV: production
+  NEXT_PUBLIC_APP_URL: ${PA_PUBLIC_URL}
+  BETTER_AUTH_URL: ${PA_PUBLIC_URL}
+  # The engine's proxy and nginx are private hops; the client is the hop before them.
+  AUTH_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  REDIS_URL: redis://redis:6379
+
+services:
+  simstudio:
+    image: ghcr.io/simstudioai/simstudio:v0.9.6
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/sim/app.env
+    environment:
+      <<: *sim-env
+      SOCKET_SERVER_URL: http://realtime:3002
+      OLLAMA_URL: ${OLLAMA_URL:-http://localhost:11434}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+      realtime:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 2048m
+
+  realtime:
+    image: ghcr.io/simstudioai/realtime:v0.9.6
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/sim/app.env
+    environment:
+      <<: *sim-env
+    # Upstream starts realtime beside the migrations; it then fails its schema
+    # check once ("incompatible with the live database schema") and restarts.
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 512m
+
+  migrations:
+    image: ghcr.io/simstudioai/migrations:v0.9.6
+    working_dir: /app/packages/db
+    env_file:
+      - ../.panelalpha/sim/app.env
+    command: ["bun", "run", "db:migrate"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 512m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  cron:
+    image: ghcr.io/simstudioai/cron:v0.9.6
+    restart: on-failure
+    env_file:
+      - ../.panelalpha/sim/app.env
+    environment:
+      SIM_URL: http://simstudio:3000
+      TZ: ${TZ:-UTC}
+    depends_on:
+      simstudio:
+        condition: service_healthy
+    mem_limit: 64m
+
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/sim/app.env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: simstudio
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  nginx:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./sim-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      simstudio:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  postgres_data:

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Coral, a commenting platform (Node.js) on MongoDB and Redis. The
+  repository's Dockerfile builds the whole monorepo from source and fails
+  at HEAD (redis-memory-server's postinstall, a test dependency, cannot build
+  its Redis modules: "Cannot find readies root"), and its docker-compose.yml is a
+  development file that only starts Redis and MongoDB 8.0.3, which refuses
+  this kernel (engine#146).
+
+  This recipe runs the published release image coralproject/talk:9.11.8 on
+  :5000 with mongo:7.0 and redis:7.2 on named volumes. hooks/prepare.sh
+  generates SIGNING_SECRET once into ~/.panelalpha/coral/ (a new one would
+  sign out every user). TRUST_PROXY=1 trusts only the engine's own hop, so
+  generated URLs are https and the client address is the proxy-added one.
+  First run is upstream's /install wizard. A health gate makes the deploy
+  wait for /api/health.

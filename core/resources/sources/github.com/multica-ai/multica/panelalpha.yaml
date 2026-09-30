@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Multica, a workspace where AI coding agents and people share an issue
+  board: a Go API/WebSocket backend on :8080, a Next.js web UI on :3000 and
+  PostgreSQL with pgvector. The plain deploy builds only the repository's
+  Dockerfile (the backend) and adds postgres and backend from
+  docker-compose.selfhost.yml, never the frontend, so the site answers the
+  API's "404 page not found"; an earlier run on a smaller account was also
+  OOM-killed in `go build`.
+
+  This recipe runs upstream's self-host compose with the published v0.6.0
+  release images (ghcr.io/multica-ai/multica-backend and multica-web), only
+  the web UI published, the backend told the site address
+  (FRONTEND_ORIGIN, CORS_ALLOWED_ORIGINS, MULTICA_APP_URL), and the
+  Postgres password and JWT_SECRET generated once into ~/.panelalpha/multica.
+  Database and uploads are on named volumes. Everything else is upstream's
+  default: sign-up is open, and without RESEND_API_KEY or SMTP_* the login
+  code is printed to the backend log, as upstream documents.

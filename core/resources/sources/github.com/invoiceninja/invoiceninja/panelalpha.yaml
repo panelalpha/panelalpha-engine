@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Invoice Ninja v5, invoicing and billing (Laravel, php-fpm with queue workers
+  and the scheduler under supervisord, Chrome for PDFs). Deployed from source
+  the engine detects Laravel and fails before start: it re-serialises
+  .env.example's single-quoted COMPOSER_AUTH='{... "${{ secrets.GITHUB_TOKEN }}"}'
+  into double quotes, and compose rejects it as an invalid template
+  (engine#326). This recipe runs upstream's own Docker setup
+  (invoiceninja/dockerfiles, debian): the official
+  invoiceninja/invoiceninja-debian image of the current release, 5.13.43,
+  behind nginx, with MySQL 8 and Redis, public/ and storage/ on named volumes.
+  The prepare hook generates APP_KEY and the database passwords once into
+  ~/.panelalpha/invoiceninja/secrets.env, and writes a ~/project/.env without
+  secrets so the repository's .env.example is not used (the image does not
+  read it). On first start the image's init.sh creates the first account from
+  IN_USER_EMAIL and IN_PASSWORD and exits without them, so a one-shot check
+  fails the deploy naming whichever of the two project env vars is missing.

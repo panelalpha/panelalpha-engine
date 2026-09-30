@@ -1,0 +1,29 @@
+# Run the app's `start` subcommand and put its HTTP (4326) and WebSocket (4327)
+# ports behind one published port.
+services:
+  app:
+    command:
+      - sh
+      - -c
+      - |
+        export RWA_WEBSOCKET_URL_SSL="wss://$${SERVERNAME}/websocket"
+        [ -d public/widgets/rwa-console ] || timeout 180 node src/main.js install-core-widgets || true
+        exec node src/main.js start
+    volumes:
+      - rcon-db:/app/db
+      - rcon-widgets:/app/public/widgets
+
+  # Shares the app's network namespace, so it answers on the app's port 3000.
+  web:
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    restart: unless-stopped
+    network_mode: "service:app"
+    volumes:
+      - ./panelalpha/rcon-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+    mem_limit: 48m
+
+volumes:
+  rcon-db:
+  rcon-widgets:

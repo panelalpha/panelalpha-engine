@@ -1,0 +1,96 @@
+# Upstream's OpenAI-compatible topology (docker-compose.yml + docker-compose.openai.yml:
+# Rails, Solid Queue, Postgres, no local generator) on the v2.3.2 release images
+# instead of :latest, uploads and the database on named volumes (the repo binds
+# them into ~/project, wiped on every deploy), and the public host allowed by Rails.
+services:
+  meme_search_uploads_setup:
+    image: alpine:3.20
+    command: ["sh", "-c", "chown -R 1000:1000 /direct-uploads && chmod -R u+rwX /direct-uploads"]
+    volumes:
+      - direct_uploads:/direct-uploads
+    mem_limit: 32m
+
+  meme_search:
+    image: ghcr.io/neonwatty/meme_search:v2.3.2
+    container_name: meme_search
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/meme-search/app.env
+    environment:
+      # The local generator needs more than the account's 4 GB (OOM at 3.1 GB).
+      IMAGE_DESCRIPTION_PROVIDER: openai
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-}
+      MEME_SEARCH_ALLOWED_HOSTS: ${PA_PUBLIC_HOST}
+    ports:
+      - "3000:3000"
+    depends_on:
+      meme_search_uploads_setup:
+        condition: service_completed_successfully
+      meme_search_db:
+        condition: service_healthy
+    volumes:
+      - ./meme_search/memes/:/rails/public/memes
+      - direct_uploads:/rails/public/memes/direct-uploads
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/up"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 768m
+
+  meme_search_jobs:
+    image: ghcr.io/neonwatty/meme_search:v2.3.2
+    container_name: meme_search_jobs
+    restart: unless-stopped
+    command: ./bin/jobs
+    env_file:
+      - ../.panelalpha/meme-search/app.env
+    environment:
+      IMAGE_DESCRIPTION_PROVIDER: openai
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-}
+    depends_on:
+      meme_search_uploads_setup:
+        condition: service_completed_successfully
+      meme_search_db:
+        condition: service_healthy
+    volumes:
+      - ./meme_search/memes/:/rails/public/memes
+      - direct_uploads:/rails/public/memes/direct-uploads
+    mem_limit: 768m
+
+  meme_search_db:
+    image: pgvector/pgvector:pg17
+    container_name: meme-search-db
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/meme-search/db.env
+    environment:
+      POSTGRES_DB: meme_search
+      POSTGRES_USER: postgres
+    volumes:
+      - meme_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns once Rails answers /up.
+  ready:
+    image: alpine:3.20
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      meme_search:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  direct_uploads: {}
+  meme_db: {}

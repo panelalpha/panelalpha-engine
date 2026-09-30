@@ -1,0 +1,59 @@
+# The repo's compose is a devcontainer. This runs upstream's release image as
+# the installation docs' compose example, UI on the authenticated port 8971.
+services:
+  # Frigate's default config plus `tls: enabled: false`, written only when none
+  # exists: 8971 is otherwise self-signed TLS, which the proxy cannot reach.
+  config:
+    image: ghcr.io/blakeblackshear/frigate:0.18.0
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        [ -e /config/config.yml ] || [ -e /config/config.yaml ] && exit 0
+        cd /opt/frigate && python3 -c 'from frigate.config.config import DEFAULT_CONFIG; open("/config/config.yml", "w").write(DEFAULT_CONFIG + "\ntls:\n  enabled: false\n")'
+    volumes:
+      - config:/config
+    mem_limit: 512m
+
+  app:
+    image: ghcr.io/blakeblackshear/frigate:0.18.0
+    restart: unless-stopped
+    stop_grace_period: 30s
+    shm_size: 512m
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      - config:/config
+      - media:/media/frigate
+      - type: tmpfs
+        target: /tmp/cache
+        tmpfs:
+          size: 1000000000
+    ports:
+      - "8971:8971"
+    depends_on:
+      config:
+        condition: service_completed_successfully
+    healthcheck:
+      # The internal port 5000 is not published; it answers without auth.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:5000/api/version"]
+      interval: 5s
+      timeout: 5s
+      retries: 90
+      start_period: 30s
+    mem_limit: 2g
+
+  # No-op gate: `compose up -d` returns only once Frigate answers.
+  ready:
+    image: ghcr.io/blakeblackshear/frigate:0.18.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  media: {}

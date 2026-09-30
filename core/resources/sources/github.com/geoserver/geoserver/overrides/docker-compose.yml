@@ -1,0 +1,41 @@
+# The repo is the Maven source tree with no container setup (the Docker
+# packaging is the separate geoserver/docker repo); this runs its published
+# image of the current release, 3.0.1.
+services:
+  app:
+    image: docker.osgeo.org/geoserver:3.0.1
+    restart: unless-stopped
+    environment:
+      # "/" answers 404 without this; redirect it to the web admin.
+      ROOT_WEBAPP_REDIRECT: "true"
+      # Behind the engine's TLS proxy: absolute links and the Wicket CSRF
+      # origin check must use the public address.
+      PROXY_BASE_URL: ${PA_PUBLIC_URL}/geoserver
+      GEOSERVER_CSRF_WHITELIST: ${PA_PUBLIC_HOST}
+    volumes:
+      # Data directory (catalog, styles, security); seeded with upstream's
+      # demo data on first start.
+      - data:/opt/geoserver_data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # The image's own healthcheck URL, probed more often than its 1 minute.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/geoserver/web/wicket/resource/org.geoserver.web.GeoServerBasePage/img/logo.png"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    mem_limit: 2g
+
+  # No-op gate: `compose up -d` returns only once GeoServer answers.
+  ready:
+    image: docker.osgeo.org/geoserver:3.0.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

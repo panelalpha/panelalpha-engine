@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  FHEM is a Perl home-automation server (lights, heating, sensors, logging)
+  with the FHEMWEB web UI. The listed upstream is svn.fhem.de; this recipe
+  applies to its git mirror, github.com/fhem/fhem-mirror, which is a source
+  tree with no container build. It runs upstream's recommended minimal image
+  ghcr.io/fhem/fhem-minimal-docker:5.4.0-bookworm (the current image
+  release): on the first start the image installs FHEM from svn.fhem.de
+  trunk into /opt/fhem, which is a named volume, so fhem.cfg, logs and
+  device state survive a redeploy. FHEMWEB listens on 8083; the image's own
+  health check gates the deploy.
+
+  FHEM's first-start config is upstream's: FHEMWEB with no password, which
+  FHEM itself flags in its security warning. Hardware interfaces (USB/serial
+  sticks, Bluetooth, GPIO) and LAN discovery of devices in a home network are
+  not available inside the account; network-reachable devices and cloud APIs
+  work.

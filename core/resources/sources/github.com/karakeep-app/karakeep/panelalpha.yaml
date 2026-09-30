@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Karakeep (formerly Hoarder), a bookmark-everything app with full-text search,
+  page crawling and optional AI tagging. The repository has no root compose
+  file, so the engine builds docker/Dockerfile, whose last stage is the MCP
+  server: it exits 0 at once and the deploy restart-loops with no output.
+
+  This recipe runs upstream's docker/docker-compose.yml with pinned images of
+  the current release: ghcr.io/karakeep-app/karakeep:0.33.2 (web + workers,
+  SQLite in /data), karakeep-chrome:151.0.7922.47-r1 for crawling and
+  getmeili/meilisearch:v1.41.0 for search, on named volumes. NEXTAUTH_URL is
+  the site's own address. NEXTAUTH_SECRET and MEILI_MASTER_KEY are generated
+  once into ~/.panelalpha/karakeep. The first account registered becomes the
+  admin, as upstream ships it; AI tagging needs OPENAI_API_KEY (or an Ollama
+  address) set as a project env var and is off without it.

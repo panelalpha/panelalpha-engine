@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  tinyfeed, a Go CLI that aggregates RSS/Atom/JSON feeds into one static HTML
+  page. It does not run a web server, and without an input list it reads
+  feeds from stdin and exits, so the plain deploy (the Go build of the repo)
+  never answers.
+
+  This recipe is the setup upstream documents in docs/docker.md: the
+  published image of the current release (thebigroomxxl/tinyfeed:v1.5.0) in
+  daemon mode regenerating index.html, and Caddy (caddy:2.11.4-alpine) serving
+  it on :8080. The customer lists the feeds in TINYFEED_FEEDS (URLs separated
+  by spaces or commas); a one-shot init service writes it to feeds.txt on
+  every deploy and fails the deploy when it is empty. Optional
+  TINYFEED_NAME sets the page title (default "Feed") and TINYFEED_INTERVAL
+  the refresh period in minutes (default 60). The page and the list live on
+  a named volume.

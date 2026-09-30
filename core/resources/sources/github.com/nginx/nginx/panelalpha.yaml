@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  NGINX, the HTTP and reverse proxy server. The repository is the C source
+  with no deployment files; the plain deploy detected "Unknown", fell back to
+  the engine placeholder and served "PanelAlpha — Project not configured".
+  This recipe runs the official nginx image of the current release (1.31.6,
+  mainline, alpine) on container port 80. The document root
+  /usr/share/nginx/html and the server config /etc/nginx/conf.d are named
+  volumes, seeded from the image on first start and kept across redeploys.
+extends: compose
+# nginx's welcome page is this application's own first page, which the stock
+# default-page check exists to fail; a 5xx or no answer still fails the deploy.
+check_skip:
+  - check: _baseline/not-a-stock-default-page
+    reason: 'This project is nginx itself: "Welcome to nginx!" is the application answering, until the owner replaces the content in the nginx-html volume.'
+    covered_by: _baseline/no-server-error

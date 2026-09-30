@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Twenty, an open-source CRM (NestJS server that also serves the React app on
+  :3000, a BullMQ worker, PostgreSQL and Redis). The repository root is the
+  whole Nx/yarn monorepo, so detection read it as a Next.js app and the host
+  compile died in `yarn install`; upstream's deployment is
+  packages/twenty-docker/docker-compose.yml on the published image. This recipe
+  runs that topology on the current release (twentycrm/twenty:v2.43.0,
+  postgres:16, redis:8) with SERVER_URL set to the account's address and the
+  database password and ENCRYPTION_KEY generated once into ~/.panelalpha/twenty.
+  Files stay on the local-storage volume shared by server and worker. The
+  first visitor creates the workspace through Twenty's own sign-up, as
+  upstream ships it. Give the account 4096 MB: server and worker together use
+  about 1.3-1.6 GB at idle.

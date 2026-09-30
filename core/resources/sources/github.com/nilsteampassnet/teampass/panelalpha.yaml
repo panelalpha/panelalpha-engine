@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Teampass, a collaborative password manager (PHP-FPM + nginx) on MariaDB.
+  The plain deploy builds the root Dockerfile alone: its entrypoint waits for
+  a database at db:3306 that does not exist, so nothing ever answers. This
+  recipe is upstream's own docker/docker-compose/docker-compose.yml: the
+  official teampass/teampass image of the current release (3.2.2.5) with
+  MariaDB 11.4 (upstream's sql_mode=NO_ENGINE_SUBSTITUTION from
+  docker/mariadb/custom.cnf passed on the command line), and the same named
+  volumes for the saltkey, files, uploads, install state (settings.php,
+  csrfp.config.php) and the master key, so an installed instance survives
+  redeploys. hooks/prepare.sh generates the database passwords once into
+  ~/.panelalpha/teampass/ (db.env, app.env; 0600 in 0700). INSTALL_MODE stays
+  upstream's `manual`: the first visit is Teampass's web installer at
+  /install/install.php, which asks for host `db`, port 3306, database and
+  user `teampass`, prefix `teampass_` and the MARIADB_PASSWORD from
+  ~/.panelalpha/teampass/db.env. A `ready` service gates on nginx /health.

@@ -1,0 +1,48 @@
+# Layered over the laravel strategy's compose (service `app`) and the services
+# it keeps from the repo's Laravel Sail workstation stack (mysql, redis,
+# elasticsearch).
+services:
+  # Sail mounts vendor/laravel/sail's test-database script, but Sail is a dev
+  # dependency and is not installed, so MySQL would source a missing path
+  # (engine#439).
+  mysql:
+    volumes: !override
+      - sail-mysql:/var/lib/mysql
+
+  # Bagisto only uses Elasticsearch when an admin switches catalog search to
+  # it (default: database), and its memlock ulimit cannot be set in an account
+  # (engine#346), so it is a one-shot no-op.
+  elasticsearch:
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    ulimits: !reset {}
+    environment: !reset []
+    mem_limit: 32m
+
+  # One-shot: seeds the volume with the repo's storage/app (import samples)
+  # without overwriting, and hands it to the account uid the app runs as.
+  storage-init:
+    image: alpine:3.22
+    restart: "no"
+    volumes:
+      - ./artisan:/owner-ref:ro
+      - ./storage/app:/seed:ro
+      - bagisto-storage:/data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # tar -k keeps files already there (it exits 1 when it skips one).
+        tar -C /seed -cf - . | tar -C /data -xkf - 2>/dev/null || true
+        chown -R "$$(stat -c %u:%g /owner-ref)" /data
+    mem_limit: 32m
+
+  app:
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
+    volumes:
+      # Product, category and theme images survive a redeploy.
+      - bagisto-storage:/app/storage/app
+
+volumes:
+  bagisto-storage: {}

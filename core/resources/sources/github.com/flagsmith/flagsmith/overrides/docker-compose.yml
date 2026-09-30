@@ -1,0 +1,73 @@
+# Upstream docker-compose.yml on a pinned release. The secrets come from
+# ~/.panelalpha/flagsmith/secrets.env instead of the published `password`.
+# The account address is set per service: the engine substitutes it only
+# inside a service's environment, not in this anchor.
+x-flagsmith-env: &flagsmith-env
+  USE_POSTGRES_FOR_ANALYTICS: "true"
+  ENVIRONMENT: production
+  DJANGO_ALLOWED_HOSTS: "*"
+  TASK_RUN_METHOD: TASK_PROCESSOR
+  PROMETHEUS_ENABLED: "true"
+
+services:
+  postgres:
+    image: postgres:15.5-alpine
+    restart: unless-stopped
+    env_file: ../.panelalpha/flagsmith/secrets.env
+    environment:
+      POSTGRES_DB: flagsmith
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d flagsmith -U postgres"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  migrate-db:
+    image: flagsmith/flagsmith:2.277.0
+    command: ["migrate"]
+    restart: "no"
+    # DATABASE_URL and DJANGO_SECRET_KEY (hooks/prepare.sh).
+    env_file: ../.panelalpha/flagsmith/secrets.env
+    environment:
+      <<: *flagsmith-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 512m
+
+  flagsmith:
+    image: flagsmith/flagsmith:2.277.0
+    command: ["serve"]
+    restart: unless-stopped
+    env_file: ../.panelalpha/flagsmith/secrets.env
+    environment:
+      <<: *flagsmith-env
+      FLAGSMITH_DOMAIN: ${PA_PUBLIC_HOST}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate-db:
+        condition: service_completed_successfully
+    mem_limit: 768m
+
+  flagsmith-task-processor:
+    image: flagsmith/flagsmith:2.277.0
+    command: ["run-task-processor"]
+    restart: unless-stopped
+    env_file: ../.panelalpha/flagsmith/secrets.env
+    environment:
+      <<: *flagsmith-env
+      FLAGSMITH_DOMAIN: ${PA_PUBLIC_HOST}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+    depends_on:
+      migrate-db:
+        condition: service_completed_successfully
+    mem_limit: 512m
+
+volumes:
+  pgdata: {}

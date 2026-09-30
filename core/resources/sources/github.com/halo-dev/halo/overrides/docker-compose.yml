@@ -1,0 +1,64 @@
+# The repo's Dockerfile only packages a jar built beforehand (build/libs), and
+# there is no compose file; this runs upstream's published image of the
+# current release on PostgreSQL, as upstream's Docker Compose guide does.
+services:
+  db:
+    image: docker.io/library/postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/halo/db.env
+    environment:
+      POSTGRES_DB: halo
+      POSTGRES_USER: halo
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U halo -d halo -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 384m
+
+  app:
+    image: docker.io/halohub/halo:2.26.1
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/halo/db.env
+    environment:
+      SPRING_R2DBC_URL: r2dbc:pool:postgresql://db/halo
+      SPRING_R2DBC_USERNAME: halo
+      SPRING_SQL_INIT_PLATFORM: postgresql
+      HALO_EXTERNAL_URL: ${PA_PUBLIC_URL}
+      JVM_OPTS: -Xmx512m
+    volumes:
+      # Themes, plugins, attachments, indices and keys (HALO_WORK_DIR).
+      - halo:/root/.halo2
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/actuator/health/readiness"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 30s
+    mem_limit: 1280m
+
+  # No-op gate: `compose up -d` returns only once Halo is ready. The halo image,
+  # as postgres declares a VOLUME and would leave one behind on every deploy.
+  ready:
+    image: docker.io/halohub/halo:2.26.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  halo: {}

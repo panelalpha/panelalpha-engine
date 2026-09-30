@@ -1,0 +1,60 @@
+# Compose-replace: the repository ships only a source-build Dockerfile, which
+# starts the GUI with no password. This runs the official image of the current
+# release:
+#   - /var/syncthing (keys, config.xml, database, synced folders) on a named volume
+#   - the GUI login is written by `seed` BEFORE the app publishes its port
+services:
+  # One-shot: creates keys and config.xml on first run and sets the GUI user and
+  # bcrypt password; leaves an existing password alone. No port.
+  seed:
+    image: syncthing/syncthing:2.1.5
+    restart: "no"
+    entrypoint: ["/bin/entrypoint.sh", "/bin/sh", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/syncthing/admin.env
+    volumes:
+      - data:/var/syncthing
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    mem_limit: 128m
+
+  app:
+    image: syncthing/syncthing:2.1.5
+    restart: unless-stopped
+    hostname: syncthing
+    env_file:
+      - .env
+    environment:
+      # Runtime override of config.xml's 127.0.0.1:8384. Syncthing's Host-header
+      # check only applies to a localhost GUI address, so the public domain works.
+      STGUIADDRESS: 0.0.0.0:8384
+      STNOUPGRADE: "1"
+      TZ: Etc/UTC
+    volumes:
+      - data:/var/syncthing
+    # Only the GUI is published. Sync (22000/tcp+udp) is not reachable from
+    # outside; peers connect through the public relay pool instead.
+    ports:
+      - "8384:8384"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8384/rest/noauth/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the GUI answers.
+  ready:
+    image: syncthing/syncthing:2.1.5
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

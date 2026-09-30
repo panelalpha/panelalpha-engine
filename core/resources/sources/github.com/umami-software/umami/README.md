@@ -1,7 +1,9 @@
 # Umami for PanelAlpha Engine
 
 Umami ships its own `docker-compose.yml` with hardcoded development credentials.
-`panelalpha-after-clone.sh` generates random secrets into a `.env` file;
+`panelalpha-after-clone.sh` generates random secrets once into
+`~/.panelalpha/umami/secrets.env` (0600 in a 0700 directory, outside `~/project`,
+which is emptied on every deploy) and copies them to `.env` on every deploy;
 `docker-compose.override.yml` (a file snippet copied verbatim) overrides those
 values and mounts the `docker/` helper directory. Docker Compose automatically
 merges the override — the upstream `docker-compose.yml` is never modified.

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Flipt v2, a git-native feature-flag server: one Go binary on :8080 serving
+  the UI, the REST/OFREP APIs and gRPC over HTTP. The repository's
+  docker-compose.yml is a developer environment (the Go server under
+  `mise run dev` and a Vite dev server, both bind-mounting the checkout), so
+  the plain deploy never serves the app.
+
+  This recipe runs the published image of the current release
+  (ghcr.io/flipt-io/flipt:v2.13.0). Upstream's default storage is in memory,
+  which a restart or redeploy wipes, so a config file points the default
+  environment at a local git repository on a named volume. Every project env
+  var reaches Flipt, so FLIPT_* settings (authentication, a remote git
+  repository to sync with, ...) go there. First run is as upstream ships it:
+  no authentication, the UI opens straight to the flags list.

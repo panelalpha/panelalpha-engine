@@ -1,0 +1,35 @@
+# The repository's docker-compose.yml is a developer environment (Go server
+# via `mise run dev` plus a Vite dev server, both bind-mounting the source).
+# This runs the published image of the current release instead.
+services:
+  flipt:
+    image: ghcr.io/flipt-io/flipt:v2.13.0
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    # FLIPT_* settings (authentication, remote git sync, ...) from the
+    # project's env vars override the config file.
+    env_file: .env
+    volumes:
+      - ./flipt-config.yml:/etc/flipt/config/default.yml:ro
+      - flipt-data:/var/opt/flipt
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Flipt answers /health.
+  ready:
+    image: ghcr.io/flipt-io/flipt:v2.13.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      flipt:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  flipt-data: {}

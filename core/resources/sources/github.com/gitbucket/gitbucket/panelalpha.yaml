@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  GitBucket, a GitHub-like Git platform (Scala, one executable WAR with embedded
+  Jetty on :8080 and an embedded H2 database). The repository is an sbt build
+  with no Dockerfile or compose file, so a plain deploy detects nothing and
+  serves the engine placeholder; the published gitbucket/gitbucket image stops
+  at 4.38.4 (2022).
+
+  This recipe follows upstream's install instructions ("download gitbucket.war
+  and run it by java -jar"): a one-shot service fetches gitbucket.war of the
+  current release (4.48.0) from the GitHub release, checks its SHA-256, and
+  the app runs it on the official eclipse-temurin:21-jre image. The WAR and
+  GITBUCKET_HOME (repositories, H2 database, settings) live on named volumes
+  that survive redeploys. The first login is upstream's own root/root.

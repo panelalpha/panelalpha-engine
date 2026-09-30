@@ -1,0 +1,45 @@
+# Layered over the engine-generated php `app` service.
+services:
+  # One-shot: upstream's npm step (install.md), which ILIAS's public/ build reads.
+  ilias-npm:
+    image: node:24.21.0-alpine
+    restart: "no"
+    user: "0"
+    working_dir: /app
+    command:
+      - sh
+      - -c
+      - npm clean-install --omit=dev --ignore-scripts --no-audit --no-fund && chown -R $$(stat -c %u:%g /app) node_modules
+    volumes:
+      - ./:/app
+    mem_limit: 768m
+
+  # One-shot: hand the volumes to the account user Apache runs as.
+  ilias-volumes:
+    image: busybox:1.37.0-musl
+    restart: "no"
+    user: "0"
+    command: ["sh", "-c", "chown $$(stat -c %u:%g /src) /v/config /v/data /v/web"]
+    volumes:
+      - ./:/src:ro
+      - ilias-config:/v/config
+      - ilias-data:/v/data
+      - ilias-web:/v/web
+    mem_limit: 32m
+
+  app:
+    depends_on:
+      ilias-npm:
+        condition: service_completed_successfully
+      ilias-volumes:
+        condition: service_completed_successfully
+    volumes:
+      - ./panelalpha-ilias/php.ini:/usr/local/etc/php/conf.d/zz-ilias.ini:ro
+      - ilias-config:/var/lib/ilias-config
+      - ilias-data:/var/lib/ilias
+      - ilias-web:/app/public/data
+
+volumes:
+  ilias-config: {}
+  ilias-data: {}
+  ilias-web: {}

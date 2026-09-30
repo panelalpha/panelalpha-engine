@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Convertigo, a low-code application platform (Java, Tomcat). The repository's
+  root pom.xml is the Eclipse Tycho build of the desktop Studio, so a plain
+  deploy runs Maven on it and fails on a missing eclipse-feature/feature.xml.
+  This recipe runs upstream's published convertigo/convertigo image of the
+  current release (8.4.5) on its port 28080, with the /workspace directory
+  (projects, configuration, logs) on a named volume that survives redeploys.
+  The admin console keeps upstream's first-run defaults.

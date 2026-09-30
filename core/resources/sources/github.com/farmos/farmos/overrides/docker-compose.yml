@@ -1,0 +1,57 @@
+# Compose-replace: upstream's docker/docker-compose.production.yml with the
+# current release image, named volumes, the DB password from ~/.panelalpha and
+# a ready gate. The plain deploy tried to build the repo as a PHP site.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/farmos/db.env
+    environment:
+      POSTGRES_USER: farm
+      POSTGRES_DB: farm
+    volumes:
+      - farmos-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "farm", "-d", "farm"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  app:
+    image: farmos/farmos:4.0.6
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      # settings.php and uploaded files (upstream's persistence advice).
+      - farmos-sites:/opt/drupal/web/sites
+      - farmos-keys:/opt/drupal/keys
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # Anonymous / is 403 once installed; /user/login answers 200 (302 to
+      # the installer before the first run).
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/user/login"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns only once Apache + PHP answer.
+  ready:
+    image: postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  farmos-db: {}
+  farmos-sites: {}
+  farmos-keys: {}

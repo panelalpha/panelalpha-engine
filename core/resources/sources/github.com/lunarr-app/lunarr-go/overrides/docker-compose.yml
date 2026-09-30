@@ -1,0 +1,46 @@
+# The repository's compose runs :latest behind its own Traefik on host ports
+# 80/443 and bind-mounts /mnt/media. This runs the current release instead:
+#   - sayem314/lunarr pinned to 0.10.0
+#   - /data (SQLite, generated auth-secret, HLS cache) and /media (local
+#     library) on named volumes
+# .env is not loaded on purpose: the engine would fill it from .env.example,
+# whose AUTH_SECRET placeholder Lunarr would accept. Unset, Lunarr generates
+# one into /data/auth-secret on first start.
+services:
+  app:
+    image: sayem314/lunarr:0.10.0
+    restart: unless-stopped
+    environment:
+      ORIGIN: ${PA_PUBLIC_URL}
+      # .env.example says ".lunarr", which the image cannot create under /app.
+      LUNARR_DATA_DIR: /data
+      # Client address for share/device-pairing rate limits: the hop the
+      # engine's proxy appended, not the visitor-supplied first entry (engine#319).
+      ADDRESS_HEADER: X-Forwarded-For
+      XFF_DEPTH: "1"
+    volumes:
+      - data:/data
+      - media:/media
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once Lunarr answers.
+  ready:
+    image: sayem314/lunarr:0.10.0
+    restart: "no"
+    command: ["node", "-e", "0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  data: {}
+  media: {}

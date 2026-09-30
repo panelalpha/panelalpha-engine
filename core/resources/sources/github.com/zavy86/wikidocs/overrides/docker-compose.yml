@@ -1,0 +1,39 @@
+# The repository's docker/compose.yml builds the backend and the Angular
+# frontend from source. This runs the published 2.0.1 image with the datasets
+# (documents, revisions, accounts, settings) on a named volume. SECRET comes
+# from ~/.panelalpha; .env (the project's environment variables) is loaded
+# after it.
+services:
+  app:
+    image: zavy86/wikidocs:2.0.1
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/wikidocs/app.env
+      - .env
+    volumes:
+      - datasets:/var/lib/wikidocs/datasets
+    ports:
+      - "3210:3210"
+    # /api/health answers 501 until the first-run setup is done, so probe the
+    # public /api/information. Slow interval: every request is logged.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3210/api/information"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+      start_interval: 2s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns only once the app answers.
+  ready:
+    image: zavy86/wikidocs:2.0.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  datasets: {}

@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Scryer, a self-hosted media manager (movies, series, anime) shipped as one
+  Rust binary with an embedded web UI, SQLite state in /config, port 8080.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The engine's Rust build fails: the repo
+  gitignores generated sigstore files that crates/scryer-application embeds at
+  compile time, and docker/scryer.Dockerfile only packages CI-built binaries.
+  This recipe runs the published ghcr.io/scryer-media/scryer image of the
+  current release (0.21.11) with /config (database, settings, the encryption
+  key Scryer generates on first run) on a named volume.
+
+  As upstream ships it, authentication is off and Scryer answers only
+  private/local clients; a public visitor gets 403 "public unauthenticated
+  access is blocked" (release builds refuse the public-access switches). To
+  get in, set the project env var SCRYER_RECOVERY_ADMIN_PASSWORD (upstream's
+  recovery switch, passed through): login turns on and recovery-admin can
+  sign in, set the admin password and enable login in Settings. Then remove
+  the variable.

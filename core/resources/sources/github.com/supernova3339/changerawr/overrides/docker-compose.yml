@@ -1,0 +1,61 @@
+# Compose-replace: upstream's docker-compose.yml builds Dockerfile.compose, whose
+# `next build` was killed for memory in a 4096 MB account. This runs upstream's
+# published image of the current release instead (docker-compose-online.yml),
+# without the optional AI tagger (ghcr.io/changerawr/tag-ai, 4 GB cap on its
+# own) and with generated secrets from ~/.panelalpha/changerawr.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: ../.panelalpha/changerawr/secrets.env
+    environment:
+      POSTGRES_USER: changerawr
+      POSTGRES_DB: changerawr
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U changerawr -d changerawr"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  app:
+    image: ghcr.io/supernova3339/changerawr:v1.0.7.4
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports:
+      - "3000:3000"
+    # DATABASE_URL, JWT_ACCESS_SECRET, GITHUB_ENCRYPTION_KEY, ENCRYPTION_KEY,
+    # ANALYTICS_SALT, INTERNAL_API_SECRET (hooks/prepare.sh).
+    env_file: ../.panelalpha/changerawr/secrets.env
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_APP_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - app_uploads:/app/uploads
+      - app_public:/app/public/generated
+    healthcheck:
+      # The setup-time maintenance server answers 503 here; Next.js answers 200
+      # once migrations ran and the database is reachable.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+    mem_limit: 1536m
+
+  # No-op: `compose up -d` returns once Next.js answers (first boot migrates).
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app: { condition: service_healthy }
+    mem_limit: 32m
+
+volumes:
+  postgres_data: {}
+  app_uploads: {}
+  app_public: {}

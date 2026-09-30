@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Pleroma, a federated (ActivityPub, Mastodon-API compatible) microblogging
+  server in Elixir with its bundled Pleroma-FE web client, backed by PostgreSQL.
+
+  A plain deploy builds the repository's Dockerfile (about six minutes of
+  Elixir compilation), then the entrypoint waits forever for a database at
+  `db` ("db:5432 - no response"): the repository ships no compose file, and
+  config/docker.exs also needs DB_PASS. This recipe runs upstream's published
+  image of the current release, git.pleroma.social/pleroma/pleroma:v2.10.2,
+  with PostgreSQL 16 on a named volume. hooks/prepare.sh generates the
+  database password once into ~/.panelalpha/pleroma/. DOMAIN is the account's
+  public host; ADMIN_EMAIL and NOTIFY_EMAIL default to admin@<host> (unset,
+  creating a user crashes on the welcome mail's empty sender) and can be set
+  in the project's env vars, as can INSTANCE_NAME. Uploads, static overrides
+  and the secrets Pleroma generates on first boot (secret.exs) are on a named
+  volume at /var/lib/pleroma. Registrations stay closed as upstream's docker
+  config ships them; create the first user with
+  `/opt/pleroma/bin/pleroma_ctl user new <name> <email> --admin` in the app
+  container. A `ready` gate makes the deploy finish only once Pleroma answers.

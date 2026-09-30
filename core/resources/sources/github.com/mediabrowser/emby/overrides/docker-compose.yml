@@ -1,0 +1,40 @@
+# Compose-replace: the repository is a 2018 .NET Framework/Mono source tree
+# that cannot build; Emby ships as the vendor's image. Current stable release
+# on named volumes.
+services:
+  app:
+    image: emby/embyserver:4.10.0.40
+    restart: unless-stopped
+    environment:
+      # The image's own defaults: run as uid/gid 2 and fix /config ownership.
+      UID: "2"
+      GID: "2"
+    volumes:
+      # system.xml, library.db, users, metadata, plugins, logs.
+      - config:/config
+      # Library root for movies, TV, music and photos.
+      - media:/media
+    ports:
+      - "8096:8096"
+    healthcheck:
+      # Busybox wget; the public system-info endpoint answers without a login.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8096/emby/System/Info/Public"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once Emby answers.
+  ready:
+    image: emby/embyserver:4.10.0.40
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  media: {}

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mikochi is a remote file browser (browse, upload, rename, delete, download,
+  stream): one Go binary serving the Preact UI and its API on :8080 over the
+  files in /data. The repository cannot be built as-is: its Dockerfile copies a
+  prebuilt backend/mikochi binary and frontend/dist that only the release CI
+  produces, and its docker-compose.yml is a Traefik development stack that
+  mounts the Docker socket, so a plain deploy falls back to the engine
+  placeholder. This recipe runs upstream's own image of the current release,
+  docker.io/zer0tonin/mikochi:1.12.0, with /data on a named volume that
+  survives redeploys.
+
+  Upstream defaults are kept: the login is USERNAME=root / PASSWORD=pass
+  unless changed in the container environment, and the JWT secret is random
+  per start (sessions end on restart).

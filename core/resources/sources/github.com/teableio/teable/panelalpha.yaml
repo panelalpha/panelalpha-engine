@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Teable, no-code database with a spreadsheet interface over Postgres
+  (Next.js + NestJS). A plain deploy picks the nextjs recipe, runs only the
+  Next.js frontend with no backend or database, and every page answers 500. This recipe
+  runs upstream's dockers/examples/standalone stack on the published release
+  image ghcr.io/teableio/teable:release.2026-09-27T13-21-53Z.3275 (the digest
+  `latest` points at; upstream publishes no semver image tags) with Postgres
+  15 and Redis 7. hooks/prepare.sh generates SECRET_KEY and the Postgres and
+  Redis passwords once into ~/.panelalpha/teable/teable.env. Attachments
+  (/app/.assets), the database and Redis are named volumes. First run is
+  upstream's: the first account signs up on the login page.

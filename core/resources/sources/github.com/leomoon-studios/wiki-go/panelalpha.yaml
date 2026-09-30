@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Wiki-Go is a flat-file Markdown wiki written in Go (no database). On first
+  start it writes data/config.yaml with the built-in admin/admin, and the
+  repository ships no docker-compose.yml, only its Dockerfile and two example
+  compose files for `:latest`, so a deploy served that default admin to
+  anyone who had read the README.
+
+  overrides/docker-compose.yml runs the current release image
+  (leomoonstudios/wiki-go:1.9.2) with all data (pages, uploads, users,
+  settings) on a named `data` volume. A one-shot `init` service writes
+  config.yaml before Wiki-Go first starts, only while the volume has none: the
+  admin's bcrypt hash of a password generated once by hooks/prepare.sh into
+  ~/.panelalpha/wikigo/admin.env, secure cookies, the site's domain as owner,
+  and the account's Docker bridge (172.16.0.0/12) as the only trusted proxy,
+  so the login ban lands on the visitor's address (the proxy-added last
+  X-Forwarded-For hop) rather than on the shared internal address. Wiki-Go
+  fills in every other setting itself. The admin is never admin/admin, and a
+  password changed in the UI survives redeploys.
+
+  The wiki is deliberately public-read, Wiki-Go's default and the point of a
+  wiki: visitors can read pages and attachments; creating, editing,
+  commenting and uploading need a login. Admin > Settings > Private turns
+  anonymous reading off.

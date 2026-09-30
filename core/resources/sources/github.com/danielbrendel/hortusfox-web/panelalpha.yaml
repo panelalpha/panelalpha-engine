@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  HortusFox is a collaborative plant manager: PHP (Asatru framework) under
+  Apache in upstream's ghcr.io/danielbrendel/hortusfox-web image, with
+  MariaDB. The repository's docker-compose.yml runs `:latest` with the
+  README's default admin (admin@example.com / password), fixed database
+  passwords and MariaDB published on 3306, so a deploy from it hands the
+  admin account to whoever reads the README.
+
+  overrides/docker-compose.yml keeps the same two services on the current
+  release image (v6.1) and MariaDB 11.4 LTS, unpublishes the database, and
+  feeds the admin and database passwords from ~/.panelalpha/hortusfox/,
+  generated once by hooks/prepare.sh so they survive redeploys alongside the
+  MariaDB and upload volumes. The image's own entrypoint runs the migrations
+  and creates the admin (admin@<site domain>, APP_ADMIN_PASSWORD in
+  ~/.panelalpha/hortusfox/app.env) only while no admin exists, so a password
+  changed in the UI is kept. There is no public registration.
+
+  The entrypoint's CLI steps run only with APP_DEBUG=true, so the app service's
+  command switches the generated .env to APP_DEBUG=false and turns
+  display_errors off before Apache starts. Web backup exports land in a served
+  directory under a timestamp name and are never removed; a sweeper deletes
+  them after 15 minutes. A no-op `ready` service waits for the app's
+  healthcheck (the login form renders), so the deploy ends once migrations
+  and the admin exist.

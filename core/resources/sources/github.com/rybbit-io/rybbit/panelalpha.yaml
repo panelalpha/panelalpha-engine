@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Rybbit, privacy-friendly web analytics: a Fastify backend (:3001) and a
+  Next.js client (:3002) on PostgreSQL, ClickHouse and Redis. The repository's
+  compose builds both images from source (the Next.js build runs out of memory
+  in the account), publishes them on 127.0.0.1 only, and routes /api through a
+  Caddy that runs only under the `with-webserver` profile; its secrets come
+  from a .env written by setup.sh.
+
+  This recipe is upstream's docker-compose.yml on the published release images
+  (ghcr.io/rybbit-io/rybbit-backend and -client v2.9.0, the current release).
+  An nginx:1-alpine `web` service does the Caddyfile's routing (/api and the
+  OAuth/OIDC discovery documents to the backend, the rest to the client) and is
+  the only service publishing a port (8080). BASE_URL is the site's address;
+  BETTER_AUTH_SECRET and the PostgreSQL/ClickHouse/Redis passwords are
+  generated once into ~/.panelalpha/rybbit by hooks/prepare.sh. The ClickHouse
+  config.d/users.d files are upstream's inline configs, as files. The backend
+  runs one cluster worker (upstream: 4) to fit the account's memory. First run
+  is upstream's: the site opens the sign-up page for the first account.

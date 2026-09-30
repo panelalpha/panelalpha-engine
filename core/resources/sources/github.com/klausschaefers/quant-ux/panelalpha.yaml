@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Quant-UX, a tool for prototyping and usability-testing UI designs: a Vue
+  front end served by a small Express server that proxies /rest to a Java
+  backend, with MongoDB. A plain deploy built the repository's Dockerfile,
+  whose `vue-cli-service build` was OOM-killed in a 2500 MB account, and the
+  repository's compose file is not a deployment. This recipe runs upstream's
+  published stack from docker/docker-compose.yml: klausenschaefersinho/quant-ux
+  (front end, built from the current main) on port 8082, quant-ux-backend and
+  MongoDB 7.0, with the database and uploaded images on named volumes.
+  QUX_JWT_PASSWORD is generated once into ~/.panelalpha/quantux.
+
+  The optional live-collaboration websocket server needs a second public port,
+  which an account does not have, so it is not run; QUX_WS_URL points at the
+  site itself (the client logs a failed connection instead of sending its token
+  to upstream's hosted server, the built-in default). The backend runs with
+  QUX_DEBUG=true, which only swaps its SMTP client for one that logs mail: the
+  image's real SMTP client throws a NullPointerException at start whatever
+  mail settings it gets (MailClient.createShared is given the mail block's
+  missing http.host as its pool name), so no mail is sent (sign-up works
+  without it).

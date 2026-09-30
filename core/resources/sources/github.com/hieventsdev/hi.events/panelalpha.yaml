@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hi.Events, an event management and ticketing platform (Laravel API +
+  React SSR frontend). The plain deploy builds Dockerfile.all-in-one and the
+  frontend's `yarn build` is OOM-killed inside the account (exit 137,
+  `cannot allocate memory`); even built, it would start with no APP_KEY,
+  JWT_SECRET, database or Redis.
+
+  Compose-REPLACE with upstream's docker/all-in-one stack on the official
+  daveearley/hi.events-all-in-one v1.11.1-beta release image, Postgres 17 and
+  Redis 7. APP_KEY, JWT_SECRET and the database password are generated once by
+  hooks/prepare.sh into ~/.panelalpha/hievents/app.env. Uploads and the
+  database on named volumes. First run is as upstream ships it: the site
+  offers sign-up for the first organizer account.

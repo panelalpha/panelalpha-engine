@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Vertex is a management tool for private-tracker seeding (RSS rules,
+  download clients, media servers): a Node app on :3000 that upstream ships
+  only as a Docker image bundling its own Redis, Xvfb and Chromium. A plain
+  deploy detects Express on Node 20 and fails compiling better-sqlite3 from
+  source. This recipe runs upstream's image of the current stable build,
+  docker.io/lswl/vertex:2026.09.19 (the CI's date tag for stable @
+  c8bbfe70), with /vertex (config, SQLite database, settings, rules,
+  torrents) on a named volume that survives redeploys.
+
+  First run is as upstream ships it: Vertex creates the user `admin` with a
+  random password, written to /vertex/data/password; read it with
+  `docker compose -p project exec app cat /vertex/data/password`.

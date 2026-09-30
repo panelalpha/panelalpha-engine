@@ -1,0 +1,35 @@
+# Compose-replace: the repository's Dockerfile compiles the agent from source,
+# which the compiler OOMs on inside an account. This runs the official image.
+services:
+  app:
+    image: netdata/netdata:v2.11.1
+    restart: unless-stopped
+    volumes:
+      # Config, metrics database and cache; survive redeploys.
+      - netdataconfig:/etc/netdata
+      - netdatalib:/var/lib/netdata
+      - netdatacache:/var/cache/netdata
+    ports:
+      - "19999:19999"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:19999/api/v1/info"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once the agent answers its API.
+  ready:
+    image: netdata/netdata:v2.11.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  netdataconfig: {}
+  netdatalib: {}
+  netdatacache: {}

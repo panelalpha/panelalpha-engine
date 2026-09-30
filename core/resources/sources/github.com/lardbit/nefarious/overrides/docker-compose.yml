@@ -1,0 +1,73 @@
+# Compose-replace: the repository compose also publishes Jackett (9117) and
+# Transmission (9091, 51413) and runs watchtower on the Docker socket; the
+# engine took Jackett's port as the site. This runs the official image with
+# nefarious, the celery worker and scheduler, and Redis; nefarious owns the port.
+x-nefarious-env: &nefarious-env
+  DATABASE_URL: sqlite:////nefarious-db/db.sqlite3
+  REDIS_HOST: redis
+  CONFIG_PATH: /nefarious-db
+  HOST_DOWNLOAD_PATH: /downloads
+  INTERNAL_DOWNLOAD_PATH: /downloads
+  NUM_CELERY_WORKERS: "1"
+
+services:
+  nefarious:
+    image: lardbit/nefarious:latest
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    volumes:
+      - nefarious-db:/nefarious-db
+      - downloads:/downloads
+    environment:
+      <<: *nefarious-env
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/static/index.html"]
+      interval: 5s
+      timeout: 5s
+      retries: 90
+      start_period: 30s
+    mem_limit: 448m
+
+  celery:
+    image: lardbit/nefarious:latest
+    restart: unless-stopped
+    entrypoint: /app/entrypoint-celery.sh
+    volumes:
+      - nefarious-db:/nefarious-db
+      - downloads:/downloads
+    environment:
+      <<: *nefarious-env
+      CELERY_BEAT_SEPARATELY: "1"
+    depends_on:
+      nefarious:
+        condition: service_healthy
+    mem_limit: 384m
+
+  celery-scheduler:
+    image: lardbit/nefarious:latest
+    restart: unless-stopped
+    entrypoint: /app/entrypoint-celery.sh
+    volumes:
+      - nefarious-db:/nefarious-db
+      - downloads:/downloads
+    environment:
+      <<: *nefarious-env
+      CELERY_BEAT: "1"
+      CELERY_BEAT_SEPARATELY: "1"
+    depends_on:
+      nefarious:
+        condition: service_healthy
+    mem_limit: 192m
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    mem_limit: 64m
+
+volumes:
+  nefarious-db: {}
+  downloads: {}

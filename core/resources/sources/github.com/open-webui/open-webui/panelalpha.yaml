@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Open WebUI, a self-hosted chat interface for local and remote LLMs, on :8080.
+  The repository's docker-compose.yaml builds the image from source (Svelte
+  frontend plus a large Python dependency set) next to an Ollama sidecar; the
+  plain deploy ran out of memory in `uv pip install` at 2500 MB. This recipe
+  runs the published ghcr.io/open-webui/open-webui image of the current
+  release (v0.11.4) with /app/backend/data on a named volume, including the
+  generated WEBUI_SECRET_KEY, so accounts, chats and sessions survive
+  redeploys. Ollama is left out: models are connected from the admin panel
+  (an Ollama URL or an OpenAI-compatible API).

@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Notifo, a multichannel notification server on MongoDB (ASP.NET Core, UI and
+  API on one port). The repository's Dockerfile builds from source and runs
+  the frontend (Playwright/Chromium) and backend test suites during the
+  build, and the app needs MongoDB, which the repository does not provide.
+
+  This recipe runs upstream's deployment/docker-compose on
+  squidex/notifo:1.3.0 (the latest release) with MongoDB 7.0 on :5000.
+  Assets are in a Folder store on a named volume, the data in MongoDB on
+  another. URLS__BASEURL is the site's address. The notifo.io Google/GitHub
+  OAuth clients that appsettings.json ships are blanked. First run is
+  upstream's.

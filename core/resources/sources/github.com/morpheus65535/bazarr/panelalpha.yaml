@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bazarr manages and downloads subtitles for the series and movies in Sonarr
+  and Radarr. Python (Flask) with SQLite, web UI and API on :6767.
+
+  RUN THE OFFICIAL IMAGE, DO NOT BUILD. The repository has no compose file and
+  no Dockerfile; the source path detects as generic Python and never starts
+  bazarr.py, so the engine served its placeholder. The standard distribution is
+  the LinuxServer.io image, pinned here to the current release v1.6.2
+  (v1.6.2-ls366). Everything Bazarr keeps -- config.yaml, the SQLite database,
+  logs and backups -- lives under /config on a named volume, so it survives a
+  redeploy.
+
+  AUTH. Bazarr ships with authentication off: the UI injects the API key into
+  the page for anyone, and the API key is the API's only check. On the first
+  boot (no config.yaml on the volume) a thin wrapper in front of the image's
+  /init writes one with auth.type form, username admin, the md5 hex of a
+  generated password (what check_credentials in utilities/helper.py compares)
+  and a generated auth.apikey. Bazarr fills every other setting with its
+  defaults. The password, its hash and the API key are generated once into
+  ~/.panelalpha/bazarr (0600 in 0700); the plain password and API key are in
+  credentials.txt there. An existing config.yaml is never rewritten, so changes
+  made in the UI survive a redeploy. Sonarr/Radarr connections are runtime
+  settings made in the UI.
+
+  A `ready` gate holds the deploy until /api/system/ping answers.

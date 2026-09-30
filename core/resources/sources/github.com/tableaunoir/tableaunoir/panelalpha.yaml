@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tableaunoir, an online blackboard for teaching and animated presentations.
+  The repository's root docker-compose.yml is a developer workflow: it runs
+  `image: tableaunoir:latest` with no `build:`, expecting the image to be built
+  by hand first, and that tag was never published, so the plain deploy failed
+  pulling it.
+
+  Upstream's own hosting notes (server/README.md) say the front-end alone is
+  all an instance needs; shared boards use a separate websocket server, which
+  src/config.json points at upstream's public one. The recipe builds the
+  front-end with the project's own `npm run build` (webpack, into dist/) and
+  serves it with nginx.
+extends: bundler-spa

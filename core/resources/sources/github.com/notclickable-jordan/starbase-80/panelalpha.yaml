@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Starbase 80 is a homepage with an iPad-style grid of application icons: the
+  container builds the site from one JSON file at boot and serves it with nginx
+  on :4173.
+
+  The repository's compose.yml bind-mounts ./config.json and ./icons from the
+  checkout. Neither exists, so Docker creates ./config.json as a directory and
+  the container fails with "error mounting ... config.json ... not a
+  directory". overrides/docker-compose.yml runs the published
+  jordanroher/starbase-80:1.6.7 (the current release) with /app/src/config and
+  /app/public/icons on named volumes, so the image's example config.json seeds
+  the volume on first start and later edits survive redeploys.
+
+  Editing the grid: change config.json in the config volume, e.g.
+  `docker compose -p project cp config.json app:/app/src/config/config.json`,
+  then restart the app service; the site is rebuilt at boot.

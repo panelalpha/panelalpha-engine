@@ -1,0 +1,55 @@
+# The repository's Dockerfile builds Gerbera and its libraries from source,
+# which runs out of memory in the account; this runs the official image of
+# the current release.
+services:
+  app:
+    image: gerbera/gerbera:3.3.0
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+      GERBERA_EXTERNAL_URL: ${PA_PUBLIC_URL}
+    # Gerbera rejects any Host header that is not its own IP or the
+    # configured externalURL, so write the public URL into config.xml:
+    # directly when it exists, via the image's first-boot hook otherwise.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mkdir -p /mnt/customization/shell
+        cat > /mnt/customization/shell/gerbera_config.sh <<'HOOK'
+        sed -i -e '/<externalURL>/d' -e "/<server>/a\    <externalURL>$$GERBERA_EXTERNAL_URL</externalURL>" /var/run/gerbera/config.xml
+        HOOK
+        chmod 755 /mnt/customization/shell/gerbera_config.sh
+        [ -f /var/run/gerbera/config.xml ] && . /mnt/customization/shell/gerbera_config.sh
+        exec /sbin/tini -- docker-entrypoint.sh /bin/sh -c 'gerbera --port 49494 --config /var/run/gerbera/config.xml'
+    volumes:
+      # config.xml and the SQLite library database.
+      - config:/var/run/gerbera
+      # Media, scanned automatically (the image links /mnt/content here).
+      - content:/content
+    # Only the web UI/HTTP port goes through the engine's proxy; SSDP
+    # discovery on 1900/udp is not published.
+    ports:
+      - "49494:49494"
+    healthcheck:
+      # Gerbera binds the container IP only, not 127.0.0.1.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://$$(hostname -i):49494/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the server answers.
+  ready:
+    image: gerbera/gerbera:3.3.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  content: {}

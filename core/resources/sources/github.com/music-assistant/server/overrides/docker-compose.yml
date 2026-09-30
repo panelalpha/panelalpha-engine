@@ -1,0 +1,33 @@
+# Compose-replace: the repo Dockerfile needs a CI-built wheel (dist/); run the
+# official release image with its data dir on a named volume.
+services:
+  app:
+    image: ghcr.io/music-assistant/server:2.10.4
+    restart: unless-stopped
+    volumes:
+      - data:/data
+    ports:
+      - "8095:8095"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8095/', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once the web server answers.
+  ready:
+    image: ghcr.io/music-assistant/server:2.10.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    # The image declares VOLUME /data; mount the named one so nothing anonymous leaks.
+    volumes:
+      - data:/data
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

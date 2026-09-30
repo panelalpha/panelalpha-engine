@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mautic, open-source marketing automation (PHP/Symfony on Apache, MySQL). The
+  repository is the source tree: detection runs it as a plain PHP app, and
+  composer stops at once because Mautic requires ext-imap, which the shared PHP
+  image does not have; even past that, assets need an npm build. This recipe
+  runs upstream's docker-mautic "basic" shape on the current release
+  (mautic/mautic:7.2.1-apache): the web role, the cron and worker roles (which
+  wait until Mautic is installed) and mysql:8.4. hooks/prepare.sh generates the
+  database passwords once into ~/.panelalpha/mautic (0600 in 0700), passed as
+  env_files. Mautic's config, logs, media and the database live on named
+  volumes that survive redeploys. The admin account is created in Mautic's own
+  web installer on first visit.

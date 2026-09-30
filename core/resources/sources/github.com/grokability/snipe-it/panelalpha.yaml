@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Snipe-IT is an IT asset manager: Laravel under Apache in upstream's
+  snipe/snipe-it image, with MariaDB. The repository's docker-compose.yml is
+  already upstream's production stack, but it reads every value (database
+  passwords, APP_KEY, APP_URL) from a .env the checkout does not ship, so the
+  compose deploy started MariaDB with MYSQL_ROOT_PASSWORD unset and failed.
+
+  overrides/docker-compose.yml keeps the same two services, pins the current
+  release image (v8.7.2; upstream's `latest` tracks master) and feeds the
+  secrets from ~/.panelalpha/snipeit/, generated once by hooks/prepare.sh so
+  they survive redeploys alongside the MariaDB and storage volumes. APP_URL is
+  set to the engine's public URL, the engine proxy is trusted for
+  X-Forwarded-*, and session cookies are Secure.
+
+  Snipe-IT's first run is a web wizard in which the first visitor creates the
+  superuser. A one-shot `setup` service completes that wizard over the
+  internal network with the generated admin (admin / the password in
+  ~/.panelalpha/snipeit/admin.env), running the wizard's own migrate step (it
+  also creates the Passport keys the API needs) and its own create-admin
+  step. The artisan snipeit:create-admin command is not enough: setup counts
+  as complete only when both a user and the settings row exist, and only the
+  wizard writes the settings row. Once done every /setup URL redirects to the
+  site. A no-op `ready` service waits for `setup` so the deploy finishes only
+  once the admin exists.

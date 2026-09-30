@@ -1,0 +1,62 @@
+# The repo compose routes bitmagnet through a gluetun VPN and adds an
+# observability stack; this is upstream's minimal installation example.
+services:
+  bitmagnet:
+    image: ghcr.io/bitmagnet-io/bitmagnet:v0.10.0
+    restart: unless-stopped
+    # POSTGRES_PASSWORD, shared with the postgres service.
+    env_file:
+      - ../.panelalpha/bitmagnet/db.env
+    environment:
+      POSTGRES_HOST: postgres
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
+    # An empty TMDB_API_KEY would replace bitmagnet's default key.
+    entrypoint: ["/bin/sh", "-c", "[ -n \"$$TMDB_API_KEY\" ] || unset TMDB_API_KEY; exec bitmagnet worker run --keys=http_server --keys=queue_server --keys=dht_crawler"]
+    volumes:
+      - config:/root/.config/bitmagnet
+    # Web UI and API only; the DHT port 3334 is not published.
+    ports:
+      - "3333:3333"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3333/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/bitmagnet/db.env
+    environment:
+      POSTGRES_DB: bitmagnet
+      PGUSER: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns only once the web UI answers.
+  ready:
+    image: postgres:16-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      bitmagnet:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  pgdata: {}

@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Codex is a web comic archive browser and reader (CBZ, CBR, CB7, CBT, PDF):
+  one Django app served by Granian on :9810, with its SQLite database, secret
+  key and caches in /config and the comic library in /comics. Detection picks
+  the Django platform, whose build never installs the codex package itself
+  (`ModuleNotFoundError: No module named 'codex'`), and the repository's
+  compose.yaml is a CI container. This recipe runs the published image of the
+  current release 2.4.3 from ghcr.io (the docker.io image is a deprecated
+  mirror), with /config and /comics on named volumes.
+
+  /comics is mounted without copying the image's DOCKER_UNMOUNTED_VOLUME
+  marker, which Codex reads as "this library is not mounted" and refuses to
+  scan. First run is left as upstream ships it: the default administrator is
+  admin / admin, to be changed in the Admin Panel. Adding comics: copy files
+  into the comics volume, e.g. `docker compose -p project cp <dir>
+  app:/comics/`, and add /comics as a library in Admin > Libraries.

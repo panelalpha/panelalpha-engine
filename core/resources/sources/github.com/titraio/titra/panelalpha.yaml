@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Titra, a Meteor time-tracking app for freelancers and small teams, with
+  MongoDB. The repository's docker-compose.yml passes ROOT_URL=${ROOT_URL},
+  which is empty on the engine, and Meteor refuses to start without it ("Must
+  pass options.rootUrl or set ROOT_URL"). This recipe replaces that compose:
+  the official titraio/titra image of the current release (v1.1.0) with
+  ROOT_URL set to the account's public URL, mongo:7.0 on a named volume, no
+  fixed container names, and a `ready` gate so the deploy waits for Titra to
+  answer.

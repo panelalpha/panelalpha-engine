@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Didacta is a fair-code learning management system: a NestJS API (:4000) and a
+  Next.js web app (:3000) in one image, backed by PostgreSQL with pgvector and
+  Redis. The web app proxies /api to the API, so the site is one origin.
+
+  The plain deploy takes the repo's root docker-compose.yml, which only starts
+  development dependencies (Postgres, Redis, Mailpit and MinIO on
+  minio/minio:latest, a tag Docker Hub no longer has), so it fails before
+  anything runs. This recipe follows upstream's Dokploy template
+  (deploy/dokploy): the published release image
+  ghcr.io/va360labs/didacta-community:0.1.0-beta.9, pgvector/pgvector:pg16 and
+  redis:7-alpine on named volumes, local file storage on the didacta-data
+  volume, and the database password and AUTH_SECRET generated once into
+  ~/.panelalpha/didacta. Only the web port is published. The first-run admin
+  setup is left as upstream ships it: open /setup with the one-time token the
+  app prints to its log. Mail is not configured (the app starts without SMTP
+  and says so in its UI).

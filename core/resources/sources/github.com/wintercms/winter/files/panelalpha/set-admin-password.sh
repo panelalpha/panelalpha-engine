@@ -10,7 +10,7 @@
 # That is a better default than most — the account is not open to whoever finds
 # the address — but the only copy of it is in the deploy log, which is not
 # where an account's credentials live. This replaces it with one written to
-# ~/project/.panelalpha-admin-password before it is set, so there is never a
+# ~/.panelalpha/winter/admin-password before it is set, so there is never a
 # password in the database that nothing recorded.
 #
 # Runs in the container, from /app, on the install and upgrade stages. It does
@@ -18,7 +18,12 @@
 # what somebody chose afterwards in Settings → Administrators.
 set -e
 
-CRED=/app/.panelalpha-admin-password
+# /pa-data is ~/.panelalpha/winter: ~/project is emptied before every deploy,
+# and a record kept there made each redeploy reset the admin password.
+CRED=/pa-data/admin-password
+if [ ! -f "$CRED" ] && [ -f /app/.panelalpha-admin-password ]; then
+    ( umask 077; cp /app/.panelalpha-admin-password "$CRED" )
+fi
 
 if [ -f "$CRED" ]; then
     echo "[panelalpha] the admin password is already recorded; left alone" >&2
@@ -50,4 +55,4 @@ if ! php artisan winter:passwd admin "$PASSWORD"; then
     exit 1
 fi
 
-echo "[panelalpha] admin password written to ~/project/.panelalpha-admin-password" >&2
+echo "[panelalpha] admin password written to ~/.panelalpha/winter/admin-password" >&2

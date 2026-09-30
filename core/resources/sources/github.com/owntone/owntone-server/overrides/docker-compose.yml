@@ -1,0 +1,50 @@
+# The repository is a C/autotools source tree with no container build; this
+# runs upstream's official image (owntone/owntone-container) of the current
+# release.
+services:
+  app:
+    image: owntone/owntone:29.3
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+    # The database volume starts root-owned and OwnTone runs as `owntone`
+    # (created here the same way the image's init script does).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        adduser -D -g owntone -h /dev/null -s /sbin/nologin owntone 2>/dev/null
+        chown owntone:owntone /var/cache/owntone
+        exec /sbin/init
+    volumes:
+      - config:/etc/owntone
+      # Music library, scanned automatically.
+      - media:/srv/media
+      # SQLite library database and artwork cache.
+      - cache:/var/cache/owntone
+    # Web UI and DAAP on one port; mDNS/AirPlay discovery does not leave
+    # the account.
+    ports:
+      - "3689:3689"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:3689/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the server answers.
+  ready:
+    image: owntone/owntone:29.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  media: {}
+  cache: {}

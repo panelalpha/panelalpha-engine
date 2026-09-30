@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Sure (community continuation of the Maybe finance app; Rails + Sidekiq on
+  :3000, PostgreSQL, Redis). The repository ships only compose.example.yml
+  next to its Dockerfile, so the plain deploy builds the Dockerfile as an
+  extra app service beside the example stack and wires it to the wrong
+  database port; nothing answers on :3000.
+
+  This recipe runs upstream's compose.example.yml layout on the published
+  ghcr.io/we-promise/sure:0.7.4 image (current stable release): web and a
+  Sidekiq worker beside postgres:16 and redis. SECRET_KEY_BASE and the
+  database password are generated once by hooks/prepare.sh into
+  ~/.panelalpha/sure/; the key also seeds the app's self-hosted
+  ActiveRecord encryption keys, so it must never change. RAILS_ASSUME_SSL is
+  on because the engine terminates TLS. Uploads, the database and Redis
+  live on named volumes. POSTGRES_USER/POSTGRES_DB sit in that env file,
+  not in the compose environment, so the engine does not take web/worker
+  for Postgres servers (engine#419). The first visit shows Sure's own registration
+  page; everything else is upstream's default.

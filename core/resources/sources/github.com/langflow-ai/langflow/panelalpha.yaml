@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Langflow, a visual builder for AI agent and RAG flows (FastAPI backend that
+  also serves the React UI on :7860). The repository has no root compose file,
+  so the plain deploy runs it as a Python project and fails. Upstream's
+  deployment is docker_example/docker-compose.yml: the langflowai/langflow image
+  with PostgreSQL.
+
+  This recipe is that compose with the image pinned to the current release
+  (1.12.3) and postgres:16-trixie as upstream pins it. The image disables
+  auto-login, so upstream requires LANGFLOW_SUPERUSER_PASSWORD (the admin login,
+  user LANGFLOW_SUPERUSER, default "langflow"); it comes from the project's env
+  vars and a one-shot check fails the deploy naming it when unset. The database
+  password is generated once into ~/.panelalpha/langflow/db.env. Langflow's
+  config dir (its generated secret key, files) and PostgreSQL are on named
+  volumes. Login rate limiting reads the proxy-added X-Forwarded-For hop,
+  since every visitor reaches the app through the engine's proxy. A `ready`
+  gate waits for /health.
+
+  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 3072 ==
+
+  Without LANGFLOW_SUPERUSER_PASSWORD the deploy fails naming it. With it:
+  create success in 137 s; / is <title>Langflow</title>, /api/v1/version
+  1.12.3, /api/v1/auto_login 403 "Auto login is disabled"; POST /api/v1/login
+  as langflow 200, whoami is_superuser true; a flow was created. /.env and
+  /.git/config return the SPA shell (no secrets). Rebuild: success in 87 s,
+  login 200 and the flow is still there. Directly to the host (no front proxy),
+  7 bad logins from one client gave 429 while another client still logged in.

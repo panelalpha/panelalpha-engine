@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Shinobi CE is a network video recorder: a Node.js server (camera.js under
+  pm2) with ffmpeg for recording and MariaDB for users, monitors and video
+  records, serving the dashboard and the /super Superuser console on :8080.
+  The repository ships a Dockerfile that bundles Node 22, ffmpeg and MariaDB in
+  one image, and no compose file.
+
+  Built as it stands, that image opens with the Superuser admin@shinobi.video /
+  admin: Docker/init.sh copies super.sample.json (md5 of "admin") to super.json
+  whenever none exists and prints the default login in the log. The Superuser
+  creates the Admin accounts that own cameras, so that login is the whole
+  system. The bundled database user majesticflame is created by sql/user.sql
+  with an empty password.
+
+  overrides/docker-compose.yml builds the repository's Dockerfile unchanged
+  and hooks/prepare.sh generates, once, into ~/.panelalpha/shinobi/ (0600 in
+  0700): credentials.txt (Superuser e-mail and a random password), super.json
+  (sha256 of that password, the hash conf.sample.json's passwordType selects)
+  and db.env (DB_PASSWORD). super.json is bind-mounted over
+  /home/Shinobi/super.json, so init.sh keeps it and a password changed in
+  /super is written back to it. The service command runs after init.sh: it
+  refuses to start if super.json is missing or holds the default hash, sets
+  the generated password on majesticflame@127.0.0.1 (init.sh has already
+  written the same value into conf.json) and then starts pm2 as the image
+  would. MariaDB is reachable only inside the container's network; only :8080
+  is published.
+
+  Persistence: /var/lib/mysql and /home/Shinobi/videos on named volumes.
+  conf.json is regenerated from conf.sample.json on every container start, so
+  settings edited in /super > Configuration do not survive a redeploy. Cameras
+  are runtime configuration: add them as monitors in an Admin account. `ready`
+  waits on the app's healthcheck so `up -d` returns only once Shinobi answers.
+
+  == Verified on mariusz.panelalpha.tools (engine 705f250a), memory_limit 2500 ==
+
+  Deploy success in 263s (build 215.7s, start_to_answer 26.3s). `/` and
+  `/super` serve title "Shinobi" (10068 / 9855 B). Superuser login with
+  admin@shinobi.video / admin -> {"ok":false}; with the generated password ->
+  ok. Superuser registerAdmin created ops@example.com, which logged in on `/`
+  and added monitors through /configureMonitor, read back from /monitor.
+  majesticflame has a password; an empty-password login is denied. Rebuild
+  233s: default still refused, generated login, the Admin account and all four
+  monitors intact. /.env, /.git/config, /super.json, /conf.json, /sql/user.sql
+  -> 404. App ~286 MiB.

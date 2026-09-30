@@ -1,0 +1,28 @@
+# Browserless v2.56.7 release image (Chromium); HTTP + WebSocket API on :3000.
+services:
+  browserless:
+    image: ghcr.io/browserless/chromium:v2.56.7
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "const t=process.env.TOKEN;fetch('http://127.0.0.1:3000/active'+(t?'?token='+encodeURIComponent(t):'')).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    shm_size: 1gb
+    mem_limit: 2048m
+
+  # No-op gate: `compose up -d` returns only once Browserless answers.
+  ready:
+    image: ghcr.io/browserless/chromium:v2.56.7
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      browserless:
+        condition: service_healthy
+    mem_limit: 32m

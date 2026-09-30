@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DumbTerm is a browser terminal: a Node (Express + node-pty) server that
+  gives every websocket client a root bash shell inside its container, with an
+  optional numeric PIN.
+
+  The repository's docker-compose.yml builds from source with ./config and
+  ./data bind mounts and DUMBTERM_PIN defaulting to 1234, so anyone who
+  guesses four digits gets a shell. overrides/docker-compose.yml runs the
+  official image of the current release, dumbwareio/dumbterm:1.2.0, with
+  /root/.config and /root/data on named volumes that survive redeploys, and
+  BASE_URL and ALLOWED_ORIGINS set to the site's address.
+
+  Security: hooks/prepare.sh generates a 20-digit PIN once into
+  ~/.panelalpha/dumbterm/pin.env (0600 in 0700); that file is where the owner
+  reads it. The login form takes digits only, one box per digit, and pasting
+  fills them all. Upstream locks /verify-pin after 5 wrong PINs for 15 minutes
+  per client, but its cookie is the PIN itself, compared on every request and
+  on the terminal websocket with no lockout. `proxy` (nginx), the only service
+  on the account's port, drops the Cookie header when the PIN in it is wrong,
+  lets a websocket upgrade through only with the right PIN cookie and this
+  site's Origin (a refused Origin crashes 1.2.0 at server.js:401), and
+  throttles /verify-pin per client (X-Real-IP from the engine's proxy) and
+  for everyone at once. The shell is root in the app container inside the
+  account's own Docker: no docker socket, outbound internet, nothing of the
+  engine's host but its public web port.

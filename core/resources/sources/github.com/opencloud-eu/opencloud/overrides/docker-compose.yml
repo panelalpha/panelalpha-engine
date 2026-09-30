@@ -1,0 +1,49 @@
+# Compose-replace: the repository builds the Go server and the web UI from
+# source and its image exits without a config. This runs upstream's release
+# image the way opencloud-compose does behind an external proxy: `opencloud
+# init` writes a config with random secrets once (it fails harmlessly when the
+# config exists), then the server listens on plain HTTP 8080.
+services:
+  opencloud:
+    image: docker.io/opencloudeu/opencloud-rolling:8.0.1
+    restart: unless-stopped
+    user: "1000:1000"
+    entrypoint: ["/bin/sh"]
+    command: ["-c", "opencloud init || true; opencloud server"]
+    environment:
+      OC_URL: ${PA_PUBLIC_URL}
+      # TLS ends at the engine's proxy.
+      PROXY_TLS: "false"
+      # Not upstream's 9200: the engine takes 9200 for Elasticsearch and
+      # skips the binding (engine#438).
+      PROXY_HTTP_ADDR: 0.0.0.0:8080
+      OC_INSECURE: "false"
+      OC_LOG_LEVEL: info
+      IDM_CREATE_DEMO_USERS: "false"
+      PROXY_ENABLE_BASIC_AUTH: "false"
+    volumes:
+      - config:/etc/opencloud
+      - data:/var/lib/opencloud
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/status.php"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once OpenCloud answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      opencloud:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  data: {}

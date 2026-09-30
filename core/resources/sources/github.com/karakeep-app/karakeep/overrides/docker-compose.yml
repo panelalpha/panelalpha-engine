@@ -1,0 +1,70 @@
+# Compose-replace: upstream's docker/docker-compose.yml (web, chrome,
+# meilisearch) with release images pinned and secrets from ~/.panelalpha.
+services:
+  web:
+    image: ghcr.io/karakeep-app/karakeep:0.33.2
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+      - ../.panelalpha/karakeep/secrets.env
+    environment:
+      NEXTAUTH_URL: ${PA_PUBLIC_URL}
+      MEILI_ADDR: http://meilisearch:7700
+      BROWSER_WEB_URL: http://chrome:9222
+      DATA_DIR: /data
+    volumes:
+      # SQLite database, uploaded assets, crawled page archives.
+      - data:/data
+    depends_on:
+      - meilisearch
+      - chrome
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    # Next.js web server plus the crawler/indexing workers.
+    mem_limit: 1280m
+
+  chrome:
+    image: ghcr.io/karakeep-app/karakeep-chrome:151.0.7922.47-r1
+    restart: unless-stopped
+    init: true
+    command:
+      - --disable-gpu
+      - --disable-dev-shm-usage
+      - --hide-scrollbars
+      - --disable-blink-features=AutomationControlled
+      - --window-size=1440,900
+    mem_limit: 640m
+
+  meilisearch:
+    image: docker.io/getmeili/meilisearch:v1.41.0
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/karakeep/secrets.env
+    environment:
+      MEILI_NO_ANALYTICS: "true"
+      # Meilisearch sizes indexing from host RAM, not the cgroup.
+      MEILI_MAX_INDEXING_MEMORY: 256Mb
+      MEILI_MAX_INDEXING_THREADS: "2"
+    volumes:
+      - meilisearch:/meili_data
+    mem_limit: 512m
+
+  # No-op: `compose up -d` returns once Karakeep answers (runs migrations first).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  meilisearch: {}

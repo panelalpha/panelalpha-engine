@@ -1,0 +1,32 @@
+# The repository has no compose file and its Dockerfile runs Caddy with the site
+# address taken from SERVER_NAME, which the engine sets to the domain: Caddy then
+# forces HTTPS and every request 308s to itself. This runs the published image of
+# the current release and pins SERVER_NAME to the plain-HTTP port.
+services:
+  # One-shot: fails the deploy while LDAP_HOST is unset.
+  ldap-check:
+    image: phpldapadmin/phpldapadmin:2.3.11
+    restart: "no"
+    env_file:
+      - path: .env
+        required: false
+    entrypoint: ["/bin/sh", "/ldap-check.sh"]
+    volumes:
+      - ./phpldapadmin-ldap-check.sh:/ldap-check.sh:ro
+    mem_limit: 32m
+
+  app:
+    image: phpldapadmin/phpldapadmin:2.3.11
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    # LDAP_HOST, LDAP_USERNAME, LDAP_PASSWORD, LDAP_BASE_DN, ... from the project's env vars.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SERVER_NAME: ":8080"
+    depends_on:
+      ldap-check:
+        condition: service_completed_successfully
+    mem_limit: 512m

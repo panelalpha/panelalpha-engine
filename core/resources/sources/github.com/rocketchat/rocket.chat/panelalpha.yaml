@@ -50,13 +50,16 @@ description: >-
   and every container exited instantly with "MongoDB cannot start: Linux kernel
   versions 6.19 and newer has a known incompatibility with this version of
   MongoDB" (SERVER-121912) — a refusal MongoDB ships itself, present in
-  mongo:8.0 and mongo:latest alike, with no 8.1 or 8.2 image to move to. The
+  mongo:8.0 (8.0.32) and mongo:8.3 (8.3.11) alike, re-checked 2026-09-29. The
   healthcheck never passed, so the engine rolled the deploy back. mongo:7.0
   carries no such guard, and Rocket.Chat accepts it: serverRunning.ts exits
   only below 7.0.0 and merely prints a deprecation box below 8.0.0, warning
   that support ends in Rocket.Chat 9.0.0. So hooks/prepare.sh takes 8.0 below
   kernel 6.19 and 7.0 at or above it; containers share the host's kernel, so
-  uname in the account shell is the kernel mongod will run on.
+  uname in the account shell is the kernel mongod will run on. The choice is
+  made on the first deploy and kept in ~/.panelalpha/rocketchat/state.env,
+  because 7.0 cannot open data written by 8.0: an install created on an older
+  kernel stays on 8.0 and cannot simply be switched to 7.0 (see README.md).
 
   Two things the recipe supplies that the engine cannot infer.
 
@@ -66,7 +69,8 @@ description: >-
   initialData.ts has insertAdminUserFromEnv(), which creates that account from
   ADMIN_PASS / ADMIN_USERNAME / ADMIN_EMAIL when no user holds the admin role,
   so the compose file carries them and the wizard has nothing left to give
-  away. The password is generated per account into
+  away. The password is generated once per account, kept in
+  ~/.panelalpha/rocketchat/state.env and shown in
   ~/project/.panelalpha-admin-password (0600), never a default, and is built to
   satisfy Rocket.Chat's own default policy — Accounts_Password_Policy_Enabled
   is true with a 14-character minimum and character-class rules — so the admin

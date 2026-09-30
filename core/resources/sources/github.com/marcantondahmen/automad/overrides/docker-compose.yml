@@ -1,0 +1,32 @@
+# The repo is the dev tree (its npm lockfile does not build); run the official
+# image of the current release. It installs Automad into /app on first start.
+services:
+  app:
+    image: automad/automad:2.0.0-beta.59
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - app:/app
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    # The image runs a static php-fpm pool of 60 workers.
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns only once the first-start install is
+  # done and / answers.
+  ready:
+    image: automad/automad:2.0.0-beta.59
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  app: {}

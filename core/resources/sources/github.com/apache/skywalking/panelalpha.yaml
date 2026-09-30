@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Apache SkyWalking APM: the OAP server (Java) storing into BanyanDB, with
+  the Horizon web UI on the site's address.
+
+  The repository root is the multi-module Maven source tree; a plain deploy
+  picks the generic java strategy, which runs the first jar it finds
+  (apm-network, "no main manifest attribute") and restart-loops. Upstream's
+  own docker/docker-compose.yml runs locally built images. This recipe is
+  that file's banyandb profile on the published images of the current
+  release: apache/skywalking-oap-server:11.0.0 (SW_STORAGE=banyandb, the
+  env upstream's compose sets), apache/skywalking-banyandb:0.11.1 in
+  standalone mode with every root path on a named volume, and
+  apache/skywalking-ui:horizon-1.0.0 on port 8081 with the repository's own
+  docker/horizon.yaml mounted exactly as upstream's compose does (OAP
+  addresses and its documented demo login admin / admin, left as shipped).
+  The OAP image's JAVA_OPTS is -Xms2G with no ceiling, so the heap is set to
+  -Xms512m -Xmx1g. Measured: OAP ~620-645 MB, BanyanDB ~175-300 MB, Horizon
+  ~85-115 MB, about 1 GB for the account. OAP's first boot installs the
+  BanyanDB schema; a `ready` gate makes the deploy finish only once OAP's
+  query port and the UI answer.
+
+  Only the UI is published. Agents and OpenTelemetry exporters reach OAP
+  (gRPC 11800, HTTP 12800) on the account's internal network only.

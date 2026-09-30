@@ -1,0 +1,7 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SignServer CE, Keyfactor's PKI signing server (WildFly). The repository is
+  an Ant/Maven source tree with no container build, so this recipe runs the
+  official keyfactor/signserver-ce image of the current release (7.7.1) in
+  upstream's behind-a-proxy mode (PROXY_HTTP_BIND, plain HTTP on :8081; the
+  engine terminates TLS), with the bundled H2 database on a named volume.

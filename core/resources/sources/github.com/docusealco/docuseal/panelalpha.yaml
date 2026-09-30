@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DocuSeal, an open-source document signing platform (Rails, Sidekiq and an
+  embedded Redis in one image) serving its web UI on :3000. The repository's
+  docker-compose.yml is a server template: a Caddy service that binds 80/443
+  and needs $HOST (unset, so it restart-loops with `--to is required`), and
+  bind mounts under ./ that a redeploy wipes. This recipe runs the official
+  docuseal/docuseal image of the current release, 3.3.0, alone, with its
+  default SQLite database, as upstream's single-container instructions do.
+  /data/docuseal (db.sqlite3, uploaded documents, and the docuseal.env holding
+  the SECRET_KEY_BASE the image generates on first start) is on a named volume
+  that survives redeploys. The first visitor completes DocuSeal's own setup
+  page, as upstream ships it.

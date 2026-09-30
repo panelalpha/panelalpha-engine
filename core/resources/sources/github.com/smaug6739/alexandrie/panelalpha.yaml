@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Alexandrie is a Markdown notes app: a Nuxt frontend (:8200), a Go API
+  (:8201, routes under /api), MySQL and S3 object storage (RustFS, :9000) for
+  uploads, all published images. The browser talks to all three public
+  services directly, so the plain deploy of the repo's compose points the
+  frontend at http://localhost:8201 and :9000 and the engine routes the domain
+  to RustFS (S3 "Access Denied").
+
+  This recipe runs upstream's stack from the current release images
+  (alexandrie-backend/frontend v8.14.2, rustfs 1.0.0, MySQL 8.4) behind a small
+  nginx on :8080 that serves the frontend at /, the API at /api/ and the
+  public and backup buckets at /alexandrie/ and /alexandrie-backups/, so the
+  API and CDN URLs are the site's own address. The JWT secret, the MySQL
+  passwords and the RustFS keys are generated once by hooks/prepare.sh into
+  ~/.panelalpha/alexandrie/. Data stays on named volumes. Everything else is
+  upstream's default, including open sign-up (CONFIG_DISABLE_SIGNUP), SMTP and
+  OIDC settings read from the project's environment variables.

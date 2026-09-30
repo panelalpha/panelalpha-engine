@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Beszel is a lightweight server-monitoring hub: one Go binary (PocketBase
+  inside) serving the web UI and API on :8090, SQLite in /beszel_data. Agents
+  on the monitored hosts connect to it (hub-initiated SSH to the agent, or
+  agent-initiated WebSocket to the hub's HTTPS URL); that is per-system runtime
+  config, and the hub runs without any.
+
+  The repository is Go source whose `//go:embed all:dist` needs the frontend
+  built first, so the detected `go` strategy fails ("This project embeds files
+  that have to be produced by an earlier build step"). This recipe runs the
+  official henrygd/beszel hub image of the current release, 0.20.0, with
+  /beszel_data on a named volume that survives redeploys.
+
+  On an empty database Beszel serves an anonymous "create account" form
+  (/api/beszel/create-user) that makes its submitter admin and superuser.
+  hooks/prepare.sh generates USER_EMAIL (admin@example.com) and USER_PASSWORD
+  once into ~/.panelalpha/beszel/admin.env (0600 in 0700), fed as an env_file;
+  Beszel's initial migration creates the user and the PocketBase superuser from
+  them before the port opens, so the form is never registered. The values are
+  read only by that migration; a password changed later is not reset by a
+  redeploy. The users collection has no create rule, so there is no sign-up.
+
+  The env-seeded user gets role "user", where the UI first-run gives "admin"
+  (admin-only settings are hidden otherwise). The `ready` service, a
+  curlimages/curl one-shot gated on the hub's own `/beszel health`, logs in as
+  the superuser and PATCHes that user to "admin" through the PocketBase API,
+  only while it is the sole user with role "user"; on later deploys it leaves
+  roles alone. APP_URL is set to the account's public URL.
+
+  Measured on mariusz.panelalpha.tools: fresh deploy 34s, hub 11 MiB of its
+  512 MiB cap; first-run false, create-user 404, anonymous sign-up 403; login
+  as the seeded user returns role admin; a system created through the API reads
+  back; after rebuild the admin.env md5, the user and the system are unchanged.

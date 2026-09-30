@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  BookWyrm, the federated social reading platform (Django, Celery, Postgres,
+  Redis). The repository's docker-compose.yml is upstream's production stack
+  but reads every setting from a .env the operator writes by hand; the plain
+  deploy had none and failed ("You must change the SECRET_KEY env variable",
+  redis-server "requirepass" with no value). This recipe runs the same stack
+  built from the repository's Dockerfile: nginx in upstream's reverse_proxy
+  mode with Anubis in front of gunicorn, the Celery worker and beat, flower,
+  Postgres 17 and two Redis, without certbot (the engine terminates TLS) and
+  the backup job. hooks/prepare.sh generates SECRET_KEY and the Postgres,
+  Redis and flower passwords once into ~/.panelalpha/bookwyrm/. Static files, uploaded
+  images, exports and all databases are on named volumes. SMTP comes from the
+  optional EMAIL_HOST, EMAIL_PORT, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD
+  variables.

@@ -1,0 +1,66 @@
+# ZoneMinder 1.38.4 from the zoneminder-containers image with MariaDB, as in
+# that project's docker-compose.yml. MYSQL_* come from an env_file (engine#419).
+services:
+  db:
+    image: mariadb:11.8
+    restart: unless-stopped
+    env_file: ../.panelalpha/zoneminder/db.env
+    environment:
+      MARIADB_DATABASE: zm
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    mem_limit: 512m
+
+  app:
+    image: yaoa/zoneminder-base:1.38.4
+    restart: unless-stopped
+    stop_grace_period: 45s
+    env_file: ../.panelalpha/zoneminder/db.env
+    environment:
+      TZ: UTC
+      # The image defaults (12-120 php-fpm workers, 15 fcgiwrap) are sized for a
+      # dedicated host, not an account.
+      PHP_MAX_CHILDREN: "16"
+      PHP_START_SERVERS: "3"
+      PHP_MIN_SPARE_SERVERS: "2"
+      PHP_MAX_SPARE_SERVERS: "4"
+      PHP_MEMORY_LIMIT: 512M
+      FCGIWRAP_PROCESSES: "4"
+    ports:
+      - "8080:80"
+    shm_size: 256m
+    volumes:
+      - data:/data
+      - config:/config
+      - log:/log
+    depends_on:
+      db:
+        condition: service_healthy
+    # The zm schema is created on the first start; answer once it is there.
+    healthcheck:
+      test: ["CMD-SHELL", "php -r 'exit(strpos((string)@file_get_contents(\"http://127.0.0.1/index.php\"), \"ZoneMinder\") === false ? 1 : 0);'"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1536m
+
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  dbdata: {}
+  data: {}
+  config: {}
+  log: {}

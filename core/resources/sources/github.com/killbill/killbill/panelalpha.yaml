@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kill Bill, the subscription billing and payments platform (Java, Tomcat),
+  with Kaui, its admin UI.
+
+  The repository is the Maven source tree of the server alone; a plain deploy
+  builds it with the generic java strategy and nothing answers. This recipe
+  runs upstream's published images of the current release the way its Docker
+  guide does: killbill/killbill:0.24.22, killbill/kaui:4.0.31 and
+  killbill/mariadb:0.24 (MariaDB with both schemas in its init scripts), with
+  the guide's demo catalog (SpyCarAdvanced.xml). hooks/prepare.sh writes the
+  database password once to ~/.panelalpha/killbill/db.env (0600 in 0700)
+  instead of the guide's fixed one. One nginx gives both services the site's
+  address: Kaui at /, the REST API at /1.0/ and its Swagger page at
+  /api.html. The database is on a named volume that survives redeploys. A
+  `ready` gate makes the deploy finish only once both JVMs answer.
+
+  First run is upstream's: Kaui's login page, with the documented default
+  credentials (admin / password).

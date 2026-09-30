@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  fx, a self-hosted micro-blogging service (Rust, SQLite) on port 3000. The
+  repository has no compose file, so the engine built it as a generic Rust app
+  that never started the server (the binary needs its `serve` subcommand) and
+  answered on no port. This recipe runs upstream's published
+  rikhuijzer/fx image of the current release (1.6.3) with the database on a
+  named volume. The admin login needs FX_PASSWORD (FX_USERNAME defaults to
+  admin); a one-shot check service fails the deploy with a clear message
+  while it is unset.

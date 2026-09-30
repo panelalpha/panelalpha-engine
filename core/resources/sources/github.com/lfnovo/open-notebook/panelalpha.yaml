@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Open Notebook, a self-hosted alternative to NotebookLM (Next.js web UI on
+  :8502 that proxies /api to the FastAPI backend on :5055 in the same
+  container, SurrealDB). The repository's compose file runs the published
+  images, but the engine routed the domain to SurrealDB's own debug port 8000
+  (the public site showed "SurrealDB Studio" with root:root credentials), both
+  data directories are bind mounts under ~/project that every deploy wipes,
+  and the frontend tells browsers to call the API on <host>:5055, which is not
+  reachable through the account's webserver.
+
+  This recipe runs the same two services on the current release
+  (lfnovo/open_notebook:1.14.0, surrealdb/surrealdb:v2): only the web UI is
+  published, API_URL is the site's own address so the browser goes through the
+  /api proxy, SurrealDB and the app's uploads/podcasts live on named volumes,
+  and the SurrealDB password and OPEN_NOTEBOOK_ENCRYPTION_KEY (which encrypts
+  stored provider API keys) are generated once into ~/.panelalpha/open-notebook.
+
+  AI providers are configured in the UI (Manage -> Models). The optional
+  OPEN_NOTEBOOK_PASSWORD project variable enables the app's own login, as
+  upstream ships it.

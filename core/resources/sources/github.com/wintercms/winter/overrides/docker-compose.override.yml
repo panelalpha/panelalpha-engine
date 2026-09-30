@@ -12,6 +12,12 @@
 # off the table entirely.
 services:
   app:
+    # ~/project is /app and is emptied before every deploy. The database, the
+    # admin password record and storage/app (uploads, media) live in
+    # ~/.panelalpha/winter instead; see hooks/prepare.sh.
+    volumes:
+      - ../.panelalpha/winter:/pa-data
+      - ../.panelalpha/winter/storage-app:/app/storage/app
     # Two requests, and the second is the one that proves anything.
     #
     # The install stage does the real work before Apache binds: `winter:up`,

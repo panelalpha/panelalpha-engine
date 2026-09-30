@@ -1,0 +1,48 @@
+# Replaces the repo compose, whose ROOT_URL=${ROOT_URL} is empty here and stops
+# Meteor at boot. Same services, current release pinned.
+services:
+  titra:
+    image: titraio/titra:v1.1.0
+    restart: unless-stopped
+    environment:
+      ROOT_URL: ${PA_PUBLIC_URL}
+      MONGO_URL: mongodb://mongodb/titra?directConnection=true
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 20s
+    mem_limit: 768m
+
+  mongodb:
+    image: mongo:7.0
+    restart: unless-stopped
+    volumes:
+      - titra_db_volume:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 768m
+
+  # `compose up -d` returns once Titra answers.
+  ready:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      titra:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  titra_db_volume: {}

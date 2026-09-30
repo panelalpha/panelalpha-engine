@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  HedgeDoc is a collaborative real-time Markdown editor. The repository's
+  default branch, `develop`, is the unreleased HedgeDoc 2 monorepo: separate
+  backend and frontend servers joined by a development Caddy proxy, with its
+  production compose in docker/ pulling `:develop` images. A plain deploy
+  detects a single Node app and runs out of memory in `pnpm run build`; even
+  built, port 3000 would be the API only.
+
+  This recipe runs the current release instead, HedgeDoc 1.12.0, from the
+  official quay.io/hedgedoc/hedgedoc image with PostgreSQL, following the
+  upstream hedgedoc/container compose. Links are generated for the account's
+  HTTPS domain (CMD_DOMAIN from PA_PUBLIC_HOST, CMD_PROTOCOL_USESSL, no port).
+  hooks/prepare.sh generates the database password and the session secret once
+  into ~/.panelalpha/hedgedoc/ (0600 in 0700), so they survive redeploys.
+  Notes live in PostgreSQL and uploads in /hedgedoc/public/uploads, both on
+  named volumes. Registration and guest editing are upstream defaults.

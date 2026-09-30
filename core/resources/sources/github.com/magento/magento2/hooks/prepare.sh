@@ -1,29 +1,60 @@
 #!/bin/bash
 set -e
+cd ~/project
 
-# Magento's installer is a CLI step that wants an admin username, password and
-# email, and there is nowhere for a customer to type them. Generate them here,
-# before anything is built, and leave them in .env -- which the generated
-# compose file loads, so the install command inside the container reads the
-# same values, and `app.sh info` can print them back afterwards.
+# ~/project is /app in the container and is emptied before every deploy, so
+# everything Magento must keep lives in ~/.panelalpha/magento instead, which
+# the compose override mounts at /pa-data:
 #
-# The admin path is generated too. Left alone Magento invents one
-# (Magento Admin URI: /admin_inabui6) and prints it once, into a build log
-# nobody keeps. Choosing it here means the panel can say where the store is.
+#   admin.env    the admin credentials below, generated once
+#   etc/         app/etc/env.php (crypt key, DB, install date) and config.php,
+#                reached through symlinks written here on every deploy
+#   media/       pub/media, bind-mounted over the checkout's copy
+#
+# Without the env.php link a redeploy lands in the upgrade stage with no
+# env.php, which exits 0 and leaves an uninstalled store over a full database.
+STORE="${HOME}/.panelalpha/magento"
+mkdir -p "${STORE}/etc" "${STORE}/media"
+chmod 700 "${HOME}/.panelalpha" "${STORE}"
 
-if [ -f .env ] && grep -q '^MAGENTO_ADMIN_PASSWORD=' .env; then
-  # A rebuild. The store already has these credentials in its database;
-  # regenerating them would lock the owner out of their own admin.
-  exit 0
+# Magento's installer wants an admin username, password and email, and there
+# is nowhere for a customer to type them. The admin path is generated too: left
+# alone Magento invents one and prints it once, into a build log nobody keeps.
+# Generated once and copied into .env (which the generated compose file loads)
+# on every deploy; the store already holds them, so a new set would only be
+# a record of credentials that do not work.
+if [ ! -s "${STORE}/admin.env" ]; then
+    (
+        umask 077
+        # An older deploy's values, when this checkout was not wiped.
+        if grep -q '^MAGENTO_ADMIN_PASSWORD=.' .env 2>/dev/null; then
+            grep '^MAGENTO_ADMIN_' .env > "${STORE}/admin.env"
+        else
+            # Magento requires a password with both letters and digits, at least 7 long.
+            printf 'MAGENTO_ADMIN_USER=admin\nMAGENTO_ADMIN_EMAIL=admin@example.com\nMAGENTO_ADMIN_PASSWORD=%s\nMAGENTO_ADMIN_URI=%s\n' \
+                "$(openssl rand -hex 12)Aa1" "admin_$(openssl rand -hex 4)" > "${STORE}/admin.env"
+        fi
+    )
 fi
+chmod 600 "${STORE}/admin.env"
+touch .env
+sed -i '/^MAGENTO_ADMIN_/d' .env
+cat "${STORE}/admin.env" >> .env
 
-# Magento requires a password with both letters and digits, at least 7 long.
-ADMIN_PASSWORD="$(openssl rand -hex 12)Aa1"
-ADMIN_URI="admin_$(openssl rand -hex 4)"
+# An install from before the store existed, on a rebuild that did not wipe.
+for f in env.php config.php; do
+    if [ -f "app/etc/${f}" ] && [ ! -L "app/etc/${f}" ] && [ ! -s "${STORE}/etc/${f}" ]; then
+        cp -p "app/etc/${f}" "${STORE}/etc/${f}"
+    fi
+done
+# Dangling until setup:install writes through them on the first deploy. The
+# target is the container's path: Magento resolves no symlinks when it checks a
+# config path, and fopen() follows this one.
+ln -sfn /pa-data/etc/env.php app/etc/env.php
+ln -sfn /pa-data/etc/config.php app/etc/config.php
 
-cat >> .env <<EOF
-MAGENTO_ADMIN_USER=admin
-MAGENTO_ADMIN_EMAIL=admin@example.com
-MAGENTO_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-MAGENTO_ADMIN_URI=${ADMIN_URI}
-EOF
+# The checkout's pub/media carries the .htaccess files that fence off
+# customer/, downloadable/ and import/. Seeded once; uploads land here after.
+if [ -z "$(ls -A "${STORE}/media")" ]; then
+    cp -a pub/media/. "${STORE}/media/"
+fi

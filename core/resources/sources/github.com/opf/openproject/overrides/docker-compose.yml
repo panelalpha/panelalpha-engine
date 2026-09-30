@@ -1,0 +1,39 @@
+# Compose-replace: the repo compose is the developer environment. This runs
+# upstream's all-in-one release image (Rails, worker, PostgreSQL, memcached).
+services:
+  app:
+    image: docker.io/openproject/openproject:17.8.0
+    restart: unless-stopped
+    environment:
+      OPENPROJECT_HOST__NAME: ${PA_PUBLIC_HOST}
+      OPENPROJECT_HTTPS: "true"
+      # The image ships SECRET_KEY_BASE=OVERWRITE_ME and refuses to boot on it.
+      SECRET_KEY_BASE: ${OPENPROJECT_SECRET_KEY_BASE:?generated per account}
+      OPENPROJECT_DEFAULT__LANGUAGE: en
+    volumes:
+      - pgdata:/var/openproject/pgdata
+      - assets:/var/openproject/assets
+    ports:
+      - "8080:80"
+    healthcheck:
+      # Rails itself (puma on 8080); the first boot migrates and seeds.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8080/health_checks/default"]
+      interval: 10s
+      timeout: 10s
+      retries: 120
+      start_period: 120s
+    mem_limit: 3584m
+
+  # No-op gate: `compose up -d` returns only once OpenProject answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  assets: {}

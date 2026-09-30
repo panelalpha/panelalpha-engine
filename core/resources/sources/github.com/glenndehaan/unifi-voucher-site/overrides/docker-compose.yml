@@ -1,0 +1,56 @@
+# Upstream's compose hardcodes every setting, UNIFI_TOKEN: '' included, so no
+# project env var can reach the app. This runs the published image of the
+# current release and takes the settings from the project's env vars (.env);
+# anything unset keeps the app's own default, which matches upstream's compose.
+services:
+  # One-shot: the app exits at boot without these, so the deploy fails here
+  # naming each missing one. Read from .env, not interpolated (engine#336).
+  env-check:
+    image: glenndehaan/unifi-voucher-site:8.13.1
+    restart: "no"
+    env_file:
+      - path: .env
+        required: false
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        missing=""
+        [ -n "$$UNIFI_TOKEN" ] || missing="$$missing UNIFI_TOKEN (the UniFi Network Integration API key)"
+        if [ -n "$$UNIFI_SITE_MANAGER" ] && [ -z "$$UNIFI_SITE_MANAGER_CONSOLE_ID" ]; then
+          missing="$$missing UNIFI_SITE_MANAGER_CONSOLE_ID (required while UNIFI_SITE_MANAGER is set)"
+        fi
+        if [ -n "$$missing" ]; then
+          echo "Error: set in the project's environment variables:$$missing"
+          exit 1
+        fi
+    mem_limit: 32m
+
+  unifi-voucher-site:
+    image: glenndehaan/unifi-voucher-site:8.13.1
+    restart: unless-stopped
+    # UNIFI_IP / UNIFI_PORT / UNIFI_SITE_ID, AUTH_*, VOUCHER_*, SMTP_*, KIOSK_* ...
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "3000:3000"
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/_health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once the app answers /_health.
+  ready:
+    image: glenndehaan/unifi-voucher-site:8.13.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      unifi-voucher-site:
+        condition: service_healthy
+    mem_limit: 32m

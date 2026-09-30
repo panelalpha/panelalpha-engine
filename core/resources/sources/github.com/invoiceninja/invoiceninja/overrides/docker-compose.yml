@@ -1,0 +1,127 @@
+# Compose-replace with upstream's Docker setup (invoiceninja/dockerfiles, debian):
+# official image + nginx + MySQL + Redis. Secrets come from ~/.panelalpha (hooks/prepare.sh).
+services:
+  nginx:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    volumes:
+      - ./invoiceninja-nginx:/etc/nginx/conf.d:ro
+      - app_public:/var/www/html/public:ro
+      - app_storage:/var/www/html/storage:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 64m
+
+  app:
+    image: invoiceninja/invoiceninja-debian:5.13.43
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/invoiceninja/secrets.env
+    environment:
+      APP_URL: ${PA_PUBLIC_URL}
+      APP_ENV: production
+      APP_DEBUG: "false"
+      REQUIRE_HTTPS: "false"
+      TRUSTED_PROXIES: "*"
+      IS_DOCKER: "true"
+      PDF_GENERATOR: snappdf
+      PHANTOMJS_PDF_GENERATION: "false"
+      CACHE_DRIVER: redis
+      QUEUE_CONNECTION: redis
+      SESSION_DRIVER: redis
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      FILESYSTEM_DISK: debian_docker
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_DATABASE: ninja
+      DB_USERNAME: ninja
+      MAIL_MAILER: log
+      SCOUT_DRIVER: "null"
+      # First account, created by the image on first start (checked below).
+      IN_USER_EMAIL: ${IN_USER_EMAIL:-}
+      IN_PASSWORD: ${IN_PASSWORD:-}
+    volumes:
+      - app_public:/var/www/html/public
+      - app_storage:/var/www/html/storage
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "REMOTE_ADDR=127.0.0.1 REQUEST_URI=/health REQUEST_METHOD=GET SCRIPT_FILENAME=/var/www/html/public/index.php cgi-fcgi -bind -connect 127.0.0.1:9000 | grep -q 'API is healthy'"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 120s
+    mem_limit: 1536m
+
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/invoiceninja/secrets.env
+    environment:
+      MYSQL_DATABASE: ninja
+      MYSQL_USER: ninja
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uninja -p\"$$MYSQL_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 768m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  # Fails `compose up` (and so the deploy) while a required variable is unset.
+  env-check:
+    image: nginx:1.29-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "/invoiceninja-env-check.sh"]
+    environment:
+      IN_USER_EMAIL: ${IN_USER_EMAIL:-}
+      IN_PASSWORD: ${IN_PASSWORD:-}
+    volumes:
+      - ./invoiceninja-env-check.sh:/invoiceninja-env-check.sh:ro
+    mem_limit: 32m
+
+  # No-op gate: `compose up -d` returns once nginx serves /health (migrations done).
+  ready:
+    image: nginx:1.29-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      nginx:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  app_public: {}
+  app_storage: {}
+  mysql_data: {}
+  redis_data: {}

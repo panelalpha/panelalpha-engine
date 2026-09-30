@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  beets is a music library manager and MusicBrainz tagger. Its `web` plugin
+  serves a browser UI and JSON API for the library (`beet web`, :8337). The
+  repository is the Python package itself: the plain deploy detects Python,
+  finds no server entry point and serves the PanelAlpha placeholder.
+
+  This recipe runs the LinuxServer.io image of the current release
+  (lscr.io/linuxserver/beets:2.14.1-ls354), whose service is `beet web` with
+  the web plugin enabled in its default config. /config (config.yaml and the
+  library database), /music and /downloads are named volumes that survive
+  redeploys. Importing music is done with the `beet` CLI inside the container,
+  as upstream documents; the web UI browses and plays the library.

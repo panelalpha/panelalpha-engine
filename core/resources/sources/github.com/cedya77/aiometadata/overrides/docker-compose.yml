@@ -1,0 +1,61 @@
+# Compose-replace: upstream has no compose, and the addon will not boot without Redis 8.
+# Release image, SQLite on a named volume, Redis cache on another.
+services:
+  app:
+    image: ghcr.io/cedya77/aiometadata:3.3.1
+    restart: unless-stopped
+    environment:
+      PORT: "3232"
+      HOST_NAME: ${PA_PUBLIC_URL}
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URI: sqlite://addon/data/db.sqlite
+      REDIS_URL: redis://redis:6379
+      ADMIN_KEY: ${ADMIN_KEY:-}
+      BUILT_IN_TMDB_API_KEY: ${BUILT_IN_TMDB_API_KEY:-}
+      BUILT_IN_TVDB_API_KEY: ${BUILT_IN_TVDB_API_KEY:-}
+      BUILT_IN_FANART_API_KEY: ${BUILT_IN_FANART_API_KEY:-}
+      BUILT_IN_RPDB_API_KEY: ${BUILT_IN_RPDB_API_KEY:-}
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
+    volumes:
+      - data:/app/addon/data
+    ports:
+      - "3232:3232"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3232/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1024m
+
+  redis:
+    image: redis:8
+    restart: unless-stopped
+    # A cache: bounded so it cannot outgrow its container.
+    command: ["redis-server", "--maxmemory", "200mb", "--save", "300", "1"]
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once the addon is ready.
+  ready:
+    image: redis:8
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  redis: {}

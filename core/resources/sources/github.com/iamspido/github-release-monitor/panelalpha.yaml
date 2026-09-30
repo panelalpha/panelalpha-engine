@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  GitHub Release Monitor watches GitHub, GitLab, Codeberg and Forgejo
+  repositories for new releases and notifies by e-mail or Apprise: one
+  Next.js standalone server on :3000, with its settings, repository list and
+  Better Auth SQLite database in /app/data. The repository ships no compose
+  file and its docker/Dockerfile ends with a CI coverage stage, so a plain
+  build runs that stage and starts a bare `node`. This recipe runs the
+  published image of the current release 2.6.0 instead, /app/data on a named
+  volume (handed to the image's uid 1001 by a one-shot init service), and
+  BETTER_AUTH_URL set to the account's public URL.
+
+  BETTER_AUTH_SECRET (required, the app refuses to start without it) and
+  AUTH_SETUP_TOKEN (the one-time token the first-run setup form asks for) are
+  generated once into ~/.panelalpha/ghrm/app.env. Either can be replaced by
+  setting it in the project's environment variables, which are loaded after
+  that file; set AUTH_SETUP_TOKEN (32+ characters) there to choose the setup
+  token yourself.
+
+  First run is left as upstream ships it: /setup creates the first admin
+  with the setup token. GITHUB_ACCESS_TOKEN (optional) raises the GitHub API
+  limit from 60 to 5000 requests an hour; mail and Apprise settings are the
+  upstream MAIL_* / APPRISE_URL variables.

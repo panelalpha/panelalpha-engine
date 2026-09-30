@@ -1,0 +1,75 @@
+# Upstream's docker/compose/docker-compose.simple.yml written out at the root:
+# the root file only include:s it, which the engine neither hardens nor
+# scans for ports (engine#368).
+services:
+  app:
+    image: onetimesecret/onetimesecret:v0.26.13
+    restart: unless-stopped
+    depends_on:
+      maindb:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      RACK_ENV: production
+      # VALKEY_PASSWORD and SECRET: generated once per account by the engine.
+      VALKEY_URL: redis://:${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set}@maindb:6379/0
+      SECRET: ${SECRET:?SECRET must be set}
+      AUTHENTICATION_MODE: simple
+      # TLS ends at the engine: https links to this domain, Secure cookie.
+      HOST: ${PA_PUBLIC_HOST}
+      SSL: "true"
+    entrypoint: ["./bin/entrypoint.sh"]
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "bin/healthcheck.sh"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 768m
+
+  maindb:
+    image: valkey/valkey:8.1-bookworm@sha256:fea8b3e67b15729d4bb70589eb03367bab9ad1ee89c876f54327fc7c6e618571
+    restart: unless-stopped
+    environment:
+      # valkey-cli in the healthcheck authenticates with this.
+      REDISCLI_AUTH: ${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set}
+    command: >
+      valkey-server
+      --appendonly yes
+      --appendfilename onetime.aof
+      --appendfsync everysec
+      --dbfilename onetime.rdb
+      --save 157680000 1
+      --bind 0.0.0.0
+      --port 6379
+      --requirepass ${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set}
+      --databases 1
+      --timeout 30
+      --loglevel notice
+      --rdbcompression yes
+    expose:
+      - "6379"
+    volumes:
+      - maindb-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once the app answers.
+  ready:
+    image: valkey/valkey:8.1-bookworm@sha256:fea8b3e67b15729d4bb70589eb03367bab9ad1ee89c876f54327fc7c6e618571
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  maindb-data: {}

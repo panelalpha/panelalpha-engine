@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MovieMatch lets a group swipe through a Plex library and shows the movies
+  everyone liked. The repository is a Deno backend plus a Svelte frontend
+  built by a Justfile; its only Dockerfile (configs/Dockerfile) copies a
+  binary that must already be compiled, and there is no root manifest, so the
+  plain deploy fell back to the engine placeholder.
+
+  This recipe runs the published image of the current release,
+  lukechannings/moviematch:2.0.0-beta.3 (the version the repository's VERSION
+  file names), listening on 0.0.0.0:8000. With no Plex server configured the
+  app serves its own setup screen and writes config.yaml into its working
+  directory; the entrypoint links that file onto a named volume so the setup
+  survives redeploys. PLEX_URL and PLEX_TOKEN may instead be set as project
+  env vars (with the other options from the README); env wins over the file.

@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Picsur, a simple image hosting service (an Imgur/Pastebin hybrid): one
+  NestJS backend serving the Angular frontend and the API on :8080, with
+  PostgreSQL holding users, settings and the images themselves. The plain
+  deploy reaches Railpack, whose `pnpm run build` calls ./support/build.sh
+  (a docker buildx release script) and fails, so the engine serves its
+  placeholder page. This recipe runs the published ghcr.io/caramelfur/picsur
+  image of the current release (0.5.6) beside PostgreSQL 17, as upstream's
+  README compose does, with the database password a required compose
+  variable the engine generates once per account. Picsur creates its schema
+  on start and keeps its JWT secret in the database. The default admin
+  login (admin / picsur unless PICSUR_ADMIN_PASSWORD is set) is left as
+  upstream ships it. Upstream marks the project as no longer maintained.

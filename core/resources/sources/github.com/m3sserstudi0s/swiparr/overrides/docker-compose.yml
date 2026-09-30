@@ -1,0 +1,39 @@
+# Compose-replace from upstream's docker-compose.example.yml: the published
+# image of the current release instead of building the checkout, whose
+# `next build` is OOM-killed at 2500 MB.
+services:
+  app:
+    image: ghcr.io/m3sserstudi0s/swiparr:1.5.1
+    restart: unless-stopped
+    ports:
+      - "4321:4321"
+    # Project env vars (JELLYFIN_URL, PROVIDER, PROVIDER_LOCK, TMDB_ACCESS_TOKEN...).
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: file:/app/data/swiparr.db
+      # Public address; an https value also makes the session cookie Secure.
+      APP_PUBLIC_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - swiparr-data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:4321/api/health >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  # No-op: makes `compose up -d` return only once the app answers.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  swiparr-data: {}

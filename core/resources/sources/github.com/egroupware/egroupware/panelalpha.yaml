@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  EGroupware, a groupware suite (calendar, address book, mail client, InfoLog,
+  projects, timesheet, file manager), PHP-FPM behind nginx with MariaDB. The
+  master branch is the development line: the plain deploy detects PHP and
+  fails with "This project needs the PHP extension swoole, which is not in the
+  PHP image it runs on".
+
+  This recipe runs upstream's own Docker setup (doc/docker/docker-compose.yml
+  and nginx.conf) on the published image of the current release,
+  egroupware/egroupware:26.9.20260928-2, with mariadb:11.8, reduced to
+  EGroupware itself: the optional Rocket.Chat, Collabora, push-server and
+  watchtower services are left out. The image's entrypoint installs
+  EGroupware on the first boot and prints the generated setup and `sysop`
+  passwords in the egroupware container's log (also in
+  /var/lib/egroupware/egroupware-docker-install.log). The MariaDB root
+  password is generated once into ~/.panelalpha/egroupware/; the database,
+  the data directory (files, backups, header.inc.php) and the sessions are
+  on named volumes, so a redeploy keeps the installation.

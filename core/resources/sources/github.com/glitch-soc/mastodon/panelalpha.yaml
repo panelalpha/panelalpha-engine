@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  glitch-soc, a Mastodon fork (Rails + Sidekiq). A plain deploy runs the
+  repository's docker-compose.yml, whose web and sidekiq read every setting
+  from an .env.production the repository does not ship: both crash-loop on
+  the missing ACTIVE_RECORD_ENCRYPTION_* keys. This recipe is the Mastodon
+  recipe on glitch-soc's release image ghcr.io/glitch-soc/mastodon:v4.7.2
+  (the tag the repository's compose file pins): puma, sidekiq, Postgres 14,
+  Redis 7, configured through the environment, with LOCAL_DOMAIN set to the
+  site's host and a one-shot rails db:prepare. hooks/prepare.sh generates
+  SECRET_KEY_BASE, the Active Record encryption keys, the VAPID pair and the
+  database password once into ~/.panelalpha/glitch-soc/mastodon.env. Uploads
+  are on a named volume. The streaming server is not run (one proxied port);
+  the web UI falls back to polling.

@@ -1,0 +1,51 @@
+# Compose-replace: the repo's Dockerfile copies a CI-built binary, so it cannot
+# be built from a clone. Runs the published image of the current release.
+services:
+  app:
+    image: ghcr.io/0x2e/fusion:1.2.1
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      FUSION_PORT: "8080"
+      FUSION_DB_PATH: /data/fusion.db
+      # Login password, from the project's env vars (checked below).
+      FUSION_PASSWORD: ${FUSION_PASSWORD:-}
+      # Every visitor arrives from the account's Docker gateway; trusting it makes the
+      # login rate limit key on the proxy-added (last) X-Forwarded-For hop per visitor.
+      FUSION_TRUSTED_PROXIES: 172.16.0.0/12
+    volumes:
+      - fusion-data:/data
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/oidc/enabled"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    mem_limit: 256m
+
+  # Fails `compose up` (and so the deploy) while FUSION_PASSWORD is unset.
+  env-check:
+    image: ghcr.io/0x2e/fusion:1.2.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "/fusion-env-check.sh"]
+    environment:
+      FUSION_PASSWORD: ${FUSION_PASSWORD:-}
+    volumes:
+      - ./fusion-env-check.sh:/fusion-env-check.sh:ro
+    mem_limit: 32m
+
+  # No-op: `compose up -d` returns once Fusion answers.
+  ready:
+    image: ghcr.io/0x2e/fusion:1.2.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  fusion-data: {}

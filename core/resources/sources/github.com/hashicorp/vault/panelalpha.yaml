@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  HashiCorp Vault, secrets management with a web UI and HTTP API on :8200. The
+  repository has no compose file and its release Dockerfile copies prebuilt
+  binaries from dist/, so the plain deploy fails building it. This recipe runs
+  the official hashicorp/vault image of the current release (2.1.1) as a real
+  server, not dev mode: file storage on a named volume, UI enabled, plain HTTP
+  listener behind the engine's HTTPS proxy, mlock disabled (the account has no
+  IPC_LOCK). First visit shows Vault's own "initialize" page; after every
+  restart or redeploy Vault starts sealed and must be unsealed with the keys
+  from initialization, as upstream intends.

@@ -1,0 +1,75 @@
+# Compose-replace: the repository's Dockerfile compiles PHP, OpenResty and
+# SiriDB from source (~18 min) and ships no compose file. This runs the
+# maintainer's published all-in-one image of the current release instead.
+services:
+  # UISP itself (API, device websocket, UCRM, Postgres, RabbitMQ, SiriDB and
+  # OpenResty under s6). Its OpenResty answers HTTPS only (port 80 just
+  # redirects), so it publishes nothing and `app` fronts it.
+  uisp:
+    image: docker.io/nico640/docker-unms:3.1.65
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      # Devices and links use the public domain on 443 (TLS at the engine).
+      PUBLIC_HTTPS_PORT: "443"
+      PUBLIC_WS_PORT: "443"
+    volumes:
+      - uisp-config:/config
+    healthcheck:
+      test: ["CMD-SHELL", "curl -skf https://127.0.0.1/nms/api/v2.1/nms/version >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 90
+      start_period: 60s
+    mem_limit: 2048m
+
+  # One-shot: completes UISP's first-visitor-wins setup with the generated
+  # admin over the compose network, before `app` exposes anything.
+  setup:
+    image: docker.io/nico640/docker-unms:3.1.65
+    restart: "no"
+    depends_on:
+      uisp:
+        condition: service_healthy
+    env_file:
+      - .env
+      - ../.panelalpha/uisp/admin.env
+    environment:
+      PA_PUBLIC_HOST: ${PA_PUBLIC_HOST}
+    volumes:
+      - uisp-config:/config
+      - ./panelalpha/uisp:/pa:ro
+    entrypoint: ["/bin/sh", "/pa/setup.sh"]
+    mem_limit: 128m
+
+  # The only published port: plain HTTP for the engine proxy, re-encrypted to
+  # UISP's self-signed HTTPS listener (websockets included, for devices).
+  app:
+    image: docker.io/library/nginx:1.29-alpine
+    restart: unless-stopped
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    volumes:
+      - ./panelalpha/uisp/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/nms/api/v2.1/nms/version | grep -q version"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+    mem_limit: 64m
+
+  # Exits 0 once `app` answers, so the deploy finishes only when UISP does.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  uisp-config: {}

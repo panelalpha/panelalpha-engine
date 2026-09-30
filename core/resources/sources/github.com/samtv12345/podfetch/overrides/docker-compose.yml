@@ -1,0 +1,46 @@
+# Compose-replace: upstream's compose runs the image as uid 1000 on named
+# volumes that start root-owned (the process dies, exit 101) and has no auth.
+# This runs the current release as the image's own user, with auth on.
+services:
+  podfetch:
+    image: docker.io/samuel19982/podfetch:v5.2.3
+    restart: unless-stopped
+    env_file:
+      # BASIC_AUTH=true, USERNAME=admin, PASSWORD=<generated>.
+      - ../.panelalpha/podfetch/auth.env
+    environment:
+      DATABASE_URL: sqlite:///app/db/podcast.db
+      POLLING_INTERVAL: "60"
+    volumes:
+      - podfetch-db:/app/db
+      - podfetch-podcasts:/app/podcasts
+    ports:
+      - "8000:8000"
+    mem_limit: 512m
+
+  # The image has no shell, so it cannot healthcheck itself: `wait` polls it
+  # from alpine and `ready` waits on `wait` completing. `up -d` runs without
+  # --wait (engine#204), so this blocks it until PodFetch answers.
+  wait:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - for i in $$(seq 1 90); do wget -q -O /dev/null http://podfetch:8000/ui/ && exit 0; sleep 2; done; exit 1
+    depends_on:
+      - podfetch
+    mem_limit: 32m
+
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      wait:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  podfetch-db: {}
+  podfetch-podcasts: {}

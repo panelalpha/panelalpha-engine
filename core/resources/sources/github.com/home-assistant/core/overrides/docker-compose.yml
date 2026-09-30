@@ -1,0 +1,45 @@
+# Compose-replace: the repo's Dockerfile only builds with HA's own builder
+# (FROM ${BUILD_FROM}, no default). Runs upstream's image of the current release.
+services:
+  app:
+    image: ghcr.io/home-assistant/home-assistant:2026.9.4
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+    volumes:
+      - config:/config
+    ports:
+      - "8123:8123"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8123/manifest.json"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1536m
+
+  # One-shot: default config on first run, plus the reverse-proxy http block.
+  init:
+    image: ghcr.io/home-assistant/home-assistant:2026.9.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    volumes:
+      - config:/config
+      - ./panelalpha/hass:/pa:ro
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once Home Assistant answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}

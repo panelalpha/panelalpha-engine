@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Rote is a personal note repository: a Bun/Hono API (rote-backend), a
+  static Vite frontend (rote-frontend) and Postgres with pgvector.
+
+  OFFICIAL IMAGES, COMPOSE-REPLACE of the repo's docker-compose.yml, pinned to
+  the v2.5.2 release of rabithua/rote-backend and rabithua/rote-frontend. The
+  backend keeps upstream's start command (wait, run migrations, serve). The
+  container_name lines, the fixed network name and the two published ports
+  are dropped.
+
+  ONE DOMAIN. Upstream publishes the frontend (18001) and the API (18000) as
+  two origins and tells the frontend where the API is via VITE_API_BASE. Here
+  VITE_API_BASE is the site's own address and a small nginx `web` service
+  (files/panelalpha/router.conf) sends /v2/api and /.well-known to the
+  backend and everything else to the frontend. It is the only service that
+  publishes a port (8080).
+
+  The Postgres password is generated once into ~/.panelalpha/rote (0600 in
+  0700) and handed to both Postgres and the backend through an env_file, so
+  it is never interpolated (upstream's ${POSTGRES_PASSWORD:?} otherwise gets
+  an engine-generated value that does not survive, engine#336). Notes live in
+  Postgres on a named volume; attachments go to the S3/R2 storage configured
+  in the app's admin settings. First run is as upstream ships it: the first
+  account registered becomes the site owner.

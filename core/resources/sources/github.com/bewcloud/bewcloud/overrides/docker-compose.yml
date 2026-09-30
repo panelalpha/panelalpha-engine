@@ -1,0 +1,94 @@
+# Compose-replace of upstream's docker-compose.yml: same images, but secrets
+# from ~/.panelalpha instead of a hand-written .env, named volumes instead of
+# ./ binds (~/project is wiped every deploy), and the README's manual
+# `make migrate-db` step as a one-shot service before the website starts.
+services:
+  website:
+    image: ghcr.io/bewcloud/bewcloud:v4.15.0
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+      - ../.panelalpha/bewcloud/app.env
+    environment:
+      PORT: "8000"
+      POSTGRESQL_HOST: postgresql
+      POSTGRESQL_USER: postgres
+      POSTGRESQL_DBNAME: bewcloud
+      POSTGRESQL_PORT: "5432"
+    ports:
+      - "8000:8000"
+    volumes:
+      - bewcloud_files:/app/data-files
+      - ./bewcloud.config.ts:/app/bewcloud.config.ts:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    mem_limit: 256m
+
+  # README: "initializes/updates the database (... the first time and on any
+  # data updates)". Idempotent: it only runs missing migrations.
+  migrate:
+    image: ghcr.io/bewcloud/bewcloud:v4.15.0
+    restart: "no"
+    command: ["task", "migrate-db"]
+    env_file:
+      - ../.panelalpha/bewcloud/app.env
+    environment:
+      PORT: "8000"
+      POSTGRESQL_HOST: postgresql
+      POSTGRESQL_USER: postgres
+      POSTGRESQL_DBNAME: bewcloud
+      POSTGRESQL_PORT: "5432"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    mem_limit: 256m
+
+  # A fresh named volume is root-owned; the image runs as deno (uid 1993).
+  init:
+    image: ghcr.io/bewcloud/bewcloud:v4.15.0
+    user: "0:0"
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "chown 1993:1993 /app/data-files"]
+    volumes:
+      - bewcloud_files:/app/data-files
+    mem_limit: 64m
+
+  postgresql:
+    image: postgres:18.4
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/bewcloud/app.env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: bewcloud
+    volumes:
+      - bewcloud_db:/var/lib/postgresql/18/docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bewcloud"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  # CardDav/CalDav backend for the Contacts and Calendar apps (enabled by default).
+  radicale:
+    image: tomsquest/docker-radicale:3.7.6.0
+    init: true
+    read_only: true
+    # Upstream's cap_drop ALL + cap_add is left out: the engine strips cap_add
+    # but keeps cap_drop, and the entrypoint then cannot chown /data or drop to
+    # the radicale user. Docker's default capability set covers all four.
+    restart: unless-stopped
+    volumes:
+      - bewcloud_radicale:/data
+      - ./radicale-config:/config:ro
+    mem_limit: 256m
+
+volumes:
+  bewcloud_files: {}
+  bewcloud_db: {}
+  bewcloud_radicale: {}

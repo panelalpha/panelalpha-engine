@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Manyfold, a self-hosted digital asset manager for 3D print files (STL, OBJ,
+  3MF). The plain deploy takes the engine's Rails recipe, whose generated
+  Dockerfile runs `bundle install` without `.ruby-version` next to the Gemfile
+  (`ruby file: ".ruby-version"`) and fails with exit code 4 (engine#421).
+
+  Compose-REPLACE with upstream's single-container image
+  manyfold3d/manyfold-solo 0.150.0 (current release; SQLite and Redis inside),
+  running as PUID/PGID 1000 as upstream's example compose does. SECRET_KEY_BASE
+  is generated once by hooks/prepare.sh into ~/.panelalpha/manyfold/app.env.
+  The database (/config) and the model library (/libraries) are named
+  volumes. First run is as upstream ships it: the site asks to create the
+  admin account.

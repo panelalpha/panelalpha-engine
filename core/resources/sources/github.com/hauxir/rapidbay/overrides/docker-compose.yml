@@ -1,0 +1,15 @@
+# Compose-replace: the repository's own Dockerfile (HEAD; the only published
+# image, hauxir/rapidbay:latest, lags it) as a single service on port 5000.
+# The search backend is the customer's: JACKETT_HOST/JACKETT_API_KEY and/or
+# PROWLARR_HOST/PROWLARR_API_KEY from the project's env vars.
+services:
+  app:
+    build: .
+    image: rapidbay:local
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    # The project's env vars (search backend, PASSWORD, RD_TOKEN, ...).
+    env_file:
+      - .env
+    mem_limit: 1536m

@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Steedos, a low-code enterprise application platform (object/metadata server
+  with a web UI and Node-RED). The repository is a lerna monorepo whose
+  source build did not finish inside the deploy watchdog. This recipe runs
+  the published all-in-one steedos/steedos-community image of the current
+  HEAD (3.0.15-beta.49): nginx on :80 in front of the Steedos server, with
+  MongoDB 4.4, Redis and Node-RED under supervisord in the same container.
+  On first start the image generates its own database and encryption
+  secrets into /steedos-storage/configuration, which is a named volume
+  together with the database, Redis data, uploads and logs. The first
+  visitor registers the first workspace user, as upstream ships it.

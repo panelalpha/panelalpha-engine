@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LightNVR is a lightweight network video recorder (C, SQLite) with a web UI
+  and REST API on :8080 and go2rtc for RTSP/WebRTC/HLS. On first start it
+  creates the account admin/admin, and the repository compose also publishes
+  RTSP, WebRTC and go2rtc's unauthenticated API. This recipe runs the
+  official ghcr.io/opensensor/lightnvr image of the current release, 0.42.8,
+  with /etc/lightnvr and /var/lib/lightnvr/data on named volumes that survive
+  redeploys.
+
+  A one-shot `seed` service writes lightnvr.ini before LightNVR first starts,
+  with `[web] password` set to the value in
+  ~/.panelalpha/lightnvr/admin.env (generated once by hooks/prepare.sh).
+  LightNVR's own bootstrap then creates `admin` with that password instead of
+  `admin`, so the default credential is never valid. Once the database exists
+  the seed does nothing, so a password changed in the UI survives redeploys.
+  There is no self-registration; further users are created by an admin.
+  Only the web UI is published: cameras are added at runtime from the UI, live
+  view has to use HLS, which LightNVR proxies through :8080 (not exercised
+  without a camera), and RTSP re-streaming (8554), WebRTC
+  (8555) and the go2rtc API (1984) are not reachable from outside.

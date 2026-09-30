@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Squidex, a headless CMS on MongoDB (ASP.NET Core, UI and API on one port).
+  The repository ships only its multi-stage source Dockerfile (Angular
+  frontend plus .NET backend); upstream deploys the published image with
+  MongoDB from the separate squidex-hosting repository.
+
+  This recipe runs that deployment on squidex/squidex:7.24.0 (the current
+  release) with MongoDB 7.0 on :5000. Assets are in a Folder store on a named
+  volume, the event store and content in MongoDB on another. URLS__BASEURL is
+  the site's address and forwarded headers are honoured. The squidex.io
+  Google/GitHub/Microsoft OAuth clients that appsettings.json ships are
+  blanked, as squidex-hosting does. First run is upstream's: with no user in
+  the database every page redirects to /identity-server/setup, which creates
+  the first admin.
+
+  NGINX FRONT (engine#429). The engine's health probe requests the app over
+  plain http with no X-Forwarded-Proto; Squidex's antiforgery cookie is
+  secure-only, so the setup and login pages answer that probe 500 and the
+  deploy ends "partial" while visitors get 200. A small nginx:1-alpine `web`
+  service (files/panelalpha/front.conf) sets X-Forwarded-Proto to https only
+  when the request carries none (every request through the engine's proxy
+  does), sends `Connection: upgrade` only for real upgrades (engine#323), and
+  is the only service publishing a port (5000). It can be dropped once
+  engine#429 is fixed.

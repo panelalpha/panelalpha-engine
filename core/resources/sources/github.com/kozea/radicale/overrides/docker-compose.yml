@@ -1,0 +1,33 @@
+# Compose-replace: upstream's compose.yaml binds ./config (a file) and ./data (missing)
+# as local-driver volumes, which cannot mount. Official image, current release, named volumes.
+services:
+  app:
+    image: ghcr.io/kozea/radicale:3.8.1
+    restart: unless-stopped
+    volumes:
+      # /etc/radicale/config is optional; Radicale runs on built-in defaults without it.
+      - config:/etc/radicale
+      - data:/var/lib/radicale
+    ports:
+      - "5232:5232"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:5232/.web/"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once Radicale answers.
+  ready:
+    image: ghcr.io/kozea/radicale:3.8.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  data: {}

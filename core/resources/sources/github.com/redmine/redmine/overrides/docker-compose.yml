@@ -1,0 +1,37 @@
+# Compose-replace: the repo has no database.yml, so a source build installs no
+# DB adapter. Runs the official image of the current release on SQLite.
+services:
+  app:
+    image: redmine:7.0.1
+    restart: unless-stopped
+    env_file:
+      # A missing file aborts `up` rather than starting with a throwaway secret.
+      - ../.panelalpha/redmine/secret.env
+    volumes:
+      # SQLite database (the image's default when no DB variables are set).
+      - db:/usr/src/redmine/sqlite
+      # Attachments.
+      - files:/usr/src/redmine/files
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/login"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Redmine answers (first boot migrates).
+  ready:
+    image: redmine:7.0.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db: {}
+  files: {}

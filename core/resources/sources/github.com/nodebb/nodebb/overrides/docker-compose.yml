@@ -1,0 +1,75 @@
+# Compose-replace: upstream's compose builds the repo and bind-mounts every
+# volume into ./.docker under the checkout, which the image's uid 1001 cannot
+# write and which a redeploy wipes. This runs the published image of the
+# current release with named volumes and an authenticated MongoDB.
+services:
+  nodebb:
+    image: ghcr.io/nodebb/nodebb:4.16.0
+    restart: unless-stopped
+    ports:
+      - "4567:4567"
+    env_file:
+      # mongo__uri with the password generated once by hooks/prepare.sh. A URI,
+      # not mongo__password: the installer renders the latter into its page.
+      - ../.panelalpha/nodebb/db.env
+    environment:
+      # nconf reads these (separator "__"); with url and database set the web
+      # installer asks only for the admin account.
+      url: ${PA_PUBLIC_URL}
+      database: mongo
+      mongo__host: mongo
+      mongo__port: "27017"
+      mongo__database: nodebb
+      # The session cookie is Secure (https url); without proxy trust the
+      # request looks like plain HTTP and login fails with 403. Private-range
+      # hops only, so req.ip is the last address the proxies added (engine#319).
+      trust_proxy: "loopback, linklocal, uniquelocal"
+    volumes:
+      - nodebb-build:/usr/src/app/build
+      - nodebb-uploads:/usr/src/app/public/uploads
+      - nodebb-config:/opt/config
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      # The image has no curl/wget.
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4567/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  mongo:
+    # 7.0: every 8.x image refuses to start on this kernel (engine#146).
+    image: mongo:7.0
+    restart: unless-stopped
+    command: ["mongod", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"]
+    env_file:
+      - ../.panelalpha/nodebb/db-root.env
+      - ../.panelalpha/nodebb/db-user.env
+    volumes:
+      - mongo-data:/data/db
+      - ./panelalpha/mongo-init.js:/docker-entrypoint-initdb.d/nodebb-user.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 10s
+      retries: 40
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `up -d` returns only once NodeBB (or its web installer) answers.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      nodebb:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  nodebb-build: {}
+  nodebb-uploads: {}
+  nodebb-config: {}
+  mongo-data: {}

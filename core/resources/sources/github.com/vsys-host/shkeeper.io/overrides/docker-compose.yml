@@ -1,0 +1,56 @@
+# Compose-replace: upstream's published gateway image of the current release
+# (the version its Helm chart pins). No coin backends: each coin needs its own
+# wallet server plus a full node or a remote RPC, which this account does not run.
+services:
+  # One-shot, every boot: schema + admin password before the app is reachable.
+  seed:
+    image: docker.io/vsyshost/shkeeper:2.5.32
+    restart: "no"
+    env_file:
+      - .env
+      - ../.panelalpha/shkeeper/app.env
+      - ../.panelalpha/shkeeper/admin.env
+    volumes:
+      - shkeeper-instance:/shkeeper.io/instance
+      - ./panelalpha/shkeeper/seed.py:/pa/seed.py:ro
+      - ./panelalpha/shkeeper/config.py:/shkeeper.io/instance/config.py:ro
+    entrypoint: ["python", "/pa/seed.py"]
+    mem_limit: 512m
+
+  app:
+    image: docker.io/vsyshost/shkeeper:2.5.32
+    restart: unless-stopped
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    # .env holds panel-overridable settings (the coin switches and backend
+    # hosts, e.g. BTC_WALLET, BTC_API_SERVER_HOST); app.env the persisted secrets.
+    env_file:
+      - .env
+      - ../.panelalpha/shkeeper/app.env
+    ports:
+      - "5000:5000"
+    volumes:
+      # shkeeper.sqlite and the session files.
+      - shkeeper-instance:/shkeeper.io/instance
+      - ./panelalpha/shkeeper/config.py:/shkeeper.io/instance/config.py:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:5000/login"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 512m
+
+  # No-op gate: `up -d` returns only once the app answers (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  shkeeper-instance: {}

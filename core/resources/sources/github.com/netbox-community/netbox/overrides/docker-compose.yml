@@ -1,0 +1,107 @@
+# The repository has no configuration.py and no deployment; this is
+# netbox-docker's docker-compose.yml on its release image.
+x-netbox: &netbox
+  image: netboxcommunity/netbox:v4.7.1-5.1.1
+  restart: unless-stopped
+  user: "netbox:root"
+  env_file:
+    - ../.panelalpha/netbox/netbox.env
+  environment: &netbox-env
+    DB_HOST: postgres
+    DB_NAME: netbox
+    DB_USER: netbox
+    REDIS_HOST: redis
+    REDIS_DATABASE: "0"
+    REDIS_CACHE_HOST: redis
+    REDIS_CACHE_DATABASE: "1"
+    # Django rejects the login POST from the https origin without this.
+    CSRF_TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+    SKIP_SUPERUSER: "true"
+    GRAPHQL_ENABLED: "true"
+    WEBHOOKS_ENABLED: "true"
+    METRICS_ENABLED: "false"
+    MEDIA_ROOT: /opt/netbox/netbox/media
+    RELEASE_CHECK_URL: https://api.github.com/repos/netbox-community/netbox/releases
+    # Image default is 4; sized for a 2.5 GB account.
+    GRANIAN_WORKERS: "2"
+  volumes:
+    - media:/opt/netbox/netbox/media
+    - reports:/opt/netbox/netbox/reports
+    - scripts:/opt/netbox/netbox/scripts
+
+services:
+  netbox:
+    <<: *netbox
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # First boot runs every migration before granian binds; the long
+    # start_period keeps compose from calling it unhealthy meanwhile.
+    healthcheck:
+      test: ["CMD", "/opt/netbox/health.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 900s
+    # Peaks ~1.05 GB while the first-boot migrations run.
+    mem_limit: 1536m
+
+  # Upstream's worker; depending on netbox being healthy also makes
+  # `compose up -d` return only once the site answers.
+  netbox-worker:
+    <<: *netbox
+    command: ["/opt/netbox/venv/bin/python", "/opt/netbox/netbox/manage.py", "rqworker"]
+    depends_on:
+      netbox:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "ps -aux | grep -v grep | grep -q rqworker || exit 1"]
+      interval: 15s
+      timeout: 3s
+      start_period: 20s
+    mem_limit: 512m
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/netbox/netbox.env
+    environment:
+      POSTGRES_DB: netbox
+      POSTGRES_USER: netbox
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -t 2 -d netbox -U netbox"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 384m
+
+  # One Valkey for tasks (db 0, persisted) and cache (db 1).
+  redis:
+    image: valkey/valkey:9.1-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/netbox/netbox.env
+    command: ["sh", "-c", "exec valkey-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "[ \"$$(valkey-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping)\" = PONG ]"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    mem_limit: 192m
+
+volumes:
+  media: {}
+  reports: {}
+  scripts: {}
+  postgres: {}
+  redis: {}

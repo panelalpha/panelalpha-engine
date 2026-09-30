@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  FredBet is a Spring Boot web app for friendly football betting pools, with
+  an integrated user administration. The repository compose builds the app
+  from source behind a `profiles: ["app"]` gate (a plain `compose up` starts
+  only Postgres, which it publishes with fred/fred), and FredBet creates the
+  administrator admin/admin on first start. This recipe runs the official
+  fred4jupiter/fredbet image of the current release, 4.8.3, against a
+  Postgres 17 sidecar on a named volume; uploaded images live in the database,
+  so nothing else needs persisting.
+
+  hooks/prepare.sh generates the database password and the admin password once
+  into ~/.panelalpha/fredbet/. FredBet reads `fredbet.admin-password` (here
+  FREDBET_ADMIN_PASSWORD) only when it creates the admin user on an empty
+  database, so admin/admin is never valid and a password changed in the UI
+  survives redeploys. Self-registration is off by default and additionally
+  needs a random registration code. Only the app port is published.

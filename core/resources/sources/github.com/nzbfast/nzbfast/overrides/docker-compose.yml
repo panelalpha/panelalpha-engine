@@ -1,0 +1,45 @@
+# Compose-replace: the repo compose keeps config on ./ bind mounts (wiped on
+# every deploy), downloads on a host path, and adds a Watchtower that needs the
+# Docker socket. It also pairs cap_drop: [ALL] with cap_add, and the engine keeps
+# only the drop (engine#349), so the entrypoint cannot switch to PUID
+# ("failed switching to 1000:1000"). Default capabilities here instead.
+services:
+  app:
+    image: nzbfast/nzbfast:1.7.1
+    restart: unless-stopped
+    ports:
+      - "6789:6789"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+      NZBFAST_OUT: /data/usenet
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      # Settings, generated API key, queue and index database.
+      - config:/config
+      - watch:/watch
+      - usenet:/data/usenet
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:6789/api?mode=version&output=json"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 5s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns once nzbfast answers.
+  ready:
+    image: nzbfast/nzbfast:1.7.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  watch: {}
+  usenet: {}

@@ -1,0 +1,56 @@
+# Compose-replace: the repository's root has no compose file and the Go
+# detection starts the binary with no Vault and no binding address, so it
+# exits at once. This is upstream's deploy/docker-compose.yml shape: Vault in
+# dev mode (secrets kept in memory, by design) plus the official app image of
+# the current release. The root token is per account, from prepare.sh.
+services:
+  vault:
+    image: hashicorp/vault:2.1.1
+    restart: unless-stopped
+    command: ["server", "-dev"]
+    env_file:
+      - ../.panelalpha/sup3rs3cretmes5age/vault.env
+    environment:
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      # No IPC_LOCK in the account; do not try to setcap the binary.
+      SKIP_SETCAP: "true"
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 256m
+
+  app:
+    image: algolia/supersecretmessage:0.4.4
+    restart: unless-stopped
+    env_file:
+      - .env
+      - ../.panelalpha/sup3rs3cretmes5age/vault.env
+    environment:
+      VAULT_ADDR: http://vault:8200
+      SUPERSECRETMESSAGE_HTTP_BINDING_ADDRESS: ":8082"
+      SUPERSECRETMESSAGE_HTTPS_REDIRECT_ENABLED: "false"
+      SUPERSECRETMESSAGE_VAULT_PREFIX: cubbyhole/
+      SUPERSECRETMESSAGE_ALLOWED_ORIGINS: ${PA_PUBLIC_URL}
+    depends_on:
+      vault:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8082/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once the app answers /health.
+  ready:
+    image: algolia/supersecretmessage:0.4.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m

@@ -1,0 +1,99 @@
+# Upstream's compose with its published images (current main, pinned by
+# digest), the scheduler on, the project's own address as the public URL and
+# generated secrets from ~/.panelalpha instead of required `:?` variables.
+x-backend-env: &backend-env
+  DEBUG: "False"
+  ALLOWED_HOSTS: localhost,127.0.0.1,backend
+  FRONTEND_BASE_URL: ${PA_PUBLIC_URL}
+  CORS_ALLOWED_ORIGINS: ${PA_PUBLIC_URL}
+  CSRF_TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+  DATABASE_NAME: trackwatch
+  DATABASE_USER: trackwatch
+  DATABASE_HOST: db
+  DATABASE_PORT: "5432"
+
+services:
+  # One-shot: the app cannot log anyone in without a Spotify app, so the deploy
+  # fails here naming each missing variable. Read from .env, not interpolated:
+  # the engine would generate a value for SPOTIFY_CLIENT_SECRET (engine#336).
+  check:
+    image: ghcr.io/emlopezr/trackwatch-backend:9197bd6@sha256:958eb5dad25108e6cc81416a0ab50833d5355e2f904ef5c30b36f5712ff38854
+    restart: "no"
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        missing=""
+        [ -n "$$SPOTIFY_CLIENT_ID" ] || missing="$$missing SPOTIFY_CLIENT_ID"
+        [ -n "$$SPOTIFY_CLIENT_SECRET" ] || missing="$$missing SPOTIFY_CLIENT_SECRET"
+        if [ -n "$$missing" ]; then
+          echo "Error: set in the project's environment variables:$$missing (from your app at https://developer.spotify.com/dashboard, with Redirect URI <this site's URL>/callback)"
+          exit 1
+        fi
+    mem_limit: 64m
+
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    env_file: ../.panelalpha/trackwatch/db.env
+    environment:
+      POSTGRES_DB: trackwatch
+      POSTGRES_USER: trackwatch
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trackwatch -d trackwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  backend:
+    image: ghcr.io/emlopezr/trackwatch-backend:9197bd6@sha256:958eb5dad25108e6cc81416a0ab50833d5355e2f904ef5c30b36f5712ff38854
+    restart: unless-stopped
+    # .env: Spotify app and optional e-mail settings; app.env: generated secrets.
+    env_file:
+      - .env
+      - ../.panelalpha/trackwatch/app.env
+    environment: *backend-env
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8000/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    depends_on:
+      check:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    mem_limit: 512m
+
+  scheduler:
+    image: ghcr.io/emlopezr/trackwatch-scheduler:9197bd6@sha256:fc6899d90aa9d66b64d504d3578aa35cd7d6e467065d1803f547ce26dcfe45c3
+    restart: unless-stopped
+    env_file:
+      - .env
+      - ../.panelalpha/trackwatch/app.env
+    environment: *backend-env
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 384m
+
+  frontend:
+    image: ghcr.io/emlopezr/trackwatch-frontend:8b45f71@sha256:bec51463c7d9e524bb9778c251117b7bad4d55a4273af54d8ce16d3a02fd7aeb
+    restart: unless-stopped
+    environment:
+      BACKEND_PROXY_PASS: http://backend:8000
+      BACKEND_PROXY_HOST: backend
+      NGINX_RESOLVER: 127.0.0.11
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  postgres_data: {}

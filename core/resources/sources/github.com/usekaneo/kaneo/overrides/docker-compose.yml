@@ -1,0 +1,54 @@
+# Upstream's compose.yml on a pinned release, with the values its .env would
+# hold: the public URL (Better Auth rejects any other origin) and the secrets.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: ../.panelalpha/kaneo/secrets.env
+    environment:
+      POSTGRES_DB: kaneo
+      POSTGRES_USER: kaneo
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kaneo -d kaneo"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  kaneo:
+    image: ghcr.io/usekaneo/kaneo:2.29.2
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    # POSTGRES_PASSWORD and AUTH_SECRET (hooks/prepare.sh).
+    env_file: ../.panelalpha/kaneo/secrets.env
+    environment:
+      KANEO_CLIENT_URL: ${PA_PUBLIC_URL}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: kaneo
+      POSTGRES_USER: kaneo
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-Y", "off", "-q", "--spider", "http://127.0.0.1:5173/api/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 30
+    mem_limit: 1024m
+
+  # `up -d` returns once the API has migrated and answers.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      kaneo:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  postgres_data: {}

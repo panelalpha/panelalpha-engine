@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Superdesk is a newsroom content platform: a Python server (REST API,
+  websocket notifications, Celery workers, content API) and an AngularJS
+  client, on MongoDB, Elasticsearch and Redis.
+
+  COMPOSE-REPLACE of the repo's docker-compose.yml. It uses the same datastores
+  and the published sourcefabricoss/superdesk-server:latest image (the v3.5
+  release). It drops the `build:` key on the server, the host-published
+  datastore ports and the external `superdesk-newsroom` network. MongoDB,
+  Elasticsearch and Redis data live on named volumes and survive a redeploy.
+  SECRET_KEY replaces the one hardcoded upstream. It is generated once into
+  ~/.panelalpha/superdesk (0600 in 0700) and reused.
+
+  CLIENT BUILT FROM THE REPO. The published superdesk-client image has
+  http://localhost:8080/api compiled into its bundle, and its start.sh only
+  rewrites http://localhost:5000/api, so the image can only be used at
+  localhost:8080. The client is therefore built from the repo's own
+  client/Dockerfile with this site's address as the SUPERDESK_URL build
+  argument, the way upstream's compose builds it for localhost. The address
+  comes from PUBLIC_URL, which the engine fills into .env from
+  files/.env.example. The websocket URL is the relative /ws on the same
+  origin. The client's nginx is the only published port (8080) and proxies
+  /api, /ws and /capi to the server. The first build takes about 4 minutes;
+  a rebuild reuses the cached layers.
+
+  MEMORY. Measured at idle: the server takes ~1.4 GB (hypercorn x2 for REST,
+  content API and public API, plus Celery, beat and the websocket), and
+  Elasticsearch ~1.0 GB with a fixed 512 MB heap. The account totals ~2.7 GB.
+  With the default memory limit of 2500 MB, Elasticsearch is OOM-killed in a
+  loop, so hooks/precheck.sh fails the deploy below 3072 MB with a message
+  saying so. Celery gets CELERY_WORKER_CONCURRENCY=2, because it otherwise
+  forks one ~170 MB worker per host CPU.
+
+  FIRST RUN AS UPSTREAM SHIPS IT. The server image's start script creates
+  admin / admin on every start (README). The recipe leaves it, so change it
+  after the first login. On the *.panelalpha.online test names the front edge
+  strips `Upgrade` (engine#170), so live notifications need a real domain there.

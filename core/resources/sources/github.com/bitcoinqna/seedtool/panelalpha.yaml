@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bitcoin Seed Tool, a single-page browser tool for learning how wallet seeds
+  are derived. There is no server: the release is one self-contained
+  dist/index.html that build.js inlines from src/www (upstream's
+  `release:check` asserts the committed file equals a fresh build).
+  package.json has no start script and names a non-existent index.js as
+  `main`, so the plain deploy went to Railpack, which ran `node index.js` and
+  crash-looped on `Cannot find module '/app/index.js'`.
+
+  The recipe uses the bundler-SPA platform: `npm run build` (node build.js)
+  produces dist/index.html and nginx serves dist/.
+extends: bundler-spa
+output_directory: dist

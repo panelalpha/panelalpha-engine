@@ -1,0 +1,33 @@
+# Compose-replace: the source build is a large lerna monorepo; run the
+# published all-in-one image (nginx, Steedos, MongoDB, Redis, Node-RED).
+services:
+  app:
+    image: steedos/steedos-community:3.0.15-beta.49
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      ROOT_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # Generated secrets, MongoDB, Redis, uploads and logs.
+      - steedos_storage:/steedos-storage
+    healthcheck:
+      test: ["CMD", "/opt/steedos/healthcheck.sh"]
+      interval: 10s
+      timeout: 15s
+      retries: 60
+      start_period: 60s
+    mem_limit: 2g
+
+  # No-op gate: `compose up -d` returns once Steedos answers.
+  ready:
+    image: steedos/steedos-community:3.0.15-beta.49
+    restart: "no"
+    entrypoint: ["/bin/true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  steedos_storage: {}

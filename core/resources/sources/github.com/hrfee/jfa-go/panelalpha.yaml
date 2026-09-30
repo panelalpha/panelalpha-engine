@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  jfa-go manages users and invites for a Jellyfin (or Emby) server: invite
+  links, account defaults, password resets and notifications. One Go binary
+  serves its web UI on :8056; config.ini and the database live in /data.
+  On first start it serves its own setup wizard, which asks for the Jellyfin
+  server's address and an admin login.
+
+  The repository's Dockerfile builds through scripts/version.sh, which runs
+  `git describe --tags`; the engine's shallow clone has no tags, so the build
+  fails ("fatal: No names found, cannot describe anything", then ENOENT on
+  build/data/web/css/v0.6.0bundle.css). This recipe runs upstream's published
+  image of the current release, hrfee/jfa-go:latest (v0.6.0, pinned by
+  digest), as the README's docker instructions do, with /data on a named
+  volume that survives redeploys. The optional /jf mount (Jellyfin's own
+  config dir, for password resets through Jellyfin) is not provided.

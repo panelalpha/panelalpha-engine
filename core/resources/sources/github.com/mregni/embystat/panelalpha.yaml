@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  EmbyStat, a statistics dashboard for Emby and Jellyfin servers (ASP.NET Core
+  with a React frontend) on port 6555. The plain deploy ran `dotnet publish`
+  on EmbyStat.Hosts.Cmd only and never built the frontend (EmbyStat.Web), so
+  every page was HTTP 500 "The SPA default page middleware could not return
+  the default page '/index.html'". This recipe runs upstream's published
+  uping/embystat image of the latest release (0.2.0-beta.38, pinned by
+  digest) with its settings (/app/config) and database (/app/data) on named volumes.

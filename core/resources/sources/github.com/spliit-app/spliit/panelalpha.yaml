@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Spliit, an open-source expense-sharing app (a Splitwise alternative): one
+  Next.js standalone server on :3000 with PostgreSQL. The plain deploy runs the
+  repository's compose.yaml, which builds the Dockerfile from source; its
+  `next build` is killed for memory (SIGKILL, "cannot allocate memory") inside
+  a 2 GB account, and its postgres service reads POSTGRES_PASSWORD from a
+  container.env the engine fills from .env.example, which has none.
+
+  This recipe runs the published ghcr.io/spliit-app/spliit image of the
+  current release (1.28.0) beside PostgreSQL 17, as upstream's README compose
+  does, with BASE_URL set to the site's address and the database password a
+  required compose variable the engine generates once per account. The image
+  runs its Prisma migrations on start; a gate service waits for Spliit's own
+  /api/health/readiness. The database is on a named volume. Spliit has no
+  accounts: groups are shared by link (upstream behaviour).

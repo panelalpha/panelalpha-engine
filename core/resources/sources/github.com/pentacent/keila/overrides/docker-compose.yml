@@ -1,0 +1,95 @@
+# Compose-replace: the repo root has no compose file (Elixir is not detected, so
+# the engine served its placeholder); ops/docker-compose.yml is a local-testing
+# stack. This runs the published image of the current release beside PostgreSQL.
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file:
+      # POSTGRES_PASSWORD, generated once by hooks/prepare.sh.
+      - ../.panelalpha/keila/db.env
+    environment:
+      POSTGRES_USER: keila
+      POSTGRES_DB: keila
+    volumes:
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -U keila -d keila"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 256m
+
+  # One-shot: Keila exits at boot without an SMTP mailer for system emails, so
+  # the deploy fails here naming each missing variable. Values come from .env
+  # (the project's env vars), not interpolation (engine#336). Also hands the
+  # uploads volume, created root-owned, to the image's user (uid 1001).
+  init:
+    image: pentacent/keila:0.30.3
+    restart: "no"
+    user: "0"
+    env_file:
+      - path: .env
+        required: false
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        missing=""
+        [ -n "$$MAILER_SMTP_HOST" ] || missing="$$missing MAILER_SMTP_HOST (SMTP server for system emails)"
+        [ -n "$$MAILER_SMTP_FROM_EMAIL" ] || missing="$$missing MAILER_SMTP_FROM_EMAIL (sender address)"
+        if [ "$$MAILER_SMTP_AUTH_METHOD" != "none" ] && [ -z "$$MAILER_SMTP_PASSWORD" ]; then
+          missing="$$missing MAILER_SMTP_PASSWORD (or MAILER_SMTP_AUTH_METHOD=none)"
+        fi
+        if [ -n "$$missing" ]; then
+          echo "Error: Keila needs an SMTP mailer to start. Set in the project's environment variables:$$missing"
+          exit 1
+        fi
+        chown 1001:0 /opt/app/uploads
+    volumes:
+      - uploads:/opt/app/uploads
+    mem_limit: 64m
+
+  app:
+    image: pentacent/keila:0.30.3
+    restart: unless-stopped
+    env_file:
+      # MAILER_SMTP_* and optional KEILA_USER / KEILA_PASSWORD from the project.
+      - path: .env
+        required: false
+      # SECRET_KEY_BASE and DB_URL, generated once by hooks/prepare.sh.
+      - ../.panelalpha/keila/app.env
+    environment:
+      URL_HOST: ${PA_PUBLIC_HOST}
+      URL_SCHEMA: https
+      PORT: "4000"
+    volumes:
+      - uploads:/opt/app/uploads
+    ports:
+      - "4000:4000"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4000/auth/login"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  # `up -d` runs without --wait (engine#204); this blocks it until Keila answers.
+  ready:
+    image: postgres:18-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db_data: {}
+  uploads: {}

@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Floppy, a self-hosted media tracker (a Yamtrack fork: Django + gunicorn behind
+  nginx in one container, Celery under supervisord, Redis as cache and broker,
+  SQLite by default). The repository's docker-compose.yml runs the published
+  image, but keeps SQLite and backups in ./db and ./backups inside ~/project,
+  which every deploy wipes (a user registered before a rebuild was gone after
+  it), sets SECRET=longstring, and has no health gate, so the engine probes
+  while ~370 first-boot migrations run and reports the deploy as partial.
+
+  This recipe runs the same image at the current release
+  (ghcr.io/dannyvfilms/floppy:26.9.24) with SQLite and backups on named
+  volumes, SECRET generated once into ~/.panelalpha/floppy/app.env, URLS set to
+  the site address (Floppy adds it to ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS),
+  and a `ready` gate on /health/. ADMIN_ENABLED and DEMO_ACCOUNT_ENABLED are
+  False as in upstream's compose; registration stays upstream's default (open).
+  Metadata keys (TMDB_API etc.) come from the project's env vars.
+
+  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
+
+  Fresh create: `ready` passed once /health/ answered, health :8000 200,
+  335 s (first-boot migrations). / -> /accounts/login/ 200 <title>Login -
+  Floppy</title>, 19.6 KB. Registered a user over https (CSRF with URLS) and
+  logged in to <title>Home - Floppy</title>. /.env and /.git/config are the
+  app's own 404 page. Rebuild: success in 95 s, the user was still in the
+  database and logged in again. The plain deploy lost that user on rebuild.

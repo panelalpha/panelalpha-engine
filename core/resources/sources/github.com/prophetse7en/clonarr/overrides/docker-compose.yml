@@ -1,0 +1,61 @@
+# Compose-replace: the repository ships only its Dockerfile (a Go build). This
+# runs the published release image, durable and closed:
+#   - ghcr.io/prophetse7en/clonarr pinned to v3.4.0
+#   - /config (settings, auth.json, profiles, TRaSH clone) on a named volume
+#   - the admin is created by `seed` BEFORE the app publishes its port, so
+#     /setup is never open to the first visitor
+services:
+  # Starts Clonarr privately (no published port) against the same volume,
+  # creates the admin through its own /setup, then exits.
+  seed:
+    image: ghcr.io/prophetse7en/clonarr:v3.4.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/clonarr/admin.env
+    environment:
+      TZ: Etc/UTC
+      TRUSTED_NETWORKS: 127.0.0.1
+    volumes:
+      - config:/config
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    mem_limit: 512m
+
+  clonarr:
+    image: ghcr.io/prophetse7en/clonarr:v3.4.0
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+      # Only loopback may skip the login (locked; the UI cannot widen it).
+      TRUSTED_NETWORKS: 127.0.0.1
+      # The engine's proxy reaches the app over the account's Docker bridge.
+      # Clonarr walks X-Forwarded-For right to left past these, so the login
+      # rate limit lands on the proxy-added visitor hop, not on everyone.
+      TRUSTED_PROXIES: 172.16.0.0/12
+    volumes:
+      - config:/config
+    ports:
+      - "6060:6060"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:6060/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Clonarr answers.
+  ready:
+    image: ghcr.io/prophetse7en/clonarr:v3.4.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      clonarr:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}

@@ -1,0 +1,43 @@
+# The repository's docker-compose.yml is the dev environment (dev.Dockerfile,
+# the source bind-mounted over /app). This runs the published image of the
+# current release, 2025.9.26 (tagged only as `latest`, so pinned by digest),
+# the way the README's compose example does, on named volumes.
+services:
+  app:
+    image: ghcr.io/kieraneglin/pinchflat:latest@sha256:01b4f98aabaf3f5fe394213f7a32578c9e84e42080f52e2f8334021a4473b202
+    restart: unless-stopped
+    env_file:
+      # SECRET_KEY_BASE, generated once per account by hooks/prepare.sh.
+      - ../.panelalpha/pinchflat/app.env
+      # The project's environment variables (e.g. BASIC_AUTH_USERNAME/PASSWORD).
+      - .env
+    environment:
+      TZ: Etc/UTC
+      PORT: "8945"
+    volumes:
+      # pinchflat.db, logs, yt-dlp cookies and extras.
+      - config:/config
+      - downloads:/downloads
+    ports:
+      - "8945:8945"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8945/healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Pinchflat answers.
+  ready:
+    image: ghcr.io/kieraneglin/pinchflat:latest@sha256:01b4f98aabaf3f5fe394213f7a32578c9e84e42080f52e2f8334021a4473b202
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  downloads: {}

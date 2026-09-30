@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Calibre-Web Automated (CWA) is an ebook library server: Calibre-Web's web UI
+  with Calibre's conversion and metadata tools, plus an ingest folder that
+  imports whatever is dropped into it. Every page is behind a login and there
+  is no open self-registration by default, so the login is the boundary.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repo's docker-compose.yml is a template
+  (/path/to/... bind mounts, a placeholder HARDCOVER_TOKEN). This recipe runs
+  the maintainer's Docker Hub image pinned to the current release v4.0.7 with
+  /config (app.db, settings, users), /calibre-library and /cwa-book-ingest on
+  named volumes, so settings, users and books survive a redeploy.
+
+  NGINX FRONT (engine#323). The engine's account vhost sends `Connection:
+  upgrade` on every request. Calibre-Web is served by gevent's pywsgi, which
+  then treats the socket as upgraded and reads a POST body until EOF, so every
+  form POST, the login included, hangs until the proxy gives up. A small
+  nginx:1-alpine `web` service in front (files/panelalpha/front.conf) sends
+  `upgrade` only when the client sent an Upgrade header and passes the
+  X-Forwarded-* headers through unchanged. It is the only service that
+  publishes a port (8083). It can be dropped once engine#323 is fixed.
+
+  DEFAULT ADMIN CLOSED BEFORE THE PORT OPENS. Calibre-Web creates admin /
+  admin123 with a new app.db. A one-shot `set-admin` service runs first, on the
+  same config volume, and uses Calibre-Web's own CLI (`cps.py -s admin:<pw>`),
+  which also creates app.db on an empty volume, to set the password generated
+  once into ~/.panelalpha/calibre-web-automated (0600 in 0700). The web service
+  depends on it completing, so the site never answers with the default live.
+  It only acts while admin still has admin123, so a password changed in the app
+  survives a redeploy. The generated login is in credentials.txt there.
+
+  A `ready` gate holds the deploy until /login answers. The session cookie is
+  marked Secure, as the site is only reached through the engine's https proxy.

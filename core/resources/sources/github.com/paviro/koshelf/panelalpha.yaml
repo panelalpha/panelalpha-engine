@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  KoShelf, a web dashboard for KOReader highlights, notes and reading
+  statistics (Rust server with an embedded React UI). The plain deploy builds
+  it with the rust recipe, whose image has no npm, and KoShelf's build.rs
+  shells out to npm for the frontend ("Failed to install frontend npm
+  dependencies"). This recipe runs the image upstream's installation guide
+  points to, ghcr.io/devtigro/koshelf at the current release (2026.8.0), in
+  `koshelf serve` mode on :3000. The library (/books), the KOReader settings
+  directory (/settings) and KoShelf's runtime data (/data) are named volumes
+  that survive redeploys; a one-shot init service hands them to the image's
+  uid 1000. The image's default statistics database path is dropped until a
+  statistics.sqlite3 exists in /settings, since serve refuses a missing file.
+  Authentication is off, as upstream ships it.

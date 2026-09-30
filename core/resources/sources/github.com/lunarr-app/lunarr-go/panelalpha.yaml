@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Lunarr is a self-hosted media streaming server (a Plex alternative): one
+  SvelteKit/Node process on :3000 with ffmpeg for transcoding, SQLite and the
+  HLS cache in /data. Libraries are local folders, SFTP or WebDAV shares. The
+  repository's docker-compose.yml runs sayem314/lunarr:latest behind its own
+  Traefik on host ports 80/443 with a /mnt/media bind mount; this recipe
+  replaces it with the published image of the current release 0.10.0, /data
+  and /media on named volumes, and ORIGIN set to the account's public URL.
+
+  The repository's .env.example sets LUNARR_DATA_DIR=.lunarr (not writable in
+  the image, the container crash-loops with EACCES) and a placeholder
+  AUTH_SECRET that Lunarr would accept, so the compose does not load .env:
+  LUNARR_DATA_DIR is /data and AUTH_SECRET is left unset, which makes Lunarr
+  generate its own into /data/auth-secret on first start.
+
+  First run is left as upstream ships it: until someone completes /setup
+  ("Set up Lunarr") every page redirects there, and that first account becomes
+  the admin. Adding media: copy files into the media volume, e.g.
+  `docker compose -p project cp <dir> app:/media/`, and add /media/<dir> as a
+  library, or point a library at an SFTP/WebDAV share.

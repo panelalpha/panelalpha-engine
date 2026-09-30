@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  RCON Web Admin, a Node web UI for administering game servers over RCON. The
+  express platform builds it fine; the plain deploy restart-looped because the
+  generated start runs `node src/main.js` with no subcommand and the app's CLI
+  only prints its usage. It must run as `node src/main.js start`.
+
+  It also listens on two ports: HTTP on 4326 and its WebSocket (which carries
+  every view and login) on 4327, and the account publishes one. An nginx
+  sidecar in the app container's network namespace takes the published port
+  3000 and routes /websocket to 4327 and everything else to 4326;
+  RWA_WEBSOCKET_URL_SSL (upstream's own env var) points the browser at
+  wss://<domain>/websocket. Users/servers (db/) and widgets (public/widgets)
+  sit on named volumes; the core widgets are installed once with the app's own
+  `install-core-widgets`, as its README instructs. The first visit shows the
+  app's own "create the first user" panel, left as upstream ships it.
+extends: express

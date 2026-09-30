@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PHP Server Monitor: a plain PHP + MySQL app (Symfony DI, Twig) with its own
+  web installer at install.php. Detection is right (php, Apache, composer
+  install on the host), but the plain deploy answered HTTP 200 with an empty
+  body on every path. The app reads its database from PHP constants in
+  config.php, which the repository ships only as config.php.sample; without
+  it src/config/services.xml resolves `constant('PSM_DB_HOST')`, which on
+  PHP 8 throws "Undefined constant" before bootstrap.php can redirect to the
+  installer, and bootstrap.php's error_reporting(E_USER_ERROR) hides the
+  fatal, so the page is blank.
+
+  The recipe asks for a MySQL database (`database: mysql`) and installs
+  config.php: the sample's values with the DB_* credentials the engine hands
+  the container. The upstream installer then runs as shipped: it creates the
+  tables and asks for the first administrator.
+extends: php
+database: mysql

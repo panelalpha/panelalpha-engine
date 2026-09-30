@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gogs, a self-hosted Git service (Go binary, web UI on :3000). The repository's
+  main branch is unreleased 0.15.0+dev: it removed the first-run web installer
+  and refuses to start without a hand-written custom/conf/app.ini, so the plain
+  dockerfile deploy builds an image that crash-loops. This recipe runs the
+  official gogs/gogs image of the current release, 0.14.3, with /data
+  (app.ini, repositories, SQLite database) on a named volume that survives
+  redeploys. First start serves Gogs's own /install page, as upstream ships it.

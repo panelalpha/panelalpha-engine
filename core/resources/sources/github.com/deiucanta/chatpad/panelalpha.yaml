@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Chatpad is a chat front-end for the OpenAI API: a React single-page app
+  built with Parcel. Each visitor enters their own API key in the browser and
+  chats are kept in the browser's IndexedDB; the server only hands out static
+  files. package.json still lists an unused `next` dependency, so a plain
+  deploy detects Next.js and fails in `yarn install --frozen-lockfile` (the
+  committed yarn.lock is out of date; upstream's CI builds with npm), and the
+  repository's own Dockerfile only copies a prebuilt ./dist that is not in
+  the repository.
+
+  This recipe runs the image upstream's CI publishes for every push to main,
+  pinned to the tag of the current HEAD commit (bb5f4abb, 2024-06-13, the same
+  digest as `latest`): nginx serving that build on :80. Nothing is stored
+  server-side, so there is no volume.

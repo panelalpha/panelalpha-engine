@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Shiori is a bookmark manager with page archiving (go-shiori/shiori, MIT): one
+  Go binary serving the web UI and a REST API on :8080, with shiori.db
+  (SQLite), archives, thumbnails and ebooks under SHIORI_DIR.
+
+  == Why compose-replace from the published image ==
+
+  The repository cannot be deployed as it stands. Dockerfile and
+  Dockerfile.alpine copy dist/shiori_<os>_<arch>/shiori, a GoReleaser output
+  a clone does not have; Dockerfile.compose is a development image with no
+  source in it (`go run main.go` against a bind mount, restart-looping on
+  "stat main.go"); docker-compose.yaml is a development stack with postgres,
+  mariadb, mysql and an nginx sidecar. This recipe runs the image upstream
+  publishes for the current release, ghcr.io/go-shiori/shiori:alpine-v1.8.0
+  (the alpine variant, so the container can host a healthcheck).
+
+  == What the recipe supplies ==
+
+  1. SHIORI_HTTP_SECRET_KEY generated once by hooks/prepare.sh into
+     ~/.panelalpha/shiori/secret.env. Without it Shiori signs sessions with a
+     random key per start and every restart logs everyone out.
+  2. No default login, ever. Shiori seeds shiori/gopher as an owner whenever
+     the account table is empty (internal/cmd/root.go). A one-shot `init`
+     (files/panelalpha/shiori: the same image plus curl and jq, nothing
+     built or patched) starts a private server on 127.0.0.1:18080, logs in
+     as shiori/gopher, creates `admin` as owner with the password from
+     ~/.panelalpha/shiori/admin.env, deletes shiori through the API and
+     checks the default login is refused. `app` waits on
+     `init: service_completed_successfully`, so the public port never opens
+     with shiori/gopher in place. On later deploys init sees the default
+     refused and does nothing, so a password changed in the UI is kept.
+  3. Persistence: /shiori on the named volume shiori-data. `ready` waits on
+     the app's /system/liveness healthcheck so `up -d` returns only once the
+     app answers (engine#204).
+  4. Proxy-header SSO stays off (SHIORI_SSO_PROXY_AUTH_ENABLED defaults to
+     false; its default trusted ranges include every private network).
+
+  == Verified on mariusz2 (engine 705f250a), memory_limit 1200 ==
+
+  Deploy success in 44s. `/` title "Shiori - Bookmarks Manager" (8084 B).
+  shiori/gopher login -> 400 "username or password do not match"; admin
+  login OK, accounts list is [admin (owner)] only. Bookmark added via
+  POST /api/bookmarks, archived via PUT /api/v1/bookmarks/cache, read back
+  with its tag; /bookmark/1/archive serves the archived page to the owner
+  and 302s anonymous visitors to login. Rebuild 28s: init "default
+  shiori/gopher login is refused; nothing to do", admin and the archived
+  bookmark intact; a token issued before an app restart still valid.
+  /.env, /.git/config, /shiori.db serve only the SPA shell. App ~3.4 MiB,
+  account ~105 MiB.
+
+  Credentials: ~/.panelalpha/shiori/credentials.txt. More users: web UI,
+  Settings > Accounts.

@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  pgweb is a web client for PostgreSQL written in Go: browse schemas and
+  tables, run SQL, export results. It keeps no state of its own; everything it
+  shows lives in the database it is connected to.
+
+  COMPOSE-REPLACE FROM THE OFFICIAL IMAGE. The repository's docker-compose.yml is
+  a development setup (hard-coded pgweb/pgweb credentials, `build: .`) and runs
+  pgweb with NO authentication, so any visitor could open connections to any
+  host the account can reach through /api/connect. This recipe runs the
+  published sosedoff/pgweb:0.17.0 image (the current release) with a
+  postgres:18-alpine sidecar as its database, the version upstream's own
+  compose uses.
+
+  SECURED. hooks/prepare.sh generates an HTTP Basic auth password and the
+  database password once into ~/.panelalpha/pgweb/ (0600 files, 0700 dir;
+  credentials.txt holds the login). pgweb's basic auth is global middleware,
+  so every route -- the page, static assets and the whole /api -- answers 401
+  without it. pgweb also runs with --lock-session: it opens only
+  PGWEB_DATABASE_URL, and /api/connect and /api/switchdb refuse, so even a
+  logged-in user cannot point it at another host. --no-ssh drops SSH tunnels.
+  The `ready` gate fails the deploy if an anonymous request is not refused.
+
+  OWN DATABASE. To browse your own PostgreSQL instead of the sidecar, change
+  PGWEB_DATABASE_URL in ~/.panelalpha/pgweb/pgweb.env and rebuild. The files
+  are never rewritten by a redeploy.
+
+  PERSISTENCE. The sidecar's data is the named volume pgweb-db and survives
+  rebuilds.

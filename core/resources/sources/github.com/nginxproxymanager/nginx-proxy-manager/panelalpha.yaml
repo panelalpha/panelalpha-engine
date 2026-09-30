@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Nginx Proxy Manager, a web UI for managing Nginx proxy hosts and Let's
+  Encrypt certificates (Node API + React UI; admin UI on :81, proxy
+  listeners on :80/:443). The repository has no deployment compose, only CI
+  and development stacks under docker/, so a plain deploy detects nothing
+  and serves the engine placeholder. Compose-REPLACE from upstream's
+  documented setup compose on the published image of the current release,
+  jc21/nginx-proxy-manager:2.16.0, publishing only the admin UI, with /data
+  (SQLite database, JWT keys, proxy configs) and /etc/letsencrypt on named
+  volumes. The proxy listeners run inside the account only; the account's
+  domain reaches the admin UI, not the proxy. First run is upstream's.

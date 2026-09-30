@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Plik is a temporary file upload service: one Go server (plikd) serving the
+  web UI and the upload API on :8080, SQLite metadata and files on disk. The
+  repository root is the Go command-line client, not the server, so the plain
+  go deploy builds `plik` and it restart-loops asking "Please enter your plik
+  domain". The server lives in server/ and needs the Vue webapp built next to
+  it; the root Dockerfile does that with twelve client cross-compiles, far
+  more than an account needs to start the server.
+
+  This recipe runs upstream's official image of the current release,
+  rootgg/plik:1.4.2, with the files and the SQLite database on a named volume
+  (/data) that survives redeploys, and PlikDomain set to the account's
+  address. Uploads are anonymous by default (FeatureAuthentication =
+  "disabled"), as upstream ships it; PLIKD_* env vars override any plikd.cfg
+  setting.

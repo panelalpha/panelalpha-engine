@@ -1,0 +1,53 @@
+# Compose-replace: the repo is Woodpecker's source tree (detected as a Go build that
+# restart-loops). Runs the official server image of the current release, SQLite on a
+# named volume. The forge and its OAuth app come from the project's env vars (.env).
+services:
+  app:
+    image: woodpeckerci/woodpecker-server:v3.18.1
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      WOODPECKER_HOST: ${PA_PUBLIC_URL}
+    volumes:
+      # woodpecker.sqlite, logs and the generated keys.
+      - data:/var/lib/woodpecker
+    ports:
+      - "8000:8000"
+    depends_on:
+      forge-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/bin/woodpecker-server", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # One-shot: fails the deploy naming each missing forge setting. Reads .env
+  # rather than interpolating, so *_SECRET values are never replaced (engine#336).
+  forge-check:
+    image: woodpeckerci/woodpecker-server:v3.18.1-alpine
+    restart: "no"
+    env_file:
+      - path: .env
+        required: false
+    entrypoint: ["/bin/sh", "/forge-check.sh"]
+    volumes:
+      - ./woodpecker-forge-check.sh:/forge-check.sh:ro
+    mem_limit: 32m
+
+  # No-op gate: `compose up -d` returns only once the server answers.
+  ready:
+    image: woodpeckerci/woodpecker-server:v3.18.1-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

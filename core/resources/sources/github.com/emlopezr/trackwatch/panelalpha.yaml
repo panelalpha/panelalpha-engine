@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  TrackWatch is a self-hosted Spotify release tracker: a React frontend on
+  nginx that proxies /api to a Django backend, an APScheduler worker that
+  checks for new releases, and PostgreSQL. The repository's compose file
+  requires SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET with `:?`, so the plain
+  deploy stops at interpolation; the engine also generates a value for the
+  secret-named SPOTIFY_CLIENT_SECRET over the customer's (engine#336), and the
+  public URL, CORS and CSRF origins default to upstream's own domain, so the
+  Spotify login would send users there.
+
+  This recipe runs upstream's published images for the current main
+  (ghcr.io/emlopezr/trackwatch-{frontend,backend,scheduler}, pinned by digest)
+  with the scheduler enabled, points FRONTEND_BASE_URL, CORS_ALLOWED_ORIGINS
+  and CSRF_TRUSTED_ORIGINS at the project's address, and keeps SECRET_KEY,
+  ADMIN_KEY and the database password in ~/.panelalpha/trackwatch/ (generated
+  once). The customer supplies SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in
+  the project's environment variables (a one-shot check service fails the
+  deploy naming each missing one) and registers https://<domain>/callback as
+  the Redirect URI of their Spotify app. Optional e-mail settings
+  (RESEND_API_KEY, ADMIN_EMAIL, EMAIL_DOMAIN) are read from the same
+  variables. The database is on a named volume.

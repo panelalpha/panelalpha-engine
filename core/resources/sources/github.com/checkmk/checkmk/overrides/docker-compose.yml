@@ -1,0 +1,34 @@
+# Compose-replace: the repo is Bazel source; run the official Community image.
+services:
+  app:
+    image: checkmk/check-mk-community:2.5.0p14
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CMK_SITE_ID: cmk
+      TZ: UTC
+    volumes:
+      - sites:/omd/sites
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:5000/cmk/check_mk/login.py"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 20s
+    mem_limit: 2g
+
+  # No-op gate: `compose up -d` returns only once the site's login page answers.
+  ready:
+    image: checkmk/check-mk-community:2.5.0p14
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  sites: {}

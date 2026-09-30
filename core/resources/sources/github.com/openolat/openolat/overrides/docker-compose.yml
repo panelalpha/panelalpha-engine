@@ -1,0 +1,115 @@
+# Compose-replace: the repository is the Maven source tree and upstream
+# publishes no current image. This follows upstream's installation guide:
+# the release .war on Tomcat 10.1 / Java 17 with PostgreSQL 18.
+services:
+  # One-shot: fetches and unpacks the release .war (checksum pinned) once per
+  # version into the `webapp` volume.
+  fetch:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    environment:
+      OO_VERSION: 21.0.3
+      OO_WAR: openolat_2103.war
+      OO_SHA256: 9051e98beed38b4eaa523c06dc960ce835ad6b65f019dd30d7d46cb45c1a9f6f
+    command:
+      - sh
+      - -euc
+      - |
+        [ "$$(cat /webapp/.pa-version 2>/dev/null)" = "$$OO_VERSION" ] && exit 0
+        wget -q -O /tmp/oo.war "https://www.openolat.com/releases/$$OO_WAR"
+        echo "$$OO_SHA256  /tmp/oo.war" | sha256sum -c -
+        find /webapp -mindepth 1 -delete
+        unzip -q /tmp/oo.war -d /webapp
+        rm -f /tmp/oo.war
+        echo "$$OO_VERSION" > /webapp/.pa-version
+    volumes:
+      - webapp:/webapp
+    mem_limit: 256m
+
+  database:
+    image: docker.io/library/postgres:18
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/openolat/openolat.env
+    environment:
+      POSTGRES_DB: openolat
+      POSTGRES_USER: openolat
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "openolat", "-d", "openolat"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  app:
+    image: docker.io/library/tomcat:10.1-jre17
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/openolat/openolat.env
+    environment:
+      OO_HOST: ${PA_PUBLIC_HOST}
+      # Upstream's setenv.sh values.
+      CATALINA_OPTS: -Xmx1024m -Xms512m -XX:MaxMetaspaceSize=512m -Duser.timezone=UTC -Djava.awt.headless=true -Djava.net.preferIPv4Stack=true -Djava.security.egd=file:/dev/urandom
+    # olat.local.properties is written at start: it carries the DB password.
+    # TLS ends at the engine's proxy, so links are built as https on 443.
+    command:
+      - sh
+      - -euc
+      - |
+        umask 077
+        cat > /usr/local/tomcat/lib/olat.local.properties <<PROPS
+        db.vendor=postgresql
+        db.source=local
+        db.host=database
+        db.host.port=5432
+        db.name=openolat
+        db.user=openolat
+        db.pass=$$POSTGRES_PASSWORD
+        installation.dir=/var/openolat
+        userdata.dir=/var/openolat/olatdata
+        log.dir=/var/openolat/logs
+        server.domainname=$$OO_HOST
+        server.port=8080
+        server.port.ssl=443
+        smtp.host=disabled
+        tomcat.id=1
+        PROPS
+        exec catalina.sh run
+    volumes:
+      - webapp:/opt/openolat/webapp
+      - olatdata:/var/openolat
+      - ./openolat/server.xml:/usr/local/tomcat/conf/server.xml:ro
+      - ./openolat/ROOT.xml:/usr/local/tomcat/conf/Catalina/localhost/ROOT.xml:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      fetch:
+        condition: service_completed_successfully
+      database:
+        condition: service_healthy
+    healthcheck:
+      # The login page renders only once the schema exists and OpenOlat runs.
+      # bash /dev/tcp: the Tomcat base image does not promise curl.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /dmz/ HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200'"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 120s
+    mem_limit: 2048m
+
+  # No-op gate: `compose up -d` returns only once OpenOlat answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  webapp: {}
+  olatdata: {}
+  postgres: {}

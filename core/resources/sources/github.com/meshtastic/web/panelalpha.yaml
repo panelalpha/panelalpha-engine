@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Meshtastic Web is the browser client for configuring and messaging through
+  Meshtastic mesh radios: a static Vite single-page app that talks to a node
+  over HTTP(S), Web Bluetooth or Web Serial from the visitor's browser.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repository is a pnpm monorepo whose root
+  package.json has no build or start script (the app is apps/web), so Railpack
+  builds an image whose command exits at once and the container restarts
+  forever. Upstream publishes the production build as
+  ghcr.io/meshtastic/web (nginx serving apps/web/dist on :8080, built from
+  apps/web/infra/Containerfile); this recipe runs that image at the current
+  release (v2.7.2).
+
+  The app is stateless on the server: device connections and settings live in
+  the visitor's browser, so there is no volume. It is served over the site's
+  HTTPS, which Web Bluetooth and Web Serial require.

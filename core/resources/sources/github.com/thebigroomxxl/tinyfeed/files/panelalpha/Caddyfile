@@ -1,0 +1,12 @@
+# Upstream's docs/docker.md Caddy example, on :8080 without TLS (the engine
+# terminates it). Every path serves the generated page, as upstream does.
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	root * /srv
+	rewrite * /index.html
+	file_server
+}

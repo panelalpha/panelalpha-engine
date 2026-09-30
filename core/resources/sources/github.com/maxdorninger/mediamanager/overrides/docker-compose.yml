@@ -1,0 +1,62 @@
+# Compose-replace: the repository's compose keeps PostgreSQL, config and
+# /data in bind mounts under ~/project, which every deploy replaces. Same
+# stack from the current release image, on named volumes.
+services:
+  app:
+    image: quay.io/maxdorninger/mediamanager:1.12.3
+    restart: unless-stopped
+    env_file:
+      # MEDIAMANAGER_AUTH__TOKEN_SECRET, generated once by hooks/prepare.sh.
+      - ../.panelalpha/mediamanager/secret.env
+    environment:
+      CONFIG_DIR: /app/config
+      MEDIAMANAGER_MISC__FRONTEND_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # config.toml, copied from config.example.toml on first start.
+      - config:/app/config
+      # Media libraries, downloads and cached images (/data/images).
+      - data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/api/v1/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1g
+
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      # Upstream's own values; config.example.toml expects them.
+      POSTGRES_USER: MediaManager
+      POSTGRES_DB: MediaManager
+      POSTGRES_PASSWORD: MediaManager
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d MediaManager -U MediaManager"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once migrations ran and the API answers.
+  ready:
+    image: postgres:17
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  data: {}
+  pgdata: {}

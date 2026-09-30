@@ -1,0 +1,92 @@
+# Upstream's deploy/compose/docker-compose.yml (proxy, frontend, backend, db)
+# with the release tags pinned, named volumes and a generated DB password.
+services:
+  proxy:
+    image: reallibrephotos/librephotos-proxy:1.2.1
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    volumes:
+      - pictures:/data
+      - protected-media:/protected_media
+    depends_on:
+      - backend
+      - frontend
+    mem_limit: 128m
+
+  db:
+    image: pgautoupgrade/pgautoupgrade:18-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/librephotos/db.env
+    environment:
+      POSTGRES_USER: docker
+      POSTGRES_DB: librephotos
+    volumes:
+      - db:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "psql -U docker -d librephotos -c 'SELECT 1;'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 384m
+
+  frontend:
+    image: reallibrephotos/librephotos-frontend:1.2.1
+    restart: unless-stopped
+    mem_limit: 128m
+
+  backend:
+    image: reallibrephotos/librephotos:1.2.1
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/librephotos/db.env
+    environment:
+      BACKEND_HOST: backend
+      DB_BACKEND: postgresql
+      DB_NAME: librephotos
+      DB_USER: docker
+      DB_HOST: db
+      DB_PORT: "5432"
+      WEB_CONCURRENCY: "2"
+      # Default is one scan worker per host core, each loading the ML models.
+      WORKER_CONCURRENCY: "1"
+      CSRF_TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+      FRONTEND_BASE_URL: ${PA_PUBLIC_URL}
+      ALLOW_UPLOAD: "false"
+      DEBUG: "0"
+    volumes:
+      - pictures:/data
+      - protected-media:/protected_media
+      # secret.key is generated here on first start.
+      - logs:/logs
+      - cache:/root/.cache
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # ALLOWED_HOSTS takes `backend` (the Host the proxy sends), not 127.0.0.1.
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8001/api/healthz', headers={'Host': 'backend'}))"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1800m
+
+  # No-op gate: `compose up -d` returns once migrations ran and the API answers.
+  ready:
+    # The frontend image has no shell; the backend image is already pulled.
+    image: reallibrephotos/librephotos:1.2.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pictures: {}
+  protected-media: {}
+  db: {}
+  logs: {}
+  cache: {}

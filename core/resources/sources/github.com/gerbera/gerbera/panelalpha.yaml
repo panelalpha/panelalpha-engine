@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gerbera is a UPnP/DLNA media server with a web UI for browsing and managing
+  the media library. The repository's Dockerfile compiles Gerbera and six
+  C/C++ libraries from source with `-j$(nproc)`, which runs the account out of
+  memory. This recipe runs the official image of the current release
+  gerbera/gerbera:3.3.0 instead, with the config and SQLite database
+  (/var/run/gerbera) and the media directory (/mnt/content, scanned
+  automatically) on named volumes.
+
+  Adding media: copy files into the content volume, e.g.
+  `docker compose -p project cp <dir> app:/mnt/content/`.
+
+  Only the web UI and the HTTP media port (49494) go through the engine's
+  proxy. UPnP discovery (SSDP multicast on 1900/udp) cannot leave the
+  account, so UPnP/DLNA players on a home network will not find this server
+  on their own.

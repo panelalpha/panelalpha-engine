@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  TiddlyWiki 5, a non-linear personal web notebook, run as its Node.js server
+  (tiddlers saved as files). The repository has no start script, so a plain
+  deploy goes to Railpack, which runs `node ./boot/boot.js`; with no wiki
+  folder and no --listen it exits at once and the container restart-loops.
+
+  This recipe follows upstream's Node.js install: a one-shot service installs
+  the current release from npm (tiddlywiki@5.4.1, integrity-checked by npm)
+  into a volume, and the app initialises a wiki folder from the "server"
+  edition on first start and serves it with --listen on :8080 on the official
+  node:24-alpine image. The wiki folder is on a named volume that survives
+  redeploys. TiddlyWiki's server has no login by default; that is left as
+  upstream ships it.

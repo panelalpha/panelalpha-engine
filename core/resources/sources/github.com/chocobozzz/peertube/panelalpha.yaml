@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PeerTube, the ActivityPub-federated video platform (Node server that also
+  serves its Angular client on :9000, PostgreSQL, Redis). The repository root
+  is the pnpm source tree; the plain deploy compiles it as an Express app and
+  then restart-loops with `exec: pnpm: not found` (engine#414), and it would
+  still have no database, Redis or config. This recipe runs the official
+  chocobozzz/peertube image of the current release, v8.3.1, with PostgreSQL 17
+  and Redis 8 as upstream's support/docker/production compose does, minus its
+  nginx/certbot/postfix sidecars (the engine terminates TLS; SMTP is the
+  operator's to configure) and the RTMP live port. The webserver hostname is
+  the site's address. PEERTUBE_ADMIN_EMAIL (the root account's email) is
+  required; the deploy fails naming it when unset. The prepare hook generates
+  PEERTUBE_SECRET and the database password once into
+  ~/.panelalpha/peertube/secrets.env. Media, config, database and Redis are on
+  named volumes. PeerTube creates the `root` user on first start and prints
+  its generated password in the container log (upstream behaviour).

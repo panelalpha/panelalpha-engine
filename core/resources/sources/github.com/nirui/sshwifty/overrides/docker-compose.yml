@@ -1,0 +1,38 @@
+# Compose-replace: the repository's docker-compose.example.yaml builds from
+# source with SSHWIFTY_SHAREDKEY commented out. Without a shared key Sshwifty is
+# an open SSH/Telnet relay: any visitor can dial any host the account can reach.
+# This runs the official image of the current release with a generated key.
+services:
+  app:
+    image: niruix/sshwifty:0.4.11-beta-release
+    restart: unless-stopped
+    # SSHWIFTY_SHAREDKEY, generated once by hooks/prepare.sh.
+    env_file:
+      - ../.panelalpha/sshwifty/sharedkey.env
+    environment:
+      SSHWIFTY_LISTENINTERFACE: 0.0.0.0
+      SSHWIFTY_LISTENPORT: "8182"
+    # Fail closed: never start as an open relay if the key is missing.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - '[ "$${#SSHWIFTY_SHAREDKEY}" -ge 32 ] || { echo "SSHWIFTY_SHAREDKEY missing or short, refusing to start" >&2; exit 1; }; exec /sshwifty.sh'
+    ports:
+      - "8182:8182"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8182/"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once Sshwifty answers.
+  ready:
+    image: niruix/sshwifty:0.4.11-beta-release
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m

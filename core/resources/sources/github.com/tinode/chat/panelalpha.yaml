@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tinode, an instant messaging server (Go) with its bundled web client, backed
+  by PostgreSQL.
+
+  A plain deploy detects Go and builds the repository's keygen tool, which
+  prints a key and exits, so nothing answers. This recipe runs upstream's
+  published image of the current release, tinode/tinode-postgres:0.25.3,
+  with PostgreSQL 17 on a named volume. hooks/prepare.sh generates the
+  database password, AUTH_TOKEN_KEY and UID_ENCRYPTION_KEY once into
+  ~/.panelalpha/tinode/ (0600 files in 0700) instead of the image's published
+  defaults; API_KEY_SALT stays upstream's because the bundled web client's API
+  key is derived from it. Chat file uploads and the chatbot's credentials are
+  on named volumes. A `ready` gate makes the deploy finish only once Tinode
+  answers. First run is upstream's: the image initialises the database and
+  loads its sample data (data.json) on the first start only.

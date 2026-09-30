@@ -1,0 +1,16 @@
+# Give legit its scan path and a config that lives outside the re-cloned checkout.
+services:
+  app:
+    command:
+      - sh
+      - -c
+      - |
+        [ -f /data/config.yaml ] || sed "s/^  name: .*/  name: $${SERVER_NAME}/" /app/config.yaml > /data/config.yaml
+        exec /app/app -config /data/config.yaml
+    volumes:
+      - legit-data:/data
+      - legit-repos:/var/www/git
+
+volumes:
+  legit-data:
+  legit-repos:

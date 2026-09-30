@@ -1,0 +1,49 @@
+# Compose-replace: the repo's Dockerfile builds Flutter + Rust + Elixir from
+# source and fails in an account; run the official release image instead.
+services:
+  app:
+    image: ghcr.io/getmydia/mydia:0.15.0
+    restart: unless-stopped
+    env_file:
+      - .env
+      # A missing file aborts `up` rather than booting without secrets.
+      - ../.panelalpha/mydia/secrets.env
+    environment:
+      PHX_HOST: ${PA_PUBLIC_HOST}
+      PORT: "4000"
+      TZ: UTC
+      MOVIES_PATH: /media/movies
+      TV_PATH: /media/tv
+    volumes:
+      - config:/config
+      - data:/data
+      - media:/media
+    ports:
+      - "4000:4000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:4000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Mydia answers /health.
+  ready:
+    image: ghcr.io/getmydia/mydia:0.15.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    # The image declares VOLUMEs; mount the named ones so no anonymous volume leaks per deploy.
+    volumes:
+      - config:/config
+      - data:/data
+      - media:/media
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  data: {}
+  media: {}

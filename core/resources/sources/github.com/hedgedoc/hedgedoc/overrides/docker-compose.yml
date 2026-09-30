@@ -1,0 +1,61 @@
+# Compose-replace: the repo's default branch is the unreleased HedgeDoc 2
+# (two servers plus a dev proxy). This runs the current release, 1.12.0, as the
+# upstream hedgedoc/container compose does: official image plus PostgreSQL.
+services:
+  database:
+    image: postgres:18.6-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/hedgedoc/db.env
+    environment:
+      POSTGRES_USER: hedgedoc
+      POSTGRES_DB: hedgedoc
+    volumes:
+      # PostgreSQL 18 keeps PGDATA under /var/lib/postgresql/<major>/docker.
+      - database:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hedgedoc -d hedgedoc"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 256m
+
+  app:
+    image: quay.io/hedgedoc/hedgedoc:1.12.0
+    restart: unless-stopped
+    env_file:
+      # Missing file aborts `up`: CMD_DB_URL and CMD_SESSION_SECRET.
+      - ../.panelalpha/hedgedoc/app.env
+    environment:
+      CMD_DOMAIN: ${PA_PUBLIC_HOST}
+      CMD_PROTOCOL_USESSL: "true"
+      CMD_URL_ADDPORT: "false"
+      CMD_PORT: "3000"
+    volumes:
+      - uploads:/hedgedoc/public/uploads
+    ports:
+      - "3000:3000"
+    depends_on:
+      database:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "/hedgedoc/healthcheck.mjs"]
+      interval: 5s
+      timeout: 6s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once HedgeDoc reports ready.
+  ready:
+    image: postgres:18.6-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  database: {}
+  uploads: {}

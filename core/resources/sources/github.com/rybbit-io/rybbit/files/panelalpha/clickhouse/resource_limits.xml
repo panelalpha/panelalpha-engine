@@ -1,0 +1,10 @@
+<clickhouse>
+  <!-- Leave headroom for the backend, Redis, Caddy, the kernel, and the
+       filesystem cache instead of allowing ClickHouse to exhaust RAM. -->
+  <max_server_memory_usage_to_ram_ratio>0.80</max_server_memory_usage_to_ram_ratio>
+  <!-- Share at most one query-processing thread per CPU core across all
+       concurrent queries. This throttles work rather than rejecting it. -->
+  <concurrent_threads_soft_limit_ratio_to_cores>1</concurrent_threads_soft_limit_ratio_to_cores>
+  <!-- Bound memory used by background merges and mutations separately. -->
+  <merges_mutations_memory_usage_to_ram_ratio>0.25</merges_mutations_memory_usage_to_ram_ratio>
+</clickhouse>

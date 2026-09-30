@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Scratch Map marks the countries, states and provinces you have visited on
+  interactive maps: one Node.js (Express) process on :8080 keeping its data
+  in a lowdb JSON file.
+
+  The repository's compose.yaml bind-mounts ./data over /my-data-dir. Docker
+  creates that directory root-owned, the image runs as the non-root `node`
+  user, and the app crash-loops with "EACCES: permission denied, open
+  '/my-data-dir/.db.json.tmp'"; ./data would also sit in the checkout, which
+  every deploy wipes. overrides/docker-compose.yml runs the published
+  ad3m3r5/scratch-map:1.2.3 (the current release) with DATA_DIR on a named
+  volume at /app/data, a directory the image already owns as `node`, so the
+  volume inherits that ownership and survives redeploys.
+
+  First run is upstream's: the maps are open to anyone who reaches the site.

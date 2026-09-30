@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Domain Watchdog, a Symfony (FrankenPHP) app that watches domain names over
+  RDAP, with a Messenger worker, PostgreSQL and Valkey. The plain deploy of the
+  repository's docker-compose.yml fails before anything starts: its php-worker
+  disables the healthcheck with `test: [ ]`, and the engine's compose rewrite
+  turns the empty list into `test: {}`, which Compose rejects
+  ("services.php-worker.healthcheck.test must be a string", engine#345).
+
+  The recipe runs the same four services from the current release image
+  (maelgangloff/domain-watchdog:v1.4.5) with the worker's healthcheck disabled
+  by `disable: true` alone. The image bakes the repository's .env, so its
+  APP_SECRET and JWT_PASSPHRASE are the same on every install; hooks/prepare.sh
+  generates them and the database password once into ~/.panelalpha, which
+  survives redeploys. Registration is open by default, as upstream ships it.

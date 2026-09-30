@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  eLabFTW, an electronic lab notebook (PHP on nginx) with MySQL. The
+  repository is the development tree; the plain PHP deploy failed with
+  "EACCES: permission denied, mkdir '/var/cache/elabftw'". This recipe runs
+  upstream's published image of the current release (elabftw/elabimg:6.0.5)
+  the way upstream's containers/elabimg compose example does, with MySQL 8.4
+  (the schema uses utf8mb4_0900_ai_ci, which MariaDB lacks). The image runs
+  as an unprivileged uid (php-fpm refuses root), so a one-shot `perms`
+  service hands the cache, uploads and exports volumes to that uid first.
+  AUTO_DB_INIT/AUTO_DB_UPDATE install the schema on the first boot and
+  migrate on later ones. hooks/prepare.sh generates the MySQL passwords and
+  the defuse SECRET_KEY once into ~/.panelalpha/elabftw/. HTTPS ends at the
+  engine's proxy (DISABLE_HTTPS=true, SITE_URL is the public URL). The first
+  visitor registers the Sysadmin account at /register.php, as upstream ships
+  it. A health-check gate makes the deploy wait until nginx answers.

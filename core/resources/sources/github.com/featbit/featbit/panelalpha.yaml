@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  FeatBit is a self-hosted feature flag platform: a management UI and API
+  (.NET), an evaluation server the SDKs connect to, and Postgres. Every page
+  and API call is behind a login and there is no self-registration.
+
+  OFFICIAL IMAGES, COMPOSE-REPLACE of the repo's standalone Postgres stack
+  (docker-compose.yml: Postgres as database, queue and cache, no Redis or
+  Mongo). The image tag is the repo's own FEATBIT_VERSION from .env; the
+  schema comes from the repo's infra/postgresql init scripts on a named
+  volume, so flags and users survive a redeploy. The fixed subnet, the
+  container_name and the published database port of the upstream file are
+  dropped.
+
+  ONE DOMAIN. Upstream publishes the UI (8081), API (5000) and evaluation
+  server (5100) as three origins. The UI reads API_URL and EVALUATION_URL at
+  start, so both are set to the site's own address and a small nginx `web`
+  service (files/panelalpha/router.conf) routes /api/public and /streaming
+  (websocket) to the evaluation server, /api and /mcp to the API, and the
+  rest to the UI. SDKs use https://<domain> as both the streaming and event
+  URL. It is the only service that publishes a port (8080). On the
+  *.panelalpha.online test names the front edge strips `Upgrade`
+  (engine#170), so SDK websocket streaming needs a real domain there; the
+  REST polling endpoints work either way.
+
+  FIRST RUN AS UPSTREAM SHIPS IT. The init SQL seeds the login
+  test@featbit.com / 123456 (README); the recipe leaves it, so change it after
+  the first login. The Postgres password and the JWT signing key replace the
+  upstream placeholders with values generated once into ~/.panelalpha/featbit
+  (0600 in 0700), reused on every redeploy.

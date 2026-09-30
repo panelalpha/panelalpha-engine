@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  JupyterLab, the web-based notebook environment (Python/Tornado). The
+  repository's only Dockerfile (docker/Dockerfile) is a contributor dev image
+  with no CMD, so a plain deploy builds for ~15 minutes and then nothing
+  listens. This recipe runs the official Jupyter Docker Stacks image of the
+  current release (quay.io/jupyter/minimal-notebook:lab-4.6.4) on port 8888
+  with the notebook user's home on a named volume. Login is JupyterLab's own
+  token page: set JUPYTER_TOKEN to choose the token, otherwise the server
+  generates one and prints it in the app log.

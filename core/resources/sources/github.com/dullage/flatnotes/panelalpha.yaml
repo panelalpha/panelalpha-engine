@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  flatnotes is a single-user markdown note-taking app: a FastAPI server that
+  serves its own Vue frontend and JSON API on :8080 and stores every note as a
+  plain .md file in /data (no database; a Whoosh search index lives in
+  /data/.flatnotes). The repository ships a two-stage Dockerfile (Node build of
+  the client, then Python) but no compose file, and the image refuses to start
+  without credentials: auth defaults to `password`, and FLATNOTES_USERNAME,
+  FLATNOTES_PASSWORD and FLATNOTES_SECRET_KEY are all mandatory, so a plain
+  dockerfile deploy restart-loops.
+
+  This recipe runs the official dullage/flatnotes image of the current release,
+  v5.5.5, with /data on a named volume that survives redeploys.
+  hooks/prepare.sh generates the password and the JWT signing key once into
+  ~/.panelalpha/flatnotes/auth.env (0600 in 0700), fed to the container as an
+  env_file, so the single login is `admin` with that generated password and
+  every note and attachment route needs a token. The key stays stable across
+  redeploys, so sessions survive a rebuild. The password is read from the env
+  on every start; to change it, edit auth.env and redeploy.

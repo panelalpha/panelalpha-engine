@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Redash, SQL queries, visualizations and dashboards (Flask + RQ). A plain
+  deploy builds the repository's Dockerfile and the webpack frontend build is
+  OOM-killed (exit 137) in a 2500 MB account; the repository's compose.yaml is
+  the development stack. This recipe runs upstream's production compose
+  (getredash/setup) on the release image redash/redash:26.9.0: gunicorn,
+  the RQ scheduler, one RQ worker for every queue, Postgres 17 and Redis 7,
+  with a one-shot redash-init that creates the schema. hooks/prepare.sh
+  generates REDASH_COOKIE_SECRET, REDASH_SECRET_KEY and the database password
+  once into ~/.panelalpha/redash/redash.env. First run is upstream's: /setup
+  creates the first admin.

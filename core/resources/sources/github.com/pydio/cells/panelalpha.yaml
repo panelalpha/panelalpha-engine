@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Pydio Cells, a self-hosted file sharing and collaboration server (Go,
+  single binary with its own web UI and S3-compatible gateway).
+
+  The repository's default branch is v5-dev and it ships no deployable
+  compose at its root; a plain deploy compiles the Go binary and runs it
+  without a command, so it prints its usage and exits in a loop. This recipe
+  runs upstream's published image of the current release,
+  pydio/cells:5.0.3, on plain HTTP behind the engine's proxy
+  (CELLS_SITE_NO_TLS, CELLS_SITE_EXTERNAL set to the site's address). All
+  state (pydio.json, keys, the SQLite database option, stored files) is in
+  /var/cells on a named volume, so an installed instance survives redeploys.
+  First run is upstream's: the web installer asks for the database (SQLite
+  needs no extra service; MySQL/MariaDB or PostgreSQL can be pointed at an
+  external server) and the administrator account. A `ready` gate makes the
+  deploy finish only once Cells answers.

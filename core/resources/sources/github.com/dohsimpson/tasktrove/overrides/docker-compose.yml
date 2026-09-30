@@ -1,0 +1,16 @@
+# The repo root is a monorepo with no compose file; this is upstream's
+# selfhost/docker-compose.yml on the current release tag, with named volumes.
+services:
+  app:
+    image: ghcr.io/dohsimpson/tasktrove:v0.12.4
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - data:/app/data
+      - backups:/app/backups
+    mem_limit: 768m
+
+volumes:
+  data: {}
+  backups: {}

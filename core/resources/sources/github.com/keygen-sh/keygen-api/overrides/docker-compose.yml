@@ -1,0 +1,133 @@
+# Upstream compose.yaml without Caddy (the engine terminates TLS): the released
+# keygen/api image, PostgreSQL, Redis, web + worker, secrets from ~/.panelalpha.
+services:
+  postgres:
+    image: postgres:17.5
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/keygen/db.env
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keygen -d keygen"]
+      interval: 5s
+      retries: 30
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    volumes:
+      - redis:/data
+
+  # Fails `compose up` (and so the deploy) while a required variable is unset.
+  env-check:
+    image: keygen/api:v1.7.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "/keygen-env-check.sh"]
+    environment:
+      KEYGEN_ADMIN_EMAIL: ${KEYGEN_ADMIN_EMAIL:-}
+      KEYGEN_ADMIN_PASSWORD: ${KEYGEN_ADMIN_PASSWORD:-}
+    volumes:
+      - ./keygen-env-check.sh:/keygen-env-check.sh:ro
+    mem_limit: 64m
+
+  # One-shot: keygen:setup on the first deploy, db:migrate afterwards.
+  setup:
+    image: keygen/api:v1.7.2
+    env_file:
+      - ../.panelalpha/keygen/app.env
+    restart: "no"
+    entrypoint: ["/bin/bash", "/keygen-setup.sh"]
+    environment:
+      KEYGEN_EDITION: CE
+      KEYGEN_MODE: singleplayer
+      KEYGEN_HOST: ${PA_PUBLIC_HOST}
+      REDIS_URL: redis://redis:6379
+      # Optional upstream settings, passed through from the project's env vars.
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_BUCKET: ${AWS_BUCKET:-}
+      AWS_REGION: ${AWS_REGION:-}
+      DISABLE_DATABASE_ENVIRONMENT_CHECK: "1"
+      KEYGEN_ADMIN_EMAIL: ${KEYGEN_ADMIN_EMAIL:-}
+      KEYGEN_ADMIN_PASSWORD: ${KEYGEN_ADMIN_PASSWORD:-}
+    volumes:
+      - ./keygen-setup.sh:/keygen-setup.sh:ro
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  web:
+    image: keygen/api:v1.7.2
+    env_file:
+      - ../.panelalpha/keygen/app.env
+    restart: unless-stopped
+    command: web
+    ports:
+      - "3000:3000"
+    environment:
+      KEYGEN_EDITION: CE
+      KEYGEN_MODE: singleplayer
+      KEYGEN_HOST: ${PA_PUBLIC_HOST}
+      REDIS_URL: redis://redis:6379
+      # Optional upstream settings, passed through from the project's env vars.
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_BUCKET: ${AWS_BUCKET:-}
+      AWS_REGION: ${AWS_REGION:-}
+    volumes:
+      - keygen:/etc/keygen
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/v1/health"]
+      interval: 5s
+      retries: 60
+      start_period: 20s
+
+  worker:
+    image: keygen/api:v1.7.2
+    env_file:
+      - ../.panelalpha/keygen/app.env
+    restart: unless-stopped
+    command: worker
+    environment:
+      KEYGEN_EDITION: CE
+      KEYGEN_MODE: singleplayer
+      KEYGEN_HOST: ${PA_PUBLIC_HOST}
+      REDIS_URL: redis://redis:6379
+      # Optional upstream settings, passed through from the project's env vars.
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_BUCKET: ${AWS_BUCKET:-}
+      AWS_REGION: ${AWS_REGION:-}
+    volumes:
+      - keygen:/etc/keygen
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+  # No-op gate: `compose up -d` returns only once the API answers.
+  ready:
+    image: redis:7.4-alpine
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  keygen:
+  postgres:
+  redis:

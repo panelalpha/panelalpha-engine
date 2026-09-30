@@ -1,0 +1,160 @@
+# Replaces the repository's docker-compose.yml, which is Laravel Sail's
+# development stack (builds docker/local, bind-mounts the source, adds
+# mailpit/minio/playwright). This is upstream's self-hosting example
+# (solidtime-io/self-hosting-examples, 1-docker-with-database) instead:
+# the published solidtime/solidtime image as app + scheduler + queue worker,
+# Postgres 15 and Gotenberg for PDF reports, with:
+#   - secrets from ~/.panelalpha/solidtime/*.env, generated once by the hook
+#   - APP_URL in `environment:`, where the engine substitutes the public URL
+#   - a one-shot `setup` that migrates and creates the owner
+#   - a no-op `ready` gate so `compose up -d` returns once the app answers
+x-solidtime-env: &solidtime-env
+  APP_NAME: solidtime
+  VITE_APP_NAME: solidtime
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_URL: ${PA_PUBLIC_URL}
+  APP_FORCE_HTTPS: "true"
+  # Only the engine's proxy on the account's private network is trusted.
+  TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  # Owners are created by `setup`; nobody can sign themselves up.
+  APP_ENABLE_REGISTRATION: "off"
+  SUPER_ADMINS: admin@${PA_PUBLIC_HOST}
+  LOG_CHANNEL: stderr
+  LOG_LEVEL: info
+  DB_CONNECTION: pgsql
+  DB_HOST: database
+  DB_PORT: "5432"
+  DB_DATABASE: solidtime
+  DB_USERNAME: solidtime
+  # Postgres is on the internal network and has no TLS certificate.
+  DB_SSLMODE: disable
+  # No mail service in the account; mail is logged instead of failing.
+  MAIL_MAILER: log
+  MAIL_FROM_ADDRESS: no-reply@${PA_PUBLIC_HOST}
+  MAIL_FROM_NAME: solidtime
+  QUEUE_CONNECTION: database
+  FILESYSTEM_DISK: local
+  PUBLIC_FILESYSTEM_DISK: public
+  GOTENBERG_URL: http://gotenberg:3000
+
+services:
+  database:
+    # upstream's pin in the self-hosting example
+    image: postgres:15
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/solidtime/db.env
+    environment:
+      POSTGRES_DB: solidtime
+      POSTGRES_USER: solidtime
+    volumes:
+      - database-storage:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-d", "solidtime", "-U", "solidtime"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 384m
+
+  setup:
+    # current release; `latest` floats and `main` tracks the branch
+    image: solidtime/solidtime:0.21.0
+    user: "1000:1000"
+    restart: "no"
+    entrypoint: ["/bin/sh", "/panelalpha/solidtime-setup.sh"]
+    env_file:
+      - ../.panelalpha/solidtime/app.env
+      - ../.panelalpha/solidtime/admin.env
+    environment:
+      <<: *solidtime-env
+      SOLIDTIME_ADMIN_EMAIL: admin@${PA_PUBLIC_HOST}
+    volumes:
+      - app-storage:/var/www/html/storage
+      - ./panelalpha/solidtime-setup.sh:/panelalpha/solidtime-setup.sh:ro
+    depends_on:
+      database:
+        condition: service_healthy
+    mem_limit: 256m
+
+  app:
+    image: solidtime/solidtime:0.21.0
+    user: "1000:1000"
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.panelalpha/solidtime/app.env
+    environment:
+      <<: *solidtime-env
+      CONTAINER_MODE: http
+    volumes:
+      - app-storage:/var/www/html/storage
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "-sS", "-o", "/dev/null", "http://localhost:8000/health-check/up"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 768m
+
+  scheduler:
+    image: solidtime/solidtime:0.21.0
+    user: "1000:1000"
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/solidtime/app.env
+    environment:
+      <<: *solidtime-env
+      CONTAINER_MODE: scheduler
+    volumes:
+      - app-storage:/var/www/html/storage
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "healthcheck"]
+    mem_limit: 256m
+
+  queue:
+    image: solidtime/solidtime:0.21.0
+    user: "1000:1000"
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/solidtime/app.env
+    environment:
+      <<: *solidtime-env
+      CONTAINER_MODE: worker
+      WORKER_COMMAND: php /var/www/html/artisan queue:work
+    volumes:
+      - app-storage:/var/www/html/storage
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "healthcheck"]
+    mem_limit: 384m
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--silent", "--fail", "http://localhost:3000/health"]
+    mem_limit: 512m
+
+  ready:
+    image: solidtime/solidtime:0.21.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  database-storage: {}
+  app-storage: {}

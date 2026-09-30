@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Whisparr is an *arr-family PVR (a Sonarr fork): one .NET process serving its
+  web UI and REST API on :6969, SQLite in /config. The repository's default
+  branch (v2-develop) is a source build that fails under the engine (the
+  generated `dotnet publish` does not pick a framework for the multi-targeted
+  SignalR project), and Servarr publishes no image of its own; this recipe
+  replaces the build with hotio's image of the current v2 release
+  (2.2.0-release.231), config and library on named volumes that survive
+  redeploys.
+
+  Whisparr v2 with no authentication configured serves every visitor with no
+  login at all and a "set up authentication" modal, which would let the first
+  visitor own the instance. Unlike Sonarr v4 it reads no WHISPARR__AUTH__ env,
+  so a one-shot `init` service pins AuthenticationMethod=Forms (Basic is kept
+  if the admin chose it), AuthenticationRequired=Enabled, port, bind address
+  and URL base in config.xml before the app starts, on every deploy.
+  hooks/prepare.sh generates the login password once into
+  ~/.panelalpha/whisparr/admin.env; a one-shot `seed` service, after the app
+  is healthy, reads Whisparr's own API key from config.xml and sets the user
+  through PUT /api/v3/config/host, only when no user exists. `ready` makes
+  `compose up -d` return only after that.

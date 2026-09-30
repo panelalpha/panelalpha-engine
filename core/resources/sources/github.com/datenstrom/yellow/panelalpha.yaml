@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Datenstrom Yellow, a flat-file CMS: no database, no Composer, the entry point
+  is yellow.php at the repository root, selected by the repo's own .htaccess
+  (DirectoryIndex yellow.php plus a catch-all RewriteRule). The plain php-plain
+  deploy found no index.php anywhere and served the image's empty document root,
+  so / answered 403. The override pins PA_DOCROOT=/app so Apache serves the
+  checkout and the upstream .htaccess takes over.
+
+  Yellow keeps everything it writes inside the tree: pages in content/, uploads
+  in media/, settings, users and self-updated extensions in system/. A redeploy
+  re-clones ~/project, so hooks/prepare.sh copies those three directories into
+  ~/.panelalpha/yellow once and the override bind-mounts them back. Yellow's
+  own first-run installer (language, admin account) is left as upstream ships it.
+extends: php-plain

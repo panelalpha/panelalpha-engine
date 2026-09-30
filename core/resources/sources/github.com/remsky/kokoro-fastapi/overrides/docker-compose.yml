@@ -1,0 +1,34 @@
+# Kokoro-FastAPI v0.9.0 CPU release image (model baked in); API + web player on :8880.
+services:
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.0
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # torch sizes its pool from the host's cores, not the cpus quota, and
+      # thrashes: one sentence took 28 s with the default pool, 2.4 s with 2.
+      OMP_NUM_THREADS: "2"
+    ports:
+      - "8880:8880"
+    # uvicorn answers only after the model is loaded and warmed up.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8880/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 2048m
+    # Inference is CPU-bound; the engine's default is 0.75 CPU.
+    cpus: 2
+
+  # No-op gate: `compose up -d` returns only once the model is loaded.
+  ready:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      kokoro:
+        condition: service_healthy
+    mem_limit: 32m

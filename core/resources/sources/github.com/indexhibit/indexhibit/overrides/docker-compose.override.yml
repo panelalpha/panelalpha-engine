@@ -1,0 +1,6 @@
+# The installer's config.php and the uploaded images survive a redeploy.
+services:
+  app:
+    volumes:
+      - ../.panelalpha/indexhibit/config:/app/ndxzsite/config
+      - ../.panelalpha/indexhibit/files:/app/files

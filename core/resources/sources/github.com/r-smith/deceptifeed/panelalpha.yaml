@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Deceptifeed, honeypot servers with a threat-feed web dashboard (Go). The
+  plain deploy built the repository's Dockerfile and published port 8080,
+  which is the HTTP honeypot (it answers 401 on purpose); the dashboard on
+  port 9000 was never reachable. This recipe runs the published
+  deceptifeed/server image of the current release (0.69.0) with only the
+  threat-feed dashboard (9000) published and /data (feed database, logs,
+  generated keys) on a named volume.

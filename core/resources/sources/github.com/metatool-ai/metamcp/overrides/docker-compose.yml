@@ -1,0 +1,69 @@
+# Compose-replace of the repo's docker-compose.yml: the v2.4.22 release image
+# instead of :latest, APP_URL set to the site, generated secrets, one port.
+services:
+  app:
+    image: ghcr.io/metatool-ai/metamcp:2.4.22
+    restart: unless-stopped
+    env_file:
+      # Generated secrets first, so a project env var of the same name wins.
+      - ../.panelalpha/metamcp/app.env
+      - path: .env
+        required: false
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: metamcp_user
+      POSTGRES_DB: metamcp_db
+      # Auth cookies, OAuth metadata and the MCP endpoint URLs are built from this.
+      APP_URL: ${PA_PUBLIC_URL}
+      NEXT_PUBLIC_APP_URL: ${PA_PUBLIC_URL}
+      TRANSFORM_LOCALHOST_TO_DOCKER_INTERNAL: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "12008:12008"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # uvx package cache for STDIO MCP servers (upstream's volume).
+      - uv_cache:/home/nextjs/.cache/uv
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:12008/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1536m
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/metamcp/app.env
+    environment:
+      POSTGRES_DB: metamcp_db
+      POSTGRES_USER: metamcp_user
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U metamcp_user -d metamcp_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  # No-op gate: `up` returns only once MetaMCP answers.
+  ready:
+    image: postgres:16-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  postgres_data: {}
+  uv_cache: {}

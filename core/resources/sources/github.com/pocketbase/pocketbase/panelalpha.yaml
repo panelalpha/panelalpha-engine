@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PocketBase is a backend in one Go binary: SQLite database, auth, file
+  storage, a REST/realtime API and the admin dashboard at /_/. The go platform
+  finds the runnable server in examples/base and builds it correctly; what the
+  plain deploy gets wrong is the start. It runs `./app` with no subcommand,
+  and PocketBase's root command prints its help and exits 0, so the container
+  restart-loops. `serve` alone would not do either: it binds 127.0.0.1:8090
+  and reads neither HOST nor PORT, only the --http flag.
+
+  The override starts `app serve --http=0.0.0.0:8080` and moves the data
+  directory (--dir) off the re-cloned checkout onto a named volume, so the
+  database survives redeploys. The first superuser is created as upstream
+  ships it: PocketBase prints a one-time installer link to the container log
+  on first start, or run `app superuser upsert <email> <password>` in the
+  container.
+extends: go

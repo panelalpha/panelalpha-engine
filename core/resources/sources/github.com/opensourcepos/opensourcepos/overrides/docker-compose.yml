@@ -1,0 +1,68 @@
+# Compose-replace: upstream's docker-compose.yml runs jekkos/opensourcepos with MariaDB
+# and fixed passwords; this pins the current release and takes secrets from ~/.panelalpha.
+services:
+  ospos:
+    image: jekkos/opensourcepos:3.4.2
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    # The image's own CMD (Apache). No `spark env:provision`: in 3.4.2 it always
+    # writes /app/.env as root 0640, which www-data then cannot read (500 on every page).
+    env_file:
+      # ENCRYPTION_KEY and THROTTLE_KEY (read when there is no .env) and MYSQL_PASSWORD.
+      - ../.panelalpha/opensourcepos/secrets.env
+    environment:
+      CI_ENVIRONMENT: production
+      ALLOWED_HOSTNAMES: ${PA_PUBLIC_HOST}
+      # TLS ends at the engine's proxy; links must still be https.
+      FORCE_HTTPS: "true"
+      PHP_TIMEZONE: UTC
+      MYSQL_USERNAME: admin
+      MYSQL_DB_NAME: ospos
+      MYSQL_HOST_NAME: mysql
+    volumes:
+      - uploads:/app/public/uploads
+      - logs:/app/writable/logs
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1/') === false ? 1 : 0);"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+    mem_limit: 512m
+
+  mysql:
+    image: mariadb:10.11
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/opensourcepos/secrets.env
+    environment:
+      MARIADB_DATABASE: ospos
+      MARIADB_USER: admin
+    volumes:
+      - mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns once OSPOS answers.
+  ready:
+    image: mariadb:10.11
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      ospos:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  uploads: {}
+  logs: {}
+  mysql: {}

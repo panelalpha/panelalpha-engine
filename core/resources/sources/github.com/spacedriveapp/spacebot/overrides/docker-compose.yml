@@ -1,0 +1,35 @@
+# The repository has no compose file; its Dockerfile is a Rust LTO release
+# build that is OOM-killed in the account. This runs the published image of
+# the current release the way upstream's Docker docs do, data on a volume.
+services:
+  app:
+    image: ghcr.io/spacedriveapp/spacebot:v0.5.0
+    restart: unless-stopped
+    # LLM and messaging keys (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+    # DISCORD_BOT_TOKEN, ...) come from the project's environment variables.
+    env_file: .env
+    volumes:
+      # config.toml, agents, SQLite/LanceDB and the embedding cache.
+      - spacebot-data:/data
+    ports:
+      - "19898:19898"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:19898/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once the app answers (engine#204).
+  ready:
+    image: ghcr.io/spacedriveapp/spacebot:v0.5.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  spacebot-data: {}

@@ -1,0 +1,186 @@
+# Upstream's production stack (docker-compose.yml) without certbot and the
+# backup job: nginx in upstream's reverse_proxy mode (the engine terminates
+# TLS) with Anubis, gunicorn, Celery, Postgres and two Redis. Secrets come from
+# ~/.panelalpha (hooks/prepare.sh); POSTGRES_* declared here trip engine#419.
+x-bookwyrm: &bookwyrm
+  image: bookwyrm:local
+  restart: unless-stopped
+  env_file:
+    - ../.panelalpha/bookwyrm/bookwyrm.env
+  environment: &bookwyrm-env
+    DEBUG: "false"
+    DOMAIN: ${PA_PUBLIC_HOST}
+    STATIC_ROOT: static/
+    MEDIA_ROOT: images/
+    PGPORT: "5432"
+    REDIS_ACTIVITY_HOST: redis_activity
+    REDIS_ACTIVITY_PORT: "6379"
+    REDIS_BROKER_HOST: redis_broker
+    REDIS_BROKER_PORT: "6379"
+    FLOWER_PORT: "8888"
+    ENABLE_THUMBNAIL_GENERATION: "true"
+    EMAIL_HOST: ${EMAIL_HOST:-localhost}
+    EMAIL_PORT: ${EMAIL_PORT:-587}
+    EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+    EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+    EMAIL_USE_TLS: ${EMAIL_USE_TLS:-true}
+    EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-admin}
+  volumes:
+    - static_volume:/app/static
+    - media_volume:/app/images
+    - exports_volume:/app/exports
+
+services:
+  nginx:
+    image: nginx:1.30.1
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      DOMAIN: ${PA_PUBLIC_HOST}
+      MAX_UPLOAD_MiB: "100"
+    volumes:
+      - ./nginx/reverse_proxy.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./nginx/server_config:/etc/nginx/templates/server_config.template:ro
+      - ./nginx/server_name:/etc/nginx/templates/server_name.template:ro
+      - ./nginx/locations:/etc/nginx/conf.d/locations:ro
+      - static_volume:/app/static:ro
+      - media_volume:/app/images:ro
+    depends_on:
+      web:
+        condition: service_healthy
+      anubis:
+        condition: service_healthy
+      flower:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/static/images/logo.png"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  anubis:
+    image: ghcr.io/techarohq/anubis:v1.27.0
+    restart: unless-stopped
+    environment:
+      BIND: ":8000"
+      DIFFICULTY: "4"
+      METRICS_BIND: ":9090"
+      SERVE_ROBOTS_TXT: "true"
+      TARGET: " "
+      POLICY_FNAME: /data/cfg/botPolicy.yaml
+      OG_PASSTHROUGH: "true"
+      OG_EXPIRY_TIME: 24h
+    volumes:
+      - ./anubis/botPolicy.yaml:/data/cfg/botPolicy.yaml:ro
+    healthcheck:
+      test: ["CMD", "anubis", "--healthcheck"]
+      interval: 5s
+      timeout: 30s
+      retries: 5
+    mem_limit: 128m
+
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    shm_size: 128mb
+    env_file:
+      - ../.panelalpha/bookwyrm/bookwyrm.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bookwyrm -d bookwyrm"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 384m
+
+  redis_activity:
+    image: redis:7.2.1
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/bookwyrm/bookwyrm.env
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_ACTIVITY_PASSWORD\" --appendonly yes --port 6379"]
+    volumes:
+      - redis_activity_data:/data
+    mem_limit: 128m
+
+  redis_broker:
+    image: redis:7.2.1
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/bookwyrm/bookwyrm.env
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_BROKER_PASSWORD\" --appendonly yes --port 6379"]
+    volumes:
+      - redis_broker_data:/data
+    mem_limit: 128m
+
+  web:
+    <<: *bookwyrm
+    build: .
+    # The entrypoint migrates, runs initdb and collects static files first.
+    command: gunicorn bookwyrm.wsgi:application
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:8000"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis_activity:
+        condition: service_started
+      redis_broker:
+        condition: service_started
+    mem_limit: 640m
+
+  celery_worker:
+    <<: *bookwyrm
+    pull_policy: never
+    command: celery -A celerywyrm worker --pool=threads --concurrency=20 -l info -Q high_priority,medium_priority,low_priority,streams,images,suggested_users,email,connectors,lists,inbox,imports,import_triggered,broadcast,misc
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 512m
+
+  celery_beat:
+    <<: *bookwyrm
+    pull_policy: never
+    command: celery -A celerywyrm beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 256m
+
+  # Celery monitor at /flower/ (upstream's nginx config requires the host);
+  # basic auth user/password from ~/.panelalpha/bookwyrm/bookwyrm.env.
+  flower:
+    <<: *bookwyrm
+    pull_policy: never
+    command: ["sh", "-c", "exec celery -A celerywyrm flower --basic_auth=\"$$FLOWER_USER:$$FLOWER_PASSWORD\" --url_prefix=flower"]
+    volumes:
+      - static_volume:/app/static
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns once nginx serves.
+  ready:
+    image: redis:7.2.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      nginx:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  static_volume: {}
+  media_volume: {}
+  exports_volume: {}
+  redis_activity_data: {}
+  redis_broker_data: {}

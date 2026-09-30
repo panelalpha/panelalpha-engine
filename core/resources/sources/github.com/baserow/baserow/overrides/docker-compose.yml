@@ -1,0 +1,37 @@
+# Compose-replace: the repo's root compose is the multi-service file that needs
+# customer secrets; this is upstream's all-in-one image, as in
+# docker-compose.all-in-one.yml.
+services:
+  app:
+    image: docker.io/baserow/baserow:2.3.4
+    restart: unless-stopped
+    environment:
+      BASEROW_PUBLIC_URL: ${PA_PUBLIC_URL}
+      # TLS ends at the engine's proxy; Caddy only serves plain HTTP.
+      BASEROW_CADDY_ADDRESSES: ":80"
+    ports:
+      - "8080:80"
+    volumes:
+      # Embedded PostgreSQL, Redis data, uploads and the generated secrets.
+      - baserow-data:/baserow/data
+    healthcheck:
+      # Frontend and backend, as the image's own watcher checks them; the
+      # backend answers only once migrations are done.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/_health/ >/dev/null && curl -fsS http://127.0.0.1:8000/api/_health/ >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  # No-op: `compose up -d` returns once Baserow answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  baserow-data: {}

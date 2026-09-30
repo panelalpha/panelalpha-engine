@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Nginx UI, a web UI for managing nginx sites, certificates and config (Go
+  binary with an embedded Vue frontend). The repository has no deployment
+  compose file, so the engine built it with the generic Go recipe, which
+  fails on `//go:embed all:dist` because the frontend is never built first.
+  This recipe runs upstream's published uozi/nginx-ui image of the current
+  release (v2.8.1): nginx plus the UI under s6-overlay, the bundled nginx on
+  container port 80 proxying the UI. /etc/nginx and
+  /etc/nginx-ui (app.ini and the UI's SQLite database) are
+  named volumes, kept across redeploys. The Docker socket mount from
+  upstream's example is left out; the UI starts without it. /etc/nginx
+  starts empty (nocopy) as upstream's bind mount does, so the image's
+  init-config seeds it with the UI's own :80 proxy; copied from the image it
+  holds no server block and nothing listens. First visit opens the app's own
+  install page, which asks for the one-time secret printed in the app log.

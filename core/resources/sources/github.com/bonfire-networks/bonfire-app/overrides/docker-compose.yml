@@ -1,0 +1,63 @@
+# Compose-replace: the repo compose is a dev environment (Dockerfile.dev) and
+# the release compose has no image. Runs upstream's published release image.
+# Secrets come from ~/.panelalpha (hooks/prepare.sh); POSTGRES_* declared here
+# trip engine#419.
+services:
+  web:
+    image: bonfirenetworks/bonfire:1.0.7-social
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - ../.panelalpha/bonfire/bonfire.env
+    environment:
+      HOSTNAME: ${PA_PUBLIC_HOST}
+      SERVER_PORT: "4000"
+      PUBLIC_PORT: "443"
+      LANG: en_US.UTF-8
+      REPLACE_OS_VARS: "true"
+      LIVEVIEW_ENABLED: "true"
+      MAIL_BACKEND: none
+      # Upstream's public.env default: concurrent index builds fail inside
+      # the migration transaction (ERROR 25001) on a fresh database.
+      DB_MIGRATE_INDEXES_CONCURRENTLY: "false"
+    volumes:
+      - uploads:/opt/app/data/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:4000/login"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+    mem_limit: 1280m
+
+  db:
+    image: postgis/postgis:17-3.5-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/bonfire/bonfire.env
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bonfire_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 384m
+
+  # No-op gate: `compose up -d` returns only once Bonfire answers.
+  ready:
+    image: bonfirenetworks/bonfire:1.0.7-social
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db-data: {}
+  uploads: {}

@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Browserless, headless Chromium as a service: an HTTP API (/content,
+  /screenshot, /pdf, /function, ...) and a WebSocket endpoint for Puppeteer
+  and Playwright, with OpenAPI docs at /docs (Node.js, port 3000). The
+  repository has no compose file and no root Dockerfile, so the plain deploy
+  builds it with the generic Node recipe; its `npm run build` downloads the
+  uBlock Origin Lite extension and needs `unzip`, which that image lacks, and
+  even a successful build would have no Chromium. Upstream ships the browser
+  through its own images built from docker/<browser>/Dockerfile.
+
+  This recipe runs the current release image
+  ghcr.io/browserless/chromium:v2.56.7 (upstream's documented `docker run`)
+  on port 3000 with a 1 GB /dev/shm, a 2 GB memory cap and a `ready` gate on
+  /active. It keeps no data. Browserless settings are project env vars: TOKEN
+  (API token; unset means an open API), CONCURRENT, QUEUED, TIMEOUT and the
+  rest of upstream's environment variables.

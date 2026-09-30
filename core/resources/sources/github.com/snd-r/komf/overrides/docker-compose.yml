@@ -1,0 +1,36 @@
+# Compose-replace: the repo has no compose file and its Dockerfile copies a jar
+# built outside Docker. Runs the published image of the current release.
+services:
+  komf:
+    image: sndxr/komf:2.1.0
+    restart: unless-stopped
+    ports:
+      - "8085:8085"
+    environment:
+      # Optional: Komga/Kavita can also be connected from the web UI.
+      KOMF_KOMGA_BASE_URI: ${KOMF_KOMGA_BASE_URI:-}
+      KOMF_KOMGA_USER: ${KOMF_KOMGA_USER:-}
+      KOMF_KOMGA_PASSWORD: ${KOMF_KOMGA_PASSWORD:-}
+      KOMF_KAVITA_BASE_URI: ${KOMF_KAVITA_BASE_URI:-}
+      KOMF_KAVITA_API_KEY: ${KOMF_KAVITA_API_KEY:-}
+      KOMF_LOG_LEVEL: ${KOMF_LOG_LEVEL:-INFO}
+      # Upstream's low-memory JVM options.
+      JAVA_TOOL_OPTIONS: -XX:+UnlockExperimentalVMOptions -XX:+UseShenandoahGC -XX:ShenandoahGCHeuristics=compact -XX:ShenandoahGuaranteedGCInterval=3600000 -XX:TrimNativeHeapInterval=3600000
+    volumes:
+      # application.yml written by the UI, plus Komf's SQLite database.
+      - komf-config:/config
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
+
+  # Komf refuses to start without /config/application.yml; upstream expects the
+  # operator to create it. Writes an empty one (all defaults) on first deploy only.
+  config-init:
+    image: sndxr/komf:2.1.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "[ -f /config/application.yml ] || echo '{}' > /config/application.yml"]
+    volumes:
+      - komf-config:/config
+
+volumes:
+  komf-config: {}

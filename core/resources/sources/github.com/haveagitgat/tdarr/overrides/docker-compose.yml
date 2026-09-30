@@ -1,0 +1,70 @@
+# The repository holds no source: Tdarr ships closed-source binaries, free to
+# use, as the official image. This runs that image with its internal node.
+services:
+  app:
+    image: ghcr.io/haveagitgat/tdarr:2.91.01
+    restart: unless-stopped
+    env_file:
+      # authSecretKey, seededApiKey, apiKey (hooks/prepare.sh).
+      - ../.panelalpha/tdarr/tdarr.env
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+      serverIP: 0.0.0.0
+      serverPort: "8266"
+      webUIPort: "8265"
+      # Login required; the seed service registers the only admin.
+      auth: "true"
+      openBrowser: "false"
+      internalNode: "true"
+      inContainer: "true"
+      ffmpegVersion: "7"
+      nodeName: InternalNode
+      # CPU only, kept small for a shared account.
+      transcodecpuWorkers: "1"
+      transcodegpuWorkers: "0"
+      healthcheckcpuWorkers: "1"
+      healthcheckgpuWorkers: "0"
+    volumes:
+      # Database, users, API keys, libraries and flows.
+      - tdarr-server:/app/server
+      - tdarr-configs:/app/configs
+      - tdarr-logs:/app/logs
+      # Library root for Libraries > Source, and the transcode cache.
+      - tdarr-media:/media
+      - tdarr-cache:/temp
+    ports:
+      - "8265:8265"
+    mem_limit: 2g
+
+  # Registers the admin user once, then exits. Same image: it has curl.
+  seed:
+    image: ghcr.io/haveagitgat/tdarr:2.91.01
+    restart: "no"
+    entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/tdarr/admin.env
+    volumes:
+      - tdarr-media:/media
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    depends_on:
+      - app
+    mem_limit: 128m
+
+  # No-op gate: `up -d` returns only after the admin exists.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  tdarr-server: {}
+  tdarr-configs: {}
+  tdarr-logs: {}
+  tdarr-media: {}
+  tdarr-cache: {}

@@ -1,0 +1,65 @@
+# Replaces the source build (default branch develop, which does not build
+# under the engine). Servarr publishes no image of its own; this runs the
+# LinuxServer.io build of the current stable v3 release.
+services:
+  app:
+    image: linuxserver/lidarr:3.1.0
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+      # Env wins over config.xml and the UI. Forms login is always on, and never
+      # relaxed for "local addresses": behind the proxy every client is local.
+      LIDARR__AUTH__METHOD: Forms
+      LIDARR__AUTH__REQUIRED: Enabled
+      LIDARR__SERVER__PORT: "8686"
+      LIDARR__SERVER__BINDADDRESS: "*"
+      LIDARR__SERVER__URLBASE: ""
+    volumes:
+      # config.xml (API key) and lidarr.db (login user, artists, settings).
+      - lidarr-config:/config
+      # Library root folder for Settings > Media Management.
+      - lidarr-music:/music
+    ports:
+      - "8686:8686"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8686/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1g
+
+  # Sets the login user once through Lidarr's own API, then exits. Same image:
+  # it already has curl, jq and xmlstarlet.
+  seed:
+    image: linuxserver/lidarr:3.1.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/lidarr/admin.env
+    volumes:
+      - lidarr-config:/config:ro
+      - lidarr-music:/music
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 128m
+
+  # No-op gate: `up -d` returns only after the app is healthy and seeded.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  lidarr-config: {}
+  lidarr-music: {}

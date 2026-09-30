@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  rotki, a self-hosted portfolio tracker and accounting app (Python core behind
+  the starling supervisor, Vue frontend). The repository's own Dockerfile needs
+  a ROTKI_VERSION build argument the engine cannot pass, so the plain deploy
+  fails in PyInstaller with "Invalid version: ''". This recipe runs the
+  published rotki/rotki image of the current release (v1.44.0) on port 80 with
+  /data (encrypted user databases) and /logs on named volumes.

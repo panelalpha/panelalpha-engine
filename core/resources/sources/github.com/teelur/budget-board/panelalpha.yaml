@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Budget Board tracks monthly spending and savings goals: an ASP.NET Core API
+  (:8080), a React client served by nginx on :6253 that proxies /api to it, and
+  PostgreSQL 16.
+
+  The repository's compose.yml requires `--env-file compose.env`; without it
+  every `${POSTGRES_USER:?...}` / `${POSTGRES_DATABASE:?...}` fails to
+  interpolate ("required variable POSTGRES_DATABASE is missing a value").
+  overrides/docker-compose.yml runs the same three services from upstream's
+  published images of the current release (ghcr.io/teelur/budget-board
+  server and client v3.8.2) with the database on a named volume. The database
+  password is generated once into ~/.panelalpha/budget-board by
+  hooks/prepare.sh; the server migrates the schema on boot
+  (AUTO_UPDATE_DB=true), and the client waits for the server's /health.
+
+  First run is upstream's: the first visitor registers an account. OIDC and
+  e-mail are off, as in upstream's compose.env.

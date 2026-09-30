@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  WorkWit is a FastAPI + SQLite AI office-assistant platform with a vanilla-JS
+  frontend served by the same process. The repository root holds only README.md
+  and workwit/, so a plain deploy finds no manifest and serves the placeholder.
+
+  This recipe runs upstream's own workwit/docker-compose.yml from the repo
+  root: the backend is built from workwit/backend/Dockerfile unchanged and
+  serves on :8000. The ./data bind mount becomes a named volume, because
+  ~/project is wiped on every deploy. Model endpoints (MODEL_*_BASE/_KEY from
+  workwit/.env.example) are optional project env vars; the app starts without
+  them and they can be set later in its admin UI. Upstream's default admin
+  (admin / admin123, per its README) is left as shipped.

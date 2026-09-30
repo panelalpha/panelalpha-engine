@@ -1,0 +1,34 @@
+# Compose-replace: the repo has no compose file, and a source build lacks the
+# Vite frontend. Runs the published image of the current release.
+services:
+  app:
+    image: fireflyiii/data-importer:version-2.3.5
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Optional: preset the Firefly III instance; left empty the importer asks for it.
+      FIREFLY_III_URL: ${FIREFLY_III_URL:-}
+      VANITY_URL: ${VANITY_URL:-}
+      FIREFLY_III_CLIENT_ID: ${FIREFLY_III_CLIENT_ID:-}
+      # Behind the engine's proxy: trust its X-Forwarded-Proto for https URLs.
+      TRUSTED_PROXIES: "**"
+      APP_URL: ${PA_PUBLIC_URL}
+      TZ: ${TZ:-UTC}
+    volumes:
+      # The image's own VOLUME (import files), named so a rebuild keeps it.
+      - importer-upload:/var/www/html/storage/upload
+    mem_limit: 512m
+
+  # No-op: `compose up -d` returns once the image's own healthcheck passes.
+  ready:
+    image: fireflyiii/data-importer:version-2.3.5
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  importer-upload: {}

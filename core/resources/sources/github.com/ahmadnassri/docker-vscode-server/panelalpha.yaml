@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  VS Code Server in a container: Microsoft's `code serve-web` serving the
+  editor in the browser on :8000. The repository's docker-compose.yml gates
+  every service behind a Compose profile (`app`, `dev`), so the plain deploy
+  failed with "no service selected". This recipe runs the published
+  ahmadnassri/vscode-server image of the current release (2.1.0, VS Code
+  CLI 1.97.2, which downloads the current stable server on the first
+  request) with upstream's four data directories on named volumes. Upstream
+  starts it with --without-connection-token, so the editor has no login of
+  its own.

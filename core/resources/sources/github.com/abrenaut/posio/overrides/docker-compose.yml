@@ -1,0 +1,84 @@
+# Compose-replace: the repository's compose is a development stack (source
+# bind-mounted over /app, DEBUG settings, no database setup), and its image's
+# ENTRYPOINT is a bare `python`, so a plain deploy exits at once. This runs the
+# repository's own Dockerfile the way its README does: migrate, load the two
+# games once, then Daphne and the game-loop worker, with Redis. nginx serves
+# the collected static files, which Daphne does not with DEBUG off.
+x-app: &app
+  build:
+    context: .
+  restart: unless-stopped
+  env_file:
+    - .env
+    - ../.panelalpha/posio/secret.env
+  environment:
+    ENV: production
+    REDIS_HOST: redis
+    ALLOWED_HOSTS: ${PA_PUBLIC_HOST},127.0.0.1,localhost
+    CSRF_TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+    STATIC_ROOT: /public_collected
+    STATIC_URL: /static/
+    MEDIA_ROOT: /app/db/media
+    MEDIA_URL: /media/
+  mem_limit: 384m
+
+services:
+  redis:
+    image: redis:7.2.4-bookworm
+    restart: unless-stopped
+    volumes:
+      - redis:/data
+    mem_limit: 64m
+
+  app:
+    <<: *app
+    entrypoint: ["/bin/sh", "-c"]
+    # The games are created only while the table is empty: the commands are
+    # not idempotent (Game.slug is not unique).
+    command:
+      - >-
+        python manage.py migrate --noinput &&
+        (python manage.py shell -c "import sys; from game.models import Game; sys.exit(0 if Game.objects.exists() else 1)" ||
+         (python manage.py createcitiesgame && python manage.py createflagsgame)) &&
+        python manage.py collectstatic --noinput --clear -v 0 &&
+        exec daphne -b 0.0.0.0 -p 8000 posio.asgi:application
+    volumes:
+      - spatialite:/app/db
+      - static:/public_collected
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  # Drives the rounds of every game; it reads the game list once at start,
+  # so it waits for the web service to have created them.
+  gameloops:
+    <<: *app
+    command: ["manage.py", "startgameloops"]
+    volumes:
+      - spatialite:/app/db
+    depends_on:
+      app:
+        condition: service_healthy
+
+  web:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    volumes:
+      - ./panelalpha/posio-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - static:/static:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  spatialite: {}
+  static: {}
+  redis: {}

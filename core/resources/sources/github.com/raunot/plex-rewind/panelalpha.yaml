@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Plex Rewind, a Next.js app presenting "Spotify Wrapped"-style Plex viewing
+  statistics from Tautulli, with Plex sign-in through next-auth. The repository's
+  compose builds from source and reads a .env.local it does not ship, so a plain
+  deploy answers 500 ("[next-auth][error][NO_SECRET]"). This recipe runs the
+  published image of the current release (ghcr.io/raunot/plex-rewind:5.2.0) on
+  port 8383 with NEXTAUTH_SECRET generated once into ~/.panelalpha,
+  NEXTAUTH_URL / NEXT_PUBLIC_SITE_URL set to the site's address and /app/config
+  (the settings written from the UI) on a named volume.

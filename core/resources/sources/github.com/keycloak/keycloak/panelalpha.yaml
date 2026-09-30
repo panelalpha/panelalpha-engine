@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Keycloak, the identity and access management server. The repository is
+  Keycloak's full Maven source tree; the java strategy built it and failed in
+  the keycloak-js module (frontend-maven-plugin: 'pnpm build' failed). This
+  recipe runs the official quay.io/keycloak/keycloak image of the current
+  release (26.7.4) in production mode (`start`) on port 8080 behind the
+  engine's proxy, against PostgreSQL 17. The first admin is Keycloak's own
+  bootstrap admin, KC_BOOTSTRAP_ADMIN_USERNAME / KC_BOOTSTRAP_ADMIN_PASSWORD
+  from the project env vars: without them the admin console only offers
+  "Local access required", so a one-shot check fails the deploy naming
+  whichever is missing. The database password is generated once into
+  ~/.panelalpha/keycloak.

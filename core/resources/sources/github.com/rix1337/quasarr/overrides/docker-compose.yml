@@ -1,0 +1,49 @@
+# Replaces the source checkout with upstream's own image of the current
+# release (4.6.19). The image runs in DOCKER mode: config and database in
+# /config, which is a named volume here.
+services:
+  app:
+    image: ghcr.io/rix1337/quasarr:4.6.19
+    restart: unless-stopped
+    env_file:
+      # USER / PASS: without both, every page and the setup wizard are open.
+      - ../.panelalpha/quasarr/auth.env
+    environment:
+      AUTH: form
+      PORT: "8080"
+      TZ: Etc/UTC
+    # INTERNAL_ADDRESS is what Radarr/Sonarr call; Quasarr appends :8080 unless
+    # it names a port, so give it the public URL with the scheme's port.
+    # The loop is the image's own ENTRYPOINT (exit 0 = restart from the UI).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        case "$$PA_PUBLIC_URL" in https://*) p=443 ;; *) p=80 ;; esac
+        export INTERNAL_ADDRESS="$${PA_PUBLIC_URL%/}:$$p" EXTERNAL_ADDRESS="$${PA_PUBLIC_URL%/}"
+        while true; do quasarr; ret=$$?; if [ $$ret -ne 0 ]; then echo "Quasarr exited with error $$ret, stopping..."; exit $$ret; fi; echo "Quasarr restarting..."; sleep 2; done
+    volumes:
+      # Quasarr.ini (hostnames, JDownloader login, API key) and Quasarr.db.
+      - quasarr-config:/config
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  # No-op gate: `up -d` returns only once the web server answers.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  quasarr-config: {}

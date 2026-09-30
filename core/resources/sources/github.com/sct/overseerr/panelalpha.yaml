@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Overseerr is a media request manager for Plex and the *arr stack (Sonarr,
+  Radarr): one Node/Next.js server on port 5055 with an embedded SQLite
+  database and settings.json under /app/config.
+
+  ARCHIVED UPSTREAM, WORKING RELEASE. sct/overseerr is archived; its README
+  points to Seerr as the successor. The final release, v1.35.0, is still
+  published by upstream as docker.io/sctx/overseerr:1.35.0 and runs, so this
+  recipe runs that image via overrides/docker-compose.yml. The repo's own
+  docker-compose.yml is a dev environment (Dockerfile.local, the checkout
+  bind-mounted over /app) and is replaced.
+
+  CLOSED FIRST RUN. Overseerr's setup wizard begins with "Sign in with Plex",
+  and server/routes/auth.ts makes whoever signs in first, while the user table
+  is empty, the ADMIN -- any free Plex account claims a fresh instance. A
+  one-shot `seed` service runs before the app on every boot: it migrates with
+  Overseerr's own compiled datasource, creates a local owner (User entity,
+  bcrypt via User.setPassword, Permission.ADMIN) only when no user exists,
+  and sets public.initialized, applicationUrl and trustProxy in settings.json.
+  With a user present the Plex path admits only the owner's own Plex account
+  or users of the owner's Plex server. The owner email has a random local part
+  (admin-<hex>@<domain>) so a Plex account registered with a guessable
+  address cannot match it before the customer links their own Plex account.
+
+  LINKING PLEX. The owner is linked to Plex only by a Plex sign-in whose email
+  equals the owner's, and Overseerr has no UI to change an email. Setting
+  OVERSEERR_OWNER_EMAIL in the project env and redeploying makes the seed set
+  the owner's email to it (only while the owner has no plexId); the customer
+  then signs in with that Plex account and configures Settings > Plex.
+
+  SECRETS AND PERSISTENCE. hooks/prepare.sh writes the owner password once to
+  ~/.panelalpha/overseerr/ (0600 in 0700) with a credentials.txt note. The
+  database, settings.json (API key, session secret) and logs live on the
+  overseerr-config named volume and survive redeploys.

@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kaneo, a project management app (one image serving the web app and the API on
+  :5173, PostgreSQL). The repository's compose.yml already runs the published
+  image and deploys, but with no .env it starts without KANEO_CLIENT_URL, so
+  Better Auth refuses every sign-up and sign-in from the public domain with
+  403 INVALID_ORIGIN, and without AUTH_SECRET, so it generates a new one on
+  every boot and a restart logs everyone out. This recipe runs the same two
+  services on the current release (ghcr.io/usekaneo/kaneo:2.29.2,
+  postgres:16-alpine) with KANEO_CLIENT_URL set to the account's address and
+  the database password and AUTH_SECRET generated once into ~/.panelalpha/kaneo.
+  Registration is left open as upstream ships it.

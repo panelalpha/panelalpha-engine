@@ -1,0 +1,60 @@
+# Jackett ships no compose file and no Dockerfile (a .NET solution plus
+# installers), so this runs the linuxserver.io image, the one Jackett's README
+# points Docker users to. Docker Hub name rather than lscr.io (same image), so
+# the engine seeds it like any Hub image. Pinned to the current release.
+services:
+  # Writes /config/Jackett/ServerConfig.json once, before Jackett first boots,
+  # with an admin password. Upstream starts with none, and then the web UI
+  # (indexer credentials, the API key) is open to anyone with the address.
+  init:
+    image: linuxserver/jackett:0.24.2685
+    restart: "no"
+    entrypoint: ["/bin/bash", "/panelalpha/jackett-seed.sh"]
+    env_file:
+      - ../.panelalpha/jackett/jackett.env
+    environment:
+      JACKETT_BASE_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - jackett-config:/config
+      - ./panelalpha/jackett-seed.sh:/panelalpha/jackett-seed.sh:ro
+    mem_limit: 128m
+
+  app:
+    image: linuxserver/jackett:0.24.2685
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: Etc/UTC
+      # The image runs `jackett --NoUpdates` unless this is true; a redeploy
+      # pins the version, the app must not swap its own binary under it.
+      AUTO_UPDATE: "false"
+    volumes:
+      # ServerConfig.json, indexer configs, DataProtection keys (login cookies).
+      - jackett-config:/config
+    ports:
+      - "9117:9117"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      # 200 with login.html once the web host is up and the config is loaded.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9117/UI/Login?cookiesChecked=1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 768m
+
+  # No-op gate: `up -d` returns only once Jackett answers.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  jackett-config: {}

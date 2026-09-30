@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Meelo, a personal music server (NestJS API, Next.js front, Go scanner, Python
+  matcher, a transcoder, PostgreSQL, Meilisearch and RabbitMQ behind upstream's
+  nginx on :5000). The repository's docker-compose.yml builds every service
+  from source and takes its paths and secrets from a .env the repository does
+  not ship, so a plain deploy fails on "invalid spec: :/data:ro: empty section
+  between colons". This recipe runs upstream's docker-compose.prod.yml on the
+  published images of the current release (v3.13.0) with the music library,
+  config and datastores on named volumes, upstream's default settings.json from
+  the repository, and the database, message-queue, JWT, Meilisearch and
+  internal API secrets generated once per account by the engine. First run is
+  as upstream ships it: the site opens Meelo's own sign-up / login page.

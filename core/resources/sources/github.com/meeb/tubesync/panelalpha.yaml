@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  TubeSync syncs YouTube channels and playlists into a local media library
+  with yt-dlp: a Django app behind nginx on :4848, run by s6 together with
+  its download queue workers, SQLite and settings in /config, media in
+  /downloads.
+
+  The generic Django recipe claims the repository (manage.py, Pipfile) and
+  runs it outside the container layout it is written for; it restart-loops on
+  "No module named 'tubesync.local_settings'", a file the upstream Dockerfile
+  puts in place along with nginx, ffmpeg and the s6 services. This recipe runs
+  the official image of the current release, ghcr.io/meeb/tubesync:v0.18.4
+  (pinned by digest), as the README's Docker Compose example lays it out, with
+  /config and /downloads on named volumes that survive redeploys.

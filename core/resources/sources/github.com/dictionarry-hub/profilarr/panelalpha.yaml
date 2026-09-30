@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Profilarr v2 manages Radarr/Sonarr quality profiles and custom formats: one
+  compiled Deno server with its web UI and REST API on :6868, SQLite in
+  /config, plus an optional C# parser sidecar for release testing. The
+  repository's compose.yml follows the `develop` image channel and bind-mounts
+  ./config, which the engine wipes on every deploy; this recipe replaces it
+  with the images upstream documents, pinned to the current release 2.2.0,
+  and /config on a named volume.
+
+  With AUTH=on and no password account Profilarr sends every visitor to
+  /auth/setup, where the first one owns the instance. A one-shot `seed`
+  service starts Profilarr privately against the same volume, creates the
+  account through /auth/setup from ~/.panelalpha/profilarr/admin.env
+  (generated once by hooks/prepare.sh), and only then does the app service
+  publish its port. PROFILARR_API_KEY (app.env) gives full X-Api-Key access.
+  Linked databases (Dictionarry, TRaSH) are cloned from GitHub and Radarr/
+  Sonarr instances are added at runtime from the UI.

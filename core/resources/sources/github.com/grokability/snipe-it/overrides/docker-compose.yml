@@ -1,0 +1,101 @@
+# Replaces the repository's docker-compose.yml, which is upstream's production
+# stack (snipe/snipe-it + MariaDB) but takes every value from a .env the
+# checkout does not ship, so MariaDB started with no root password and failed.
+# Same two services here, with:
+#   - secrets from ~/.panelalpha/snipeit/*.env, generated once by the hook
+#   - APP_URL in `environment:`, where the engine substitutes the public URL
+#   - a one-shot `setup` that completes the first-visitor-wins web wizard
+#   - a no-op `ready` gate so `compose up -d` returns once the admin exists
+services:
+  db:
+    # upstream's own pin in docker-compose.yml
+    image: mariadb:11.4.7
+    restart: unless-stopped
+    command:
+      - --innodb-buffer-pool-size=128M
+      - --max-connections=64
+      - --performance-schema=OFF
+    env_file:
+      - ../.panelalpha/snipeit/db.env
+    environment:
+      MARIADB_DATABASE: snipeit
+      MARIADB_USER: snipeit
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
+    mem_limit: 512m
+
+  app:
+    # current release; `latest` tracks master
+    image: snipe/snipe-it:v8.7.2
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    env_file:
+      - ../.panelalpha/snipeit/app.env
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_URL: ${PA_PUBLIC_URL}
+      APP_TIMEZONE: UTC
+      APP_LOCALE: en-US
+      DB_CONNECTION: mariadb
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_DATABASE: snipeit
+      DB_USERNAME: snipeit
+      # Behind the engine's HTTPS proxy: trust its X-Forwarded-* from the
+      # account's private network, mark session cookies Secure.
+      APP_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+      APP_TRUSTED_HEADERS: "HEADER_X_FORWARDED_FOR,HEADER_X_FORWARDED_HOST,HEADER_X_FORWARDED_PORT,HEADER_X_FORWARDED_PROTO"
+      SECURE_COOKIES: "true"
+      # No mail service in the account; mail is logged instead of failing.
+      MAIL_MAILER: log
+      PRIVATE_FILESYSTEM_DISK: local
+      PUBLIC_FILESYSTEM_DISK: local_public
+    # Uploads, backups and the Passport OAuth keys.
+    volumes:
+      - storage:/var/lib/snipeit
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    mem_limit: 768m
+
+  setup:
+    image: snipe/snipe-it:v8.7.2
+    restart: "no"
+    entrypoint: ["/bin/bash", "/panelalpha/snipeit-setup.sh"]
+    env_file:
+      - ../.panelalpha/snipeit/admin.env
+    environment:
+      SNIPEIT_ADMIN_EMAIL: admin@${PA_PUBLIC_HOST}
+    volumes:
+      - ./panelalpha/snipeit-setup.sh:/panelalpha/snipeit-setup.sh:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+  ready:
+    image: snipe/snipe-it:v8.7.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    mem_limit: 32m
+
+volumes:
+  db_data: {}
+  storage: {}

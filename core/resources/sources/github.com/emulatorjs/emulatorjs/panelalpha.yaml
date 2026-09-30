@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  EmulatorJS, RetroArch cores running in the browser. The repository is the
+  site as committed: index.html (the upstream demo page - pick a ROM and a
+  system, it plays client-side) and data/ (loader.js, emulator source,
+  localization). `npm start` upstream is only http-server over this tree.
+  The plain deploy sent it to the Node platform, whose image build runs
+  `npm run build`; that script only packs release archives (dist/*.zip) with
+  the 7z binary and died on `spawn 7z ENOENT`. The recipe serves the files
+  as committed with the static platform's nginx. Cores are not committed;
+  the loader falls back to cdn.emulatorjs.org for them.
+
+  output_directory is `.` because a package.json makes the engine host-run
+  `npm install` for an nginx recipe and then require <output>/index.html
+  (default dist/, which this repo never produces) (engine#341). The build
+  stage is a no-op on purpose: left empty, the host compile falls back to
+  `npm run build`, the same 7z packaging step.
+extends: static
+output_directory: .
+commands:
+  - id: no-build
+    stage: build
+    run: 'true'

@@ -1,0 +1,55 @@
+# The repository ships only docker-compose.dev.yml (a Debug build behind
+# Traefik with MySQL), so this runs the published image the README documents,
+# pinned to the current release, on SQLite in a named volume.
+#
+# Lingarr's /api/auth/signup and /api/auth/onboarding are [AllowAnonymous] and
+# never check whether an admin already exists, and its SignalR hubs carry no
+# authorization at all. So the app publishes nothing: `proxy` is the only thing
+# on the account's port, and it requires a logged-in session for those paths.
+services:
+  app:
+    image: lingarr/lingarr:1.3.0
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS: http://+:9876
+      DB_CONNECTION: sqlite
+      # Re-applied from the environment on every start (StartupService), so
+      # authentication cannot stay switched off on a public address.
+      AUTH_ENABLED: "true"
+      TELEMETRY_ENABLED: "false"
+      TZ: Etc/UTC
+    volumes:
+      # local.db (settings, users, encrypted API keys), Hangfire.db, and the
+      # DataProtection keys that sign the login cookie.
+      - lingarr-config:/app/config
+    mem_limit: 1g
+
+  # Creates the admin from ~/.panelalpha/lingarr/admin.env and completes
+  # onboarding, talking to the app directly before the proxy exists. Only ever
+  # creates: an existing admin (and a password changed in the UI) is left alone.
+  seed:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "/panelalpha/lingarr-seed.sh"]
+    env_file:
+      - ../.panelalpha/lingarr/admin.env
+    volumes:
+      - ./panelalpha/lingarr-seed.sh:/panelalpha/lingarr-seed.sh:ro
+    depends_on:
+      - app
+    mem_limit: 64m
+
+  proxy:
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./panelalpha/lingarr-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 48m
+
+volumes:
+  lingarr-config: {}

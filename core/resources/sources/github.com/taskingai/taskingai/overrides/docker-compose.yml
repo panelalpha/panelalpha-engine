@@ -1,0 +1,145 @@
+# Upstream's docker/docker-compose.yml with its image pins. Credentials come from
+# taskingai.env (hooks/prepare.sh), data from named volumes instead of ./data.
+# Health checks use python: the images ship no curl, so upstream's never pass.
+services:
+  frontend:
+    image: taskingai/taskingai-console:v0.3.0
+    depends_on:
+      - backend-web
+      - backend-api
+
+  backend-inference:
+    image: taskingai/taskingai-inference:v0.2.14
+    env_file: taskingai.env
+    environment:
+      ICON_URL_PREFIX: ${PA_PUBLIC_URL}
+      PROJECT_ID: taskingai
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/v1/health_check')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  backend-plugin:
+    image: taskingai/taskingai-plugin:v0.2.10
+    env_file: taskingai.env
+    environment:
+      ICON_URL_PREFIX: ${PA_PUBLIC_URL}
+      HOST_URL: ${PA_PUBLIC_URL}
+      OBJECT_STORAGE_TYPE: local
+      PATH_TO_VOLUME: /var/lib/data
+      PROJECT_ID: taskingai
+    volumes:
+      - object-storage:/var/lib/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/v1/health_check')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  backend-api:
+    image: taskingai/taskingai-server:v0.3.0
+    env_file: taskingai.env
+    environment:
+      TASKINGAI_INFERENCE_URL: http://backend-inference:8000
+      TASKINGAI_PLUGIN_URL: http://backend-plugin:8000
+      OBJECT_STORAGE_TYPE: local
+      HOST_URL: ${PA_PUBLIC_URL}
+      PATH_TO_VOLUME: /var/lib/data
+      PROJECT_ID: taskingai
+    volumes:
+      - object-storage:/var/lib/data
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+      backend-inference:
+        condition: service_started
+      backend-plugin:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/v1/health_check')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  backend-web:
+    image: taskingai/taskingai-server:v0.3.0
+    env_file: taskingai.env
+    environment:
+      TASKINGAI_INFERENCE_URL: http://backend-inference:8000
+      TASKINGAI_PLUGIN_URL: http://backend-plugin:8000
+      PURPOSE: WEB
+      OBJECT_STORAGE_TYPE: local
+      HOST_URL: ${PA_PUBLIC_URL}
+      PATH_TO_VOLUME: /var/lib/data
+      PROJECT_ID: taskingai
+    volumes:
+      - object-storage:/var/lib/data
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+      backend-inference:
+        condition: service_started
+      backend-plugin:
+        condition: service_started
+    # Served under /api/v1; upstream probes /v1 with curl, which the image lacks.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/api/v1/health_check')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  db:
+    image: ankane/pgvector:v0.5.1
+    env_file: taskingai.env
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  cache:
+    image: redis:7-alpine
+    env_file: taskingai.env
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  nginx:
+    image: nginx:1.24
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docker/nginx/conf:/etc/nginx/conf.d:ro
+    depends_on:
+      - frontend
+      - backend-web
+      - backend-api
+
+  # The deploy ends once the web backend has migrated and answers.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      backend-web:
+        condition: service_healthy
+      backend-api:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  object-storage: {}
+  postgres: {}
+  redis: {}

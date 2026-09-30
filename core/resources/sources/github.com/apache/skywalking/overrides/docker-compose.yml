@@ -1,0 +1,78 @@
+# The repo's root is the Maven source tree; its docker/docker-compose.yml runs
+# locally built images. This is that file's banyandb profile on the published
+# images of the current release: OAP 11.0.0, BanyanDB 0.11.1, Horizon UI 1.0.0.
+services:
+  banyandb:
+    image: apache/skywalking-banyandb:0.11.1
+    restart: unless-stopped
+    command:
+      - standalone
+      - --stream-root-path=/data
+      - --measure-root-path=/data
+      - --property-root-path=/data
+      - --trace-root-path=/data
+      - --schema-server-root-path=/data
+    volumes:
+      - banyandb:/data
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -q -O /dev/null http://127.0.0.1:17913/api/healthz"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+    mem_limit: 1g
+
+  oap:
+    image: apache/skywalking-oap-server:11.0.0
+    restart: unless-stopped
+    environment:
+      SW_STORAGE: banyandb
+      SW_STORAGE_BANYANDB_TARGETS: banyandb:17912
+      SW_HEALTH_CHECKER: default
+      SW_TELEMETRY: prometheus
+      # The image's default is -Xms2G with no ceiling.
+      JAVA_OPTS: -Xms512m -Xmx1g
+    depends_on:
+      banyandb:
+        condition: service_healthy
+    healthcheck:
+      # The image has no curl/wget; probe the query port as upstream does.
+      test: ["CMD", "bash", "-c", "cat < /dev/null > /dev/tcp/127.0.0.1/12800"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+    mem_limit: 1536m
+
+  ui:
+    image: apache/skywalking-ui:horizon-1.0.0
+    restart: unless-stopped
+    volumes:
+      # Upstream's own config for this compose: OAP addresses and its demo login.
+      - ./docker/horizon.yaml:/app/horizon.yaml:ro
+      - horizon:/data
+    ports:
+      - "8080:8081"
+    depends_on:
+      - oap
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once OAP and the UI answer.
+  ready:
+    image: apache/skywalking-banyandb:0.11.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      oap:
+        condition: service_healthy
+      ui:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  banyandb: {}
+  horizon: {}

@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DVinyl is a collection manager for physical media: an Express/TypeScript app
+  (run with tsx) on :3099 with MongoDB.
+
+  REPO DOCKERFILE, COMPOSE-REPLACE. The repository's docker-compose.yml keeps
+  MongoDB and uploads in ./mongo_data and ./public/uploads (inside ~/project,
+  which every deploy empties), so the engine falls back to building the
+  Dockerfile with .env.example copied to .env. Two things in that .env stop
+  the app: PASSJWT and SESSION_SECRET are blank (DVinyl throws "[SECURITY]
+  PASSJWT is not defined"), and the blank BASE_URL, which DVinyl reads as a
+  sub-path prefix, is filled with the site's https:// address, so Express
+  crashes with "PathError: Missing parameter name ... /https://<domain>".
+
+  This recipe builds the repository's own Dockerfile (upstream publishes no
+  image for the current release, 3.2.0) next to mongo:7.0, keeps the database
+  and uploads on named volumes, leaves BASE_URL unset (served from /), and
+  sets PROD=true because the site is served over HTTPS (secure cookies,
+  trust proxy). hooks/prepare.sh generates PASSJWT and SESSION_SECRET once
+  into ~/.panelalpha/dvinyl/app.env. The first visit shows DVinyl's own setup
+  page. Metadata sources (Discogs, TMDB, IGDB, ...) are optional; add their
+  keys to ~/.panelalpha/dvinyl/app.env and redeploy.
+
+  MongoDB is 7.0 rather than upstream's mongo:latest because every 8.x image
+  refuses to start on Linux 6.19 or newer (SERVER-121912); see README.md.

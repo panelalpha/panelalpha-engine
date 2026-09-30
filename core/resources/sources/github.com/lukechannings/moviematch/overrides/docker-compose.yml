@@ -1,0 +1,29 @@
+# The repo has no buildable Dockerfile (configs/Dockerfile copies a prebuilt
+# binary); run the published release image instead.
+services:
+  app:
+    image: lukechannings/moviematch:2.0.0-beta.3
+    restart: unless-stopped
+    # The setup screen writes /app/config.yaml; keep it on the volume.
+    entrypoint: ["/bin/sh", "-c", "ln -sf /data/config.yaml /app/config.yaml && exec /app/moviematch"]
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8000"
+      # Optional: configure Plex here instead of through the setup screen.
+      PLEX_URL: ${PLEX_URL:-}
+      PLEX_TOKEN: ${PLEX_TOKEN:-}
+      AUTH_USER: ${AUTH_USER:-}
+      AUTH_PASS: ${AUTH_PASS:-}
+      REQUIRE_PLEX_LOGIN: ${REQUIRE_PLEX_LOGIN:-}
+      LIBRARY_TITLE_FILTER: ${LIBRARY_TITLE_FILTER:-}
+      LIBRARY_TYPE_FILTER: ${LIBRARY_TYPE_FILTER:-}
+      MOVIE_LINK_TYPE: ${MOVIE_LINK_TYPE:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - moviematch-data:/data
+    ports:
+      - "8000:8000"
+    mem_limit: 256m
+
+volumes:
+  moviematch-data: {}

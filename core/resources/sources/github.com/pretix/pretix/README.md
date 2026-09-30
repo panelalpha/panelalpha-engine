@@ -150,8 +150,10 @@ It also means `createsuperuser` is the wrong tool: for that address it exits 1
 with `Error: That Email is already taken`, and for any other address it would
 leave the default one in place beside the new account.
 
-So `hooks/prepare.sh` generates a password into `~/project/.env` — once,
-because the data volume outlives the checkout — and the start command runs
+So `hooks/prepare.sh` generates a password into
+`~/.panelalpha/pretix/admin.env` — once, because the data volume outlives the
+checkout and `~/project` is emptied before every deploy — copies it into
+`~/project/.env` each time, and the start command runs
 `files/panelalpha-admin-password.py` through `pretix shell` between the
 migration and gunicorn. Django's `shell` execs stdin when stdin is not a tty,
 so the script is a readable file rather than a `-c` one-liner, mounted at
@@ -168,7 +170,7 @@ Re-applying the `.env` password every boot would be harmless — it never
 changes — but an operator who has since set their own password in the web
 interface would find it reset under them by the next redeploy. Checking for
 the default is the narrower statement: rotate what upstream published, never
-what somebody chose. Credentials are in `~/project/.env`.
+what somebody chose. Credentials are in `~/.panelalpha/pretix/admin.env`.
 
 `|| true` on the step, so that a site which would otherwise serve is never held
 back by it.

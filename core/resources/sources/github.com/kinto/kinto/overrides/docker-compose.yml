@@ -1,0 +1,61 @@
+# kinto/kinto-server 26.3.3 on PostgreSQL; secrets from ~/.panelalpha (hooks/prepare.sh).
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/kinto/app.env
+    environment:
+      POSTGRES_USER: kinto
+      POSTGRES_DB: kinto
+    volumes:
+      - kinto_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kinto -d kinto"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  web:
+    image: kinto/kinto-server:26.3.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/kinto/app.env
+    environment:
+      KINTO_STORAGE_BACKEND: kinto.core.storage.postgresql
+      KINTO_PERMISSION_BACKEND: kinto.core.permission.postgresql
+      KINTO_CACHE_BACKEND: kinto.core.cache.postgresql
+      KINTO_INI: /tmp/kinto.ini
+      # TLS ends at the engine; links Kinto returns must be https.
+      KINTO_HTTP_SCHEME: https
+    # The image's ini listens on 127.0.0.1; copy it with only the host changed.
+    command:
+      - sh
+      - -c
+      - sed 's/^host = .*/host = 0.0.0.0/' /etc/kinto/kinto.ini > /tmp/kinto.ini && kinto migrate --ini /tmp/kinto.ini && exec kinto start --ini /tmp/kinto.ini --port 8888
+    ports:
+      - "8888:8888"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/v1/__heartbeat__')"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Kinto answers.
+  ready:
+    image: postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  kinto_db: {}

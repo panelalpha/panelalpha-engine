@@ -1,0 +1,31 @@
+# Compose-replace: main (0.15.0+dev) needs a hand-written app.ini and has no
+# installer; run the official image of the current release instead.
+services:
+  app:
+    image: gogs/gogs:0.14.3
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # gogs/conf/app.ini, git/ repositories, the SQLite database, logs.
+      - gogs-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sS", "-o", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op: `compose up -d` returns once Gogs answers on :3000.
+  ready:
+    image: gogs/gogs:0.14.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  gogs-data: {}

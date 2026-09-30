@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MyMangaDB is a manga collection manager: a FastAPI backend on :8000 (SQLite
+  and cover images under /app/data) behind an nginx frontend on :80 that serves
+  the SPA and proxies /api/ to the backend. The repository's docker-compose.yml
+  is a Traefik stack with placeholder domains (`<FrontendDomain>`,
+  `https://<BackendDomain>` baked into the frontend build) and publishes nothing
+  once Traefik is dropped, so the plain compose deploy answers 502. This recipe
+  follows upstream's docker-compose.prod.yml without Traefik: the prebuilt
+  ghcr.io/fabianrolfmatthiasnoll/mymangadb frontend and backend images of the
+  current release, 2.8.3, with only the frontend published and /app/data on a
+  named volume. API_TOKEN (the JWT signing key, which otherwise falls back to a
+  public default) is generated once by hooks/prepare.sh into
+  ~/.panelalpha/mymangadb/secret.env. The upstream default accounts
+  (admin/admin, guest/guest) are left as upstream ships them.

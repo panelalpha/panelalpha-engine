@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  EspoCRM, a CRM (PHP on Apache) with MariaDB. The repository is the
+  development tree: its frontend is built with grunt from a package-lock.json
+  that does not match package.json at HEAD, so the plain PHP deploy failed in
+  `npm ci`. This recipe runs the official image of the current release
+  (espocrm/espocrm:10.0.9) the way upstream's espocrm-docker compose does:
+  with the ESPOCRM_DATABASE_* variables set the image installs the schema and
+  the admin user on first boot, and migrates on later boots. The database
+  password is generated per account by the engine. data/, custom/ and
+  client/custom/ live on named volumes (the EspoCRM 10 layout), and the
+  daemon service runs scheduled jobs. A health-check gate makes the deploy
+  wait until the install has finished and Apache answers.

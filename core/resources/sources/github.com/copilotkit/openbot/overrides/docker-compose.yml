@@ -1,0 +1,75 @@
+# Compose-replace: the repo compose is the 9-service dev topology. This runs the
+# published single-container release image (app, API, browser) with its embedded
+# PostgreSQL, as upstream's docs/deployment.md describes.
+x-customer-env: &customer-env
+  INTELLIGENCE_API_KEY: ${INTELLIGENCE_API_KEY:-}
+  GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+  GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+  MICROSOFT_OAUTH_CLIENT_ID: ${MICROSOFT_OAUTH_CLIENT_ID:-}
+  MICROSOFT_OAUTH_CLIENT_SECRET: ${MICROSOFT_OAUTH_CLIENT_SECRET:-}
+  MICROSOFT_OAUTH_TENANT_ID: ${MICROSOFT_OAUTH_TENANT_ID:-}
+  OKTA_OAUTH_CLIENT_ID: ${OKTA_OAUTH_CLIENT_ID:-}
+  OKTA_OAUTH_CLIENT_SECRET: ${OKTA_OAUTH_CLIENT_SECRET:-}
+  OKTA_OAUTH_ISSUER: ${OKTA_OAUTH_ISSUER:-}
+  INITIAL_ADMIN_EMAILS: ${INITIAL_ADMIN_EMAILS:-}
+
+services:
+  app:
+    image: ghcr.io/copilotkit/openbot:v0.0.15
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - ../.panelalpha/openbot/secrets.env
+    environment:
+      <<: *customer-env
+      EMBEDDED_POSTGRES: "on"
+      BETTER_AUTH_URL: ${PA_PUBLIC_URL}
+      TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+      INTELLIGENCE_API_URL: ${INTELLIGENCE_API_URL:-https://api.intelligence.copilotkit.ai}
+      INTELLIGENCE_GATEWAY_WS_URL: ${INTELLIGENCE_GATEWAY_WS_URL:-wss://realtime.intelligence.copilotkit.ai}
+      COPILOTKIT_LICENSE_TOKEN: ${COPILOTKIT_LICENSE_TOKEN:-}
+      SIGNIN_ALLOWED_EMAIL_DOMAINS: ${SIGNIN_ALLOWED_EMAIL_DOMAINS:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      COMPOSIO_API_KEY: ${COMPOSIO_API_KEY:-}
+    volumes:
+      # The parent of the data dir, as upstream asks; audit trail and users live here.
+      - openbot-db:/var/lib/postgresql
+      - openbot-workspace:/workspace
+      - openbot-profiles:/profiles
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3001/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 2g
+
+  # Fails `compose up` (and so the deploy) while a required variable is unset.
+  env-check:
+    image: ghcr.io/copilotkit/openbot:v0.0.15
+    restart: "no"
+    entrypoint: ["/bin/sh", "/openbot-env-check.sh"]
+    environment:
+      <<: *customer-env
+    volumes:
+      - ./openbot-env-check.sh:/openbot-env-check.sh:ro
+    mem_limit: 32m
+
+  # No-op: `compose up -d` returns once migrations ran and the API answers.
+  ready:
+    image: ghcr.io/copilotkit/openbot:v0.0.15
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  openbot-db: {}
+  openbot-workspace: {}
+  openbot-profiles: {}

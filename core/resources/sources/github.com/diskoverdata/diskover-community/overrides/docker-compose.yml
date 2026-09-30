@@ -1,0 +1,61 @@
+# The repository has no root entry point (diskover/ and diskover-web/); this
+# runs linuxserver's published image of the current release on Elasticsearch,
+# as linuxserver's compose does.
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.29
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    # 1 GB heap plus off-heap: 1.41 GiB measured idle.
+    mem_limit: 2048m
+
+  app:
+    image: lscr.io/linuxserver/diskover:v2.3.5-ls247
+    restart: unless-stopped
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+      ES_HOST: elasticsearch
+      ES_PORT: "9200"
+    volumes:
+      - config:/config
+      - data:/data
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1/login.php || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once the web UI answers.
+  ready:
+    image: lscr.io/linuxserver/diskover:v2.3.5-ls247
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  esdata: {}
+  config: {}
+  data: {}

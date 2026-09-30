@@ -1,0 +1,45 @@
+# Compose-replace: upstream bind-mounts ./data (root-owned, the app runs as uid 1000).
+# Release image, SQLite on a named volume.
+services:
+  app:
+    image: ghcr.io/crosstalk-solutions/unifi-toolkit:1.11.3
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/unifi-toolkit/app.env
+    environment:
+      DEPLOYMENT_TYPE: ${DEPLOYMENT_TYPE:-local}
+      DOMAIN: ${PA_PUBLIC_HOST}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: sqlite+aiosqlite:///./data/unifi_toolkit.db
+      AUTH_USERNAME: ${AUTH_USERNAME:-}
+      AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:-}
+      UNIFI_CONTROLLER_URL: ${UNIFI_CONTROLLER_URL:-}
+      UNIFI_USERNAME: ${UNIFI_USERNAME:-}
+      UNIFI_PASSWORD: ${UNIFI_PASSWORD:-}
+      UNIFI_API_KEY: ${UNIFI_API_KEY:-}
+      UNIFI_SITE_ID: ${UNIFI_SITE_ID:-default}
+      UNIFI_VERIFY_SSL: ${UNIFI_VERIFY_SSL:-false}
+    volumes:
+      - data:/app/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the toolkit answers.
+  ready:
+    image: ghcr.io/crosstalk-solutions/unifi-toolkit:1.11.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

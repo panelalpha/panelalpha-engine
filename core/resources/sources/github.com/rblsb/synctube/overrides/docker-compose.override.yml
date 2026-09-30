@@ -1,0 +1,12 @@
+# The repo compose binds ${PWD}/user, which resolves to an empty root-owned
+# /user in the account; the app (uid 1000) cannot write it and crash-loops.
+# Same target path, so this replaces that bind with a named volume, seeded
+# from the image's own user/ on first start.
+services:
+  synctube:
+    volumes:
+      - synctube-user:/app/user
+    mem_limit: 512m
+
+volumes:
+  synctube-user: {}

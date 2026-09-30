@@ -37,6 +37,10 @@ services:
       #   error setting rlimit type 8: operation not permitted
       # It is only needed for bootstrap.memory_lock, which this does not set.
       nofile: { soft: 65536, hard: 65536 }
+    # The catalogue index. Category pages and search read it, so an index lost
+    # with the container would empty them until a full reindex.
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
     healthcheck:
       # setup:install talks to the search engine partway through, and a
       # refused connection there leaves a half-written database that the next
@@ -51,3 +55,12 @@ services:
     depends_on:
       opensearch:
         condition: service_healthy
+    # ~/project is /app and is emptied before every deploy. hooks/prepare.sh
+    # links app/etc/env.php and config.php into /pa-data/etc, and uploads live
+    # in the media mount, so the install and the catalogue images survive.
+    volumes:
+      - ../.panelalpha/magento:/pa-data
+      - ../.panelalpha/magento/media:/app/pub/media
+
+volumes:
+  opensearch-data:

@@ -1,0 +1,44 @@
+# Replaces the repo compose (absolute host bind /opt/app/server-data, which
+# Docker creates root-owned and the image's uid 1000 cannot write, so the app
+# exits silently) with the official image on a named volume.
+services:
+  www:
+    image: ${WBO_IMAGE:-docker.io/lovasoa/wbo:v2.17.1}
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Unprivileged port: no reliance on the image's setcap'd node for :80.
+      PORT: "8080"
+      NODE_ENV: production
+      # Per-visitor rate limits and bans: the socket peer is the DinD bridge
+      # gateway for everyone, so read the rightmost X-Forwarded-For entry, the
+      # one the engine's nginx appends itself (not spoofable by the client).
+      WBO_IP_SOURCE: X-Forwarded-For
+      WBO_TRUST_PROXY_HOPS: "1"
+      # Empty = public boards (the default). Set via env_vars to require JWTs.
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-}
+    volumes:
+      # Boards are board-<name>.svg files here; the named volume survives rebuild.
+      - wbodata:/opt/app/server-data
+    healthcheck:
+      # /rules answers 200 with or without JWT auth ("/" is 403 once it is on).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/rules || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 10s
+    mem_limit: 512m
+
+  # Exits 0 once www is healthy, so `compose up -d` returns only when WBO answers.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      www:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  wbodata: {}

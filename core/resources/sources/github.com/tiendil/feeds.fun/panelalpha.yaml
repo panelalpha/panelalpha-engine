@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Feeds Fun, a self-hosted news reader that tags entries (optionally with an
+  LLM) and scores them by the user's rules: a Python API and background
+  workers on PostgreSQL, and a Vue UI served by Caddy.
+
+  The repository's root docker-compose.yml is the development stack: it
+  builds from a locally-built `ffun-backend-dev` image nobody publishes, so a
+  plain deploy fails with "A base image this project asks for could not be
+  downloaded". This recipe is upstream's own docs/examples/single-user setup
+  on the current release images (tiendil/feeds-fun-backend and
+  feeds-fun-frontend-data 1.29.3, postgres:18.3-trixie, caddy:2.10.0):
+  single-user mode as upstream ships it, upstream's tag_processors.toml from
+  the checkout, and its Caddyfile listening on any host (files/). The
+  frontend-data job builds the UI into a shared volume on every deploy, as
+  upstream does. hooks/prepare.sh generates the PostgreSQL password and
+  FFUN_USER_SETTINGS_SECRET_KEY (it encrypts the users' stored LLM API keys;
+  upstream's example ships a public one) once into ~/.panelalpha/feeds-fun/.
+  FFUN_ORIGINS is the site's address. LLM tagging is optional: users set
+  their OpenAI/Gemini key in the site's settings.

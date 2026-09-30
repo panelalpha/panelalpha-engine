@@ -1,0 +1,68 @@
+# Compose-replace: the repository ships only a Dockerfile, whose container needs
+# a database at `db` and DB_PASS. This runs upstream's published image of the
+# current release with PostgreSQL.
+services:
+  db:
+    # Pinned major: a postgres datadir cannot move between majors in place.
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    # POSTGRES_PASSWORD, generated once by hooks/prepare.sh.
+    env_file:
+      - ../.panelalpha/pleroma/db.env
+    environment:
+      POSTGRES_USER: pleroma
+      POSTGRES_DB: pleroma
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "pleroma", "-d", "pleroma"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  app:
+    image: git.pleroma.social/pleroma/pleroma:v2.10.2
+    restart: unless-stopped
+    # DB_PASS, the same value as the database's POSTGRES_PASSWORD.
+    env_file:
+      - ../.panelalpha/pleroma/app.env
+    environment:
+      DOMAIN: ${PA_PUBLIC_HOST}
+      # Overridable from the project's env vars. Mail is sent from ADMIN_EMAIL;
+      # unset, creating a user crashes on the welcome mail's empty sender.
+      INSTANCE_NAME: ${INSTANCE_NAME:-Pleroma}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@${PA_PUBLIC_HOST}}
+      NOTIFY_EMAIL: ${NOTIFY_EMAIL:-admin@${PA_PUBLIC_HOST}}
+      DB_HOST: db
+      DB_USER: pleroma
+      DB_NAME: pleroma
+    volumes:
+      # Uploads, static overrides, generated secret.exs and the user config.exs.
+      - data:/var/lib/pleroma
+    ports:
+      - "4000:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4000/api/v1/instance"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once Pleroma answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  postgres: {}
+  data: {}

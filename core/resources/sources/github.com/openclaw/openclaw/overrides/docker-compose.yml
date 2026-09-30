@@ -1,0 +1,73 @@
+# Compose-replace: upstream's gateway on the published 2026.9.6 image, state on
+# named volumes instead of ${HOME}/.openclaw bind mounts (EACCES for uid 1000).
+x-openclaw-env: &openclaw-env
+  HOME: /home/node
+  OPENCLAW_HOME: /home/node
+  OPENCLAW_STATE_DIR: /home/node/.openclaw
+  OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
+  OPENCLAW_CONFIG_DIR: /home/node/.openclaw
+  OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
+  OPENCLAW_GATEWAY_PORT: "18789"
+  TZ: UTC
+
+services:
+  # One-shot: allow the site's address as the Control UI's browser origin, and
+  # trust the engine's reverse proxy (a private address) for forwarded client IPs.
+  openclaw-config:
+    image: ghcr.io/openclaw/openclaw:2026.9.6
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        node /app/openclaw.mjs config set --batch-json "[
+        {\"path\":\"gateway.mode\",\"value\":\"local\"},
+        {\"path\":\"gateway.bind\",\"value\":\"lan\"},
+        {\"path\":\"gateway.publicOrigin\",\"value\":\"$$SITE_URL\"},
+        {\"path\":\"gateway.controlUi.allowedOrigins\",\"value\":[\"$$SITE_URL\"]},
+        {\"path\":\"gateway.trustedProxies\",\"value\":[\"10.0.0.0/8\",\"172.16.0.0/12\",\"192.168.0.0/16\"]}]"
+    environment:
+      <<: *openclaw-env
+      SITE_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - state:/home/node/.openclaw
+      - auth-secrets:/home/node/.config/openclaw
+    mem_limit: 768m
+
+  openclaw-gateway:
+    image: ghcr.io/openclaw/openclaw:2026.9.6
+    restart: unless-stopped
+    command: ["node", "openclaw.mjs", "gateway", "--allow-unconfigured", "--bind", "lan", "--port", "18789"]
+    # OPENCLAW_GATEWAY_TOKEN, generated once by hooks/prepare.sh.
+    env_file:
+      - ../.panelalpha/openclaw/gateway.env
+    environment:
+      <<: *openclaw-env
+    volumes:
+      - state:/home/node/.openclaw
+      - auth-secrets:/home/node/.config/openclaw
+    ports:
+      - "18789:18789"
+    depends_on:
+      openclaw-config:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "dist/docker-healthcheck.js"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 2g
+
+  # No-op gate: `compose up -d` returns once the Gateway reports healthy.
+  ready:
+    image: ghcr.io/openclaw/openclaw:2026.9.6
+    restart: "no"
+    entrypoint: ["sh", "-c", "exit 0"]
+    depends_on:
+      openclaw-gateway:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  state: {}
+  auth-secrets: {}

@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Ocular, a budgeting web app (Vue frontend served by Caddy, Go "genesis"
+  backend with a file store). The repository has no compose file, only
+  docker/Dockerfile, and the plain deploy crash-loops: genesis panics when
+  GENESIS_JWT_TOKEN_EXPIRATION is unset and needs GENESIS_JWT_SECRET. This
+  recipe runs the official ghcr.io/simonwep/ocular image of the current release
+  (v2.4.1) on Caddy's port 80 with /data/genesis on a named volume, a JWT secret
+  generated once into ~/.panelalpha/ocular, and a 60-minute token lifetime.
+  Initial users come from the optional project env var GENESIS_CREATE_USERS
+  (`name!:password`, `!` marks an admin), passed through unchanged.

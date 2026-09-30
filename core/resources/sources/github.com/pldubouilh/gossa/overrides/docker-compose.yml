@@ -1,0 +1,17 @@
+# Gossa needs the shared directory as a positional argument, so the generic Go
+# build (./app with no arguments) prints usage and exits. This runs upstream's
+# published image of the current release, whose entrypoint passes host, port
+# and /shared, as support/docker-compose.yml does, with /shared on a volume.
+services:
+  app:
+    image: pldubouilh/gossa:v1.1.2@sha256:bc9e7325e422ff0e9c9439fc6575d6c8f398ede7393ea5983f9502874bbe13ba
+    restart: unless-stopped
+    volumes:
+      # The shared files; the image owns /shared as 1000:1000.
+      - shared:/shared
+    ports:
+      - "8001:8001"
+    mem_limit: 256m
+
+volumes:
+  shared: {}

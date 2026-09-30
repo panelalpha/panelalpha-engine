@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Questarr is an *arr-style manager for a video-game library: IGDB discovery,
+  Torznab/Newznab indexers, download clients (qBittorrent, Transmission,
+  SABnzbd...). Node/Express server with a React UI on :5000, SQLite in
+  /app/data.
+
+  The repository's docker-compose.yml bind-mounts ./data, which the engine
+  wipes on every deploy and which the image's entrypoint could not take
+  ownership of (it crash-looped with "questarr (UID 1000) cannot write to
+  /app/data"). overrides/docker-compose.yml runs the published image of the
+  current release, ghcr.io/doezer/questarr:v1.4.2, with /app/data (database,
+  config.yaml, the generated JWT secret and credentials-encryption key) on a
+  named volume. PUID/PGID are set to 1001, the image's own questarr user that
+  owns /app/data in a fresh volume: with the default 1000 the entrypoint's
+  ownership fix-up (busybox `find -uid`, unsupported) silently does nothing
+  and the container exits. The optional HTTPS listener (:9898) is not
+  published; the engine terminates TLS.
+
+  Security: with no user in the database POST /api/auth/setup lets the first
+  visitor create the only account. hooks/prepare.sh generates the admin
+  password once into ~/.panelalpha/questarr/admin.env; a one-shot `seed`
+  service starts Questarr on loopback against the same volume and creates the
+  user through that endpoint before the app publishes its port. Indexer and
+  download-client API keys stay behind the login. IGDB (Twitch) client
+  credentials are runtime settings entered in Settings after login.

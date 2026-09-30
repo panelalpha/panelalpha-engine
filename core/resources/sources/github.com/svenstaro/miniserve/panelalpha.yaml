@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  miniserve is a single-binary HTTP file server: one Rust process serving a
+  directory listing (download, optional upload/WebDAV) on :8080. A plain build
+  of the repository detects as Rust and compiles for ~8 minutes, then the
+  binary exits straight away: "Refusing to start as no explicit serve path was
+  set and no interactive terminal was attached". This recipe runs upstream's
+  own image of the current release, 0.35.0 (docker.io/svenstaro/miniserve,
+  Alpine variant), serving /data from a named volume that survives redeploys.
+
+  Upstream defaults are kept: a read-only listing with no authentication.
+  Adding files: `docker compose -p project cp <file> app:/data/`.

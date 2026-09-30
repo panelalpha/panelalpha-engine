@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ydl_api_ng, a REST API (FastAPI) that queues yt-dlp downloads on the server,
+  with RQ workers and Redis, on :80; interactive API docs at /docs. The
+  repository's docker-compose.yml bind-mounts ./params, whose params.ini is
+  the non-Docker configuration (port 5011, Redis off), so the API never
+  answers on the published port. This recipe runs the same totonyus/ydl_api_ng
+  image (pinned by digest: upstream publishes only latest) and Redis, with
+  params, downloads, logs, cookies and the programmation database on named
+  volumes that survive redeploys; on first boot the image writes its own
+  Docker params.ini into the params volume.

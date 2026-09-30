@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Davis is a CalDAV/CardDAV (and optional WebDAV) server with an admin UI,
+  built on sabre/dav and Symfony. A plain deploy builds the repository's
+  docker/Dockerfile, which is PHP-FPM only: FastCGI on :9000 with no web
+  server, so nothing answers HTTP. This recipe runs upstream's standalone image
+  of the current release, ghcr.io/tchapi/davis-standalone:5.5.0 (Caddy +
+  PHP-FPM on :9000), on SQLite in a named volume. A one-shot `migrate` service
+  runs `doctrine:migrations:migrate` before the app starts, as upstream's
+  README requires on every start/upgrade, and hands /data to www-data.
+
+  APP_SECRET is generated once per account into ~/.panelalpha/davis/. The
+  rest is upstream's dist .env as shipped, including the admin login
+  (ADMIN_LOGIN=admin, ADMIN_PASSWORD=test) until changed in the environment.

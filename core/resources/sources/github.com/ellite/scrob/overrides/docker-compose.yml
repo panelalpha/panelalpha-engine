@@ -1,0 +1,56 @@
+# Upstream's two-service compose (app + PostgreSQL) on the pinned current
+# release. The database password is one ${...:?} variable, generated per
+# account by the engine, so the DSN and the database always agree.
+services:
+  scrob-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scrob
+      POSTGRES_PASSWORD: ${SCROB_DB_PASSWORD:?SCROB_DB_PASSWORD is required}
+      POSTGRES_DB: scrob
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scrob -d scrob"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  scrob:
+    image: bellamy/scrob:2.21.0
+    restart: unless-stopped
+    depends_on:
+      scrob-db:
+        condition: service_healthy
+    ports:
+      - "7330:7330"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://scrob:${SCROB_DB_PASSWORD:?SCROB_DB_PASSWORD is required}@scrob-db:5432/scrob
+      SECRET_KEY: ${SCROB_SECRET_KEY:?SCROB_SECRET_KEY is required}
+      TZ: UTC
+    volumes:
+      - scrob_data:/app/backend/data
+    # The image's own check waits 2m between probes after a 20s start period.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:7331/health && curl -fsS -o /dev/null http://127.0.0.1:7330/"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns only once Scrob answers.
+  ready:
+    image: postgres:16-alpine
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      scrob:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db_data: {}
+  scrob_data: {}

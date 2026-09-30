@@ -1,0 +1,56 @@
+# Compose-replace: the repo compose bind-mounts ./params, whose params.ini is
+# the non-Docker config (port 5011, no Redis), so the API never answers on the
+# published :80. Same image and Redis, with named volumes; the image then seeds
+# /app/params from its own params_docker.ini on first boot.
+services:
+  app:
+    # latest (no version tags upstream), built 2026-09-14 from HEAD 399f6057.
+    image: totonyus/ydl_api_ng@sha256:b139eef1cf3e62b884328919576b3ed3559587b832e73c40edf76334b231e3ce
+    restart: unless-stopped
+    depends_on:
+      ydl_api_ng_redis:
+        condition: service_healthy
+    ports:
+      - "80:80"
+    volumes:
+      - downloads:/app/downloads
+      - params:/app/params
+      - logs:/app/logs
+      - cookies:/app/persistant_cookies
+      - data:/app/data
+    healthcheck:
+      # The entrypoint upgrades yt-dlp with pip before the API starts.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:80/docs', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1g
+
+  # Host name fixed by params_docker.ini (_redis_host) and workers.ini.
+  ydl_api_ng_redis:
+    image: redis:8.2-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 128m
+
+  # No-op: `compose up -d` returns once the API answers.
+  ready:
+    image: redis:8.2-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  downloads: {}
+  params: {}
+  logs: {}
+  cookies: {}
+  data: {}

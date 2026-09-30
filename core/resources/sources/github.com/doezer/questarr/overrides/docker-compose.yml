@@ -1,0 +1,70 @@
+# Compose-replace: the repository's compose bind-mounts ./data, which the
+# engine wipes on every deploy. Official image of the current release,
+# /app/data on a named volume; the admin is created by `seed` BEFORE the app
+# publishes its port, so /api/auth/setup is never open to the first visitor.
+# PUID/PGID 1001 = the image's own questarr user, which owns /app/data in the
+# fresh volume: with the default 1000 the entrypoint's ownership fix-up (a
+# busybox find without -uid) never runs and it exits "cannot write to /app/data".
+x-questarr: &questarr
+  image: ghcr.io/doezer/questarr:v1.4.2
+  volumes:
+    - data:/app/data
+
+services:
+  # Starts Questarr on loopback (no published port) against the same volume,
+  # creates the admin through its own /api/auth/setup, then exits.
+  seed:
+    <<: *questarr
+    restart: "no"
+    command: ["node", "/panelalpha-seed.mjs"]
+    env_file:
+      - ../.panelalpha/questarr/admin.env
+    environment:
+      PUID: "1001"
+      PGID: "1001"
+      HOST: 127.0.0.1
+      PORT: "5000"
+    volumes:
+      - data:/app/data
+      - ./panelalpha-seed.mjs:/panelalpha-seed.mjs:ro
+    mem_limit: 768m
+
+  app:
+    <<: *questarr
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: "1001"
+      PGID: "1001"
+      HOST: 0.0.0.0
+      PORT: "5000"
+      APP_URL: ${PA_PUBLIC_URL}
+      ALLOWED_ORIGINS: ${PA_PUBLIC_URL}
+      NODE_OPTIONS: --max-old-space-size=768
+    ports:
+      - "5000:5000"
+    healthcheck:
+      # The v1.4.2 image has no curl.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Questarr answers.
+  ready:
+    image: ghcr.io/doezer/questarr:v1.4.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

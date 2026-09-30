@@ -1,0 +1,16 @@
+# Database and caches (see supysonic.conf) and the music library survive redeploys.
+services:
+  app:
+    volumes:
+      - data:/var/lib/supysonic
+      - music:/music
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/user/login')"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+
+volumes:
+  data: {}
+  music: {}

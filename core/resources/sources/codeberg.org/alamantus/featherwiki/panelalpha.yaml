@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Feather Wiki, a self-contained single-file wiki that saves itself to a
+  server. Bare detection took the root package.json as a Node app and ran
+  `npm start`, the esbuild watch/dev script, which never answered. The
+  repository's own server side is the PHP "nest" (nests/index.php): it serves
+  the wiki, answers OPTIONS with a `dav` header so Feather Wiki offers "Save
+  Wiki to Server", and accepts the saved page by PUT with Basic auth. This
+  recipe runs that file on the official php:8.3-apache-bookworm image. The
+  wiki file and the credential hash it writes (featherwiki.html,
+  .featherwikiadmin) are on a named volume, and Apache denies dotfiles as the
+  nests README asks. First run is upstream's: the nest asks for a username and
+  password, then fetches the current Warbler build from feather.wiki.

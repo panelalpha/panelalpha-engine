@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  legit, a minimal Go web frontend for browsing git repositories. The go
+  platform builds and starts it correctly; what the plain deploy got wrong is
+  that legit's only configuration is config.yaml, whose repo.scanPath is the
+  absolute /var/www/git, which does not exist in the container, so every
+  request failed with "reading scan path: open /var/www/git: no such file or
+  directory" (HTTP 500).
+
+  The override mounts a named volume at /var/www/git (the bare repositories
+  legit lists) and keeps the configuration on a second volume: on first boot
+  the repository's config.yaml is copied to /data/config.yaml with server.name
+  (used for the displayed clone URL) set to the account's domain, and legit
+  runs with -config /data/config.yaml, so edits survive the redeploy that
+  re-clones ~/project.
+extends: go

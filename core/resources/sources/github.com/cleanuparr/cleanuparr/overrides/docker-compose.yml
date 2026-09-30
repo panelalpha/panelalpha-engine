@@ -1,0 +1,39 @@
+# The repo root has no .csproj and code/Dockerfile restores packages from a
+# private GitHub Packages feed, so this runs upstream's release image, laid out
+# like the Docker Compose example in docs/docs/installation/detailed.mdx.
+services:
+  app:
+    image: ghcr.io/cleanuparr/cleanuparr:2.10.8@sha256:ec444338a67e429a20f6eef938e1ed771ce357ed4831765026096061a09bbbb7
+    restart: unless-stopped
+    environment:
+      PORT: "11011"
+      BASE_PATH: ""
+      PUID: "1000"
+      PGID: "1000"
+      UMASK: "022"
+      TZ: Etc/UTC
+    volumes:
+      # SQLite database, settings and logs.
+      - config:/config
+    ports:
+      - "11011:11011"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:11011/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Cleanuparr answers.
+  ready:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}

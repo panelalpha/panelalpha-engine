@@ -1,0 +1,10 @@
+# Compose-replace: upstream's published image (nginx serving the static export),
+# pinned by digest because upstream only publishes `latest`. No state.
+services:
+  web:
+    # shdv/hat.sh:latest, built from v2.3.6 (HEAD 540d3cc) on 2022-06-18.
+    image: shdv/hat.sh@sha256:41141a03779b3de4e0f354ef5da1ef207d5f9b5598362fa8578ddaa79b44fdf4
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    mem_limit: 64m

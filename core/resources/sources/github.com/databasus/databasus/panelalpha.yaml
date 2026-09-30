@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Databasus, a web UI for scheduled PostgreSQL/MySQL/MariaDB/MongoDB backups
+  to local or cloud storage: one Go server on :4005 with its own embedded
+  PostgreSQL, all state under /databasus-data. The repository's
+  docker-compose.yml is a development stack, so the plain deploy builds the
+  root Dockerfile from source (about 11 minutes) and runs it with the
+  development .env.example as its environment; that file's DATABASE_DSN
+  (password Q1234567) cannot authenticate against the embedded database, so
+  the app crash-loops on its migrations.
+
+  This recipe is upstream's README compose: the published
+  databasus/databasus image of the current release (v3.60.0) with
+  /databasus-data on a named volume and no extra environment, so the image
+  generates its own database password at start. A gate service waits for the
+  image's own `databasus healthcheck`. First run is as upstream ships it: the
+  site opens Databasus's sign-up page, where the first account administers
+  the instance.

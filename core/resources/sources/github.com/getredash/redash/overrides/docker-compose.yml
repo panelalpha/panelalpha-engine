@@ -1,0 +1,117 @@
+# The repository's compose.yaml is the development stack (dev_server, source
+# bind mounts). This is upstream's production compose from getredash/setup on
+# the release image, with one worker serving every queue.
+x-redash-image: &redash-image redash/redash:26.9.0
+x-redash-env: &redash-env
+  PYTHONUNBUFFERED: "0"
+  REDASH_LOG_LEVEL: INFO
+  REDASH_REDIS_URL: redis://redis:6379/0
+  REDASH_ENFORCE_CSRF: "true"
+  REDASH_GUNICORN_TIMEOUT: "60"
+  REDASH_WEB_WORKERS: "2"
+  REDASH_HOST: ${PA_PUBLIC_URL}
+
+services:
+  app:
+    image: *redash-image
+    command: server
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/redash/redash.env
+    environment: *redash-env
+    ports:
+      - "5000:5000"
+    depends_on:
+      redash-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    mem_limit: 900m
+
+  # create_tables only acts on an empty database; db upgrade applies the
+  # migrations of a newer image.
+  redash-init:
+    image: *redash-image
+    entrypoint: ["/bin/sh", "-c", "/app/manage.py database create_tables && /app/manage.py db upgrade"]
+    restart: "no"
+    env_file:
+      - ../.panelalpha/redash/redash.env
+    environment: *redash-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 512m
+
+  scheduler:
+    image: *redash-image
+    command: scheduler
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/redash/redash.env
+    environment: *redash-env
+    depends_on:
+      redash-init:
+        condition: service_completed_successfully
+    mem_limit: 384m
+
+  worker:
+    image: *redash-image
+    command: worker
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/redash/redash.env
+    environment:
+      <<: *redash-env
+      QUEUES: "queries,scheduled_queries,schemas,periodic,emails,default"
+      WORKERS_COUNT: "2"
+    depends_on:
+      redash-init:
+        condition: service_completed_successfully
+    # Two RQ workers idle at ~730 MiB; each job forks a work horse.
+    mem_limit: 1200m
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/redash/redash.env
+    volumes:
+      - redash-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 256m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redash-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  redash-db: {}
+  redash-redis: {}

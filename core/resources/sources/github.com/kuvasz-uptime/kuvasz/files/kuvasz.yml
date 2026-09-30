@@ -1,0 +1,2 @@
+# Kuvasz YAML configuration (mounted at /config/kuvasz.yml). Empty means the
+# defaults plus the environment variables; see https://kuvasz-uptime.dev

@@ -1,0 +1,10 @@
+# Serve the repository root (yellow.php via the upstream .htaccess) and keep
+# Yellow's pages, uploads and settings outside the re-cloned checkout.
+services:
+  app:
+    environment:
+      PA_DOCROOT: /app
+    volumes:
+      - ../.panelalpha/yellow/content:/app/content
+      - ../.panelalpha/yellow/media:/app/media
+      - ../.panelalpha/yellow/system:/app/system

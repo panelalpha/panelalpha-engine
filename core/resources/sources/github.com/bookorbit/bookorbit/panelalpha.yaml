@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  BookOrbit, a self-hosted book library and reading tracker (NestJS + Vue in
+  one image on port 3000, PostgreSQL with pgvector). The repository's
+  docker-compose.yml runs the published image but keeps the app data and the
+  database in ./data inside ~/project, which every deploy wipes, takes
+  APP_IMAGE and APP_URL from .env.example (`latest`, bookorbit.example.com),
+  leaves PODCAST_ENCRYPTION_KEY blank (the app refuses to boot: "Too small:
+  expected string to have >=16 characters"), and relies on cap_add, which
+  the engine strips while keeping cap_drop: ALL (engine#349).
+
+  This recipe runs the current release image ghcr.io/bookorbit/bookorbit:3.1.0
+  with pgvector/pgvector:pg18, the data, books and database on named volumes,
+  APP_URL set to the site address, the default container capabilities, and a
+  `ready` gate on /api/v1/health. POSTGRES_PASSWORD, JWT_SECRET,
+  PODCAST_ENCRYPTION_KEY and SETUP_BOOTSTRAP_TOKEN are generated once into
+  ~/.panelalpha/bookorbit/app.env; the project's environment variables are
+  loaded after that file, so any of them can be replaced there - set
+  SETUP_BOOTSTRAP_TOKEN yourself to know the token the first-run setup page
+  asks for (upstream requires it in production).
+
+  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
+
+  Fresh create with SETUP_BOOTSTRAP_TOKEN set as a project env var: `ready`
+  passed once /api/v1/health answered (database up), 144 s. / 200
+  <title>BookOrbit</title>, 20.7 KB; setup-status needsSetup true. Setup with
+  a wrong token 403 "Invalid setup token", with the project's token 200 and
+  an access token. /.env is the app's JSON 404, /.git/config the SPA shell.
+  Rebuild: 98 s, needsSetup false, the admin logged in again, and the
+  ~/.panelalpha files were not regenerated. Idle: app 200 MiB, postgres 44 MiB.

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Chatto, a self-hosted team chat server (Go single binary with the web app
+  and an embedded NATS JetStream store). A plain deploy goes to Railpack,
+  which builds the `cli` workspace module and runs it with no subcommand, so
+  the server never starts and the engine serves its placeholder.
+
+  Compose-REPLACE on the official image of the current release
+  (ghcr.io/chattocorp/chatto:0.4.24), started as the standalone deployment
+  upstream documents: embedded NATS with its data directory on a named
+  volume, configured through CHATTO_* variables (no chatto.toml).
+  hooks/prepare.sh generates the four required secrets once into
+  ~/.panelalpha/chatto/app.env. The public URL is the site's address.
+  First run is as upstream ships it: open email/password registration; SMTP
+  is off until the customer configures it.

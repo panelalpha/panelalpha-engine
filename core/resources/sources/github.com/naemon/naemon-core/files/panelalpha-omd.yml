@@ -1,0 +1,11 @@
+# OMD-Labs Ansible drop-in: runs before the site starts (see /root/start.sh).
+# TLS ends at the engine's proxy, so the site apache speaks plain HTTP (the
+# default "ssl" mode redirects every http request to https, a loop behind the
+# proxy), and "/" redirects to the site.
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: plain HTTP behind the proxy
+      shell: |
+        [ "$(omd config {{ SITENAME }} show APACHE_MODE)" = own ] || omd config {{ SITENAME }} set APACHE_MODE own
+        [ "$(omd config {{ SITENAME }} show WEB_REDIRECT)" = on ] || omd config {{ SITENAME }} set WEB_REDIRECT on

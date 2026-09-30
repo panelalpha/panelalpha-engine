@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Youtarr downloads videos from YouTube channels on a schedule with yt-dlp and
+  has a web UI to browse and pick videos (Plex/Jellyfin friendly folders). The
+  repository's docker-compose.yml runs the published image and MariaDB, and
+  deploys as is; what it gets wrong on a host is where it keeps state: the
+  database (./database), config.json and the setup token (./config), job
+  files (./jobs), thumbnails (./server/images) and the downloads
+  (${YOUTUBE_OUTPUT_DIR}) are bind mounts inside ~/project, which every
+  redeploy replaces. overrides/docker-compose.override.yml moves each of them
+  to a named volume (upstream's own docker-compose.arm.yml does the same for
+  the database) and pins the image to the current release, v1.86.1.
+
+  First run is upstream's: Youtarr asks for the setup token it writes to
+  /app/config/setup-token (and prints in the container log) before the first
+  admin account is created.

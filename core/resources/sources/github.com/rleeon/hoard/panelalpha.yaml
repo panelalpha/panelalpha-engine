@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hoard, a game-save backup and sync server with a web panel (Rust, SQLite,
+  one container on :12421). The repository is a Cargo workspace whose members
+  include a GTK desktop client, so the generic Rust build of the whole
+  workspace failed on the missing gdk-3.0 library. This recipe runs upstream's
+  own single-node compose (deploy/docker/docker-compose.yml) with the
+  published ghcr.io/rleeon/hoard image of the current release (1.2.0), data
+  and the self-written config.toml on named volumes. The site opens the web
+  panel's sign-in page; accounts come from upstream's HOARD_ADMIN_USERNAME /
+  HOARD_ADMIN_PASSWORD on the first start or from hoard-admin.

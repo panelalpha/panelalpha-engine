@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Operational, an event timeline and alerting app (Vue SPA served by nginx,
+  Express API on :2000, MySQL). The plain deploy built the root docker/
+  Dockerfile with no database and restart-looped on Prisma's "the URL must
+  start with the protocol mysql://". overrides/docker-compose.yml runs the
+  published ghcr.io/operational-co/operational.co image of the current release
+  with MySQL 8.4. Upstream serves the API on a second port (4337); the mounted
+  files/panelalpha/operational-nginx.conf proxies it under /backend/ on the
+  app's own port instead, and VITE_API_URL points the SPA there.
+  hooks/prepare.sh generates the MySQL passwords and the auth SECRET once into
+  ~/.panelalpha/operational/ (the image otherwise mints a new SECRET on every
+  start, logging everyone out). The first account is created by the app's own
+  setup screen; uploads live on a named volume.

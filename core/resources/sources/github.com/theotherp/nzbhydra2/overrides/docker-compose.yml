@@ -1,0 +1,56 @@
+# The repository is the Maven/React source tree with no deployment compose
+# file, so this runs the linuxserver.io image the README points Docker users
+# to. Docker Hub name rather than lscr.io (same image), pinned to the current
+# release.
+services:
+  # Writes /config/nzbhydra.yml once, before NZBHydra2 first boots, with form
+  # login and an admin. Upstream starts with auth NONE: the whole UI, indexer
+  # credentials and the API key are open to anyone with the address.
+  init:
+    image: linuxserver/nzbhydra2:9.0.6
+    restart: "no"
+    entrypoint: ["/bin/bash", "/panelalpha/nzbhydra-seed.sh"]
+    env_file:
+      - ../.panelalpha/nzbhydra/nzbhydra.env
+    volumes:
+      - nzbhydra-config:/config
+      - ./panelalpha/nzbhydra-seed.sh:/panelalpha/nzbhydra-seed.sh:ro
+    mem_limit: 128m
+
+  app:
+    image: linuxserver/nzbhydra2:9.0.6
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      # nzbhydra.yml, the H2 database, backups and logs.
+      - nzbhydra-config:/config
+    ports:
+      - "5076:5076"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      # Always anonymous; answers once Spring is up.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:5076/actuator/health/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    # Native binary; the heap is capped by main.xmx in nzbhydra.yml (256 MB).
+    mem_limit: 768m
+
+  # No-op gate: `up -d` returns only once NZBHydra2 answers.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  nzbhydra-config: {}

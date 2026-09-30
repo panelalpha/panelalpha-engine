@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  gonic is a lightweight Subsonic-compatible music streaming server: one Go
+  binary serving the Subsonic API (/rest) and a small admin web UI (/admin) on
+  :80, SQLite in /data.
+
+  The repository's Dockerfile declares /cache, /data, /music and /podcasts as
+  volumes but sets GONIC_PLAYLISTS_PATH=/playlists without creating it, and
+  gonic exits at start with "checking playlist directory: path does not exist"
+  unless every configured path exists. This recipe runs the official image of
+  the current release, sentriz/gonic:v0.22.0, laid out like the upstream wiki's
+  Docker Compose example, with all five paths on named volumes that survive
+  redeploys. Music is added to the music volume; the library is scanned from
+  the admin UI.

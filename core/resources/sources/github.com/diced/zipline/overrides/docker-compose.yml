@@ -1,0 +1,59 @@
+# Upstream docker-compose.yml, pinned to a release. CORE_SECRET and the DB
+# password are required variables; the engine generates them per account.
+services:
+  postgresql:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zipline
+      POSTGRES_PASSWORD: ${POSTGRESQL_PASSWORD:?POSTGRESQL_PASSWORD is required}
+      POSTGRES_DB: zipline
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "zipline"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  zipline:
+    image: ghcr.io/diced/zipline:4.8.0
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://zipline:${POSTGRESQL_PASSWORD:?POSTGRESQL_PASSWORD is required}@postgresql:5432/zipline
+      CORE_SECRET: ${CORE_SECRET:?CORE_SECRET is required}
+      CORE_HOSTNAME: 0.0.0.0
+      CORE_PORT: "3000"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    volumes:
+      - uploads:/zipline/uploads
+      - public:/zipline/public
+      - themes:/zipline/themes
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns only once Zipline answers its healthcheck.
+  ready:
+    image: postgres:16
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      zipline:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  uploads: {}
+  public: {}
+  themes: {}

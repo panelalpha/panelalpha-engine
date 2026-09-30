@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Ferdium Server is the self-hosted account and sync backend for the Ferdium
+  messaging desktop client (AdonisJS on Node, SQLite by default), with a small
+  web dashboard.
+
+  A plain deploy builds the repository's Dockerfile and crash-loops with
+  `E_MISSING_ENV_VALUE: Missing environment variable "APP_KEY"`: the engine
+  fills APP_KEY in the .env copied from .env.example, and docker/entrypoint.sh
+  only generates a key when APP_KEY is empty and otherwise reads it from
+  $DATA_DIR/FERDIUM_APP_KEY.txt, which does not exist yet. That .env is a
+  development template (NODE_ENV=development, HOST=127.0.0.1, DATA_DIR=data).
+
+  overrides/docker-compose.yml runs the image upstream publishes for the
+  current release, ferdium/ferdium-server:2.0.13, the way upstream's
+  docker/docker-compose.yml does: production mode on 0.0.0.0:3333, SQLite and
+  the generated app key and JWT keys in /data on the named volume `data`,
+  recipes on `recipes`. APP_KEY is passed empty so the entrypoint generates
+  the key on first start and keeps reading it from the volume afterwards.
+  The first start clones and packages the service recipes from GitHub, which
+  takes a minute or two.
+
+  Mail (SMTP_HOST, SMTP_PORT, MAIL_SSL, MAIL_USERNAME, MAIL_PASSWORD,
+  MAIL_SENDER) and IS_REGISTRATION_ENABLED / IS_DASHBOARD_ENABLED /
+  IS_CREATION_ENABLED are the project's env vars.

@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Amgix is a hybrid (keyword + semantic) search system behind one REST API on
+  :8234, with a web dashboard at /dashboard/. The repository holds the source
+  and test stacks only (no root compose file or Dockerfile), so the plain
+  deploy detects nothing and serves the engine placeholder.
+
+  This recipe runs Amgix One, upstream's all-in-one image of the current
+  release (amgixio/amgix-one:v1.6.6: API, encoders, RabbitMQ and Qdrant under
+  supervisord), exactly as the README's `docker run` does, with /data (Qdrant,
+  RabbitMQ and the Hugging Face model cache) on a named volume that survives
+  redeploys. API keys stay optional as upstream ships them: AMGIX_API_KEY,
+  AMGIX_READ_KEY and AMGIX_SEARCH_KEY are passed through from the project's
+  env vars when set, and the API is open when none is.

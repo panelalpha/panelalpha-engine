@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Syncthing is a continuous peer-to-peer file synchronisation daemon with a web
+  GUI and REST API on :8384. The repository ships only a source-build
+  Dockerfile (a ~100s Go build) whose container starts the GUI with no
+  password: anyone reaching the site could add devices and folders and read
+  the synced files. This recipe runs the official syncthing/syncthing image of
+  the current release, 2.1.5, with /var/syncthing (device keys, config.xml,
+  database and synced folders) on a named volume that survives redeploys.
+
+  A one-shot `seed` service runs `syncthing generate` against that volume
+  before the app publishes its port: it creates the device keys and config on
+  first run and sets the GUI user `admin` with a bcrypt hash of the password in
+  ~/.panelalpha/syncthing/admin.env (generated once by hooks/prepare.sh). An
+  existing password is never overwritten, so a password changed in the GUI
+  survives redeploys. The API key is Syncthing's own, generated once into
+  config.xml. STGUIADDRESS=0.0.0.0:8384 overrides config.xml's loopback
+  address; Syncthing's Host-header check applies only to a loopback GUI, so
+  the public domain is accepted without insecureSkipHostcheck. Only the GUI is
+  published: the sync port 22000 (TCP/QUIC) and local discovery are not
+  reachable from outside, so peers connect through the public relay pool
+  (outbound TCP), which works but is slower than a direct connection.

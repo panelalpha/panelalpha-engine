@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gathio publishes shareable, self-destructing event pages without accounts:
+  one Node server on :3000 backed by MongoDB. The repository's
+  docker-compose.yml builds the checkout and bind-mounts ./gathio-docker/config,
+  which holds nothing until someone copies config.example.toml there by hand,
+  so the plain deploy (dockerfile strategy, no config, no MongoDB) never
+  answers.
+
+  This recipe runs the published image of the current release
+  (ghcr.io/lowercasename/gathio:1.6.7) beside mongo:7.0, as the Docker install
+  docs describe. config/config.toml is the example config with two values
+  changed: the domain comes from the site's address through GATHIO_DOMAIN,
+  and mongodb_url points at the mongo service. The database and uploaded event
+  images stay on named volumes. Email is off (mail_service = "none") until
+  the owner configures it, as upstream ships it.
+
+  MongoDB is 7.0 rather than upstream's mongo:latest because every 8.x image
+  refuses to start on Linux 6.19 or newer (SERVER-121912); see README.md.

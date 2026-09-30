@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Journiv, a self-hosted private journaling app (FastAPI + a React SPA, Celery
+  workers, PostgreSQL and Valkey). The repository's own docker-compose.yml is
+  the right stack but bind-mounts ./data, which Docker creates root-owned while
+  the image runs as uid 1000, so the app restart-loops on
+  "mkdir: cannot create directory '/data/media': Permission denied". This
+  recipe runs the same stack from the published image of the current release
+  (swalabtech/journiv-app:0.1.0-beta.26) with every datastore on a named
+  volume. SECRET_KEY and the database password are generated once per account
+  by the engine; DOMAIN_NAME is the site's host with DOMAIN_SCHEME=https,
+  because the engine terminates TLS. First run is as upstream ships it: the
+  site opens Journiv's own sign-up / login page.

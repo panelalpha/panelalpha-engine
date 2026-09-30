@@ -1,0 +1,101 @@
+# The repo's compose runs the image with RAILS_ENV=development, which the image
+# was built without (`listen is not part of the bundle`). This runs the current
+# release image in production, as upstream's installation docs describe.
+x-octobox: &octobox
+  image: octoboxio/octobox:september-2026
+  restart: unless-stopped
+  # GITHUB_* and other optional settings first; generated secrets last and win.
+  env_file:
+    - path: .env
+      required: false
+    - ../.panelalpha/octobox/app.env
+  environment: &octobox-env
+    RAILS_ENV: production
+    RAILS_SERVE_STATIC_FILES: "1"
+    RAILS_LOG_TO_STDOUT: "1"
+    OCTOBOX_DATABASE_NAME: octobox
+    OCTOBOX_DATABASE_USERNAME: postgres
+    OCTOBOX_DATABASE_HOST: db
+    REDIS_URL: redis://redis:6379
+
+services:
+  # One-shot: Octobox only signs in with GitHub OAuth, so the deploy fails here
+  # naming each missing variable. Read from .env at runtime (engine#336).
+  check:
+    image: octoboxio/octobox:september-2026
+    restart: "no"
+    env_file:
+      - path: .env
+        required: false
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        missing=""
+        [ -n "$$GITHUB_CLIENT_ID" ] || missing="$$missing GITHUB_CLIENT_ID"
+        [ -n "$$GITHUB_CLIENT_SECRET" ] || missing="$$missing GITHUB_CLIENT_SECRET"
+        if [ -n "$$missing" ]; then
+          echo "Error: Octobox signs in with a GitHub OAuth app (https://github.com/settings/developers, callback <site>/auth/github/callback). Set in the project's environment variables:$$missing"
+          exit 1
+        fi
+    mem_limit: 64m
+
+  app:
+    <<: *octobox
+    ports:
+      - "3000:3000"
+    depends_on:
+      check:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 768m
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/octobox/db.env
+    environment:
+      POSTGRES_DB: octobox
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once Octobox answers.
+  ready:
+    image: redis:7-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pg_data: {}
+  redis_data: {}

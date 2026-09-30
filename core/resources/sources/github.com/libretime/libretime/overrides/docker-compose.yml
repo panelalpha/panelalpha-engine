@@ -1,0 +1,161 @@
+# Compose-replace: upstream's docker-compose.yml of release 4.5.0 with its
+# config.yml rendered per account, the database migrated before the services
+# start, and only the web UI (nginx, 8080) published.
+x-libretime: &libretime
+  init: true
+  restart: unless-stopped
+  ulimits:
+    nofile: 1024
+
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/libretime/secrets.env
+    environment:
+      POSTGRES_USER: libretime
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -U libretime
+      interval: 5s
+      retries: 30
+    mem_limit: 256m
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+    restart: unless-stopped
+    hostname: rabbitmq
+    env_file:
+      - ../.panelalpha/libretime/secrets.env
+    environment:
+      RABBITMQ_DEFAULT_VHOST: /libretime
+      RABBITMQ_DEFAULT_USER: libretime
+    healthcheck:
+      test: nc -z 127.0.0.1 5672
+      interval: 5s
+      retries: 30
+    mem_limit: 256m
+
+  # One-shot: writes config.yml (public URL + generated secrets) to a volume.
+  config:
+    image: alpine:3.22
+    restart: "no"
+    env_file:
+      - ../.panelalpha/libretime/secrets.env
+    environment:
+      # Rewritten by the engine to this account's https address.
+      PA_PUBLIC_URL: http://localhost
+    volumes:
+      - ./panelalpha/libretime:/pa:ro
+      - config:/etc/libretime
+    entrypoint: ["/bin/sh", "/pa/render-config.sh"]
+    mem_limit: 32m
+
+  # One-shot: upstream's install step (`libretime-api migrate`).
+  migrate:
+    <<: *libretime
+    image: ghcr.io/libretime/libretime-api:4.5.0
+    restart: "no"
+    command: libretime-api migrate
+    depends_on:
+      config:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    volumes:
+      - config:/etc/libretime:ro
+
+  playout:
+    <<: *libretime
+    image: ghcr.io/libretime/libretime-playout:4.5.0
+    depends_on: &after_migrate
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - config:/etc/libretime:ro
+      - libretime_playout:/app
+    environment:
+      LIBRETIME_GENERAL_PUBLIC_URL: http://nginx:8080
+    mem_limit: 256m
+
+  liquidsoap:
+    <<: *libretime
+    image: ghcr.io/libretime/libretime-playout:4.5.0
+    command: /usr/local/bin/libretime-liquidsoap
+    depends_on: *after_migrate
+    volumes:
+      - config:/etc/libretime:ro
+      - libretime_playout:/app
+    environment:
+      LIBRETIME_GENERAL_PUBLIC_URL: http://nginx:8080
+    mem_limit: 512m
+
+  analyzer:
+    <<: *libretime
+    image: ghcr.io/libretime/libretime-analyzer:4.5.0
+    depends_on: *after_migrate
+    volumes:
+      - config:/etc/libretime:ro
+      - libretime_storage:/srv/libretime
+    environment:
+      LIBRETIME_GENERAL_PUBLIC_URL: http://nginx:8080
+    mem_limit: 512m
+
+  worker:
+    <<: *libretime
+    image: ghcr.io/libretime/libretime-worker:4.5.0
+    depends_on: *after_migrate
+    volumes:
+      - config:/etc/libretime:ro
+    environment:
+      LIBRETIME_GENERAL_PUBLIC_URL: http://nginx:8080
+    mem_limit: 256m
+
+  api:
+    <<: *libretime
+    image: ghcr.io/libretime/libretime-api:4.5.0
+    depends_on: *after_migrate
+    volumes:
+      - config:/etc/libretime:ro
+      - libretime_storage:/srv/libretime
+    mem_limit: 512m
+
+  legacy:
+    <<: *libretime
+    image: ghcr.io/libretime/libretime-legacy:4.5.0
+    depends_on: *after_migrate
+    volumes:
+      - config:/etc/libretime:ro
+      - libretime_storage:/srv/libretime
+    mem_limit: 512m
+
+  nginx:
+    image: ghcr.io/libretime/libretime-nginx:4.5.0
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - legacy
+      - api
+    volumes:
+      - libretime_storage:/srv/libretime:ro
+    mem_limit: 64m
+
+  # Streaming server liquidsoap sends to; not published (the engine proxies
+  # only the web UI port).
+  icecast:
+    image: ghcr.io/libretime/icecast:2.4.4
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/libretime/secrets.env
+    mem_limit: 64m
+
+volumes:
+  postgres_data: {}
+  config: {}
+  libretime_storage: {}
+  libretime_playout: {}

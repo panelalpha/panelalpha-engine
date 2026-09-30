@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mylar3 is an automated comic book downloader in the *arr family: one Python
+  (CherryPy) process serving its web UI and API on :8090, SQLite and
+  config.ini under /config. The repository's own Dockerfile does not build
+  (it pins Alpine 3.11 package revisions that no longer exist, and clones an
+  old tag rather than the checkout); this recipe replaces it with the
+  LinuxServer.io image of the current release v0.11.0, which is built from
+  this repository, with /config and the /comics library on named volumes that
+  survive redeploys.
+
+  Mylar ships with no login and the API disabled, so the first visitor would
+  own the instance. hooks/prepare.sh generates a login password and a
+  32-character API key once into ~/.panelalpha/mylar; a thin entrypoint in
+  front of the image's /init writes them into config.ini (form login,
+  authentication = 2; API enabled) only when the volume has no config.ini
+  yet, so settings changed in the UI later are never overwritten. `ready`
+  makes `compose up -d` return only once the login page answers.

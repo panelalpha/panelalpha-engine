@@ -1,0 +1,21 @@
+# Compose-replace: the Go build embeds files (hls.min.js, VERSION) that
+# upstream's release pipeline generates, so the generic go recipe fails.
+# This runs the official image of the current release with its built-in
+# config; the HLS server (:8888) is the only published port.
+services:
+  app:
+    image: bluenviron/mediamtx:1.21.1
+    restart: unless-stopped
+    env_file:
+      # Project env vars: MTX_* overrides, e.g. MTX_PATHS_CAM_SOURCE=rtsp://...
+      - path: .env
+        required: false
+    volumes:
+      # Default recordPath is ./recordings/... relative to /.
+      - recordings:/recordings
+    ports:
+      - "8888:8888"
+    mem_limit: 512m
+
+volumes:
+  recordings: {}

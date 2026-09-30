@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Polaris is a music browsing and streaming server: one Rust process serving
+  the web player and its API on :5050, with its database, settings and auth secret in
+  /var/lib/polaris. The repository holds only the server; the web UI is a
+  separate repository (polaris-web) bundled into release archives, and a plain
+  build of the repo detects as Rust and exits straight away. Upstream's
+  docs/SETUP.md sends Docker users to ogarcia/docker-polaris, so this recipe
+  runs that image of the current release 0.16.1
+  (quay.io/connectical/polaris:0.16.1-alpine3.24.2), with the database, the
+  cache and /music on named volumes. The image runs as uid 100, so /music is
+  read-only to Polaris; files copied in with `docker compose cp` are read.
+
+  First run is left as upstream ships it: the web UI asks the first visitor
+  to create the admin account. Adding music: copy files into the music
+  volume, e.g. `docker compose -p project cp <dir> app:/music/`, then add
+  /music as a mount point in Settings and rescan.

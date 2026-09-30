@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  HTMLy, a flat-file PHP blog: no database, vendor/ committed under
+  system/vendor, index.php at the repository root. The php strategy builds and
+  serves it as is. Two things it gets wrong without this recipe: before
+  install.php has written config/config.ini, GET / answers 500
+  ("[views.root] is not set"), so the deploy ends partial; and posts, uploads,
+  settings and users live in content/ and config/ inside the checkout, which a
+  redeploy re-clones. files/panelalpha-htmly.conf sends only the bare / to
+  upstream's own /install.php while config.ini is missing; hooks/prepare.sh
+  seeds config/ and content/ into ~/.panelalpha/htmly once and the override
+  mounts them back.
+extends: php

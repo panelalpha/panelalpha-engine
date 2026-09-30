@@ -1,0 +1,32 @@
+# Upstream compose with the release image and the depot on a named volume:
+# a fresh named volume inherits the image's trailbase-owned /app/traildepot.
+services:
+  trail:
+    image: docker.io/trailbase/trailbase:0.34.0
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    volumes:
+      - traildepot:/app/traildepot
+    environment:
+      RUST_BACKTRACE: "1"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "-s", "-o", "/dev/null", "http://127.0.0.1:4000/api/healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once TrailBase is healthy.
+  ready:
+    image: docker.io/trailbase/trailbase:0.34.0
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      trail:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  traildepot: {}

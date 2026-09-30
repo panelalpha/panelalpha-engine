@@ -40,7 +40,11 @@ compile() {
 if [ "$MODE" = upgrade ]; then
   # Nothing to upgrade until something is installed. Not an error: the upgrade
   # stage runs on every deploy, including the one before the first install.
-  [ -f app/etc/env.php ] || exit 0
+  # env.php is a link into /pa-data (hooks/prepare.sh), so it outlives ~/project.
+  if [ ! -f app/etc/env.php ]; then
+    echo "panelalpha: no app/etc/env.php (~/.panelalpha/magento/etc); nothing to upgrade" >&2
+    exit 0
+  fi
   wait_for_database
   magento setup:upgrade --keep-generated
   compile

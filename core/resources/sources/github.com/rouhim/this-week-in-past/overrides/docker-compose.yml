@@ -1,0 +1,18 @@
+# The repo's compose builds a Containerfile that copies binaries CI produces
+# beforehand; run the published image of the current release instead.
+# The image is FROM scratch (no shell), so there is no healthcheck to gate on.
+services:
+  this-week-in-past:
+    image: rouhim/this-week-in-past:3.0.2
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Photos to show; the app only reads them.
+      - pictures:/resources:ro
+      - data:/data
+    mem_limit: 512m
+
+volumes:
+  pictures: {}
+  data: {}

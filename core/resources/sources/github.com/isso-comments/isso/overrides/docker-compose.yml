@@ -1,0 +1,36 @@
+# The repository's docker-compose.yml is a test environment (dev config and a
+# puppeteer runner). This runs the published image of the current release.
+services:
+  isso:
+    image: ghcr.io/isso-comments/isso:0.14.0
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      ISSO_SETTINGS: /config/isso.cfg
+      PA_PUBLIC_URL: ${PA_PUBLIC_URL}
+      ISSO_HOST: ${ISSO_HOST:-}
+      ISSO_TRUSTED_PROXIES: ${ISSO_TRUSTED_PROXIES:-}
+    volumes:
+      - ./isso.cfg:/config/isso.cfg:ro
+      - isso-db:/db
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/info"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Isso answers /info.
+  ready:
+    image: ghcr.io/isso-comments/isso:0.14.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      isso:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  isso-db: {}

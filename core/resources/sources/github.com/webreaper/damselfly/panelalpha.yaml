@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Damselfly, a server-based photo manager (.NET, Blazor WebAssembly, SQLite)
+  with face/object recognition and keyword tagging, serving on :6363. The
+  plain deploy builds the repo's Dockerfile, which copies CI output that a
+  checkout does not have, and fails with `"/publish": not found`.
+
+  Compose-REPLACE with the published image of the current release
+  (webreaper/damselfly:4.5.3), as docs/Installation.md runs it: config
+  (SQLite database), thumbnails and the photo library on named volumes. hooks/prepare.sh removes the
+  repo's Visual Studio docker-compose.override.yml, which the engine would
+  otherwise layer over the replacement (engine#416).

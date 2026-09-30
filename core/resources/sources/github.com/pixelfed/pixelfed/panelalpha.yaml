@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Pixelfed is a federated (ActivityPub) photo-sharing server: Laravel on
+  FrankenPHP (serversideup/php) on :8080, with Horizon, the scheduler, MySQL
+  and Redis. The plain deploy detects Laravel on the dev branch and fails in
+  composer: jcupitt/vips requires ext-ffi, which the shared PHP image lacks.
+  Pixelfed also routes every page through Route::domain(APP_DOMAIN), which a
+  generic Laravel deploy does not set.
+
+  This recipe replaces the compose with upstream's docker-compose.yml and
+  DOCKER_COMPOSE_SETUP.md on the published ghcr.io/pixelfed/pixelfed:v0.14.3
+  image (current release; building the Dockerfile compiles ffmpeg for ~12
+  minutes) for the app, Horizon and the scheduler, with mariadb:11.8 and
+  redis:7-alpine. APP_URL, APP_DOMAIN and ADMIN_DOMAIN are the site's
+  address; the other settings are upstream's .env.docker.example. APP_KEY and
+  the database passwords are generated once by hooks/prepare.sh into
+  ~/.panelalpha/pixelfed/. The image migrates on start (upstream's AUTORUN); a
+  one-shot init service then runs upstream's setup steps instance:actor and
+  passport:keys (kept on the storage volume). Horizon's auto balancing starts
+  a worker per queue (~18 PHP processes, over 1 GB), so it runs small fixed
+  pools through Pixelfed's own HORIZON_* variables, without CLI OPcache;
+  every service has a memory limit. Media (storage/), the database and Redis
+  are on named volumes. Registration is closed as upstream ships it: create
+  the first account with `php artisan user:create` in the pixelfed service,
+  or set OPEN_REGISTRATION=true (and MAIL_*) in the project's environment
+  variables.

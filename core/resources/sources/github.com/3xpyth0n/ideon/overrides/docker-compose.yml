@@ -1,0 +1,69 @@
+# Compose-replace: upstream's docker-compose.yml on the release image, with
+# the values it reads from a .env the checkout does not ship.
+services:
+  app:
+    image: ghcr.io/3xpyth0n/ideon:0.9.7
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - ../.panelalpha/ideon/app.env
+      # SMTP_* and other optional settings from the project's env vars
+      - path: .env
+        required: false
+    environment:
+      APP_PORT: "3000"
+      APP_URL: ${PA_PUBLIC_URL}
+      # src/auth.ts copies APP_URL to AUTH_URL only in the Node server; the
+      # middleware's own NextAuth needs it from the start, or it rejects every
+      # session with "UntrustedHost" and redirects logged-in users to /login.
+      AUTH_URL: ${PA_PUBLIC_URL}
+      TIMEZONE: UTC
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ideon
+      DB_USER: ideon
+    volumes:
+      - ideon-app-data:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/ideon/db.env
+    environment:
+      POSTGRES_USER: ideon
+      POSTGRES_DB: ideon
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - ideon-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ideon -d ideon"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns once the app answers /api/health.
+  ready:
+    image: postgres:18-alpine
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  ideon-app-data: {}
+  ideon-db-data: {}

@@ -1,0 +1,46 @@
+# Upstream's compose is a hand-edit template: placeholder host paths, a
+# docker.sock mount, and `config-volume` used but its declaration commented
+# out, so Compose rejects it. The published image of the current release with
+# the README's four folders on named volumes.
+services:
+  comic-utils:
+    image: allaboutduncan/comic-utils-web:v6.5.3
+    restart: unless-stopped
+    ports:
+      - "5577:5577"
+    # Optional project env vars: CLU_USERNAME/CLU_PASSWORD, MONITOR, GCD_DATABASE_PATH ...
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # Settings and the SQLite database.
+      - config:/config
+      # The comic library; upload or sync comics into it.
+      - data:/data
+      # Folder monitoring input (MONITOR=yes).
+      - downloads:/downloads
+      # Thumbnail cache.
+      - cache:/cache
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5577/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once CLU answers /health.
+  ready:
+    image: allaboutduncan/comic-utils-web:v6.5.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      comic-utils:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  data: {}
+  downloads: {}
+  cache: {}

@@ -1,0 +1,16 @@
+# The go platform starts `./app` bare, which only prints PocketBase's help.
+# Serve on the published port, with pb_data outside the re-cloned checkout.
+services:
+  app:
+    command: ["/app/app", "serve", "--http=0.0.0.0:8080", "--dir=/pb_data"]
+    volumes:
+      - pb-data:/pb_data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+
+volumes:
+  pb-data:

@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Photofield is a fast, read-only photo viewer (MIT): one Go binary with the
+  Vue UI embedded, serving :8080, that indexes the photo directories it is
+  pointed at into SQLite caches and lays them out as zoomable collections.
+
+  The repository's docker-compose.yaml is a development stack (Prometheus,
+  Pyroscope, Grafana, a local registry) around a Dockerfile built with
+  `-tags embedui,embeddocs,embedgeo`, which needs ui/dist, the docs site and
+  the geoBoundaries database produced beforehand; none is committed, so the
+  plain deploy stops at `embed-geo.go:9:12: pattern
+  data/geo/geoBoundariesCGAZ_ADM2_s5_twkb_p3.gpkg: no matching files found`. overrides/docker-compose.yml runs the image upstream publishes for
+  the current release, ghcr.io/smilyorg/photofield:v0.25.0, with
+  /app/data (configuration.yaml and the caches) and /app/photos (the working
+  directory, whose subdirectories become collections) on named volumes.
+
+  Photofield has no upload and no user accounts, as upstream ships it: photos
+  are placed in the `photos` volume, and collections are configured in
+  /app/data/configuration.yaml.
+
+  Measured on mariusz2.panelalpha.tools (2026-09-29, engine 705f250a): deploy
+  43s, rebuild 25s, app 99 MiB. / serves the UI (<title>Photos</title>); a
+  photo placed in photos/pa-test/ shows up as collection `pa-test` after a
+  rebuild, indexes through POST /api/tasks (INDEX_FILES), serves its original,
+  and the index (indexed_count 1) survives a further rebuild.

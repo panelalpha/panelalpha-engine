@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Actual Budget, a local-first envelope-budgeting app: the sync server (Node,
+  SQLite) serves the web client and the sync API on :5006 and keeps every
+  budget file and its account database in /data. The repository is the whole
+  monorepo; its root docker-compose.yml and Dockerfile are the development
+  container (bind-mounts the checkout, runs `yarn start` in a dev shell), so a
+  plain deploy never answers. This recipe runs the official
+  actualbudget/actual-server image of the current release, 26.9.0, with /data on
+  a named volume that survives redeploys. On the first visit Actual asks for a
+  server password, as upstream ships it.

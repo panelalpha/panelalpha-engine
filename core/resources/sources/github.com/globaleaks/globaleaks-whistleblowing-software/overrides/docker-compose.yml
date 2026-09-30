@@ -1,0 +1,48 @@
+# Upstream docker/docker-compose.yml on the published v5.0.99 image, reached
+# through a TLS bridge (GlobaLeaks only serves plain HTTP as a redirect to https).
+services:
+  globaleaks:
+    image: globaleaks/globaleaks:v5.0.99
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /run/globaleaks:mode=1777
+      - /tmp:mode=1777
+    volumes:
+      - globaleaks:/var/globaleaks:rw
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:8443/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 768m
+
+  app:
+    image: nginx:1.30-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./panelalpha/globaleaks-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      globaleaks:
+        condition: service_healthy
+    mem_limit: 64m
+
+  # No-op gate: `compose up -d` returns only once GlobaLeaks answers.
+  ready:
+    image: alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      globaleaks:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  globaleaks: {}

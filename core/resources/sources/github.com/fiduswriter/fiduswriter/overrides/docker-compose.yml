@@ -1,0 +1,19 @@
+# Compose-replace: the repo's docker/docker-compose.yml builds the whole
+# toolchain from source. Runs the published image of the current release.
+services:
+  app:
+    image: fiduswriter/fiduswriter:4.1.21
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    entrypoint: ["/bin/sh", "/panelalpha-start.sh"]
+    environment:
+      PA_PUBLIC_HOST: ${PA_PUBLIC_HOST}
+      PA_PUBLIC_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # configuration.py, the SQLite database and media, as upstream's script keeps them.
+      - fiduswriter-data:/data
+      - ./panelalpha/fiduswriter-start.sh:/panelalpha-start.sh:ro
+
+volumes:
+  fiduswriter-data: {}

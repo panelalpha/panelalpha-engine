@@ -1,0 +1,58 @@
+# Compose-replace: the repo's compose publishes SurrealDB's debug port (which
+# the engine picked as the site) and bind-mounts data under ~/project.
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:v2
+    restart: unless-stopped
+    # The named volume is root-owned (upstream runs it as root too).
+    user: root
+    command: ["start", "--log", "info", "rocksdb:/mydata/mydatabase.db"]
+    # SURREAL_USER / SURREAL_PASS are read by `surreal start`.
+    env_file:
+      - ../.panelalpha/open-notebook/secrets.env
+    environment:
+      SURREAL_EXPERIMENTAL_GRAPHQL: "true"
+    volumes:
+      - surreal_data:/mydata
+    mem_limit: 512m
+
+  open_notebook:
+    image: lfnovo/open_notebook:1.14.0
+    restart: unless-stopped
+    # Project env vars first; the generated secrets win over .env.example's placeholder.
+    env_file:
+      - .env
+      - ../.panelalpha/open-notebook/secrets.env
+    environment:
+      # The browser calls <site>/api, which Next.js proxies to :5055 in-container.
+      API_URL: ${PA_PUBLIC_URL}
+      SURREAL_URL: ws://surrealdb:8000/rpc
+      SURREAL_NAMESPACE: open_notebook
+      SURREAL_DATABASE: open_notebook
+    volumes:
+      - notebook_data:/app/data
+    ports:
+      - "8502:8502"
+    depends_on:
+      - surrealdb
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:5055/health && curl -fsS -o /dev/null http://127.0.0.1:8502/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1536m
+
+  # No-op: `compose up -d` returns once the API and the web UI answer.
+  ready:
+    image: lfnovo/open_notebook:1.14.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      open_notebook:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  surreal_data: {}
+  notebook_data: {}

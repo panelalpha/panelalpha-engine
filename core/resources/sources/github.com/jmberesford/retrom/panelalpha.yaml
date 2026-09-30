@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Retrom is a game library server with a web client: it scans a library of
+  (emulation) games, fetches metadata, and serves them to the web client and
+  the desktop launcher. The repository is a Cargo/pnpm monorepo that also
+  holds the Tauri desktop client, so the generic Rust strategy fails on
+  `gdk-sys` ("The system library `gdk-3.0` ... was not found"), and
+  docker/docker-compose.yml is a developer stack (source build, adminer,
+  jaeger, mock content bind mounts).
+
+  This recipe runs upstream's published server image of the current release,
+  ghcr.io/jmberesford/retrom-service v0.8.4 (pinned by digest), on port 5101
+  with its embedded PostgreSQL (the image's default). Config, data (database,
+  metadata cache), the downloaded PostgreSQL binaries and the game library
+  (/app/library, the default content directory) are on named volumes, so the
+  library survives redeploys. First run is left as upstream ships it.

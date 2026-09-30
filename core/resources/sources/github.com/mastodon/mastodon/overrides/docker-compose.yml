@@ -1,0 +1,115 @@
+# Upstream's docker-compose.yml on the same release image, configured from the
+# environment instead of an .env.production the repository does not ship.
+# The streaming server is left out: the engine proxies one port.
+x-mastodon-image: &mastodon-image ghcr.io/mastodon/mastodon:v4.7.2
+x-mastodon-env: &mastodon-env
+  LOCAL_DOMAIN: ${PA_PUBLIC_HOST}
+  RAILS_ENV: production
+  DB_HOST: db
+  DB_PORT: "5432"
+  DB_USER: postgres
+  DB_NAME: mastodon_production
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  ES_ENABLED: "false"
+  S3_ENABLED: "false"
+  RAILS_LOG_TO_STDOUT: "enabled"
+
+services:
+  app:
+    image: *mastodon-image
+    command: bundle exec puma -C config/puma.rb
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/mastodon/mastodon.env
+    environment: *mastodon-env
+    ports:
+      - "3000:3000"
+    volumes:
+      - mastodon-system:/opt/mastodon/public/system
+    depends_on:
+      mastodon-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s --noproxy localhost localhost:3000/health | grep -q OK || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    mem_limit: 1g
+
+  # Loads the schema and seeds on an empty database, migrates an existing one.
+  mastodon-migrate:
+    image: *mastodon-image
+    command: bundle exec rails db:prepare
+    restart: "no"
+    env_file:
+      - ../.panelalpha/mastodon/mastodon.env
+    environment: *mastodon-env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 768m
+
+  sidekiq:
+    image: *mastodon-image
+    command: bundle exec sidekiq
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/mastodon/mastodon.env
+    environment: *mastodon-env
+    volumes:
+      - mastodon-system:/opt/mastodon/public/system
+    depends_on:
+      mastodon-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep '[s]idekiq\\ 8' || false"]
+    mem_limit: 768m
+
+  db:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    shm_size: 256mb
+    env_file:
+      - ../.panelalpha/mastodon/mastodon.env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: mastodon_production
+    volumes:
+      - mastodon-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U postgres -d mastodon_production"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 384m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - mastodon-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  mastodon-system: {}
+  mastodon-db: {}
+  mastodon-redis: {}

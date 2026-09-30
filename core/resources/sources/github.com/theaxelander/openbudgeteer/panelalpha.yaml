@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OpenBudgeteer, a bucket-budgeting app (ASP.NET Core Blazor Server on :8080)
+  that needs a SQL database (MariaDB/MySQL or PostgreSQL) and Redis. The
+  repository ships only a Dockerfile, so the plain deploy builds the app with
+  no database configured and it exits with "Database provider not defined"
+  (exit 139) in a restart loop.
+
+  overrides/docker-compose.yml runs upstream's published image of the current
+  release (axelander/openbudgeteer:1.11) with PostgreSQL 17 and Redis 7, data
+  on named volumes. The database password is generated once into
+  ~/.panelalpha/openbudgeteer by hooks/prepare.sh; the app creates its schema
+  on first boot. A healthcheck on the app and a no-op `ready` service make the
+  deploy wait until it answers. Authentication stays off, as upstream ships it.

@@ -1,0 +1,64 @@
+# The repo's compose, without its build: section (the source build needs a
+# 4 GB Node heap): the published image of the current release instead.
+services:
+  tianji:
+    image: moonrailgun/tianji:1.33.7
+    restart: unless-stopped
+    # The image's own start steps, run in sequence. Its CMD backgrounds them and
+    # sits in `wait -n`, which returns 129 when the ClickHouse script finishes
+    # after its 10s sleep (every fresh database here), so the first start dies.
+    command:
+      - sh
+      - -c
+      - >-
+        cd /app/tianji/src/server
+        && ./node_modules/.bin/prisma migrate deploy
+        && ./node_modules/.bin/tsx ./clickhouse/scripts/apply.ts
+        && { (sleep 10; exec /usr/local/bin/tianji-reporter --url "http://localhost:12345"
+        --workspace "clnzoxcy10001vy2ohi4obbi0" --name "tianji-container" --silent > /dev/null) &
+        NODE_ENV=production exec node ./dist/src/server/main.js; }
+    # No env_file: .env is seeded from .env.example, whose JWT_SECRET
+    # placeholder the app would accept as a real, publicly known key.
+    environment:
+      DATABASE_URL: postgresql://tianji:tianji@postgres:5432/tianji
+      ALLOW_REGISTER: "false"
+      ALLOW_OPENAPI: "true"
+      PUBLIC_URL: ${PA_PUBLIC_URL}
+    ports:
+      - "12345:12345"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:12345/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  postgres:
+    image: postgres:15.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tianji
+      POSTGRES_USER: tianji
+      POSTGRES_PASSWORD: tianji
+    volumes:
+      - tianji-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # No-op gate: `compose up -d` returns only once Tianji has migrated and answers.
+  ready:
+    image: postgres:15.4-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      tianji:
+        condition: service_healthy
+
+volumes:
+  tianji-db-data: {}

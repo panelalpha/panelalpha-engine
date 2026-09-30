@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Swiparr, a Tinder-style "what to watch next" web app for Jellyfin, Emby,
+  Plex or TMDB (Next.js standalone, SQLite). Building the repository's own
+  Dockerfile is OOM-killed in `next build` at a 2500 MB account, so this recipe
+  runs the published ghcr.io/m3sserstudi0s/swiparr image of the current release
+  (1.5.1), as upstream's docker-compose.example.yml does, with the SQLite
+  database on a named volume. The media server is configured by the customer
+  through project env vars (JELLYFIN_URL, or PROVIDER / PROVIDER_LOCK=false to
+  pick one in the UI); the app starts and serves its login page without them.

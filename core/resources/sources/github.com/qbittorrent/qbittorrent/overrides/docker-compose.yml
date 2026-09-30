@@ -1,0 +1,53 @@
+# Compose-replace: the repository is C++ source with nothing to deploy.
+# Runs the official qbittorrent-nox image of the current release.
+services:
+  app:
+    image: qbittorrentofficial/qbittorrent-nox:5.2.4-1
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Confirmed by the customer (checked below).
+      QBT_LEGAL_NOTICE: ${QBT_LEGAL_NOTICE:-}
+      QBT_WEBUI_PORT: "8080"
+      QBT_TORRENTING_PORT: "6881"
+    volumes:
+      # qBittorrent.conf, the Web UI password, fastresume data.
+      - config:/config
+      - downloads:/downloads
+    depends_on:
+      legal-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    stop_grace_period: 30s
+    mem_limit: 1024m
+
+  # Fails `compose up` (and so the deploy) until the legal notice is confirmed.
+  legal-check:
+    image: qbittorrentofficial/qbittorrent-nox:5.2.4-1
+    restart: "no"
+    entrypoint: ["/bin/sh", "/qbt-legal-check.sh"]
+    environment:
+      QBT_LEGAL_NOTICE: ${QBT_LEGAL_NOTICE:-}
+    volumes:
+      - ./qbt-legal-check.sh:/qbt-legal-check.sh:ro
+    mem_limit: 32m
+
+  # No-op: `compose up -d` returns once the Web UI answers.
+  ready:
+    image: qbittorrentofficial/qbittorrent-nox:5.2.4-1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  downloads: {}

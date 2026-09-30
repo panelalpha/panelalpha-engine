@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Ever Traduora is a translation management platform (NestJS API + Angular
+  web app) with a REST API, backed by MySQL.
+
+  IMAGE OF THE CURRENT RELEASE. The repo's compose files build the monorepo
+  in development mode (SQLite, or MySQL 5.7 with change_me/root passwords).
+  overrides/docker-compose.yml runs the official release image
+  everco/ever-traduora:v0.21.0 with MySQL 8.0 on a named volume; only
+  Traduora publishes a port. A `ready` gate makes the deploy finish only once
+  /health answers.
+
+  SECRETS. hooks/prepare.sh writes TR_SECRET (the JWT key, otherwise the
+  built-in "secret") and the MySQL user and root passwords once to
+  ~/.panelalpha/traduora/ (0600 in 0700). The image's 12 GB V8 heap default
+  is capped to fit the container.
+
+  FIRST RUN AS UPSTREAM SHIPS IT. Traduora's boot seed creates the README's
+  default admin (local.admin@ever.co, password in the README) and public
+  sign-up is on; change the admin's credentials after the first login.

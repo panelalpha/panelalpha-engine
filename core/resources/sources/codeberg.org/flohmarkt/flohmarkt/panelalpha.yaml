@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  flohmarkt, a federated classifieds site (Python/FastAPI) on CouchDB. The repo
+  ships a multipurpose image whose default command only prints usage, and no
+  root compose file, so the plain deploy crash-looped. The recipe builds the
+  repository's own Dockerfile, adds the CouchDB it needs, runs upstream's
+  `initdb` (idempotent) before `web`, and keeps the CouchDB admin password in
+  ~/.panelalpha. flohmarkt's own first-run setup link (printed in the app log)
+  is left as upstream ships it.

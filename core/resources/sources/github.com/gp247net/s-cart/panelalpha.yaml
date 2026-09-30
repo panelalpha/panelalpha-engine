@@ -32,7 +32,9 @@ description: >-
   and `gp247:shop-install`, and both call their uninstall first, so a second run
   drops and recreates the storefront and the shop. panelalpha/install.sh runs it
   exactly once, guarded on the `gp247-installed.txt` marker GP247 writes on the
-  local disk.
+  local disk -- and, because that disk is ~/project, which every deploy empties,
+  on a seeded store row in the database too: a redeploy only re-publishes the
+  files the install wrote and puts the marker back.
 
   The third is the admin account, and it is a security fix.
   GP247\Core\Database\Seeders\DataDefaultSeeder creates user `admin` with a
@@ -42,7 +44,7 @@ description: >-
   account that has just been given a public HTTPS name, that is a shop whose
   administration is open to whoever reads the manual.
   panelalpha/set-admin-password.php generates one, writes it to
-  ~/project/.panelalpha-admin-password (0600) and sets it -- only while the
+  ~/.panelalpha/scart/admin-password (0600) and sets it -- only while the
   password is still literally `admin`, so a password an operator later chooses
   is never reset under them by a redeploy.
 
@@ -157,7 +159,10 @@ commands:
       ConfirmableTrait cancels every one of them under APP_ENV=production and
       the seeders then fail on tables that were never created. The script runs
       that one process as APP_ENV=local, and does nothing at all once GP247's
-      `gp247-installed.txt` marker exists.
+      `gp247-installed.txt` marker exists. On a redeploy the marker is gone
+      with the rest of ~/project while the database is not, so a seeded
+      gp247_admin_store row makes it re-publish the install's files and
+      restore the marker instead.
     run: 'sh panelalpha/install.sh'
     timeout: 900
   - id: scart-admin-password
@@ -168,7 +173,7 @@ commands:
       Replaces the seeded `admin`/`admin` credential -- a hash hardcoded in
       DataDefaultSeeder and a password the install command prints to the deploy
       log -- with one generated here and recorded in
-      ~/project/.panelalpha-admin-password (0600). Does nothing once the
+      ~/.panelalpha/scart/admin-password (0600). Does nothing once the
       password is no longer `admin`.
     run: 'php panelalpha/set-admin-password.php'
     # A site that would otherwise serve is never held back by this step; the

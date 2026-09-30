@@ -1,0 +1,66 @@
+# The repository ships only dev compose files (Flask debug server, adminer,
+# published database port). This builds the repo's own production Dockerfile
+# (gunicorn) beside PostgreSQL, the stack its README describes.
+services:
+  app:
+    image: shhh-local:latest
+    build:
+      context: .
+      dockerfile: dockerfiles/alpine.gunicorn.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      FLASK_ENV: production
+      FLASK_APP: wsgi.py
+      DB_ENGINE: postgresql+psycopg2
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: shhh
+      DB_USER: shhh
+      # Generated once per account by the engine; the same value reaches db.
+      DB_PASSWORD: ${SHHH_DB_PASSWORD:?generated per account}
+      # Secret links are built on the site's public https address.
+      SHHH_HOST: ${PA_PUBLIC_URL}
+    # The tables come from the app's own Alembic migrations (README: flask db upgrade).
+    command: ["sh", "-c", "flask db upgrade && exec gunicorn -b :8081 -w 3 wsgi:app --preload"]
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  db:
+    image: docker.io/library/postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shhh
+      POSTGRES_USER: shhh
+      POSTGRES_PASSWORD: ${SHHH_DB_PASSWORD:?generated per account}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shhh -d shhh -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once Shhh answers.
+  ready:
+    image: docker.io/library/postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}

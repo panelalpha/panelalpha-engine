@@ -1,0 +1,59 @@
+# Compose-replace: the repo's compose file is a dev environment (Dockerfile.local,
+# source bind-mounted over /app). This runs upstream's own published image of
+# the final release, v1.35.0 (sct/overseerr is archived; Seerr succeeds it).
+services:
+  # One-shot, every boot: migrate, create the owner if there is no user yet,
+  # and mark setup done, before the app ever answers a request.
+  seed:
+    image: docker.io/sctx/overseerr:1.35.0
+    restart: "no"
+    working_dir: /app
+    env_file:
+      - .env
+      - ../.panelalpha/overseerr/admin.env
+    environment:
+      NODE_ENV: production
+      PA_PUBLIC_URL: ${PA_PUBLIC_URL}
+      PA_PUBLIC_HOST: ${PA_PUBLIC_HOST}
+    volumes:
+      - overseerr-config:/app/config
+      - ./panelalpha/overseerr:/pa:ro
+    entrypoint: ["node", "/pa/seed.js"]
+    mem_limit: 512m
+
+  app:
+    image: docker.io/sctx/overseerr:1.35.0
+    restart: unless-stopped
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      # settings.json, db/db.sqlite3 and logs/.
+      - overseerr-config:/app/config
+    ports:
+      - "5055:5055"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5055/api/v1/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    mem_limit: 1024m
+
+  # Exits 0 once app is healthy, so `compose up -d` returns only when
+  # Overseerr answers (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  overseerr-config: {}

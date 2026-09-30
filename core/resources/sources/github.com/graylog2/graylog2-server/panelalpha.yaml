@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Graylog, the log management platform, with its web UI and REST API on :9000.
+  The repository is the Java/Maven source with a large TypeScript frontend; the
+  plain deploy built it with Maven and `yarn tsgo` was OOM-killed (exit 137).
+  This recipe runs the published graylog/graylog image of the current stable
+  release (7.1.9) with MongoDB 7.0 and OpenSearch 2.19 (security plugin off,
+  reachable only inside the account), each on a named volume. Graylog refuses
+  to start without password_secret and root_password_sha2: hooks/prepare.sh
+  generates both once into ~/.panelalpha/graylog/ (the admin password in
+  admin-password), fed to the container as an env_file. Only the web port is
+  published, so inputs that listen on their own ports (Syslog, GELF, Beats)
+  are reachable from inside the account only. Needs about 3.5 GB of memory.

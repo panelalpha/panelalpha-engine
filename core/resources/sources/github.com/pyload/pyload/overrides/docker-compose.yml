@@ -1,0 +1,36 @@
+# Compose-replace: the repo's image binds the web UI to localhost only. Runs
+# the image upstream's README lists, at the current release.
+services:
+  app:
+    image: linuxserver/pyload-ng:0.5.0b3.dev101-ls255
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+    volumes:
+      - pyload-config:/config
+      - pyload-downloads:/downloads
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/login"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 15s
+    mem_limit: 512m
+
+  # No-op: `compose up -d` returns once the web UI answers.
+  ready:
+    image: linuxserver/pyload-ng:0.5.0b3.dev101-ls255
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pyload-config: {}
+  pyload-downloads: {}

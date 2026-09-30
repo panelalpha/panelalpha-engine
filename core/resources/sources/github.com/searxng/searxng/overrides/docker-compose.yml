@@ -1,0 +1,60 @@
+# Compose-replace: the repo root is SearXNG's source tree; upstream's deployment
+# (container/docker-compose.yml) is the official image plus Valkey. Same pair here:
+#   - searxng/searxng pinned to the current release, config mounted read-only
+#   - server.secret_key from ~/.panelalpha/searxng/secret.env (generated once)
+#   - limiter + link_token + image proxy (public_instance), Valkey as its store
+services:
+  app:
+    image: docker.io/searxng/searxng:2026.9.25-12f8b6515
+    restart: unless-stopped
+    env_file:
+      - .env
+      # Missing file aborts `up` rather than starting with the placeholder key.
+      - ../.panelalpha/searxng/secret.env
+    environment:
+      SEARXNG_BASE_URL: "${PA_PUBLIC_URL}/"
+      SEARXNG_VALKEY_URL: "valkey://valkey:6379/0"
+      # Config is a read-only recipe mount; do not chown it.
+      FORCE_OWNERSHIP: "false"
+    volumes:
+      - ./panelalpha/searxng:/etc/searxng:ro
+      - cache:/var/cache/searxng
+    depends_on:
+      valkey:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  valkey:
+    image: docker.io/valkey/valkey:9-alpine
+    restart: unless-stopped
+    command: valkey-server --save 30 1 --loglevel warning
+    volumes:
+      - valkey:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once SearXNG answers /healthz.
+  ready:
+    image: docker.io/valkey/valkey:9-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  cache: {}
+  valkey: {}

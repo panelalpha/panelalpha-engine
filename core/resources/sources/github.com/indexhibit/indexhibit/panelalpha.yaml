@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Indexhibit, a portfolio CMS in plain PHP (no Composer) on MySQL. Its own web
+  installer (/ndxzstudio/install.php) writes ndxzsite/config/config.php; until
+  then every page says "Database is not installed.". The recipe provisions the
+  MySQL database the installer asks for and keeps the config directory and the
+  uploads (files/) in ~/.panelalpha, so a redeploy neither loses the site's
+  database settings nor its images. The installer is left as upstream ships it.
+extends: php-plain
+database: mysql

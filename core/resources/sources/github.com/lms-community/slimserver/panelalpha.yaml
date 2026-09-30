@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Lyrion Music Server (formerly Logitech Media Server / Squeezebox Server)
+  is a music library server with a web UI on :9000 that streams to and
+  controls Squeezebox and compatible players. The repository is the Perl
+  source with no build the engine recognises (detection falls back to the
+  placeholder page); the official image is built from a separate platforms
+  repository. This recipe runs the official image of the current release
+  lmscommunity/lyrionmusicserver:9.1.1, with /config (preferences, library
+  database, cache), /music and /playlist on named volumes.
+
+  First run is left as upstream ships it: the web UI opens the setup wizard.
+  Adding music: copy files into the music volume, e.g.
+  `docker compose -p project cp <dir> app:/music/`, and rescan.
+
+  Only the web UI goes through the engine's proxy. The player protocol
+  (SlimProto on 3483/tcp, discovery on 3483/udp) and the CLI on 9090 are
+  second ports the proxy cannot publish, so hardware or software players
+  outside the account cannot connect to this server.

@@ -1,0 +1,41 @@
+# Compose-replace: the repository's compose builds from source and falls back
+# to the published default password (APP_PASSWORD=${APP_PASSWORD:-shopping123}).
+# This runs the published image of the current release with the password from
+# ~/.panelalpha/koffan/app.env; nothing in `environment:` can override it.
+services:
+  app:
+    image: ghcr.io/pansalut/koffan:v2.15.0
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/koffan/app.env
+    environment:
+      APP_ENV: production
+      PORT: "8080"
+      DB_PATH: /data/shopping.db
+      # The limiter keys on client IP, which behind the proxy is one address for all:
+      # anyone's wrong guesses lock everyone out. The password is 128-bit random.
+      LOGIN_MAX_ATTEMPTS: "0"
+    volumes:
+      - data:/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/login"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once the login page answers.
+  ready:
+    image: ghcr.io/pansalut/koffan:v2.15.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

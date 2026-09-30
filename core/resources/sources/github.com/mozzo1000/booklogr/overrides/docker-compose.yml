@@ -1,0 +1,43 @@
+# Compose-replace: upstream publishes the API and the frontend on two ports and
+# the browser calls the API directly. Here only the frontend is published and
+# its nginx proxies /v1/ to the API, so one origin serves both.
+services:
+  api:
+    image: mozzo/booklogr:v1.12.0
+    restart: unless-stopped
+    env_file:
+      - .env
+      # Missing file aborts `up`; the API will not start without the key.
+      - ../.panelalpha/booklogr/secret.env
+    environment:
+      DATABASE_URL: sqlite:///books.db
+    volumes:
+      - data:/app/instance
+      - pictures:/app/profile_pictures
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  app:
+    image: mozzo/booklogr-web:v1.12.0
+    restart: unless-stopped
+    environment:
+      BL_API_ENDPOINT: ${PA_PUBLIC_URL}/
+      BL_GOOGLE_ID: ""
+      BL_DEMO_MODE: "false"
+    volumes:
+      - ./panelalpha/booklogr/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 128m
+
+volumes:
+  data: {}
+  pictures: {}

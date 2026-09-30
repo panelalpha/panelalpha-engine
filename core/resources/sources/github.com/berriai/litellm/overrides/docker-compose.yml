@@ -1,0 +1,51 @@
+# Compose-replace: the repo's compose builds the Dockerfile (Next.js UI + full
+# uv extras), which stalled in an account. Upstream's quickstart topology on the
+# published image of the current release, secrets from ~/.panelalpha/litellm.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: ../.panelalpha/litellm/secrets.env
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_DB: litellm
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  app:
+    image: ghcr.io/berriai/litellm:v1.103.0
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports:
+      - "4000:4000"
+    # DATABASE_URL, LITELLM_MASTER_KEY, LITELLM_SALT_KEY (hooks/prepare.sh).
+    env_file: ../.panelalpha/litellm/secrets.env
+    environment:
+      STORE_MODEL_IN_DB: "True"
+      PROXY_BASE_URL: ${PA_PUBLIC_URL}
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')\""]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+    mem_limit: 1536m
+
+  # No-op: `compose up -d` returns once the proxy answers (first boot migrates).
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app: { condition: service_healthy }
+    mem_limit: 32m
+
+volumes:
+  postgres_data: {}

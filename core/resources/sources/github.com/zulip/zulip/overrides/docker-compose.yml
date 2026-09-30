@@ -1,0 +1,131 @@
+# Compose-replace: the repository is the Django source tree. This follows
+# upstream's docker-zulip compose.yaml on the image of the current release.
+# Secrets come from ~/.panelalpha/zulip/zulip.env (hooks/prepare.sh) as env
+# vars instead of compose secrets.
+services:
+  database:
+    image: docker.io/zulip/zulip-postgresql:14
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/zulip/zulip.env
+    environment:
+      POSTGRES_DB: zulip
+      POSTGRES_USER: zulip
+    volumes:
+      - postgresql-14:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "zulip", "-d", "zulip"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  memcached:
+    image: docker.io/library/memcached:1.6-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/zulip/zulip.env
+    environment:
+      SASL_CONF_PATH: /home/memcache/memcached.conf
+      MEMCACHED_SASL_PWDB: /home/memcache/memcached-sasl-db
+    # Upstream's SASL setup, reading the password from the environment.
+    command:
+      - sh
+      - -euc
+      - |
+        echo 'mech_list: plain' > "$$SASL_CONF_PATH"
+        echo "zulip@$$HOSTNAME:$$MEMCACHED_PASSWORD" > "$$MEMCACHED_SASL_PWDB"
+        echo "zulip@localhost:$$MEMCACHED_PASSWORD" >> "$$MEMCACHED_SASL_PWDB"
+        exec memcached -S
+    mem_limit: 128m
+
+  rabbitmq:
+    image: docker.io/library/rabbitmq:4.2
+    restart: unless-stopped
+    hostname: rabbitmq
+    env_file:
+      - ../.panelalpha/zulip/zulip.env
+    environment:
+      RABBITMQ_DEFAULT_USER: zulip
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 30s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  redis:
+    image: docker.io/library/redis:8-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/zulip/zulip.env
+    command:
+      - sh
+      - -euc
+      - exec docker-entrypoint.sh --requirepass "$$REDIS_PASSWORD"
+    volumes:
+      - redis:/data
+    mem_limit: 128m
+
+  app:
+    image: ghcr.io/zulip/zulip-server:12.3-0
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/zulip/zulip.env
+    environment:
+      SETTING_EXTERNAL_HOST: ${PA_PUBLIC_HOST}
+      SETTING_ZULIP_ADMINISTRATOR: zulip-admin@${PA_PUBLIC_HOST}
+      SETTING_REMOTE_POSTGRES_HOST: database
+      SETTING_MEMCACHED_LOCATION: memcached:11211
+      SETTING_RABBITMQ_HOST: rabbitmq
+      SETTING_REDIS_HOST: redis
+      # TLS ends at the engine's proxy, which reaches the app from a Docker
+      # bridge address. Zulip's nginx uses real_ip_recursive, so the client
+      # is the hop the engine appended, not a spoofable left-most entry.
+      LOADBALANCER_IPS: 172.16.0.0/12
+    volumes:
+      - zulip:/data
+    # Upstream asks for 1048576; an account's hard limit is 524288 and runc
+    # refuses to raise it ("error setting rlimit type 7").
+    ulimits:
+      nofile:
+        soft: 524288
+        hard: 524288
+    ports:
+      - "8080:80"
+    depends_on:
+      database:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      memcached:
+        condition: service_started
+      redis:
+        condition: service_started
+    healthcheck:
+      # Upstream's check; the first boot runs the migrations.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 90
+      start_period: 120s
+    mem_limit: 2816m
+
+  # No-op gate: `compose up -d` returns only once Zulip answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  zulip: {}
+  postgresql-14: {}
+  rabbitmq: {}
+  redis: {}

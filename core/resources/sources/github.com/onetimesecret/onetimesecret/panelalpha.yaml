@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Onetime Secret shares self-destructing secret links: a Ruby (Puma) web app
+  on :3000 with everything stored in Valkey. Upstream's deployment is the
+  "simple" stack (app + Valkey from published images), but the repository's
+  root docker-compose.yml only `include:`s it from docker/compose/, and the
+  engine reads neither ports nor services through `include:`, so the plain
+  deploy starts the stack unhardened and routes the domain to the default
+  8080 (502, engine#368).
+
+  This recipe is that simple stack written out at the root: the published
+  image of the current release (onetimesecret/onetimesecret:v0.26.13, the
+  tag upstream pins) and valkey/valkey:8.1-bookworm at upstream's digest,
+  with the data on a named volume. VALKEY_PASSWORD and SECRET are required
+  by the stack as upstream wrote it and the engine generates them once per
+  account (stable across redeploys). HOST is the account's domain and SSL
+  is true, because the engine terminates TLS, so secret links are https
+  links to the site and the session cookie is Secure. Everything else is
+  upstream's default: simple authentication mode, anonymous secret sharing,
+  no admin account (create one with
+  `docker compose -p project exec app bin/ots customers create <email> --role colonel`).

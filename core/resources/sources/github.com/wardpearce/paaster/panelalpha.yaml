@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  paaster, an end-to-end encrypted pastebin (SvelteKit on Node, :3000) that
+  keeps paste metadata in MongoDB and the encrypted chunks in S3, MongoDB or
+  on the filesystem. The repository's docker-compose.yml runs the published
+  image with an unpinned `mongo` (latest, restarting in the account; see
+  engine#146) and an unconfigured Garage S3 node that also restarts, so a plain deploy
+  answers 500 (`getaddrinfo ENOTFOUND paaster_mongodb`).
+
+  This recipe follows upstream's documented filesystem deployment
+  (docs/docs/deployment/filesystem.md) on wardpearce/paaster:3.6.1 (the
+  current release) with MongoDB 7.0. Encrypted chunks and the database are
+  on named volumes. ORIGIN is the site's address. The per-IP rate
+  limits read the X-Forwarded-For hop the engine's proxy appended
+  (ADDRESS_HEADER, XFF_DEPTH=1) instead of the proxy's socket address, which
+  every visitor shares. No secrets are needed: encryption keys never leave
+  the browser.

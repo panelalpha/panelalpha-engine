@@ -1,0 +1,38 @@
+# Upstream's compose is a dev stack; this runs the release server image with
+# its embedded PostgreSQL and every state directory on a named volume.
+services:
+  app:
+    image: ghcr.io/jmberesford/retrom-service:v0.8.4@sha256:840c8f8da77f366a0b658661913352b860e5388d009ca4925f560ea6d200ffe5
+    restart: unless-stopped
+    volumes:
+      - config:/app/config
+      # Embedded PostgreSQL data, metadata/media cache.
+      - data:/app/data
+      # PostgreSQL binaries the embedded DB downloads on first start.
+      - psql:/app/psql
+      # Default content directory in the generated config.json.
+      - library:/app/library
+    ports:
+      - "5101:5101"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5101/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  # No-op gate: `compose up -d` returns only once the server answers.
+  ready:
+    image: ghcr.io/jmberesford/retrom-service:v0.8.4@sha256:840c8f8da77f366a0b658661913352b860e5388d009ca4925f560ea6d200ffe5
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  data: {}
+  psql: {}
+  library: {}

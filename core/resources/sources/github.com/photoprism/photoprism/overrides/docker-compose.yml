@@ -1,0 +1,101 @@
+# Compose-replace: the repo's Dockerfile and compose.yaml are the developer
+# environment. This follows upstream's production compose
+# (dl.photoprism.app/docker/compose.yaml): the published image plus MariaDB.
+services:
+  app:
+    image: photoprism/photoprism:260919
+    restart: unless-stopped
+    stop_grace_period: 15s
+    working_dir: /photoprism
+    env_file:
+      # PHOTOPRISM_DATABASE_PASSWORD; a missing file aborts `up`.
+      - ../.panelalpha/photoprism/app.env
+    environment:
+      PHOTOPRISM_ADMIN_USER: ${PHOTOPRISM_ADMIN_USER:-admin}
+      # Initial admin password, from the project's env vars (checked below).
+      PHOTOPRISM_ADMIN_PASSWORD: ${PHOTOPRISM_ADMIN_PASSWORD:-}
+      PHOTOPRISM_AUTH_MODE: password
+      PHOTOPRISM_SITE_URL: ${PA_PUBLIC_URL}/
+      # The engine terminates TLS; PhotoPrism serves plain HTTP on 2342.
+      PHOTOPRISM_DISABLE_TLS: "true"
+      PHOTOPRISM_DEFAULT_TLS: "false"
+      PHOTOPRISM_DATABASE_DRIVER: mysql
+      PHOTOPRISM_DATABASE_SERVER: db:3306
+      PHOTOPRISM_DATABASE_NAME: photoprism
+      PHOTOPRISM_DATABASE_USER: photoprism
+    volumes:
+      # Original photos and videos.
+      - originals:/photoprism/originals
+      # Cache, thumbnails, sidecar files and backups.
+      - storage:/photoprism/storage
+    ports:
+      - "2342:2342"
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "photoprism", "status"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1536m
+
+  db:
+    image: mariadb:12.3
+    restart: unless-stopped
+    stop_grace_period: 15s
+    # Upstream's settings, with a buffer pool sized for the account.
+    command: --innodb-buffer-pool-size=256M --transaction-isolation=READ-COMMITTED --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --max-connections=512 --innodb-rollback-on-timeout=OFF --innodb-lock-wait-timeout=120
+    env_file:
+      - ../.panelalpha/photoprism/db.env
+    environment:
+      MARIADB_AUTO_UPGRADE: "1"
+      MARIADB_INITDB_SKIP_TZINFO: "1"
+      MARIADB_DATABASE: photoprism
+      MARIADB_USER: photoprism
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+    volumes:
+      - database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 640m
+
+  # Fails `compose up` (and so the deploy) while the admin password is unset.
+  env-check:
+    image: mariadb:12.3
+    restart: "no"
+    environment:
+      PHOTOPRISM_ADMIN_PASSWORD: ${PHOTOPRISM_ADMIN_PASSWORD:-}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        n=$${#PHOTOPRISM_ADMIN_PASSWORD}
+        if [ "$$n" -lt 8 ] || [ "$$n" -gt 72 ]; then
+          echo "photoprism: project environment variable PHOTOPRISM_ADMIN_PASSWORD is missing or not 8-72 characters (the initial admin password; write any \$$ as \$$\$$). Set it and redeploy." >&2
+          exit 1
+        fi
+        echo "photoprism: initial admin password set"
+    mem_limit: 32m
+
+  # No-op gate: `compose up -d` returns only once PhotoPrism answers.
+  ready:
+    image: mariadb:12.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  originals: {}
+  storage: {}
+  database: {}

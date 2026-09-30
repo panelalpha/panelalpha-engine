@@ -1,0 +1,44 @@
+# REPLACE compose: the official image of the current stable release (0.14.1, also
+# ghcr :latest) on a named volume, admin seeded from generated credentials.
+services:
+  app:
+    image: ghcr.io/hoshinosuzumi/chronoframe:0.14.1
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # Admin email/password + session and og-image secrets, generated once by
+    # hooks/prepare.sh. Without them the seed creates admin@chronoframe.com / CF1234@!.
+    env_file:
+      - ../.panelalpha/chronoframe/chronoframe.env
+    environment:
+      # Local storage defaults to ./data/storage, inside the volume below. (0.14.1
+      # reads NUXT_PROVIDER_LOCAL_LOCAL_PATH, not the documented NUXT_PROVIDER_LOCAL_PATH.)
+      NUXT_STORAGE_PROVIDER: local
+      NUXT_PROVIDER_LOCAL_BASE_URL: /storage
+      NUXT_PUBLIC_MAP_PROVIDER: maplibre
+      NUXT_PUBLIC_OAUTH_GITHUB_ENABLED: "false"
+      # Session cookie stays Secure; the engine terminates TLS in front.
+      NUXT_ALLOW_INSECURE_COOKIE: "false"
+    volumes:
+      # SQLite database (data/app.sqlite3) and uploaded photos (data/storage).
+      - chronoframe-data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1536m
+
+  # Exits 0 once the app is healthy, so `compose up -d` (and the deploy) waits for it.
+  ready:
+    image: alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  chronoframe-data: {}

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Nagios Core, host and service monitoring with a CGI web interface. The
+  repository is the C source (autoconf, make, CGIs) and ships no container;
+  a plain deploy picks the php recipe and answers 403 with no front page. This
+  recipe runs manios/nagios:4.5.14, which packages the current release
+  (4.5.14) with the official Nagios plugins behind Apache on :80. The object
+  configuration and htpasswd (/opt/nagios/etc), status/retention/logs
+  (/opt/nagios/var) and custom plugins (/opt/Custom-Nagios-Plugins) are named
+  volumes that survive redeploys; the first start seeds them from the image.
+  The web UI keeps the image's HTTP basic-auth login; its credentials come from
+  NAGIOSADMIN_USER / NAGIOSADMIN_PASS in the project's env vars, otherwise the
+  upstream default applies.
+  Known gap: ICMP checks run as the nagios user report CRITICAL until the
+  engine restores unprivileged ping in tenant containers (engine#442).

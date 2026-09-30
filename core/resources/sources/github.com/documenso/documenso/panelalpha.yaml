@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Documenso, an open-source document signing platform (Remix/Node, Prisma,
+  PostgreSQL) serving its web UI on :3000. The repository has no root compose
+  file, so the engine builds docker/Dockerfile from source: a turbo monorepo
+  build that sets --max-old-space-size=8192 and is killed for memory inside a
+  2.5 GB account. This recipe runs the official documenso/documenso image of
+  the current release, v2.19.0, with PostgreSQL 15 beside it, as upstream's
+  docker/production/compose.yml does. The prepare hook generates the
+  NEXTAUTH secret, the two encryption keys and the database password once into
+  ~/.panelalpha/documenso/secrets.env; the database is on a named volume. The
+  image runs its Prisma migrations on start. Without a signing certificate
+  Documenso starts and says signing is unavailable (upstream behaviour); SMTP
+  is the operator's to configure.

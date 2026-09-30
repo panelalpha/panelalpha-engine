@@ -1,0 +1,65 @@
+# Compose-replace: the repo's Dockerfile is a full source build (Go + npm).
+# This runs the official rootless release image with install locked, secrets
+# from ~/.panelalpha and the admin created before the port is published.
+services:
+  # One-shot: migrates and creates the admin (see init.sh), then exits 0.
+  init:
+    image: codeberg.org/forgejo/forgejo:16.0.5-rootless
+    restart: "no"
+    env_file:
+      # SECRET_KEY, INTERNAL_TOKEN and both JWT secrets, generated once.
+      - ../.panelalpha/forgejo/secrets.env
+      # Admin login, read only by init.
+      - ../.panelalpha/forgejo/admin.env
+    # Applied to app.ini by the image's environment-to-ini on every start.
+    environment: &forgejo-env
+      FORGEJO__server__ROOT_URL: ${PA_PUBLIC_URL}/
+      FORGEJO__server__DOMAIN: ${PA_PUBLIC_HOST}
+      FORGEJO__server__HTTP_PORT: "3000"
+      # Port 22 is not reachable on an account: no SSH clone URLs, no SSH server.
+      FORGEJO__server__DISABLE_SSH: "true"
+      FORGEJO__server__START_SSH_SERVER: "false"
+      FORGEJO__database__DB_TYPE: sqlite3
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+      FORGEJO__mailer__ENABLED: "false"
+    volumes:
+      # app.ini, SQLite database, repositories, LFS, avatars; survives redeploys.
+      - forgejo-data:/var/lib/gitea
+      - ./panelalpha/forgejo:/pa:ro
+    command: ["/bin/sh", "/pa/init.sh"]
+    mem_limit: 512m
+
+  app:
+    image: codeberg.org/forgejo/forgejo:16.0.5-rootless
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - ../.panelalpha/forgejo/secrets.env
+    environment: *forgejo-env
+    volumes:
+      - forgejo-data:/var/lib/gitea
+    ports:
+      - "8000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/api/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # `up -d` runs without --wait (engine#204); this blocks it until Forgejo answers.
+  ready:
+    image: codeberg.org/forgejo/forgejo:16.0.5-rootless
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  forgejo-data: {}

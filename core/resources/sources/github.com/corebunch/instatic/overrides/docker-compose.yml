@@ -1,0 +1,44 @@
+# The repo's docker-compose.yml is a dev Postgres and its Dockerfile build is
+# OOM-killed (`tsc -b`). This is upstream's image-pull SQLite install
+# (compose.prod.yml + compose.sqlite.yml) on the current release's image.
+services:
+  app:
+    image: ghcr.io/corebunch/instatic:0.0.20
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/instatic/secrets.env
+    environment:
+      PORT: "3001"
+      DATABASE_URL: sqlite:/app/data/cms.db
+      UPLOADS_DIR: /app/uploads
+      STATIC_DIR: /app/dist
+      # TLS ends at the proxy: the CSRF check needs the public origin, and the
+      # client IP is the nearest untrusted X-Forwarded-For hop (as compose.tls.yml).
+      PUBLIC_ORIGIN: ${PA_PUBLIC_URL}
+      TRUSTED_PROXY_CIDRS: 172.16.0.0/12
+    volumes:
+      - data:/app/data
+      - uploads:/app/uploads
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "bun", "run", "server/healthcheck.ts"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 30
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once the app answers (engine#204).
+  ready:
+    image: ghcr.io/corebunch/instatic:0.0.20
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  uploads: {}

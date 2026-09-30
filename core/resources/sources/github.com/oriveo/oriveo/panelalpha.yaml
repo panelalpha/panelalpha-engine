@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Oriveo's web client is a Next.js 16 bring-your-own-key AI chat app whose
+  route handlers relay requests to model providers; keys and chats live in the
+  browser, there is no account and no database. The repository root holds the
+  iOS, Android and macOS clients beside web/, with no root package.json, so a
+  plain deploy detects nothing and serves the placeholder.
+
+  web/ is an npm workspace (apps/app is the Next app, packages/* its
+  libraries). The shipped Next.js recipe runs with app_root: web and its
+  commands spelled out for that layout: npm ci and upstream's own `build:app`
+  script in web/, and `next start -H 0.0.0.0` in apps/app (upstream's start
+  script binds 127.0.0.1:3001 only). `extends: nextjs` + `app_root: web` alone
+  should be enough once engine#367 is fixed; until then the {{js.*}} commands
+  stay literal under an app_root, hence the explicit commands. Every setting
+  in web/.env.example is optional.
+extends: nextjs
+# web/ holds package.json (workspaces), package-lock.json and .nvmrc. The
+# host compile runs at the repository root with install and build chained in
+# one shell, hence the `cd web` subshells below.
+app_root: web
+output_directory: web/apps/app/.next
+commands:
+  - id: npm-install
+    stage: build
+    role: dependencies
+    # The host compile checks for node_modules at the repository root.
+    run: (cd web && npm ci --no-audit --no-fund) && ln -sfn web/node_modules node_modules
+  - id: next-build
+    stage: build
+    run: (cd web && npm run build:app)
+  # The container mounts web/ (app_root) at /app. Its own id: a command named
+  # `serve` is replaced by the base recipe's unresolved {{js.start}}.
+  - id: oriveo-serve
+    stage: start
+    serve: true
+    run: cd apps/app && ../../node_modules/.bin/next start -H 0.0.0.0 -p 3000

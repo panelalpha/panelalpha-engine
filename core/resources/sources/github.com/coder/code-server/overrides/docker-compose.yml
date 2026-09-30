@@ -1,0 +1,19 @@
+# Compose-replace: the repository has no compose file and builds from source
+# (VS Code submodule, native modules). Runs the published release image.
+services:
+  app:
+    image: codercom/code-server:4.139.1
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Empty keeps upstream's default: a generated password in
+      # ~/.config/code-server/config.yaml.
+      PASSWORD: ${PASSWORD:-}
+    volumes:
+      # Home holds the config (with the password), extensions and the workspace.
+      - coder-home:/home/coder
+    mem_limit: 2g
+
+volumes:
+  coder-home: {}

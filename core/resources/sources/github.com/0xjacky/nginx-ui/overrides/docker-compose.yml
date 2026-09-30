@@ -1,0 +1,42 @@
+# Compose-replace: the repo has no deployment compose, and a source build needs
+# the Vue frontend built first. Runs the published image of the current release.
+services:
+  app:
+    image: uozi/nginx-ui:v2.8.1
+    restart: unless-stopped
+    ports:
+      # The bundled nginx on :80 proxies the UI (127.0.0.1:9000) and the sites it manages.
+      - "8080:80"
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      # nginx config the UI edits. Starts empty (nocopy) like upstream's bind mount,
+      # so the image's init-config seeds it with the UI's own proxy on :80.
+      - type: volume
+        source: nginx-conf
+        target: /etc/nginx
+        volume:
+          nocopy: true
+      # The UI's app.ini, SQLite database and one-time install secret.
+      - nginx-ui-data:/etc/nginx-ui
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op: `compose up -d` returns once the UI answers through the bundled nginx.
+  ready:
+    image: uozi/nginx-ui:v2.8.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  nginx-conf: {}
+  nginx-ui-data: {}

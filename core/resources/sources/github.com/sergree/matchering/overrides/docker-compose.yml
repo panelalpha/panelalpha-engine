@@ -1,0 +1,32 @@
+# Compose-replace: the repo is the matchering library; upstream's DOCKER.md
+# runs the Matchering WEB image, which this pins to its current release.
+services:
+  app:
+    image: sergree/matchering-web:0.1.7
+    restart: unless-stopped
+    ports:
+      - "8360:8360"
+    volumes:
+      # SQLite database plus uploaded and mastered tracks.
+      - mgw-data:/app/data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8360/', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    # Mastering loads whole tracks into memory; upstream asks for 4 GB hosts.
+    mem_limit: 1536m
+
+  # No-op: `compose up -d` returns once the web app answers.
+  ready:
+    image: sergree/matchering-web:0.1.7
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  mgw-data: {}

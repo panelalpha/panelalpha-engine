@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LanguageTool, the multilingual grammar and style checker, as its HTTP API
+  server (/v2/check, /v2/languages) for the browser, office and editor
+  add-ons. It has no web UI of its own. The repository is the Maven
+  multi-module source; the engine's Java strategy built it for five minutes
+  and then nothing answered on a port.
+
+  Upstream publishes no image and its README points to community images; this
+  recipe runs the first one listed there, meyay/languagetool, at the tag of the
+  current release (LanguageTool 6.8, image revision 6.8-11), on :8081. The
+  fastText language-identification model is downloaded on first start into
+  the fasttext volume. The optional n-gram data (several GB per language) is
+  not downloaded. The JVM heap is the image default (-Xmx1536m).

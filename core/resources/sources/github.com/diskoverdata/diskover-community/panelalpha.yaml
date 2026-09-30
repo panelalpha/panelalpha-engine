@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Diskover Community Edition, the file system indexer and storage analytics
+  web UI (PHP diskover-web plus the Python crawler) on Elasticsearch.
+
+  The repository holds the two components in diskover/ and diskover-web/ with
+  no index.php at the root, so a plain deploy served a 403. This recipe runs
+  the published linuxserver/diskover image of the current release (2.3.5,
+  web UI on :80, crawler and crontab inside) with Elasticsearch 7.17 as a
+  sidecar, as linuxserver's compose does; diskover's client library is 7.13,
+  so 7.x is the line it talks to. Elasticsearch runs single-node without
+  security on the account's private network, heap 1 GB. /config (settings
+  SQLite database, crontab), /data (the default crawl root) and the index
+  data are on named volumes. A `ready` gate makes the deploy finish only once
+  Elasticsearch is green/yellow and the web UI answers.
+
+  First run is upstream's: the login page with diskover's documented default
+  account; no index exists until a crawl is run (crontab in /config, or
+  diskover.py inside the container).

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ChiefOnboarding, employee onboarding platform (Django). A plain deploy
+  builds the checkout with the django recipe and the container never answers:
+  the settings require SECRET_KEY and DATABASE_URL, and the repository's own
+  compose is a development stack (Dockerfile-dev, source bind mount, S3
+  emulator). This recipe runs upstream's docs/deployment/docker.md stack on
+  the release image chiefonboarding/chiefonboarding:v2.5.0 (gunicorn plus the
+  django-q scheduler under supervisord) with Postgres 17 on a named volume.
+  hooks/prepare.sh generates SECRET_KEY and the database password once into
+  ~/.panelalpha/chiefonboarding/chief.env. The login lockout reads X-Real-IP
+  (the engine vhost peer) instead of the spoofable leftmost X-Forwarded-For
+  entry. File uploads need S3-compatible
+  object storage (AWS_* variables), as upstream documents; the app starts
+  and runs without it. First run is upstream's: the first visit creates the
+  administrator account.

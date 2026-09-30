@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Prometheus, the monitoring system and time series database, with its web UI
+  for querying and alerting on :9090. The repository has no compose file and
+  its Dockerfile only copies prebuilt binaries from .build/, so the engine built
+  it as a plain Go app, which exits at once looking for prometheus.yml. This
+  recipe runs the official prom/prometheus image of the current release
+  (v3.15.0) with its bundled default configuration (Prometheus scraping
+  itself). The configuration directory and the TSDB are on named volumes, so a
+  prometheus.yml edited in the account and the collected data survive
+  redeploys.

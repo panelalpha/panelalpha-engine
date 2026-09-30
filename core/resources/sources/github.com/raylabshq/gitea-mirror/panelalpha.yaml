@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gitea Mirror copies GitHub repositories, issues and wikis into a Gitea or
+  Forgejo instance on a schedule (Bun/Astro, SQLite).
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repo's compose builds its Dockerfile
+  and points the auth URLs at localhost:4321. This recipe runs the published
+  image ghcr.io/raylabshq/gitea-mirror pinned to the current release v3.40.3,
+  with /app/data (database and the secrets the entrypoint generates) on a
+  named volume. Only the app service publishes a port.
+
+  ADMIN SEEDED BEFORE THE PORT OPENS. With no users the site shows "Setup
+  Admin Account" and the first visitor's sign-up becomes the admin; the app
+  has no env or CLI to create one. A one-shot `init` service on the same
+  volume starts the app bound to 127.0.0.1 inside its own container (no
+  published port), signs the admin up through the app's own endpoint
+  POST /api/auth/sign-up/email with a login generated once into
+  ~/.panelalpha/giteamirror (credentials.txt there), then stops it. It does
+  nothing once the database has a user, so a changed password survives a
+  redeploy. The app service depends on `init` completing, and
+  AUTH_ALLOW_SIGNUP=false makes the sign-up endpoint answer 403 once an
+  account exists. HEADER_AUTH_ENABLED is pinned to false: nothing sits in
+  front of the app to set trusted identity headers.
+
+  BETTER_AUTH_SECRET and ENCRYPTION_SECRET are set empty on purpose, which
+  makes the entrypoint generate them into the data volume once (the repo's
+  .env.example value is a public placeholder the entrypoint does not catch).
+  GitHub and Gitea URLs and tokens are the user's runtime configuration,
+  entered in the app after login.

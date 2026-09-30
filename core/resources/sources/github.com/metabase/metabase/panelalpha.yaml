@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Metabase is a business-intelligence and dashboard server: one JVM process
+  (Clojure uberjar) on port 3000 that keeps its own application database
+  (users, questions, dashboards, connection details) in H2 by default, or in
+  PostgreSQL/MySQL.
+
+  OFFICIAL IMAGE, NOT A SOURCE BUILD. The repository's root Dockerfile builds
+  the uberjar and the frontend from source (JDK, Clojure CLI, bun, a full
+  bin/build.sh) and has no compose file. The recipe replaces that with
+  overrides/docker-compose.yml running upstream's published OSS image of the
+  current release, docker.io/metabase/metabase:v0.63.18 (not the enterprise
+  metabase/metabase-enterprise image).
+
+  POSTGRES, NOT H2. Upstream documents the embedded H2 file as unsuitable for
+  production, so the application database is postgres:16-alpine on the pgdata
+  volume. hooks/prepare.sh writes the database password,
+  MB_ENCRYPTION_SECRET_KEY (encrypts stored connection details) and the admin
+  password once to ~/.panelalpha/metabase/ (0600 in 0700) with a
+  credentials.txt note. MB_SITE_URL is the account's public URL. The JVM heap
+  is capped with JAVA_OPTS=-Xmx1g inside a 1.75 GB container (the JVM
+  measured ~1.35 GB resident).
+
+  CLOSED FIRST RUN. Metabase's setup wizard is first-visitor-wins: until the
+  first user exists, anyone can read the setup token from
+  /api/session/properties and POST /api/setup to become admin. A one-shot
+  `setup` service boots Metabase with MB_JETTY_HOST=127.0.0.1 (unreachable
+  from outside the container), runs the migrations, creates the admin
+  (admin@<domain>, or MB_ADMIN_EMAIL) through /api/setup with the generated
+  password, stops, and records a marker on the mb-state volume. The public
+  `app` service starts only after it completes, and a `ready` gate makes the
+  deploy finish only when /api/health answers. Metabase has no open sign-up;
+  further users are invited by the admin.

@@ -1,0 +1,33 @@
+# The repo's Dockerfile needs web clients built by the release pipeline, so
+# this runs the official image of the current release on a named volume.
+services:
+  app:
+    image: ghcr.io/donkie/spoolman:0.27.0
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      # spoolman.db and automatic backups.
+      - data:/home/app/.local/share/spoolman
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Spoolman answers.
+  ready:
+    image: ghcr.io/donkie/spoolman:0.27.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

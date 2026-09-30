@@ -1,0 +1,28 @@
+# The repo Dockerfile's Vue build OOMs; this runs the release image instead.
+services:
+  app:
+    image: synclounge/synclounge:5.2.35@sha256:f3e57c1b8734d9a49a572f96f5da64ce909f6ba6f52b70b4f08de96feb9fee3e
+    restart: unless-stopped
+    env_file:
+      # The project's environment variables (config/defaults.js keys).
+      - path: .env
+        required: false
+    ports:
+      - "8088:8088"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8088/config.json"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once SyncLounge answers.
+  ready:
+    image: synclounge/synclounge:5.2.35@sha256:f3e57c1b8734d9a49a572f96f5da64ce909f6ba6f52b70b4f08de96feb9fee3e
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m

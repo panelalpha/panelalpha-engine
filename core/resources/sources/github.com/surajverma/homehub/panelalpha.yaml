@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  HomeHub is a no-login family dashboard (shopping list, chores, notes,
+  calendar, file sharing): a Flask app served by gunicorn on :5000 with a
+  SQLite database.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repository's compose.yml bind-mounts
+  ./config.yml, which the repository does not ship (only config-example.yml),
+  so Docker creates a directory there and the app crash-loops with
+  "IsADirectoryError: /app/config.yml". Its other bind mounts would put the
+  database and uploads in ~/project, which every deploy empties. This recipe
+  runs the published ghcr.io/surajverma/homehub image of the current release
+  (0.2.4) with data, uploads, media and pdfs on named volumes.
+
+  hooks/prepare.sh copies upstream's config-example.yml to
+  ~/.panelalpha/homehub/config.yml once (the README's first step) and
+  generates SECRET_KEY into ~/.panelalpha/homehub/app.env, so sessions
+  survive a restart. Edit that config.yml (name, family members, optional
+  site password, features) and redeploy to apply it.

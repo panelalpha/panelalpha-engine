@@ -1,0 +1,62 @@
+# Compose-replace: the repo's compose.yaml builds the Dockerfile, whose default
+# target packages prebuilt release binaries that are not in the checkout. This is
+# upstream's examples/compose.yml on the published release image.
+services:
+  app:
+    image: docker.io/pascalebeier/hitkeep:2.13.18
+    restart: unless-stopped
+    env_file:
+      # HITKEEP_JWT_SECRET, generated once by hooks/prepare.sh.
+      - ../.panelalpha/hitkeep/secret.env
+    environment:
+      HITKEEP_PUBLIC_URL: ${PA_PUBLIC_URL}
+      # As upstream's example: forwarded headers are not trusted unless set.
+      HITKEEP_TRUSTED_PROXIES: ${HITKEEP_TRUSTED_PROXIES:-}
+      HITKEEP_DB_PATH: /var/lib/hitkeep/data/hitkeep.db
+      HITKEEP_DATA_PATH: /var/lib/hitkeep/data
+      HITKEEP_ARCHIVE_PATH: /var/lib/hitkeep/archive
+      HITKEEP_BACKUP_PATH: /var/lib/hitkeep/backups
+      HITKEEP_BACKUP_INTERVAL: ${HITKEEP_BACKUP_INTERVAL:-60}
+      HITKEEP_BACKUP_RETENTION: ${HITKEEP_BACKUP_RETENTION:-24}
+      HITKEEP_SPAM_FILTER_PATH: /var/lib/hitkeep/data/spam-filter.json
+      HITKEEP_MAIL_HOST: ${HITKEEP_MAIL_HOST:-}
+      HITKEEP_MAIL_PORT: ${HITKEEP_MAIL_PORT:-587}
+      HITKEEP_MAIL_USERNAME: ${HITKEEP_MAIL_USERNAME:-}
+      HITKEEP_MAIL_PASSWORD: ${HITKEEP_MAIL_PASSWORD:-}
+      HITKEEP_MAIL_ENCRYPTION: ${HITKEEP_MAIL_ENCRYPTION:-tls}
+      HITKEEP_MAIL_FROM_ADDRESS: ${HITKEEP_MAIL_FROM_ADDRESS:-hitkeep@localhost}
+      HITKEEP_MAIL_FROM_NAME: ${HITKEEP_MAIL_FROM_NAME:-HitKeep}
+    volumes:
+      - data:/var/lib/hitkeep/data
+      - archive:/var/lib/hitkeep/archive
+      - backups:/var/lib/hitkeep/backups
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # Distroless image: the binary's own probe of /healthz.
+      test: ["CMD", "hitkeep", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # First boot runs ~150 migrations and backfills: ~110s before it listens.
+      start_period: 300s
+      start_interval: 3s
+    # DuckDB sizes its cache to half the container limit (floor 1 GiB).
+    mem_limit: 2g
+
+  # `up -d` returns only once HitKeep is healthy.
+  ready:
+    image: docker.io/pascalebeier/hitkeep:2.13.18
+    restart: "no"
+    command: ["--version"]
+    env_file:
+      - ../.panelalpha/hitkeep/secret.env
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 256m
+
+volumes:
+  data: {}
+  archive: {}
+  backups: {}

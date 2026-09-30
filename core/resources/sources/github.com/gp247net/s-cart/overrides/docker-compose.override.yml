@@ -15,6 +15,13 @@
 # rather than leaving them for this file to fight with.
 services:
   app:
+    # ~/project is emptied on every deploy; ~/.panelalpha is not. Uploads (the
+    # `public` and `gp247` disks, served via public/storage) and the admin
+    # password note live there. Sources are relative to ~/project; prepare.sh
+    # creates them as the account user first.
+    volumes:
+      - ../.panelalpha/scart:/panelalpha
+      - ../.panelalpha/scart/uploads:/app/storage/app/public
     # Two requests, and the second is the one that proves anything.
     #
     # The install stage does all the real work before Apache binds: waiting for

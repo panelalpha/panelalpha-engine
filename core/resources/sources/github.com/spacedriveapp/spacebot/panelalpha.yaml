@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Spacebot is a self-hosted multi-agent AI platform with its own web UI and
+  API on :19898 (Rust). The plain deploy builds the repo's Dockerfile, a
+  `cargo build --release` with LTO that is OOM-killed inside a 4096 MB
+  account (BuildKit ResourceExhausted, reported as "Rust code does not
+  compile", engine#353).
+
+  This recipe runs the image upstream publishes for the current release,
+  ghcr.io/spacedriveapp/spacebot:v0.5.0, as upstream's Docker docs do. Nothing
+  is built. /data (config.toml written by the image's entrypoint on first
+  start, agents, SQLite/LanceDB, embedding cache) is on a named volume. LLM and
+  messaging keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY,
+  DISCORD_BOT_TOKEN, ...) are optional project environment variables;
+  providers can also be set up in the web UI.

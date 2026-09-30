@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  qBittorrent, the BitTorrent client, as qbittorrent-nox with its Web UI. The
+  repository is the C++/Qt source with no Dockerfile or compose, and a plain
+  deploy fell back to the PanelAlpha placeholder page. This recipe runs the
+  official qbittorrentofficial/qbittorrent-nox image of the current release
+  (5.2.4) with the Web UI on port 8080 and /config and /downloads on named
+  volumes. The image only starts once its legal notice is confirmed, which is
+  the customer's decision: the project env var QBT_LEGAL_NOTICE=confirm is
+  required, and a one-shot check fails the deploy with a message naming it.
+  Peers can only be reached outbound: the torrenting port (6881) is not
+  published by the account.

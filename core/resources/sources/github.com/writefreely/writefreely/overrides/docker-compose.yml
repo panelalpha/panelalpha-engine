@@ -1,0 +1,22 @@
+# The repo's compose runs writeas/writefreely:latest (last pushed 2021) with a
+# config.ini nothing creates, so the app restart-loops. This runs the official
+# image of the newest published release with a config, keys and a SQLite
+# database on a volume.
+services:
+  app:
+    image: ghcr.io/writefreely/writefreely:v0.17.1
+    restart: unless-stopped
+    # Starts as root only to prepare /data; the script drops to `daemon`.
+    user: root
+    entrypoint: ["/bin/sh", "/panelalpha-writefreely-start.sh"]
+    environment:
+      WF_HOST: ${PA_PUBLIC_URL}
+    volumes:
+      - data:/data
+      - ./panelalpha-writefreely-start.sh:/panelalpha-writefreely-start.sh:ro
+    ports:
+      - "8080:8080"
+    mem_limit: 256m
+
+volumes:
+  data: {}

@@ -1,0 +1,60 @@
+# Compose-replace: docker/docker-compose.yml mounts ${PWD}/sharry.conf (the
+# caller's cwd, a directory here), runs :latest and enables a fixed admin:admin
+# login. This runs the current release beside PostgreSQL, as upstream's does.
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file:
+      # POSTGRES_PASSWORD, generated once by hooks/prepare.sh.
+      - ../.panelalpha/sharry/db.env
+    environment:
+      POSTGRES_USER: sharry
+      POSTGRES_DB: sharry
+    volumes:
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -U sharry -d sharry"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 256m
+
+  app:
+    image: eikek0/sharry:v1.16.0
+    restart: unless-stopped
+    command: ["/opt/sharry.conf"]
+    env_file:
+      - ../.panelalpha/sharry/db.env
+    environment:
+      # Read by sharry.conf; links and cookies are built from the base URL.
+      SHARRY_BASE_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - ./sharry.conf:/opt/sharry.conf:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9090/api/v2/open/info/version"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  # `up -d` runs without --wait (engine#204); this blocks it until Sharry answers.
+  ready:
+    image: postgres:18-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  # Accounts, shares and uploaded files (Sharry's default store is the database).
+  db_data: {}

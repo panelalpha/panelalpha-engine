@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SearXNG is a privacy-respecting metasearch engine: a Flask app served by
+  granian on :8080 that queries other search engines and shows the merged
+  results, with Valkey backing its bot protection (the limiter). It stores no
+  user accounts or private data, so a public, login-free instance is the
+  intended shape.
+
+  SEED THE OFFICIAL IMAGE, DO NOT BUILD. The repository is the source tree
+  (root requirements.txt, package.json and go.mod), so detection builds it as
+  a plain Python app with no server and the site serves the engine
+  placeholder. Upstream's deployment is container/docker-compose.yml running
+  docker.io/searxng/searxng plus Valkey; this recipe runs the same pair,
+  pinned to the current release tag 2026.9.25-12f8b6515.
+
+  CONFIGURED AS A PUBLIC INSTANCE. files/panelalpha/searxng/settings.yml is
+  mounted read-only as /etc/searxng: server.public_instance forces the
+  limiter, the link_token check and the image proxy (upstream's settings for
+  an instance on the open internet) and makes SearXNG refuse to start without
+  Valkey; search.formats is html only, so the JSON/CSV/RSS API is not open to
+  scrapers. limiter.toml trusts X-Forwarded-For only from the private ranges
+  the engine's proxy chain uses, so each visitor is rate limited on their own
+  address instead of all sharing the proxy's.
+
+  SECRETS. server.secret_key comes from SEARXNG_SECRET, generated once by
+  hooks/prepare.sh into ~/.panelalpha/searxng/secret.env (0600 in 0700) and
+  reused on every redeploy, so the upstream placeholder "ultrasecretkey" is
+  never in effect. server.base_url is the account's public URL. A `ready`
+  gate makes the deploy finish only after /healthz answers.

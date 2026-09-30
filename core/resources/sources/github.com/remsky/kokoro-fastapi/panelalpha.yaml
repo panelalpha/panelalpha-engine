@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kokoro-FastAPI, an OpenAI-compatible text-to-speech server for the Kokoro-82M
+  model (/v1/audio/speech, /v1/audio/voices) with a web player at /web/
+  (Python/FastAPI, port 8880). The repository's root has no compose file or
+  Dockerfile and no app.py/main.py: the plain deploy lands on the generic
+  Python strategy, which cannot work out the start command
+  (`api.src.main:app`), installs the CUDA torch stack on the host and then
+  crash-loops. Upstream ships the app as prebuilt images from
+  docker/cpu/Dockerfile.optimized, with the model downloaded at build time.
+
+  This recipe runs the current release image
+  ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.0 (upstream's documented CPU
+  `docker run`) on port 8880 with a 2 GB memory cap, 2 CPUs with
+  OMP_NUM_THREADS=2 (inference is CPU-bound, and torch otherwise sizes its
+  thread pool from the host's cores and thrashes the quota) and a `ready` gate on
+  /health, which answers only once the model is loaded. It keeps no data.
+  Upstream's settings (docs/configuration.md) are project env vars.

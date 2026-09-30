@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OctoPrint, a web interface for controlling consumer 3D printers (Python /
+  Tornado), port 80 in the container, all state in /octoprint.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repository is the Python package
+  source; the engine's python strategy builds it but finds no start command
+  and serves its placeholder page. This recipe runs upstream's published
+  octoprint/octoprint image of the current release (1.11.8) with /octoprint
+  (config, users, uploads, plugins) on a named volume. OctoPrint's own
+  first-run setup wizard is left as upstream ships it.
+
+  A hosted account has no serial or USB device, so OctoPrint cannot drive a
+  locally attached printer; it can still manage files and reach networked
+  printers through its plugins. The optional webcam streamer is not enabled.

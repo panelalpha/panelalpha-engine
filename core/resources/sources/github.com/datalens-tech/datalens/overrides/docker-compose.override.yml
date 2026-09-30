@@ -1,0 +1,9 @@
+# Fewer API workers than upstream's 4 (uwsgi) and 5 (gunicorn): the full stack
+# then idles under ~2 GB and fits a 2500 MB account.
+services:
+  control-api:
+    environment:
+      BI_API_UWSGI_WORKERS_COUNT: 2
+  data-api:
+    environment:
+      GUNICORN_WORKERS_COUNT: 2

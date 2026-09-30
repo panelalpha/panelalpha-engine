@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Open Archiver, a self-hosted email archive with full-text search (Node
+  backend, workers and SvelteKit frontend in one image on :3000, PostgreSQL,
+  Valkey, Meilisearch, Apache Tika). The repository's docker-compose.yml runs
+  the published image but reads every setting from a .env the operator is
+  meant to write by hand, so a plain deploy starts with no DATABASE_URL and
+  the migration step exits.
+
+  This recipe runs upstream's compose on logiclabshq/open-archiver:v0.6.0
+  (the current release) with the same PostgreSQL 17, Valkey 8, Meilisearch
+  v1.38 and Tika 3.2.2 images. The prepare hook generates the database,
+  Valkey and Meilisearch passwords, JWT_SECRET and ENCRYPTION_KEY once into
+  ~/.panelalpha/openarchiver, since stored ingestion credentials are
+  unreadable under a different key. The archive, database, search index and
+  Valkey data are on named volumes. APP_URL/ORIGIN are the site's address.
+  First run is upstream's: the setup page creates the first admin.
+
+  NGINX FRONT (engine#323). The engine's account vhost sends `Connection:
+  upgrade` on every request; the app's SvelteKit /api proxy forwards that
+  header to Node's fetch(), which rejects it ("invalid connection header"),
+  so every API call, setup and login included, answers 500. A small
+  nginx:1-alpine `web` service (files/panelalpha/front.conf) sends `upgrade`
+  only when the client sent an Upgrade header and is the only service
+  publishing a port (3000). It can be dropped once engine#323 is fixed.

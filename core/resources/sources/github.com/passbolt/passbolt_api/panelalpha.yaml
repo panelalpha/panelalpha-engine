@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Passbolt CE, the team password manager. A plain deploy of this checkout
+  takes the shipped php platform, whose install stage dies with
+  "ProcessUserService::getName(): Return value must be of type string, null
+  returned": the account uid has no passwd entry and Passbolt resolves its
+  process user with posix_getpwuid(). This recipe runs upstream's release
+  image instead (passbolt/passbolt:5.16.0-1-ce-non-root, the checkout's own
+  version) with MariaDB 11.4, as passbolt_docker's docker-compose-ce.yaml
+  does. The image generates the server GPG key and JWT keys on first boot
+  into named volumes and installs or migrates the schema itself.
+  hooks/prepare.sh generates the database password once into
+  ~/.panelalpha/passbolt/db.env. First run is left as upstream ships it: the
+  first administrator is registered with `cake passbolt register_user`.

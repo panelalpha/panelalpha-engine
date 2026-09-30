@@ -1,0 +1,56 @@
+# Compose-replace: the repository's docker-compose.yml builds the image from
+# source (a ~5 minute PHP extension compile). This runs the published image of
+# the current release with the same named volume, and closes the setup wizard:
+#   - var/data (SQLite with the admin and the *arr/qBittorrent API keys,
+#     generated APP_SECRET/MERCURE_JWT_SECRET, sessions) on a named volume
+#   - the admin is created and setup marked complete by `seed` BEFORE the app
+#     publishes its port, so /setup is never open to the first visitor
+services:
+  # The image's own /init (s6: migrations, FrankenPHP) with the seed script as
+  # its CMD; the container exits with the script's status. No published port.
+  # s6 starts the CMD with an empty environment; with-contenv restores it.
+  seed:
+    image: shoshuo/prismarr:1.2.0
+    restart: "no"
+    command: ["/command/with-contenv", "/bin/sh", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/prismarr/admin.env
+    volumes:
+      - prismarr_data:/var/www/html/var/data
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    mem_limit: 768m
+
+  prismarr:
+    image: shoshuo/prismarr:1.2.0
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      TZ: Etc/UTC
+      DEFAULT_URI: ${PA_PUBLIC_URL}
+    volumes:
+      - prismarr_data:/var/www/html/var/data
+    ports:
+      - "7070:7070"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:7070/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Prismarr answers.
+  ready:
+    image: shoshuo/prismarr:1.2.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      prismarr:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  prismarr_data: {}

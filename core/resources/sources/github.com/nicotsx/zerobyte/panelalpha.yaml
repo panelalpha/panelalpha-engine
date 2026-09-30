@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Zerobyte is a web UI for scheduling and monitoring Restic backups: one
+  published image (Bun server on :4096) with its SQLite database, repositories
+  and cache under /var/lib/zerobyte. It will not start without APP_SECRET. The
+  repo's compose.yaml is a development and e2e stack, so the plain deploy
+  builds the Dockerfile with .env.example's development paths and the e2e
+  services' settings and crash-loops on a missing migrations directory.
+
+  This recipe runs upstream's documented "simplified" setup from the current
+  release image (ghcr.io/nicotsx/zerobyte:v0.43.1): no SYS_ADMIN or /dev/fuse,
+  so NFS/SMB/WebDAV/SFTP shares cannot be mounted from the UI, while local
+  directories and every repository type (local, S3, GCS, Azure, rclone) work.
+  APP_SECRET is generated once by hooks/prepare.sh into
+  ~/.panelalpha/zerobyte/ (it encrypts stored repository passwords, so it must
+  survive redeploys), BASE_URL is the site's https address with TRUST_PROXY
+  as upstream's reverse-proxy guide says, and /var/lib/zerobyte is a named
+  volume. Everything else is upstream's default, including the first-run
+  sign-up of the admin account.

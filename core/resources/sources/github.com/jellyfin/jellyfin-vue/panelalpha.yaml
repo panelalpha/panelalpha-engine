@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Jellyfin Vue is a web client for a Jellyfin media server: a static Vue SPA
+  served by nginx on :80. It holds no data of its own; the visitor enters the
+  address of their Jellyfin server on first load, and the list of servers is
+  kept in the browser.
+
+  The repository is a pnpm workspace whose root package.json has no build or
+  start script (the app is packages/frontend) and there is no compose file,
+  so a plain deploy detects nothing and serves the PanelAlpha placeholder.
+  This recipe runs the image upstream publishes, jellyfin/jellyfin-vue, built
+  by upstream from packaging/docker/Dockerfile. Upstream ships only rolling
+  `unstable` builds (the last numbered tag, 0.3.1, is from 2023); the pinned
+  tag is the build of the current HEAD, unstable.2026-09-22.363446d.
+
+  Optional environment, read by the image's own setup.sh on start:
+  DEFAULT_SERVERS (comma-separated Jellyfin URLs to pre-fill),
+  DISABLE_SERVER_SELECTION=1, HISTORY_ROUTER_MODE=0 (hash routing).

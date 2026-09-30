@@ -21,10 +21,6 @@ cd ~/project
 #                        So writing one here is not a race with it; it is how
 #                        you win.
 #
-#    Guarded on the file, not on its contents: regenerating APP_KEY on a
-#    redeploy would invalidate every session and encrypted value the account
-#    has written, and an operator's own edits have to survive too.
-#
 #    APP_KEY is generated here, on the host, and not by `artisan key:generate`
 #    in the install stage — because by then it is too late. The generated
 #    service loads this file through `env_file:`, and Compose reads it when the
@@ -36,16 +32,36 @@ cd ~/project
 #      Illuminate\Encryption\MissingAppKeyException: No application encryption
 #      key has been specified.
 #
-#    with `printenv APP_KEY` in the container printing an empty line and
-#    `grep ^APP_KEY /app/.env` printing the key. Measured; that was the second
-#    thing wrong with this deploy after `migrate --force`.
-#
 #    base64:<32 raw bytes> is the only shape Laravel's Encrypter accepts for
 #    config/app.php's AES-256-CBC. Not hex, not a bare string.
+#
+# 2. Durable state. ~/project is /app and is emptied before every deploy, so
+#    the key, the SQLite database, storage/app (uploads, media) and the admin
+#    password record live in ~/.panelalpha/winter, mounted at /pa-data by the
+#    compose override. A key regenerated per deploy would invalidate every
+#    session and encrypted value; a database kept in storage/ was simply gone.
+STORE="${HOME}/.panelalpha/winter"
+mkdir -p "${STORE}/storage-app"
+chmod 700 "${HOME}/.panelalpha" "${STORE}"
+if [ ! -s "${STORE}/app.env" ]; then
+    (
+        umask 077
+        # An older deploy's key, when this checkout was not wiped.
+        if grep -q '^APP_KEY=base64:' .env 2>/dev/null; then
+            grep -m1 '^APP_KEY=' .env > "${STORE}/app.env"
+        else
+            printf 'APP_KEY=base64:%s\n' "$(openssl rand -base64 32)" > "${STORE}/app.env"
+        fi
+    )
+fi
+chmod 600 "${STORE}/app.env"
+
+# Guarded on the file, so an operator's edits survive a rebuild that does not
+# wipe. After a wipe it is rewritten, with the stored key.
 if [ ! -f .env ]; then
-    WINTER_APP_KEY="base64:$(openssl rand -base64 32)"
+    WINTER_APP_KEY=$(sed -n 's/^APP_KEY=//p' "${STORE}/app.env")
     sed -e 's|^DB_CONNECTION=.*|DB_CONNECTION=sqlite|' \
-        -e 's|^DB_DATABASE=.*|DB_DATABASE=/app/storage/database.sqlite|' \
+        -e 's|^DB_DATABASE=.*|DB_DATABASE=/pa-data/database.sqlite|' \
         -e 's|^APP_DEBUG=.*|APP_DEBUG=false|' \
         -e "s|^APP_KEY=.*|APP_KEY=${WINTER_APP_KEY}|" \
         .env.example > .env
@@ -55,26 +71,29 @@ if [ ! -f .env ]; then
     # different user, and a .env it cannot open is a .env that says mysql —
     # which brings the sidecar back.
     chmod 644 .env
-    echo "[winter] wrote .env: SQLite at storage/database.sqlite"
+    echo "[winter] wrote .env: SQLite at ~/.panelalpha/winter/database.sqlite"
 fi
 
-# 2. The SQLite file itself. Laravel 9 will not create it:
+# 3. The SQLite file itself. Laravel 9 will not create it:
 #
-#      Illuminate\Database\SQLiteConnector: Database file at path
-#      [/app/storage/database.sqlite] does not exist. Ensure this is an
-#      absolute path to the database.
+#      Illuminate\Database\SQLiteConnector: Database file at path [...] does
+#      not exist. Ensure this is an absolute path to the database.
 #
-#    and `winter:up` is the first thing to open it, so without this the
-#    install stage fails and the container restart-loops exactly as it did
-#    before this recipe existed. Empty is a valid SQLite database; the
-#    migration builds it.
-#
-#    storage/ is in the checkout already. Kept 664 rather than 600 because the
-#    engine walks the tree as a different user while working out the document
-#    root, and a file it cannot stat stops the deploy.
-mkdir -p storage
-if [ ! -f storage/database.sqlite ]; then
-    : > storage/database.sqlite
-    echo "[winter] created an empty storage/database.sqlite for winter:up"
+#    and `winter:up` is the first thing to open it. Empty is a valid SQLite
+#    database; the migration builds it. A database an older deploy left in
+#    storage/ (a rebuild that did not wipe) is moved over instead.
+if [ ! -f "${STORE}/database.sqlite" ]; then
+    if [ -s storage/database.sqlite ]; then
+        cp -p storage/database.sqlite "${STORE}/database.sqlite"
+    else
+        : > "${STORE}/database.sqlite"
+        echo "[winter] created an empty database.sqlite for winter:up"
+    fi
 fi
-chmod 664 storage/database.sqlite
+chmod 600 "${STORE}/database.sqlite"
+
+# 4. storage/app, seeded once from the checkout so its directory skeleton is
+#    there; the override mounts it over /app/storage/app.
+if [ -z "$(ls -A "${STORE}/storage-app")" ]; then
+    cp -a storage/app/. "${STORE}/storage-app/"
+fi

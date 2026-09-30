@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Loops, a federated (ActivityPub) short-video platform: Laravel on FrankenPHP
+  (serversideup/php) on :8080, with Horizon, the scheduler, MySQL and Redis.
+  The plain deploy reads the repo compose as a workstation file, runs the
+  generic Laravel strategy with upstream's .env.example (REDIS_PASSWORD=null)
+  against the kept Redis sidecar that requires a password, and every page
+  answers 500 with "NOAUTH Authentication required".
+
+  This recipe replaces the compose with upstream's docker-compose.yml and
+  DOCKER_COMPOSE_SETUP.md: the image is built once from the repo's own
+  Dockerfile (it compiles ffmpeg; about 10 minutes and needs a 4 GB memory
+  limit) and shared by the app, Horizon and the scheduler, with mysql:9 and
+  redis:8 as upstream pins them. APP_URL is the site's address; the other
+  settings are upstream's .env.docker.example. APP_KEY and the database and
+  Redis passwords are generated once by hooks/prepare.sh into
+  ~/.panelalpha/loops/. The image migrates on start (upstream's AUTORUN); a
+  one-shot init service then runs upstream's setup steps (admin settings
+  defaults once, passport:keys, app:ensure-boottime). Media (storage/), the
+  database and Redis are on named volumes. No account is created: register
+  the first user on the site or run `php artisan create-admin-account` in the
+  loops service.

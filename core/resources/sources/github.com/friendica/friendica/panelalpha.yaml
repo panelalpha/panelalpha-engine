@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Friendica is a federated social network server (ActivityPub, Diaspora,
+  OStatus) in PHP with MariaDB. The repository's default branch is the
+  2026.08 release candidate, and the plain PHP deploy serves it without
+  Friendica's .htaccess (shipped as .htaccess-dist) and without a database:
+  / redirects to /install, which answers Apache's 404.
+
+  This recipe runs the official friendica:2026.05-apache image (current stable
+  release) as upstream's docker stack does: the app, a cron worker running the
+  image's /cron.sh once Friendica is installed, and mariadb:11.8. The database
+  password is generated once by hooks/prepare.sh into ~/.panelalpha/friendica/.
+  The image installs itself on the first start (upstream's autoinstall) from
+  MYSQL_*, FRIENDICA_URL (the site's https address) and FRIENDICA_ADMIN_MAIL,
+  which the customer must set in the project's environment variables: a
+  one-shot check service fails the deploy naming it when it is missing. The web
+  installer is not an alternative here: it cannot see the generated database
+  password, and before install Friendica builds http:// links behind the TLS
+  proxy. After the deploy, register at /register with that e-mail address to
+  get the admin panel (upstream's flow); Friendica e-mails the new password,
+  so configure SMTP or set one with bin/console.php user password.
+  Code/config, uploads and the database
+  are on named volumes.

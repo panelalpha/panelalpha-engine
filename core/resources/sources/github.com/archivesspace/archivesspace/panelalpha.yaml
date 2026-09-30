@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ArchivesSpace is an archives management system: one JVM (JRuby) running
+  the backend API, the staff UI, the public UI, the indexer and OAI-PMH, on
+  MySQL and Solr.
+
+  COMPOSE-REPLACE FROM PUBLISHED IMAGES. The repository's docker-compose.yml
+  is a developer environment (Dev.dockerfile, source bind mount, test
+  databases). The recipe runs upstream's published images of the current
+  release, archivesspace/archivesspace:4.2.1 and archivesspace/solr:4.2.1,
+  with mysql:8.4, the way docker-compose-prod.yml does. An nginx service
+  routes as upstream's proxy/default.conf.docker.release: the public UI at /
+  and the staff UI at /staff/ (the proxy URLs are this site's address). The
+  MySQL passwords are generated once into ~/.panelalpha/archivesspace (0600
+  in 0700). Database, Solr index and app data live on named volumes. A
+  `ready` gate makes the deploy finish only once both UIs answer; the first
+  boot (migrations and the first index run) takes about 7 minutes.
+
+  MEMORY. docker-compose-prod.yml's sizes (2 GB app heap, 1 GB Solr heap, a
+  1 GB InnoDB buffer pool) pushed a 4096 MB account to its limit (3.78 GB
+  anonymous memory, still growing, while booting). The recipe uses the
+  launcher's own default heap (-Xmx1024m), a 512 MB Solr heap and a 256 MB
+  buffer pool. Measured after the first boot: app ~1.5 GB, Solr ~0.72 GB,
+  MySQL ~0.57 GB, 2.93 GB for the whole account. hooks/precheck.sh fails
+  the deploy below 3072 MB with a message saying so.
+
+  FIRST RUN AS UPSTREAM SHIPS IT. The staff login is admin / admin.

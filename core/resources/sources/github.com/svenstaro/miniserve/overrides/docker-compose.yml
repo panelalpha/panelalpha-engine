@@ -1,0 +1,31 @@
+# The repo builds a binary that refuses to start without a serve path. This runs
+# upstream's image of the current release, serving a named volume.
+services:
+  app:
+    image: docker.io/svenstaro/miniserve:0.35.0-alpine
+    restart: unless-stopped
+    command: ["--port", "8080", "/data"]
+    volumes:
+      - data:/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once miniserve answers.
+  ready:
+    image: docker.io/svenstaro/miniserve:0.35.0-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

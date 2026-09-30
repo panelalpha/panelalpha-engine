@@ -1,0 +1,35 @@
+# Compose-replace: the repo's compose is a dev stack (Prometheus, Pyroscope,
+# Grafana, a registry) around a Dockerfile that needs the UI and docs built
+# beforehand. Runs the published image of the current release instead.
+services:
+  app:
+    image: ghcr.io/smilyorg/photofield:v0.25.0
+    restart: unless-stopped
+    volumes:
+      # configuration.yaml and the cache databases.
+      - data:/app/data
+      # The working directory; each subdirectory is shown as a collection.
+      - photos:/app/photos
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 768m
+
+  # `compose up -d` returns only once Photofield answers.
+  ready:
+    image: ghcr.io/smilyorg/photofield:v0.25.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  photos: {}

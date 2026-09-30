@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  File Browser Quantum is a web file manager (a maintained fork of File
+  Browser): one Go binary with an embedded SQLite database, serving on :80.
+  The repository has no root manifest, so the engine detects nothing and
+  serves its placeholder; its only compose file (_docker/) is Playwright test
+  tooling. This recipe runs upstream's published image instead, pinned to
+  1.5.6-stable, the current stable line (upstream's 2.0.x tags are all
+  -beta).
+
+  The image's own config.yaml (served files under /srv, password login,
+  sign-up off) is used unchanged. /home/filebrowser/data (database and
+  config) and /srv (the files) are named volumes; the image runs as uid 1000
+  and /srv is root-owned in it, so a one-shot service chowns the fresh volume
+  before the app starts. First run is as upstream ships it.

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Rustrak, a lightweight Sentry-compatible error-tracking server with its web
+  dashboard (Rust, one container on :8080, SQLite). The repository's
+  docker-compose.yml requires SESSION_SECRET_KEY as `${SESSION_SECRET_KEY:?}`;
+  the engine fills that with a 48-character generated secret and Rustrak
+  refuses anything under 64 bytes, so the plain deploy restart-loops on
+  "SESSION_SECRET_KEY is 48 bytes, but at least 64 are required". This recipe
+  runs the same compose with the release image pinned
+  (rustrak/rustrak-server:v0.15.1), a 64-character session key generated once
+  into ~/.panelalpha/rustrak/ by hooks/prepare.sh, PUBLIC_URL set to the site's
+  address (it goes into every DSN) and /data (SQLite, source maps) on a named
+  volume. Registration is invite-only upstream: the first login is created from
+  the optional CREATE_SUPERUSER project variable (email:password), as the
+  upstream docs describe.

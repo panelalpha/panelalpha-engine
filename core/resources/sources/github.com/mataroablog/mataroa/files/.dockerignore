@@ -1,0 +1,7 @@
+# Keep the checkout's git metadata and env files out of the image (engine#420).
+.git
+.env
+.env.*
+.envrc
+.panelalpha
+docker-postgres-data

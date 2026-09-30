@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  phpList 3, newsletter and email-marketing manager. A plain deploy detects
+  PHP and serves the static landing page at /, but /lists/ and
+  /lists/admin/ answer 500 "Cannot connect to database": the source tree has
+  no database and no config. This recipe runs upstream's release image,
+  phplist/phplist:3.7.0 (built from the repository's Dockerfile.release),
+  with MariaDB 11.8; the image's own config.php reads the database settings
+  and PHPLIST_SECRET from the environment. PHPLIST_SECRET and the database
+  passwords are generated once into ~/.panelalpha/phplist; the database and
+  uploaded images are on named volumes. A small Apache config sets HTTPS=on
+  when the engine's proxy forwarded https (phpList builds its links from
+  $_SERVER['HTTPS']) and redirects / to /lists/admin/, since the image
+  serves nothing at /. The image's cron runs the queue
+  every minute. Outgoing mail goes through PHP mail() unless the project
+  sets MAILHOST (host:port of an SMTP relay). The first admin is created in
+  phpList's own web initialisation at /lists/admin/, as upstream ships it.

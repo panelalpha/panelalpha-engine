@@ -1,0 +1,13 @@
+# The repo has no compose file and no buildable root; this runs upstream's
+# published image of the current HEAD (upstream ships rolling unstable builds only).
+services:
+  app:
+    image: docker.io/jellyfin/jellyfin-vue:unstable.2026-09-22.363446d
+    restart: unless-stopped
+    environment:
+      DEFAULT_SERVERS: ${DEFAULT_SERVERS:-}
+      DISABLE_SERVER_SELECTION: ${DISABLE_SERVER_SELECTION:-0}
+      HISTORY_ROUTER_MODE: ${HISTORY_ROUTER_MODE:-1}
+    ports:
+      - "80:80"
+    mem_limit: 64m

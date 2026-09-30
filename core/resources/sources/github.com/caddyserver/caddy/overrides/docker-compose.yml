@@ -1,0 +1,27 @@
+# Compose-replace: the repository is Caddy's Go source, whose build is a CLI
+# that prints its help and exits. Runs the official image of the current release.
+services:
+  app:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      # Caddyfile and site root; seeded from the image on first start.
+      - caddy-etc:/etc/caddy
+      - caddy-site:/usr/share/caddy
+      # Certificates, autosaved JSON config and other state.
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    mem_limit: 256m
+
+volumes:
+  caddy-etc: {}
+  caddy-site: {}
+  caddy-data: {}
+  caddy-config: {}

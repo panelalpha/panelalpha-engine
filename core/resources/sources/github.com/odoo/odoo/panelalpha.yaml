@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Odoo, the open-source business suite (CRM, accounting, inventory, website):
+  a Python server with PostgreSQL. The repository is Odoo's source tree; the
+  plain deploy detects it as `python` and fails installing requirements.txt,
+  because psycopg2 is built from source and stops at "pg_config executable
+  not found" (and wkhtmltopdf is not a pip package at all). This recipe runs
+  the official odoo image of the repository's default branch (odoo:20.0) with
+  postgres:17, as the image's documentation does: the database, filestore,
+  extra addons and /etc/odoo (where Odoo saves the master password) on named
+  volumes; --http-interface=0.0.0.0 because Odoo 20 binds 127.0.0.1 by
+  default and the image's odoo.conf does not change that; --proxy-mode so
+  URLs come out on the account's https domain. The database password is
+  generated once by hooks/prepare.sh into ~/.panelalpha/odoo/. Odoo's
+  first-run behaviour (the database manager that creates the first database
+  and its admin) is left as upstream ships it.

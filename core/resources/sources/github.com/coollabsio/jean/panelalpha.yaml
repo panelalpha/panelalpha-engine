@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Jean, a browser-based workspace for AI coding agents (Claude, Codex,
+  OpenCode) over git worktrees, run as its headless server `jean-server`. A
+  plain deploy built the repository's Dockerfile.server, whose frontend stage
+  (`tsc && vite build`) was OOM-killed in a 2500 MB account before the Rust
+  build even started. This recipe runs upstream's published image of the
+  current release, ghcr.io/coollabsio/jean-server:v1.0.6, on port 3456 with
+  /home/jean (app data, repositories, CLI logins) on a named volume.
+
+  Jean always requires an access token. Upstream's Docker example sets
+  JEAN_TOKEN; the recipe generates one once into ~/.panelalpha/jean/token.env
+  (read it there to log in). Setting JEAN_TOKEN in the project's environment
+  variables replaces it.

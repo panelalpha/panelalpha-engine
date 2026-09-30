@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Zulip, the topic-threaded team chat server (Django, Tornado, PostgreSQL,
+  RabbitMQ, Redis, memcached).
+
+  The repository is the Django source tree, which reads its settings from
+  /etc/zulip rather than the environment; a plain deploy was detected as
+  `django` and never answered. This recipe follows upstream's docker-zulip
+  compose.yaml on the image of the current release,
+  ghcr.io/zulip/zulip-server:12.3-0, with upstream's datastores
+  (zulip/zulip-postgresql:14, rabbitmq:4.2, redis, memcached with SASL).
+  hooks/prepare.sh generates the datastore passwords and Django's secret key
+  once into ~/.panelalpha/zulip/zulip.env (0600 in 0700); docker-zulip
+  takes them as SECRETS_* variables instead of compose secrets.
+  SETTING_EXTERNAL_HOST is the account's host. TLS ends at the engine's
+  proxy, so the container serves HTTP and trusts forwarded headers from the
+  Docker bridge range (LOADBALANCER_IPS=172.16.0.0/12); Zulip's nginx uses
+  real_ip_recursive, so the client address is the hop the engine appended,
+  not a spoofable left-most X-Forwarded-For entry. The nofile ulimit is
+  lowered from upstream's 1048576 to the account's hard limit of 524288,
+  which runc otherwise refuses. Data, database and broker state are named
+  volumes. A `ready` gate makes the deploy finish only once /health answers;
+  the first boot runs the migrations (about 3 minutes). About 1.7 GB
+  resident in total.
+
+  First run is upstream's: the site shows "No organization found" until an
+  organization is created with the one-time link from
+  `manage.py generate_realm_creation_link` (docker-zulip's documented
+  step). Outgoing email (SETTING_EMAIL_HOST and friends) is left to the
+  customer.

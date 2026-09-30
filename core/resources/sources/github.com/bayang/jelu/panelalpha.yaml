@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Jelu, a read and to-read book tracker (Kotlin/Spring Boot, SQLite, Vue UI,
+  Calibre for metadata). The repository's Dockerfile only copies a jar built
+  beforehand by CI, and the Vue UI goes into that jar through a separate
+  Gradle task (copyWebDist). A plain deploy compiles the jar on the host
+  without the UI, so the site answers a Spring "Whitelabel Error Page" 404.
+
+  This recipe runs the published wabayang/jelu image of the current release
+  (0.87.3) on port 11111, with the database, images, imports and /config on
+  named volumes. The first user is created on the app's own first-run page.

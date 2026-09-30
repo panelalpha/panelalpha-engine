@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Zammad, a web-based helpdesk / ticketing system (Rails, PostgreSQL, Redis,
+  Memcached). The repository's Dockerfile is upstream's CI image build and
+  fails a plain deploy with "the required build argument $COMMIT_SHA is
+  missing".
+
+  This recipe runs upstream's own Docker deployment
+  (zammad/zammad-docker-compose) on the image of the current release,
+  ghcr.io/zammad/zammad:7.2.0-0016: init, railsserver, scheduler, websocket
+  and Zammad's nginx on port 8080, with postgres:17.11-alpine,
+  redis:8.10.2-alpine and memcached:1.6.45-alpine. Elasticsearch, which
+  upstream calls optional, is left out as in upstream's
+  disable-elasticsearch scenario (search then uses the database), and so is
+  the backup service. The PostgreSQL password is generated once into
+  ~/.panelalpha/zammad/. The first visit opens Zammad's own getting-started
+  wizard as upstream ships it. Attachments (/opt/zammad/storage), the
+  database and Redis are on named volumes and survive redeploys.

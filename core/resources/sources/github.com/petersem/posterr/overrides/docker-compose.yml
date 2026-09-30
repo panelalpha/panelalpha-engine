@@ -1,0 +1,52 @@
+# Compose-replace: the repo's compose builds from source with a Brisbane TZ and
+# ~/docker bind mounts. This runs the published release image behind a proxy.
+services:
+  # One-shot: seeds config/settings.json with the generated settings password,
+  # so the app never starts with the README's default in place.
+  init:
+    image: petersem/posterr:v1.21.18
+    restart: "no"
+    entrypoint: ["node", "/panelalpha/init.js"]
+    env_file:
+      - ../.panelalpha/posterr/admin.env
+    volumes:
+      - posterr-config:/usr/src/app/config
+      - ./panelalpha/posterr/init.js:/panelalpha/init.js:ro
+    mem_limit: 256m
+
+  app:
+    image: petersem/posterr:v1.21.18
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      TZ: Etc/UTC
+      NODE_ENV: production
+      BASEPATH: ""
+    volumes:
+      # settings.json (password, Plex/*arr tokens) and custom pictures survive redeploys.
+      - posterr-config:/usr/src/app/config
+      - posterr-custom:/usr/src/app/public/custom
+    mem_limit: 512m
+
+  proxy:
+    image: nginxinc/nginx-unprivileged:1.29-alpine
+    restart: unless-stopped
+    # user: is the account uid, set in the docker-compose.override.yml that
+    # hooks/prepare.sh writes, so nginx can read the 0600 htpasswd.
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./panelalpha/posterr/proxy.conf:/etc/nginx/conf.d/default.conf:ro
+      # The directory, not the file: a single-file bind mount is bound by inode.
+      - ../.panelalpha/posterr/auth:/etc/nginx/posterr-auth:ro
+    depends_on:
+      # The image's own HEALTHCHECK (GET / on :3000).
+      app:
+        condition: service_healthy
+    mem_limit: 48m
+
+volumes:
+  posterr-config: {}
+  posterr-custom: {}

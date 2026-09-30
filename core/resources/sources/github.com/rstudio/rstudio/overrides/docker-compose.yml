@@ -1,0 +1,37 @@
+# Compose-replace: the repository builds the IDE from source; its root
+# Dockerfile is a CI dispatcher. Runs the rocker image of RStudio Server.
+services:
+  app:
+    image: rocker/rstudio:4.6.1
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      # Empty keeps upstream's default: a random password printed in the log.
+      PASSWORD: ${PASSWORD:-}
+      # The account's user namespace maps uid 0 to 100000, which the image's
+      # "auto" check reads as rootless and then deletes the rstudio user.
+      RUNROOTLESS: "false"
+    volumes:
+      # The rstudio user's projects, settings and installed R packages.
+      - rstudio-home:/home/rstudio
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8787"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 2g
+
+  # No-op gate: `compose up -d` returns once rserver listens.
+  ready:
+    image: rocker/rstudio:4.6.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  rstudio-home: {}

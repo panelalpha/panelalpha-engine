@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Changerawr, a self-hosted changelog publishing app (Next.js + PostgreSQL).
+  The repository's docker-compose.yml builds Dockerfile.compose, whose
+  `next build` is killed for memory in a 4096 MB account, and adds an optional
+  AI tagger image with a 4 GB cap of its own. This recipe runs upstream's
+  published image ghcr.io/supernova3339/changerawr of the current release
+  (v1.0.7.4) with postgres:16-alpine, no tagger, data on named volumes and
+  secrets generated once into ~/.panelalpha/changerawr. The app's own setup
+  wizard is left as upstream ships it.

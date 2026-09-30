@@ -1,0 +1,21 @@
+# Compose-replace: upstream's compose runs on network_mode: host (for WOL
+# broadcasts) and publishes no port, so the engine's proxy cannot reach it, and
+# ./data sits in ~/project, which every deploy wipes.
+services:
+  app:
+    image: ghcr.io/seriousm4x/upsnap:5.7.2
+    restart: unless-stopped
+    # Upstream's cap_drop ALL + cap_add NET_RAW is left out: the engine strips
+    # cap_add but keeps cap_drop, which would remove NET_RAW (privileged ping,
+    # nmap scan). Docker's default capability set includes it.
+    environment:
+      UPSNAP_HTTP_LISTEN: "0.0.0.0:8090"
+    ports:
+      - "8090:8090"
+    volumes:
+      # PocketBase database (devices, users, settings).
+      - upsnap_data:/app/pb_data
+    mem_limit: 256m
+
+volumes:
+  upsnap_data: {}

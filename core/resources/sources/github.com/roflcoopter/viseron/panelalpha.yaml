@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Viseron is a self-hosted NVR with object, motion and face detection. Its
+  web UI (with a built-in config editor) is served on :8888 by nginx in front
+  of the Python backend, with PostgreSQL and go2rtc bundled in the same
+  container. The repository's docker/Dockerfile builds FROM ${GPAC_IMAGE} and
+  prebuilt base images selected by build args that only upstream's CI passes,
+  so the plain deploy fails at once ("base name (${GPAC_IMAGE}) should not be
+  blank").
+
+  This recipe runs upstream's published image of the current release,
+  roflcoopter/viseron:3.7.0 (amd64, CPU only), with /config (config.yaml and
+  the bundled database) and the recordings directories (/segments,
+  /snapshots, /thumbnails, /event_clips, /timelapse) on named volumes that
+  survive redeploys, and upstream's documented 1 GB /dev/shm. On first start
+  Viseron writes its example config.yaml; cameras are added in the UI's
+  config editor. Cameras must be reachable from the server (RTSP pulled
+  outbound); USB/GPU/Coral devices are not available to an account. The
+  image is large (3 GB compressed, about 9 GB of account disk). The live view
+  uses a websocket (/websocket), which the shared *.panelalpha.online test
+  front strips (engine#170); on the engine host or a real domain it upgrades.

@@ -1,0 +1,35 @@
+# Upstream runs docker/Dockerfile with src/ bind-mounted as the docroot. The
+# site is written in place by the CMS, so it lives on a named volume seeded
+# once from src/. Rendered pages go to /var/www/dist (DIST_DIR, next to the
+# docroot), which must exist and be writable by Apache.
+services:
+  app:
+    image: lichen-markdown-local:latest
+    build:
+      context: ./docker
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        if [ -z "$$(ls -A /var/www/html)" ]; then
+          cp -a /seed/. /var/www/html/ && chown -R www-data:www-data /var/www/html
+        fi
+        chown www-data:www-data /var/www/dist
+        exec apache2-foreground
+    volumes:
+      - site:/var/www/html
+      - dist:/var/www/dist
+      - ./src:/seed:ro
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 256m
+
+volumes:
+  site: {}
+  dist: {}

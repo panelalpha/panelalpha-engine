@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Aptabase, privacy-first analytics for mobile and desktop apps: the published
+  ghcr.io/aptabase/aptabase image (.NET on :8080) with PostgreSQL and
+  ClickHouse, as upstream's self-hosting compose runs it. The repository's
+  docker-compose.yml is a development environment (databases and a mail
+  catcher, no app), so the plain deploy builds the Dockerfile alone and
+  crash-loops on "Missing DATABASE_URL environment variable" behind a 502.
+
+  This recipe replaces it with upstream's self-hosting compose: the image is
+  pinned by digest to the build of the current HEAD (upstream publishes only a
+  moving `main` tag), BASE_URL is the site's address, and AUTH_SECRET plus the
+  PostgreSQL and ClickHouse passwords are generated once into
+  ~/.panelalpha/aptabase by hooks/prepare.sh. A gate service waits until the app
+  answers. Login is by e-mailed magic link: set SMTP_HOST, SMTP_PORT,
+  SMTP_USERNAME, SMTP_PASSWORD and SMTP_FROM_ADDRESS as project env vars;
+  without them upstream writes the link to the app's log.

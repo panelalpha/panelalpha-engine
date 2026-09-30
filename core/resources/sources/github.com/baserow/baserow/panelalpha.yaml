@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Baserow, the no-code database (Django backend, Celery workers, Nuxt
+  frontend, PostgreSQL and Redis). The repository's root docker-compose.yml is
+  the multi-service production file and cannot start without a set of
+  customer-chosen secrets (REDIS_PASSWORD, DATABASE_PASSWORD, SECRET_KEY, ...),
+  so a plain deploy fails at interpolation.
+
+  This recipe runs upstream's recommended all-in-one image of the current
+  release, baserow/baserow:2.3.4 (the same thing docker-compose.all-in-one.yml
+  in the repository runs): embedded PostgreSQL 15, Redis, backend, workers and
+  frontend behind the image's own Caddy on :80. The image generates its secret
+  key and database password itself on first boot and keeps them, the database
+  and uploads on the baserow-data volume. BASEROW_PUBLIC_URL is the account's
+  public URL. The first visitor sees Baserow's sign-up page; that is upstream's
+  first-run behaviour and is left as shipped.

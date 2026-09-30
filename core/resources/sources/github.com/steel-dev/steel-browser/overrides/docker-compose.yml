@@ -1,0 +1,40 @@
+# Compose-replace: upstream's all-in-one image (API + UI on one port) instead
+# of the two-container compose, since an account publishes a single port.
+services:
+  steel:
+    # Upstream publishes only `latest`; pinned by digest (build of main
+    # e5902fc5, 2026-09-28).
+    image: ghcr.io/steel-dev/steel-browser@sha256:f5cd68fbc2cb27e5d7766269860fd0fb29cbe5fe506245a49c82f85ba210e7da
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    shm_size: 1gb
+    environment:
+      DOMAIN: ${PA_PUBLIC_HOST}
+      USE_SSL: "true"
+      LOG_STORAGE_ENABLED: "true"
+      LOG_STORAGE_PATH: /data/logs/browser-logs.duckdb
+    volumes:
+      - logs:/data/logs
+      - exports:/tmp/steel-browser-exports
+      - cache:/app/.cache
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/v1/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+  # No-op: `compose up -d` returns once the API answers.
+  ready:
+    image: ghcr.io/steel-dev/steel-browser@sha256:f5cd68fbc2cb27e5d7766269860fd0fb29cbe5fe506245a49c82f85ba210e7da
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      steel:
+        condition: service_healthy
+
+volumes:
+  logs: {}
+  exports: {}
+  cache: {}

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Checkmate, an uptime and infrastructure monitoring app: one Node server on
+  :52345 (API plus the React client) with MongoDB. The repository has no root
+  compose file, so the plain deploy builds docker/Dockerfile from source; its
+  frontend `npm run build` is killed for memory inside a 2 GB account.
+
+  This recipe is upstream's docker/docker-compose.yaml with the all-in-one
+  ghcr.io/bluewave-labs/checkmate image pinned to the current release
+  (3.12.0), CLIENT_HOST set to the site's address, JWT_SECRET a required
+  compose variable the engine generates once per account, and mongo:7.0 in
+  place of 8.0 (MongoDB 8 does not start on kernel 6.19+, engine#146).
+  MongoDB data is on a named volume. A gate service waits for Checkmate's own
+  /livez. First run is as upstream ships it: the site opens Checkmate's
+  registration page, where the first account becomes the super admin.

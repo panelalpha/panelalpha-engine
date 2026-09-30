@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kong Gateway (OSS), the API gateway. The repository is the Lua/Bazel source
+  with no deployment compose; the plain deploy detected "Unknown", fell back
+  to the engine placeholder and served "PanelAlpha — Project not configured".
+  This recipe runs the official kong image of the current OSS release (3.9.3)
+  in database mode on postgres:16-alpine: a one-shot `migrations` service
+  bootstraps the schema (and applies pending migrations on later deploys)
+  before `app` starts, and `ready` holds `compose up` until `kong health`
+  passes. The site is the proxy (container port 8000), which answers
+  Kong's own `{"message":"no Route matched with those values"}` until routes
+  are added. The Admin API and Kong Manager keep the image defaults
+  (Admin API on the container's 127.0.0.1:8001) and are not published. The
+  database password is generated once by hooks/prepare.sh into
+  ~/.panelalpha/kong/db.env; the database is the named volume kong-db.

@@ -1,0 +1,20 @@
+# Compose-replace: the repo compose builds from source with an .env.local that
+# does not exist. Runs the published image of the current release instead.
+services:
+  plex-rewind:
+    image: ghcr.io/raunot/plex-rewind:5.2.0
+    restart: unless-stopped
+    ports:
+      - "8383:8383"
+    env_file:
+      # NEXTAUTH_SECRET (hooks/prepare.sh)
+      - ../.panelalpha/plex-rewind/app.env
+    environment:
+      NEXTAUTH_URL: ${PA_PUBLIC_URL}
+      NEXT_PUBLIC_SITE_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # Settings written from the UI (Plex/Tautulli connection, features).
+      - plex-rewind-config:/app/config
+
+volumes:
+  plex-rewind-config: {}

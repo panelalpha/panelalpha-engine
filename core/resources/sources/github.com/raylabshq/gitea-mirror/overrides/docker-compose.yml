@@ -1,0 +1,70 @@
+# Compose-replace: the repo's compose builds from source with localhost auth
+# URLs. This runs the release image and seeds the admin before the port opens.
+x-gm-env: &gm-env
+  NODE_ENV: production
+  DATABASE_URL: file:data/gitea-mirror.db
+  BASE_URL: /
+  # Empty: the entrypoint generates both into /app/data once and reuses them.
+  BETTER_AUTH_SECRET: ""
+  ENCRYPTION_SECRET: ""
+  AUTH_ALLOW_SIGNUP: "false"
+  HEADER_AUTH_ENABLED: "false"
+  HEADER_AUTH_AUTO_PROVISION: "false"
+
+services:
+  # Starts the app on 127.0.0.1 in its own container, signs the admin up, stops.
+  init:
+    image: ghcr.io/raylabshq/gitea-mirror:v3.40.3
+    restart: "no"
+    entrypoint: ["sh", "/panelalpha/init.sh"]
+    env_file:
+      - ../.panelalpha/giteamirror/admin.env
+    environment:
+      <<: *gm-env
+      HOST: 127.0.0.1
+      PORT: "4321"
+      BETTER_AUTH_URL: ${PA_PUBLIC_URL}
+      PUBLIC_BETTER_AUTH_URL: ${PA_PUBLIC_URL}
+      BETTER_AUTH_TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      - data:/app/data
+    mem_limit: 768m
+
+  app:
+    image: ghcr.io/raylabshq/gitea-mirror:v3.40.3
+    restart: unless-stopped
+    environment:
+      <<: *gm-env
+      HOST: 0.0.0.0
+      PORT: "4321"
+      BETTER_AUTH_URL: ${PA_PUBLIC_URL}
+      PUBLIC_BETTER_AUTH_URL: ${PA_PUBLIC_URL}
+      BETTER_AUTH_TRUSTED_ORIGINS: ${PA_PUBLIC_URL}
+    volumes:
+      - data:/app/data
+    ports:
+      - "8000:4321"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4321/api/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    mem_limit: 1024m
+
+  # No-op gate: `up` returns only once the site answers (engine#204).
+  ready:
+    image: ghcr.io/raylabshq/gitea-mirror:v3.40.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  data: {}

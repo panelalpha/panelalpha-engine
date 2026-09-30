@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Firefly III Data Importer, the web wizard that imports bank files and
+  bank-API transactions into a Firefly III instance (Laravel, nginx + PHP-FPM).
+  The repository has no compose file, so the engine built it with the generic
+  laravel recipe, which never runs the Vite build: every page answered 500
+  with "Vite manifest not found at /app/public/build/manifest.json". This
+  recipe runs upstream's published fireflyiii/data-importer image of the
+  current release (version-2.3.5) on port 8080, trusting the engine's proxy
+  headers. The Firefly III address is optional: FIREFLY_III_URL (and
+  FIREFLY_III_CLIENT_ID / VANITY_URL) preset it from the project env vars,
+  otherwise the importer asks for it in the browser. A no-op `ready` service
+  waits for the image's own /healthcheck.

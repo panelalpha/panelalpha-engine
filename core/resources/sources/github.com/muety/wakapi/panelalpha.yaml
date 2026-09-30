@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Wakapi is a self-hosted, WakaTime-compatible backend for coding statistics:
+  one Go binary serving the web UI and the WakaTime API on :3000, SQLite by
+  default. The repository's compose.yml builds from source with PostgreSQL and
+  takes its secrets from the operator's shell, which failed under the engine
+  ("Failed to start app: Image project-wakapi Building"). This recipe replaces
+  it with upstream's published image (n1try/wakapi, pushed by the same release
+  workflow as ghcr.io/muety/wakapi) pinned to the 2.18.0 release, on SQLite in
+  a named volume that survives redeploys.
+
+  hooks/prepare.sh generates WAKAPI_PASSWORD_SALT and the owner's password once
+  into ~/.panelalpha/wakapi/. Signup is closed (WAKAPI_ALLOW_SIGNUP=false), so
+  there is no first-visitor-wins registration. The owner is created by a
+  one-shot `seed` service after the app is healthy: it writes a single-use
+  invite code into Wakapi's key_string_values table (the same row Settings >
+  Generate invite writes) and signs up with it over the compose network; the
+  first user Wakapi creates is its admin. Further users join through invite
+  codes the owner generates. `ready` makes `compose up -d` return only after
+  the seed has run.

@@ -1,0 +1,55 @@
+# The official single-container image (SQLite + bundled Redis) of the current
+# release instead of a Rails source build.
+services:
+  app:
+    image: manyfold3d/manyfold-solo:0.150.0
+    restart: unless-stopped
+    ports:
+      - "3214:3214"
+    env_file:
+      - ../.panelalpha/manyfold/app.env
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      PUBLIC_HOSTNAME: ${PA_PUBLIC_HOST}
+    volumes:
+      # SQLite database and plugins.
+      - config:/config
+      # Model library: add a library at /libraries in the web UI.
+      - libraries:/libraries
+    depends_on:
+      perms:
+        condition: service_completed_successfully
+    healthcheck:
+      # Not wget: `/` redirects to https:// (PUBLIC_HOSTNAME sets assume_ssl).
+      test: ["CMD", "ruby", "-rnet/http", "-e", "exit Net::HTTP.get_response(URI('http://127.0.0.1:3214/')).code.to_i < 400"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    # Rails, two Sidekiq workers and Redis: ~1.1 GB idle, 1.4 GB after a scan.
+    mem_limit: 2048m
+
+  # Fresh named volumes are root-owned; the app runs as PUID 1000.
+  perms:
+    image: manyfold3d/manyfold-solo:0.150.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "chown 1000:1000 /config /libraries"]
+    volumes:
+      - config:/config
+      - libraries:/libraries
+    mem_limit: 32m
+
+  # No-op gate: `compose up -d` returns once migrations ran and the site answers.
+  ready:
+    image: manyfold3d/manyfold-solo:0.150.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  libraries: {}

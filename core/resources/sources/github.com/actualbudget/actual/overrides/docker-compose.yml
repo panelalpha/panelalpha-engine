@@ -1,0 +1,32 @@
+# Compose-replace: the repo compose is the dev container (bind-mounts the source).
+# Runs the official sync-server image of the current release, data on a named volume.
+services:
+  app:
+    image: actualbudget/actual-server:26.9.0
+    restart: unless-stopped
+    ports:
+      - "5006:5006"
+    environment:
+      ACTUAL_PORT: "5006"
+    volumes:
+      - data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5006/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the server answers /health.
+  ready:
+    image: actualbudget/actual-server:26.9.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  szurubooru is a Danbooru-style image board: a Python API (szurubooru/server),
+  an nginx client that serves the UI, the uploaded files and proxies /api to
+  the server (szurubooru/client), and Postgres.
+
+  OFFICIAL IMAGES, COMPOSE-REPLACE of the repo's docker-compose.yml, which is
+  labelled an example template: it bind-mounts ${MOUNT_DATA}/${MOUNT_SQL} host
+  paths and a ./server/config.yaml the repo does not ship. Images are pinned
+  to the 2.5 release; upstream's EOL postgres:11-alpine becomes
+  postgres:17-alpine. Uploads and the database live on named volumes, so they
+  survive a redeploy. Only the client publishes a port (80); it already
+  routes /api to the server, so the site is one origin.
+
+  hooks/prepare.sh writes, once, ~/.panelalpha/szurubooru/db.env (Postgres
+  credentials, 0600) and config.yaml, which only replaces upstream's
+  placeholder `secret: change` (the password-hashing salt) with a generated
+  value. config.yaml is 0644 inside the 0700 directory because the server
+  runs as a non-root user that must read it. Everything else is upstream's
+  config.yaml.dist. First run is as upstream ships it: registration is open
+  and the first user registered becomes the administrator.

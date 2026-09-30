@@ -1,0 +1,65 @@
+# The repo has no start script (Railpack runs boot.js, which exits), so this
+# runs the npm release as upstream documents: --init server, then --listen.
+x-tiddlywiki: &release
+  TIDDLYWIKI_VERSION: "5.4.1"
+
+services:
+  # Installs the release from npm once per version into the tw volume.
+  install:
+    image: node:24-alpine
+    restart: "no"
+    environment: *release
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        dir="/opt/tiddlywiki/$$TIDDLYWIKI_VERSION"
+        if [ ! -f "$$dir/node_modules/tiddlywiki/tiddlywiki.js" ]; then
+          npm install --prefix "$$dir" --no-audit --no-fund --omit=dev "tiddlywiki@$$TIDDLYWIKI_VERSION"
+        fi
+        echo "tiddlywiki: $$dir ready"
+    volumes:
+      - tw:/opt/tiddlywiki
+    mem_limit: 256m
+
+  app:
+    image: node:24-alpine
+    restart: unless-stopped
+    environment: *release
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        tw="node /opt/tiddlywiki/$$TIDDLYWIKI_VERSION/node_modules/tiddlywiki/tiddlywiki.js"
+        [ -f /data/wiki/tiddlywiki.info ] || $$tw /data/wiki --init server
+        exec $$tw /data/wiki --listen host=0.0.0.0 port=8080
+    volumes:
+      - tw:/opt/tiddlywiki:ro
+      # The wiki folder: tiddlywiki.info and one file per tiddler.
+      - data:/data
+    ports:
+      - "8080:8080"
+    depends_on:
+      install:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the server answers.
+  ready:
+    image: node:24-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  tw: {}
+  data: {}

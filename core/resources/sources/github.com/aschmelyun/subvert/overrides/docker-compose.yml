@@ -1,0 +1,56 @@
+# Compose-replace of the repo's compose: no placeholder-domain TLS proxy (the
+# engine terminates TLS), and the customer's OpenAI key from the project env.
+services:
+  # One-shot: Subvert needs the customer's OpenAI key; fail the deploy naming
+  # it. Read from .env, not interpolated (engine#336).
+  check:
+    image: aschmelyun/subvert:1.0.9
+    restart: "no"
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$$OPENAI_API_KEY" ]; then
+          echo "Error: set OPENAI_API_KEY (your OpenAI API key, used for transcription and summaries) in the project's environment variables"
+          exit 1
+        fi
+    mem_limit: 32m
+
+  subvert:
+    image: aschmelyun/subvert:1.0.9
+    restart: unless-stopped
+    depends_on:
+      check:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      UPLOAD_MAX_FILESIZE: 256M
+      MEMORY_LIMIT: 512M
+      APP_ENV: production
+      APP_DEBUG: "false"
+    volumes:
+      - audio:/var/www/storage/app/audio
+      - video:/var/www/storage/app/video
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  # No-op gate: `up` returns only once Subvert answers (engine#204).
+  ready:
+    image: aschmelyun/subvert:1.0.9
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      subvert:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  audio: {}
+  video: {}

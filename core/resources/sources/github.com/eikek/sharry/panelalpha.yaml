@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Sharry shares files between authenticated and anonymous users, both ways,
+  with resumable uploads (Scala/JVM). The repository's only compose file,
+  docker/docker-compose.yml, bind-mounts ${PWD}/sharry.conf, which resolves
+  outside docker/ when the engine runs it, so Docker created a directory and
+  the server restart-looped on "/opt/sharry.conf (Is a directory)"; it also
+  pins :latest and enables a fixed admin:admin login. This recipe runs the
+  current release eikek0/sharry:v1.16.0 beside postgres:18-alpine as
+  upstream's compose does, with a minimal sharry.conf (base URL from the
+  site's address, bind 0.0.0.0, the JDBC connection) and every other setting
+  at Sharry's default: sign-up is open, so the first visitor registers an
+  account. The database password is generated once into
+  ~/.panelalpha/sharry/db.env; accounts, shares and uploaded files live in
+  PostgreSQL on the named volume db_data.

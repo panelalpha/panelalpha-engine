@@ -1,0 +1,58 @@
+# Upstream's documented compose on the release image; secrets from ~/.panelalpha,
+# the first admin login from the project's env vars (checked below).
+services:
+  app:
+    image: ghcr.io/francesco-gaglione/focusflowcloud:v1.3.0
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    # Database settings sit in env files: named in `environment:` they make the
+    # engine take this service for a datastore (engine#419).
+    env_file:
+      - ../.panelalpha/focusflow/app.env
+      - ./focusflow-db.env
+    environment:
+      SERVER_PORT: "8080"
+      CORS_ORIGIN: ${PA_PUBLIC_URL}
+      APP_ENV: production
+      RUST_LOG: info
+      PWA_DIST_DIR: /app/pwa
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    mem_limit: 512m
+
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/focusflow/app.env
+    environment:
+      POSTGRES_DB: focusflow
+      POSTGRES_USER: focusflow
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U focusflow -d focusflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  # Fails `compose up` (and so the deploy) while a required variable is unset.
+  env-check:
+    image: ghcr.io/francesco-gaglione/focusflowcloud:v1.3.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "/focusflow-env-check.sh"]
+    environment:
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    volumes:
+      - ./focusflow-env-check.sh:/focusflow-env-check.sh:ro
+    mem_limit: 32m
+
+volumes:
+  db-data:

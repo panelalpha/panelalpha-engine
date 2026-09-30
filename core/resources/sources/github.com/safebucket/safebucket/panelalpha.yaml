@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Safebucket, a file sharing platform (Go API + web UI on :8080) where
+  browsers upload and download straight to S3-compatible storage through
+  presigned URLs. The repository's Dockerfile builds a binary that exits at
+  once with "Invalid configuration" (no admin, URLs, secrets, database or
+  storage configured), and its only compose file is a developer stack. This
+  recipe follows upstream's deployments/local/lite layout on the v0.7.5
+  release image: SQLite, in-memory cache and events, filesystem notifier and
+  activity log, a RustFS bucket created by a one-shot aws-cli job, and an
+  nginx front door that routes /safebucket/ (the path-style presigned URLs)
+  to RustFS with the Host kept and everything else to the app, so both share
+  the site's one address. Token and MFA secrets and the RustFS keys are
+  generated once into ~/.panelalpha/safebucket. The admin account comes from
+  SAFEBUCKET_ADMIN_EMAIL / SAFEBUCKET_ADMIN_PASSWORD (upstream's lite defaults
+  admin@safebucket.io / ChangeMePlease when unset). Data, database and
+  objects live on named volumes.

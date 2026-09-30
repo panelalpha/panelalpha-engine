@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Zoraxy, a general-purpose HTTP reverse proxy with a web management UI (Go;
+  UI on :8000, proxy listeners on :80/:443). The plain deploy finds
+  docker/docker-compose.yml, which publishes 80/443/443-udp/8000, bind-mounts
+  `/path/to/zoraxy/...` placeholders and tracks `latest`; the engine routes the
+  site to :80, where Zoraxy's proxy answers `307` to https on the same URL (a
+  redirect loop behind the TLS-terminating proxy), and the UI is unreachable.
+
+  Compose-REPLACE from the published image of the current release
+  (zoraxydocker/zoraxy:v3.3.4) that publishes only the management UI, with
+  config (including its database) and plugins on named volumes and no Docker
+  socket. First run is as upstream ships it: /login.html shows Zoraxy's
+  "Account Setup" form for the first admin. The proxy listeners run inside the
+  account only; the account's domain reaches the UI, not the proxy.

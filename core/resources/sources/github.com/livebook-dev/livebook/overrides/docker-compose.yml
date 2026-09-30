@@ -1,0 +1,37 @@
+# Compose-replace: the repo's Dockerfile needs BASE_IMAGE/VARIANT build args from
+# upstream's CI. Runs the published image of the current release instead.
+services:
+  app:
+    image: ghcr.io/livebook-dev/livebook:0.19.10
+    restart: unless-stopped
+    # An empty LIVEBOOK_PASSWORD aborts boot; unset it so token auth applies.
+    entrypoint: ["/bin/sh", "-c", "[ -n \"$$LIVEBOOK_PASSWORD\" ] || unset LIVEBOOK_PASSWORD; exec /app/bin/server"]
+    ports:
+      - "8080:8080"
+    environment:
+      LIVEBOOK_PORT: "8080"
+      # Optional project env var (12+ chars); without it Livebook uses token auth.
+      LIVEBOOK_PASSWORD: ${LIVEBOOK_PASSWORD:-}
+    volumes:
+      # Notebooks (LIVEBOOK_HOME) and Livebook's settings/hub data.
+      - livebook-data:/data
+      - livebook-settings:/home/livebook/.local/share/livebook
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/public/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+
+  # No-op gate: `compose up -d` returns once Livebook answers.
+  ready:
+    image: ghcr.io/livebook-dev/livebook:0.19.10
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  livebook-data: {}
+  livebook-settings: {}

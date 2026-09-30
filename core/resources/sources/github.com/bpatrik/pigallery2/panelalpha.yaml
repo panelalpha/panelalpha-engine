@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PiGallery2, a directory-first photo gallery: a Node/Express server with an
+  Angular frontend and SQLite, serving on :80 in its image. The plain deploy
+  detects the repository as a static Angular site, runs the frontend build
+  and fails with `Static build finished but dist/index.html is missing`; the
+  app needs its Node server running.
+
+  Compose-REPLACE from the published image of the current release
+  (bpatrik/pigallery2:3.5.2), as upstream's
+  docker/docker-compose/pigallery2-only: config, database, photos and
+  thumbnails on named volumes. The photo volume is writable (upstream mounts
+  it read-only) so the app's own upload, off by default, can be enabled in
+  its settings. First run is as upstream ships it: login required, default
+  user admin/admin.

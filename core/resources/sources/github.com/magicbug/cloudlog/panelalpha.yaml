@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Cloudlog, an amateur-radio logbook: plain PHP (CodeIgniter 3, no Composer)
+  on MySQL. The repository's Dockerfile is a dev environment on php:7.4-apache
+  (Debian bullseye, EOL) whose apt-get step now fails with 404s, so this runs
+  on the engine's PHP image with the account's MySQL database instead. The
+  first visit opens Cloudlog's own web installer, which takes the DB_*
+  credentials the engine shows for the project. The two files the installer
+  writes (application/config/config.php and database.php) and the upload
+  directories live in ~/.panelalpha/cloudlog, so a redeploy keeps them.
+extends: php-plain
+database: mysql

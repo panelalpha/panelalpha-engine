@@ -1,0 +1,2 @@
+# X-Prober ships dist/prober.php as its only entry point.
+DirectoryIndex prober.php

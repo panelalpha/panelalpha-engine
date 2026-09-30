@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Semaphore UI is a web interface for running Ansible playbooks, Terraform,
+  OpenTofu and shell tasks: one Go binary with an embedded Vue frontend on
+  :3000. The repository has no root compose file or Dockerfile; detection read
+  it as `go`, and that build fails because the embedded frontend has to be
+  produced by an npm step first. This recipe runs the official
+  semaphoreui/semaphore image of the current release, v2.19.14, with SQLite in
+  /var/lib/semaphore and the config.json its first start generates in
+  /etc/semaphore, both on named volumes that survive redeploys.
+
+  The image's server-wrapper runs `semaphore setup` on first start and seeds
+  the admin from SEMAPHORE_ADMIN / SEMAPHORE_ADMIN_PASSWORD. hooks/prepare.sh
+  generates that password, the access-key encryption key and the two cookie
+  keys once into ~/.panelalpha/semaphore/secrets.env (0600 in 0700), fed to
+  the container as an env_file; environment values outrank config.json, so
+  the keys stay fixed across redeploys. Semaphore has no self-registration:
+  only an admin creates users. SEMAPHORE_WEB_ROOT is the public URL.
+
+  Playbooks and tasks run inside the Semaphore container itself (ansible,
+  terraform and tofu ship in the image); no docker.sock is mounted or needed.

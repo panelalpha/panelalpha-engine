@@ -1,0 +1,73 @@
+# The repository's compose is a development stack (runserver, maildev, a
+# source bind mount). This builds the repo's own Dockerfile and runs Pytition
+# under uWSGI (a declared dependency) with the upstream config-file mechanism.
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pytition
+      POSTGRES_PASSWORD: ${PYTITION_DB_PASSWORD:?PYTITION_DB_PASSWORD is required}
+      POSTGRES_DB: pytition
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "pytition"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DJANGO_SETTINGS_MODULE: config.panelalpha_config
+      PYTHONPATH: /
+      PYTITION_SECRET_KEY: ${PYTITION_SECRET_KEY:?PYTITION_SECRET_KEY is required}
+      PYTITION_DB_PASSWORD: ${PYTITION_DB_PASSWORD:?PYTITION_DB_PASSWORD is required}
+      PA_PUBLIC_URL: ${PA_PUBLIC_URL}
+      PA_PUBLIC_HOST: ${PA_PUBLIC_HOST}
+    volumes:
+      - ./panelalpha_config.py:/config/panelalpha_config.py:ro
+      - media:/mediaroot
+    # Upstream's start sequence (dev/initialize.sh, nginx-uwsgi/start_pytition.sh)
+    # without the interactive superuser step.
+    command:
+      - sh
+      - -c
+      - >-
+        cd /code/pytition
+        && /venv/.venv/bin/python manage.py migrate --noinput
+        && /venv/.venv/bin/python manage.py collectstatic --noinput
+        && /venv/.venv/bin/python manage.py compilemessages
+        && exec /venv/.venv/bin/uwsgi --http-socket :8000 --master --need-app
+        --die-on-term --processes 2 --threads 2
+        --chdir /code/pytition --module pytition.wsgi:application
+        --static-map /static=/static --static-map /mediaroot=/mediaroot
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns only once Pytition answers.
+  ready:
+    image: postgres:18-alpine
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  media: {}

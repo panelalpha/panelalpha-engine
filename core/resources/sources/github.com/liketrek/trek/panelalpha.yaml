@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  TREK, a self-hosted travel and trip planner (Node.js, SQLite) with maps,
+  real-time collaboration, OIDC SSO and an MCP endpoint. The repository's
+  docker-compose.yml runs the published mauriceboe/trek image, but it drops
+  ALL capabilities and adds back CHOWN/SETUID/SETGID for the entrypoint's
+  gosu switch to `node`. The engine keeps the cap_drop and strips the cap_add
+  (engine#349), so the plain deploy crash-loops on "error: failed switching
+  to 'node': operation not permitted". Its ./data and ./uploads bind mounts
+  would also sit inside ~/project, which every deploy wipes.
+
+  This recipe runs the same image at the current release (mauriceboe/trek:4.3.3)
+  with upstream's read-only root, /tmp tmpfs, no-new-privileges and health
+  check, leaves the capability pair out so Docker's defaults apply, and keeps
+  /app/data (SQLite database, the auto-generated encryption key) and
+  /app/uploads on named volumes. Every other setting (ENCRYPTION_KEY,
+  ALLOWED_ORIGINS, APP_URL, OIDC_*, ADMIN_EMAIL/ADMIN_PASSWORD, ...) comes from
+  the project's env vars; nothing is set by default, so first-run behaviour is
+  upstream's.
+
+  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
+
+  Fresh create: health :3000 200, 118 s. / and /login 200 <title>TREK;
+  /api/health 200; /api/auth/app-config reports version 4.3.3. First boot
+  created the admin and printed its password in the container log, as
+  upstream does. Log in over https (session cookie) and POST /api/trips
+  worked. /.env and /.git/config return the SPA shell, not the files.
+  Rebuild: success in 75 s, the trip was still listed and the session
+  cookie was still valid (the data volume keeps the key).

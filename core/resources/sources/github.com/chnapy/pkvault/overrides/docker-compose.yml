@@ -1,0 +1,38 @@
+# Compose-replace: the repo's compose builds the Dockerfile, whose last stage is
+# a helper (convert-view-builder), not the web image (`monolith`). Upstream's
+# published image runs instead, with its data and saves on named volumes.
+services:
+  app:
+    image: ghcr.io/chnapy/pkvault:2.3.4
+    restart: unless-stopped
+    # The project's env vars (LOG_FILE_COUNT_LIMIT, BACKUP_FILE_COUNT_LIMIT).
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "3000:3000"
+    volumes:
+      - pkvault_data:/pkvault
+      # Save files; point PKVault's settings at /data/saves/.
+      - pkvault_saves:/data/saves
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op: `compose up -d` returns once nginx and the backend answer.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pkvault_data: {}
+  pkvault_saves: {}

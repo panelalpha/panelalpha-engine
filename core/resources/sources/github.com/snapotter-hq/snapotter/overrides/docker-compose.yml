@@ -1,0 +1,39 @@
+# Compose-replace: the repo has no root compose file, and docker/docker-compose.yml
+# builds the image from source (~10 min of native compiles). This runs the
+# official image of the current release in its single-container mode (embedded
+# Postgres 17 + Redis 8 under /data), as the README's quick start does.
+services:
+  app:
+    image: docker.io/snapotter/snapotter:2.2.0
+    restart: unless-stopped
+    environment:
+      # Only used for OIDC/SAML callbacks; the site's own address.
+      EXTERNAL_URL: ${PA_PUBLIC_URL}
+    volumes:
+      # Files, settings, the embedded database and AI models.
+      - data:/data
+      - workspace:/tmp/workspace
+    ports:
+      - "1349:1349"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "--max-time", "5", "http://localhost:1349/api/v1/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 90
+      start_period: 30s
+    shm_size: 512m
+    mem_limit: 2300m
+
+  # `up -d` returns only once SnapOtter answers its health endpoint.
+  ready:
+    image: docker.io/snapotter/snapotter:2.2.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  workspace: {}

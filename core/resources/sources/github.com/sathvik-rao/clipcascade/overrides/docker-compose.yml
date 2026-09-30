@@ -1,0 +1,32 @@
+# The repository root holds no deployment (the server's compose examples sit in
+# ClipCascade_Server/docker-compose/). This runs the published image of the
+# current release as upstream's docker-compose.yml does, database on a volume.
+services:
+  app:
+    image: sathvikrao/clipcascade:0.7.0
+    restart: unless-stopped
+    volumes:
+      # H2 user database (clipcascade.mv.db).
+      - database:/database
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once ClipCascade answers.
+  ready:
+    image: sathvikrao/clipcascade:0.7.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  database: {}

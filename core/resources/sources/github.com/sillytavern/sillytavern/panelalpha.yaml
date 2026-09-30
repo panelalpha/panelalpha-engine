@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SillyTavern, a self-hosted LLM chat frontend (Node.js). Plain deploys built
+  the repo Dockerfile and answered 403 to every visitor: the default config
+  keeps whitelistMode on, and with it off the app exits on its own security
+  check unless whitelisting, basic auth or user accounts protect it. This recipe
+  runs the official image of the current release
+  (ghcr.io/sillytavern/sillytavern:1.19.0) on port 8000 in SillyTavern's own
+  basic-auth mode with the credentials the customer sets as
+  SILLYTAVERN_BASICAUTHUSER_USERNAME / SILLYTAVERN_BASICAUTHUSER_PASSWORD; a
+  one-shot check service fails the deploy while either is unset. Config, data,
+  plugins and third-party extensions live on named volumes.

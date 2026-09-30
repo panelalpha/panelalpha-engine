@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Sync-in, file storage, sync and sharing with real-time collaboration: the
+  released syncin/server image (NestJS on :8080) with MariaDB, as upstream's
+  docker/docker-compose.yaml runs it. The plain deploy builds the repository's
+  root Dockerfile, whose monorepo `npm ci && npm run build` is killed with
+  "cannot allocate memory" at 2500 MB, and would then have no database or
+  secrets configured.
+
+  This recipe runs upstream's compose: the image pinned to 2.5.2 (the current
+  release), the configuration as SYNCIN_* env vars instead of the bind-mounted
+  environment.yaml, SYNCIN_SERVER_PUBLICURL set to the site's address, and the
+  JWT access/refresh secrets, the MFA encryption key and the MariaDB password
+  generated once into ~/.panelalpha/sync-in by hooks/prepare.sh. The first
+  admin is upstream's INIT_ADMIN mechanism, passed through from the project's
+  env vars (INIT_ADMIN, INIT_ADMIN_LOGIN, INIT_ADMIN_PASSWORD). A gate waits for
+  the image's own readiness check. Files live on the `data` volume.

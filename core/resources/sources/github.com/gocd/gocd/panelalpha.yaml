@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  GoCD, the continuous delivery server, with its web UI on :8153. The
+  repository is the Gradle source of the server, agent and installers; the
+  plain deploy built it with the java strategy on JDK 21 and failed, the build
+  asks for a Java 25 toolchain ("Cannot find a Java installation ... matching
+  languageVersion=25"). This recipe runs the published gocd/gocd-server image
+  of the current release (v26.1.0) instead, with its configuration, database,
+  artifacts and plugins on one named volume and the go user's home (SSH keys,
+  known_hosts) on another. No agent is started: agents run elsewhere and
+  register against the site's address.

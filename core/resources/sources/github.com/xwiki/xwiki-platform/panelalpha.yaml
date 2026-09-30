@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  XWiki, the structured wiki platform (Java on Tomcat) on port 8080.
+
+  The repository is the Maven source tree of the platform with no compose
+  file; a plain deploy was detected as `java` and Maven could not assemble it
+  (the parent POMs live in other repositories). This recipe runs the image
+  upstream publishes from xwiki/xwiki-docker at the current stable release,
+  xwiki:18.7.0-postgres-tomcat, on postgres:17-alpine, following that
+  repository's compose file. The database password is generated per account
+  by the engine (XWIKI_DB_PASSWORD) and kept across redeploys. The permanent
+  directory (/usr/local/xwiki: extensions, Solr index, saved configuration)
+  and the database are named volumes. The heap is 1.5 GB inside a 3 GB
+  container. A `ready` gate makes the deploy finish only once /rest/ answers.
+
+  First run is upstream's: the Distribution Wizard (admin account and flavor
+  install) is left as shipped.

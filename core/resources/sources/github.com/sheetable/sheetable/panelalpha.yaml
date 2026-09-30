@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SheetAble (SheetAble/SheetAble, AGPL-3.0) is a self-hosted music sheet
+  library: a Go server on :8080 serving the API and the React UI (embedded
+  with go.rice), SQLite by default.
+
+  The repository is a monorepo whose root package.json is lint tooling only
+  (husky/prettier, no start script), so a plain deploy hands it to Railpack,
+  which finds no start command and the container restart-loops. The server is
+  backend/, and upstream publishes its Docker build of it as
+  vallezw/sheetable. This recipe runs vallezw/sheetable:v0.8.1, the current
+  release, with the database and uploaded sheets (CONFIG_PATH, /app/config)
+  on a named volume. The JWT signing key API_SECRET, which upstream defaults
+  to the public string "sheetable", is generated once per account by the
+  engine; SERVER_URL is the site's address. The first admin is upstream's
+  default (admin@admin.com / sheetable), left as shipped.

@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  phpLDAPadmin v2, a web UI for administering an existing LDAP directory
+  (Laravel on FrankenPHP/Caddy, no database of its own). The repository has no
+  compose file, so the engine built its Dockerfile, set SERVER_NAME to the
+  site's domain, and Caddy took that as a public site address: automatic HTTPS
+  and an endless 308 to the same URL. This recipe runs the published image of
+  the current release (phpldapadmin/phpldapadmin:2.3.11) with SERVER_NAME
+  pinned to :8080, the image's own plain-HTTP default. The directory is the
+  customer's: LDAP_HOST (and LDAP_USERNAME / LDAP_PASSWORD / LDAP_BASE_DN when
+  the server needs them) are project environment variables, and a one-shot
+  check service fails the deploy while LDAP_HOST is unset, since without it
+  every page 500s with "Can't contact LDAP server".

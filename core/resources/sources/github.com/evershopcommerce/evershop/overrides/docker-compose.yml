@@ -1,0 +1,88 @@
+# Compose-replace: the official evershop/evershop image of the current release
+# with Postgres 16 (the major upstream's compose uses), on named volumes, with
+# every secret from ~/.panelalpha/evershop/ instead of postgres/postgres.
+services:
+  database:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/evershop/db.env
+    environment:
+      POSTGRES_USER: evershop
+      POSTGRES_DB: evershop
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evershop -d evershop -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  # One-shot, every boot: runs the release's migrations on a private loopback
+  # server, then creates the admin with EverShop's own `user:create` while no
+  # admin exists. The published app never starts on a database without one.
+  seed:
+    image: docker.io/evershop/evershop:2.2.1
+    restart: "no"
+    depends_on:
+      database:
+        condition: service_healthy
+    env_file:
+      - ../.panelalpha/evershop/app.env
+      - ../.panelalpha/evershop/admin.env
+    environment:
+      DB_HOST: database
+      DB_PORT: "5432"
+      DB_USER: evershop
+      DB_NAME: evershop
+      EVERSHOP_HOME_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - ./panelalpha/evershop:/pa:ro
+    entrypoint: ["node", "/pa/seed.mjs"]
+    mem_limit: 1024m
+
+  app:
+    image: docker.io/evershop/evershop:2.2.1
+    restart: unless-stopped
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    env_file:
+      - ../.panelalpha/evershop/app.env
+    environment:
+      DB_HOST: database
+      DB_PORT: "5432"
+      DB_USER: evershop
+      DB_NAME: evershop
+      EVERSHOP_HOME_URL: ${PA_PUBLIC_URL}
+      # One proxy in front: take the client address it appends, never an
+      # earlier X-Forwarded-For entry a visitor wrote (engine#319).
+      TRUST_PROXY_HOPS: "1"
+    ports:
+      - "3000:3000"
+    volumes:
+      # Product images and other uploads.
+      - media:/app/media
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1536m
+
+  # Exits 0 once the store answers, so `compose up -d` returns only then.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  postgres-data: {}
+  media: {}

@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Komf, a metadata fetcher for Komga and Kavita libraries (Kotlin/Ktor on :8085)
+  with the Komelia web UI for configuration and job monitoring. The repository
+  has no compose file, its Dockerfile copies a jar built outside Docker, and the
+  engine's Gradle build fails (Android SDK location not found).
+  This recipe runs the published image of the current release
+  (sndxr/komf:2.1.0) with /config (application.yml and the job database) on a
+  named volume. The Komga/Kavita connection is optional at deploy time
+  (KOMF_KOMGA_BASE_URI, KOMF_KOMGA_USER, KOMF_KOMGA_PASSWORD,
+  KOMF_KAVITA_BASE_URI, KOMF_KAVITA_API_KEY) and can be set in the web UI.

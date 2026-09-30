@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Homepage is a static-config dashboard for self-hosted services: a Next.js
+  server on :3000 that reads YAML files (services, widgets, bookmarks,
+  settings) from /app/config and writes a starter set there on first start.
+  The repository ships only a Dockerfile, so the plain deploy builds the `dev`
+  branch (~110 s of pnpm install and next build) and then answers every request
+  with HTTP 400: Homepage only accepts Host headers listed in
+  HOMEPAGE_ALLOWED_HOSTS (by default localhost:3000 and 127.0.0.1:3000), and
+  logs "Host validation failed for: <domain>". /app/config is also not a
+  volume, so any edit would be lost on redeploy.
+
+  This recipe runs the official ghcr.io/gethomepage/homepage image of the
+  current release (v2.4.0) with HOMEPAGE_ALLOWED_HOSTS set to the account's
+  domain and /app/config on a named volume that survives redeploys. The
+  dashboard is configured by editing the YAML files in that volume, as
+  upstream documents.

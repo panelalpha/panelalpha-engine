@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Swing Music is a self-hosted music player and streaming server for a local
+  audio library: one Python process serving its web client and API on :1970,
+  settings and the library database in /config, music read from /music.
+
+  The generic Python recipe claims the repository (requirements.txt,
+  pyproject.toml) but finds no web entry point it can start and serves the
+  engine's placeholder page; the web client is not built from this repository
+  at all. This recipe runs the official image of the current release,
+  ghcr.io/swingmx/swingmusic:v3.0.0 (pinned by digest), as the upstream
+  README's Docker Compose example lays it out, with /config and /music on
+  named volumes that survive redeploys. The first visitor goes through Swing
+  Music's own onboarding.

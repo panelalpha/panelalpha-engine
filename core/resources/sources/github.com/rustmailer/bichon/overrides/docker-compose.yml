@@ -1,0 +1,38 @@
+# Compose-replace: the repo's Dockerfile copies CI-built binaries, so it cannot
+# be built from a clone. Runs the published image of the current release.
+services:
+  app:
+    image: rustmailer/bichon:2.0.3
+    restart: unless-stopped
+    ports:
+      - "15630:15630"
+    env_file:
+      - ../.panelalpha/bichon/app.env
+    environment:
+      BICHON_ROOT_DIR: /data
+      BICHON_HTTP_PORT: "15630"
+      BICHON_PUBLIC_URL: ${PA_PUBLIC_URL}
+      BICHON_LOG_LEVEL: info
+      BICHON_ANSI_LOGS: "false"
+    volumes:
+      # Metadata DB, full-text index and the mail blobs.
+      - bichon-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://127.0.0.1:15630/api/status"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+    mem_limit: 1g
+
+  # No-op: `compose up -d` returns once Bichon answers.
+  ready:
+    image: rustmailer/bichon:2.0.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  bichon-data: {}

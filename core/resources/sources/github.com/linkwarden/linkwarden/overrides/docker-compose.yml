@@ -1,0 +1,104 @@
+# Compose-replace: runs upstream's published image of the current release
+# with the stack its own docker-compose.yml describes (Postgres, Meilisearch),
+# but on named volumes and with secrets from ~/.panelalpha/linkwarden/.
+services:
+  postgres:
+    # Same major as upstream; Postgres cannot migrate a datadir backwards.
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/linkwarden/db.env
+    environment:
+      POSTGRES_USER: linkwarden
+      POSTGRES_DB: linkwarden
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U linkwarden -d linkwarden -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  meilisearch:
+    # The version upstream's compose pins.
+    image: docker.io/getmeili/meilisearch:v1.13.3
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/linkwarden/meili.env
+    environment:
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+      # Meilisearch sizes indexing from host RAM, not the cgroup, and was
+      # OOM-killed at 512m by the first indexing batch without these caps.
+      MEILI_MAX_INDEXING_MEMORY: 256Mb
+      MEILI_MAX_INDEXING_THREADS: "2"
+    volumes:
+      - meili_data:/meili_data
+    mem_limit: 640m
+
+  # One-shot, every boot: migrate, and on an empty database create the admin
+  # through Linkwarden's own sign-up API on a private loopback server. The
+  # public app never runs with registration open.
+  seed:
+    image: ghcr.io/linkwarden/linkwarden:v2.16.3
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+      - ../.panelalpha/linkwarden/app.env
+      - ../.panelalpha/linkwarden/admin.env
+    environment:
+      NEXTAUTH_URL: ${PA_PUBLIC_URL}/api/v1/auth
+    volumes:
+      - ./panelalpha/linkwarden:/pa:ro
+    entrypoint: ["sh", "/pa/seed.sh"]
+    mem_limit: 1024m
+
+  linkwarden:
+    image: ghcr.io/linkwarden/linkwarden:v2.16.3
+    restart: unless-stopped
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      meilisearch:
+        condition: service_started
+    # .env holds panel-overridable defaults; app.env the persisted secrets.
+    env_file:
+      - .env
+      - ../.panelalpha/linkwarden/app.env
+    environment:
+      NEXTAUTH_URL: ${PA_PUBLIC_URL}/api/v1/auth
+    ports:
+      - "3000:3000"
+    volumes:
+      # Archives: screenshots, PDFs, readable text, monolith snapshots.
+      - data:/data/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "-o", "/dev/null", "http://127.0.0.1:3000/api/v1/logins"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    # next + worker + headless Chromium for archiving; V8 sizes its heap from this.
+    mem_limit: 1536m
+
+  # Exits 0 once the app is healthy, so `compose up -d` returns only when
+  # Linkwarden answers (engine#204).
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      linkwarden:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  pgdata: {}
+  meili_data: {}
+  data: {}

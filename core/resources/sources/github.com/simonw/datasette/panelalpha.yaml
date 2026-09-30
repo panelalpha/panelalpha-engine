@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Datasette, a tool for exploring and publishing SQLite databases (Python/ASGI
+  on :8001). The repository's Dockerfile installs a release zip named by a
+  VERSION build argument and has no default, so a plain deploy fails fetching
+  ".../refs/tags/.zip" (404); its CMD also listens on 127.0.0.1 only.
+
+  This recipe runs upstream's official image of the current release,
+  datasetteproject/datasette:0.65.5, bound to 0.0.0.0, serving
+  /data/data.db (created on first start) from a named volume that survives
+  redeploys. Datasette has no login; that is left as upstream ships it.

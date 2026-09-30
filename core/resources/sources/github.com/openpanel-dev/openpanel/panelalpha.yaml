@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OpenPanel, an open-source web and product analytics platform (Mixpanel /
+  Plausible alternative): API and dashboard (Node), a queue worker,
+  PostgreSQL, Redis and ClickHouse.
+
+  The repository's root docker-compose.yml is the developer dependency stack
+  (postgres, redis, clickhouse, redpanda) with no OpenPanel service in it, so
+  a plain deploy serves nothing and the Redpanda broker restart-loops.
+  Upstream's deployment is self-hosting/docker-compose.template.yml, rendered
+  by its interactive setup script. This recipe is that compose on the current
+  release images (lindesvard/openpanel-{api,dashboard,worker}:2.3.0) for one
+  domain: upstream's Caddy routes /api to the API and everything else to the
+  dashboard, with TLS left to the engine (Caddyfile in files/). ClickHouse
+  uses upstream's own config files from self-hosting/clickhouse/.
+  hooks/prepare.sh generates the PostgreSQL password, COOKIE_SECRET and
+  ENCRYPTION_KEY once into ~/.panelalpha/openpanel/. DASHBOARD_URL and
+  API_URL follow the site's address; CUSTOM_COOKIE_DOMAIN (upstream's own
+  setting) keeps the session cookie on the site's host, since by default it
+  goes to the parent domain (.panelalpha.online, shared by every account). Registration settings are upstream's
+  defaults (the first account can sign up, later ones by invitation); mail is
+  optional (EMAIL_SENDER and RESEND_API_KEY in the project's env vars). The
+  API runs upstream's migrations on every start; a `ready` gate makes the
+  deploy finish only once the stack is healthy.

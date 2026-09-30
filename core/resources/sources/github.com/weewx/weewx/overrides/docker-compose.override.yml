@@ -1,0 +1,31 @@
+# Station config, SQLite archive and generated site survive redeploys.
+services:
+  app:
+    volumes:
+      - data:/var/lib/weewx
+    # Healthy once weewxd has written its first report (up to one archive interval).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/index.html')"]
+      interval: 10s
+      timeout: 5s
+      retries: 45
+      start_period: 10s
+    # weewxd prints every LOOP packet (upstream's StdPrint); the account's
+    # dockerd does not rotate logs (engine#24).
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

@@ -1,0 +1,44 @@
+# Compose-replace: upstream's compose reserves an NVIDIA GPU and runs with
+# cap_drop: ALL + cap_add, which the engine turns into cap_drop only (engine#349),
+# so the entrypoint cannot chown /app/data or drop to uid 1000 and crash-loops.
+# Runs the published CPU image of the current release with default caps.
+services:
+  minuspod:
+    image: ttlequals0/minuspod:2.97.36-cpu
+    restart: unless-stopped
+    stop_grace_period: 60s
+    ports:
+      - "8000:8000"
+    environment:
+      BASE_URL: ${PA_PUBLIC_URL}
+      MINUSPOD_PORT: "8000"
+      WHISPER_MODEL: ${WHISPER_MODEL:-tiny}
+      WHISPER_DEVICE: cpu
+      WHISPER_BACKEND: ${WHISPER_BACKEND:-}
+      WHISPER_API_BASE_URL: ${WHISPER_API_BASE_URL:-}
+      WHISPER_API_KEY: ${WHISPER_API_KEY:-}
+      WHISPER_API_MODEL: ${WHISPER_API_MODEL:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      MINUSPOD_MASTER_PASSPHRASE: ${MINUSPOD_MASTER_PASSPHRASE:-}
+      MINUSPOD_REQUIRE_AUTH: "true"
+      # Upstream's remote first-password setup: send it as X-MinusPod-Setup-Token.
+      MINUSPOD_SETUP_TOKEN: ${MINUSPOD_SETUP_TOKEN:-}
+      MINUSPOD_ALLOW_PUBLIC_PROCESSING: ${MINUSPOD_ALLOW_PUBLIC_PROCESSING:-false}
+      # One proxy (the account vhost) in front: login lockout keys on the real client.
+      MINUSPOD_TRUSTED_PROXY_COUNT: "1"
+    volumes:
+      - minuspod-data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  minuspod-data: {}

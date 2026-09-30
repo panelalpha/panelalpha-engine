@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  CTFd, the capture-the-flag platform (Flask, MariaDB, Redis). A plain deploy
+  built the repository's Dockerfile and folded its compose services in as
+  sidecars, but the engine replaced the compose file's
+  DATABASE_URL=mysql+pymysql://... with a generic mysql://..., which
+  SQLAlchemy maps to the MySQLdb driver the image does not ship
+  (ModuleNotFoundError: No module named 'MySQLdb'), so the app restart-looped.
+  This recipe runs the official ctfd/ctfd image of the current release (3.8.7)
+  on port 8000 against MariaDB 11.8 and Redis, with uploads, the database and
+  Redis on named volumes. The database passwords and CTFd's SECRET_KEY are
+  generated once into ~/.panelalpha/ctfd, so a rebuild keeps both the data and
+  the sessions. The first visit opens CTFd's own setup wizard.

@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Peppermint (peppermint-lab/peppermint, AGPL-3.0) is a helpdesk and ticket
+  system: one image running a Next.js client on :3000 and a Fastify API on
+  :5003 under pm2, with PostgreSQL through Prisma. The client proxies /api/v1
+  to the API on localhost, so only :3000 is published.
+
+  OFFICIAL IMAGE. The repo's docker-compose.yml publishes both ports, runs
+  postgres:latest (18 refuses its /var/lib/postgresql/data volume) and
+  hard-codes the database password and JWT secret. overrides/docker-compose.yml
+  runs upstream's pepperlabs/peppermint image, pinned by digest to the build of
+  the latest release 0.5.5 (upstream publishes only :latest and :nightly), on
+  postgres:16-alpine. hooks/prepare.sh generates the database password and
+  SECRET once into ~/.panelalpha/peppermint/ (0600 in 0700). Tickets live on
+  the pgdata volume, attachments on peppermint-uploads. A `ready` gate makes
+  the deploy finish only when both the client and the API answer.
+
+  FIRST RUN AS UPSTREAM SHIPS IT. The API seeds admin@admin.com / 1234 on an
+  empty database (README); log in and change it.

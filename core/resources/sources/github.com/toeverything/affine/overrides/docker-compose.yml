@@ -1,0 +1,96 @@
+# Compose-replace: upstream's .docker/selfhost/compose.yml on the 0.27.4 image,
+# with named volumes instead of ./data bind mounts (~/project is re-cloned).
+x-affine-env: &affine-env
+  REDIS_SERVER_HOST: redis
+  DATABASE_URL: postgresql://affine@postgres:5432/affine
+  DEPLOYMENT_TYPE: selfhosted
+
+services:
+  affine:
+    image: ghcr.io/toeverything/affine:0.27.4
+    restart: unless-stopped
+    ports:
+      - "3010:3010"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      affine_migration:
+        condition: service_completed_successfully
+    volumes:
+      - storage:/root/.affine/storage
+      - config:/root/.affine/config
+    environment:
+      <<: *affine-env
+      AFFINE_SERVER_EXTERNAL_URL: ${PA_PUBLIC_URL}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3010/info').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1536m
+
+  affine_migration:
+    image: ghcr.io/toeverything/affine:0.27.4
+    restart: "no"
+    command: ["sh", "-c", "node ./scripts/self-host-predeploy.js"]
+    volumes:
+      - storage:/root/.affine/storage
+      - config:/root/.affine/config
+    environment:
+      <<: *affine-env
+      AFFINE_SERVER_EXTERNAL_URL: ${PA_PUBLIC_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 1g
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: affine
+      POSTGRES_DB: affine
+      POSTGRES_INITDB_ARGS: --data-checksums
+      # Upstream's setting; the database is reachable only on the account's compose network.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "affine", "-d", "affine"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 384m
+
+  # No-op gate: `compose up -d` returns once the server answers /info.
+  ready:
+    image: redis:7
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      affine:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  storage: {}
+  config: {}
+  postgres: {}
+  redis: {}

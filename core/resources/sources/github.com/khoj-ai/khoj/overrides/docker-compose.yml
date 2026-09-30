@@ -1,0 +1,84 @@
+# Compose-replace of upstream's docker-compose.yml: same stack minus the
+# optional `computer` desktop (its VNC port 5900 outranked the app's 42110),
+# images pinned to the current release, and KHOJ_DOMAIN set to the site.
+# KHOJ_DJANGO_SECRET_KEY/KHOJ_ADMIN_PASSWORD keep upstream's placeholders:
+# the engine replaces them with per-account values, stable across rebuilds.
+services:
+  database:
+    image: docker.io/pgvector/pgvector:pg15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - khoj_db:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  sandbox:
+    # Terrarium publishes only `latest`; pinned by digest.
+    image: ghcr.io/khoj-ai/terrarium@sha256:caf9356305daf9f7f4e4a63ef1ce3a72dc2c0190cb8fdfa4e0e837d2298f19ce
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 2
+
+  search:
+    image: docker.io/searxng/searxng:2026.9.29-4e2c1ea7f
+    volumes:
+      - khoj_search:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+
+  server:
+    image: ghcr.io/khoj-ai/khoj:2.0.0-beta.28
+    depends_on:
+      database:
+        condition: service_healthy
+    ports:
+      - "42110:42110"
+    working_dir: /app
+    volumes:
+      - khoj_config:/root/.khoj/
+      - khoj_models:/root/.cache/torch/sentence_transformers
+      - khoj_models:/root/.cache/huggingface
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=database
+      - POSTGRES_PORT=5432
+      - KHOJ_DJANGO_SECRET_KEY=secret
+      - KHOJ_DEBUG=False
+      - KHOJ_ADMIN_EMAIL=username@example.com
+      - KHOJ_ADMIN_PASSWORD=password
+      - KHOJ_TERRARIUM_URL=http://sandbox:8080
+      - KHOJ_SEARXNG_URL=http://search:8080
+      # Trusted CSRF origin and cookie domain for the public site.
+      - KHOJ_DOMAIN=${PA_PUBLIC_HOST}
+    command: --host="0.0.0.0" --port=42110 -vv --anonymous-mode --non-interactive
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:42110/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  # No-op: `compose up -d` returns once Khoj has loaded its models and answers.
+  ready:
+    image: docker.io/pgvector/pgvector:pg15
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      server:
+        condition: service_healthy
+
+volumes:
+  khoj_config:
+  khoj_db:
+  khoj_models:
+  khoj_search:

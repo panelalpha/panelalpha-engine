@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PicoClaw, a lightweight personal AI assistant (Go) with a browser-based web
+  console. A plain deploy builds the repository's docker/Dockerfile, whose
+  `make build` is OOM-killed at 2500 MB, and even when built it runs the bare
+  gateway, which exits without an LLM configured ("model is required"). This
+  recipe runs upstream's published launcher image of the v0.3.1 release
+  (sipeed/picoclaw:v0.3.1-launcher), as upstream's own compose `launcher`
+  profile does: the web console on 18800, from which the model, API key and
+  channels are configured and the gateway is started; the console proxies the
+  gateway's websocket on the same port. Config, workspace and the dashboard
+  password store live on a named volume. First run is upstream's: the console
+  asks for a dashboard password to be set.

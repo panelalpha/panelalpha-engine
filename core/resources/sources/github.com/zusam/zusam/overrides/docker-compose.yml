@@ -1,0 +1,38 @@
+# Compose-replace: the repository ships no deployable Dockerfile (upstream
+# generates one with cpp). Runs the published image of the current release;
+# database, config and uploads live on the `data` volume.
+services:
+  app:
+    image: zusam/zusam:0.6.1
+    restart: unless-stopped
+    # The project's env vars (INIT_USER, INIT_PASSWORD, ALLOW_EMAIL, ...)
+    env_file:
+      - .env
+    environment:
+      APP_ENV: prod
+      DOMAIN: ${PA_PUBLIC_HOST}
+    volumes:
+      - data:/zusam/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # nginx starts last in run.sh, after composer install and the DB init
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/info"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 512m
+
+  # `compose up -d` returns only once the API answers.
+  ready:
+    image: zusam/zusam:0.6.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Agent Zero, an autonomous AI agent framework with a browser chat UI. The
+  repository root has no runnable entry point (its image is built by
+  docker/run/Dockerfile on a prebuilt base), so the engine ran it as a generic
+  Python app and pip failed resolving requirements.txt. This recipe runs the
+  published agent0ai/agent-zero image of the current release (v2.13) with
+  /a0/usr (settings, chats, memory, uploads) on a named volume. LLM provider
+  keys are entered in the app's own settings page.

@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Croodle, an end-to-end encrypted web app for scheduling a date or running a
+  poll (Ember.js client, PHP/Slim API, polls stored as encrypted text files,
+  no database). The repository is the pnpm monorepo the release is built
+  from: its `build` script runs the Ember build and then `composer install`
+  from inside the pnpm step, and the host frontend build has no composer, so
+  the plain deploy fails with `sh: 1: composer: not found`.
+
+  Upstream distributes production builds as release tarballs (README: "Production
+  builds are provided as github release assets"). This recipe downloads the
+  current release, v0.7.0, checks its sha256 and serves it on the official
+  php:8.3-apache-bookworm image on port 8080 with the image's production
+  php.ini (without one, PHP 8 deprecation notices from Slim 3 are printed
+  into the API's JSON and the client cannot parse it), with a `ready` gate. Polls live
+  in the `data` volume at /data (CROODLE__DATA_DIR), outside the web root,
+  and survive redeploys.

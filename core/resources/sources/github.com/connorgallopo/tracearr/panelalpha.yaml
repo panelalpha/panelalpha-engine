@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tracearr monitors Plex, Jellyfin and Emby streaming activity: a Node
+  (Fastify) server with its web UI on :3000, backed by TimescaleDB
+  (PostgreSQL 18) and Redis.
+
+  The repository is a pnpm/turbo monorepo with no root compose file, so a
+  plain deploy goes to Railpack, whose `pnpm run build` of the whole
+  workspace is OOM-killed and leaves the PanelAlpha placeholder. This recipe
+  is upstream's recommended docker/examples/docker-compose.pg18.yml on the
+  published image of the current release, ghcr.io/connorgallopo/tracearr:2.5.1,
+  with timescale/timescaledb-ha:pg18.4-ts2.29.1 and redis:8-alpine as
+  upstream pins them.
+
+  hooks/prepare.sh generates the database password, JWT_SECRET and
+  COOKIE_SECRET once into ~/.panelalpha/tracearr/ (0600 files in a 0700 dir)
+  and the services read them through env_file. Database, Redis, backups and
+  the image cache are on named volumes that survive redeploys. A `ready` gate
+  holds the deploy until /health answers. TRUST_PROXY is left at upstream's
+  default (off).
+
+  First run is upstream's: the setup page asks the first visitor to create
+  the owner account and connect a media server.

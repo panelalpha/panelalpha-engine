@@ -42,18 +42,22 @@ done
 
 # 2. .env, written before anything reads the checkout.
 #
-#    Guarded on the file existing, not on its contents: regenerating APP_KEY or
-#    GP247_ENCRYPTION_KEY on a redeploy would invalidate every session and every
-#    encrypted column the account has written, and an operator's own edits have
-#    to survive too. ProjectEnvironment copies .env.example to .env only when
-#    there is no .env, so writing one here is not a race with it.
-if [ ! -f .env ]; then
+#    The secrets are generated once into ~/.panelalpha/scart and reused:
+#    ~/project, .env included, is emptied on every deploy, while the MariaDB
+#    volume keeps the password it was created with and APP_KEY /
+#    GP247_ENCRYPTION_KEY decrypt the sessions and encrypted columns.
+STORE="${HOME}/.panelalpha/scart"
+# uploads/ is bind-mounted over storage/app/public by the compose override;
+# created here so it is the account's, not root's.
+mkdir -p "${STORE}/uploads"
+chmod 700 "${HOME}/.panelalpha" "${STORE}"
+if [ ! -s "${STORE}/secrets.env" ]; then
     # base64:<32 raw bytes> is the only shape Laravel's Encrypter accepts for
     # config/app.php's AES-256-CBC.
     #
     # Generated here, on the host, and NOT by `artisan key:generate` in the
-    # install stage -- by then it is too late. The generated service loads this
-    # file through `env_file:`, and Compose reads it when the container is
+    # install stage -- by then it is too late. The generated service loads .env
+    # through `env_file:`, and Compose reads it when the container is
     # *created*: an `APP_KEY=` line makes APP_KEY a real, empty environment
     # variable, and Laravel's Dotenv is immutable, so it never overwrites one.
     # Measured on Winter CMS: key:generate wrote a good key into .env and every
@@ -61,16 +65,32 @@ if [ ! -f .env ]; then
     # printing an empty line and the file printing the key. This recipe states
     # the whole manifest rather than `extends: laravel` precisely so that the
     # platform's `key-generate` command is not inherited.
-    SCART_APP_KEY="base64:$(openssl rand -base64 32)"
-    # GP247's own key for data at rest -- SMTP passwords, OAuth secrets,
-    # licences. Upstream ships it empty and `gp247:doctor` warns: with no value
-    # those columns fall back to APP_KEY, and an APP_KEY rotation then destroys
-    # them. Setting it now is free; setting it later is a migration.
-    SCART_GP247_KEY="base64:$(openssl rand -base64 32)"
-    # Hex, so there is no character in it that docker compose interpolates out
-    # of the .env it reads from this same directory, and none that needs
-    # quoting in a URL or a shell.
-    SCART_DB_PASSWORD="$(openssl rand -hex 16)"
+    #
+    # GP247_ENCRYPTION_KEY is GP247's own key for data at rest -- SMTP
+    # passwords, OAuth secrets, licences. Upstream ships it empty and
+    # `gp247:doctor` warns: with no value those columns fall back to APP_KEY.
+    #
+    # The password is hex, so there is no character in it that docker compose
+    # interpolates out of .env, and none that needs quoting in a URL or a shell.
+    (
+        umask 077
+        {
+            printf 'SCART_APP_KEY=base64:%s\n' "$(openssl rand -base64 32)"
+            printf 'SCART_GP247_KEY=base64:%s\n' "$(openssl rand -base64 32)"
+            printf 'SCART_DB_PASSWORD=%s\n' "$(openssl rand -hex 16)"
+        } > "${STORE}/secrets.env.tmp"
+        mv "${STORE}/secrets.env.tmp" "${STORE}/secrets.env"
+    )
+fi
+chmod 600 "${STORE}/secrets.env"
+
+#    Guarded on the file existing: a deploy that did not empty ~/project keeps
+#    an operator's own edits. ProjectEnvironment copies .env.example to .env
+#    only when there is no .env, so writing one here is not a race with it.
+if [ ! -f .env ]; then
+    SCART_APP_KEY=$(sed -n 's/^SCART_APP_KEY=//p' "${STORE}/secrets.env")
+    SCART_GP247_KEY=$(sed -n 's/^SCART_GP247_KEY=//p' "${STORE}/secrets.env")
+    SCART_DB_PASSWORD=$(sed -n 's/^SCART_DB_PASSWORD=//p' "${STORE}/secrets.env")
 
     sed -e 's|^APP_ENV=.*|APP_ENV=production|' \
         -e 's|^APP_DEBUG=.*|APP_DEBUG=false|' \
@@ -119,5 +139,5 @@ if [ ! -f .env ]; then
     # EnvSidecars reads this file from the engine's own process, as a different
     # user, and a .env it cannot open is a .env with no database in it.
     chmod 644 .env
-    echo "[s-cart] wrote .env: production, generated APP_KEY and GP247_ENCRYPTION_KEY, MySQL with a generated password"
+    echo "[s-cart] wrote .env: production, APP_KEY, GP247_ENCRYPTION_KEY and the MySQL password from ~/.panelalpha/scart"
 fi

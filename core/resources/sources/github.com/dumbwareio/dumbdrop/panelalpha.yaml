@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DumbDrop is a small Node (Express) file drop: chunked uploads into
+  /app/uploads behind an optional numeric PIN, with a PIN-gated file list,
+  download, rename and delete API.
+
+  The repository's docker-compose.yml runs dumbwareio/dumbdrop:latest with
+  DUMBDROP_PIN hardcoded to 123456, BASE_URL http://localhost:3000 and the
+  uploads in a ./local_uploads bind mount. overrides/docker-compose.yml runs
+  the image of the current commit (tag sha-<commit>; upstream publishes no
+  version tags), with /app/uploads on a named volume that survives redeploys,
+  BASE_URL and ALLOWED_ORIGINS set to the site's address.
+
+  Security: hooks/prepare.sh generates a 10-digit PIN once into
+  ~/.panelalpha/dumbdrop/pin.env (0600 in 0700); that file is where the owner
+  reads it. Everything except the login page and static assets needs it:
+  uploading, listing and downloading alike. There are no public share links,
+  so a download is never public; whoever has the PIN can read, rename and
+  delete every file. The app locks /api/auth after 5 requests per 15 minutes
+  per client; TRUST_PROXY makes that per visitor, from the address `proxy`
+  hands it (the engine's X-Real-IP, which a client cannot set). `proxy`
+  (nginx), the only service on the account's port, closes what upstream
+  leaves open: a PIN cookie or X-Pin header is compared on /api/upload and
+  /api/files with no lockout, so X-Pin is dropped, only the one PIN cookie
+  nginx checked is forwarded, and requests carrying a wrong one are throttled
+  to 10 per minute; PIN submissions are capped at 10 per minute for everyone
+  as a backstop (a flood can hold the owner's login off while it lasts); and
+  `..` in a path is refused, since the app renders any *.html path relative to
+  public/ without the PIN, which reached uploaded .html files. Behind a relay
+  (a withoutdns.com name) every visitor has the relay's address and shares one
+  lockout. No websocket.

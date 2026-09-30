@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OpenProject, the project management suite (Ruby on Rails, PostgreSQL).
+
+  The repository is the Rails source tree on the `dev` branch and its
+  docker-compose.yml is the developer environment; a plain deploy was
+  detected as `rails` and the build failed (exit code 4). This recipe runs
+  the all-in-one image upstream publishes for the current release,
+  openproject/openproject:17.8.0, the way its Docker guide does: Rails,
+  background worker, PostgreSQL 17, memcached and Apache in one container on
+  port 80. OPENPROJECT_HOST__NAME is the account's host. SECRET_KEY_BASE
+  (the image ships OVERWRITE_ME and refuses to boot on it) is generated per
+  account by the engine and kept across redeploys. The database
+  (/var/openproject/pgdata) and attachments (/var/openproject/assets) are
+  named volumes. A `ready` gate makes the deploy finish only once Rails
+  answers its health check; a boot takes about three minutes and the first
+  one also migrates and seeds the database. About 1.6-2 GB resident.
+
+  First run is upstream's: the login page, with the documented default
+  admin account (admin / admin, password change forced on first login).

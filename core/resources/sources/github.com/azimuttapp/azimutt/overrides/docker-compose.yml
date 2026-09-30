@@ -1,0 +1,71 @@
+# Compose-replace: upstream's published image (built from HEAD) instead of the
+# repo Dockerfile, whose bullseye runner stage can no longer apt-get install.
+services:
+  backend:
+    image: ghcr.io/azimuttapp/azimutt:main@sha256:ecb0ca8b51ed397cf5e8500de748c3d1490cdf1f9773777be8f769f4b9f1ae99  # only tag upstream publishes; pinned to the HEAD build
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+      uploads-owner:
+        condition: service_completed_successfully
+    env_file:
+      - ../.panelalpha/azimutt/app.env
+    environment:
+      PHX_SERVER: "true"
+      PHX_PROTOCOL: ipv4
+      PHX_HOST: ${PA_PUBLIC_HOST}
+      PORT: "4000"
+      FILE_STORAGE_ADAPTER: local
+      AUTH_PASSWORD: "true"
+    volumes:
+      - azimutt_uploads:/app/bin/uploads
+    ports:
+      - "4000:4000"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4000"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1024m
+
+  # The image runs as nobody; a fresh named volume is root-owned.
+  uploads-owner:
+    image: busybox:1.37
+    restart: "no"
+    command: ["chown", "65534:65534", "/uploads"]
+    volumes:
+      - azimutt_uploads:/uploads
+    mem_limit: 32m
+
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/azimutt/db.env
+    environment:
+      POSTGRES_USER: azimutt
+      POSTGRES_DB: azimutt
+    volumes:
+      - azimutt_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U azimutt -d azimutt"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns once Azimutt accepts connections.
+  ready:
+    image: busybox:1.37
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  azimutt_uploads: {}
+  azimutt_pg: {}

@@ -1,0 +1,41 @@
+# Compose-replace: the repo's compose builds docker/golang.Dockerfile and
+# bind-mounts ./storages, a workstation setup. Upstream's published image runs
+# instead, with its documented named volumes.
+services:
+  app:
+    image: aldinokemal2104/go-whatsapp-web-multidevice:v9.5.0
+    restart: unless-stopped
+    command: ["rest"]
+    # The project's env vars (APP_BASIC_AUTH, WHATSAPP_WEBHOOK, ...).
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_PORT: "3000"
+    ports:
+      - "3000:3000"
+    volumes:
+      - gowa_storages:/app/storages
+      - gowa_statics:/app/statics
+    healthcheck:
+      # Port check: a 401 from APP_BASIC_AUTH still means the app is up.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 3000"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op: `compose up -d` returns once the app listens.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  gowa_storages: {}
+  gowa_statics: {}

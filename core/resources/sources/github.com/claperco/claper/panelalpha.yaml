@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Claper is a live audience-interaction tool (polls, Q&A, quizzes over
+  presentation slides), a Phoenix/Elixir release on :4000 with Postgres.
+
+  OFFICIAL IMAGE, NOT BUILT. The repo's compose runs ghcr.io/claperco/claper:latest
+  from a .env the operator fills in (SECRET_KEY_BASE, BASE_URL, a fixed DB
+  password). The override pins ghcr.io/claperco/claper:3.0.0 (the current
+  release), generates SECRET_KEY_BASE and the Postgres password once into
+  ~/.panelalpha/claper, sets BASE_URL from ${PA_PUBLIC_URL} (LiveView checks the
+  websocket origin against it) and keeps Postgres and uploaded presentations on
+  named volumes.
+
+  ADMIN. The image's seeds create admin@claper.co with the fixed password
+  "claper" when the users table is empty. start.sh runs the image's own
+  migrate + seeds, then replaces that password with a generated one (only while
+  the default still verifies) before the server listens. The login is in
+  ~/.panelalpha/claper/credentials.txt.
+
+  ACCESS. Presenter self-registration is closed (ENABLE_ACCOUNT_CREATION=false);
+  the admin creates presenters from /admin/users. Attendees join an event by its
+  code without an account, which is the app's purpose.
+
+  WEBSOCKETS. Every interactive screen (event creation, polls, the attendee
+  room) is a Phoenix LiveView over /live/websocket, and Claper ships no
+  long-poll fallback. The engine vhost upgrades it (101); the shared
+  *.panelalpha.online test edge strips Upgrade (engine#170), so on a test name
+  pages render but do not react. Use a domain that points at the host.

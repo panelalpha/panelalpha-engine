@@ -1,0 +1,73 @@
+# tinyfeed only generates an HTML page; upstream's docs/docker.md runs it in
+# daemon mode next to Caddy serving the page. This is that setup, on the
+# published image of the current release (v1.5.0).
+services:
+  # One-shot: writes feeds.txt from TINYFEED_FEEDS (URLs separated by spaces,
+  # commas or newlines) and hands the volume to the image's user (uid 1000).
+  init:
+    image: caddy:2.11.4-alpine
+    restart: "no"
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$$(echo "$$TINYFEED_FEEDS" | tr -d ' ,\n')" ]; then
+          echo "Error: set TINYFEED_FEEDS in the project's environment variables: the feed URLs to aggregate, separated by spaces or commas"
+          exit 1
+        fi
+        echo "$$TINYFEED_FEEDS" | tr ', ' '\n\n' | grep -v '^$$' > /data/feeds.txt
+        chown -R 1000:1000 /data
+        echo "tinyfeed: $$(wc -l < /data/feeds.txt) feed(s)"
+    volumes:
+      - data:/data
+    mem_limit: 32m
+
+  tinyfeed:
+    image: thebigroomxxl/tinyfeed:v1.5.0
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    command:
+      - --daemon
+      - --input
+      - feeds.txt
+      - --output
+      - index.html
+      - --interval
+      - "${TINYFEED_INTERVAL:-60}"
+      - --name
+      - "${TINYFEED_NAME:-Feed}"
+    volumes:
+      - data:/app
+    mem_limit: 128m
+
+  web:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    volumes:
+      - data:/srv:ro
+      - ./panelalpha/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "8080:8080"
+    # Healthy once tinyfeed has written the first page.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 64m
+
+  # No-op gate: `compose up -d` returns only once the page is served.
+  ready:
+    image: caddy:2.11.4-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

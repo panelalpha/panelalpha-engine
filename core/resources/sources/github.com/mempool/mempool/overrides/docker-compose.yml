@@ -1,0 +1,114 @@
+# Upstream's docker/docker-compose.yml on the v3.3.1 release images, with the
+# data on named volumes (upstream bind-mounts ./mysql/data and runs MariaDB as
+# uid 1000, which cannot write it here) and generated database passwords.
+services:
+  # One-shot: Mempool is an explorer for the customer's own Bitcoin Core node,
+  # so the deploy fails here until its address is set. Also hands the cache
+  # volume to the backend's uid 1000 (volumes are created root-owned).
+  init:
+    image: mempool/backend:v3.3.1
+    restart: "no"
+    user: "0"
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$$CORE_RPC_HOST" ]; then
+          echo "Error: set CORE_RPC_HOST (your Bitcoin Core node's address) in the project's environment variables; CORE_RPC_PORT, CORE_RPC_USERNAME and CORE_RPC_PASSWORD default to 8332, mempool, mempool"
+          exit 1
+        fi
+        chown 1000:1000 /backend/cache
+    volumes:
+      - cache:/backend/cache
+    mem_limit: 64m
+
+  web:
+    image: mempool/frontend:v3.3.1
+    restart: on-failure
+    stop_grace_period: 1m
+    environment:
+      FRONTEND_HTTP_PORT: "8080"
+      BACKEND_MAINNET_HTTP_HOST: "api"
+    command: "./wait-for db:3306 --timeout=720 -- nginx -g 'daemon off;'"
+    ports:
+      - "8080:8080"
+    # nginx resolves the `api` upstream once at start and exits if it is not
+    # there yet (a rebuild brings the database back before the backend).
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/ | grep -q '<html' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    mem_limit: 128m
+
+  api:
+    image: mempool/backend:v3.3.1
+    restart: on-failure
+    stop_grace_period: 1m
+    # db.env: DATABASE_PASSWORD (hooks/prepare.sh). .env: the project's env
+    # vars - CORE_RPC_*, ELECTRUM_*, and any other upstream setting.
+    env_file:
+      - ../.panelalpha/mempool/db.env
+      - .env
+    environment:
+      MEMPOOL_BACKEND: "${MEMPOOL_BACKEND:-none}"
+      DATABASE_ENABLED: "true"
+      DATABASE_HOST: "db"
+      DATABASE_DATABASE: "mempool"
+      DATABASE_USERNAME: "mempool"
+      STATISTICS_ENABLED: "true"
+    command: "./wait-for-it.sh db:3306 --timeout=720 --strict -- ./start.sh"
+    volumes:
+      - cache:/backend/cache
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8999/api/v1/backend-info | grep -q . || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 40s
+    mem_limit: 1024m
+
+  db:
+    image: mariadb:10.5.21
+    restart: on-failure
+    stop_grace_period: 1m
+    # MYSQL_* from ~/.panelalpha (declared here they trip engine#419).
+    env_file:
+      - ../.panelalpha/mempool/db.env
+    environment:
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      - mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u mempool -p$$MYSQL_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once the explorer answers.
+  ready:
+    image: mempool/frontend:v3.3.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  cache: {}
+  mysql: {}

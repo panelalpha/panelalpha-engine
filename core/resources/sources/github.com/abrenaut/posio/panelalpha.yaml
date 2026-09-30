@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Posio (abrenaut/posio, MIT) is a multiplayer geography game: Django with
+  GeoDjango on SpatiaLite, Django Channels over Redis, served by Daphne on
+  :8000, plus a `startgameloops` worker that runs the rounds.
+
+  A plain deploy builds the repository's Dockerfile, whose ENTRYPOINT is a bare
+  `python`, so the container exits at once (Restarting (0)). The repository's
+  docker-compose.yml is a development stack (source bind-mounted over /app,
+  DEBUG settings) and its README initialises the database by hand. This recipe
+  replaces the compose with the same three services (web, gameloops, Redis),
+  built from the
+  repository's own Dockerfile, in its production settings (ENV=production):
+  the web service migrates, creates the Cities and Flags games only while no
+  game exists (the commands are not idempotent), collects static files and
+  runs Daphne, with an nginx in front serving /static/ (Daphne does not
+  with DEBUG off) and proxying the rest, websockets included; the
+  gameloops worker starts once the web service is healthy. SECRET_KEY is
+  generated once by hooks/prepare.sh into ~/.panelalpha/posio/secret.env.
+  The SpatiaLite database and Redis data are on named volumes.

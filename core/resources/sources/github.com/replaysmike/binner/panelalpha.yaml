@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Binner is an electronic parts inventory manager (ASP.NET Core + React, SQLite
+  by default). The plain deploy builds Binner.Web with the dotnet recipe's .NET
+  10 SDK and fails: the StrawberryShake GraphQL code generator in the build
+  needs the .NET 8 runtime.
+
+  This recipe runs the published image of the current release
+  (binnerofficial/binner:v2.6.25), as the repo's own Binner/compose.yml does,
+  with plain HTTP on :8090 behind the engine's TLS (BINNER_USEHTTPS=false) and
+  BINNER_PUBLICURL set to the account's address. Config, the SQLite database
+  and uploaded files live on named volumes. First-run behaviour (the default
+  admin login) is upstream's.

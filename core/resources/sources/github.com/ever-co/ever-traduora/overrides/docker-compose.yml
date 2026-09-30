@@ -1,0 +1,68 @@
+# Compose-replace: the official everco/ever-traduora image of the current
+# release with MySQL on a named volume, secrets from ~/.panelalpha/traduora/.
+# Upstream's compose files build from source in development mode.
+services:
+  mysqldb:
+    # Upstream pins 5.7, which is end-of-life; 8.0 is the supported line.
+    image: docker.io/library/mysql:8.0
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/traduora/db.env
+    environment:
+      MYSQL_DATABASE: traduora
+      MYSQL_USER: traduora
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # TCP only answers once the init server (skip-networking) has finished.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 768m
+
+  traduora:
+    image: docker.io/everco/ever-traduora:v0.21.0
+    restart: unless-stopped
+    depends_on:
+      mysqldb:
+        condition: service_healthy
+    # app.env: TR_SECRET and TR_DB_PASSWORD.
+    env_file:
+      - ../.panelalpha/traduora/app.env
+    environment:
+      NODE_ENV: production
+      # The image defaults V8 to a 12 GB heap; keep it inside mem_limit.
+      NODE_OPTIONS: --max-old-space-size=768
+      TR_PORT: "8080"
+      TR_VIRTUAL_HOST: ${PA_PUBLIC_URL}
+      TR_DB_TYPE: mysql
+      TR_DB_HOST: mysqldb
+      TR_DB_PORT: "3306"
+      TR_DB_USER: traduora
+      TR_DB_DATABASE: traduora
+      TR_DB_AUTOMIGRATE: "true"
+      TR_CORS_ENABLED: "false"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1024m
+
+  # Exits 0 once Traduora answers, so `compose up -d` returns only then.
+  ready:
+    image: docker.io/library/alpine:3
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    restart: "no"
+    depends_on:
+      traduora:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  mysql-data: {}

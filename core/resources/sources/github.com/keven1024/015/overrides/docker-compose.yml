@@ -1,0 +1,63 @@
+# Compose-replace: release images, the repo's example config mounted as-is,
+# env overrides for the address, upload path and secrets, named volumes.
+services:
+  app:
+    image: fudaoyuanicu/015-app:0.14.1
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/015/secrets.env
+    environment:
+      SITE_URL: ${PA_PUBLIC_URL}
+      UPLOAD_PATH: /uploads
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - uploads:/uploads
+      - ./config.example.yaml:/app/config.yaml:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1/ && curl -fsS -o /dev/null http://127.0.0.1/api/config || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    mem_limit: 512m
+
+  worker:
+    image: fudaoyuanicu/015-worker:0.14.1
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/015/secrets.env
+    environment:
+      SITE_URL: ${PA_PUBLIC_URL}
+      UPLOAD_PATH: /uploads
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - uploads:/uploads
+      - ./config.example.yaml:/config.yaml:ro
+    depends_on:
+      - app
+      - redis
+    mem_limit: 512m
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    volumes:
+      - redis:/data
+    mem_limit: 128m
+
+  # No-op gate: `up` returns only once the site and its API answer.
+  ready:
+    image: redis:7
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  uploads: {}
+  redis: {}

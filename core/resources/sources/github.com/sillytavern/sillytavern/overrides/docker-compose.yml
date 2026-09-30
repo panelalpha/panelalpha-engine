@@ -1,0 +1,45 @@
+# Compose-replace: the repo's compose (docker/) bind-mounts workstation dirs.
+# Official image of the current release, in SillyTavern's own basic-auth mode.
+services:
+  app:
+    image: ghcr.io/sillytavern/sillytavern:1.19.0
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      NODE_ENV: production
+      # The proxy is not on the IP whitelist; basic auth satisfies the app's
+      # own "listening to non-localhost" security check instead.
+      SILLYTAVERN_WHITELISTMODE: "false"
+      SILLYTAVERN_BASICAUTHMODE: "true"
+      SILLYTAVERN_BASICAUTHUSER_USERNAME: ${SILLYTAVERN_BASICAUTHUSER_USERNAME:-}
+      SILLYTAVERN_BASICAUTHUSER_PASSWORD: ${SILLYTAVERN_BASICAUTHUSER_PASSWORD:-}
+      # Every visitor arrives from the proxy: rate-limit on X-Real-IP (set by it).
+      SILLYTAVERN_RATELIMITING_PREFERREALIPHEADER: "true"
+    volumes:
+      - sillytavern-config:/home/node/app/config
+      - sillytavern-data:/home/node/app/data
+      - sillytavern-plugins:/home/node/app/plugins
+      - sillytavern-extensions:/home/node/app/public/scripts/extensions/third-party
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+    mem_limit: 1g
+
+  # Fails `compose up` (and so the deploy) while a credential is unset.
+  env-check:
+    image: ghcr.io/sillytavern/sillytavern:1.19.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "/sillytavern-env-check.sh"]
+    environment:
+      SILLYTAVERN_BASICAUTHUSER_USERNAME: ${SILLYTAVERN_BASICAUTHUSER_USERNAME:-}
+      SILLYTAVERN_BASICAUTHUSER_PASSWORD: ${SILLYTAVERN_BASICAUTHUSER_PASSWORD:-}
+    volumes:
+      - ./sillytavern-env-check.sh:/sillytavern-env-check.sh:ro
+    mem_limit: 32m
+
+volumes:
+  sillytavern-config: {}
+  sillytavern-data: {}
+  sillytavern-plugins: {}
+  sillytavern-extensions: {}

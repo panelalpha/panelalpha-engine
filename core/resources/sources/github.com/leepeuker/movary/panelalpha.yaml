@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Movary tracks and rates the movies you watched (PHP). Every page except the
+  login is behind authentication.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repo's compose builds its Dockerfile
+  and publishes port 80 with a placeholder TMDB key. This recipe runs the
+  maintainer's image leepeuker/movary pinned to the current release 0.72.1 on
+  SQLite (the upstream default), with /app/storage (database, logs, cached
+  images) on a named volume so users and history survive a redeploy. The
+  image's nginx serves on :8080; only the app service publishes a port.
+
+  FIRST USER SEEDED BEFORE THE PORT OPENS. With no users, /create-user lets
+  the first visitor create the admin. A one-shot `init` service on the same
+  volume runs the migrations (the image entrypoint), then
+  `bin/console.php user:create` with an admin login generated once into
+  ~/.panelalpha/movary (credentials.txt there). It creates the user only while
+  the database has none, so a login changed in the app survives a redeploy.
+  Once a user exists /create-user redirects to the login, and
+  ENABLE_REGISTRATION is set to 0 explicitly. The app service depends on
+  `init` completing; a `ready` gate holds the deploy until /fpm-ping answers.
+
+  TMDB_API_KEY is left empty: it is the user's own key, set under
+  Settings -> Server (or as an env var). Without it movie search does not work.

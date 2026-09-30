@@ -1,0 +1,6 @@
+# The Dockerfile copies the whole context into Apache's docroot; keep the
+# engine's .env (generated DB passwords, env_vars) and .git out of it.
+.env
+.env.*
+.git
+.dockerignore

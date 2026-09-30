@@ -1,0 +1,69 @@
+# The repository root has no main package (the binary is cmd/stash, engine
+# #328) and the UI is a separate pnpm build, so this runs upstream's published
+# v0.31.1 release image laid out like docker/production/docker-compose.yml.
+#
+# Behind the engine every visitor arrives with a public X-Forwarded-For, and
+# Stash without a login answers the first such request by writing a permanent
+# lock into config.yml. dangerous_allow_public_without_auth is Stash's own
+# switch for that; it is read from config.yml only (no STASH_* env), so a
+# first config.yml is written once and Stash owns it from then on.
+services:
+  app:
+    image: stashapp/stash:v0.31.1@sha256:df744af5a0c976e2ec671052ecc1f8a9aa757fa12b8f9930b59910b7295f0da6
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cfg=/root/.stash/config.yml
+        if [ ! -s "$$cfg" ]; then
+          mkdir -p /root/.stash
+          printf '%s\n' \
+            'dangerous_allow_public_without_auth: true' \
+            'database: /root/.stash/stash-go.sqlite' \
+            'generated: /generated/' \
+            'metadata: /metadata/' \
+            'cache: /cache/' \
+            'blobs_storage: FILESYSTEM' \
+            'blobs_path: /blobs/' \
+            'stash:' \
+            '  - path: /data/' > "$$cfg"
+        fi
+        exec stash
+    environment:
+      STASH_PORT: "9999"
+      TZ: Etc/UTC
+    volumes:
+      # config.yml, stash-go.sqlite, scrapers and plugins.
+      - config:/root/.stash
+      - data:/data
+      - metadata:/metadata
+      - cache:/cache
+      - blobs:/blobs
+      - generated:/generated
+    ports:
+      - "9999:9999"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9999/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once Stash answers.
+  ready:
+    image: stashapp/stash:v0.31.1@sha256:df744af5a0c976e2ec671052ecc1f8a9aa757fa12b8f9930b59910b7295f0da6
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  data: {}
+  metadata: {}
+  cache: {}
+  blobs: {}
+  generated: {}

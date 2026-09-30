@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gotenberg, a stateless Docker-powered HTTP API that converts HTML, Markdown
+  and office documents to PDF with Chromium and LibreOffice (Go, port 3000).
+  The repository's compose.yaml is upstream's development stack: its image is
+  `${DOCKER_REGISTRY}/${DOCKER_REPOSITORY}:${GOTENBERG_VERSION}` (the repo's
+  .env says `snapshot`, which is not published), every port and flag comes
+  from Makefile variables that are unset at deploy time, and it adds an
+  OpenTelemetry collector and OpenObserve for tracing, so the plain deploy
+  fails before anything starts.
+
+  This recipe runs only the gotenberg service from the current release image
+  gotenberg/gotenberg:8.37.0 with the image's own defaults (upstream's
+  documented `docker run`), port 3000 and a `ready` gate on /health. It keeps
+  no data. Gotenberg's own settings (API_ENABLE_BASIC_AUTH and friends via
+  GOTENBERG_API_BASIC_AUTH_USERNAME/PASSWORD, flags as env vars) can be set as
+  project env vars.

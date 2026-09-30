@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Medama is a cookie-free web analytics server: one Go binary serving the
+  dashboard, the tracker script and the API on :8080, with SQLite (users,
+  websites) and DuckDB (events) files under /app/data. The repository's
+  Dockerfile builds fine but its distroless final stage points both databases
+  at /app/data without creating the directory or declaring a VOLUME, so the
+  plain dockerfile deploy restart-loops on "lstat /app/data: no such file or
+  directory". This recipe runs the official ghcr.io/medama-io/medama image of
+  the current release, v0.6.2, with /app/data on a named volume that survives
+  redeploys. Medama's own first-run login (admin / CHANGE_ME_ON_FIRST_LOGIN,
+  changed on first sign-in) is left as upstream ships it.

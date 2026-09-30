@@ -1,0 +1,38 @@
+# The repository is the Rust server only; the web UI lives in agersant/polaris-web
+# and is bundled at release time. This runs the container image upstream's
+# docs/SETUP.md points to (ogarcia/docker-polaris), current release 0.16.1.
+services:
+  app:
+    image: quay.io/connectical/polaris:0.16.1-alpine3.24.2
+    restart: unless-stopped
+    environment:
+      POLARIS_PORT: "5050"
+    volumes:
+      # polaris.ndb (users, playlists), polaris.toml, auth.secret, index.
+      - data:/var/lib/polaris
+      - cache:/var/cache/polaris
+      - music:/music
+    ports:
+      - "5050:5050"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5050/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once Polaris answers.
+  ready:
+    image: quay.io/connectical/polaris:0.16.1-alpine3.24.2
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  cache: {}
+  music: {}

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Gossa is a minimal web file manager: one Go binary serving a directory with
+  browsing, upload, rename, move, text editing and media playback on :8001.
+
+  Its main.go takes the directory to share as a required positional argument
+  and reads only flags, so the generic Go recipe (`./app`, no arguments)
+  prints usage and restart-loops. This recipe runs upstream's published image
+  of the current release pldubouilh/gossa:v1.1.2, as support/docker-compose.yml
+  does; its entrypoint passes -h 0.0.0.0 -p 8001 and /shared, and the image's
+  env (READONLY, SKIP_HIDDEN_FILES, FOLLOW_SYMLINKS, PREFIX) sets the options.
+  /shared is a named volume that survives redeploys.
+
+  Gossa has no authentication of its own by design (upstream suggests a
+  proxy in front); that is left as upstream ships it.

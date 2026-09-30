@@ -1,0 +1,36 @@
+# The repo's compose files are a workstation/nginx-proxy stack that builds
+# from source; run the published image of the current release instead.
+services:
+  app:
+    image: ghcr.io/shurco/mycart:v0.2.10
+    restart: unless-stopped
+    command: ["serve", "--http", "0.0.0.0:8080"]
+    ports:
+      - "8080:8080"
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+    volumes:
+      - base:/app/lc_base
+      - uploads:/app/lc_uploads
+      - digitals:/app/lc_digitals
+      - certs:/app/lc_certs
+    mem_limit: 512m
+
+  # One-shot: new volumes are root-owned; the image runs as 65532.
+  data-init:
+    image: alpine:3.22
+    restart: "no"
+    volumes:
+      - base:/v/base
+      - uploads:/v/uploads
+      - digitals:/v/digitals
+      - certs:/v/certs
+    entrypoint: ["/bin/sh", "-c", "chown 65532:65532 /v/*"]
+    mem_limit: 32m
+
+volumes:
+  base: {}
+  uploads: {}
+  digitals: {}
+  certs: {}

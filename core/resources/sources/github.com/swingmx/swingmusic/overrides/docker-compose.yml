@@ -1,0 +1,36 @@
+# The Python recipe finds no entry point here and serves the placeholder;
+# this runs the release image as in the README's compose example.
+services:
+  app:
+    image: ghcr.io/swingmx/swingmusic:v3.0.0@sha256:a49155d1809bc6ad09d87d76cc91648c149fc80146b5e10260e70fe1cfa78175
+    restart: unless-stopped
+    environment:
+      SWINGMUSIC_PORT: "1970"
+      SWINGMUSIC_DEVICE_NAME: ${PA_PUBLIC_HOST}
+    volumes:
+      # Settings, library database and backups.
+      - config:/config
+      - music:/music
+    ports:
+      - "1970:1970"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:1970/', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Swing Music answers.
+  ready:
+    image: ghcr.io/swingmx/swingmusic:v3.0.0@sha256:a49155d1809bc6ad09d87d76cc91648c149fc80146b5e10260e70fe1cfa78175
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  music: {}

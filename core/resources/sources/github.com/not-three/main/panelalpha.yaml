@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  !3 (not-th.re) is a paste-sharing service with client-side encryption and
+  the Monaco editor: a NestJS api (:4000), a static Nuxt ui (:3000) and an
+  Excalidraw build (draw, :80), glued together by path routing. The
+  repository's compose.yml runs Traefik on the Docker socket with scaled
+  replicas, so the plain compose deploy fails binding the same port twice. The
+  README's "Minimal" proxy mode (PROXY_URL on the ui) only exists in the Nuxt
+  dev server, not in the published ui image, which serves the SPA for /api/.
+
+  This recipe runs the published images of the current releases (api 2.1.0,
+  ui 2.2.0, draw 2.0.1) behind Caddy 2.11.4 carrying upstream's Traefik
+  routing: /api/draw/ to draw, /api to the api, the rest
+  to the ui, on one public port. The api keeps its default SQLite database in
+  /app/db on a named volume (upstream's example mounts /data/db, which the api
+  never writes). Rate limits and bans key on the X-Real-Ip header the engine
+  proxy sets, not on the first, client-supplied X-Forwarded-For entry; on a
+  *.panelalpha.online domain that header is still the shared front address
+  until engine#319 resolves it. Caddy rather than upstream's Traefik because
+  the engine drops every traefik service (engine#334). Everything else is
+  upstream's default.

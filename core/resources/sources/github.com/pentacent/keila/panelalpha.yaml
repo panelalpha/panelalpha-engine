@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Keila is a newsletter and email-marketing tool (Elixir/Phoenix + PostgreSQL).
+  The repository root has no compose file or Dockerfile and Elixir is not a
+  detected stack, so the engine served its placeholder; ops/docker-compose.yml
+  is upstream's local-testing stack (:latest, postgres:postgres). This recipe
+  runs the published pentacent/keila:0.30.3 (current release) beside
+  postgres:18-alpine, with URL_HOST from the site's address, SECRET_KEY_BASE
+  and the database password generated once into ~/.panelalpha/keila/, and
+  uploads on a named volume. Keila refuses to boot without an SMTP mailer for
+  system emails: a one-shot `init` service fails the deploy naming each
+  missing variable (MAILER_SMTP_HOST, MAILER_SMTP_FROM_EMAIL,
+  MAILER_SMTP_PASSWORD unless MAILER_SMTP_AUTH_METHOD=none). On the first
+  start Keila creates its root user as upstream does: KEILA_USER /
+  KEILA_PASSWORD when set, otherwise root@localhost with a random password
+  printed in the app log.

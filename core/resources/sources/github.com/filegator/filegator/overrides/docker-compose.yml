@@ -1,0 +1,53 @@
+# Compose-replace: the repository's compose builds the Dockerfile, which clones
+# master and runs npm and phpunit (heavy for an account). This runs the official
+# image of the current release and replaces the default admin/admin123 password
+# with a generated one before the port is published.
+services:
+  app:
+    image: filegator/filegator:v7.16.5
+    restart: unless-stopped
+    volumes:
+      # Managed files. Outside the web root (dist/), so never served or executed.
+      - repository:/var/www/filegator/repository
+      # users.json, logs, sessions, tmp.
+      - private:/var/www/filegator/private
+    ports:
+      - "8080:8080"
+    depends_on:
+      users-seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 256m
+
+  # Writes the generated admin hash into users.json while it is missing or still
+  # holds the default password; a password changed in the app is never touched.
+  users-seed:
+    image: filegator/filegator:v7.16.5
+    restart: "no"
+    # Root reads the 0600 hash from ~/.panelalpha; users.json is chowned to www-data.
+    user: root
+    entrypoint: ["php", "/run/panelalpha/seed-users.php"]
+    volumes:
+      - private:/var/www/filegator/private
+      - ./panelalpha/filegator/seed-users.php:/run/panelalpha/seed-users.php:ro
+      - ../.panelalpha/filegator/admin.hash:/run/panelalpha/admin.hash:ro
+    mem_limit: 64m
+
+  # No-op gate: `compose up -d` returns only once the app answers.
+  ready:
+    image: filegator/filegator:v7.16.5
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  repository: {}
+  private: {}

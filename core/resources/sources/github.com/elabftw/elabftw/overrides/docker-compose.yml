@@ -1,0 +1,86 @@
+# Compose-replace: upstream's elabimg example (containers/elabimg/docker-compose.yml-EXAMPLE)
+# on the published release image instead of building the development tree.
+services:
+  # Named volumes start root-owned; the image runs as an unprivileged uid.
+  perms:
+    image: elabftw/elabimg:6.0.5
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["chown", "-R", "1000:1000", "/var/cache/elabftw", "/var/lib/elabftw/uploads", "/var/lib/elabftw/exports"]
+    volumes:
+      - elab-cache:/var/cache/elabftw
+      - elab-uploads:/var/lib/elabftw/uploads
+      - elab-exports:/var/lib/elabftw/exports
+    mem_limit: 64m
+
+  app:
+    image: elabftw/elabimg:6.0.5
+    restart: unless-stopped
+    # php-fpm refuses to run as root (upstream sets a dedicated uid here too)
+    user: "1000:1000"
+    tmpfs:
+      - /run:mode=755,uid=1000,gid=1000,exec,nosuid,nodev,size=64m
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../.panelalpha/elabftw/app.env
+    environment:
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: elabftw
+      DB_USER: elabftw
+      SITE_URL: ${PA_PUBLIC_URL}
+      # TLS ends at the engine's proxy
+      DISABLE_HTTPS: "true"
+      AUTO_DB_INIT: "true"
+      AUTO_DB_UPDATE: "true"
+      PHP_TIMEZONE: UTC
+      TZ: UTC
+      PHP_MAX_CHILDREN: "10"
+      MAX_PHP_MEMORY: 512M
+      NGINX_WORK_PROC: "2"
+    volumes:
+      - elab-cache:/var/cache/elabftw
+      - elab-uploads:/var/lib/elabftw/uploads
+      - elab-exports:/var/lib/elabftw/exports
+    depends_on:
+      perms:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+    mem_limit: 1024m
+
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/elabftw/db.env
+    environment:
+      MYSQL_DATABASE: elabftw
+      MYSQL_USER: elabftw
+      TZ: UTC
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysql --user=$$MYSQL_USER --password=$$MYSQL_PASSWORD --execute 'SHOW DATABASES;'"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 640m
+
+  # No-op gate: `compose up -d` returns once the schema is installed and nginx answers.
+  ready:
+    image: mysql:8.4
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  elab-cache: {}
+  elab-uploads: {}
+  elab-exports: {}
+  mysql-data: {}

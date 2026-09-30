@@ -1,0 +1,29 @@
+# The repo ships no compose file, and without a volume at /app/db (hard-coded
+# SQLite path) the app cannot open its database. Published image of the current
+# release, with the README's two volumes as named volumes; no host networking.
+services:
+  app:
+    image: misterbabou/gptwol:7.1.6
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      PORT: "5000"
+      IP: 0.0.0.0
+      ENABLE_LOGIN: ${ENABLE_LOGIN:-false}
+      USERNAME: ${USERNAME:-admin}
+      PASSWORD: ${PASSWORD:-admin}
+      OIDC_ENABLED: ${OIDC_ENABLED:-false}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-${PA_PUBLIC_URL}}
+    volumes:
+      - db:/app/db
+      - cron:/etc/cron.d
+    ports:
+      - "5000:5000"
+    mem_limit: 256m
+
+volumes:
+  db: {}
+  cron: {}

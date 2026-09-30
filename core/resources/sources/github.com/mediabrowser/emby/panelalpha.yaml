@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Emby Server is a personal media server: one process serving the web client,
+  admin dashboard and REST API on :8096, settings, database and metadata in
+  /config.
+
+  The repository is Emby's last public source (master, 2018): a .NET
+  Framework 4.x / Mono solution that `dotnet publish` cannot build, and the
+  engine's .NET strategy asks for a nonexistent mcr.microsoft.com/dotnet/sdk
+  image. Emby Server has been closed source since; the vendor publishes it
+  as emby/embyserver. This recipe runs that image at the current stable
+  release (4.10.0.40), /config and the media folder /media on named volumes
+  that survive redeploys. Emby Premiere is optional; the server runs without
+  a licence.
+
+  First run is left as upstream ships it: the first visitor goes through the
+  startup wizard and creates the admin user. Adding media: copy files into
+  the media volume, e.g. `docker compose -p project cp <dir> app:/media/`,
+  then add /media/<dir> as a library in the dashboard.

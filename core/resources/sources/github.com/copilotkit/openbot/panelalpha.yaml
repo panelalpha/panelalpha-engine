@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OpenBot, a self-hosted AI coworker platform (app, API and a Chromium the Bots
+  drive, one port 3001). Bare detection ran the repo's docker-compose.yml, a
+  9-service development topology whose concurrent builds were SIGKILLed. This
+  recipe runs the published single-container release image
+  ghcr.io/copilotkit/openbot:v0.0.15 with EMBEDDED_POSTGRES=on, as upstream's
+  docs/deployment.md describes, with the database, workspace and browser
+  profiles on named volumes. KEY_ENCRYPTION_KEY and BETTER_AUTH_SECRET are
+  generated once into ~/.panelalpha/openbot/; BETTER_AUTH_URL and
+  TRUSTED_ORIGINS are the site address. OpenBot refuses to start without a
+  CopilotKit Intelligence key and a sign-in provider, so a one-shot check fails
+  the deploy naming whichever of INTELLIGENCE_API_KEY, an OAuth client
+  (GOOGLE_/MICROSOFT_/OKTA_OAUTH_*) and INITIAL_ADMIN_EMAILS is missing.

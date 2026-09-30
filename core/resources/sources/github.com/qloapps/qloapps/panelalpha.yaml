@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  QloApps, a hotel booking engine and website (PrestaShop 1.6 based, PHP
+  8.1-8.4, MySQL). The plain deploy is detected correctly (php) and serves
+  QloApps' own installer, but has no database to install into, and every
+  redeploy would wipe what the installer writes into ~/project. This recipe
+  adds the account's MySQL (database: mysql; its DB_* values are what the
+  customer enters in the installer, left as upstream ships it) and keeps the
+  runtime state: config/settings.inc.php (DB login, cookie/encryption keys)
+  and the root .htaccess are symlinks into ~/.panelalpha/qloapps (0700 dir,
+  bind-mounted at /var/lib/qloapps), so the installer writes them there; img/,
+  upload/, download/ and the image directories of the bundled hotel modules
+  (hotel images, amenities, interior, features, payment, testimonial and
+  review images) are named volumes, seeded from the checkout without
+  overwriting by a one-shot service. composer.json requires ext-mcrypt, which
+  the engine bakes into a variant PHP base; on a host that has not built that
+  variant yet the first deploy fails and a redeploy succeeds (engine#342).
+extends: php
+database: mysql
+commands:
+  - id: persist-links
+    stage: start
+    before: true
+    description: 'Every boot: point the two files the installer writes at ~/.panelalpha/qloapps. Until it has written them the links dangle, which file_exists() reads as "not installed", so the installer still runs.'
+    run: 'ln -sfn /var/lib/qloapps/settings.inc.php /app/config/settings.inc.php && ln -sfn /var/lib/qloapps/htaccess /app/.htaccess'

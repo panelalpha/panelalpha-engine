@@ -1,0 +1,31 @@
+# Compose-replace: the repo's runnable image is built by docker/run/Dockerfile
+# from a prebuilt base; run the published image of the current release instead.
+services:
+  app:
+    image: agent0ai/agent-zero:v2.13
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      # Settings, chats, memory, projects and uploads (upstream: -v a0_usr:/a0/usr).
+      - a0-usr:/a0/usr
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 2g
+
+  # No-op: `compose up -d` returns once the web UI answers.
+  ready:
+    image: agent0ai/agent-zero:v2.13
+    restart: "no"
+    entrypoint: ["/bin/true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  a0-usr: {}

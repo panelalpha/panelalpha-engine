@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Cleanarr, a web UI for finding and deleting duplicate files in a Plex
+  library: a React front end served by nginx + uWSGI/Flask on :80 in one image.
+  The repository ships only a Dockerfile, and the engine's Dockerfile check
+  rejects it because of `COPY ./backend/requirements.txt/ /app` (a trailing
+  slash after a file name, which Docker accepts), so the plain deploy detects
+  "Unknown" and serves the PanelAlpha placeholder.
+
+  This recipe runs upstream's published image of the latest release
+  (selexin/cleanarr:v2.5.2) as its README's compose example does, with the
+  /config directory (Cleanarr's SQLite of ignored items) on a named volume.
+  Cleanarr needs a Plex server to talk to: the customer sets PLEX_BASE_URL and
+  PLEX_TOKEN as project environment variables (LIBRARY_NAMES, BYPASS_SSL_VERIFY,
+  PAGE_SIZE and PLEX_TIMEOUT optional), and a one-shot check service fails the
+  deploy naming each required one that is missing.

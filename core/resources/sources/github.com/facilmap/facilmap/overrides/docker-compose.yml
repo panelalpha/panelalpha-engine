@@ -1,0 +1,65 @@
+# Compose-replace: the repo's compose builds a Dockerfile that does not fit an
+# account. Release image + MariaDB, as in the upstream Docker docs.
+services:
+  app:
+    image: facilmap/facilmap:4.1
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../.panelalpha/facilmap/secrets.env
+      # Optional routing/geoip keys (ORS_TOKEN, MAPBOX_TOKEN, ...) from the
+      # project env vars; the engine creates .env when there are none.
+      - .env
+    environment:
+      USER_AGENT: FacilMap (${PA_PUBLIC_URL})
+      TRUST_PROXY: "true"
+      DB_TYPE: mysql
+      DB_HOST: mariadb
+      DB_NAME: facilmap
+      DB_USER: facilmap
+    volumes:
+      - facilmap-cache:/opt/facilmap/cache
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null 'http://127.0.0.1:8080/socket.io/?EIO=4&transport=polling'"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 768m
+
+  mariadb:
+    image: mariadb:11
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/facilmap/secrets.env
+    environment:
+      MARIADB_DATABASE: facilmap
+      MARIADB_USER: facilmap
+      MARIADB_RANDOM_ROOT_PASSWORD: "true"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - facilmap-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    mem_limit: 512m
+
+  # No-op: `compose up -d` returns once FacilMap has created its tables and answers.
+  ready:
+    image: mariadb:11
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  facilmap-db: {}
+  facilmap-cache: {}

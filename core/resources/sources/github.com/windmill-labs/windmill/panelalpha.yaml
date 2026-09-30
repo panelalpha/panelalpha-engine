@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Windmill, a developer platform that turns Python/TypeScript/Go/Bash
+  scripts into workflows, scheduled jobs and internal apps (Rust server and
+  workers, PostgreSQL). The repository's docker-compose.yml runs the
+  moving :main image with three 2 GB privileged workers, a native worker,
+  an LSP/debugger sidecar and Caddy publishing ports 80 and 25. On the plain
+  deploy the database comes up with a generated POSTGRES_PASSWORD while the
+  repo's .env still hands every Windmill service DATABASE_URL with
+  "changeme", so the server and all workers crash-loop on "password
+  authentication failed for user postgres" and the site answers 502
+  (engine#363).
+
+  This recipe runs upstream's stack on the published image of the current
+  release, ghcr.io/windmill-labs/windmill:1.820.0, sized for one account:
+  postgres:18, the server (whose port 8000 is the site), one default worker
+  and one native worker, none privileged. Caddy is left out (it only
+  fronts the optional windmill_extra LSP/debugger and an SMTP listener on
+  :25), and so is windmill_extra. The Postgres password and the matching
+  DATABASE_URL are generated once into ~/.panelalpha/windmill/; the
+  database and the worker caches are on named volumes. The first login is
+  upstream's default (admin@windmill.dev / changeme), left as shipped;
+  BASE_URL is set in Windmill's instance settings.

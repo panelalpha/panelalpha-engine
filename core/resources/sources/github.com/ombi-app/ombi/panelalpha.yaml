@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Ombi is a media request manager for Plex, Emby and Jellyfin in front of
+  Sonarr and Radarr: one .NET process serving its Angular UI and REST API on
+  :3579, SQLite in /config. Built from source by the dotnet strategy it
+  restart-looped with exit 139, so this recipe replaces the build with the
+  LinuxServer.io image of the repository's own HEAD (v4.60.16, lsio
+  `development` channel; the older "stable" 4.53.10 lacks the fix that stops
+  anonymous POST /api/v1/Plex from overwriting a configured Plex server),
+  /config on a named volume that survives redeploys.
+
+  Ombi's first run is a wizard whose POST /api/v1/Identity/Wizard is anonymous
+  and creates the admin: first visitor wins. hooks/prepare.sh generates the
+  admin password once into ~/.panelalpha/ombi/admin.env. A one-shot `seed`
+  service runs Ombi on 127.0.0.1 only, sets the application URL, creates the
+  admin through the wizard's own endpoint, confirms /api/v1/Status/Wizard is
+  true, and stops. The published `app` service depends on it completing, so
+  the wizard is never reachable from outside; on a redeploy the seed sees the
+  wizard done and does nothing. `ready` makes `compose up -d` return only once
+  the app answers.
+
+  POST /api/v1/Jellyfin and /api/v1/Emby are also anonymous upstream and save
+  a media-server connection whenever none is configured (measured: an
+  anonymous POST made Ombi dial the given host). On the first seed the admin
+  saves a disabled "Not configured" server for each, after which both return
+  204 without acting; the admin replaces it with the real server in Settings.
+  Media-server and Sonarr/Radarr connections are runtime settings in the UI.

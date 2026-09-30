@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tunarr builds live-TV channels (M3U/XMLTV, HDHomeRun emulation) from a Plex,
+  Jellyfin or Emby library: one server on :8000 with the web UI, SQLite and a
+  bundled Meilisearch, keeping its data in /config/tunarr. The plain deploy
+  builds the repo's Dockerfile, whose web bundle step asks for a 32 GB V8 heap
+  (NODE_OPTIONS=--max-old-space-size=32768) and is killed on the account's
+  memory ceiling.
+
+  This recipe runs the published image of the current release
+  (chrisbenincasa/tunarr:2026.9.2) the way upstream's run docs do, with
+  /config/tunarr on a named volume. Media servers are added in the web UI.
+  Hardware transcoding and SSDP discovery (UDP 1900) are not available in an
+  account; software transcoding works.

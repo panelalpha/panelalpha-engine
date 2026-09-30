@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  nefarious automates downloading movies and TV shows: a Django + Angular web
+  app (uvicorn on :80) with a Celery worker and scheduler on Redis and SQLite
+  in /nefarious-db.
+
+  The repository compose also publishes Jackett (9117) and Transmission (9091,
+  51413) and runs watchtower on the Docker socket, and the engine took
+  Jackett's port as the site. overrides/docker-compose.yml runs the official
+  lardbit/nefarious image (`latest` is upstream's only release channel; there
+  are no tagged releases) with nefarious on the account's port, celery,
+  celery-scheduler and Redis. The database is on a named volume that
+  survives redeploys. Jackett and the torrent client are runtime settings
+  pointing at the user's own services.
+
+  First run is left as upstream ships it: the entrypoint creates the login
+  admin/admin (NEFARIOUS_PASS defaults to admin); change it in the app.
+
+  Measured on mariusz2.panelalpha.tools (2026-09-29, engine 705f250a,
+  memory_limit 1200): deploy 75s, rebuild 51s, ~340 MB for the four
+  services. `/` -> /static/index.html (title "nefarious"); a settings PATCH
+  and a watch-list movie read back and survive a rebuild.

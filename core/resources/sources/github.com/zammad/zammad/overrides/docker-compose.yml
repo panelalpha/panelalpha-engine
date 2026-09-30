@@ -1,0 +1,115 @@
+# Upstream's zammad/zammad-docker-compose on the image of the current release,
+# 7.2.0, with Elasticsearch left out (upstream's disable-elasticsearch scenario)
+# and without the backup service. The repo's own Dockerfile is the CI build
+# and needs a COMMIT_SHA build argument.
+x-zammad: &zammad
+  image: ghcr.io/zammad/zammad:7.2.0-0016
+  init: true
+  restart: unless-stopped
+  env_file: ../.panelalpha/zammad/zammad.env
+  environment:
+    MEMCACHE_SERVERS: zammad-memcached:11211
+    POSTGRESQL_DB: zammad_production
+    POSTGRESQL_HOST: zammad-postgresql
+    POSTGRESQL_USER: zammad
+    POSTGRESQL_PORT: "5432"
+    POSTGRESQL_OPTIONS: "?pool=50"
+    POSTGRESQL_DB_CREATE: "false"
+    REDIS_URL: redis://zammad-redis:6379
+    ELASTICSEARCH_ENABLED: "false"
+    TZ: UTC
+    # The engine's proxy terminates TLS; Zammad's nginx passes this on to Rails.
+    NGINX_SERVER_SCHEME: https
+  volumes:
+    - zammad-storage:/opt/zammad/storage
+  depends_on:
+    zammad-memcached:
+      condition: service_healthy
+    zammad-postgresql:
+      condition: service_healthy
+    zammad-redis:
+      condition: service_healthy
+
+services:
+  zammad-init:
+    <<: *zammad
+    command: ["zammad-init"]
+    restart: on-failure
+    user: 0:0
+    mem_limit: 768m
+
+  zammad-railsserver:
+    <<: *zammad
+    command: ["zammad-railsserver"]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:3000"]
+      interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 30
+    mem_limit: 1g
+
+  zammad-scheduler:
+    <<: *zammad
+    command: ["zammad-scheduler"]
+    mem_limit: 768m
+
+  zammad-websocket:
+    <<: *zammad
+    command: ["zammad-websocket"]
+    mem_limit: 512m
+
+  zammad-nginx:
+    <<: *zammad
+    command: ["zammad-nginx"]
+    init: false
+    ports:
+      - "8080:8080"
+    depends_on:
+      zammad-railsserver:
+        condition: service_healthy
+    mem_limit: 256m
+
+  zammad-postgresql:
+    image: postgres:17.11-alpine
+    restart: unless-stopped
+    env_file: ../.panelalpha/zammad/db.env
+    environment:
+      POSTGRES_DB: zammad_production
+      POSTGRES_USER: zammad
+    volumes:
+      - postgresql-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U zammad -d zammad_production"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    mem_limit: 512m
+
+  zammad-memcached:
+    image: memcached:1.6.45-alpine
+    command: memcached -m 256M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "11211"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 320m
+
+  zammad-redis:
+    image: redis:8.10.2-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+volumes:
+  postgresql-data: {}
+  redis-data: {}
+  zammad-storage: {}

@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  AFFiNE, an open-source knowledge base and whiteboard workspace (NestJS
+  server serving the web client on :3010, PostgreSQL with pgvector, Redis).
+  The repository root is the development monorepo: the engine detects Vite
+  and compiles it on the host, which stops at the monorepo's own CLI
+  ("Unknown Syntax Error: Command not found ... affine build"). Upstream's
+  deployment is .docker/selfhost/compose.yml on the published image.
+
+  This recipe runs that compose on ghcr.io/toeverything/affine:0.27.4 (the
+  release the stable tag points to), with pgvector pg16 and Redis 7:
+  upstream's one-shot migration job (self-host-predeploy.js, which also
+  generates the server's private key into the config volume) runs before
+  the server. Storage, config and the database are on named volumes
+  instead of upstream's ./data bind mounts, since ~/project is re-cloned
+  on every deploy. AFFINE_SERVER_EXTERNAL_URL is the site's address.
+  First run is upstream's: the admin setup page creates the first account.

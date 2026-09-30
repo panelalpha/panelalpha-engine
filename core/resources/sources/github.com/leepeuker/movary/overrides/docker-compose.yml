@@ -1,0 +1,57 @@
+# Compose-replace: the repo's compose builds from source with a placeholder TMDB
+# key. This runs the release image on SQLite and seeds the first user before the
+# port is published.
+x-movary-env: &movary-env
+  DATABASE_MODE: sqlite
+  ENABLE_REGISTRATION: "0"
+  TMDB_ENABLE_IMAGE_CACHING: "0"
+  LOG_ENABLE_FILE_LOGGING: "0"
+
+services:
+  # Migrations (image entrypoint), then the admin while the database has no users.
+  init:
+    image: leepeuker/movary:0.72.1
+    restart: "no"
+    command: ["sh", "/panelalpha/init.sh"]
+    env_file:
+      - ../.panelalpha/movary/admin.env
+    environment:
+      <<: *movary-env
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      - storage:/app/storage
+    mem_limit: 256m
+
+  app:
+    image: leepeuker/movary:0.72.1
+    restart: unless-stopped
+    environment:
+      <<: *movary-env
+      APPLICATION_URL: ${PA_PUBLIC_URL}
+    volumes:
+      - storage:/app/storage
+    ports:
+      - "8000:8080"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs --max-time 5 http://127.0.0.1:8080/fpm-ping >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  # No-op gate: `up` returns only once the site answers (engine#204).
+  ready:
+    image: leepeuker/movary:0.72.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  storage: {}

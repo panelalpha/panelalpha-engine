@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Netdata is a real-time monitoring agent: one daemon collecting per-second
+  metrics and serving its dashboard and API on :19999, with its metrics
+  database under /var/lib/netdata. The repository ships no compose file, and
+  the plain deploy builds its Dockerfile, which compiles the whole agent from
+  source; inside a 2500 MB account the C++ compiler is OOM-killed after ~120 s
+  ("c++: fatal error: Killed signal terminated program cc1plus").
+
+  This recipe runs the official image of the current release,
+  netdata/netdata:v2.11.1, with /etc/netdata, /var/lib/netdata and
+  /var/cache/netdata on named volumes that survive redeploys. Upstream's
+  compose also mounts the host's /proc, /sys, docker.sock and runs with
+  pid/network host; none of that exists for an account, so the agent monitors
+  its own container. The dashboard is left as upstream ships it (sign in to
+  Netdata Cloud or continue anonymously).

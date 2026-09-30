@@ -1,0 +1,77 @@
+# Compose-replace: the repo's compose files are dev/example stacks with two
+# public endpoints. This runs the all-in-one image of the current release
+# (client on /, API on /api, one port) with MongoDB on a named volume.
+services:
+  # One-shot: the server exits without a Spotify application, so the deploy
+  # fails here naming each missing variable. Read from .env (the project's
+  # env vars), not interpolated: the engine would generate a *_SECRET value.
+  check:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        missing=""
+        [ -n "$$SPOTIFY_PUBLIC" ] || missing="$$missing SPOTIFY_PUBLIC (Client ID of your Spotify application)"
+        [ -n "$$SPOTIFY_SECRET" ] || missing="$$missing SPOTIFY_SECRET (Client secret of that application)"
+        if [ -n "$$missing" ]; then
+          echo "Error: set in the project's environment variables:$$missing"
+          echo "Create the app at https://developer.spotify.com/dashboard with the redirect URI <site URL>/api/oauth/spotify/callback"
+          exit 1
+        fi
+    mem_limit: 32m
+
+  app:
+    image: lscr.io/linuxserver/your_spotify:1.20.0-ls167
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_URL: ${PA_PUBLIC_URL}
+      CORS: ${PA_PUBLIC_URL}
+      MONGO_ENDPOINT: mongodb://mongo:27017/your_spotify
+      PUID: "1000"
+      PGID: "1000"
+      TZ: UTC
+    depends_on:
+      check:
+        condition: service_completed_successfully
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:80/ && nc -z 127.0.0.1 8080"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+    mem_limit: 768m
+
+  # 7.0, not 8.x: MongoDB 8.0+ refuses to start on Linux 6.19+ (SERVER-121912,
+  # tcmalloc rseq), which is what these hosts run.
+  mongo:
+    image: docker.io/library/mongo:7.0
+    restart: unless-stopped
+    volumes:
+      - db:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns only once the web app and API answer.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db: {}

@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  OctoBot, a self-hosted cryptocurrency trading bot. OFFICIAL IMAGE,
+  COMPOSE-REPLACE. The repo's docker-compose.yml publishes three port ranges
+  and maps host port 80 to container port 5001, and adds a watchtower that
+  needs the host Docker socket. Since 3.0 the image starts in node mode: the
+  classic web interface on 5001 is disabled and the UI ("OctoBot Node") is
+  served on 8000, so a plain deploy's domain went to the dead 5001 and
+  answered 502 while watchtower crash-looped. This recipe runs
+  drakkarsoftware/octobot:3.0.0-beta2 (the latest GitHub release, the same
+  digest as :stable) publishing only 8000, without watchtower, with user
+  config, tentacles, logs and backtesting data on named volumes and the node
+  scheduler's SQLite file (SCHEDULER_SQLITE_FILE) moved into the user volume.
+  The image's own healthcheck probes 5001 and is replaced with one on 8000.

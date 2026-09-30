@@ -1,0 +1,132 @@
+# Upstream compose.yaml (v5.4.1) with the secrets read from ~/.panelalpha
+# (hooks/prepare.sh, standing in for configure.sh), BASE_URL set to the site's
+# address, nginx-proxy published on 8080 and a gate on the services' health.
+services:
+  swetrix:
+    image: swetrix/swetrix-fe:v5.4.1
+    restart: always
+    depends_on:
+      - swetrix-api
+    environment:
+      - BASE_URL=${PA_PUBLIC_URL}
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/ping || exit 1"]
+      interval: 10s
+      start_period: 15s
+      retries: 30
+    mem_limit: 512m
+
+  swetrix-api:
+    image: swetrix/swetrix-api:v5.4.1
+    restart: always
+    env_file:
+      - ../.panelalpha/swetrix/api.env
+    environment:
+      # configure.sh's defaults: the first account can always register.
+      - DISABLE_REGISTRATION=true
+      - IP_GEOLOCATION_DB_PATH
+      - DEBUG_MODE=false
+      # Set by nginx-proxy from the proxy-added hop (files/panelalpha/realip.conf).
+      - CLIENT_IP_HEADER=x-real-ip
+
+      # Emails configuration (SMTP)
+      - SMTP_HOST
+      - SMTP_PORT
+      - SMTP_USER
+      - SMTP_PASSWORD
+      - FROM_EMAIL
+      - SMTP_MOCK
+
+      # OIDC configuration
+      - OIDC_ENABLED
+      - OIDC_ONLY_AUTH
+      - OIDC_DISCOVERY_URL
+      - OIDC_CLIENT_ID
+      - OIDC_CLIENT_SECRET
+
+      - REDIS_HOST=redis
+      - CLICKHOUSE_HOST=http://clickhouse
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DATABASE=analytics
+    depends_on:
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:5005/ping || exit 1"]
+      interval: 10s
+      start_period: 15s
+      retries: 30
+    mem_limit: 768m
+
+  redis:
+    image: redis:8.6-alpine
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 10s
+      start_period: 1m
+    mem_limit: 128m
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8-alpine
+    restart: always
+    env_file:
+      - ../.panelalpha/swetrix/clickhouse.env
+    environment:
+      - CLICKHOUSE_DB=analytics
+      - CLICKHOUSE_USER=default
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 -O - http://127.0.0.1:8123/ping || exit 1"]
+      interval: 10s
+      start_period: 1m
+    cap_add:
+      - SYS_NICE
+    volumes:
+      - swetrix-events-data:/var/lib/clickhouse
+      # Upstream's logging and RAM settings.
+      - ./clickhouse/reduce-logs.xml:/etc/clickhouse-server/config.d/reduce-logs.xml:ro
+      - ./clickhouse/disable-user-logging.xml:/etc/clickhouse-server/users.d/disable-user-logging.xml:ro
+      - ./clickhouse/preserve-ram-config.xml:/etc/clickhouse-server/config.d/preserve-ram-config.xml:ro
+      - ./clickhouse/preserve-ram-user.xml:/etc/clickhouse-server/users.d/preserve-ram-user.xml:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    mem_limit: 1536m
+
+  nginx-proxy:
+    image: nginx:1.31.1-alpine
+    restart: always
+    depends_on:
+      swetrix:
+        condition: service_healthy
+      swetrix-api:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/config:/etc/nginx/conf.d/default.conf:ro
+      - ./panelalpha/realip.conf:/etc/nginx/conf.d/realip.conf:ro
+    mem_limit: 64m
+
+  # No-op gate: `compose up -d` returns only once both apps are healthy.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      nginx-proxy:
+        condition: service_started
+      swetrix:
+        condition: service_healthy
+      swetrix-api:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  swetrix-events-data: {}

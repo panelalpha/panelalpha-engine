@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Poznote, a self-hosted note-taking app (PHP-FPM + nginx, SQLite). The
+  repository's docker-compose.yml publishes the web server on
+  "${HTTP_WEB_PORT}:80" (no default, HTTP_WEB_PORT lives in .env.template) and
+  the MCP sidecar on "127.0.0.1:${POZNOTE_MCP_PORT:-8045}:8045". The engine
+  cannot resolve the first, strips the loopback host from the second, and so
+  routed the domain to the MCP sidecar's 8045 (HTTP 404). This recipe keeps the
+  upstream services but pins the published images of the current release
+  (6.100.0), publishes only the web server on upstream's default 8040, leaves
+  the MCP sidecar on the compose network only (upstream keeps it
+  localhost-only), and moves ./data (wiped with ~/project on every deploy) to a
+  named volume.

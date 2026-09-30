@@ -1,0 +1,37 @@
+# Compose-replace: no root compose upstream, and building the monorepo from
+# source runs out of memory. Runs the published image of the current release.
+services:
+  app:
+    image: ghcr.io/techsquidtv/cliparr:2.0.2
+    restart: unless-stopped
+    ports:
+      - "7171:7171"
+    env_file:
+      - ../.panelalpha/cliparr/app.env
+    environment:
+      PORT: "7171"
+      CLIPARR_DATA_DIR: /data
+    volumes:
+      # SQLite database with the connected media servers.
+      - cliparr-data:/data
+    healthcheck:
+      # Distroless image: no shell or curl, so probe with its own node.
+      test: ["CMD", "/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:7171/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns once Cliparr answers.
+  ready:
+    image: ghcr.io/techsquidtv/cliparr:2.0.2
+    restart: "no"
+    entrypoint: ["/nodejs/bin/node", "-e", "0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  cliparr-data: {}

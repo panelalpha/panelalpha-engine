@@ -1,0 +1,64 @@
+# The repository ships no compose; this runs upstream's release image (built from
+# Dockerfile.release) with MariaDB. Secrets come from ~/.panelalpha (hooks/prepare.sh).
+services:
+  app:
+    image: phplist/phplist:3.7.0
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    env_file:
+      - ../.panelalpha/phplist/secrets.env
+    environment:
+      PHPLIST_DATABASE_HOST: db
+      PHPLIST_DATABASE_PORT: "3306"
+      PHPLIST_DATABASE_NAME: phplist
+      PHPLIST_DATABASE_USER: phplist
+      # Outgoing SMTP relay (host:port); empty sends through PHP mail().
+      MAILHOST: ${MAILHOST:-}
+    volumes:
+      - phplist_images:/var/www/phpList3/public_html/images
+      - ./phplist-apache.conf:/etc/apache2/conf-enabled/zz-panelalpha.conf:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # A static file: a PHP page would store 127.0.0.1 as phpList's website address
+      # if it were the first request after initialisation. Apache starts once the DB answers.
+      test: ["CMD-SHELL", "php -r 'exit(@file_get_contents(\"http://127.0.0.1/lists/admin/images/phplist.ico\") === false ? 1 : 0);'"]
+      interval: 5s
+      timeout: 10s
+      retries: 40
+      start_period: 20s
+    mem_limit: 384m
+
+  db:
+    image: mariadb:11.8
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/phplist/secrets.env
+    environment:
+      MARIADB_DATABASE: phplist
+      MARIADB_USER: phplist
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 384m
+
+  # No-op gate: `compose up -d` returns once phpList answers.
+  ready:
+    image: mariadb:11.8
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  phplist_images: {}
+  db_data: {}

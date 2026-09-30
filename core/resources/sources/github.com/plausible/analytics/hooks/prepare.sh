@@ -22,25 +22,32 @@ if [ -n "${MAJOR}" ]; then
     fi
 fi
 
-# Each secret is written once and only once: the postgres volume and the TOTP
-# secrets in it outlive the checkout, so a regenerated POSTGRES_PASSWORD would
-# lock plausible out of its own database and a regenerated TOTP_VAULT_KEY would
-# make every enrolled second factor undecryptable.
-#
-# SECRET_KEY_BASE signs the session cookies and must be at least 32 bytes
-# (runtime.exs raises below that). TOTP_VAULT_KEY has a format requirement --
-# base64 of exactly 32 bytes -- and anything else is rejected at boot with the
-# same message this generates it with. Hex for the database password: it ends
-# up inside DATABASE_URL, where a base64 `/` or `+` would have to be
-# percent-encoded.
-touch .env
-keep() { grep -q "^$1=" .env || printf '%s=%s\n' "$1" "$2" >> .env; }
-keep SECRET_KEY_BASE "$(openssl rand -base64 48 | tr -d '\n')"
-keep TOTP_VAULT_KEY "$(openssl rand -base64 32 | tr -d '\n')"
-keep POSTGRES_PASSWORD "$(openssl rand -hex 16)"
-chmod 600 .env
+# Secrets live in ~/.panelalpha/plausible, written once: ~/project is emptied on
+# every deploy, while the Postgres volume keeps the password it was created with
+# and a new TOTP_VAULT_KEY would make every enrolled second factor undecryptable.
+# TOTP_VAULT_KEY must be base64 of exactly 32 bytes; the password is hex because
+# it is embedded in DATABASE_URL.
+STORE="${HOME}/.panelalpha/plausible"
+mkdir -p "${STORE}"
+chmod 700 "${HOME}/.panelalpha" "${STORE}"
+(
+    umask 077
+    if [ ! -s "${STORE}/db.env" ]; then
+        printf 'POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 16)" > "${STORE}/db.env"
+    fi
+    if [ ! -s "${STORE}/app.env" ]; then
+        PG_PASSWORD=$(sed -n 's/^POSTGRES_PASSWORD=//p' "${STORE}/db.env")
+        {
+            printf 'SECRET_KEY_BASE=%s\n' "$(openssl rand -base64 48 | tr -d '\n')"
+            printf 'TOTP_VAULT_KEY=%s\n' "$(openssl rand -base64 32 | tr -d '\n')"
+            printf 'DATABASE_URL=postgres://postgres:%s@plausible_db:5432/plausible_db\n' "${PG_PASSWORD}"
+        } > "${STORE}/app.env"
+    fi
+)
+chmod 600 "${STORE}/db.env" "${STORE}/app.env"
 
-# The image tag is the one line rewritten on every deploy, so a redeploy after
-# an upstream release actually moves. The secrets above never do.
+# .env only carries the image tag, rewritten on every deploy so a redeploy
+# after an upstream release actually moves.
+touch .env
 sed -i '/^PLAUSIBLE_IMAGE=/d' .env
 printf 'PLAUSIBLE_IMAGE=%s\n' "ghcr.io/plausible/community-edition:${IMAGE_TAG}" >> .env

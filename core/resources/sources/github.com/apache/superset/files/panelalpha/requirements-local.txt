@@ -1,0 +1,3 @@
+# docker-bootstrap.sh installs the Postgres driver for the web app only; the
+# Celery worker and beat get it from here. Same pin as 6.1.0's [postgres] extra.
+psycopg2-binary==2.9.9

@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  AzuraCast is a self-hosted web radio suite: station management, AutoDJ
+  (Liquidsoap), Icecast, a media library and public station pages, all in one
+  container with its own MariaDB and nginx.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repository's Dockerfile builds the
+  image from source (about 7 minutes) and docker-compose.sample.yml publishes
+  150 radio ports and mounts the host's docker.sock for its updater. This
+  recipe runs ghcr.io/azuracast/azuracast:0.23.8 (the current release) with
+  the sample's named volumes (stations, database, uploads, backups, ...) and
+  publishes only the web port. The web updater is switched off, since its
+  updater container is not run.
+
+  The bundled MariaDB password (the image default is the fixed "azur4c457")
+  is generated once by hooks/prepare.sh into ~/.panelalpha/azuracast/app.env
+  and read through env_file; the database volume keeps it.
+
+  First visit opens AzuraCast's own setup wizard (create the admin account,
+  first station, site URL). Radio streams are served through the web port
+  under /listen/<station>/... ("Use Web Proxy for Radio" is on by default);
+  the raw Icecast, DJ/source and SFTP ports are not reachable from outside the
+  account, so live DJs cannot connect with an external encoder.
+  Leave Settings -> "IP Address Source" on "Local": the "X-Forwarded-For"
+  option takes the first, visitor-supplied entry.
+
+  About 1 GB of memory at idle; the service is capped at 2000 MB.

@@ -1,0 +1,38 @@
+# Compose-replace: the repo ships no compose file and its Dockerfile needs
+# binaries from `make` in dist/. Official image of the current release in
+# server mode; storage on a named volume.
+services:
+  app:
+    image: hashicorp/vault:2.1.1
+    restart: unless-stopped
+    command: ["server"]
+    environment:
+      # TLS ends at the engine's proxy; no IPC_LOCK in the account.
+      VAULT_LOCAL_CONFIG: '{"storage":{"file":{"path":"/vault/file"}},"listener":[{"tcp":{"address":"0.0.0.0:8200","tls_disable":true}}],"ui":true,"disable_mlock":true}'
+      VAULT_API_ADDR: ${PA_PUBLIC_URL}
+      SKIP_SETCAP: "true"
+    ports:
+      - "8080:8200"
+    volumes:
+      - data:/vault/file
+    healthcheck:
+      # Answers 200 whether or not Vault is initialized/unsealed yet.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8200/v1/sys/health?uninitcode=200&sealedcode=200&standbycode=200"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Vault answers.
+  ready:
+    image: hashicorp/vault:2.1.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

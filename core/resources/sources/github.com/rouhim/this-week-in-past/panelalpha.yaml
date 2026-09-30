@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  This week in past, a Rust web app that shows a slideshow of the photos taken
+  in this calendar week in previous years, served on :8080. The repository's
+  docker-compose.yaml builds its Containerfile, which copies a `target/`
+  directory of binaries that only the release pipeline produces, so the plain
+  deploy fails building the image.
+
+  Compose-REPLACE from the published image of the current release
+  (rouhim/this-week-in-past:3.0.2). The photos folder (/resources, read-only
+  to the app) and its data folder (/data, image metadata cache) are named
+  volumes that survive redeploys; photos are placed in the `pictures` volume.
+  The image is FROM scratch with no shell, so there is no healthcheck; the
+  binary answers within a second of starting.

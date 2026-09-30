@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Grafana is an observability and dashboard server: one Go binary serving the
+  web UI and HTTP API on :3000, SQLite plus plugins under /var/lib/grafana.
+
+  The repository has no compose file, and the plain deploy builds its root
+  Dockerfile from source (yarn install of ~3000 packages, a 6.7 GB go mod
+  download, a Go compile and an rspack frontend build, the Go and JS stages in
+  parallel), which fails inside an account. This recipe runs the official
+  image of the current release, grafana/grafana:13.2.2, with /var/lib/grafana
+  on a named volume that survives redeploys, and GF_SERVER_ROOT_URL set to the
+  account's public URL so links, redirects and the login origin check use the
+  real domain rather than http://localhost:3000.
+
+  Everything else is upstream's default, including the first login admin/admin
+  (Grafana asks to change it on first sign-in).

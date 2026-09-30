@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Accent is a translation management tool: an Elixir/Phoenix release (with
+  the webapp and a LanguageTool JVM helper) on port 4000, backed by
+  PostgreSQL.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE of the repo's docker-compose.yml, a
+  developer file (network_mode: host, DATABASE_URL on localhost, `build: .`)
+  whose multi-stage build runs out of memory in a 2 GB account (the webapp's
+  vite build is killed). This recipe runs mirego/accent:v1.31.0, the image of
+  the current release, with postgres:17-alpine in place of the example's
+  postgres:15.6. The image's entrypoint runs the migrations and seeds before
+  starting.
+
+  CANONICAL_URL is the site's URL, so the canonical-host redirect points at
+  the site and force-SSL is on (it honours X-Forwarded-Proto). hooks/prepare.sh
+  writes, once, ~/.panelalpha/accent/db.env (Postgres credentials) and
+  app.env (DATABASE_URL, SECRET_KEY_BASE, SIGNING_SALT,
+  MACHINE_TRANSLATIONS_VAULT_KEY) in place of upstream's published defaults,
+  both 0600. The database is on a named volume.
+
+  Accent has no local accounts: sign-in is through a login provider the
+  customer configures in the project's environment variables, as upstream's
+  README lists them (GITHUB_CLIENT_ID/SECRET, GITLAB_*, GOOGLE_API_*,
+  MICROSOFT_*, DISCORD_*, SLACK_*, OIDC_*, or DUMMY_LOGIN_ENABLED for
+  password-less email login). Without one the app starts and serves its
+  login page with no way to sign in.

@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  calibre's content server: the e-book library's own web server, for browsing,
+  reading and downloading books from a browser or an OPDS client. The
+  repository is calibre's source tree; its setup.py is a build driver ("egg_info
+  is not a recognized command"), so the generic python recipe fails and upstream
+  ships no container. This recipe runs calibre-server from
+  linuxserver/calibre:9.15.0, which packages the current release (9.15.0), on
+  :8080. The library (/library, metadata.db and the book files) and calibre's
+  settings (/config) are named volumes that survive redeploys; an empty
+  library is created on first start. The image's desktop GUI (KasmVNC) is not
+  started. Access control is calibre's own: without --enable-auth the server
+  is read-only for remote visitors, as upstream ships it.

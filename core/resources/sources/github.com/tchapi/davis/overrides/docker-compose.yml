@@ -1,0 +1,55 @@
+# docker/Dockerfile is FPM-only (no HTTP). Upstream's standalone image of the
+# current release bundles Caddy; SQLite on a named volume.
+services:
+  # Upstream requires migrations before first use and after every upgrade.
+  migrate:
+    image: ghcr.io/tchapi/davis-standalone:5.5.0
+    restart: "no"
+    user: root
+    env_file:
+      - ../.panelalpha/davis/app.env
+    environment:
+      DATABASE_DRIVER: sqlite
+      # 4 slashes: absolute path (upstream docker-compose-sqlite.yml)
+      DATABASE_URL: sqlite:////data/davis-database.db
+    command: ["sh", "-c", "bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration && chown -R www-data:www-data /data"]
+    volumes:
+      - data:/data
+    mem_limit: 256m
+
+  app:
+    image: ghcr.io/tchapi/davis-standalone:5.5.0
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - ../.panelalpha/davis/app.env
+    environment:
+      DATABASE_DRIVER: sqlite
+      # 4 slashes: absolute path (upstream docker-compose-sqlite.yml)
+      DATABASE_URL: sqlite:////data/davis-database.db
+    volumes:
+      - data:/data
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Davis answers.
+  ready:
+    image: ghcr.io/tchapi/davis-standalone:5.5.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

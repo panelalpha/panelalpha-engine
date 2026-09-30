@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Subvert generates subtitles, summaries and chapters for uploaded videos
+  through the OpenAI API: one Laravel container (artisan serve on :8080,
+  SQLite, a queue worker and ffmpeg in the same image).
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE of the repo's docker-compose.yml, whose
+  second service is danieldent/nginx-ssl-proxy with the literal placeholder
+  domain test.example.com (every request 301s there) and whose app service
+  carries the literal placeholder OPENAI_API_KEY=sk-<your key here>. The
+  engine terminates TLS, so the proxy is dropped and the app publishes 8080
+  itself. The image is aschmelyun/subvert:1.0.9, the build of the repo's
+  HEAD (a23c47d, the latest release).
+
+  OPENAI_API_KEY is the customer's own key, set in the project's environment
+  variables. A one-shot `check` service fails the deploy with a message naming
+  it when it is missing (read from .env, not interpolated: engine#336 would
+  generate a value for a *_KEY variable). APP_DEBUG is off (upstream's
+  .env.example has it on) so an error page does not print the key; the built
+  Vite assets are linked by relative path, so they load over https as is.
+
+  Upstream's startup.sh runs `migrate:fresh` and `key:generate` on every
+  start, so the job list is emptied by any restart or redeploy by design; the
+  uploaded audio/video directories are on named volumes.

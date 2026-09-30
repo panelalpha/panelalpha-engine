@@ -1,0 +1,64 @@
+# The repo compose is upstream's docker-run example: a ./data bind mount and
+# profile-gated sidecars. This runs the published 0.4.0 image with the data
+# on a named volume.
+services:
+  # One-shot: the app exits without Telegram API credentials, so the deploy
+  # fails here naming each missing variable. Read from .env, not
+  # interpolated, so the engine never generates a value for them.
+  check:
+    image: ghcr.io/jarvis2f/telegram-files:0.4.0
+    restart: "no"
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        missing=""
+        [ -n "$$TELEGRAM_API_ID" ] || missing="$$missing TELEGRAM_API_ID"
+        [ -n "$$TELEGRAM_API_HASH" ] || missing="$$missing TELEGRAM_API_HASH"
+        if [ -n "$$missing" ]; then
+          echo "Error: set in the project's environment variables (from https://my.telegram.org/apps):$$missing"
+          exit 1
+        fi
+    mem_limit: 64m
+
+  telegram-files:
+    image: ghcr.io/jarvis2f/telegram-files:0.4.0
+    restart: unless-stopped
+    depends_on:
+      check:
+        condition: service_completed_successfully
+    # TELEGRAM_API_ID / TELEGRAM_API_HASH and any other upstream setting.
+    env_file: .env
+    environment:
+      APP_ENV: prod
+      APP_ROOT: /app/data
+      TZ: UTC
+      # Served over https by the engine; the app's same-origin check would
+      # otherwise compare against the http its own nginx sees.
+      HTTP_SECURE_COOKIES: "true"
+      HTTP_ALLOWED_ORIGINS: ${PA_PUBLIC_URL}
+    volumes:
+      # SQLite database, Telegram sessions and downloaded files.
+      - data:/app/data
+    ports:
+      - "6543:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once the API answers.
+  ready:
+    image: ghcr.io/jarvis2f/telegram-files:0.4.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      telegram-files:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

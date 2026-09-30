@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Bitcart, a self-hosted cryptocurrency payment processor: the Python API and
+  worker, the admin panel and the store (Nuxt), the BTC daemon (an Electrum
+  wallet daemon, no full node), PostgreSQL and Redis. The repository is the
+  backend alone; the plain deploy runs it as a python app, which cannot reach
+  Redis ("Error 111 connecting to 127.0.0.1:6379") and never answers.
+  Upstream deploys with bitcart-docker's compose generator. This recipe is
+  that generator's default pack in one-domain mode (store on /, admin on
+  /admin, API on /api) on the 0.10.3.0 release images. bitcart-docker's
+  docker-gen nginx needs the Docker socket, so a static nginx with the same
+  routes takes its place. The service names are the ones the image's
+  conf/.env points at. hooks/prepare.sh generates the PostgreSQL password once
+  into ~/.panelalpha/bitcart (upstream uses trust auth). Data (database,
+  datadir, backups, plugins, the BTC wallet daemon) is on named volumes. First
+  run is upstream's: the admin panel asks to register the first user.

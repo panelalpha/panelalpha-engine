@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  MinusPod, a podcast ad-remover (Flask/gunicorn, SQLite, Whisper
+  transcription and an LLM for ad detection) with its web UI at /ui/. The
+  repository's compose runs the GPU image with an NVIDIA device reservation and
+  cap_drop ALL plus cap_add; the engine strips the cap_add (engine#349), so the
+  entrypoint cannot chown /app/data or drop to uid 1000 and crash-loops with
+  "setpriv: setresuid failed: Operation not permitted". This recipe runs the
+  published CPU image of the current release (ttlequals0/minuspod:2.97.36-cpu)
+  with default capabilities, /app/data on a named volume, BASE_URL set to the
+  site's address and one trusted proxy hop. Provider keys (ANTHROPIC_API_KEY,
+  OPENROUTER_API_KEY, OPENAI_*), MINUSPOD_MASTER_PASSPHRASE and
+  MINUSPOD_SETUP_TOKEN (for setting the first password remotely) are optional
+  project environment variables; the app starts without them.

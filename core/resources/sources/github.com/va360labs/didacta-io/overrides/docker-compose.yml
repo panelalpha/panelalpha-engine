@@ -1,0 +1,86 @@
+# Replaces the repo's dependencies-only dev compose. Follows upstream's Dokploy
+# template (deploy/dokploy) with the published 0.1.0-beta.9 release image.
+services:
+  postgres:
+    image: docker.io/pgvector/pgvector:pg16
+    restart: unless-stopped
+    # POSTGRES_PASSWORD (hooks/prepare.sh).
+    env_file:
+      - ../.panelalpha/didacta/db.env
+    environment:
+      POSTGRES_USER: didacta
+      POSTGRES_DB: didacta
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U didacta -d didacta -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 384m
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 128m
+
+  didacta:
+    image: ghcr.io/va360labs/didacta-community:0.1.0-beta.9
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # ADMIN_DATABASE_URL, AUTH_SECRET (hooks/prepare.sh).
+    env_file:
+      - ../.panelalpha/didacta/app.env
+    environment:
+      NODE_ENV: production
+      DIDACTA_CORE_VERSION: 0.1.0-beta.9
+      WEB_PUBLIC_URL: ${PA_PUBLIC_URL}
+      WEB_PUBLIC_ALLOWED_HOSTS: ${PA_PUBLIC_HOST}
+      REDIS_URL: redis://redis:6379
+      API_PORT: "4000"
+      WEB_PORT: "3000"
+      # Only private/loopback hops are proxies, so the client IP is the last
+      # proxy-added X-Forwarded-For entry (one shared bucket otherwise).
+      TRUSTED_PROXY_IPS: 127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      STORAGE_DRIVER: local
+      STORAGE_ROOT: /app/data/storage
+    volumes:
+      # Uploads plus the keys the app generates on first boot.
+      - didacta-data:/app/data
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once the API answers.
+  ready:
+    image: docker.io/library/redis:7-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      didacta:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  postgres-data: {}
+  redis-data: {}
+  didacta-data: {}

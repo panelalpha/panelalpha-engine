@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  InvenTree, inventory and parts management (Django + React). A plain deploy
+  fails before the build with "Runtime 'python' is required but could not be
+  resolved for this project": the backend lives under src/backend and the
+  supported deployment is the container stack in contrib/container. This
+  recipe runs that stack from upstream's release image
+  (inventree/inventree:1.5.6): Postgres 17, Redis, a one-shot `invoke update`
+  (migrations + static files), the gunicorn server, the background worker,
+  and Caddy with the repository's own Caddyfile serving /static and /media.
+  hooks/prepare.sh generates the database password once into
+  ~/.panelalpha/inventree/db.env; the data directory (config, secret key,
+  media, plugins) and the database are named volumes. First run is left as
+  upstream ships it: the admin is created with `invoke superuser`.

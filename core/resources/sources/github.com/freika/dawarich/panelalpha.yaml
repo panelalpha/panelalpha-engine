@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Dawarich is a self-hosted location history tracker (Google Timeline
+  replacement): a Rails app on :3000 with a Sidekiq worker, PostGIS and Redis.
+  The repository keeps its Dockerfile and compose under docker/, so the plain
+  deploy builds docker/Dockerfile (~6 minutes) and runs it alone with no
+  command, no database and no Redis; the container restart-loops on
+  "bundler: exec needs a command to run".
+
+  This recipe replaces the compose with upstream's docker/docker-compose.yml
+  on the published freikin/dawarich:1.15.2 image (current release) for both the
+  web and the Sidekiq service, beside postgis/postgis:17-3.5-alpine and
+  redis:7.4-alpine. APPLICATION_HOSTS is the site's host name and
+  APPLICATION_PROTOCOL is https (Rails force_ssl behind the engine's TLS
+  proxy). SECRET_KEY_BASE and the database password are generated once by
+  hooks/prepare.sh into ~/.panelalpha/dawarich/. The database, Redis, imports,
+  storage and public assets are on named volumes. Per-service memory limits
+  keep the stack under the account limit (~600 MB in use idle). The first
+  visit opens Dawarich's sign-in page; upstream's db:seed creates its
+  documented admin demo@dawarich.app / safepassword, left as upstream ships it.
+  Everything else is upstream's default.

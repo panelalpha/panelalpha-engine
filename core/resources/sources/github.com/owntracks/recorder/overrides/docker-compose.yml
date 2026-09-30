@@ -1,0 +1,21 @@
+# Compose-replace: the repo is C source with no Dockerfile or compose file;
+# upstream publishes the image from owntracks/docker-recorder.
+services:
+  app:
+    image: owntracks/recorder:1.0.4
+    restart: unless-stopped
+    ports:
+      - "8080:8083"
+    environment:
+      # HTTP mode: the OwnTracks apps POST to /pub; MQTT is off (no broker here).
+      OTR_PORT: "0"
+      OTR_HTTPHOST: 0.0.0.0
+      OTR_HTTPPORT: "8083"
+      OTR_STORAGEDIR: /store
+    volumes:
+      # Location history, LMDB and the geo cache; survives redeploys.
+      - recorder-store:/store
+    mem_limit: 256m
+
+volumes:
+  recorder-store: {}

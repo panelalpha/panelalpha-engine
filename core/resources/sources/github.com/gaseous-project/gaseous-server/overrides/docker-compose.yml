@@ -1,0 +1,60 @@
+# The repo builds the unreleased 2.0 branch and ships no database. This runs
+# upstream's image of the current release with MariaDB, as its docker-compose.yml.
+services:
+  app:
+    image: docker.io/gaseousgames/gaseousserver:v1.7.14
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/gaseous/db.env
+    environment:
+      TZ: UTC
+      dbhost: db
+      dbuser: gaseous
+      dbname: gaseous
+    volumes:
+      - gs:/root/.gaseous-server
+    ports:
+      - "5198:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/api/v1.1/HealthCheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1g
+
+  db:
+    image: docker.io/library/mariadb:11.4
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/gaseous/db.env
+    environment:
+      MARIADB_DATABASE: gaseous
+      MARIADB_USER: gaseous
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+    volumes:
+      - gsdb:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Gaseous answers.
+  ready:
+    image: docker.io/library/mariadb:11.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  gs: {}
+  gsdb: {}

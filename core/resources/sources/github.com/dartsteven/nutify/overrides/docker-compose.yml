@@ -1,0 +1,50 @@
+# Upstream's compose runs cap_drop: ALL + cap_add; the engine keeps only the
+# drop (engine#349), so the entrypoint cannot chown and crash-loops. This runs
+# the release image with default caps, no USB passthrough (monitor a remote
+# NUT server instead), state on named volumes and only the web port.
+services:
+  nut:
+    image: dartsteven/nutify:0.3.0-amd64
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/nutify/app.env
+    environment:
+      NUTIFY_WEB_USER: nut
+      NUT_SERVICE_USER: nut
+      SKIP_PERMCHECK: "true"
+      LOG: "true"
+      LOG_LEVEL: INFO
+      LOG_WERKZEUG: "true"
+      ENABLE_LOG_STARTUP: Y
+      SSL_ENABLED: "false"
+      SOCKETIO_ALLOWED_ORIGINS: "${PA_PUBLIC_URL}"
+    volumes:
+      - nutify_logs:/app/nutify/logs
+      - nutify_instance:/app/nutify/instance
+      - nutify_etc:/etc/nut
+    ports:
+      - "5050:5050"
+    healthcheck:
+      # /health exists only after the setup wizard; any answer below 500 on /
+      # means the web server is up.
+      test: ["CMD", "python3", "-c", "import sys,urllib.request as u,urllib.error as e\ntry: u.urlopen('http://127.0.0.1:5050/', timeout=5)\nexcept e.HTTPError as x: sys.exit(x.code >= 500)"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    mem_limit: 768m
+
+  # No-op: `compose up -d` returns once the app answers.
+  ready:
+    image: dartsteven/nutify:0.3.0-amd64
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      nut:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  nutify_logs: {}
+  nutify_instance: {}
+  nutify_etc: {}

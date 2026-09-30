@@ -1,0 +1,66 @@
+# Compose-replace: the repository is the Gradle/Grails source tree with no
+# root compose file. This runs the image upstream publishes from its
+# docker/official directory, at the current release, on PostgreSQL.
+services:
+  db:
+    # Pinned major: Postgres cannot open a datadir from a newer major.
+    image: docker.io/library/postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rundeck
+      POSTGRES_USER: rundeck
+      POSTGRES_PASSWORD: ${RUNDECK_DB_PASSWORD:?generated per account}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rundeck -d rundeck -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  app:
+    image: docker.io/rundeck/rundeck:6.2.1
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Links, redirects and the login form post back to the public address.
+      RUNDECK_GRAILS_URL: ${PA_PUBLIC_URL}
+      RUNDECK_SERVER_FORWARDED: "true"
+      RUNDECK_DATABASE_DRIVER: org.postgresql.Driver
+      RUNDECK_DATABASE_URL: jdbc:postgresql://db:5432/rundeck
+      RUNDECK_DATABASE_USERNAME: rundeck
+      RUNDECK_DATABASE_PASSWORD: ${RUNDECK_DB_PASSWORD:?generated per account}
+    volumes:
+      # The image's own VOLUMEs: server data and execution logs.
+      - data:/home/rundeck/server/data
+      - logs:/home/rundeck/var/logs
+    ports:
+      - "4440:4440"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:4440/user/login"]
+      interval: 10s
+      timeout: 10s
+      retries: 90
+      start_period: 60s
+    # The image sizes the heap at 75% of this (JVM_MAX_RAM_PERCENTAGE).
+    mem_limit: 2g
+
+  # No-op gate: `compose up -d` returns only once Rundeck serves its login page.
+  ready:
+    image: docker.io/library/postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  data: {}
+  logs: {}

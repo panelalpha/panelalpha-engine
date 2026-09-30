@@ -1,0 +1,41 @@
+# The repository is the Perl server source with no container build; the
+# official image is assembled from lms-community/slimserver-platforms. This
+# runs the image of the current release on named volumes.
+services:
+  app:
+    image: lmscommunity/lyrionmusicserver:9.1.1
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+      HTTP_PORT: "9000"
+    volumes:
+      # prefs, logs, cache (library database, artwork).
+      - config:/config
+      - music:/music
+      - playlist:/playlist
+    # Only the web UI/JSON-RPC port goes through the engine's proxy; the
+    # player ports 3483/tcp+udp and the CLI on 9090 are not published.
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once the server answers.
+  ready:
+    image: lmscommunity/lyrionmusicserver:9.1.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  music: {}
+  playlist: {}

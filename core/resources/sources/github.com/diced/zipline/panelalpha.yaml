@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Zipline is a ShareX/file-upload server with a URL shortener: one Node server
+  (web UI + API) on :3000 with PostgreSQL. The repository's docker-compose.yml
+  runs ghcr.io/diced/zipline:latest, but Zipline 4 refuses to start without
+  CORE_SECRET, which the upstream file never sets (it expects it in a
+  hand-written .env), so the plain deploy restart-loops on
+  "CORE_SECRET: Invalid input: expected string, received undefined".
+
+  This recipe is the upstream production compose with three changes: the image
+  is pinned to the current release (4.8.0), CORE_SECRET and the database
+  password are required compose variables the engine generates once per
+  account (stable across redeploys), and uploads, public and themes live on
+  named volumes instead of bind mounts into the checkout, which a redeploy
+  wipes. A gate service waits for Zipline's own /api/healthcheck. First run is
+  as upstream ships it: the site opens Zipline's setup page to create the
+  first user.

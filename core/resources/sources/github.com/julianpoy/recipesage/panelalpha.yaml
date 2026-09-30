@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  RecipeSage, a recipe keeper, meal planner and shopping list manager (Node API,
+  Angular frontend, PostgreSQL, Valkey job queue, Pushpin for websockets, all
+  behind upstream's own nginx proxy on :80). The repository's
+  docker-compose.yml is a development stack (bind-mounted sources, `nx serve`,
+  a local ML categorizer) whose note points self-hosters to
+  github.com/julianpoy/recipesage-selfhost. This recipe is that self-host
+  compose with the images of the current release (api/static v4.0.16, proxy
+  2026-08-16): API_PUBLIC_BASE_URL from the account's public URL, the database
+  password and Pushpin's GRIP_KEY required compose variables the engine
+  generates once per account, the database and uploaded media on named
+  volumes, and a gate service that waits for the API (migrations run on every
+  start). The AI features stay off until the customer sets AI_API_KEY; the
+  grocery categorizer uses upstream's public API, as the self-host default.
+  Registration is open, as upstream ships it.

@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  IFM (Improved File Manager) is a single-script PHP file manager. The
+  repository holds its sources (src/) and compiler.php, which concatenates
+  them into the one dist/ifm.php upstream releases; nothing in the checkout is
+  servable as it sits. The repo's Dockerfile, which would do that build, fails
+  at HEAD outside the engine too: its builder stage installs Alpine's
+  `composer` package (PHP 8.5 without ext-dom), and `composer install` stops
+  on the dev requirements.
+
+  This recipe builds IFM the way upstream's own Dockerfile and release
+  workflow do, on the PHP platform: `composer install` with the dev packages
+  compiler.php needs (matthiasmullie/minify; the platform's own install drops
+  require-dev from a lockless project, engine#101), then `compiler.php
+  --languages=all`, renaming dist/ifm.php to dist/index.php and serving only
+  dist/. The managed files live in /data (IFM_ROOT_DIR), a bind mount of
+  ~/.panelalpha/ifm that a redeploy keeps. Everything else is IFM's own
+  IFM_* env vars (IFM_AUTH, IFM_AUTH_SOURCE, ...), left at upstream's defaults.
+extends: php
+docroot: dist
+commands:
+  - id: compile
+    stage: build
+    description: 'compiler.php needs the dev packages, which the runtime manifest the platform installs from leaves out, so install from composer.json itself; then concatenate src/ into the single dist/ifm.php upstream ships and make it the index of the document root.'
+    run: 'COMPOSER=composer.json composer install --no-interaction --no-scripts --no-plugins && php compiler.php --languages=all && mv dist/ifm.php dist/index.php'

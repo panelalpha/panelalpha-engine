@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  JSON Crack visualises JSON, YAML, XML and CSV as interactive graphs in the
+  browser. The site is apps/www, a Next.js app in a pnpm/Turborepo workspace
+  with `output: "export"`: `next build` writes plain files to apps/www/out and
+  there is no server side and nothing stored. Upstream's own container is that
+  export behind nginx.
+
+  A plain deploy detects the workspace as a Node-served Next app, because the
+  static-export rule only reads a next.config at the repository root; the
+  runtime then has nothing to `next start`. This recipe uses the Next.js
+  export platform with the commands spelled out for the workspace: pnpm
+  install at the root and upstream's own `build:www` script (turbo, www and
+  the jsoncrack-react package it uses). nginx serves apps/www/out.
+extends: nextjs-export
+output_directory: apps/www/out
+commands:
+  - id: npm-install
+    stage: build
+    role: dependencies
+    # Spelled out like the engine's own pnpm line (engine#351): corepack is
+    # enabled only by the command, and package.json pins pnpm@10.20.0.
+    run: >-
+      sh -c 'command -v corepack >/dev/null 2>&1 || npm install -g corepack'
+      && corepack enable && corepack prepare pnpm@10.20.0 --activate
+      && pnpm install --frozen-lockfile
+  - id: next-build
+    stage: build
+    run: pnpm run build:www

@@ -1,0 +1,5 @@
+# .git stays in: webpack.config.js runs `git rev-parse HEAD` (engine#413).
+node_modules
+.env
+.env.*
+docker-compose*.yml

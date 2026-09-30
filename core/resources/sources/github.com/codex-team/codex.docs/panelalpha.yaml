@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  CodeX.docs is a documentation site built on Editor.js (Node/Express, pages
+  stored in a local NeDB database, uploads on local disk).
+
+  The repository's docker-compose.yml runs an old release candidate
+  (v2.0.0-rc.8) and bind-mounts ./docs-config.local.yaml, a file the
+  repository does not contain. Docker creates the missing source as a
+  directory and the app crash-loops on `EISDIR: illegal operation on a
+  directory, read` in its config loader. Its ./db and ./uploads bind mounts
+  would also sit in ~/project, which every deploy wipes.
+
+  overrides/docker-compose.yml runs the image upstream publishes for the
+  current release, ghcr.io/codex-team/codex.docs:v2.3.3, mounts the
+  repository's own docs-config.yaml read-only as its config, and keeps the
+  database and uploads on the named volumes `db` and `uploads`.
+
+  The admin password is upstream's: docs-config.yaml (and the built-in
+  default) set auth.password to `secretpassword` and auth.secret to
+  `supersecret`. The app reads any config key from APP_CONFIG_<path>
+  environment variables, so set APP_CONFIG_auth_password and
+  APP_CONFIG_auth_secret in the project's environment variables to change
+  them.

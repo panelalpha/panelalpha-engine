@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SourceBans++, a web panel (PHP 8.5 + MariaDB) for managing bans, admins and
+  communication on Source-engine game servers. The repository's root
+  docker-compose.yml is the developer stack (bind-mounted worktree, fixed
+  admin/admin, `./sbpp.sh up`) and the plain deploy never answers.
+
+  This recipe runs upstream's own production stack, docker-compose.prod.yml,
+  on the published image of the current release
+  (ghcr.io/sbpp/sourcebans-pp:2.2.1) with mariadb:11.8. Upstream's entrypoint
+  installs the schema headlessly and requires the first Owner admin, so the
+  customer sets INITIAL_ADMIN_NAME, INITIAL_ADMIN_STEAM, INITIAL_ADMIN_EMAIL
+  and INITIAL_ADMIN_PASSWORD (optionally STEAMAPIKEY and SB_EMAIL) in the
+  project's environment variables; a one-shot check service fails the deploy
+  naming each missing one. The DB passwords and SB_SECRET_KEY are generated
+  once into ~/.panelalpha/sourcebans/. Database and uploaded demos are on
+  named volumes.

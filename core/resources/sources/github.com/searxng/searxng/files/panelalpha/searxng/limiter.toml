@@ -1,0 +1,23 @@
+# Trust X-Forwarded-For only from the engine's private proxy chain, so the
+# limiter counts each visitor's own address (rightmost untrusted hop).
+[botdetection]
+ipv4_prefix = 32
+ipv6_prefix = 48
+
+trusted_proxies = [
+  '127.0.0.0/8',
+  '::1',
+  '10.0.0.0/8',
+  '172.16.0.0/12',
+  '192.168.0.0/16',
+  'fd00::/8',
+]
+
+[botdetection.ip_limit]
+filter_link_local = false
+link_token = true
+
+[botdetection.ip_lists]
+block_ip = []
+pass_ip = []
+pass_searxng_org = true

@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SPIS (Simple Private Image Server) is a photo/video gallery: a Rust server
+  behind nginx in one image, nginx on :8080 serving the UI, originals and
+  generated thumbnails. It indexes whatever is in /var/lib/spis/media
+  (watching the folder for new files) into SQLite and thumbnails in
+  /var/lib/spis/data. The repository ships no compose file and building its
+  Dockerfile needs prebuilt release binaries that are not in the checkout, so
+  the engine's Rust build cannot produce it; this recipe runs the published
+  image of the current release v0.15.0 instead, with media and data on named
+  volumes.
+
+  SPIS has no authentication of its own: upstream expects it to sit behind
+  the operator's reverse-proxy auth, so the gallery is readable by anyone who
+  has the URL. Adding media: copy files into the media volume, e.g.
+  `docker compose -p project cp <dir> app:/var/lib/spis/media/`.

@@ -1,0 +1,20 @@
+# Upstream's deploy/templates/Caddyfile without TLS (the engine terminates it):
+# static files from collectstatic, everything else to gunicorn. Visitors reach
+# the engine over https, so say so (upstream's Caddy does the same by
+# terminating TLS itself); Django's CSRF Origin check depends on it.
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	route {
+		file_server /static/* {
+			root /srv
+		}
+		reverse_proxy web:5000 {
+			header_up X-Forwarded-Proto https
+		}
+	}
+	encode zstd gzip
+}

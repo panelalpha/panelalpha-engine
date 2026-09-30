@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Immich Kiosk, a Go web app that shows photos from an Immich server as a
+  full-screen slideshow for kiosk devices and browsers (port 3000, no
+  database of its own).
+
+  The repository's compose runs the :latest image with an empty ./config bind
+  mount, so a plain deploy restart-looped on `FATAL Immich URL is missing`.
+  This recipe runs the image of the current release,
+  ghcr.io/damongolding/immich-kiosk:0.44.1, and takes every KIOSK_* setting
+  from the project's environment variables. The customer must set
+  KIOSK_IMMICH_URL and KIOSK_IMMICH_API_KEY; without them a one-shot `check`
+  service fails the deploy naming each missing variable. Other options
+  (KIOSK_ALBUMS, KIOSK_PASSWORD, KIOSK_DURATION, ...) are optional env vars
+  as documented upstream. KIOSK_BEHIND_PROXY is left off, so client IPs are
+  not taken from a spoofable X-Forwarded-For. The kiosk keeps no state of its
+  own; the photos stay in Immich.

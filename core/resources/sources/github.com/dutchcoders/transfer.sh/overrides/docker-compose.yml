@@ -1,0 +1,20 @@
+# The repo ships no compose file, and its Dockerfile starts the server without
+# the mandatory storage provider. This runs the official image of the current
+# release with the local provider on a named volume.
+services:
+  app:
+    image: dutchcoders/transfer.sh:v1.6.1
+    restart: unless-stopped
+    environment:
+      LISTENER: ":8080"
+      PROVIDER: local
+      BASEDIR: /data
+      TEMP_PATH: /tmp
+    volumes:
+      - data:/data
+    ports:
+      - "8080:8080"
+    mem_limit: 256m
+
+volumes:
+  data: {}

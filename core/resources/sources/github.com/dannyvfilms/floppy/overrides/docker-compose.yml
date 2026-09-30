@@ -1,0 +1,55 @@
+# Compose-replace: upstream's SQLite compose with the release image, the data
+# and backups on named volumes (./db and ./backups sit in ~/project, which every
+# deploy wipes), a generated SECRET, the public URL, and a health gate.
+services:
+  floppy:
+    image: ghcr.io/dannyvfilms/floppy:26.9.24
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+      - ../.panelalpha/floppy/app.env
+    environment:
+      TZ: "UTC"
+      REDIS_URL: "redis://redis:6379"
+      # Adds the domain to ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS.
+      URLS: "${PA_PUBLIC_URL}"
+      ADMIN_ENABLED: "False"
+      DEMO_ACCOUNT_ENABLED: "False"
+      DEBUG: "False"
+    volumes:
+      - floppy_db:/floppy/db
+      - floppy_backups:/floppy/backups
+    depends_on:
+      - redis
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # First boot applies ~370 migrations before gunicorn listens.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/health/ || exit 1"]
+      interval: 10s
+      timeout: 15s
+      retries: 60
+      start_period: 60s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --save "" --maxmemory 256mb --maxmemory-policy volatile-lru
+    volumes:
+      - redis_data:/data
+
+  # No-op: `compose up -d` returns once the app is healthy.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      floppy:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  floppy_db: {}
+  floppy_backups: {}
+  redis_data: {}

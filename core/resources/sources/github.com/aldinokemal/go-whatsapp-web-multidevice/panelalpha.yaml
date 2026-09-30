@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  GOWA (go-whatsapp-web-multidevice), a WhatsApp REST API gateway with a web
+  dashboard, MCP endpoint and webhooks (Go, SQLite). The repository's
+  docker-compose.yml builds docker/golang.Dockerfile and bind-mounts
+  ./storages and ./statics, so the engine rightly declines it as a workstation
+  compose; with go.mod under src/ and no root Dockerfile nothing else matches
+  and the plain deploy serves the PanelAlpha placeholder.
+
+  This recipe runs upstream's published image of the current release
+  (aldinokemal2104/go-whatsapp-web-multidevice:v9.5.0) with `rest` on :3000,
+  as the README's production compose does, and keeps storages (WhatsApp
+  session and chat SQLite databases) and statics (QR codes, media) on named
+  volumes. Configuration is the app's own APP_* / WHATSAPP_* environment
+  variables, read from the project's env vars; nothing is set by default, so
+  the dashboard is open until APP_BASIC_AUTH (user:pass[,user:pass]) is set,
+  as upstream ships it. The dashboard HTML is downloaded from upstream's
+  gowa-ui GitHub release at start (APP_UI_AUTO_UPDATE).
+
+  == Verified on 10.10.10.25 (engine 705f250a), memory_limit 2000 ==
+
+  Fresh create: health :3000 200 in 53 s; / 200, <title>gowa-ui, 1154824
+  bytes (dashboard v1.7.0 fetched at start); /devices 200 JSON; /.env and
+  /.git/config 400 from the app, not served. A device added with POST
+  /devices was still listed after POST /rebuild (storages volume kept).
+  With APP_BASIC_AUTH set as a project env var: /devices 401 without and
+  200 with the credentials.

@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DMARCguard (parse-dmarc) pulls DMARC aggregate reports from an IMAP mailbox
+  and shows them on a dashboard: one static Go binary with SQLite, :8080. The
+  repo's root compose.yml is a developer fixture (a seeded Dovecot IMAP server,
+  no app service), so the plain deploy serves IMAP and never the dashboard.
+
+  This recipe replaces it with the published image of the current release
+  (dmarcguard/parse-dmarc:v1.7.0), as the upstream README's docker run does,
+  with the database on a named volume. parse-dmarc refuses to start without
+  the mailbox it reads: the customer sets IMAP_HOST, IMAP_USERNAME and
+  IMAP_PASSWORD (optionally IMAP_PORT, IMAP_MAILBOX, IMAP_USE_TLS,
+  IMAP_STARTTLS) in the project's environment variables, and a one-shot init
+  service fails the deploy naming each one that is missing. The same service
+  hands the data volume to the image's nonroot user (65532): the release image
+  ships no /data, so the volume is created root-owned and SQLite cannot open
+  its file otherwise.

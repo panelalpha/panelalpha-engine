@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Immich, a self-hosted photo and video library (NestJS server + SvelteKit web
+  UI on :2283, a Python machine-learning service, PostgreSQL with VectorChord,
+  Valkey). The repository root is a pnpm monorepo with no root compose file, so
+  the plain deploy hands it to Railpack, which builds the workspace but finds no
+  start command: the container exits 0 and restart-loops. This recipe runs the
+  official images of the current release, v3.2.4, as upstream's release
+  docker-compose.yml does: immich-server, immich-machine-learning, the
+  ghcr.io/immich-app/postgres VectorChord image and Valkey 9, with the same
+  pinned digests. The prepare hook generates the database password once into
+  ~/.panelalpha/immich/secrets.env. The library (/data), the database and the
+  model cache are on named volumes. A gate service waits for the server's own
+  healthcheck. First visit shows Immich's admin sign-up (upstream behaviour).

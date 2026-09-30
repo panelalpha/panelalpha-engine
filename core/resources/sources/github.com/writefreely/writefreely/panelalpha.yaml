@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  WriteFreely is a minimalist, federated (ActivityPub) blogging platform: one
+  Go binary with templates, SQLite or MySQL. It is configured only through a
+  config.ini, normally written by the interactive `writefreely config`. The
+  repo's docker-compose.yml runs writeas/writefreely:latest (last pushed 2021)
+  with a bind-mounted ./config.ini that nothing creates, so the app
+  restart-loops. Building the repo's Dockerfile instead does not fit a 2 GB
+  account: compiling github.com/writeas/activity/vocab is OOM-killed.
+
+  This recipe runs upstream's official image of the newest published release,
+  ghcr.io/writefreely/writefreely:v0.17.1 (v0.17.2 has no image). A start
+  script, run as root and then dropping to the image's `daemon` user, writes
+  a minimal config.ini on first boot (SQLite, multi-user, listen
+  0.0.0.0:8080, host = the project's public URL), generates the keys, creates
+  the database and runs `db migrate` on every start. Config, keys and database
+  live on a named volume that survives redeploys. Registration is open as
+  WriteFreely's multi-user setup allows: the first account created is user 1,
+  which WriteFreely treats as the admin, and it can close registration in the
+  admin panel. No account is seeded.

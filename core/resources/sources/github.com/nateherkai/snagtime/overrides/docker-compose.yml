@@ -1,0 +1,178 @@
+# Upstream's compose.production.yml, made runnable in one account: the same
+# services, images and env split, with file secrets from ~/.panelalpha instead
+# of external swarm secrets, and a one-shot `init` that applies the Prisma
+# migrations and provisions the role logins as the database owner.
+# hooks/prepare.sh generates the secrets and writes docker-compose.override.yml
+# (BUILD_ID, account uid).
+x-customer-env: &customer_env
+  # Supplied by the customer (project env vars); checked by env-check.
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+  STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-}
+  SMTP_TLS_MODE: ${SMTP_TLS_MODE:-}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  EMAIL_FROM: ${EMAIL_FROM:-}
+  EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
+  EMAIL_SENDER_DOMAIN: ${EMAIL_SENDER_DOMAIN:-}
+
+services:
+  # Fails `compose up` (and the deploy) naming each missing/invalid variable.
+  env-check:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "/check.sh"]
+    environment:
+      <<: *customer_env
+    volumes:
+      - ./panelalpha/snagtime/env-check.sh:/check.sh:ro
+    mem_limit: 32m
+
+  postgres:
+    build: { context: ., dockerfile: infrastructure/postgresql/Dockerfile }
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tempocove_owner
+      POSTGRES_DB: tempocove
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_owner_password
+    secrets: [postgres_owner_password, postgres_server_cert, postgres_server_key, postgres_ca_cert]
+    volumes:
+      - postgres_data:/var/lib/postgresql/18/docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tempocove_owner -d tempocove"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  # One-shot, idempotent: prisma migrate deploy + provision-postgres-logins.mjs.
+  init:
+    build: { context: ., target: builder }
+    restart: "no"
+    entrypoint: ["/bin/sh", "/pa/init.sh"]
+    environment:
+      DATABASE_PROVIDER: postgresql
+    secrets: [owner_database_url, postgres_ca_cert, tenant_context_secret, db_migration_password, db_app_password, db_worker_password, db_monitor_password]
+    volumes:
+      - ./panelalpha/snagtime:/pa:ro
+    depends_on:
+      env-check: { condition: service_completed_successfully }
+      postgres: { condition: service_healthy }
+    mem_limit: 768m
+
+  worker:
+    build: { context: ., target: runtime }
+    image: snagtime-runtime:local
+    restart: unless-stopped
+    command: ["node", "dist/worker.mjs"]
+    environment:
+      <<: *customer_env
+      NODE_ENV: production
+      DATABASE_PROVIDER: postgresql
+      DATABASE_ROLE: worker
+      WORKER_DATABASE_URL_FILE: /run/secrets/worker_database_url
+      TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/token_encryption_key
+      EMAIL_TOKEN_SECRET_FILE: /run/secrets/email_token_secret
+      NEXT_PUBLIC_APP_URL: ${PA_PUBLIC_URL}
+      OUTBOX_WORKER_MODE: dedicated
+      OUTBOX_WORKER_ENABLED: "false"
+      DEMO_MODE: "false"
+      EMAIL_PROVIDER: smtp
+      CALENDAR_PROVIDER: google
+      PAYMENTS_PROVIDER: stripe
+    secrets: [worker_database_url, postgres_ca_cert, token_encryption_key, email_token_secret]
+    read_only: true
+    tmpfs: [/tmp]
+    depends_on:
+      init: { condition: service_completed_successfully }
+    mem_limit: 512m
+
+  app:
+    build: { context: ., target: runtime }
+    image: snagtime-runtime:local
+    restart: unless-stopped
+    command: ["node", "apps/web/server.js"]
+    ports:
+      - "3000:3000"
+    environment:
+      <<: *customer_env
+      NODE_ENV: production
+      # The standalone server chdirs to /app/apps/web and Prisma never looks in
+      # /app/node_modules, where the image puts the generated client's engine
+      # (PrismaClientInitializationError on every query without this).
+      PRISMA_QUERY_ENGINE_LIBRARY: /app/node_modules/@tempocove/postgresql-client/libquery_engine-debian-openssl-1.1.x.so.node
+      DATABASE_PROVIDER: postgresql
+      DATABASE_URL_FILE: /run/secrets/app_database_url
+      DATABASE_ROLE: app
+      AUTH_SECRET_FILE: /run/secrets/auth_secret
+      BOOKING_CAPABILITY_KEY_ID: booking-capability-v1
+      BOOKING_CAPABILITY_SECRET_FILE: /run/secrets/booking_capability_secret
+      BOOKING_CAPABILITY_KEYRING_FILE: /run/secrets/booking_capability_keyring
+      TOKEN_ENCRYPTION_KEY_FILE: /run/secrets/token_encryption_key
+      EMAIL_TOKEN_SECRET_FILE: /run/secrets/email_token_secret
+      TENANT_CONTEXT_SECRET_FILE: /run/secrets/tenant_context_secret
+      RATE_LIMIT_HASH_SECRET_FILE: /run/secrets/rate_limit_hash_secret
+      PROXY_SHARED_SECRET_FILE: /run/secrets/proxy_shared_secret
+      OPERATOR_HEALTH_SECRET_FILE: /run/secrets/operator_health_secret
+      NEXT_PUBLIC_APP_URL: ${PA_PUBLIC_URL}
+      RATE_LIMIT_PROVIDER: postgresql
+      RATE_LIMIT_MAX_BUCKETS: "100000"
+      OUTBOX_WORKER_MODE: dedicated
+      OUTBOX_WORKER_ENABLED: "false"
+      # Required by the production contract; the engine proxy does not inject
+      # x-tempocove-proxy-secret, so rate limits fall back to one shared bucket.
+      TRUST_PROXY: "true"
+      DEMO_MODE: "false"
+      EMAIL_PROVIDER: smtp
+      CALENDAR_PROVIDER: google
+      PAYMENTS_PROVIDER: stripe
+    secrets: [app_database_url, postgres_ca_cert, auth_secret, booking_capability_secret, booking_capability_keyring, token_encryption_key, email_token_secret, tenant_context_secret, rate_limit_hash_secret, proxy_shared_secret, operator_health_secret]
+    read_only: true
+    tmpfs: [/tmp]
+    depends_on:
+      init: { condition: service_completed_successfully }
+    healthcheck:
+      # Upstream's check: role login, schema release and a live worker heartbeat.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 36
+      start_period: 10s
+    mem_limit: 768m
+
+  # No-op: `compose up -d` returns once the web server answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app: { condition: service_healthy }
+    mem_limit: 32m
+
+secrets:
+  postgres_owner_password: { file: ../.panelalpha/snagtime/secrets/postgres_owner_password }
+  postgres_server_cert: { file: ../.panelalpha/snagtime/secrets/postgres_server_cert }
+  postgres_server_key: { file: ../.panelalpha/snagtime/secrets/postgres_server_key }
+  postgres_ca_cert: { file: ../.panelalpha/snagtime/secrets/postgres_ca_cert }
+  owner_database_url: { file: ../.panelalpha/snagtime/secrets/owner_database_url }
+  app_database_url: { file: ../.panelalpha/snagtime/secrets/app_database_url }
+  worker_database_url: { file: ../.panelalpha/snagtime/secrets/worker_database_url }
+  db_migration_password: { file: ../.panelalpha/snagtime/secrets/db_migration_password }
+  db_app_password: { file: ../.panelalpha/snagtime/secrets/db_app_password }
+  db_worker_password: { file: ../.panelalpha/snagtime/secrets/db_worker_password }
+  db_monitor_password: { file: ../.panelalpha/snagtime/secrets/db_monitor_password }
+  auth_secret: { file: ../.panelalpha/snagtime/secrets/auth_secret }
+  booking_capability_secret: { file: ../.panelalpha/snagtime/secrets/booking_capability_secret }
+  booking_capability_keyring: { file: ../.panelalpha/snagtime/secrets/booking_capability_keyring }
+  token_encryption_key: { file: ../.panelalpha/snagtime/secrets/token_encryption_key }
+  email_token_secret: { file: ../.panelalpha/snagtime/secrets/email_token_secret }
+  tenant_context_secret: { file: ../.panelalpha/snagtime/secrets/tenant_context_secret }
+  rate_limit_hash_secret: { file: ../.panelalpha/snagtime/secrets/rate_limit_hash_secret }
+  proxy_shared_secret: { file: ../.panelalpha/snagtime/secrets/proxy_shared_secret }
+  operator_health_secret: { file: ../.panelalpha/snagtime/secrets/operator_health_secret }
+
+volumes:
+  postgres_data: {}

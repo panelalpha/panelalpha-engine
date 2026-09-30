@@ -1,0 +1,29 @@
+# Compose-replace: the repo is the Python package source with no start command
+# the engine can find. Runs upstream's published image of the current release.
+services:
+  app:
+    image: octoprint/octoprint:1.11.8
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      # Settings, users, uploaded G-code, plugins and logs.
+      - octoprint-data:/octoprint
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:80/', timeout=4)"]
+      interval: 3s
+      timeout: 5s
+      retries: 80
+      start_period: 5s
+
+  # No-op gate: `compose up -d` returns once OctoPrint answers.
+  ready:
+    image: octoprint/octoprint:1.11.8
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  octoprint-data: {}

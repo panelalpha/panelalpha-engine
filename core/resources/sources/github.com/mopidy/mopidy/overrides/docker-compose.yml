@@ -1,0 +1,32 @@
+# Mopidy from upstream's APT archive (files/panelalpha/mopidy/Dockerfile);
+# the build context is that directory only, so no checkout file is baked in.
+services:
+  app:
+    build:
+      context: panelalpha/mopidy
+    image: panelalpha/mopidy:local
+    restart: unless-stopped
+    ports:
+      - "6680:6680"
+    volumes:
+      # Config (~/.config/mopidy/mopidy.conf), data, cache and a Music dir.
+      - data:/var/lib/mopidy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:6680/mopidy/')"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 512m
+
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

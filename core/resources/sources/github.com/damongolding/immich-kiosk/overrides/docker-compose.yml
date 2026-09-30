@@ -1,0 +1,53 @@
+# Compose-replace: the repo's compose runs :latest with an empty ./config bind
+# mount, so the kiosk exits on "Immich URL is missing". This pins the current
+# release and takes the Immich connection from the project's env vars.
+services:
+  # One-shot: the kiosk cannot start without an Immich server, so the deploy
+  # fails here naming each missing variable. Read from .env (the project's env
+  # vars), not interpolated: the engine would generate a value for *_API_KEY.
+  check:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        missing=""
+        [ -n "$$KIOSK_IMMICH_URL" ] || missing="$$missing KIOSK_IMMICH_URL (address of your Immich server, e.g. https://photos.example.com)"
+        [ -n "$$KIOSK_IMMICH_API_KEY" ] || missing="$$missing KIOSK_IMMICH_API_KEY (an API key created in Immich > Account Settings > API Keys)"
+        if [ -n "$$missing" ]; then
+          echo "Error: set in the project's environment variables:$$missing"
+          exit 1
+        fi
+    mem_limit: 32m
+
+  app:
+    image: ghcr.io/damongolding/immich-kiosk:0.44.1
+    restart: unless-stopped
+    # KIOSK_* settings, including the Immich URL and API key.
+    env_file: .env
+    environment:
+      KIOSK_PORT: "3000"
+      TZ: UTC
+    depends_on:
+      check:
+        condition: service_completed_successfully
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "/kiosk", "--healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    mem_limit: 256m
+
+  # No-op gate: `compose up -d` returns only once the kiosk answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m

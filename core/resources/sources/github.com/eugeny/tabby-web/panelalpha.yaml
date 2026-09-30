@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Tabby Web serves the Tabby terminal in the browser (Django + gunicorn in one
+  image, MariaDB), with sign-in through the OAuth providers the customer
+  configures.
+
+  A plain deploy runs the repository's docker-compose.yml and answers 500 on
+  every page: it passes `DOCKERIZE_ARGS="-wait tcp://db:3306 -timeout 60s"`
+  in list form, so the quotes reach dockerize (`exec: "\"-wait": executable
+  file not found`), start.sh runs `manage.py migrate` before MariaDB is up
+  (`Can't connect to server on 'db'`) and gunicorn serves an empty schema; its
+  `DEBUG=False` is truthy to settings.py (`bool(os.getenv("DEBUG"))`), so the
+  500 is Django's debug page. This recipe runs upstream's published image
+  (ghcr.io/eugeny/tabby-web:latest, the nightly build of HEAD; upstream
+  publishes no versioned tags) with DEBUG unset, the app gated on a healthy
+  MariaDB 11.4 kept on a named volume, and the database password and
+  DJANGO_SECRET_KEY (upstream's default is the fixed "django-insecure")
+  generated once into ~/.panelalpha/tabby-web. A `ready` gate makes the
+  deploy finish once migrations ran and the site answers.
+
+  Sign-in needs at least one OAuth provider: set e.g. SOCIAL_AUTH_GITHUB_KEY
+  and SOCIAL_AUTH_GITHUB_SECRET (or the GitLab, Google, Microsoft, Auth0 or
+  OIDC variables from upstream's README) in the project's environment
+  variables, with the callback
+  `<site URL>/api/1/auth/social/complete/<provider>/`.

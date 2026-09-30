@@ -1,0 +1,25 @@
+# Compose-replace: upstream's compose puts every service behind a profile
+# (`app`, `dev`), so a plain `up -d` starts nothing. Runs the published image.
+services:
+  app:
+    image: ahmadnassri/vscode-server:2.1.0
+    restart: unless-stopped
+    hostname: vscode
+    ports:
+      - "8000:8000"
+    environment:
+      TZ: Etc/UTC
+    volumes:
+      # Upstream's four documented data dirs; the CLI downloads the server
+      # build into cli-data on first start.
+      - vscode-server-data:/root/.vscode/server-data
+      - vscode-user-data:/root/.vscode/user-data
+      - vscode-cli-data:/root/.vscode/cli-data
+      - vscode-extensions:/root/.vscode/extensions
+    mem_limit: 1g
+
+volumes:
+  vscode-server-data: {}
+  vscode-user-data: {}
+  vscode-cli-data: {}
+  vscode-extensions: {}

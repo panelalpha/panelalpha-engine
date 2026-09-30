@@ -1,0 +1,82 @@
+# Compose-replace: the repo root is a monorepo with no compose file. Official images of the
+# current release, as upstream's release docker-compose.yml (same service names and digests).
+services:
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:v3.2.4
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      database:
+        condition: service_healthy
+    env_file:
+      # DB_PASSWORD, generated once by hooks/prepare.sh.
+      - ../.panelalpha/immich/secrets.env
+    environment:
+      DB_HOSTNAME: database
+      DB_USERNAME: postgres
+      DB_DATABASE_NAME: immich
+      REDIS_HOSTNAME: redis
+    volumes:
+      - library:/data
+    ports:
+      - "2283:2283"
+    healthcheck:
+      test: ["CMD", "immich-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    # The API and the job workers share one Node process: ~1.2 GB idle.
+    mem_limit: 2g
+
+  immich-machine-learning:
+    image: ghcr.io/immich-app/immich-machine-learning:v3.2.4
+    restart: unless-stopped
+    volumes:
+      - model-cache:/cache
+    mem_limit: 1g
+
+  redis:
+    image: docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf
+    restart: unless-stopped
+    healthcheck:
+      test: redis-cli ping | grep -q PONG || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  database:
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/immich/secrets.env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: immich
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - database:/var/lib/postgresql/data
+    shm_size: 128mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d immich"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    mem_limit: 768m
+
+  # No-op gate: `compose up -d` returns only once the server's own healthcheck passes.
+  ready:
+    image: docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      immich-server:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  library: {}
+  database: {}
+  model-cache: {}

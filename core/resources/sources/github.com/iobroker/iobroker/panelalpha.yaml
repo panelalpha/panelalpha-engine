@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  ioBroker, the home automation and IoT integration platform (Node.js), with
+  its admin web UI on port 8081.
+
+  The repository is ioBroker's Linux installer script, not the server: a
+  plain deploy builds it with Railpack and the container restart-loops on
+  `curl: not found` from the installer. This recipe runs ioBroker's official
+  image of the current release, iobroker/iobroker:v11.1.0, with
+  /opt/iobroker (objects and states databases, adapters, configuration) on
+  a named volume and a fixed container host name, since ioBroker keys its
+  installation to the host name. A `ready` gate makes the deploy finish only
+  once the admin UI answers; the first start restores the bundled
+  installation and updates the image's packages, which takes a few minutes.
+
+  First run is upstream's: the admin UI opens its setup wizard (licence,
+  admin password, location) for the first visitor. Local network discovery
+  (mDNS/UPnP), USB and serial devices are not available in the account;
+  cloud and IP-based adapters work.

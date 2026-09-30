@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Headplane is a web admin UI for Headscale, the self-hosted Tailscale control
+  server. It needs a running Headscale to talk to. The repo's compose.yaml is
+  upstream's developer setup ("NOT AN EXAMPLE OF SOMETHING YOU DEPLOY"): its
+  Caddy wants self-signed certs from ./test and its Headscale has no config,
+  so both crash-loop.
+
+  COMPOSE-REPLACE with the release images headscale/headscale:v0.29.4 and
+  ghcr.io/tale/headplane:0.7.1, on one domain the way upstream's docs route
+  it: a small nginx `web` service (files/panelalpha/router.conf, the only
+  published port, 8080) sends /admin to Headplane, redirects / to /admin/ and
+  everything else (including the /ts2021 connection upgrade) to Headscale.
+  Headscale's config is upstream's config-example.yaml with listen_addr
+  opened (files/panelalpha/headscale/config.yaml); server_url is the site's
+  address via HEADSCALE_SERVER_URL. Headplane reads that config read-only,
+  gets base_url and headscale.public_url from HEADPLANE_* overrides, and its
+  cookie secret is generated once into ~/.panelalpha/headplane (0600 in 0700).
+  Headscale's noise key and SQLite database and Headplane's data are on named
+  volumes. Integrations (Docker socket, agent) are off.
+
+  Logging in takes a Headscale API key, as upstream documents: run
+  `headscale apikeys create --expiration 90d` in the headscale container.
+  Tailscale clients join with `tailscale up --login-server <site URL>`.

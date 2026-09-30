@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  alf.io, the event ticket reservation system (Spring Boot on Java 25, port
+  8080, PostgreSQL). The repository's docker-compose.yml runs only a
+  development Postgres 10 (the alf.io service is commented out), and the
+  engine's Java strategy builds the Gradle project from source.
+
+  This recipe runs upstream's published image of the current release,
+  alfio/alf.io:2.0-M5-2609, on postgres:16-alpine (pgdata volume). alf.io's
+  DOCKER platform reads the database from the POSTGRES_PORT_5432_TCP_* /
+  POSTGRES_ENV_POSTGRES_* variables; hooks/prepare.sh generates the database
+  password once into ~/.panelalpha/alfio/db.env. The heap is capped with
+  ALFIO_JAVA_OPTS=-Xmx768m. On first start alf.io creates the `admin` user
+  with a random password printed in the app's log, as upstream ships it.

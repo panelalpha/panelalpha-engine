@@ -1,0 +1,46 @@
+# Compose-replace: the repository ships no compose file and no Dockerfile; the
+# standard distribution is the LinuxServer.io image. This runs it durable and
+# closed:
+#   - linuxserver/bazarr pinned to the current release v1.6.2
+#   - /config (config.yaml, SQLite db, logs, backups) on a named volume
+#   - form login + API key seeded into config.yaml on the first boot from
+#     ~/.panelalpha/bazarr, so the UI and API are never open to the internet
+#   - only the app publishes a port
+services:
+  bazarr:
+    image: linuxserver/bazarr:v1.6.2-ls366
+    restart: unless-stopped
+    # Seeds config.yaml when the volume has none, then execs the image's /init.
+    entrypoint: ["/bin/bash", "/panelalpha/entrypoint.sh"]
+    env_file:
+      # Account env first, then the seeded secrets (PUID/PGID, auth values).
+      - .env
+      - ../.panelalpha/bazarr/app.env
+    environment:
+      TZ: "UTC"
+    volumes:
+      - ./panelalpha:/panelalpha:ro
+      - config:/config
+    ports:
+      - "6767:6767"
+    healthcheck:
+      # Bazarr's one unauthenticated API endpoint.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:6767/api/system/ping || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 60s
+    mem_limit: 1g
+
+  # No-op gate: `compose up` returns only once Bazarr answers.
+  ready:
+    image: linuxserver/bazarr:v1.6.2-ls366
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      bazarr:
+        condition: service_healthy
+    mem_limit: 64m
+
+volumes:
+  config: {}

@@ -1,0 +1,42 @@
+# Compose-replace: the repo's root compose is a debugging matrix of databases
+# with no Directus service. This runs the official image of the current
+# release on SQLite, data on named volumes.
+services:
+  app:
+    image: directus/directus:12.4.1
+    restart: unless-stopped
+    env_file:
+      # Missing file aborts `up`: SECRET.
+      - ../.panelalpha/directus/app.env
+    environment:
+      PUBLIC_URL: ${PA_PUBLIC_URL}
+      DB_CLIENT: sqlite3
+      DB_FILENAME: /directus/database/data.db
+    volumes:
+      - database:/directus/database
+      - uploads:/directus/uploads
+      - extensions:/directus/extensions
+    ports:
+      - "8055:8055"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8055/server/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once Directus answers /server/ping.
+  ready:
+    image: directus/directus:12.4.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  database: {}
+  uploads: {}
+  extensions: {}

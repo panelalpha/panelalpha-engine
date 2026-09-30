@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  What To Cook? suggests a recipe from the ingredients you have at home: a
+  Spring Boot app (Thymeleaf UI, Flyway migrations) on Postgres.
+
+  OFFICIAL IMAGE, COMPOSE-REPLACE. The repo's only compose file,
+  docker-compose.dev.yml, runs `localhost/whattocook:dev`, an image built on
+  the developer's machine, so a plain deploy compiles the jar and then fails
+  with `The base image localhost/whattocook:dev could not be downloaded`.
+  The README's documented install is examples/docker-compose.yml; this
+  recipe is that file with the release image ghcr.io/kassner/whattocook:0.4.3
+  (the tag on HEAD), postgres:17, and these changes: the database password
+  is generated once by hooks/prepare.sh into ~/.panelalpha/whattocook
+  (0600 files in a 0700 dir) instead of upstream's literal `admin123`; the
+  Postgres volume is mounted at the image's real data path
+  (/var/lib/postgresql/data; the example's /var/lib/postgres/data would lose
+  the database on every redeploy); and the app waits for a healthy Postgres.
+  The app image has no shell, so it carries no healthcheck of its own. Only
+  the app publishes a port (12393:8080).

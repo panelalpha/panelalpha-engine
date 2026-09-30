@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  FlowFuse (formerly FlowForge), a platform for running and managing Node-RED
+  instances (web UI and API on :3000). The repository ships no compose file, so
+  the plain deploy built the checkout and webpack was killed by the build
+  container's memory limit. overrides/docker-compose.yml runs the published
+  flowfuse/forge-docker image of the current release with Postgres (the image
+  has no SQLite binding) and the bundled localfs driver instead of upstream's
+  Docker-socket driver. A one-shot stack service installs Node-RED 4.1 into the
+  forge volume once, since the setup wizard needs a stack. The config file is
+  written at start from the account's public address; hooks/prepare.sh
+  generates the Postgres password once into ~/.panelalpha/flowfuse/.
+  FlowFuse's own first-run wizard creates the admin. Hosted instances listen on
+  internal ports (12080+) only, so their editors are not reachable from
+  outside the account.

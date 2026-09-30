@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  FluxDown is a multi-protocol download manager (HTTP/FTP/BitTorrent/streams)
+  with a headless server mode serving its web UI on :17800. The plain deploy
+  runs the generic rust strategy, `cargo build --release` over the whole
+  workspace including the desktop GUI crate, with fat LTO; rustc is
+  SIGKILLed (OOM) and the engine reports it as "Rust code does not compile"
+  (engine#353).
+
+  This recipe runs the server image upstream publishes for the current
+  release, ghcr.io/zerx-lab/fluxdown-server:0.4.8, the way upstream's
+  docker/docker-compose.yml does. Nothing is built. The first visit opens the
+  app's own wizard to set its access key. /data (database, logs, access key)
+  and /root/Downloads are named volumes.

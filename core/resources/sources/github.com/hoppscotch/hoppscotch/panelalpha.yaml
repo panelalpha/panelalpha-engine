@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Hoppscotch Community Edition, an API development platform (REST, GraphQL,
+  WebSocket clients) with a self-host admin dashboard. Every service in the
+  repository's docker-compose.yml sits behind a `profiles:` gate, so a plain
+  deploy fails with "no service selected"; the profiles also build the whole
+  monorepo from prod.Dockerfile.
+
+  This recipe runs the official all-in-one image of the current release
+  (hoppscotch/hoppscotch:2026.8.2) with PostgreSQL 15 as upstream pins, in
+  subpath mode so one domain serves everything: the app at /, the admin
+  dashboard at /admin and the backend at /backend, on port 8000. A one-shot
+  service runs `prisma migrate deploy` first, as upstream's migrate service
+  does. On a fresh database the backend fills its infra_config table and
+  then stops itself, relying on a restart; a one-shot init service
+  (files/hoppscotch-init.sh) runs that first boot so the app container starts
+  once. DATA_ENCRYPTION_KEY and the database password are generated once into
+  ~/.panelalpha/hoppscotch; the database is on a named volume.
+
+  Authentication providers are configured in the admin dashboard's first-run
+  onboarding, as upstream ships it (the first admin signs in there).
+  TRUST_PROXY stays false as upstream ships it.

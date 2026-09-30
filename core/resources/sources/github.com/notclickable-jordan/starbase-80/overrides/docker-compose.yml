@@ -1,0 +1,33 @@
+# Compose-replace: the repo compose bind-mounts ./config.json and ./icons that do
+# not exist in the checkout. Current release image; config and icons on named volumes.
+services:
+  app:
+    image: jordanroher/starbase-80:1.6.7
+    restart: unless-stopped
+    volumes:
+      # Seeded from the image's example config.json on first start.
+      - config:/app/src/config
+      - icons:/app/public/icons
+    ports:
+      - "4173:4173"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:4173/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1024m
+
+  # No-op gate: the site is built at boot, so `compose up -d` waits for nginx.
+  ready:
+    image: jordanroher/starbase-80:1.6.7
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  icons: {}

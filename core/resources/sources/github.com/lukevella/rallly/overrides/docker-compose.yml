@@ -1,0 +1,60 @@
+# Compose-replace: upstream's self-hosted stack (lukevella/rallly-selfhosted)
+# on the published image instead of the repo's from-source dev build.
+services:
+  app:
+    image: lukevella/rallly:4.15.2
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # Optional settings (SMTP_*, ALLOWED_EMAILS, OIDC_*, ...) from the project env.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NEXT_PUBLIC_BASE_URL: ${PA_PUBLIC_URL}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:?Set SUPPORT_EMAIL to the address Rallly shows users for support}
+      # Session encryption key (min 32 chars) and DB password: generated per account.
+      SECRET_PASSWORD: ${SECRET_PASSWORD:?SECRET_PASSWORD is required}
+      DATABASE_URL: postgres://rallly:${RALLLY_DB_PASSWORD:?RALLLY_DB_PASSWORD is required}@db:5432/rallly
+    depends_on:
+      db:
+        condition: service_healthy
+    # The image's own check, polled faster than its 30s default.
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --noproxy '*' http://localhost:3000/api/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rallly
+      POSTGRES_PASSWORD: ${RALLLY_DB_PASSWORD:?RALLLY_DB_PASSWORD is required}
+      POSTGRES_DB: rallly
+    volumes:
+      # postgres 18 keeps PGDATA under /var/lib/postgresql/<major>.
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rallly"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 384m
+
+  # No-op gate: `compose up -d` returns once the image's /api/status check passes
+  # (migrations run first).
+  ready:
+    image: postgres:18-alpine
+    restart: "no"
+    command: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db-data: {}

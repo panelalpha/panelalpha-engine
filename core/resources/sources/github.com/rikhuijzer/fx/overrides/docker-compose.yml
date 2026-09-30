@@ -1,0 +1,41 @@
+# Compose-replace: the repository has no compose file and the generic Rust
+# build runs the binary without its `serve` subcommand. This runs upstream's
+# published image of the current release, as in the README's compose example.
+services:
+  app:
+    image: rikhuijzer/fx:1.6.3
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      FX_DOMAIN: ${PA_PUBLIC_HOST}
+      FX_USERNAME: ${FX_USERNAME:-admin}
+      # The admin login; the check below refuses an empty value.
+      FX_PASSWORD: ${FX_PASSWORD:-}
+    volumes:
+      # The SQLite database (/data/db.sqlite).
+      - fx-data:/data
+    healthcheck:
+      test: ["CMD", "/fx", "check-health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      password-check:
+        condition: service_completed_successfully
+    mem_limit: 256m
+
+  # Fails the deploy while FX_PASSWORD is unset: without it nobody can log in to post.
+  password-check:
+    image: busybox:1.37
+    restart: "no"
+    environment:
+      FX_PASSWORD: ${FX_PASSWORD:-}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - '[ -n "$$FX_PASSWORD" ] && echo "fx: FX_PASSWORD set" || { echo "fx: FX_PASSWORD is not set. Set the project environment variable FX_PASSWORD to the admin password you want (and optionally FX_USERNAME, default admin), then redeploy." >&2; exit 1; }'
+    mem_limit: 32m
+
+volumes:
+  fx-data: {}

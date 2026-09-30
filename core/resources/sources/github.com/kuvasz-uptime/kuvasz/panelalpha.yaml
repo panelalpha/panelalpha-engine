@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Kuvasz is an uptime and SSL monitor (Micronaut/Kotlin on JDK 25) backed by
+  PostgreSQL. The plain deploy builds the Gradle project with the java recipe's
+  JDK 21 and fails: the Micronaut platform plugin needs JVM 25.
+
+  This recipe runs the published image of the current release
+  (kuvaszmonitoring/kuvasz:4.4.0) with a postgres:18 sidecar, as the upstream
+  docker-examples compose does. The customer sets ADMIN_USER and
+  ADMIN_PASSWORD (at least 12 characters, not equal to the user) in the
+  project's environment variables; a one-shot check service fails the deploy
+  naming each one that is missing. The database password is generated once
+  into ~/.panelalpha/kuvasz/. Monitors defined in the UI live in the database
+  (named volume); the YAML config file is shipped empty.

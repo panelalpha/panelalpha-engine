@@ -1,0 +1,58 @@
+# Compose-replace: the repo has no root compose and its source build OOMs in the
+# account. Official image of the current release plus Postgres, as docker/production/compose.yml.
+services:
+  documenso:
+    image: documenso/documenso:v2.19.0
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+    env_file:
+      # Secrets and DATABASE_URLs, generated once by hooks/prepare.sh.
+      - ../.panelalpha/documenso/secrets.env
+    environment:
+      PORT: "3000"
+      NEXT_PUBLIC_WEBAPP_URL: ${PA_PUBLIC_URL}
+      NEXT_PUBLIC_UPLOAD_TRANSPORT: database
+      NEXT_PRIVATE_SMTP_TRANSPORT: smtp-auth
+      NEXT_PRIVATE_SMTP_FROM_NAME: Documenso
+      NEXT_PRIVATE_SMTP_FROM_ADDRESS: noreply@${PA_PUBLIC_HOST}
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1g
+
+  database:
+    image: postgres:15
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/documenso/secrets.env
+    environment:
+      POSTGRES_USER: documenso
+      POSTGRES_DB: documenso
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U documenso -d documenso"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Documenso answers /api/health.
+  ready:
+    image: postgres:15
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      documenso:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  database: {}

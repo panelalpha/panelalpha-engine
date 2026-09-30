@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DSpace is an institutional repository: a Java (Spring Boot) REST backend
+  at /server on PostgreSQL and Solr, and an Angular UI rendered server-side
+  by Node.
+
+  COMPOSE-REPLACE FROM PUBLISHED IMAGES. The repository's docker-compose.yml
+  builds a -test image from source (a ~9 minute Maven build) with a config
+  bind mount, and has no UI. The recipe runs upstream's published images of
+  the current release, dspace/dspace:dspace-10.1, dspace/dspace-solr:dspace-10.1
+  and postgres:15, with upstream's own entrypoints (Solr cores created on
+  start, `dspace database migrate` before the backend), plus the UI image
+  dspace/dspace-angular:dspace-10.1-dist configured as
+  docker-compose-angular.yml does. An nginx service puts both on one origin:
+  the UI at /, the REST API at /server; dspace.server.url and dspace.ui.url
+  are this site's address. The database password is generated once into
+  ~/.panelalpha/dspace (0600 in 0700). Database, Solr cores and the
+  assetstore live on named volumes. A `ready` gate makes the deploy finish
+  only once the UI answers.
+
+  MEMORY. The backend image sets JAVA_OPTS, which its `java -jar`
+  entrypoint never reads, so the heap is capped with JAVA_TOOL_OPTIONS
+  (-Xmx1g). The UI's pm2 config starts one Node worker per host CPU; a
+  mounted copy starts two. Measured: backend ~575 MB, Solr ~800 MB, UI
+  ~280-360 MB, PostgreSQL ~75 MB, 1.8 GB for the whole account after
+  browsing and searching.
+
+  FIRST RUN AS UPSTREAM SHIPS IT. DSpace has no default account; the first
+  administrator is created with `dspace create-administrator` in the
+  dspace container, as upstream documents.

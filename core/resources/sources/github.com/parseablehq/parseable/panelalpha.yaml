@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Parseable, a log/metrics/trace observability server with its own web
+  console (Rust, port 8000). The repository's Dockerfile compiles the whole
+  server with `cargo build --release`, which was OOM-killed at 2500 MB and
+  only finished at 4096 MB; the image it produces then restart-loops,
+  because its CMD runs the bare binary and Parseable exits without a storage
+  subcommand (`local-store` or `s3-store`).
+
+  This recipe runs the published image of the current release
+  (quay.io/parseablehq/parseable:v3.2.2) with `parseable local-store`, the
+  data and staging directories on named volumes, and P_ORIGIN_URI set to the
+  site address. Everything else is upstream's default, including the admin
+  login admin/admin unless P_USERNAME / P_PASSWORD are set in the project's
+  environment variables.

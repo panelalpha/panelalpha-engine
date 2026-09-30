@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  REI3 is a low-code business application platform: one Go binary with its
+  web UI embedded, on PostgreSQL. The repository is the source only; the
+  engine builds it with the Go recipe and the binary, started without `-run`
+  and a config, prints its usage and exits in a restart loop. The vendor's
+  documented Docker deployment is a compose file on rei3.de
+  (rei3.de/docker_x64), not in the repository: postgres:16 plus an image
+  built from github.com/r3-team/r3_docker, which downloads the official
+  release tarball and points its config template at the database.
+
+  This recipe is that compose file: the same build context (pinned to a
+  commit), release 3.12.8, the vendor's database name/user/password defaults
+  (the database is not published outside the account), and /opt/r3/data and
+  the PostgreSQL data on named volumes. The app serves plain HTTP on :80
+  behind the engine's TLS proxy (`-http`, as the vendor image runs it). A
+  gate service waits until REI3 accepts connections. First run is as the
+  vendor ships it (default login admin/admin, per r3_docker's README).

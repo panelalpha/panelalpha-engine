@@ -1,0 +1,31 @@
+# The repo is the Gradle source tree (the web UI is a git submodule) with no
+# compose file; this runs upstream's published image of the current release.
+services:
+  app:
+    image: docker.io/traccar/traccar:6.16.0-alpine
+    restart: unless-stopped
+    volumes:
+      # Embedded H2 database (the image's default conf/traccar.xml).
+      - data:/opt/traccar/data
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8082/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 20s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once Traccar answers.
+  ready:
+    image: docker.io/traccar/traccar:6.16.0-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

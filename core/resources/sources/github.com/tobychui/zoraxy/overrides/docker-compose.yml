@@ -1,0 +1,35 @@
+# The repository's docker/docker-compose.yml publishes the proxy's 80/443 and
+# bind-mounts placeholder paths. The site serves Zoraxy's management UI (:8000);
+# the proxy listeners stay inside the account.
+services:
+  zoraxy:
+    image: zoraxydocker/zoraxy:v3.3.4
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      FASTGEOIP: "true"
+    volumes:
+      - zoraxy-config:/opt/zoraxy/config
+      - zoraxy-plugin:/opt/zoraxy/plugin
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8000"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once the UI port listens.
+  ready:
+    image: zoraxydocker/zoraxy:v3.3.4
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      zoraxy:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  zoraxy-config: {}
+  zoraxy-plugin: {}

@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Label Studio, the web-based data labeling tool (Django/uwsgi). The
+  repository's develop branch does not build: uv.lock pins label-studio-sdk to
+  a git commit that github.com/HumanSignal/label-studio-sdk no longer serves
+  (`fatal: could not read Username`), and its docker-compose.yml bind-mounts
+  ./mydata into an nginx sidecar. This recipe runs upstream's published image
+  of the current release, heartexlabs/label-studio:1.23.1, as the single
+  container upstream documents (`docker run -p 8080:8080 -v mydata:/label-studio/data`):
+  SQLite database, uploads and the generated Django secret key all live in
+  /label-studio/data on a named volume. LABEL_STUDIO_HOST and
+  CSRF_TRUSTED_ORIGINS are the account's public URL.

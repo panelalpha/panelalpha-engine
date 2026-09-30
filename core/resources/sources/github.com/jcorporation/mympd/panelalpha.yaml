@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  myMPD is a standalone web client for the Music Player Daemon (MPD): one C
+  process serving the web UI and its API on :8080. The repository is the C
+  source, and a plain deploy goes to Railpack's C++ provider, whose cmake
+  step fails on the missing PCRE2 headers, so the engine placeholder is
+  served. This recipe runs upstream's image of the current release,
+  ghcr.io/jcorporation/mympd/mympd:26.0.0, over plain HTTP (TLS is the
+  engine's), with its working directory (settings, playlists, scripts) and
+  cache on named volumes that survive redeploys.
+
+  myMPD controls an MPD server, which is not part of this app. Point it at
+  one in the web UI (Main menu -> MPD connection); until then the UI loads and reports that
+  MPD is not connected. Settings are open until you set a PIN (`mympd -p`),
+  as upstream ships it.

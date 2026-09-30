@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  LibreTime, radio broadcast automation (fork of Airtime): media library,
+  show scheduling and playout to an Icecast stream, with a PHP web UI behind
+  nginx on port 8080.
+
+  A plain deploy runs the repository's compose plus its development
+  docker-compose.override.yml, builds every service from source and fails:
+  config.yml has no public_url, api_key or secret_key and the database is
+  never migrated, so playout exits 1. This recipe replaces both with
+  upstream's compose of the current release, 4.5.0, on the published
+  ghcr.io/libretime images: hooks/prepare.sh generates the Postgres,
+  RabbitMQ and Icecast passwords and the API/secret keys once into
+  ~/.panelalpha/libretime/, a one-shot service renders config.yml (the
+  account's https address plus those secrets) onto a volume, and a second
+  one-shot runs upstream's `libretime-api migrate` before the services
+  start. files/docker-compose.override.yml stands in for the repository's
+  development override (source builds, bind mounts, dev ports), which the
+  engine would otherwise layer over the replacement (engine#416). Media, the database and the playout cache are on named volumes.
+
+  Log in with upstream's default admin / admin and change it under
+  Settings. Only the web UI is published: the Icecast stream (8000) and the
+  live-input harbors (8001/8002) stay inside the account.

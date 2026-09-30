@@ -1,0 +1,58 @@
+# The only thing on the account's port. The image's entrypoint renders this
+# with ${DUMBDO_PIN}; the rendered file stays inside the container.
+# DumbDo compares the PIN cookie (and an X-Pin header) on every request with no
+# lockout, so a wrong cookie is throttled here and X-Pin is never forwarded.
+
+map $cookie_DUMBDO_PIN $dumbdo_bad_cookie {
+    default         "bad";
+    ""              "";
+    "${DUMBDO_PIN}" "";
+}
+
+# The app gets only the cookie value nginx judged, so a second spelling of the
+# cookie name cannot reach it unthrottled.
+map $cookie_DUMBDO_PIN $dumbdo_cookie {
+    ""      "";
+    default "DUMBDO_PIN=$cookie_DUMBDO_PIN";
+}
+
+# The engine's proxy sets X-Real-IP, so the app's 5-try lockout is per visitor
+# and one stranger cannot lock the owner out.
+map $http_x_real_ip $dumbdo_client {
+    ""      $remote_addr;
+    default $http_x_real_ip;
+}
+
+# Shared buckets, whatever address a request claims: wrong PIN cookies, and
+# PIN submissions as a backstop to the per-visitor lockout.
+limit_req_zone $dumbdo_bad_cookie zone=dumbdo_bad:1m rate=10r/m;
+limit_req_zone $server_name zone=dumbdo_login:1m rate=10r/m;
+
+server {
+    listen 8080 default_server;
+    server_name dumbdo;
+    client_max_body_size 5m;
+    limit_req_status 429;
+
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $dumbdo app:3000;
+
+    proxy_http_version 1.1;
+    proxy_set_header Host              $http_host;
+    proxy_set_header Cookie            $dumbdo_cookie;
+    proxy_set_header X-Pin             "";
+    # The app trusts one proxy hop and keys its lockout on this address.
+    proxy_set_header X-Forwarded-For   $dumbdo_client;
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+
+    location = /api/verify-pin {
+        limit_req zone=dumbdo_login burst=10 nodelay;
+        limit_req zone=dumbdo_bad burst=10 nodelay;
+        proxy_pass http://$dumbdo$request_uri;
+    }
+
+    location / {
+        limit_req zone=dumbdo_bad burst=10 nodelay;
+        proxy_pass http://$dumbdo$request_uri;
+    }
+}

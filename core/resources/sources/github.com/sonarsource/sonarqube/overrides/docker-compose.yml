@@ -1,0 +1,79 @@
+# Compose-replace: the repository is the Gradle source tree with no compose
+# file or Dockerfile. This runs the published Community Build image of the
+# current release on PostgreSQL.
+services:
+  db:
+    # Pinned major: Postgres cannot open a datadir from a newer major.
+    image: docker.io/library/postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sonarqube
+      POSTGRES_USER: sonarqube
+      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:?generated per account}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonarqube -d sonarqube -q"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  app:
+    image: docker.io/library/sonarqube:26.9.0.129388-community
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://db:5432/sonarqube
+      SONAR_JDBC_USERNAME: sonarqube
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:?generated per account}
+    volumes:
+      # Embedded Elasticsearch indexes, installed plugins, logs.
+      - data:/opt/sonarqube/data
+      - extensions:/opt/sonarqube/extensions
+      - logs:/opt/sonarqube/logs
+    # Upstream's documented limits for the embedded Elasticsearch.
+    ulimits:
+      nofile:
+        soft: 131072
+        hard: 131072
+      nproc:
+        soft: 8192
+        hard: 8192
+    ports:
+      - "9000:9000"
+    healthcheck:
+      # /api/system/status reports UP once web, compute engine and search run.
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /api/system/status HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 &&
+          grep -q '"status":"UP"' <&3
+      interval: 10s
+      timeout: 10s
+      retries: 90
+      start_period: 60s
+    mem_limit: 3g
+
+  # No-op gate: `compose up -d` returns only once SonarQube reports UP.
+  ready:
+    image: docker.io/library/postgres:17-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  pgdata: {}
+  data: {}
+  extensions: {}
+  logs: {}

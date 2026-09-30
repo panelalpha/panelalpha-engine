@@ -24,7 +24,9 @@ description: >-
   `hooks/prepare.sh` writes .env — the file the generated app service already
   reads through `env_file:` — with one generated password shared by
   DATABASE_PASS and POSTGRES_PASSWORD, plus ENCRYPTION_KEY, SECRET_KEY_BASE and
-  SIGNING_SALT. ENCRYPTION_KEY matters beyond the first boot: TeslaMate.Vault
+  SIGNING_SALT. The secrets are generated once into ~/.panelalpha/teslamate/
+  and copied into .env on every deploy, because ~/project is emptied each time
+  while the postgres volume keeps its password. ENCRYPTION_KEY matters beyond the first boot: TeslaMate.Vault
   encrypts the stored Tesla API tokens with SHA-256 of that key and, when it is
   unset, logs a freshly generated one and uses it for that session only, so
   every restart would invalidate the saved tokens and force a new sign-in.

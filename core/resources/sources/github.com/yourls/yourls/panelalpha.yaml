@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  YOURLS, the self-hosted PHP URL shortener. A plain deploy served the checkout
+  with the php strategy and answered 403: the repository has no config.php (it
+  needs a MySQL database and a user/config.php written from
+  config-sample.php) and routes everything through yourls-loader.php with
+  rewrite rules the checkout does not ship. This recipe runs the official
+  yourls image of the current release (1.10.6, Apache on 8080) against
+  MariaDB 11.8, configured entirely through the image's environment variables.
+  YOURLS has no user table: the admin login is YOURLS_USER / YOURLS_PASS from
+  the project env vars, and a one-shot check fails the deploy naming whichever
+  is missing. The database password and the cookie key are generated once into
+  ~/.panelalpha/yourls. The first visit to /admin/ offers YOURLS' own
+  "Install YOURLS" button, which creates the tables.

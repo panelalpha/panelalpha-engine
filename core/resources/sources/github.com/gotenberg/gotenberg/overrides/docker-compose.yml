@@ -1,0 +1,27 @@
+# Gotenberg 8.37.0 release image; stateless API on :3000.
+services:
+  gotenberg:
+    image: gotenberg/gotenberg:8.37.0
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "--silent", "--fail", "http://127.0.0.1:3000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once Gotenberg answers.
+  ready:
+    image: gotenberg/gotenberg:8.37.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      gotenberg:
+        condition: service_healthy
+    mem_limit: 32m

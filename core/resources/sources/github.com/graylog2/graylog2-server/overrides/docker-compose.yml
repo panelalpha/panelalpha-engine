@@ -1,0 +1,84 @@
+# Compose-replace: the repository is the Java/Maven source (its build ran out of
+# memory in an account). Runs the published images of the current release, the
+# shape of upstream's Graylog2/docker-compose, with OpenSearch as the search backend.
+services:
+  mongodb:
+    image: mongo:7.0
+    restart: unless-stopped
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+    mem_limit: 512m
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.6
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      action.auto_create_index: "false"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms768m -Xmx768m
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs 'http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    mem_limit: 1536m
+
+  app:
+    image: graylog/graylog:7.1.9
+    restart: unless-stopped
+    env_file:
+      # password_secret and root_password_sha2; a missing file aborts `up`.
+      - ../.panelalpha/graylog/graylog.env
+    environment:
+      GRAYLOG_NODE_ID_FILE: /usr/share/graylog/data/data/node-id
+      GRAYLOG_HTTP_BIND_ADDRESS: 0.0.0.0:9000
+      GRAYLOG_HTTP_EXTERNAL_URI: ${PA_PUBLIC_URL}/
+      GRAYLOG_MONGODB_URI: mongodb://mongodb:27017/graylog
+      GRAYLOG_ELASTICSEARCH_HOSTS: http://opensearch:9200
+      GRAYLOG_SERVER_JAVA_OPTS: -Xms1g -Xmx1g -XX:+UseG1GC
+    volumes:
+      # Node id, journal and the message spool.
+      - graylog-data:/usr/share/graylog/data
+    ports:
+      - "9000:9000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://127.0.0.1:9000/api/system/lbstatus >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1792m
+
+  # No-op gate: `compose up -d` returns once Graylog reports ALIVE.
+  ready:
+    image: mongo:7.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  mongodb-data: {}
+  opensearch-data: {}
+  graylog-data: {}

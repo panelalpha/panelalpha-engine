@@ -1,0 +1,95 @@
+# Upstream compose.example.yml on the 0.7.4 release image, with generated
+# secrets from ~/.panelalpha (hooks/prepare.sh) and named volumes.
+# POSTGRES_USER/POSTGRES_DB come from app.env: declared here they make the
+# engine take web/worker for Postgres servers (engine#419).
+x-rails-env: &rails_env
+  SELF_HOSTED: "true"
+  RAILS_FORCE_SSL: "false"
+  RAILS_ASSUME_SSL: "true"
+  APP_DOMAIN: ${PA_PUBLIC_HOST}
+  DB_HOST: db
+  DB_PORT: "5432"
+  REDIS_URL: redis://redis:6379/1
+
+services:
+  web:
+    image: ghcr.io/we-promise/sure:0.7.4
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/sure/app.env
+    environment:
+      <<: *rails_env
+    volumes:
+      - app-storage:/rails/storage
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:3000/up || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1g
+
+  worker:
+    image: ghcr.io/we-promise/sure:0.7.4
+    command: bundle exec sidekiq
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/sure/app.env
+    environment:
+      <<: *rails_env
+    volumes:
+      - app-storage:/rails/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    mem_limit: 768m
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/sure/app.env
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sure_user -d sure_production"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 256m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once the web server answers.
+  ready:
+    image: redis:7-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  app-storage: {}
+  postgres-data: {}
+  redis-data: {}

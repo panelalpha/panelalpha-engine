@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Socialhome, a federated (ActivityPub/Diaspora) profile builder and social
+  network (Django + Daphne backend, Vue SPA frontend, PostgreSQL, Redis). The
+  plain deploy built docker/Dockerfile and crash-looped on "No module named
+  'debug_toolbar'", with no database, Redis or frontend. Since 0.24 the
+  frontend is a separate package, so overrides/docker-compose.yml follows
+  upstream's Docker install: the published codeberg.org/socialhome/socialhome
+  image of the current release, the socialhome-ui build fetched into a volume
+  by a one-shot service, Postgres, Redis, and nginx doing the documented path
+  and Accept-header routing (files/panelalpha/socialhome-nginx.conf), serving
+  /media from the media volume. hooks/prepare.sh generates the Postgres
+  password and DJANGO_SECRET_KEY once into ~/.panelalpha/socialhome/. The job
+  runner is limited to one Dramatiq process (the default is one per host vCPU
+  at ~500 MB each). Registration stays closed as the image ships it; the
+  operator creates the first user with manage.py createsuperuser.

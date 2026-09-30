@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Recipya is a recipe manager (GPL-3.0): one Go binary serving the web UI on
+  :8078, with SQLite databases, uploaded images, backups and logs under
+  ~/.config/Recipya.
+
+  The checkout does not build: web/web.go embeds emails/transpiled/*.gohtml
+  and the docs site, which upstream's deploy/Dockerfile produces with
+  `go generate` (templ, Hugo, an email transpiler); the engine's `go`
+  strategy stops at `pattern emails/transpiled/*.gohtml: no matching files
+  found`. overrides/docker-compose.yml runs the image upstream publishes for
+  the current release, reaper99/recipya:v1.2.2 (the tag deploy/compose.yaml
+  pins), with /root/.config/Recipya on the named volume `data`, the site's
+  address as RECIPYA_SERVER_URL and production mode on, so links use that
+  address and cookies are Secure. The SendGrid, Azure Document Intelligence
+  and sign-up settings are optional project environment variables.
+
+  First run is upstream's: the first visitor registers an account. The first
+  start downloads the 62.6 MB FDC nutrition database before it serves.
+
+  Measured on mariusz2.panelalpha.tools (2026-09-29, engine 705f250a): deploy
+  53s, rebuild 33s, app 16 MiB. / redirects to /guide/en/ (<title>Recipya</title>,
+  80 KB). An account registered through /auth/register logs in (Secure session
+  cookie), and a cookbook it created is still listed after a rebuild.

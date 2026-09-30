@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  PushBits relays push notifications to Matrix through a Gotify-compatible
+  HTTP API (no web UI; it is managed with the pbcli tool): one Go server on
+  :8080 with SQLite. It logs in to a Matrix account at startup and exits when
+  it cannot, and it refuses to start without PUSHBITS_MATRIX_USERNAME,
+  PUSHBITS_MATRIX_PASSWORD and PUSHBITS_ADMIN_MATRIXID, so the plain deploy
+  (the repo's Dockerfile, no configuration) never answers.
+
+  This recipe runs the published image of the current release
+  (ghcr.io/pushbits/server:0.10.7) as the upstream docs' compose example does.
+  The customer supplies the Matrix account in the project's environment
+  variables (PUSHBITS_MATRIX_USERNAME, PUSHBITS_MATRIX_PASSWORD,
+  PUSHBITS_ADMIN_MATRIXID, optionally PUSHBITS_MATRIX_HOMESERVER, default
+  https://matrix.org, and PUSHBITS_ADMIN_PASSWORD); a one-shot init service
+  fails the deploy naming each one that is missing. The SQLite database is on
+  a named volume. Everything else is upstream's default, including the admin
+  login admin/admin when PUSHBITS_ADMIN_PASSWORD is not set.

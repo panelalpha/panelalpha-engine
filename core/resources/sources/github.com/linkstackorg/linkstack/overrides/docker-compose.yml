@@ -1,0 +1,22 @@
+# Compose-replace: upstream ships its own Docker image (linkstack-docker) with
+# Apache + PHP 8.3; the plain Laravel build of the repo failed.
+services:
+  app:
+    # latest = v4.8.6 (2026-02-17); upstream publishes no version tags.
+    image: linkstackorg/linkstack:latest@sha256:1c8b05399ee459ac601bac3eede7fbe765d1b6b7be725663b57f3220610958bf
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      HTTP_SERVER_NAME: ${PA_PUBLIC_HOST}
+      HTTPS_SERVER_NAME: ${PA_PUBLIC_HOST}
+      SERVER_ADMIN: admin@${PA_PUBLIC_HOST}
+      TZ: UTC
+      # TLS ends at the engine's proxy; without this the pages link http:// assets.
+      FORCE_HTTPS: "true"
+    volumes:
+      # The whole app, its .env and the SQLite database the setup wizard creates.
+      - linkstack-htdocs:/htdocs
+
+volumes:
+  linkstack-htdocs: {}

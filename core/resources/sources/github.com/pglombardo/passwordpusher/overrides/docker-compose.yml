@@ -1,0 +1,63 @@
+# Compose-replace: the repository's compose publishes 443 and has Thruster
+# fetch its own Let's Encrypt certificate, which the engine's proxy already
+# does. This runs the official image of the current release on plain HTTP:
+#   - SQLite and file uploads in /opt/PasswordPusher/storage, a named volume
+#   - `init` migrates and seeds the admin from ~/.panelalpha/pwpush/app.env
+#     before the app serves, so the boot-code first-run page never appears
+#   - anonymous pushes stay on (public by design); open signup is off
+services:
+  init:
+    image: docker.io/pglombardo/pwpush:2.14.1
+    restart: "no"
+    env_file:
+      - .env
+      - ../.panelalpha/pwpush/app.env
+    volumes:
+      - storage:/opt/PasswordPusher/storage
+      - ./panelalpha/pwpush:/pa:ro
+    # The image entrypoint execs its arguments as-is.
+    command: ["bash", "-c", "bundle exec rake db:migrate && bundle exec rails runner /pa/seed.rb"]
+    mem_limit: 768m
+
+  app:
+    image: docker.io/pglombardo/pwpush:2.14.1
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+      - ../.panelalpha/pwpush/app.env
+    environment:
+      PWP__HOST_DOMAIN: ${PA_PUBLIC_HOST}
+      PWP__HOST_PROTOCOL: https
+      # Secret URLs are built from this, not from forwarded headers.
+      PWP__OVERRIDE_BASE_URL: ${PA_PUBLIC_URL}
+      PWP__DISABLE_SIGNUPS: "true"
+      PWP__SECURE_COOKIES: "true"
+      PWP__FILES__STORAGE: local
+    volumes:
+      - storage:/opt/PasswordPusher/storage
+    # Thruster serves plain HTTP on :80 when TLS_DOMAIN is unset; Rails is :5100.
+    ports:
+      - "8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/up"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1024m
+
+  # No-op gate: `compose up -d` returns only once the app answers /up.
+  ready:
+    image: docker.io/pglombardo/pwpush:2.14.1
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  storage: {}

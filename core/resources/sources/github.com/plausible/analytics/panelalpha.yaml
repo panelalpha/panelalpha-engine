@@ -44,9 +44,11 @@ description: >-
   512 threads from global thread pool" until the pool was cut to 32 and the
   service given a pids_limit of its own.
 
-  The secrets are generated once by the prepare hook into .env — SECRET_KEY_BASE,
+  The secrets are generated once by the prepare hook into
+  ~/.panelalpha/plausible/ and read through env_file: — SECRET_KEY_BASE,
   TOTP_VAULT_KEY (base64 of exactly 32 bytes, rejected at boot in any other
-  shape) and the Postgres password — and never regenerated, because the volumes
+  shape) and the Postgres password — never into .env, because ~/project is
+  emptied on every deploy while the volumes
   outlive the checkout. The one value the recipe cannot generate is BASE_URL,
   which has to be the account's public address: the compose file ships
   http://localhost, the shape ComposePlaceholders rewrites to the account's

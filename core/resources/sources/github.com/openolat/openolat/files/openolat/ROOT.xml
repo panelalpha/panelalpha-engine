@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Upstream's installation guide context descriptor; the database is
+     configured in olat.local.properties (db.source=local), not JNDI. -->
+<Context path="" docBase="/opt/openolat/webapp" debug="0" reloadable="false" allowLinking="true">
+</Context>

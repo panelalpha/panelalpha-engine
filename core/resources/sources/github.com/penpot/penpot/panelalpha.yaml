@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Penpot, an open-source design and prototyping platform (Clojure backend,
+  ClojureScript frontend behind nginx, Node exporter). The repository root is
+  the development monorepo: the engine hands it to Railpack, which builds an
+  image whose process exits at once. Upstream's deployment is
+  docker/images/docker-compose.yaml on the published images.
+
+  This recipe runs that stack on the 2.18.0 release images (frontend,
+  backend, exporter, admin-console, mcp) with PostgreSQL 15 and Valkey 8.1,
+  as upstream ships it, minus the Mailpit mail catcher. The prepare hook
+  generates PENPOT_SECRET_KEY and the database password once into
+  ~/.panelalpha/penpot; the database and uploaded assets are on named
+  volumes. PENPOT_PUBLIC_URI is the site's address. Email verification is
+  off as in upstream's compose, so the first visitor registers an account
+  from the login page; SMTP is the operator's to configure (PENPOT_SMTP_*).

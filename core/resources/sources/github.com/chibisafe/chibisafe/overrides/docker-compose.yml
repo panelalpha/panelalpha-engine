@@ -1,0 +1,52 @@
+# Compose-replace: the repo has no root compose, so the plain deploy built
+# docker/Dockerfile and ran out of memory in `yarn workspaces focus`. This is
+# upstream's docker-compose.example.yml on the published release images, with
+# named volumes instead of ./ binds (~/project is wiped on every deploy).
+services:
+  chibisafe:
+    image: chibisafe/chibisafe:v6.5.5
+    restart: unless-stopped
+    environment:
+      BASE_API_URL: "http://chibisafe_server:8000"
+    mem_limit: 512m
+
+  chibisafe_server:
+    image: chibisafe/chibisafe-server:v6.5.5
+    restart: unless-stopped
+    # ADMIN_PASSWORD is left unset: the server then uses its own default, as upstream ships it.
+    volumes:
+      - chibisafe_database:/app/database
+      - chibisafe_uploads:/app/uploads
+      - chibisafe_logs:/app/logs
+    healthcheck:
+      # `yarn start` runs the Prisma migrations first; healthy once the API answers.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    mem_limit: 768m
+
+  # Upstream's Caddyfile (repo root): uploads as static files, /api and /docs
+  # to the server, everything else to the Next.js frontend.
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    environment:
+      BASE_URL: ":80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - chibisafe_uploads:/app/uploads:ro
+    ports:
+      - "80:80"
+    depends_on:
+      chibisafe:
+        condition: service_started
+      chibisafe_server:
+        condition: service_healthy
+    mem_limit: 128m
+
+volumes:
+  chibisafe_database: {}
+  chibisafe_uploads: {}
+  chibisafe_logs: {}

@@ -1,0 +1,39 @@
+# Compose-replace: the repository is the Node-RED source monorepo with no
+# deployment. This runs the official image of the current release with a
+# settings.js that requires a login for the editor and admin API.
+services:
+  app:
+    image: nodered/node-red:5.0.7
+    restart: unless-stopped
+    env_file:
+      # A missing file aborts `up` rather than starting an open editor.
+      - ../.panelalpha/nodered/admin.env
+    environment:
+      TZ: UTC
+    volumes:
+      # Flows, flows_cred.json, installed nodes (node_modules) and context.
+      - data:/data
+      - ./panelalpha/nodered/settings.js:/data/settings.js:ro
+    ports:
+      - "1880:1880"
+    healthcheck:
+      # The image's own check, polled faster so the deploy waits less.
+      test: ["CMD-SHELL", "node /healthcheck.js"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once the editor answers.
+  ready:
+    image: nodered/node-red:5.0.7
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

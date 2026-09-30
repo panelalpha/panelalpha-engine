@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  selfoss, a multipurpose RSS reader and aggregator (PHP, SQLite by default).
+  The repository's master is the unreleased 2.20-SNAPSHOT, and the plain php
+  deploy of it fails: the first deploy on a host misses the deferred tidy base
+  image (engine#342), and after that the root npm `postinstall` runs
+  `composer install` inside the Node-only frontend build (engine#417). This
+  recipe runs rsprta/selfoss, the image selfoss's own installation docs link
+  to, at the current release 2.19, with /selfoss/data (config.ini, SQLite
+  database, favicons, thumbnails) on a named volume that survives redeploys.

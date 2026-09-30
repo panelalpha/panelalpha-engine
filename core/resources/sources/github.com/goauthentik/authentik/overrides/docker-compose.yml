@@ -1,0 +1,84 @@
+# Upstream's release compose (goauthentik.io/docker-compose.yml) with the
+# current release image. Changes: named volumes instead of ./ bind mounts
+# (~/project is wiped on every deploy), no docker.sock on the worker (only
+# needed for outposts managed through Docker), plain HTTP 9000 only (the
+# engine terminates TLS).
+services:
+  postgresql:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/authentik/db.env
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
+    volumes:
+      - authentik_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d authentik -U authentik"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    mem_limit: 384m
+
+  server:
+    image: ghcr.io/goauthentik/server:2026.8.3
+    restart: unless-stopped
+    command: server
+    ports:
+      - "9000:9000"
+    env_file:
+      - ../.panelalpha/authentik/app.env
+    environment: &authentik-env
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+    shm_size: 512mb
+    volumes:
+      - authentik_data:/data
+      - authentik_templates:/templates
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    # /-/health/ready/ answers once migrations ran and the database is usable.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/-/health/ready/', timeout=10)"]
+      interval: 10s
+      timeout: 15s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1024m
+
+  worker:
+    image: ghcr.io/goauthentik/server:2026.8.3
+    restart: unless-stopped
+    command: worker
+    env_file:
+      - ../.panelalpha/authentik/app.env
+    environment: *authentik-env
+    shm_size: 512mb
+    volumes:
+      - authentik_data:/data
+      - authentik_certs:/certs
+      - authentik_templates:/templates
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    mem_limit: 896m
+
+  # No-op gate: `compose up -d` returns only once authentik answers.
+  ready:
+    image: docker.io/library/postgres:16-alpine
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      server:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  authentik_db: {}
+  authentik_data: {}
+  authentik_certs: {}
+  authentik_templates: {}

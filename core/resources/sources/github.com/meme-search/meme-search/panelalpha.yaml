@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Meme Search, a self-hosted meme search engine (Rails + Solid Queue on
+  PostgreSQL/pgvector). The repository's compose also starts the local
+  image-to-text generator and publishes its port, so the site served the
+  generator's 24-byte JSON instead of the app (engine#425); Rails answered
+  403 to the public host because MEME_SEARCH_ALLOWED_HOSTS was empty; and the
+  generator is OOM-killed while describing a single image even at 3.1 GB
+  (upstream sizes it at 12 GB), more than a 4 GB account can hold.
+
+  This recipe runs upstream's OpenAI-compatible topology (docker-compose.yml
+  plus docker-compose.openai.yml: Rails, Solid Queue and PostgreSQL, no
+  generator) on the v2.3.2 release images, with only the web UI on :3000,
+  MEME_SEARCH_ALLOWED_HOSTS set to the site's host, and named volumes for
+  drag-and-drop uploads and the database (upstream binds them into the
+  checkout, which every deploy wipes). hooks/prepare.sh generates the
+  PostgreSQL password once into ~/.panelalpha/meme-search/. Descriptions come
+  from an OpenAI-compatible vision API: set OPENAI_API_KEY (optionally
+  OPENAI_API_BASE_URL, OPENAI_VISION_MODEL) as project env vars or save the
+  key in the app's Settings. Upload, keyword search and browsing work without
+  one. The app has no login, as upstream ships it.

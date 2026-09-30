@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Psono, team password manager: a Django REST server with a separate web
+  client and admin portal. A plain deploy builds the checkout with the django
+  recipe and never answers: the repository is the API server only, with no
+  settings and no client. This recipe runs upstream's single-image deployment,
+  psono/psono-combo:7.4.4-4.8.2-1.10.0 (server 7.4.4, web client 4.8.2, admin
+  portal 1.10.0 behind nginx, migrations on start), with Postgres 17.
+  hooks/prepare.sh generates the server secrets (SECRET_KEY, the NaCl keypair,
+  DB_SECRET, ACTIVATION_LINK_SECRET, EMAIL_SECRET_SALT) and the database
+  password once into ~/.panelalpha/psono/psono.env. The database is a named
+  volume. First run is upstream's: registration is open, users are
+  <name>@<site domain>; e-mail is not configured.

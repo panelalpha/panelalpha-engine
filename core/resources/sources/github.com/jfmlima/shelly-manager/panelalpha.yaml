@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Shelly Manager manages Shelly IoT devices (scan, status, config backup,
+  firmware) without the vendor cloud: a Litestar API on :8000 with SQLite in
+  /data, and a React UI served by nginx on :8080. The repository is a uv
+  workspace (packages/api, packages/web, ...) whose root has no entry point,
+  and its docker-compose.yml is a hot-reload dev environment, so the plain
+  deploy served the PanelAlpha placeholder.
+
+  The recipe is upstream's README "Web UI + API Stack" with the published
+  images of the current release, 1.10.0 (= HEAD). Only the UI is published;
+  its nginx config is upstream's plus a /api proxy to the API service, and
+  VITE_BASE_API_URL is the account's address, so the browser calls the API on
+  the same origin. hooks/prepare.sh generates SHELLY_SECRET_KEY (encrypts the
+  stored device credentials) once into ~/.panelalpha/shelly-manager/. Data is
+  on a named volume. Optional SHELLY_* settings (e.g. SHELLY_AUTH_TOKEN to
+  require a login, unset upstream by default) come from the project's
+  environment variables. Devices must be reachable from the server by IP;
+  mDNS discovery needs host networking and is not available.

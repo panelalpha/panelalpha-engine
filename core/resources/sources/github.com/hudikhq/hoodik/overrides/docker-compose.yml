@@ -1,0 +1,36 @@
+# Upstream's README `docker run` as compose, with the release image. TLS is
+# terminated by the engine, so Hoodik serves plain HTTP on 5443.
+services:
+  app:
+    image: hudik/hoodik:v2.5.5
+    restart: unless-stopped
+    ports:
+      - "5443:5443"
+    env_file:
+      - ../.panelalpha/hoodik/app.env
+    environment:
+      DATA_DIR: /data
+      APP_URL: ${PA_PUBLIC_URL}
+      SSL_DISABLED: "true"
+    volumes:
+      - hoodik_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5443/api/liveness >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 5s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Hoodik answers.
+  ready:
+    image: hudik/hoodik:v2.5.5
+    restart: "no"
+    entrypoint: ["true"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  hoodik_data: {}

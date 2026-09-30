@@ -1,0 +1,49 @@
+# The repo compose bind-mounts ${HOME}/Pictures, runs as ${CURRENT_USER} and
+# expects a manual `run init` first; run the release images with volumes instead.
+services:
+  gallery:
+    image: xemle/home-gallery:1.21.0
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GALLERY_API_SERVER: http://api:3000
+      GALLERY_API_SERVER_CONCURRENT: "1"
+      GALLERY_API_SERVER_TIMEOUT: "60"
+      GALLERY_OPEN_BROWSER: "false"
+      GALLERY_WATCH_POLL_INTERVAL: "300"
+    # Upstream's own `run init` writes gallery.config.yml once (it skips an existing one).
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["node /app/gallery.js run init --source /data/Pictures && exec node /app/gallery.js run server"]
+    volumes:
+      - homegallery-data:/data
+      - homegallery-pictures:/data/Pictures
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  # AI tagging (objects, faces); TensorFlow model loading needs more than 384 MB.
+  api:
+    image: xemle/home-gallery-api-server:180dac42
+    restart: unless-stopped
+    environment:
+      BACKEND: wasm
+    mem_limit: 1g
+
+  # No-op gate: `compose up -d` returns only once the gallery answers.
+  ready:
+    image: xemle/home-gallery:1.21.0
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      gallery:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  homegallery-data: {}
+  homegallery-pictures: {}

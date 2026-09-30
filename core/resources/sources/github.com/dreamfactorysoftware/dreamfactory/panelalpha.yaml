@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  DreamFactory, a REST API generator for SQL/NoSQL databases (Laravel on
+  PHP 8.5, nginx + php-fpm). Deploying the checkout fails before the build:
+  "This project needs the PHP extension mongodb, which is not in the PHP image
+  it runs on"; upstream ships its container build separately (df-docker).
+
+  This recipe runs upstream's published image
+  dreamfactorysoftware/df-docker:7.7.1 (the latest release, same as the
+  repository's newest tag) on :80 with mariadb:11.4, following df-docker's
+  own docker-compose.yml (MySQL instead of the bundled SQLite; its optional
+  Redis cache and MCP daemons are left out). hooks/prepare.sh generates the
+  database passwords and APP_KEY once into ~/.panelalpha/dreamfactory/
+  (without APP_KEY the image generates a new key in every container, and
+  stored service credentials become unreadable). HTTPS_HEADER=on because TLS
+  ends at the engine. storage/ is a named volume. First run is upstream's
+  own "create the first admin" page. A health gate makes the deploy wait
+  until nginx answers.

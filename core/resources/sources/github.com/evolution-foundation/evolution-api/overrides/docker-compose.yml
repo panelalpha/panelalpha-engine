@@ -1,0 +1,74 @@
+# Compose-replace: the repo's compose points the API at a database host that
+# does not exist and adds a frontend image that crash-loops; the API image
+# serves the manager UI at /manager itself.
+services:
+  api:
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    # Project env vars first (.env.example defaults); the generated DB URI wins.
+    env_file:
+      - .env
+      - ../.panelalpha/evolution-api/secrets.env
+    environment:
+      SERVER_URL: ${PA_PUBLIC_URL}
+      SERVER_PORT: "8080"
+      DATABASE_PROVIDER: postgresql
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/6
+      CACHE_LOCAL_ENABLED: "false"
+    volumes:
+      - evolution_instances:/evolution/instances
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1g
+
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/evolution-api/secrets.env
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_DB: evolution_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 512m
+
+  redis:
+    image: redis:8.2-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--port", "6379", "--appendonly", "yes"]
+    volumes:
+      - evolution_redis:/data
+    mem_limit: 256m
+
+  # No-op: `compose up -d` returns once the API answers.
+  ready:
+    image: redis:8.2-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  evolution_instances: {}
+  evolution_redis: {}
+  postgres_data: {}

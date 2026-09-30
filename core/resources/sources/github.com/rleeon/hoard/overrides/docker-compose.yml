@@ -1,0 +1,28 @@
+# Compose-replace: upstream's deploy/docker/docker-compose.yml with the release
+# image pinned and its ./config bind mount turned into a named volume.
+services:
+  app:
+    image: ghcr.io/rleeon/hoard:1.2.0
+    restart: unless-stopped
+    ports:
+      - "12421:12421"
+    # The project's env vars live in .env; this is how the optional
+    # HOARD_ADMIN_USERNAME / HOARD_ADMIN_PASSWORD reach the server (engine#336
+    # rules out interpolating a *_PASSWORD in environment:).
+    env_file:
+      - .env
+    environment:
+      HOARD__LOGGING__LEVEL: info
+      HOARD__LOGGING__FORMAT: json
+      PUID: "10001"
+      PGID: "10001"
+    volumes:
+      # SQLite index, save snapshots, tmp and trash.
+      - hoard-data:/var/lib/hoard
+      # config.toml, written by the container on its first start.
+      - hoard-config:/etc/hoard
+    mem_limit: 512m
+
+volumes:
+  hoard-data: {}
+  hoard-config: {}

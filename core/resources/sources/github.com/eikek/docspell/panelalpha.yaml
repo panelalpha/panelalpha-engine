@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Docspell, the personal document organizer with OCR and full-text search
+  (Scala on the JVM: a REST server with the web UI, and the job executor
+  "joex").
+
+  The repository is the sbt source tree with no compose file, so a plain
+  deploy fell back to the placeholder page. Upstream moved its container
+  setup to github.com/docspell/docker; this recipe follows that repository's
+  docker-compose.yml with the published images of the current release,
+  ghcr.io/docspell/restserver:v0.43.0 and ghcr.io/docspell/joex:v0.43.0, on
+  PostgreSQL 18 and Solr 10 (full-text search). The optional `consumedir`
+  watcher (a bind-mounted host folder) is left out. The database password,
+  the admin endpoint secret and the login token secret, which upstream ships
+  as fixed placeholders or leaves random per start, are generated per
+  account by the engine and kept across redeploys. The base URL is the
+  account's public address. Database and Solr index are named volumes. A
+  `ready` gate makes the deploy finish only once the REST server answers.
+
+  First run is upstream's: the login page with signup open, so the first
+  visitor creates a collective and account.

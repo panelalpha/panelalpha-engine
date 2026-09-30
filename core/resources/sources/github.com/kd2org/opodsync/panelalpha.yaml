@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  oPodSync is a minimalist GPodder-compatible podcast sync server with its own
+  web interface: plain PHP (no Composer) over SQLite. The repository keeps the
+  application in `server/` and has no entry point at its root, so the generic
+  PHP platform answers 403 (the front page is missing); upstream's install
+  instruction is to point the virtual host at `server/`, which `docroot` does.
+
+  Its SQLite database, config.local.php and cache default to `server/data`,
+  inside the checkout a redeploy re-clones. The compose override sets
+  upstream's own `DATA_ROOT` variable to /data, a bind mount of
+  ~/.panelalpha/opodsync (created by hooks/prepare.sh so it is owned by the
+  account). First run is as upstream ships it: the first visitor may create
+  the first account, after which registration closes.
+extends: php-plain
+# The application and its .htaccess live in server/; the repository root has no index.
+docroot: server

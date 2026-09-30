@@ -1,0 +1,40 @@
+# Compose-replace: the repository ships only a Dockerfile, and the app will not
+# start without credentials. This runs the official image of the current release:
+#   - notes, attachments and the search index on a named volume at /data
+#   - password auth, credentials and JWT key from ~/.panelalpha/flatnotes/auth.env
+services:
+  app:
+    image: dullage/flatnotes:v5.5.5
+    restart: unless-stopped
+    env_file:
+      - .env
+      # A missing file aborts `up` rather than starting without auth.
+      - ../.panelalpha/flatnotes/auth.env
+    environment:
+      FLATNOTES_AUTH_TYPE: password
+      FLATNOTES_PATH: /data
+      FLATNOTES_PORT: "8080"
+    volumes:
+      - data:/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+    mem_limit: 384m
+
+  # No-op gate: `compose up -d` returns only once flatnotes answers /health.
+  ready:
+    image: dullage/flatnotes:v5.5.5
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

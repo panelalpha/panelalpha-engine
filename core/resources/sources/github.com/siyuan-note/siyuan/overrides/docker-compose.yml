@@ -1,0 +1,52 @@
+# Compose-replace: the repository has no compose file, and its Dockerfile's
+# frontend build is OOM-killed in a 2500 MB account. Runs the image upstream
+# publishes from that Dockerfile, current release; workspace on a named volume.
+services:
+  app:
+    image: b3log/siyuan:v3.8.6
+    restart: unless-stopped
+    command: ["serve", "--workspace=/siyuan/workspace/"]
+    ports:
+      - "6806:6806"
+    environment:
+      TZ: UTC
+      # From the project's env vars (checked below).
+      SIYUAN_ACCESS_AUTH_CODE: ${SIYUAN_ACCESS_AUTH_CODE:-}
+      SIYUAN_ACCESS_AUTH_CODE_BYPASS: ${SIYUAN_ACCESS_AUTH_CODE_BYPASS:-false}
+    volumes:
+      - siyuan-workspace:/siyuan/workspace
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:6806/api/system/version || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    mem_limit: 1024m
+
+  # Fails `compose up` (and so the deploy) while no access code is set.
+  env-check:
+    image: b3log/siyuan:v3.8.6
+    restart: "no"
+    entrypoint: ["/bin/sh", "/siyuan-env-check.sh"]
+    environment:
+      SIYUAN_ACCESS_AUTH_CODE: ${SIYUAN_ACCESS_AUTH_CODE:-}
+      SIYUAN_ACCESS_AUTH_CODE_BYPASS: ${SIYUAN_ACCESS_AUTH_CODE_BYPASS:-}
+    volumes:
+      - ./siyuan-env-check.sh:/siyuan-env-check.sh:ro
+    mem_limit: 32m
+
+  # No-op gate: `compose up -d` returns only once SiYuan answers.
+  ready:
+    image: b3log/siyuan:v3.8.6
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  siyuan-workspace: {}

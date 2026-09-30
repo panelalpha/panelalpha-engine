@@ -1,0 +1,36 @@
+# Compose-replace: the repo is the Maven multi-module source of a WAR, not a
+# runnable jar. Runs upstream's published Tomcat image of the current release.
+services:
+  app:
+    image: fcrepo/fcrepo:7.0.0-tomcat10
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Repository data (OCFL root, embedded H2 index) on the volume below.
+      CATALINA_OPTS: "-Xmx1024m -Dfcrepo.home=/fcrepo-home"
+    volumes:
+      - fcrepo-home:/fcrepo-home
+      # `/` is otherwise a Tomcat 404; this sends it to the REST root.
+      - ./fcrepo-root:/usr/local/tomcat/webapps/ROOT:ro
+    healthcheck:
+      # Every fcrepo path requires a login; use the image's own admin env.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null -u \"$$FEDORA_ADMIN_USERNAME:$$FEDORA_ADMIN_PASSWORD\" http://127.0.0.1:8080/fcrepo/rest"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once Fedora answers.
+  ready:
+    image: fcrepo/fcrepo:7.0.0-tomcat10
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  fcrepo-home: {}

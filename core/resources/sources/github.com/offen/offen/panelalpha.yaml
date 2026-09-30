@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Offen Fair Web Analytics (Go, single binary with embedded UI, SQLite by
+  default). The repository's docker-compose.yml is the developer stack (hot
+  reload containers per package behind an nginx proxy), so a plain deploy
+  restart-loops on nginx "host not found in upstream auditorium:9955".
+
+  This recipe runs the published offen/offen image of the current release
+  (v1.4.2) on port 8080 in reverse-proxy mode, with /var/opt/offen (the SQLite
+  database) on a named volume. hooks/prepare.sh generates OFFEN_SECRET once
+  into ~/.panelalpha/offen so sessions and invitation links survive redeploys.
+  The first account is created in the app's own /setup/ page.

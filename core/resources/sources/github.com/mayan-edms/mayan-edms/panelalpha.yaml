@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Mayan EDMS, the document management system with OCR, versioning and
+  workflows (Django, Celery).
+
+  The repository is the GitHub mirror of gitlab.com/mayan-edms/mayan-edms,
+  the Django source tree; a plain deploy was detected as `django` and the
+  container restart-looped. This recipe follows upstream's
+  docker/docker-compose.yml with its default profiles (all_in_one,
+  postgresql, rabbitmq, redis) on the image of the current release,
+  mayanedms/mayanedms:v4.12.2, with upstream's datastore versions
+  (PostgreSQL 15.17, RabbitMQ 4.1.8, Redis 7.4.8). hooks/prepare.sh
+  generates the database, RabbitMQ and Redis passwords once into
+  ~/.panelalpha/mayan/mayan.env (0600 in 0700) instead of upstream's fixed
+  defaults, and writes the connection settings that embed them. Documents,
+  database and broker state are named volumes; Mayan keeps its generated
+  SECRET_KEY in the app volume. Upstream's default worker counts (23 Celery
+  children, 3 gunicorn workers) peak above 3.2 GB while booting and were
+  OOM-killed, so the documented MAYAN_WORKER_*_CONCURRENCY and
+  MAYAN_GUNICORN_WORKERS knobs are lowered (about 1.75 GB resident).
+  MAYAN_CSRF_TRUSTED_ORIGINS is the public URL: TLS ends at the engine's
+  proxy and the login form otherwise fails its CSRF origin check. A `ready`
+  gate makes the deploy finish only once the web frontend answers.
+
+  First run is upstream's: an `admin` account with a random password shown
+  on the login page until it is changed.

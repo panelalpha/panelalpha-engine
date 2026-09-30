@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  KOReader Sync Server, the reading-progress sync API for KOReader e-readers
+  (OpenResty/Lua with an embedded Redis, one container). The repository's
+  compose publishes only port 7200, which speaks HTTPS with a self-signed
+  certificate, so the engine's plain-HTTP proxy got "400 The plain HTTP request
+  was sent to HTTPS port". The same image also listens on plain HTTP 17200,
+  which upstream documents for running behind a TLS-terminating proxy. This
+  recipe runs the published image of the current release
+  (koreader/kosync:v2.1.1) publishing 17200, with Redis's data on a named
+  volume. It is an API with no web UI: point KOReader's progress sync at the
+  site's https address. Registration stays open as upstream ships it
+  (ENABLE_USER_REGISTRATION=false in the project env vars closes it).

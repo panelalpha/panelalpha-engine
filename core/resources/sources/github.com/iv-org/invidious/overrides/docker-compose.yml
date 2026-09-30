@@ -1,0 +1,76 @@
+# Compose-replace: the repo compose is a development build from source. Published images of
+# the current release, as the docker-compose.yml in docs.invidious.io/installation.
+services:
+  invidious:
+    image: quay.io/invidious/invidious:2.20260804.1
+    restart: unless-stopped
+    depends_on:
+      invidious-db:
+        condition: service_healthy
+      companion:
+        condition: service_started
+    env_file:
+      # HMAC key, companion key and INVIDIOUS_DATABASE_URL, generated once by hooks/prepare.sh.
+      - ../.panelalpha/invidious/secrets.env
+    environment:
+      INVIDIOUS_CONFIG: |
+        check_tables: true
+        invidious_companion:
+          - private_url: "http://companion:8282/companion"
+      INVIDIOUS_DOMAIN: ${PA_PUBLIC_HOST}
+      INVIDIOUS_EXTERNAL_PORT: "443"
+      INVIDIOUS_HTTPS_ONLY: "true"
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: wget -nv --tries=1 --spider http://127.0.0.1:3000/ || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 512m
+
+  companion:
+    image: quay.io/invidious/invidious-companion:2026.09.19-bb3b37f
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/invidious/secrets.env
+    volumes:
+      - companioncache:/var/tmp/youtubei.js:rw
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+
+  invidious-db:
+    image: docker.io/library/postgres:14
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/invidious/secrets.env
+    environment:
+      POSTGRES_DB: invidious
+      POSTGRES_USER: kemal
+    volumes:
+      - postgresdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kemal -d invidious"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Invidious answers.
+  ready:
+    image: docker.io/library/postgres:14
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      invidious:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  postgresdata: {}
+  companioncache: {}

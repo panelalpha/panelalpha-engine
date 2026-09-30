@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Papermerge DMS, a document management system for scanned documents
+  (FastAPI core + auth server + React UI behind nginx on :80). The plain
+  deploy runs the repository as a generic Python app and serves the engine
+  placeholder. This recipe runs the published papermerge/papermerge image of
+  the current release (3.5.3) beside PostgreSQL 16, as upstream's compose
+  docs do; the image's own SQLite default crashes its async core ("The
+  asyncio extension requires an async driver"). Database and media root are
+  on named volumes; the signing key and database password are required
+  compose variables the engine generates once per account. The image creates
+  its only login from PAPERMERGE__AUTH__PASSWORD on first start and has no
+  sign-up page, so a one-shot check service fails the deploy with a clear
+  message until the customer sets it (user PAPERMERGE__AUTH__USERNAME,
+  default admin). OCR, search and S3 workers are optional upstream services
+  and are not started.

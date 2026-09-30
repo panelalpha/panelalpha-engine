@@ -1,0 +1,57 @@
+# Compose-replace: upstream's compose passes DOCKERIZE_ARGS with literal quotes
+# and DEBUG=False (truthy in settings.py). This runs the published image with
+# the database gated on health and secrets from ~/.panelalpha/tabby-web.
+services:
+  app:
+    # No versioned tags upstream; latest is the nightly build of HEAD.
+    image: ghcr.io/eugeny/tabby-web:latest
+    restart: unless-stopped
+    # DATABASE_URL and DJANGO_SECRET_KEY (hooks/prepare.sh). OAuth provider
+    # keys (SOCIAL_AUTH_*) come from the project's env vars in .env.
+    env_file:
+      - ../.panelalpha/tabby-web/secrets.env
+      - .env
+    environment:
+      PORT: "80"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "9090:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 20s
+    mem_limit: 768m
+
+  db:
+    image: docker.io/library/mariadb:11.4
+    restart: unless-stopped
+    env_file: ../.panelalpha/tabby-web/secrets.env
+    environment:
+      MARIADB_DATABASE: tabby
+      MARIADB_USER: tabby
+    volumes:
+      - db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once migrations ran and the app answers.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db: {}

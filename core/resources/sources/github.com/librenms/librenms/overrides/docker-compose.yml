@@ -1,0 +1,108 @@
+# Compose-replace: the repository is the LibreNMS source, which the plain
+# deploy runs as a generic Laravel app and which exits with "artisan must be
+# run as the user librenms". This runs upstream's official image (as in
+# github.com/librenms/docker's example) with MariaDB, Redis and the poller.
+x-librenms: &librenms
+  image: librenms/librenms:26.9.1.1
+  restart: unless-stopped
+  env_file:
+    - ../.panelalpha/librenms/app.env
+  volumes:
+    - data:/data
+  mem_limit: 768m
+
+x-librenms-env: &librenms-env
+  TZ: Etc/UTC
+  PUID: "1000"
+  PGID: "1000"
+  DB_HOST: db
+  DB_NAME: librenms
+  DB_USER: librenms
+  DB_TIMEOUT: "60"
+  MEMORY_LIMIT: 256M
+  UPLOAD_MAX_SIZE: 16M
+  OPCACHE_MEM_SIZE: "128"
+  CACHE_DRIVER: redis
+  SESSION_DRIVER: redis
+  REDIS_HOST: redis
+  LIBRENMS_SNMP_COMMUNITY: librenmsdocker
+  # The engine's HTTPS proxy reaches the app from the account's private
+  # network; trusting it makes asset and redirect URLs https.
+  APP_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+services:
+  db:
+    image: mariadb:10.11
+    restart: unless-stopped
+    command:
+      - --innodb-file-per-table=1
+      - --lower-case-table-names=0
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-buffer-pool-size=128M
+      - --performance-schema=OFF
+    env_file:
+      - ../.panelalpha/librenms/db.env
+    environment:
+      MARIADB_DATABASE: librenms
+      MARIADB_USER: librenms
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
+    mem_limit: 512m
+
+  redis:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    mem_limit: 128m
+
+  app:
+    <<: *librenms
+    hostname: librenms
+    environment:
+      <<: *librenms-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/login"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  # Poller: runs discovery and polling for the devices added in the UI.
+  dispatcher:
+    <<: *librenms
+    hostname: librenms-dispatcher
+    environment:
+      <<: *librenms-env
+      DISPATCHER_NODE_ID: dispatcher1
+      SIDECAR_DISPATCHER: "1"
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns once the web UI answers.
+  ready:
+    image: redis:7.2-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  db_data: {}
+  data: {}

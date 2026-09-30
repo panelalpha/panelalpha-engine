@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  RTSPtoWeb relays RTSP/RTMP camera streams to the browser (MSE over
+  WebSocket, HLS, WebRTC) with a web UI and API on :8083, from one Go
+  process. The repository's Dockerfile builds it, but its baked config.json
+  also opens an RTSP relay on :5541 and the engine forwards the site there,
+  so a plain deploy never reaches the UI. This recipe runs upstream's image
+  of the current release, ghcr.io/deepch/rtsptoweb:v2.4.3, publishing only
+  the web UI, with /config (server settings and every stream added in the
+  UI) on a named volume that survives redeploys.
+
+  Settings are as upstream ships them: no UI login (http_auth false) and
+  upstream's demo stream entry; edit config.json in the volume to change
+  them. MSE and HLS playback go over the site's HTTPS; WebRTC needs UDP to
+  the account, which the engine does not route, and the RTSP relay port is
+  not published.

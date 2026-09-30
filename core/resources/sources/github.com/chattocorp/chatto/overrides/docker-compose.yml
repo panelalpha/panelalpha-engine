@@ -1,0 +1,23 @@
+# Upstream's standalone (embedded NATS) deployment on the release image,
+# configured with CHATTO_* variables; secrets come from ~/.panelalpha.
+services:
+  app:
+    image: ghcr.io/chattocorp/chatto:0.4.24
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - ../.panelalpha/chatto/app.env
+    environment:
+      CHATTO_WEBSERVER_URL: ${PA_PUBLIC_URL}
+      CHATTO_WEBSERVER_PORT: "4000"
+      CHATTO_NATS_EMBEDDED_ENABLED: "true"
+      CHATTO_NATS_EMBEDDED_DATA_DIR: /data
+      CHATTO_NATS_EMBEDDED_SYNC_INTERVAL: always
+      CHATTO_LOG_FORMAT: json
+    volumes:
+      - chatto-data:/data
+    mem_limit: 768m
+
+volumes:
+  chatto-data:

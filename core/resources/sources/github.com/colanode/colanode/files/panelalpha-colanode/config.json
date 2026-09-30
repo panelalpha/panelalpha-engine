@@ -1,0 +1,16 @@
+{
+  "name": "Colanode",
+  "web": { "domain": "env://PA_PUBLIC_HOST", "protocol": "https" },
+  "mode": "standalone",
+  "pathPrefix": "api",
+  "cors": { "origin": "env://PA_PUBLIC_URL", "maxAge": 7200 },
+  "account": { "verificationType": "automatic" },
+  "postgres": { "url": "env://POSTGRES_URL" },
+  "redis": { "url": "env://REDIS_URL", "db": 0, "eventsChannel": "events" },
+  "storage": {
+    "tus": { "locker": { "type": "redis", "prefix": "colanode:tus:lock" }, "cache": { "type": "none" } },
+    "provider": { "type": "file", "directory": "/var/lib/colanode/storage" }
+  },
+  "email": { "enabled": false },
+  "logging": { "level": "info" }
+}

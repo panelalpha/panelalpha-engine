@@ -1,0 +1,37 @@
+# Compose-replace: the repository has nothing to build at its root (client/ and
+# server/ are built by upstream's scripts). This is the README's `docker run`.
+services:
+  app:
+    image: docker.io/esperotech/yaade:latest
+    restart: unless-stopped
+    environment:
+      # Required to start; upstream's documented value. The app creates this
+      # user with its default password on first start.
+      YAADE_ADMIN_USERNAME: ${YAADE_ADMIN_USERNAME:-admin}
+    volumes:
+      # H2 database and uploaded files.
+      - data:/app/data
+    ports:
+      - "9339:9339"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9339/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+      start_interval: 3s
+    # The JVM sizes its heap to a quarter of this.
+    mem_limit: 1g
+
+  # `up -d` returns only once Yaade answers.
+  ready:
+    image: docker.io/esperotech/yaade:latest
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

@@ -1,0 +1,63 @@
+# Compose-replace: the repository's docker-compose.yml follows :latest and
+# bind-mounts ./data (wiped with ~/project on every deploy). This runs the
+# current release, durable and closed:
+#   - ghcr.io/av1155/houndarr pinned to v1.13.3
+#   - /data (SQLite db, master key for the stored *arr API keys) on a named volume
+#   - the admin is set by `seed` BEFORE the app publishes its port, so /setup
+#     is never open to the first visitor
+services:
+  # Starts Houndarr on loopback (no published port) against the same volume,
+  # submits its own /setup form, then exits.
+  seed:
+    image: ghcr.io/av1155/houndarr:v1.13.3
+    restart: "no"
+    entrypoint: ["/bin/bash", "/panelalpha-seed.sh"]
+    env_file:
+      - ../.panelalpha/houndarr/admin.env
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+    volumes:
+      - data:/data
+      - ./panelalpha-seed.sh:/panelalpha-seed.sh:ro
+    mem_limit: 512m
+
+  houndarr:
+    image: ghcr.io/av1155/houndarr:v1.13.3
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+      # Served over HTTPS by the engine's proxy.
+      HOUNDARR_SECURE_COOKIES: "true"
+      # HOUNDARR_TRUSTED_PROXIES stays unset on purpose: Houndarr would take
+      # the left-most X-Forwarded-For, which a visitor controls (engine#319).
+    volumes:
+      - data:/data
+    ports:
+      - "8877:8877"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8877/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    mem_limit: 512m
+
+  # No-op gate: `compose up -d` returns only once Houndarr answers.
+  ready:
+    image: ghcr.io/av1155/houndarr:v1.13.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      houndarr:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}

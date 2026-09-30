@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Redmine, the Rails project-management and issue-tracking app. The repository
+  ships no config/database.yml (only the .example), and its Gemfile installs a
+  database adapter only when that file exists, so the generic rails strategy
+  builds an image with no adapter and no server gem (puma sits in the :test
+  group) and the container restart-loops on "Please configure your
+  config/database.yml first".
+
+  This recipe runs the official redmine image of the current release (7.0.1)
+  on port 3000. With no database variables set the image configures SQLite
+  (sqlite/redmine.db) and runs db:migrate on start; the database and uploaded
+  files live on named volumes that survive redeploys. hooks/prepare.sh
+  generates REDMINE_SECRET_KEY_BASE once into ~/.panelalpha/redmine so
+  sessions survive a rebuild. The first login is upstream's own admin/admin,
+  which Redmine asks to change on first sign-in.

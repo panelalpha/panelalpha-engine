@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Scrob, a media tracker that syncs watch history from Jellyfin, Plex and
+  Emby: one image (Astro frontend on :7330, FastAPI backend on 127.0.0.1:7331)
+  with PostgreSQL. The repository's own docker-compose.yaml ships the literal
+  password "changeme" twice, as POSTGRES_PASSWORD and inside the app's
+  DATABASE_URL; the plain deploy randomises the first and not the second, so
+  Postgres rejects every connection and the app crash-loops.
+
+  This recipe runs the same two services on the pinned current release
+  (bellamy/scrob:2.21.0, postgres:16-alpine) with the database password as one
+  required variable used in both places, so the engine generates a single
+  per-account value for it; SECRET_KEY is generated the same way. Data stays on
+  the db_data and scrob_data volumes. A healthcheck on the backend and the
+  frontend gates the deploy. First run is as upstream ships it: the first
+  account registered becomes the admin.

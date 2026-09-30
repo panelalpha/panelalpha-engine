@@ -1,0 +1,74 @@
+# Compose-replace: upstream docker_example/docker-compose.yml (Langflow + PostgreSQL)
+# with the image pinned to the current release; the root has no compose file.
+services:
+  app:
+    image: langflowai/langflow:1.12.3
+    restart: unless-stopped
+    ports:
+      - "7860:7860"
+    env_file:
+      - ../.panelalpha/langflow/db.env
+    environment:
+      LANGFLOW_CONFIG_DIR: /app/langflow
+      # Initial admin login, from the project's env vars (checked below).
+      LANGFLOW_SUPERUSER: ${LANGFLOW_SUPERUSER:-langflow}
+      LANGFLOW_SUPERUSER_PASSWORD: ${LANGFLOW_SUPERUSER_PASSWORD:-}
+      # Every visitor arrives through the engine's proxy: rate-limit logins on
+      # the rightmost (proxy-added) X-Forwarded-For hop, not the proxy address.
+      LANGFLOW_RATE_LIMIT_TRUST_PROXY: "true"
+    volumes:
+      - langflow-data:/app/langflow
+    depends_on:
+      env-check:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7860/health', timeout=4).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+    mem_limit: 2g
+
+  postgres:
+    image: postgres:16-trixie
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/langflow/db.env
+    environment:
+      POSTGRES_USER: langflow
+      POSTGRES_DB: langflow
+    volumes:
+      - langflow-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langflow -d langflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+
+  # Fails `compose up` (and so the deploy) while the superuser password is unset.
+  env-check:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "/langflow-env-check.sh"]
+    environment:
+      LANGFLOW_SUPERUSER_PASSWORD: ${LANGFLOW_SUPERUSER_PASSWORD:-}
+    volumes:
+      - ./langflow-env-check.sh:/langflow-env-check.sh:ro
+    mem_limit: 32m
+
+  # No-op: `compose up -d` returns once Langflow answers /health.
+  ready:
+    image: docker.io/library/alpine:3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  langflow-data: {}
+  langflow-postgres: {}

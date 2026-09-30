@@ -1,0 +1,42 @@
+# The repository's compose.yaml is a CI container. This runs the published
+# 2.4.3 image with /config (SQLite, generated secret key) and /comics (the
+# library) on named volumes.
+services:
+  app:
+    image: ghcr.io/ajslater/codex:2.4.3
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+      GRANIAN_WORKERS: "1"
+    volumes:
+      - config:/config
+      # nocopy: the image seeds /comics with a DOCKER_UNMOUNTED_VOLUME marker
+      # that makes Codex treat the library as unmounted.
+      - type: volume
+        source: comics
+        target: /comics
+        volume:
+          nocopy: true
+    ports:
+      - "9810:9810"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9810/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    mem_limit: 1536m
+
+  # No-op gate: `compose up -d` returns only once Codex answers.
+  ready:
+    image: ghcr.io/ajslater/codex:2.4.3
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  config: {}
+  comics: {}

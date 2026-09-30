@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  TaskTrove, a self-hosted to-do manager (Next.js, data in JSON files). The
+  repository is a Turborepo/pnpm monorepo whose app lives in apps/web; the
+  plain deploy detected Next.js at the root, built it there, and `next start`
+  then crash-looped with "Could not find a production build in the '.next'
+  directory". Upstream's own deployment is selfhost/docker-compose.yml, which
+  runs the published image rather than building the checkout.
+
+  This recipe does the same with the current release's image,
+  ghcr.io/dohsimpson/tasktrove:v0.12.4, on port 3000, with /app/data (the
+  JSON store) and /app/backups on named volumes so tasks survive a redeploy.
+  As upstream ships it, login is off until AUTH_SECRET is set.

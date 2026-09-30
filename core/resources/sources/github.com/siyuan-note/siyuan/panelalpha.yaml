@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  SiYuan, a self-hosted personal knowledge management system (Go kernel with a
+  web UI). The repository has no compose file; the plain deploy builds its
+  root Dockerfile and the frontend step (`pnpm run build`) is OOM-killed in a
+  2500 MB account ("cannot allocate memory", exit 137). This recipe runs
+  b3log/siyuan, the image upstream publishes from that Dockerfile, at the
+  current release (v3.8.6), as upstream's README runs it: `serve
+  --workspace=/siyuan/workspace/` on port 6806, the workspace on a named
+  volume. In Docker the kernel refuses to start without a lock-screen
+  password (kernel/model/conf.go exits with "the access authorization code or
+  a valid OIDC configuration must be set when deploying via Docker"), so the
+  customer sets SIYUAN_ACCESS_AUTH_CODE (or SIYUAN_ACCESS_AUTH_CODE_BYPASS=true)
+  as a project env var; a one-shot check fails the deploy naming the variable
+  when neither is set.

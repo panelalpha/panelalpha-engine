@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Ghostboard is a shared, real-time text board for copying text between
+  machines: a small Python (aiohttp + websockets) server behind a bundled
+  nginx that serves the page on port 80 and proxies /ws to the WebSocket
+  server.
+
+  The repository root holds no application (client/, server/, demo/, ...),
+  so a plain deploy detects nothing and serves the placeholder; the server
+  and its Dockerfile live in server/, whose docker-compose.yml publishes the
+  raw ports 8080/8765 rather than the bundled nginx.
+  overrides/docker-compose.yml runs the image upstream publishes for the
+  current release, thehelpfulidiot/ghostboard-server:3.4.3 (tag v3.4.3 is
+  the repository HEAD), on its nginx port 80, so the page and the /ws
+  WebSocket share the one site address.
+
+  No volumes: Ghostboard keeps the text in memory by design and clears a
+  board once its last client disconnects.

@@ -1,0 +1,80 @@
+# Compose-replace: the repo root is the pnpm source tree. Official image of the current release
+# with Postgres and Redis, as support/docker/production; PeerTube serves its own client on :9000.
+services:
+  peertube:
+    image: chocobozzz/peertube:v8.3.1
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      # PEERTUBE_SECRET and the DB password, generated once by hooks/prepare.sh.
+      - ../.panelalpha/peertube/secrets.env
+    environment:
+      PEERTUBE_WEBSERVER_HOSTNAME: ${PA_PUBLIC_HOST}
+      PEERTUBE_WEBSERVER_PORT: "443"
+      PEERTUBE_WEBSERVER_HTTPS: "true"
+      PEERTUBE_ADMIN_EMAIL: ${PEERTUBE_ADMIN_EMAIL:?Set PEERTUBE_ADMIN_EMAIL to the email of the PeerTube root account}
+      PEERTUBE_DB_HOSTNAME: postgres
+      PEERTUBE_DB_USERNAME: peertube
+      PEERTUBE_DB_SSL: "false"
+      PEERTUBE_REDIS_HOSTNAME: redis
+    volumes:
+      - data:/data
+      - config:/config
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/api/v1/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    mem_limit: 1536m
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file:
+      - ../.panelalpha/peertube/secrets.env
+    environment:
+      POSTGRES_USER: peertube
+      POSTGRES_DB: peertube
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U peertube -d peertube"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    mem_limit: 512m
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 128m
+
+  # No-op gate: `compose up -d` returns only once PeerTube answers /api/v1/ping.
+  ready:
+    image: redis:8-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "exit 0"]
+    depends_on:
+      peertube:
+        condition: service_healthy
+    mem_limit: 32m
+
+volumes:
+  data: {}
+  config: {}
+  db: {}
+  redis: {}

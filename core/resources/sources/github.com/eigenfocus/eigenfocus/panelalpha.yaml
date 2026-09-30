@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Eigenfocus is a project management, planning and time tracking app: one Rails
+  process (Puma) on :3000 with SQLite, keeping its databases, generated secret
+  key base and uploads in /eigenfocus-app/app-data.
+
+  A plain deploy builds the repository's Dockerfile, which fails from a clean
+  checkout: `rails assets:precompile` in the build stage raises "Could not load
+  database configuration. No such file - config/database.yml", because the
+  Dockerfile copies database.example.yml to database.yml only in the final
+  stage. overrides/docker-compose.yml runs upstream's published image of the
+  current release, eigenfocus/eigenfocus:1.5.1-free (the README's Docker
+  install), with app-data on a named volume and DEFAULT_HOST_URL set to the
+  site's address. The image migrates the database on boot.
+
+  First run is upstream's: there are no accounts, and the first visit lands on
+  the "Welcome to Eigenfocus" profile page (upstream offers optional HTTP basic
+  auth via HTTP_AUTH_USER/HTTP_AUTH_PASSWORD).

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Quasarr bridges JDownloader to Radarr/Sonarr/Lidarr: a Newznab indexer and a
+  SABnzbd-compatible download client (API-key guarded) plus a web UI, one
+  Python (bottle) process on :8080. The source checkout has no entry point the
+  Python strategy recognises, and run outside upstream's image it keeps its
+  config beside the code; this recipe runs upstream's own image of the current
+  release, /config (Quasarr.ini, Quasarr.db) on a named volume.
+
+  Quasarr's web UI and its first-run setup wizard are open to anyone unless
+  both USER and PASS are set. hooks/prepare.sh generates PASS once into
+  ~/.panelalpha/quasarr/auth.env and the app reads it as env, with form login
+  pinned (AUTH=form). INTERNAL_ADDRESS/EXTERNAL_ADDRESS are set to the public
+  URL at boot; the setup wizard (hostnames, My JDownloader login) is the
+  user's runtime configuration, behind the login.
