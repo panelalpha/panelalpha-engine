@@ -77,12 +77,4 @@ final class ContractRemoveConnectCutoverTest extends TestCase
 
         $this->assertSame([], $hits, implode("\n", $hits));
     }
-
-    public function test_unused_lib_copy_and_backup_trees_still_exist(): void
-    {
-        $appRoot = dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'app';
-        $this->assertFileExists($appRoot . '/Lib/Apis/System.php');
-        $this->assertFileExists($appRoot . '/Lib/Copy/AccountClone.php');
-        $this->assertFileExists($appRoot . '/Lib/Backup/Host/EngineHost.php');
-    }
 }

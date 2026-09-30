@@ -9,6 +9,7 @@ use App\System\Project\Dind;
 use App\System\Project\Dind\CopyVolumes;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Tests\Support\FakeProcess;
 
 class DindCopyVolumesTest extends TestCase
 {
@@ -179,7 +180,9 @@ class DindCopyVolumesTest extends TestCase
         $this->assertTrue(
             (bool) array_filter(
                 $this->processLog,
-                static fn (string $line): bool => str_contains($line, ' compose ') && str_contains($line, ' stop')
+                // execAsUser() quotes each argument, so match on the unquoted line.
+                static fn (string $line): bool => str_contains(str_replace("'", '', $line), ' compose ')
+                    && str_contains(str_replace("'", '', $line), ' stop')
             )
         );
     }
@@ -196,8 +199,8 @@ class DindCopyVolumesTest extends TestCase
         ]);
 
         $projectDir = $this->tmpRoot . '/users/' . $username;
-        mkdir($projectDir, 0777, true);
-        mkdir($this->homeRoot . '/' . $username . '/project', 0777, true);
+        is_dir($projectDir) || mkdir($projectDir, 0777, true);
+        is_dir($this->homeRoot . '/' . $username . '/project') || mkdir($this->homeRoot . '/' . $username . '/project', 0777, true);
         file_put_contents(
             $projectDir . '/docker-compose.yml',
             "services:\n  dind:\n    image: test\n"
@@ -261,18 +264,12 @@ class DindCopyVolumesTest extends TestCase
                 if ($this->test->recordInnerCompose
                     && in_array('compose', $parts, true)
                     && in_array('stop', $parts, true)) {
-                    $process = new Process([]);
-                    $process->setExitCode(0);
-
-                    return $process;
+                    return FakeProcess::ok();
                 }
 
                 if (count($parts) >= 4 && $parts[0] === 'sudo' && $parts[1] === 'test' && $parts[2] === '-d') {
                     $path = $parts[3];
-                    $process = new Process([]);
-                    $process->setExitCode(is_dir($path) ? 0 : 1);
-
-                    return $process;
+                    return is_dir($path) ? FakeProcess::ok() : FakeProcess::failed();
                 }
 
                 if (($parts[0] ?? '') === 'sudo' && ($parts[1] ?? '') === 'ls' && ($parts[2] ?? '') === '-1') {
@@ -286,11 +283,7 @@ class DindCopyVolumesTest extends TestCase
                             $entries[] = $entry;
                         }
                     }
-                    $process = new Process([]);
-                    $process->setOutput(implode("\n", $entries));
-                    $process->setExitCode(0);
-
-                    return $process;
+                    return FakeProcess::ok(implode("\n", $entries));
                 }
 
                 if (($parts[0] ?? '') === 'sudo' && ($parts[1] ?? '') === 'mkdir') {
@@ -321,10 +314,7 @@ class DindCopyVolumesTest extends TestCase
                     $this->removeTree($target);
                 }
 
-                $process = new Process([]);
-                $process->setExitCode(0);
-
-                return $process;
+                return FakeProcess::ok();
             }
 
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string

@@ -2,8 +2,8 @@
 
 namespace Tests\Unit\Cloudflare;
 
-use App\Lib\Cloudflare\CloudflareException;
-use App\Lib\Cloudflare\TunnelClient;
+use App\Lib\Apis\Cloudflare;
+use App\Lib\Apis\Cloudflare\CloudflareException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -30,9 +30,9 @@ class AccountResolutionTest extends TestCase
 {
     private const ACCOUNT = '54390c0589dac7b4a1474b79d7ec7dde';
 
-    private function client(): TunnelClient
+    private function client(): Cloudflare
     {
-        return new TunnelClient('cf-token-not-real');
+        return new Cloudflare('cf-token-not-real');
     }
 
     /** The documented happy path: the token can list accounts. */

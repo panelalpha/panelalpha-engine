@@ -43,14 +43,6 @@ final class PhphostingSurfacesCutoverTest extends TestCase
         $this->assertSame([], $hits, implode("\n", $hits));
     }
 
-    public function test_cron_jobs_lib_does_not_import_lib_apis_system(): void
-    {
-        $cronJobs = file_get_contents(dirname(__DIR__, 3) . '/app/Lib/Apis/CronJobs.php');
-        $this->assertIsString($cronJobs);
-        $this->assertStringNotContainsString('use App\Lib\Apis\System', $cronJobs);
-        $this->assertStringContainsString('App\System as EngineSystem', $cronJobs);
-    }
-
     public function test_surfaces_use_project_collaborators(): void
     {
         $root = dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'app' . DIRECTORY_SEPARATOR . 'Http'

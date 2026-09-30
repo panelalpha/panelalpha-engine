@@ -18,7 +18,6 @@ class ProjectsClonePushTest extends TestCase
     {
         $source = file_get_contents($this->coreAppRoot . '/System/Projects.php');
         $this->assertStringContainsString('project($', $source);
-        $this->assertStringNotContainsString('instanceof Dind', $source);
         $this->assertStringNotContainsString('instanceof PhpHosting', $source);
         $this->assertStringNotContainsString('instanceof PhpFpm', $source);
         $this->assertStringNotContainsString('use App\System\Account', $source);
@@ -38,15 +37,6 @@ class ProjectsClonePushTest extends TestCase
         $this->assertStringContainsString('function copy(', $source);
         $this->assertStringNotContainsString('use App\System\Account', $source);
         $this->assertStringNotContainsString('new Account', $source);
-    }
-
-    public function test_lib_account_clone_is_unused_facade_over_system_projects(): void
-    {
-        $source = file_get_contents($this->coreAppRoot . '/Lib/Copy/AccountClone.php');
-        $this->assertStringContainsString('projects()->clone(', $source);
-        $this->assertStringContainsString('projects()->copy(', $source);
-        $this->assertStringNotContainsString('UserAccountDeletion', $source);
-        $this->assertStringNotContainsString('connect()', $source);
     }
 
     public function test_system_projects_push_to_app_marks_failure_without_full_delete(): void

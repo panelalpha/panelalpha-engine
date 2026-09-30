@@ -101,12 +101,6 @@ class DindSourceTest extends TestCase
         $this->assertStringContainsString('allowUntrustedGitDirectory', $source);
     }
 
-    public function test_lib_source_ingest_still_owns_production_prepare_handoff(): void
-    {
-        $source = file_get_contents($this->coreAppRoot . '/Lib/Apis/System/User/Project/Dind/SourceIngest.php');
-        $this->assertStringContainsString('prepareUserAppFromSources', $source);
-    }
-
     private function dind(ModelsUser $model): Dind
     {
         $runtime = (new ProjectAggregate($this->system(), $model))->runtime();

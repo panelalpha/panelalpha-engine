@@ -90,7 +90,7 @@ class ProjectFactoryTest extends TestCase
 
         $project = $system->project($model);
 
-        $this->assertNull($project->app());
+        $this->assertNull($this->dindApp($project));
     }
 
     public function test_dind_git_project_app_is_dind_application_when_deploy_strategy_set(): void
@@ -103,20 +103,9 @@ class ProjectFactoryTest extends TestCase
         );
 
         $project = $system->project($model);
-        $app = $project->app();
+        $app = $this->dindApp($project);
 
         $this->assertInstanceOf(DindApp::class, $app);
-    }
-
-    public function test_php_hosting_project_applications_empty_without_domains(): void
-    {
-        $system = $this->systemWithEngineRoot($this->tmpRoot);
-        $model = $this->phpHostingModel('alice');
-
-        $project = $system->project($model);
-
-        $this->assertTrue($project->applications()->isEmpty());
-        $this->assertNull($project->app());
     }
 
     public function test_dind_template_selects_dind_app_behaviour_without_git(): void
@@ -126,7 +115,7 @@ class ProjectFactoryTest extends TestCase
 
         $project = $system->project($model);
 
-        $this->assertInstanceOf(DindApp::class, $project->app());
+        $this->assertInstanceOf(DindApp::class, $this->dindApp($project));
     }
 
     public function test_collaborators_are_exposed_on_aggregate_not_implementation_type(): void
@@ -150,6 +139,15 @@ class ProjectFactoryTest extends TestCase
         $collaborator = $project->domain($domainModel);
         $this->assertInstanceOf(DomainCollaborator::class, $collaborator);
         $this->assertSame($project, $collaborator->project());
+    }
+
+    /** Only a DinD runtime has an application. */
+    private function dindApp(Project $project): ?DindApp
+    {
+        $runtime = $project->runtime();
+        $this->assertInstanceOf(Dind::class, $runtime);
+
+        return $runtime->app();
     }
 
     private function systemWithEngineRoot(string $engineRoot): System

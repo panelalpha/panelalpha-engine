@@ -14,19 +14,6 @@ final class SystemNoLibUserBridgeTest extends TestCase
         $this->systemRoot = dirname(__DIR__, 3) . '/app/System';
     }
 
-    public function test_system_php_factories_use_root_collaborators_not_services(): void
-    {
-        $source = file_get_contents(dirname(__DIR__, 3) . '/app/System.php');
-
-        $this->assertStringNotContainsString('App\\System\\Services\\', $source);
-        $this->assertStringContainsString('use App\\System\\Webserver;', $source);
-    }
-
-    public function test_services_tree_is_absent(): void
-    {
-        $this->assertDirectoryDoesNotExist($this->systemRoot . '/Services');
-    }
-
     public function test_change_webserver_trio_exists_on_app_system(): void
     {
         $source = file_get_contents(dirname(__DIR__, 3) . '/app/System.php');

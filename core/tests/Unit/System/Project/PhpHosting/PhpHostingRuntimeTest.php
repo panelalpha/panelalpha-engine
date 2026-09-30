@@ -194,10 +194,7 @@ class PhpHostingRuntimeTest extends TestCase
                     $this->journal[] = 'compose-down';
                 }
 
-                $process = new \Symfony\Component\Process\Process([]);
-                $process->setExitCode(0);
-
-                return $process;
+                return \Tests\Support\FakeProcess::ok();
             }
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): \Symfony\Component\Process\Process
