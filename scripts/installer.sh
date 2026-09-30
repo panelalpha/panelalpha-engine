@@ -34,6 +34,7 @@ PANELALPHA_ENGINE_VERSION="${PANELALPHA_ENGINE_VERSION:-}"
 PACKAGE_HOST=''
 MONITORING_HOST="${PANELALPHA_MONITORING_HOST:-monitoring.panelalpha.com}"
 STARTED_AT=$(date +%s || echo 0)
+REF=""
 # Git URL for the engine tree. Default is the public GitHub mirror. Credentials may
 # be embedded (https://user:token@host/...). Empty is invalid — use get.panelalpha.com/engine.
 if [ "${PANELALPHA_ENGINE_REPO+x}" = x ]; then
@@ -148,6 +149,7 @@ Usage: bash installer.sh [options]
                            later -- for when DNS is not pointing here yet.
       --cert-email ADDR    Let's Encrypt account email (expiry warnings)
       --email ADDR         Contact/monitoring email (settings:set email)
+      --ref CODE           Optional reference code
       --repo REPO          deploy a repository once the engine is up: a clone
                            URL, host/owner/repo, or a bare owner/repo, which
                            means GitHub unless the engine's default_git_host
@@ -257,6 +259,15 @@ while true; do
         ;;
     --email=*)
         INSTALL_EMAIL="${1#*=}"
+        shift
+        ;;
+    --ref)
+        REF="$2"
+        shift
+        shift
+        ;;
+    --ref=*)
+        REF="${1#*=}"
         shift
         ;;
     --repo)
@@ -487,10 +498,27 @@ installer_error_message() { # exit_code
     printf 'installer failed with exit_code=%s' "$exit_code"
 }
 
+normalize_ref() {
+    local raw=${1:-}
+    raw=$(printf '%s' "$raw" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ -z "$raw" ] || [ "${#raw}" -gt 64 ]; then
+        printf ''
+        return 0
+    fi
+    case "$raw" in
+    *[!A-Za-z0-9._-]*) printf '' ;;
+    *) printf '%s' "$raw" ;;
+    esac
+}
+
+redact_repo_url() {
+    printf '%s' "$1" | sed -E 's#(https?://)[^/@]+@#\1***@#'
+}
+
 # Report install/update outcome to monitoring (Engine emails / probes).
 send_update_status() {
     local exit_code=${1:-0}
-    local finished_at started_at software_op email error_msg event_type
+    local finished_at started_at software_op email error_msg event_type ref repo
     started_at=${STARTED_AT:-$(date +%s || echo 0)}
     finished_at=$(date +%s || echo 0)
     software_op="${ENGINE_OP:-install}"
@@ -507,6 +535,11 @@ send_update_status() {
     if [ "$exit_code" != "0" ]; then
         error_msg=$(installer_error_message "$exit_code")
     fi
+    ref=$(normalize_ref "${REF:-}")
+    repo=""
+    if [ -n "${DEPLOY_REPO:-}" ]; then
+        repo=$(redact_repo_url "$DEPLOY_REPO")
+    fi
     {
         jq -n \
             --arg type "$event_type" \
@@ -519,19 +552,25 @@ send_update_status() {
             --arg email "$email" \
             --arg error "$error_msg" \
             --arg to_version "${PANELALPHA_ENGINE_VERSION:-}" \
+            --arg ref "$ref" \
+            --arg repo "$repo" \
             '{events:[{
               type:$type,
               occurred_at:$occurred_at,
-              payload:{
-                started_at:$started_at,
-                finished_at:$finished_at,
-                exit_code:$exit_code,
-                software:$software,
-                software_op:$software_op,
-                email:$email,
-                error:$error,
-                to_version:$to_version
-              }
+              payload:(
+                {
+                  started_at:$started_at,
+                  finished_at:$finished_at,
+                  exit_code:$exit_code,
+                  software:$software,
+                  software_op:$software_op,
+                  email:$email,
+                  error:$error,
+                  to_version:$to_version
+                }
+                + (if $ref != "" then {ref:$ref} else {} end)
+                + (if $repo != "" then {repo:$repo} else {} end)
+              )
             }]}' \
         | curl -4 -sS -X POST "https://${MONITORING_HOST}/api/v1/events" \
             -H "Content-Type: application/json" \
@@ -540,10 +579,6 @@ send_update_status() {
             ${APP_UID:+-H} ${APP_UID:+"X-Engine-App-UID: ${APP_UID}"} \
             -d @- >/dev/null 2>&1 || true
     } || true
-}
-
-redact_repo_url() {
-    printf '%s' "$1" | sed -E 's#(https?://)[^/@]+@#\1***@#'
 }
 
 # engine | deploy — TUI two-step chrome for --repo install/update.
