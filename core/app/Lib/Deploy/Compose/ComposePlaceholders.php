@@ -622,6 +622,21 @@ class ComposePlaceholders
         if (trim($value) === '' && in_array(strtoupper($key), self::BLANK_URL_KEYS, true)) {
             return $publicUrl;
         }
+
+        return self::withPublicAddress($value, $publicUrl);
+    }
+
+    /**
+     * `${PA_PUBLIC_URL}` / `${PA_PUBLIC_HOST}` (with or without a default)
+     * resolved in one value; unchanged when there is no public URL. The
+     * generated compose of the framework strategies uses it for a recipe's `env:`.
+     */
+    public static function withPublicAddress(string $value, ?string $publicUrl): string
+    {
+        $publicUrl = self::normalisedPublicUrl($publicUrl);
+        if ($publicUrl === null) {
+            return $value;
+        }
         $host = (string) parse_url($publicUrl, PHP_URL_HOST);
 
         return (string) preg_replace_callback(

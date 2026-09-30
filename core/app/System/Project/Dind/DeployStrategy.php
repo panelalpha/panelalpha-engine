@@ -120,11 +120,13 @@ class DeployStrategy
      */
     public function composeDecision(array $decision): array
     {
-        return ComposeEnvironment::layer(
+        $decision = ComposeEnvironment::layer(
             ComposeEnvironment::withInstanceSecret($decision, $this->secrets()->instanceSecret()),
             $this->appConfig?->env() ?? [],
             $this->secrets()->userEnvVars()
         );
+
+        return ComposeEnvironment::withPublicAddress($decision, $this->dind->publicAppUrl());
     }
 
     // -------------------------------------------------------------------------

@@ -127,4 +127,36 @@ class ComposeEnvironmentTest extends TestCase
         $this->assertSame('prod', $environment['APP_ENV']);
         $this->assertSame('8000', $environment['PORT'], 'the engine still names the port it publishes');
     }
+
+    /**
+     * engine#432: a recipe's `${PA_PUBLIC_HOST}` reached the generated compose
+     * literally and Compose interpolated it to ''.
+     */
+    public function test_the_public_address_placeholders_are_resolved_for_a_generated_compose(): void
+    {
+        $decision = ComposeEnvironment::withPublicAddress(
+            ['env' => [
+                'SESSION_DOMAIN' => '${PA_PUBLIC_HOST}',
+                'SANCTUM_STATEFUL_DOMAINS' => '${PA_PUBLIC_HOST},localhost',
+                'MAIL_LINK' => '${PA_PUBLIC_URL:-http://localhost}/mail',
+                'APP_ENV' => 'production',
+            ]],
+            'https://crater.example.test/'
+        );
+
+        $environment = Yaml::parse(DeployCompose::framework($decision, 8000, 'https://crater.example.test'))['services']['app']['environment'];
+
+        $this->assertSame('crater.example.test', $environment['SESSION_DOMAIN']);
+        $this->assertSame('crater.example.test,localhost', $environment['SANCTUM_STATEFUL_DOMAINS']);
+        $this->assertSame('https://crater.example.test/mail', $environment['MAIL_LINK']);
+        $this->assertSame('production', $environment['APP_ENV']);
+    }
+
+    public function test_without_a_public_url_the_env_is_left_alone(): void
+    {
+        $decision = ['env' => ['SESSION_DOMAIN' => '${PA_PUBLIC_HOST}']];
+
+        $this->assertSame($decision, ComposeEnvironment::withPublicAddress($decision, null));
+        $this->assertSame(['runtime' => 'php'], ComposeEnvironment::withPublicAddress(['runtime' => 'php'], 'https://a.test'));
+    }
 }

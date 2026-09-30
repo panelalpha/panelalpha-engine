@@ -95,6 +95,28 @@ final class ComposeEnvironment
         return $decision;
     }
 
+    /**
+     * `${PA_PUBLIC_URL}` / `${PA_PUBLIC_HOST}` in the decision's env resolved,
+     * as the compose strategy does for its own file. Written into the
+     * generated compose as-is, Compose would interpolate them to ''.
+     *
+     * @param array<string, mixed> $decision
+     * @return array<string, mixed>
+     */
+    public static function withPublicAddress(array $decision, ?string $publicUrl): array
+    {
+        if (!is_array($decision['env'] ?? null)) {
+            return $decision;
+        }
+        foreach ($decision['env'] as $key => $value) {
+            if (is_string($value)) {
+                $decision['env'][$key] = ComposePlaceholders::withPublicAddress($value, $publicUrl);
+            }
+        }
+
+        return $decision;
+    }
+
     public static function isReserved(string $key): bool
     {
         return str_starts_with($key, self::RESERVED_PREFIX)

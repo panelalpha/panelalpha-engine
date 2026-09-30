@@ -149,6 +149,8 @@ Only provide a full replacement `overrides/docker-compose.yml` when the app's up
 
 Under the compose strategy every service that is not a database gets `PA_PUBLIC_URL` (`https://<domain>`) and `PA_PUBLIC_HOST` (`<domain>`) in its environment, unless it sets them itself. In the compose file the engine runs (the repository's own, or `overrides/docker-compose.yml`), `${PA_PUBLIC_URL}` and `${PA_PUBLIC_HOST}` inside an `environment:` value are replaced before the stack starts, so `ORIGIN: ${PA_PUBLIC_URL}` needs no entrypoint wrapper. A `docker-compose.override.yml` is layered by Compose itself and is not rewritten; read the variable from the container's environment there. An empty `ORIGIN`, `URL`, `PUBLIC_URL`, `BASE_URL`, `APP_URL`, `ASSET_URL` or `SITE_URL` is filled with the address as well.
 
+Under the framework strategies (`laravel`, `php`, the Node/Python/Ruby recipes, a repository `Dockerfile`) the engine writes the compose file itself, and `${PA_PUBLIC_URL}` / `${PA_PUBLIC_HOST}` in the manifest's `env:` are replaced the same way before it is written: `SESSION_DOMAIN: '${PA_PUBLIC_HOST}'` reaches the container as the site's host. `env:` is the service's `environment:`, so it also beats the `.env` the project ships (`env_file`).
+
 ---
 
 ### Secrets derived from the install path
