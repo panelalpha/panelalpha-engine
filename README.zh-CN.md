@@ -9,7 +9,7 @@
 </h3>
 
 <h3>
-<a href="#三个简单步骤完成设置"><b>开始使用</b></a> ·
+<a href="#让你的项目跑起来"><b>开始使用</b></a> ·
 <a href="https://www.panelalpha.com/documentation/panelalpha-engine/"><b>文档</b></a> ·
 <a href="#在-discord-上找我们"><b>Discord</b></a>
 </h3>
@@ -81,13 +81,13 @@ AI 已经把软件创造从旧的限制里解放出来。更多人能把想法�
 
 ---
 
-## 三个简单步骤完成设置
+## 让你的项目跑起来
 
 ### 第 1 步：在自己的 VPS 上安装 Engine
 
 你需要一台**全新**的服务器，系统为 Debian 12/13 或 Ubuntu 22.04/24.04/26.04，至少 2 GB 内存和 1 核 CPU，并以 `root` 通过 SSH 登录。
 
-**One-line app deployment command.** 想立刻让一个应用上线？加上 `--repo`，安装程序会先装好 Engine，再把该仓库部署为一个项目：
+**One-line app deployment command** 是最快的上手方式：它安装 Engine，并一次性让一个应用上线。你只需在 `--repo` 后面加上想使用的 Git 仓库，安装程序就会完成两件事：安装 Engine，并立即用你提供的仓库开始创建项目。例如，想同时安装 Engine 并部署 n8n，只需这一条：
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
@@ -95,7 +95,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 
 完成后，它会显示新网站的地址；如果你没有传 `--no-password`，还会显示打开网站用的密码。私有仓库、自定义密码，以及已经装有 Engine 的服务器： [One-line app deployment command](docs/02-getting-started/install.md#one-line-app-deployment-command)。
 
-想把这两步分开做？只安装 Engine，稍后再通过你的助手部署应用（见第 3 步）：
+想把这两步分开做？用下面的命令只安装 Engine，稍后再通过你的助手部署应用（见第 2 步）：
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh

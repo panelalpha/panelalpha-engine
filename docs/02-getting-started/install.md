@@ -45,6 +45,8 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- \
 
 When it finishes, it prints the web address of your new site (it starts with `https://`). Unless you passed `--no-password`, it also prints the password that opens the site: the one you gave with `--password`, or one the installer made up. Copy it from the screen. If the installer could not set the password, it says so and prints the command to try again. Below that comes the same information for connecting your AI assistant as after a normal install. Continue with [Connect your AI assistant](#2-connect-your-ai-assistant) on your own computer.
 
+<img src="../assets/installer-repo-success.png" alt="Installer finished: the address and password of the deployed application, then the Claude Code command" style="max-width: 100%; height: auto; margin-top: 1.5em; margin-bottom: 1.5em;">
+
 `--repo` is the application you want hosted. It is not where the engine software comes from. You do not pass a licence key.
 
 | Flag | What it does |

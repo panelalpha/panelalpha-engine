@@ -9,7 +9,7 @@ Open source. Self-hosted. Łatwy dla każdego, nie tylko dla sysadminów.
 </h3>
 
 <h3>
-<a href="#trzy-proste-kroki-żeby-to-ustawić"><b>Zacznij</b></a> ·
+<a href="#uruchom-swój-projekt"><b>Zacznij</b></a> ·
 <a href="https://www.panelalpha.com/documentation/panelalpha-engine/"><b>Dokumentacja</b></a> ·
 <a href="#porozmawiaj-z-nami-na-discordzie"><b>Discord</b></a>
 </h3>
@@ -81,13 +81,13 @@ AI wyłamało tworzenie oprogramowania ze starych ograniczeń. Więcej ludzi pot
 
 ---
 
-## Trzy proste kroki, żeby to ustawić
+## Uruchom swój projekt
 
 ### Krok 1: Zainstaluj Engine na swoim VPS-ie
 
 Potrzebujesz **świeżego** serwera z Debianem 12/13 albo Ubuntu 22.04/24.04/26.04, z minimum 2 GB RAM i 1 CPU, i logujesz się jako `root` przez SSH.
 
-**One-line app deployment command.** Chcesz od razu uruchomić aplikację? Dodaj `--repo`, a instalator skonfiguruje Engine, a potem wdroży to repozytorium jako projekt:
+**One-line app deployment command** to najszybszy sposób na start: instaluje Engine i od razu wystawia aplikację online. Wystarczy, że po `--repo` podasz repozytorium Git, którego chcesz użyć, a instalator zajmie się obiema częściami: zainstaluje Engine i od razu zacznie tworzyć projekt z podanego repozytorium. Na przykład, żeby zainstalować Engine i jednocześnie wdrożyć n8n, wystarczy to:
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
@@ -95,7 +95,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 
 Na końcu wypisuje adres nowej strony i, jeśli nie podasz `--no-password`, hasło, które ją otwiera. Repozytoria prywatne, własne hasło i serwer, na którym Engine już jest: [One-line app deployment command](docs/02-getting-started/install.md#one-line-app-deployment-command).
 
-Wolisz zrobić te dwa kroki osobno? Zainstaluj tylko Engine, a aplikację wdroż później z poziomu asystenta (zobacz krok 3):
+Wolisz zrobić te dwa kroki osobno? Użyj poniższej komendy, żeby zainstalować tylko Engine, a aplikację wdroż później z poziomu asystenta (zobacz krok 2):
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh

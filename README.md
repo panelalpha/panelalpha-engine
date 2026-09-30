@@ -9,7 +9,7 @@ Open source. Self-hosted. Easy for anyone, not just sysadmins.
 </h3>
 
 <h3>
-<a href="#three-simple-steps-to-set-it-up"><b>Get started</b></a> ·
+<a href="#get-your-project-running"><b>Get started</b></a> ·
 <a href="https://www.panelalpha.com/documentation/panelalpha-engine/"><b>Documentation</b></a> ·
 <a href="#talk-to-us-on-discord"><b>Discord</b></a>
 </h3>
@@ -81,13 +81,13 @@ AI has broken software creation out of its old limits. More people can turn idea
 
 ---
 
-## Three simple steps to set it up
+## Get your project running
 
 ### Step 1: Install Engine on your VPS
 
 You need a **fresh** server running Debian 12/13 or Ubuntu 22.04/24.04/26.04, with at least 2 GB RAM and 1 CPU, and you log in as `root` over SSH.
 
-**One-line app deployment command.** Install the engine and put an application online in one go. Add `--repo` and the installer sets up the engine, then deploys that repository as a project:
+**One-line app deployment command** is the fastest way to get started, as it installs the engine and puts an application online in one go. You simply add whatever Git repo you want to use after `--repo` and the installer takes care of both parts: it installs engine and immediately starts setting up the project from the repository you provided. For example, if you want to install the engine and deploy n8n at the same time, this is all you need:
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
@@ -95,7 +95,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 
 When it finishes, it prints the address of your new site and, unless you pass `--no-password`, the password that opens it. Private repositories, a password of your own, and running it on a server that already has the engine: [One-line app deployment command](docs/02-getting-started/install.md#one-line-app-deployment-command).
 
-Prefer to do the two steps separately? Install only the engine, and deploy your application later from your assistant (see Step 3):
+Prefer to do the two steps separately? Use the command below to install only the engine, and deploy your application later from your assistant (see Step 2):
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh

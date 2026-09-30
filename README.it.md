@@ -9,7 +9,7 @@ Open source. Self-hosted. Facile per chiunque, non solo per i sysadmin.
 </h3>
 
 <h3>
-<a href="#tre-semplici-passi-per-configurarlo"><b>Inizia</b></a> ·
+<a href="#metti-in-funzione-il-tuo-progetto"><b>Inizia</b></a> ·
 <a href="https://www.panelalpha.com/documentation/panelalpha-engine/"><b>Documentazione</b></a> ·
 <a href="#parla-con-noi-su-discord"><b>Discord</b></a>
 </h3>
@@ -81,13 +81,13 @@ L'AI ha fatto uscire la creazione del software dai suoi vecchi limiti. Più pers
 
 ---
 
-## Tre semplici passi per configurarlo
+## Metti in funzione il tuo progetto
 
 ### Passo 1: Installalo sul tuo VPS
 
 Ti serve un server **nuovo** con Debian 12/13 o Ubuntu 22.04/24.04/26.04, almeno 2 GB di RAM e 1 CPU, e accedi come `root` via SSH.
 
-**One-line app deployment command.** Vuoi una applicazione online subito? Aggiungi `--repo` e l'installer configura Engine, poi distribuisce quel repository come progetto:
+**One-line app deployment command** è il modo più rapido per iniziare: installa Engine e mette online un'applicazione in un colpo solo. Ti basta aggiungere dopo `--repo` il repository Git che vuoi usare, e l'installer si occupa di entrambe le parti: installa Engine e inizia subito a creare il progetto dal repository indicato. Per esempio, per installare Engine e distribuire n8n allo stesso tempo, ti serve solo questo:
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
@@ -95,7 +95,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 
 Alla fine mostra l'indirizzo del tuo nuovo sito e, se non passi `--no-password`, la password che lo apre. Repository privati, una password tua e un server che ha già Engine: [One-line app deployment command](docs/02-getting-started/install.md#one-line-app-deployment-command).
 
-Preferisci fare i due passaggi separatamente? Installa solo Engine e distribuisci la tua applicazione più tardi dal tuo assistente (vedi il passo 3):
+Preferisci fare i due passaggi separatamente? Usa il comando qui sotto per installare solo Engine e distribuisci la tua applicazione più tardi dal tuo assistente (vedi il passo 2):
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh

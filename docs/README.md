@@ -32,7 +32,19 @@ All it takes is just [three simple steps to set it up](#getting-started).
 
 ### 1. Install on your VPS
 
-You need a **fresh** VPS, `root` access over SSH, and one command. Full requirements and options are on the [Install](02-getting-started/install.md) page; the short version is:
+You need a **fresh** VPS and `root` access over SSH. Full requirements and options are on the [Install](02-getting-started/install.md) page.
+
+**One-line app deployment command** is the fastest way to get started, as it installs the engine and puts an application online in one go. You simply add whatever Git repo you want to use after `--repo` and the installer takes care of both parts: it installs the engine and immediately starts setting up the project from the repository you provided. For example, if you want to install the engine and deploy n8n at the same time, this is all you need:
+
+```bash
+curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
+```
+
+When it finishes, it prints the address of your new site and, unless you pass `--no-password`, the password that opens it. Private repositories, a password of your own, and running it on a server that already has the engine: [One-line app deployment command](02-getting-started/install.md#one-line-app-deployment-command).
+
+<img src="assets/installer-repo-success.png" alt="Installer finished: the address and password of the deployed application, then the Claude Code command" style="max-width: 100%; height: auto; margin-top: 1.5em; margin-bottom: 1.5em;">
+
+Prefer to do the two steps separately? Use the command below to install only the engine, and deploy your application later from your assistant (see step 3):
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh

@@ -9,7 +9,7 @@
 </h3>
 
 <h3>
-<a href="#ثلاث-خطوات-بسيطة-لإعداده"><b>ابدأ</b></a> ·
+<a href="#شغل-مشروعك"><b>ابدأ</b></a> ·
 <a href="https://www.panelalpha.com/documentation/panelalpha-engine/"><b>التوثيق</b></a> ·
 <a href="#تحدث-معنا-على-discord"><b>Discord</b></a>
 </h3>
@@ -83,13 +83,13 @@ PanelAlpha Engine برنامج تثبّته على خادم VPS لاستضافة
 
 ---
 
-## ثلاث خطوات بسيطة لإعداده
+## شغّل مشروعك
 
 ### الخطوة 1: ثبّت Engine على خادمك VPS
 
 تحتاج خادماً **نظيفاً** يعمل بـ Debian 12/13 أو Ubuntu 22.04/24.04/26.04، بذاكرة 2 غيغابايت ومعالج واحد على الأقل، وتدخل إليه بحساب `root` عبر SSH.
 
-**One-line app deployment command.** تريد تشغيل تطبيق فوراً؟ أضف `--repo` فيثبّت المُثبّت Engine ثم ينشر ذلك المستودع كمشروع:
+**One-line app deployment command** هو أسرع طريقة للبدء: يثبّت Engine وينشر تطبيقاً على الإنترنت دفعة واحدة. ما عليك سوى إضافة مستودع Git الذي تريده بعد `--repo`، ويتولى المُثبّت الجزأين: يثبّت Engine ثم يبدأ فوراً بإعداد المشروع من المستودع الذي قدّمته. مثلاً، لتثبيت Engine ونشر n8n في الوقت نفسه، هذا كل ما تحتاجه:
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
@@ -97,7 +97,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 
 في النهاية يعرض عنوان موقعك الجديد، وإذا لم تمرّر `--no-password` فيعرض أيضاً كلمة المرور التي تفتحه. المستودعات الخاصة، وكلمة مرور من اختيارك، وخادم عليه Engine أصلاً: [One-line app deployment command](docs/02-getting-started/install.md#one-line-app-deployment-command).
 
-تفضّل تنفيذ الخطوتين منفصلتين؟ ثبّت Engine فقط، وانشر تطبيقك لاحقاً من خلال مساعدك (انظر الخطوة 3):
+تفضّل تنفيذ الخطوتين منفصلتين؟ استخدم الأمر أدناه لتثبيت Engine فقط، وانشر تطبيقك لاحقاً من خلال مساعدك (انظر الخطوة 2):
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh
