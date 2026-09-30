@@ -87,7 +87,7 @@ KI hat die Softwareerstellung aus ihren alten Grenzen geholt. Mehr Menschen kön
 
 Du brauchst einen **frischen** Server mit Debian 12/13 oder Ubuntu 22.04/24.04/26.04, mindestens 2 GB RAM und 1 CPU, und du meldest dich als `root` per SSH an.
 
-**One-line installation command** ist der schnellste Einstieg: Sie installiert Engine und stellt gleich eine Anwendung online. Du hängst einfach das Git-Repository, das du nutzen willst, hinter `--repo`, und der Installer erledigt beides: Er installiert Engine und beginnt sofort damit, aus deinem Repository ein Projekt einzurichten.
+**One-line app installation command** ist der schnellste Einstieg: Sie installiert Engine und stellt gleich eine Anwendung online. Du hängst einfach das Git-Repository, das du nutzen willst, hinter `--repo`, und der Installer erledigt beides: Er installiert Engine und beginnt sofort damit, aus deinem Repository ein Projekt einzurichten.
 
 Wenn du zum Beispiel Engine installieren und gleichzeitig n8n bereitstellen willst, brauchst du nur das:
 
@@ -95,7 +95,7 @@ Wenn du zum Beispiel Engine installieren und gleichzeitig n8n bereitstellen will
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
-Am Ende zeigt er die Adresse deiner neuen Seite und, wenn du nicht `--no-password` angibst, das Passwort, das sie öffnet. Private Repositories, ein eigenes Passwort und ein Server, auf dem Engine schon läuft: [One-line installation command](docs/02-getting-started/install.md#one-line-installation-command).
+Am Ende zeigt er die Adresse deiner neuen Seite und, wenn du nicht `--no-password` angibst, das Passwort, das sie öffnet. Private Repositories, ein eigenes Passwort und ein Server, auf dem Engine schon läuft: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
 
 Lieber die zwei Schritte getrennt? Mit dem folgenden Befehl installierst du nur Engine und stellst deine Anwendung später über deinen Assistenten bereit (siehe Schritt 2):
 

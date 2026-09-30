@@ -87,7 +87,7 @@ L'AI ha fatto uscire la creazione del software dai suoi vecchi limiti. Più pers
 
 Ti serve un server **nuovo** con Debian 12/13 o Ubuntu 22.04/24.04/26.04, almeno 2 GB di RAM e 1 CPU, e accedi come `root` via SSH.
 
-**One-line installation command** è il modo più rapido per iniziare: installa Engine e mette online un'applicazione in un colpo solo. Ti basta aggiungere dopo `--repo` il repository Git che vuoi usare, e l'installer si occupa di entrambe le parti: installa Engine e inizia subito a creare il progetto dal repository indicato.
+**One-line app installation command** è il modo più rapido per iniziare: installa Engine e mette online un'applicazione in un colpo solo. Ti basta aggiungere dopo `--repo` il repository Git che vuoi usare, e l'installer si occupa di entrambe le parti: installa Engine e inizia subito a creare il progetto dal repository indicato.
 
 Per esempio, per installare Engine e distribuire n8n allo stesso tempo, ti serve solo questo:
 
@@ -95,7 +95,7 @@ Per esempio, per installare Engine e distribuire n8n allo stesso tempo, ti serve
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
-Alla fine mostra l'indirizzo del tuo nuovo sito e, se non passi `--no-password`, la password che lo apre. Repository privati, una password tua e un server che ha già Engine: [One-line installation command](docs/02-getting-started/install.md#one-line-installation-command).
+Alla fine mostra l'indirizzo del tuo nuovo sito e, se non passi `--no-password`, la password che lo apre. Repository privati, una password tua e un server che ha già Engine: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
 
 Preferisci fare i due passaggi separatamente? Usa il comando qui sotto per installare solo Engine e distribuisci la tua applicazione più tardi dal tuo assistente (vedi il passo 2):
 

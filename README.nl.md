@@ -87,7 +87,7 @@ AI heeft software maken uit zijn oude grenzen gehaald. Meer mensen kunnen een id
 
 Je hebt een **verse** server nodig met Debian 12/13 of Ubuntu 22.04/24.04/26.04, minimaal 2 GB RAM en 1 CPU, en je logt in als `root` via SSH.
 
-**One-line installation command** is de snelste manier om te beginnen: het installeert Engine en zet in één keer een applicatie online. Je voegt na `--repo` gewoon de Git-repository toe die je wilt gebruiken, en de installer regelt beide onderdelen: hij installeert Engine en begint meteen met het opzetten van het project uit jouw repository.
+**One-line app installation command** is de snelste manier om te beginnen: het installeert Engine en zet in één keer een applicatie online. Je voegt na `--repo` gewoon de Git-repository toe die je wilt gebruiken, en de installer regelt beide onderdelen: hij installeert Engine en begint meteen met het opzetten van het project uit jouw repository.
 
 Wil je bijvoorbeeld Engine installeren en tegelijk n8n deployen, dan is dit alles wat je nodig hebt:
 
@@ -95,7 +95,7 @@ Wil je bijvoorbeeld Engine installeren en tegelijk n8n deployen, dan is dit alle
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
-Aan het einde toont hij het adres van je nieuwe site en, als je `--no-password` niet meegeeft, het wachtwoord waarmee je die opent. Privérepository's, een eigen wachtwoord en een server waar Engine al op staat: [One-line installation command](docs/02-getting-started/install.md#one-line-installation-command).
+Aan het einde toont hij het adres van je nieuwe site en, als je `--no-password` niet meegeeft, het wachtwoord waarmee je die opent. Privérepository's, een eigen wachtwoord en een server waar Engine al op staat: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
 
 Liever de twee stappen los? Gebruik het commando hieronder om alleen Engine te installeren en deploy je applicatie later via je assistent (zie stap 2):
 
