@@ -4,7 +4,7 @@
 # before the port is published, and fronts it with a small nginx (engine#323).
 services:
   # One-shot, before the app exists: creates app.db and replaces
-  # admin/admin123 with the generated password (Calibre-Web's `cps.py -s`).
+  # admin/admin123 with the engine's password (Calibre-Web's `cps.py -s`).
   set-admin:
     image: crocodilestick/calibre-web-automated:v4.0.7
     restart: "no"
@@ -12,6 +12,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/calibre-web-automated/app.env
+      # CWA_ADMIN_USER / CWA_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha:/panelalpha:ro
       - config:/config

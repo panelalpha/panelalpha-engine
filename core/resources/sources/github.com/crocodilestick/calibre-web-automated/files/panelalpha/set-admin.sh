@@ -1,9 +1,9 @@
 #!/bin/bash
 # One-shot that runs before the web service publishes its port. Calibre-Web
 # creates admin/admin123 with a new app.db; this replaces that password with the
-# per-account secret through Calibre-Web's own CLI (`cps.py -s user:pass`).
+# engine's one through Calibre-Web's own CLI (`cps.py -s user:pass`).
 set -e
-: "${CWA_ADMIN_PASSWORD:?CWA_ADMIN_PASSWORD is not set; prepare.sh did not run}"
+: "${CWA_ADMIN_PASSWORD:?CWA_ADMIN_PASSWORD is not set; ~/.panelalpha/app-credentials.env missing}"
 export CALIBRE_DBPATH=/config
 cd /app/calibre-web-automated
 

@@ -1,6 +1,7 @@
 #!/bin/bash
-# Generates the MongoDB passwords and the controller admin once, in
-# ~/.panelalpha (survives redeploys; ~/project does not).
+# Generates the MongoDB passwords once, in ~/.panelalpha (survives redeploys;
+# ~/project does not). The controller admin is the engine's (`credentials:` in
+# panelalpha.yaml), in ~/.panelalpha/app-credentials.env.
 set -e
 cd ~/project
 
@@ -22,13 +23,6 @@ if [ ! -f "${STORE}/db-root.env" ]; then
         printf 'MONGO_INITDB_ROOT_USERNAME=root\n'
         printf 'MONGO_INITDB_ROOT_PASSWORD=%s\n' "$(openssl rand -hex 24)"
     } > "${STORE}/db-root.env")
-fi
-if [ ! -f "${STORE}/admin.env" ]; then
-    (umask 077; {
-        printf 'UNIFI_ADMIN_USER=admin\n'
-        printf 'UNIFI_ADMIN_EMAIL=admin@example.com\n'
-        printf 'UNIFI_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 16)"
-    } > "${STORE}/admin.env")
 fi
 chmod 600 "${STORE}"/*.env
 

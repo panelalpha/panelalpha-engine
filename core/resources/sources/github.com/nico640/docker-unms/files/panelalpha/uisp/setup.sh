@@ -1,5 +1,5 @@
 #!/bin/sh
-# Close UISP's unauthenticated first-run setup with the generated admin.
+# Close UISP's unauthenticated first-run setup with the engine's admin login.
 # Runs before the public `app` starts; a configured instance is left alone.
 set -eu
 

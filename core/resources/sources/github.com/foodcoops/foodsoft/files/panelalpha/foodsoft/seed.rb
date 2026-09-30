@@ -2,9 +2,9 @@
 #
 # This mirrors db/seeds/minimal.seeds.rb (the upstream "fresh install" seed),
 # NOT db/seeds.rb -> small.en, which fills a demo coop with users whose password
-# is "secret". The only change from minimal is that the admin password comes
-# from the environment (generated once, stored 0600 in ~/.panelalpha/foodsoft/)
-# instead of the hard-coded "secret", and the default article units are added so
+# is "secret". The only change from minimal is that the admin login comes from
+# the environment (the engine's, ~/.panelalpha/app-credentials.env) instead of
+# the hard-coded "secret", and the default article units are added so
 # the catalog is usable out of the box.
 
 nick     = ENV.fetch('FOODSOFT_ADMIN_NICK', 'admin')

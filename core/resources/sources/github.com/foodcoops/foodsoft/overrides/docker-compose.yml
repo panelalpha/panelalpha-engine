@@ -80,6 +80,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/foodsoft/app.env
+      # FOODSOFT_ADMIN_*, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       RAILS_ENV: production
       FOODSOFT_DB_HOST: db

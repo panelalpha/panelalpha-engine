@@ -11,23 +11,21 @@ say() { echo "[libredesk] $*" >&2; }
 # ~/.panelalpha/libredesk/ survives a redeploy; ~/project is emptied every
 # deploy (engine#173). A secret written under ~/project would be regenerated on
 # every rebuild -- a new DB password locks the app out of the postgres volume
-# that still holds the old one, a new encryption_key breaks stored encrypted
-# data, and a new admin password would silently change the owner's login.
+# that still holds the old one, and a new encryption_key breaks stored encrypted
+# data. The System user's login is the engine's (`credentials:` in
+# panelalpha.yaml), in ~/.panelalpha/app-credentials.env.
 STORE_DIR="${HOME}/.panelalpha/libredesk"
 SECRETS="${STORE_DIR}/secrets.env"
 DB_ENV="${STORE_DIR}/db.env"
 ADMIN_ENV="${STORE_DIR}/admin.env"
-NOTE="${STORE_DIR}/credentials.txt"
 
 mkdir -p "${STORE_DIR}"
 chmod 700 "${HOME}/.panelalpha" "${STORE_DIR}"
 
 if [ ! -f "${SECRETS}" ]; then
     # No '/', '+', '=' or '#': read back cleanly from an unquoted env file and
-    # from a TOML value. The Aa1! suffix guarantees the System user password
-    # meets libredesk's strength rule (>=10 chars, upper+lower+digit+special).
+    # from a TOML value.
     PG_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+#')"
-    ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+#')Aa1!"
     # encryption_key must be exactly 32 chars (openssl rand -hex 16).
     ENCRYPTION_KEY="$(openssl rand -hex 16)"
     (
@@ -35,29 +33,29 @@ if [ ! -f "${SECRETS}" ]; then
         cat > "${SECRETS}" <<EOF
 # Source of truth for this account's libredesk secrets. Written once on the
 # first deploy and never regenerated; a rebuild reuses these values, which is
-# what keeps the database, encrypted data and the admin login working.
+# what keeps the database and encrypted data working.
 POSTGRES_PASSWORD=${PG_PASSWORD}
 ENCRYPTION_KEY=${ENCRYPTION_KEY}
-SYSTEM_USER_PASSWORD=${ADMIN_PASSWORD}
 EOF
     )
     say "secrets written to ${STORE_DIR}"
 else
     say "reusing the secrets in ${STORE_DIR}"
 fi
+# An older deploy kept the System user's password here and in admin.env; the
+# engine adopted it from admin.env before this hook ran.
+sed -i '/^SYSTEM_USER_PASSWORD=/d' "${SECRETS}"
+rm -f "${ADMIN_ENV}"
 
 # shellcheck disable=SC1090
 . "${SECRETS}"
 
-# Derive the two env files the compose services read directly. Rewritten every
-# deploy from secrets.env (same values), so they stay in sync with it.
+# Derive the env file the postgres service reads directly. Rewritten every
+# deploy from secrets.env (same value), so it stays in sync with it.
 (
     umask 077
     # Consumed by the postgres container on first init; baked into pgdata.
     printf 'POSTGRES_PASSWORD=%s\n' "${POSTGRES_PASSWORD}" > "${DB_ENV}"
-    # Consumed by the `install` one-shot; --install reads this env to create the
-    # System user (internal/user: IsStrongPassword is enforced).
-    printf 'LIBREDESK_SYSTEM_USER_PASSWORD=%s\n' "${SYSTEM_USER_PASSWORD}" > "${ADMIN_ENV}"
 )
 
 # Render config.toml at the project root (mounted read-only into the app and
@@ -176,35 +174,5 @@ enabled = true
 requests_per_minute = 300
 EOF
 chmod 600 config.toml
-
-# Onboarding note with the admin login (never surfaced anywhere else).
-cat > "${NOTE}" <<EOF
-Libredesk on this account
-=========================
-
-Libredesk is an omnichannel customer support desk (shared inbox, live chat,
-help center). The agent/admin console and its API sit behind a login; the
-help center and live-chat widget are public by design once you publish them.
-
-ADMIN LOGIN (the System user, seeded once on the first deploy)
-  URL:      <this account's URL>/
-  Email:    System
-  Password: ${SYSTEM_USER_PASSWORD}
-
-  The password is set only when the schema is first installed and is reused on
-  every redeploy; it is never reset by a rebuild. Change it from the console, or
-  with: docker exec -it <app container> ./libredesk --set-system-user-password
-
-SECRETS
-  The database password, the config encryption_key and the admin password live
-  in ${STORE_DIR} (0600) and are reused on every redeploy. Do not delete this
-  directory -- losing it strands the postgres volume and the encrypted data.
-
-OPTIONAL
-  SSO (Google / Microsoft / any OIDC) is supported and configured from the
-  console. Email (inbound/outbound), the live-chat widget and the help center
-  are set up in the console after first login. The public app URL used in
-  email/help-center links is set under General Settings in the console.
-EOF
 
 say "prepare complete"

@@ -26,8 +26,9 @@ description: >-
   CLOSED FIRST RUN. UISP's POST /nms/api/v2.1/nms/setup is unauthenticated
   until the first admin exists (first visitor wins). A one-shot `setup`
   service waits for UISP to be healthy, then completes it over the compose
-  network with user `admin` and the password hooks/prepare.sh wrote once to
-  ~/.panelalpha/uisp/ (0600 in 0700), hostname = the account domain, no
+  network with the login the engine generates (`credentials:` below; user
+  `admin`, returned by GET /projects/{name}/app-credentials, MCP
+  app_credentials_get), hostname = the account domain, no
   Let's Encrypt (TLS is the engine's), Sentry/Logentries reporting off, EULA
   not accepted on the operator's behalf. Only then does `app` start, and a
   `ready` gate ends the deploy when the proxy answers. UISP's vault/backup
@@ -36,3 +37,9 @@ description: >-
   Measured on an account with memory_limit 2500: the uisp container ~1.0 GB
   (826 MB anon in the account cgroup), capped at 2 GB. NetFlow (UDP 2055) is
   not published; it is optional.
+credentials:
+  login_path: /nms/login
+  adopt_from: .panelalpha/uisp/admin.env
+  fields:
+    UISP_ADMIN_USER: {kind: username, value: admin}
+    UISP_ADMIN_PASSWORD: {kind: password}

@@ -36,6 +36,8 @@ services:
     restart: "no"
     env_file:
       - ../.panelalpha/gramps/gramps.env
+      # GRAMPSWEB_OWNER_*, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       GRAMPSWEB_TREE: ${GRAMPSWEB_TREE:-Gramps Web}
       GRAMPSWEB_REGISTRATION_DISABLED: "true"

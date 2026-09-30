@@ -13,11 +13,11 @@ say() { echo "[foodsoft] $*" >&2; }
 # rebuild -- a new SECRET_KEY_BASE logs everyone out and voids every signed
 # cookie, and a new DB password locks the app out of the mariadb volume that
 # still holds the old one. db.env holds only what the mariadb container needs;
-# app.env holds what the app, worker and init need.
+# app.env holds what the app, worker and init need. The admin login is the
+# engine's (`credentials:` in panelalpha.yaml), in ~/.panelalpha/app-credentials.env.
 STORE_DIR="${HOME}/.panelalpha/foodsoft"
 DB_ENV="${STORE_DIR}/db.env"
 APP_ENV="${STORE_DIR}/app.env"
-NOTE="${STORE_DIR}/credentials.txt"
 
 mkdir -p "${STORE_DIR}"
 chmod 700 "${HOME}/.panelalpha" "${STORE_DIR}"
@@ -27,7 +27,6 @@ if [ ! -f "${APP_ENV}" ] || [ ! -f "${DB_ENV}" ]; then
     # unquoted env file and by database.yml's ENV lookup.
     DB_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
     DB_ROOT_PASSWORD="$(openssl rand -base64 24 | tr -d '\n=/+')"
-    ADMIN_PASSWORD="$(openssl rand -base64 15 | tr -d '\n=/+')"
     # hex avoids anything an env file could misread; >=30 chars as Rails requires.
     SECRET_KEY_BASE="$(openssl rand -hex 48)"
     (
@@ -50,45 +49,9 @@ SECRET_KEY_BASE=${SECRET_KEY_BASE}
 # Same value as MYSQL_PASSWORD in db.env; database.yml reads it as the app's
 # MySQL password via ENV['FOODSOFT_DB_PASSWORD'].
 FOODSOFT_DB_PASSWORD=${DB_PASSWORD}
-
-# Admin seeded once by init.sh when the database is empty. Everything past the
-# login is behind auth; this is the coop's first administrator account.
-FOODSOFT_ADMIN_NICK=admin
-FOODSOFT_ADMIN_EMAIL=admin@example.com
-FOODSOFT_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-EOF
-        cat > "${NOTE}" <<EOF
-Foodsoft on this account
-========================
-
-Foodsoft runs a non-profit food coop: suppliers, an article catalog, group
-orders and member accounting. Everything past the login page requires an
-account; the root URL redirects to the coop login. New members are added by
-invitation from inside the app (there is no open public sign-up).
-
-ADMIN LOGIN (seeded once, on the first deploy)
-  URL:      <this account's URL>/    (redirects to /f/login)
-  Login:    admin
-  Password: ${ADMIN_PASSWORD}
-
-  The stock Foodsoft demo login admin/secret is deliberately NOT installed.
-  Change the password from the profile page after first login if you like; a
-  redeploy will not reset it (init only seeds the admin on an empty database).
-
-SECRETS
-  SECRET_KEY_BASE and the database password live in ${STORE_DIR} (0600). They
-  are generated once and reused on every redeploy, which is what keeps logins,
-  sessions and the database working across rebuilds. Do not delete this
-  directory.
-
-EMAIL (optional)
-  Foodsoft sends invitations, password resets and order notifications. No SMTP
-  is configured by default, so those mails are not delivered. Set SMTP_ADDRESS
-  (and the other SMTP_* variables, see config/environments/production.rb) in
-  this project's environment to enable them.
 EOF
     )
-    say "secrets written to ${STORE_DIR}; onboarding notes in ${NOTE}"
+    say "secrets written to ${STORE_DIR}"
 else
     say "reusing the secrets in ${STORE_DIR}"
 fi

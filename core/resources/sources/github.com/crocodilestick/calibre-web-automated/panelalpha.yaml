@@ -23,11 +23,19 @@ description: >-
   DEFAULT ADMIN CLOSED BEFORE THE PORT OPENS. Calibre-Web creates admin /
   admin123 with a new app.db. A one-shot `set-admin` service runs first, on the
   same config volume, and uses Calibre-Web's own CLI (`cps.py -s admin:<pw>`),
-  which also creates app.db on an empty volume, to set the password generated
-  once into ~/.panelalpha/calibre-web-automated (0600 in 0700). The web service
+  which also creates app.db on an empty volume, to set the password the engine
+  generates (`credentials:` below; a symbol included, as Calibre-Web's default
+  password policy wants one) into ~/.panelalpha/app-credentials.env. The web service
   depends on it completing, so the site never answers with the default live.
   It only acts while admin still has admin123, so a password changed in the app
-  survives a redeploy. The generated login is in credentials.txt there.
+  survives a redeploy. GET /projects/{name}/app-credentials (MCP
+  app_credentials_get) returns the login.
 
   A `ready` gate holds the deploy until /login answers. The session cookie is
   marked Secure, as the site is only reached through the engine's https proxy.
+credentials:
+  login_path: /login
+  adopt_from: .panelalpha/calibre-web-automated/app.env
+  fields:
+    CWA_ADMIN_USER: {kind: username, value: admin}
+    CWA_ADMIN_PASSWORD: {kind: password, symbol: true}

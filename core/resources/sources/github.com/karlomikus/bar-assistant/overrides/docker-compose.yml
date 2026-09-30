@@ -94,8 +94,10 @@ services:
         condition: service_healthy
     env_file:
       - ../.panelalpha/bar-assistant/app.env
-      - ../.panelalpha/bar-assistant/owner.env
+      # OWNER_EMAIL / OWNER_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
+      OWNER_NAME: Owner
       APP_ENV: "production"
       APP_DEBUG: "false"
       DB_CONNECTION: "sqlite"

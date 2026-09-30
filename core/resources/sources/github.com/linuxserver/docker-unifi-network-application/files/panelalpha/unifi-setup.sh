@@ -1,5 +1,5 @@
 #!/bin/bash
-# Closes the first-run wizard with the generated admin, using the calls the
+# Closes the first-run wizard with the engine's admin login, using the calls the
 # wizard itself makes (app-unifi/setup, configureController). Until
 # `set-installed` the controller serves every API call anonymously as a super
 # admin ("factory_default"), so the proxy waits for this to succeed.

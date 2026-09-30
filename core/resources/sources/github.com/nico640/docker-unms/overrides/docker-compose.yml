@@ -23,8 +23,8 @@ services:
       start_period: 60s
     mem_limit: 2048m
 
-  # One-shot: completes UISP's first-visitor-wins setup with the generated
-  # admin over the compose network, before `app` exposes anything.
+  # One-shot: completes UISP's first-visitor-wins setup with the engine's
+  # admin login over the compose network, before `app` exposes anything.
   setup:
     image: docker.io/nico640/docker-unms:3.1.65
     restart: "no"
@@ -33,7 +33,8 @@ services:
         condition: service_healthy
     env_file:
       - .env
-      - ../.panelalpha/uisp/admin.env
+      # UISP_ADMIN_USER / UISP_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     environment:
       PA_PUBLIC_HOST: ${PA_PUBLIC_HOST}
     volumes:

@@ -39,8 +39,9 @@ description: >-
   registers it with public(); InitOwner refuses once the site is initialized).
   If left unclaimed, the first visitor to POST that endpoint becomes Owner with
   full admin. This recipe claims it at deploy time with the login the engine
-  generates (`credentials:` below: username `owner`, or the random one an
-  account deployed before this already has, taken over by `adopt_from`), and a
+  generates (`credentials:` below: an unguessable owner_<8 hex> username, the
+  same shape the recipe generated before, whose accounts `adopt_from` carries
+  over), and a
   one-shot `init-owner` service (curlimages/curl -- the app's busybox wget
   cannot POST application/json, it forces form-urlencoded and huma 400s) waits
   for the app to be healthy, checks /api/init/status, and if no Owner exists
@@ -73,6 +74,7 @@ description: >-
 credentials:
   adopt_from: .panelalpha/ech0/ech0.env
   fields:
-    ECH0_OWNER_USERNAME: {kind: username, value: owner}
+    ECH0_OWNER_USERNAME: {kind: username, value: "owner_{random}"}
     ECH0_OWNER_PASSWORD: {kind: password}
-    ECH0_OWNER_EMAIL: {kind: email, value: owner@ech0.local}
+    # InitOwner wants a parseable email; it is not used for mail.
+    ECH0_OWNER_EMAIL: {kind: email, value: "owner_{random}@ech0.local"}

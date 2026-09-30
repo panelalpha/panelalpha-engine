@@ -52,8 +52,8 @@ services:
 
   # One-shot: create the schema and the System user, then run migrations to
   # completion before the app is allowed to serve. `--install` reads
-  # LIBREDESK_SYSTEM_USER_PASSWORD from admin.env to set the admin password (and
-  # enforces its strength). --idempotent-install makes a redeploy a no-op on an
+  # LIBREDESK_SYSTEM_USER_PASSWORD (the engine's, from app-credentials.env) to
+  # set the admin password (and enforces its strength). --idempotent-install makes a redeploy a no-op on an
   # already-installed DB. `app` waits on this with service_completed_successfully
   # so a failed install fails the deploy instead of publishing a broken site.
   install:
@@ -65,7 +65,7 @@ services:
       redis:
         condition: service_healthy
     env_file:
-      - ../.panelalpha/libredesk/admin.env
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./config.toml:/libredesk/config.toml:ro
     entrypoint: ["/bin/sh", "-c"]

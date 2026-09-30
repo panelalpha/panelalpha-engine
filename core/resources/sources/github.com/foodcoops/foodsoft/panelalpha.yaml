@@ -43,13 +43,21 @@ description: >-
   in-container healthcheck spoofs the header so it is not bounced to https.
 
   SECRETS AND ADMIN. SECRET_KEY_BASE (a rotation logs everyone out and voids
-  every signed cookie), the database password (baked into the mariadb volume)
-  and a generated admin password are written once into ~/.panelalpha/foodsoft/
+  every signed cookie) and the database password (baked into the mariadb
+  volume) are written once into ~/.panelalpha/foodsoft/
   (0600 in 0700) -- the only writable place a deploy does not delete -- and
   reused across redeploys, so a rebuild neither logs the coop out nor locks the
   app out of its data. Foodsoft's stock seed (db/seeds.rb -> small.en) creates a
   demo coop full of users whose password is literally "secret"; this recipe does
   NOT run it. `init` loads only the schema and seeds a single Administrators
-  workgroup + one admin user with the generated password (never the default
-  admin/secret), plus the minimum lookup rows the UI needs, and only when the
-  database is empty. Onboarding notes go in credentials.txt.
+  workgroup + one admin user with the login the engine generates
+  (`credentials:` below, never the default admin/secret), plus the minimum
+  lookup rows the UI needs, and only when the database is empty. The login is
+  returned by GET /projects/{name}/app-credentials (MCP app_credentials_get).
+credentials:
+  login_path: /f/login
+  adopt_from: .panelalpha/foodsoft/app.env
+  fields:
+    FOODSOFT_ADMIN_NICK: {kind: username, value: admin}
+    FOODSOFT_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    FOODSOFT_ADMIN_PASSWORD: {kind: password}

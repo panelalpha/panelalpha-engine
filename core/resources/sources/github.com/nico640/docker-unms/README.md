@@ -6,11 +6,11 @@ Closed-source freeware, no licence key needed.
 | Service | Role |
 |---|---|
 | `uisp` | the whole of UISP; HTTPS-only on 443, publishes nothing |
-| `setup` | one-shot: completes the first-run setup with the generated admin |
+| `setup` | one-shot: completes the first-run setup with the engine's admin login |
 | `app` | nginx, HTTP 80 -> `https://uisp:443` (websockets included) |
 | `ready` | ends the deploy once `app` is healthy |
 
-- Admin: `admin`, password in `~/.panelalpha/uisp/admin.env` (see `credentials.txt`).
+- Admin: `admin`; `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) returns the password.
 - Data: `uisp-config` volume (`/config`). Survives redeploys, not account deletion.
 - Devices connect to `wss://<domain>:443` (the connection string in UISP settings).
 - Not published: NetFlow (UDP 2055), optional.

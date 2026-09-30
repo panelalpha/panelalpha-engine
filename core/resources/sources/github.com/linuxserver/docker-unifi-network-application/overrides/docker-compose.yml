@@ -50,14 +50,15 @@ services:
       start_period: 30s
     mem_limit: 1536m
 
-  # Closes the first-run wizard (first visitor wins) with the generated admin
-  # before the proxy opens the port.
+  # Closes the first-run wizard (first visitor wins) with the engine's admin
+  # login before the proxy opens the port.
   setup:
     image: linuxserver/unifi-network-application:10.6.106
     restart: "no"
     entrypoint: ["/bin/bash", "/panelalpha/unifi-setup.sh"]
     env_file:
-      - ../.panelalpha/unifi/admin.env
+      # UNIFI_ADMIN_USER / UNIFI_ADMIN_EMAIL / UNIFI_ADMIN_PASSWORD, generated and kept by the engine.
+      - ../.panelalpha/app-credentials.env
     volumes:
       - ./panelalpha/unifi-setup.sh:/panelalpha/unifi-setup.sh:ro
     depends_on:

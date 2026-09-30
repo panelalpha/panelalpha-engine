@@ -38,11 +38,17 @@ description: >-
   CONFIG + SECRETS. config.toml (which upstream expects the operator to create
   from config.sample.toml) is rendered by hooks/prepare.sh, with env=prod and
   secure cookies on -- the engine terminates TLS in front of the app. The
-  Postgres password (baked into the pgdata volume), the 32-char encryption_key
-  and the generated System-user password are written once into
-  ~/.panelalpha/libredesk/ (0600 in 0700), the only writable place a redeploy
-  does not delete, and reused on every rebuild. The admin login goes in
-  credentials.txt. The public app URL used in email/help-center/widget links is
+  Postgres password (baked into the pgdata volume) and the 32-char
+  encryption_key are written once into ~/.panelalpha/libredesk/ (0600 in
+  0700), the only writable place a redeploy does not delete, and reused on
+  every rebuild. The System user's login is the engine's (`credentials:`
+  below; a symbol included for libredesk's strength rule) and is returned by
+  GET /projects/{name}/app-credentials (MCP app_credentials_get). The public app URL used in email/help-center/widget links is
   set from the console after first login (stored in the DB), so no build-time
   URL is baked. SSO (Google/Microsoft/OIDC) and email are optional and left for
   the operator to configure in the console.
+credentials:
+  adopt_from: .panelalpha/libredesk/admin.env
+  fields:
+    LIBREDESK_SYSTEM_USER: {kind: username, value: System}
+    LIBREDESK_SYSTEM_USER_PASSWORD: {kind: password, symbol: true}

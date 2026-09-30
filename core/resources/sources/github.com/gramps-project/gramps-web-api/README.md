@@ -34,13 +34,16 @@ account's public https URL.
 never regenerated:
 
 - `GRAMPSWEB_SECRET_KEY` -- Flask/JWT signing key.
-- `GRAMPSWEB_OWNER_USER` / `GRAMPSWEB_OWNER_PASSWORD` -- the owner account.
+
+The owner account (`GRAMPSWEB_OWNER_USER` / `GRAMPSWEB_OWNER_PASSWORD`) is the
+engine's: `credentials:` in `panelalpha.yaml`, returned by
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`); an account
+deployed before this keeps its password from `gramps.env` (`adopt_from`).
 
 Gramps Web has no owner until one is created and `GRAMPSWEB_REGISTRATION_DISABLED`
 turns off open sign-up. `files/panelalpha/gramps/init.sh` runs
 `gramps_webapi user add ... --role 5` **only when the user DB is empty**, so a
-redeploy never resets the owner. The password is written to
-`~/.panelalpha/gramps/credentials.txt`.
+redeploy never resets the owner.
 
 ## Persistence
 

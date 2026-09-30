@@ -1,6 +1,6 @@
 #!/bin/sh
 # Runs the migrations, then creates the owner with upstream's own
-# admin:user:create, feeding it the generated password. A no-op once the
+# admin:user:create, feeding it the engine's password. A no-op once the
 # owner exists.
 set -eu
 cd /var/www/html

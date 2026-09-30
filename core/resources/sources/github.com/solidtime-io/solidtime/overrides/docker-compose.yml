@@ -4,7 +4,8 @@
 # (solidtime-io/self-hosting-examples, 1-docker-with-database) instead:
 # the published solidtime/solidtime image as app + scheduler + queue worker,
 # Postgres 15 and Gotenberg for PDF reports, with:
-#   - secrets from ~/.panelalpha/solidtime/*.env, generated once by the hook
+#   - secrets from ~/.panelalpha/solidtime/*.env, generated once by the hook;
+#     the owner's login from ~/.panelalpha/app-credentials.env (the engine's)
 #   - APP_URL in `environment:`, where the engine substitutes the public URL
 #   - a one-shot `setup` that migrates and creates the owner
 #   - a no-op `ready` gate so `compose up -d` returns once the app answers
@@ -66,10 +67,9 @@ services:
     entrypoint: ["/bin/sh", "/panelalpha/solidtime-setup.sh"]
     env_file:
       - ../.panelalpha/solidtime/app.env
-      - ../.panelalpha/solidtime/admin.env
+      - ../.panelalpha/app-credentials.env
     environment:
       <<: *solidtime-env
-      SOLIDTIME_ADMIN_EMAIL: admin@${PA_PUBLIC_HOST}
     volumes:
       - app-storage:/var/www/html/storage
       - ./panelalpha/solidtime-setup.sh:/panelalpha/solidtime-setup.sh:ro

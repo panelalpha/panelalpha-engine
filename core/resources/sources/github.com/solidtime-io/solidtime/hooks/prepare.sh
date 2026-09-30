@@ -1,6 +1,7 @@
 #!/bin/bash
-# Generates APP_KEY, the Passport RSA pair, the Postgres password and the admin
-# password once, in ~/.panelalpha (survives redeploys; ~/project does not).
+# Generates APP_KEY, the Passport RSA pair and the Postgres password once, in
+# ~/.panelalpha (survives redeploys; ~/project does not). The owner's login is
+# the engine's (`credentials:` in panelalpha.yaml), in ~/.panelalpha/app-credentials.env.
 # Regenerating any of them against the surviving volumes would lock solidtime
 # out of its data or invalidate every issued API token.
 set -e
@@ -27,8 +28,5 @@ if [ ! -f "${STORE}/app.env" ]; then
         printf 'PASSPORT_PRIVATE_KEY="%s"\n' "${priv}"
         printf 'PASSPORT_PUBLIC_KEY="%s"\n' "${pub}"
     } > "${STORE}/app.env"
-fi
-if [ ! -f "${STORE}/admin.env" ]; then
-    printf 'SOLIDTIME_ADMIN_PASSWORD=%s\n' "$(openssl rand -hex 16)" > "${STORE}/admin.env"
 fi
 chmod 600 "${STORE}"/*.env
