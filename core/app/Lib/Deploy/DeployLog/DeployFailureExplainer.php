@@ -67,6 +67,20 @@ class DeployFailureExplainer
     }
 
     /**
+     * The message a panicking Cargo build script gave, in the current
+     * (`panicked at file:l:c:` then the message) or pre-1.73 form.
+     */
+    private static function buildScriptPanic(string $output): ?string
+    {
+        if (preg_match('/panicked at [^\n]*?:\d+:\d+:[ \t]*\R(?:#\d+[ \t]+)?(?:\d+\.\d+[ \t]+)?([^\n]*\S)/', $output, $p) === 1
+            || preg_match("/panicked at '([^'\n]+)', \\S+:\\d+:\\d+/", $output, $p) === 1) {
+            return trim($p[1]);
+        }
+
+        return null;
+    }
+
+    /**
      * Whether $output shows the compose building the image $ref locally. Docker
      * compose pulls an image a sibling service builds before building it (the
      * local-tag pattern that sidesteps engine#229), and that pull's `failed to
@@ -112,7 +126,8 @@ class DeployFailureExplainer
                 '/pull access denied for ([^\s,]+)/i',
                 '/(\S+): failed to do request/i',
             ] as $pattern) {
-                if (preg_match($pattern, $line, $r) === 1 && $r[1] !== 'solve') {
+                // `failed to solve:` and BuildKit's `#N ERROR:` put a word, not an image, before the colon.
+                if (preg_match($pattern, $line, $r) === 1 && !in_array(strtolower($r[1]), ['solve', 'error'], true)) {
                     $ref = $r[1];
                     break;
                 }
@@ -128,7 +143,10 @@ class DeployFailureExplainer
                     . '|TLS handshake|deadline exceeded|server misbehaving/i', $line) === 1 => 'unreachable',
                 default => 'unknown',
             };
-            $found[$cause] ??= preg_replace('#^docker\.io/(?:library/)?#', '', $ref);
+            // A later line may name the image an earlier one of the same cause did not.
+            if (($found[$cause] ?? '') === '') {
+                $found[$cause] = preg_replace('#^docker\.io/(?:library/)?#', '', $ref);
+            }
         }
         if ($found === []) {
             return null;
@@ -345,8 +363,9 @@ class DeployFailureExplainer
             // A host build is not in the account's cgroup, so the plan is not what ran out.
             'out-of-memory' => [
                 '/(exit code: 137|signal:\s*killed|OOMKilled'
-                    // BuildKit's form when the step's cgroup refused an allocation (engine#161).
-                    . '|ResourceExhausted:[^\n]*cannot allocate memory'
+                    // BuildKit's form when the step's cgroup refused an allocation,
+                    // in the summary and in the step's own `#N ERROR:` line.
+                    . '|(?:ResourceExhausted:|did not complete successfully:)[^\n]*cannot allocate memory'
                     . '|out of memory'
                     . '|(?:task|process)\s+"?[\w\/.-]+"?\s+killed'
                     . '|^[ \t]*(?:\[ERROR\][ \t]+)?Killed[ \t]*$'
@@ -388,12 +407,22 @@ class DeployFailureExplainer
             ],
 
             // Cargo's own report, naming the crate. The two specific reasons above win where
-            // they apply; this catches the long tail that says only "a build script failed".
+            // they apply; this catches the long tail that says only "a build script failed",
+            // which is not always a C library: scripts also panic on missing assets or inputs.
             'rust-build-script-failed' => [
                 '/error: failed to run custom build command for `([^`]+)`/',
-                static fn (array $m): string =>
-                    "The Rust dependency `{$m[1]}` could not be built (it compiles or links a C "
-                        . 'library). The full output is in the deploy log.',
+                static function (array $m, string $output = ''): string {
+                    // A local path (`name v1 (/app/src/data)`) is the checkout's own crate.
+                    $crate = preg_match('/\(\/[^)]*\)\s*$/', $m[1]) === 1
+                        ? "The project's Rust crate `{$m[1]}`"
+                        : "The Rust dependency `{$m[1]}`";
+                    $after = (string) strstr($output, $m[0]);
+                    $said = self::buildScriptPanic($after !== '' ? $after : $output);
+                    $said = $said === null ? '' : ' It said: ' . rtrim(self::clip($said), '.') . '.';
+
+                    return "{$crate} could not be built: its build script failed.{$said}"
+                        . ' The full output is in the deploy log.';
+                },
             ],
 
             'rust-compile-failed' => [
@@ -528,8 +557,9 @@ class DeployFailureExplainer
             // node-gyp needs a Python interpreter and a C toolchain the slim Node images do
             // not carry. pnpm 10+ runs install scripts by default, so the first dependency
             // with a native addon ends the build with gyp output and no diagnosis.
+            // Not a bare `node-gyp rebuild`: pnpm echoes that script line for installs that succeed.
             'native-build-toolchain-missing' => [
-                '/(gyp ERR!|Could not find any Python installation to use|node-gyp rebuild)/i',
+                '/(gyp ERR!|Could not find any Python installation to use|node-gyp: (?:command )?not found)/i',
                 static fn (): string =>
                     'A dependency has to be compiled during install, and this build image has no '
                         . 'Python or C toolchain for it. Name an image that does in a panelalpha.yaml, '

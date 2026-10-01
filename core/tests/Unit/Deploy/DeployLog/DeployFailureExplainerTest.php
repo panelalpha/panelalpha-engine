@@ -267,6 +267,26 @@ OUT;
     }
 
     /**
+     * audioserve: rustc linking two LTO binaries ran the build out of memory.
+     * The failing region ends at BuildKit's step line, before the
+     * `ResourceExhausted` summary, and read as Rust code that does not compile.
+     */
+    public function test_a_step_that_could_not_allocate_memory_is_out_of_memory(): void
+    {
+        $output = <<<'OUT'
+        #12 790.0 error: could not compile `audioserve` (test "test_binary")
+        #12 790.0   process didn't exit successfully: `rustc --crate-name test_binary -C opt-level=3 -C lto -C codegen-units=1`
+        #12 790.0 error: could not compile `audioserve` (bin "audioserve")
+        #12 ERROR: process "/bin/sh -c cargo build --release && cargo test --release" did not complete successfully: cannot allocate memory
+        OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('out-of-memory', $match['rule'] ?? null);
+        $this->assertStringContainsString('ran out of memory', $match['message']);
+    }
+
+    /**
      * ...and the same for Rust, where the decoy is apt's permission error from
      * a `systemPackages()` best effort that runs as the account.
      */
@@ -283,6 +303,46 @@ OUT;
             'rust-librocksdb-sys',
             (string) DeployFailureExplainer::explain($output)
         );
+    }
+
+    /**
+     * rauthy: the project's own crate's build script panicked on a missing
+     * data file, and the panic says what to run. It was reported as a
+     * dependency that "compiles or links a C library", without that line.
+     */
+    public function test_a_panicking_build_script_is_quoted_and_the_project_crate_named(): void
+    {
+        $output = <<<'OUT'
+        #14 118.2 error: failed to run custom build command for `rauthy-data v0.37.0-20260917 (/app/src/data)`
+        #14 118.2
+        #14 118.2 Caused by:
+        #14 118.2   process didn't exit successfully: `/app/target/release/build/rauthy-data-1f/build-script-build` (exit status: 101)
+        #14 118.2   --- stderr
+        #14 118.2
+        #14 118.2   thread 'main' (19722) panicked at src/data/build.rs:48:5:
+        #14 118.2   assets/fido_mds/dataset.bin is missing and this is a release build. Run `just fido-mds-prep` to fetch it, then build again.
+        #14 118.2   note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+        OUT;
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('rust-build-script-failed', $match['rule'] ?? null);
+        $this->assertStringContainsString("The project's Rust crate `rauthy-data", $match['message']);
+        $this->assertStringContainsString('Run `just fido-mds-prep` to fetch it', $match['message']);
+        $this->assertStringNotContainsString('C library', $match['message']);
+    }
+
+    /** The pre-1.73 panic form, from a registry dependency. */
+    public function test_an_old_style_build_script_panic_is_quoted(): void
+    {
+        $output = "error: failed to run custom build command for `ring v0.16.20`\n"
+            . "--- stderr\n"
+            . "thread 'main' panicked at 'failed to execute command: No such file or directory', build.rs:12:5\n";
+
+        $message = (string) DeployFailureExplainer::explain($output);
+
+        $this->assertStringContainsString('The Rust dependency `ring v0.16.20`', $message);
+        $this->assertStringContainsString('It said: failed to execute command: No such file or directory.', $message);
     }
 
     /**
@@ -532,6 +592,33 @@ OUT;
     {
         $output = "gyp ERR! not ok\n"
             . 'ERROR: process "/bin/sh -c pnpm install" did not complete successfully: exit code: 1';
+
+        $this->assertSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule']);
+    }
+
+    /**
+     * keystone: pnpm echoes every install script's command line, including a
+     * native build that fell back to a prebuilt binary. The failure was the
+     * project's own postinstall, and the echo must not be blamed for it.
+     */
+    public function test_an_echoed_node_gyp_command_is_not_a_missing_toolchain(): void
+    {
+        $output = "#12 5.1 node_modules/better-sqlite3 install\$ prebuild-install || node-gyp rebuild --release\n"
+            . "#12 7.4 node_modules/better-sqlite3 install: Done\n"
+            . "#12 9.0 . postinstall\$ keystone postinstall\n"
+            . "#12 9.8 . postinstall: Error: Region is missing\n"
+            . "#12 9.9 . postinstall: Failed\n"
+            . '#12 ERROR: process "/bin/sh -c pnpm install" did not complete successfully: exit code: 1';
+
+        $this->assertNotSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    /** node-gyp itself absent from the image is still the missing toolchain. */
+    public function test_a_missing_node_gyp_binary_is_explained(): void
+    {
+        $output = "better-sqlite3 install\$ node-gyp rebuild\n"
+            . "sh: 1: node-gyp: not found\n"
+            . '[ELIFECYCLE] Command failed with exit code 127.';
 
         $this->assertSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule']);
     }
@@ -1015,6 +1102,27 @@ OUT;
 
         $this->assertStringContainsString('localhost:5000/base-php:amd64', $message);
         $this->assertStringContainsString('could not be reached from this server', $message);
+    }
+
+    /**
+     * pelican-dev/panel: BuildKit's plain progress prints the step's own
+     * `#N ERROR: failed to do request` before the `failed to solve` summary,
+     * and the image was named "ERROR".
+     */
+    public function test_buildkits_error_prefix_is_not_taken_for_the_image(): void
+    {
+        $output = '#6 ERROR: failed to do request: Head "https://localhost:5000/v2/base-php/manifests/amd64": '
+            . "dial tcp [::1]:5000: connect: connection refused\n"
+            . "> [internal] load metadata for localhost:5000/base-php:amd64:\n"
+            . "11 | >>> FROM --platform=\$TARGETOS/\$TARGETARCH localhost:5000/base-php:\$TARGETARCH AS composer\n"
+            . 'failed to solve: localhost:5000/base-php:amd64: failed to do request: '
+            . 'Head "https://localhost:5000/v2/base-php/manifests/amd64": '
+            . 'dial tcp [::1]:5000: connect: connection refused';
+
+        $message = (string) DeployFailureExplainer::explain($output);
+
+        $this->assertStringContainsString('The base image localhost:5000/base-php:amd64 could not be downloaded', $message);
+        $this->assertStringNotContainsString('ERROR', $message);
     }
 
     /** Livebook (engine#143): `FROM ${BASE_IMAGE}` that only its CI fills in. */

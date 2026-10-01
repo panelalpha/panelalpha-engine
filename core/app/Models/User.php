@@ -1211,6 +1211,12 @@ class User extends Authenticatable
         return 'unknown';
     }
 
+    /** Set when a deploy failed after an earlier one had succeeded. */
+    public function hasDeployedBefore(): bool
+    {
+        return ($this->getDetails()['deployed_before'] ?? false) === true;
+    }
+
     public function getDeploymentWarnings(): array
     {
         $details = $this->getDetails();

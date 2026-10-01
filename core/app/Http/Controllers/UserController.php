@@ -19,6 +19,7 @@ use App\System;
 use App\Lib\Helper;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Source\GitRemoteProbe;
@@ -1112,7 +1113,7 @@ class UserController extends Controller
         // The same slug deploy telemetry reports, so a client and a dashboard
         // name one failure the same way.
         $match = DeployFailureExplainer::match($e->getMessage());
-        $message = $match['message'] ?? $e->getMessage();
+        $message = $match['message'] ?? FailureOutput::withoutNoise($e->getMessage());
         $stage = $deployLogger?->currentStage();
         self::finishRebuildLog($deployLogger, DeployLogger::STATUS_FAILED, $message);
 
@@ -1295,10 +1296,14 @@ class UserController extends Controller
                 throw ValidationException::withMessages([
                     'zip_path' => $e->getMessage(),
                 ]);
+            } catch (ProblemException $e) {
+                // A start failure already carries its rule; finish() is a no-op once finished.
+                $deployLogger?->finish(DeployLogger::STATUS_FAILED, $e->getMessage());
+                throw $e;
             } catch (\Exception $e) {
                 $deployLogger?->recordFailureOutput($e->getMessage());
                 $match = DeployFailureExplainer::match($e->getMessage());
-                $message = $match['message'] ?? $e->getMessage();
+                $message = $match['message'] ?? FailureOutput::withoutNoise($e->getMessage());
                 $stage = $deployLogger?->currentStage();
                 $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
                 throw self::deployProblem($match['rule'] ?? 'deploy_failed', $message, $stage);

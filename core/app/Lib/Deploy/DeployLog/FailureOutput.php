@@ -28,6 +28,12 @@ final class FailureOutput
     /** How much of a failed build step's own output to keep. */
     private const STEP_LINES = 40;
 
+    /**
+     * A build step its memory limit stopped. The compile errors printed above
+     * it are symptoms, and can be further up than CONTEXT reaches.
+     */
+    private const MEMORY_EXHAUSTED = '/(?:ResourceExhausted:|did not complete successfully:)[^\n]*cannot allocate memory/';
+
     /** BuildKit's `#<step> <seconds> ` in front of a step's output line. */
     private const STEP_PREFIX = '/^#\d+ \d+(?:\.\d+)? /';
 
@@ -127,6 +133,14 @@ final class FailureOutput
             . '|Skipped)(?:\s+[\d.]+s)?\s*$/',
         '/^\s*[0-9a-f]{12}\s+(?:Pulling fs layer|Waiting|Downloading|Download complete|Verifying Checksum'
             . '|Extracting|Pull complete|Already exists)\b/',
+        // `docker run`'s own pull of an image it does not have yet, which a
+        // host build prints on stderr ahead of anything the build says.
+        '/^Unable to find image \'[^\']+\' locally$/',
+        '/^[\w.-]+: Pulling from [\w.\/:-]+$/',
+        '/^[0-9a-f]{12}: (?:Pulling fs layer|Waiting|Downloading|Download complete|Verifying Checksum'
+            . '|Extracting|Pull complete|Already exists)\b/',
+        '/^Digest: sha256:[0-9a-f]{64}$/',
+        '/^Status: (?:Downloaded newer image|Image is up to date) for \S+$/',
         // The same for `apt-get update`, best effort in the Rust host compile
         // (`|| true`): the account cannot write the apt lists (#86).
         '/^E: List directory \/var\/lib\/apt\/lists\/partial is missing\. - Acquire \(13: Permission denied\)$/',
@@ -147,6 +161,11 @@ final class FailureOutput
 
         $window = array_slice($lines, -self::WINDOW);
         foreach ($window as $i => $line) {
+            if (preg_match(self::MEMORY_EXHAUSTED, $line) === 1) {
+                return trim(implode("\n", array_slice($window, $i, self::CONTEXT)));
+            }
+        }
+        foreach ($window as $i => $line) {
             // A build step's own output carries BuildKit's `#13 249.2 ` prefix.
             $bare = (string) preg_replace(self::STEP_PREFIX, '', $line);
             foreach (self::CAUSE as $pattern) {
@@ -162,6 +181,20 @@ final class FailureOutput
         // so the whole window is returned -- it is already bounded to WINDOW
         // non-noise lines, and keeps whatever the explainer can recognise.
         return trim(implode("\n", $window));
+    }
+
+    /**
+     * The output without its progress and advisory lines, for a failure no
+     * explainer rule matched. A host build's stderr starts with docker's image
+     * pull, which was reported as the reason. Nothing else is dropped: the
+     * text may be a sentence the engine already made.
+     */
+    public static function withoutNoise(string $output): string
+    {
+        $lines = preg_split('/\r?\n/', trim($output)) ?: [];
+        $kept = array_filter($lines, static fn (string $l): bool => !self::isNoise($l));
+
+        return $kept === [] ? trim($output) : trim(implode("\n", $kept));
     }
 
     /**

@@ -472,6 +472,11 @@ class DeployLogger
         $this->flushBuffers();
 
         $latest = $this->readLatest() ?? [];
+        // A caller that catches a failure the workflow already finished must not
+        // write a second terminal line, a second telemetry report or a new status.
+        if (($latest['id'] ?? null) === $this->deployId && ($latest['finished_at'] ?? null) !== null) {
+            return;
+        }
         [$status, $error] = $this->settleStatus($latest, $status, $error);
         [$stages] = DeployStatus::closeOpenStage($latest['stages'] ?? [], $now = time());
         $error = $error === null ? null : LogLine::sanitize($this->redact($error));

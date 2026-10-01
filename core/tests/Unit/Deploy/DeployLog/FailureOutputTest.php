@@ -151,6 +151,26 @@ class FailureOutputTest extends TestCase
     }
 
     /**
+     * qdrant: rustc was killed compiling several crates, and the compile
+     * errors were further above the memory failure than the region reaches.
+     */
+    public function test_a_step_that_ran_out_of_memory_leads_over_the_compile_errors_it_caused(): void
+    {
+        $lines = ['#22 177.7 error: could not compile `segment` (lib)'];
+        for ($i = 0; $i < 20; $i++) {
+            $lines[] = "#22 177.7 error: could not compile `crate{$i}` (lib)";
+        }
+        $lines[] = '#22 ERROR: process "/bin/sh -c cargo build --release" did not complete successfully: cannot allocate memory';
+        $lines[] = '------';
+        $lines[] = 'failed to solve: ResourceExhausted: process "/bin/sh -c cargo build --release" did not complete successfully: cannot allocate memory';
+
+        $region = FailureOutput::select(implode("\n", $lines));
+
+        $this->assertStringStartsWith('#22 ERROR: process', $region);
+        $this->assertSame('out-of-memory', DeployFailureExplainer::match($region)['rule'] ?? null);
+    }
+
+    /**
      * The daemon refusing to create a container -- akkoma's shape, where the
      * app's own image builds and sysbox will not run it.
      */
@@ -488,5 +508,51 @@ OUT;
         $this->assertSame('', FailureOutput::select(
             'E: List directory /var/lib/apt/lists/partial is missing. - Acquire (13: Permission denied)'
         ));
+    }
+
+    /** OpenSourcePOS's host frontend build: stderr of `docker run node:22-bookworm`, gulp failing. */
+    private const HOST_BUILD_PULL_STDERR = <<<'ERR'
+        Unable to find image 'node:22-bookworm' locally
+        22-bookworm: Pulling from library/node
+        0c06829c34ad: Pulling fs layer
+        105754cf457c: Pulling fs layer
+        0c06829c34ad: Download complete
+        105754cf457c: Pull complete
+        Digest: sha256:363e1587494626837fa7f9a23bdb453d13b0ff3c67c705c2805cfc69c2d2fad7
+        Status: Downloaded newer image for node:22-bookworm
+        npm warn deprecated gulp-util@3.0.8: gulp-util is deprecated
+        [18:02:31] 'update-licenses' errored after 24 ms
+        [18:02:31] Error: Command `composer licenses --format=json --no-dev > public/license/composer.LICENSES` exited with code 127
+            at ChildProcess.handleSubShellExit (/app/node_modules/gulp-run/command.js:166:13)
+        [18:02:31] 'default' errored after 38 ms
+        ERR;
+
+    public function test_docker_runs_image_pull_is_not_the_reason(): void
+    {
+        $region = FailureOutput::select(self::HOST_BUILD_PULL_STDERR);
+
+        $this->assertStringStartsWith("[18:02:31] 'update-licenses' errored", $region);
+        $this->assertStringNotContainsString('Pulling', $region);
+        $this->assertStringNotContainsString('Digest:', $region);
+    }
+
+    public function test_an_unexplained_host_build_failure_leads_with_what_the_build_said(): void
+    {
+        $text = FailureOutput::withoutNoise(FailureOutput::fromStreams(self::HOST_BUILD_PULL_STDERR, "added 574 packages\n"));
+
+        $this->assertStringStartsWith("[18:02:31] 'update-licenses' errored", $text);
+        $this->assertStringContainsString('exited with code 127', $text);
+        $this->assertStringNotContainsString('Unable to find image', $text);
+        $this->assertStringNotContainsString('npm warn', $text);
+    }
+
+    public function test_without_noise_keeps_every_line_that_says_something(): void
+    {
+        $sentence = "Failed to start app: build failed\nnpm error code 1\nnpm error path /app | Set FOO";
+
+        $this->assertSame($sentence, FailureOutput::withoutNoise($sentence));
+        $this->assertSame('Deploy failed on purpose', FailureOutput::withoutNoise("  Deploy failed on purpose\n"));
+        // All noise: the output itself, not nothing.
+        $this->assertSame('npm warn deprecated x', FailureOutput::withoutNoise('npm warn deprecated x'));
     }
 }

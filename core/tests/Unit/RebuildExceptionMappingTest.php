@@ -72,6 +72,20 @@ class RebuildExceptionMappingTest extends TestCase
         $this->assertStringContainsString('compiled during install', $problem->problems[0]['message']);
     }
 
+    /** A host build's stderr opens with docker's image pull; that is not the reason. */
+    public function test_an_unexplained_host_build_failure_is_not_reported_by_its_image_pull(): void
+    {
+        $problem = $this->translate(new \RuntimeException(
+            "Unable to find image 'node:22-bookworm' locally\n22-bookworm: Pulling from library/node\n"
+            . "0c06829c34ad: Pulling fs layer\nStatus: Downloaded newer image for node:22-bookworm\n"
+            . "[18:02:31] 'update-licenses' errored after 24 ms\n"
+            . "[18:02:31] Error: Command `composer licenses` exited with code 127"
+        ));
+
+        $this->assertStringStartsWith("[18:02:31] 'update-licenses' errored", $problem->problems[0]['message']);
+        $this->assertStringContainsString('exited with code 127', $problem->problems[0]['message']);
+    }
+
     /** engine#272: the stage the deploy log was in reaches the problem. */
     public function test_a_failure_names_the_stage_it_happened_in(): void
     {

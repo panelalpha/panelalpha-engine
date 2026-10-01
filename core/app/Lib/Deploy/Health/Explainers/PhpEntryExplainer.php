@@ -48,6 +48,12 @@ final class PhpEntryExplainer implements Explainer
         'index.php',
     ];
 
+    /** How many directory levels below the root are searched when no usual place has one. */
+    private const SEARCH_DEPTH = 3;
+
+    /** Never a front page: dependencies installed into the tree. Dot directories are skipped too. */
+    private const NOT_SEARCHED = ['vendor', 'node_modules'];
+
     public function id(): string
     {
         return 'php-entry';
@@ -88,6 +94,16 @@ final class PhpEntryExplainer implements Explainer
             ];
         }
 
+        // oPodSync keeps it in server/: the docroot hint is still the fix there.
+        $dir = self::shallowestIndexDir($context->projectDir);
+        if ($dir !== null) {
+            return [
+                'detail' => 'index.php is not in any of the usual places, but ' . $dir . '/index.php exists, '
+                    . 'so the document root should most likely be ' . $dir . ' rather than the project root.',
+                'fix' => 'Set `docroot: ' . $dir . '` in panelalpha.yaml and redeploy.',
+            ];
+        }
+
         return [
             'detail' => 'There is no index.php anywhere in ~/project, so nothing in this project '
                 . 'is a front page.',
@@ -95,5 +111,41 @@ final class PhpEntryExplainer implements Explainer
                 . 'holds the application. A repository that is a library rather than a site has no '
                 . 'front page to serve.',
         ];
+    }
+
+    /**
+     * The shallowest directory below $root holding an index.php, alphabetical
+     * within a level. Unreadable directories and symlinks are skipped.
+     */
+    private static function shallowestIndexDir(string $root): ?string
+    {
+        $root = rtrim($root, '/');
+        $level = [''];
+        for ($depth = 0; $depth < self::SEARCH_DEPTH && $level !== []; $depth++) {
+            $next = [];
+            foreach ($level as $relative) {
+                $entries = @scandir($relative === '' ? $root : $root . '/' . $relative);
+                if ($entries === false) {
+                    continue;
+                }
+                foreach ($entries as $entry) {
+                    if ($entry[0] === '.' || in_array($entry, self::NOT_SEARCHED, true)) {
+                        continue;
+                    }
+                    $child = $relative === '' ? $entry : $relative . '/' . $entry;
+                    $path = $root . '/' . $child;
+                    if (is_link($path) || !is_dir($path)) {
+                        continue;
+                    }
+                    if (is_file($path . '/index.php')) {
+                        return $child;
+                    }
+                    $next[] = $child;
+                }
+            }
+            $level = $next;
+        }
+
+        return null;
     }
 }

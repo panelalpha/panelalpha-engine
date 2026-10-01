@@ -47,7 +47,8 @@ class EntrypointWriter
     {
         return [
             PlatformStage::PHASE_ENV => PlatformStage::phaseFor(
-                $this->dind->userModel()->getDeploymentStatus()
+                $this->dind->userModel()->getDeploymentStatus(),
+                $this->dind->userModel()->hasDeployedBefore(),
             ),
         ];
     }

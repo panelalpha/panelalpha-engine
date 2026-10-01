@@ -144,6 +144,46 @@ class DeploymentWorkflowTest extends TestCase
         $this->assertTrue($mechanics->startedApplication);
     }
 
+    /**
+     * A healthy app deployed with env_vars, on a host with no public IPv4: the
+     * public-name warning made it partial, and the customer was told the deploy
+     * failed with custom variables and to retry without the ones it needs.
+     */
+    public function test_a_public_url_warning_alone_does_not_blame_the_env_vars(): void
+    {
+        foreach (['run', 'rebuildFromCheckout'] as $path) {
+            $model = $this->dindModel(['deploy_strategy' => 'express']);
+            $domain = new DomainModel();
+            $domain->domain = 'alice.example.test';
+            $mechanics = new RecordingDeployMechanics($model, $domain);
+            $mechanics->hasGit = true;
+            $mechanics->publicUrl = ['The application is deployed but not reachable from the internet.'];
+            $mechanics->envHint = 'Deploy failed with custom environment variables.';
+
+            $workflow = new DeploymentWorkflow(new StubDindProject($model), $mechanics);
+            $path === 'run' ? $workflow->run() : $workflow->rebuildFromCheckout($this->silentDeployLogger());
+
+            $this->assertSame('partial', $model->getDetails()['deployment_status'] ?? null, $path);
+            $this->assertSame($mechanics->publicUrl, $model->getDetails()['deployment_warnings'], $path);
+        }
+    }
+
+    /** An app that is not serving may have been broken by them, and is still told so. */
+    public function test_an_app_that_is_not_serving_still_gets_the_env_vars_hint(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'express']);
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+        $mechanics = new RecordingDeployMechanics($model, $domain);
+        $mechanics->hasGit = true;
+        $mechanics->serving = ['The application did not answer its health check.'];
+        $mechanics->envHint = 'Deploy failed with custom environment variables.';
+
+        (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->run();
+
+        $this->assertContains($mechanics->envHint, $model->getDetails()['deployment_warnings']);
+    }
+
     public function test_rebuild_from_source_syncs_ingests_and_starts_without_persisting_status(): void
     {
         $model = $this->dindModel(['deploy_strategy' => 'static']);
@@ -245,7 +285,7 @@ class DeploymentWorkflowTest extends TestCase
         return $started[0];
     }
 
-    public function test_rebuild_from_source_passes_zip_and_throws_plain_exception_on_start_failure(): void
+    public function test_rebuild_from_source_passes_zip_and_names_an_unrecognised_start_failure(): void
     {
         $model = $this->dindModel(['deploy_strategy' => 'express']);
         $domain = new DomainModel();
@@ -258,17 +298,81 @@ class DeploymentWorkflowTest extends TestCase
 
         try {
             $workflow->rebuildFromSource($this->silentDeployLogger(), '/tmp/app.zip');
-            $this->fail('Expected Exception');
+            $this->fail('Expected ProblemException');
         } catch (ProblemException $e) {
-            $this->fail('rebuildFromSource must not throw ProblemException: ' . $e->getMessage());
-        } catch (\Exception $e) {
+            $this->assertSame('app_did_not_start', $e->problems[0]['code']);
             $this->assertStringContainsString('Failed to start app', $e->getMessage());
         }
 
         $this->assertSame('/tmp/app.zip', $mechanics->sourceRebuildZipPath);
         $this->assertSame('/tmp/app.zip', $mechanics->wipeRebuildZipPath);
-        $this->assertNull($model->getDetails()['deployment_status'] ?? null);
+        $this->assertSame('failed', $model->getDetails()['deployment_status'] ?? null);
+        $this->assertStringContainsString('Failed to start app', (string) ($model->getDetails()['error'] ?? ''));
         $this->assertFalse($mechanics->deletedProject);
+    }
+
+    public function test_a_failed_rebuild_of_a_deployed_project_is_recorded_and_stays_upgrading(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'php', 'deployment_status' => 'partial']);
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+
+        $mechanics = new RecordingDeployMechanics($model, $domain);
+        $mechanics->wipeRebuildException = new \RuntimeException("fatal: Remote branch nope not found in upstream origin");
+        $workflow = new DeploymentWorkflow(new StubDindProject($model), $mechanics);
+
+        try {
+            $workflow->rebuildFromSource($this->silentDeployLogger(), null);
+            $this->fail('Expected Exception');
+        } catch (\RuntimeException $e) {
+        }
+
+        $this->assertSame('failed', $model->getDetails()['deployment_status'] ?? null);
+        $this->assertNotSame('', (string) ($model->getDetails()['error'] ?? ''));
+        $this->assertTrue($model->hasDeployedBefore());
+        $this->assertSame(
+            \App\Lib\Deploy\Platform\PlatformStage::UPGRADE,
+            \App\Lib\Deploy\Platform\PlatformStage::phaseFor($model->getDeploymentStatus(), $model->hasDeployedBefore())
+        );
+    }
+
+    public function test_a_failed_first_deploy_does_not_count_as_deployed_before(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'php']);
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+
+        $mechanics = new RecordingDeployMechanics($model, $domain);
+        $mechanics->wipeRebuildException = new \RuntimeException('clone failed');
+
+        try {
+            (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->rebuildFromSource($this->silentDeployLogger(), null);
+            $this->fail('Expected Exception');
+        } catch (\RuntimeException $e) {
+        }
+
+        $this->assertSame('failed', $model->getDetails()['deployment_status'] ?? null);
+        $this->assertFalse($model->hasDeployedBefore());
+    }
+
+    public function test_a_refused_archive_leaves_the_deploy_status_alone(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'php', 'deployment_status' => 'success']);
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+
+        $mechanics = new RecordingDeployMechanics($model, $domain);
+        $mechanics->archiveException = new \InvalidArgumentException('zip_path must be inside the account home');
+        $workflow = new DeploymentWorkflow(new StubDindProject($model), $mechanics);
+
+        try {
+            $workflow->deployFromArchive($this->silentDeployLogger(), '/etc/passwd');
+            $this->fail('Expected InvalidArgumentException');
+        } catch (\InvalidArgumentException $e) {
+        }
+
+        $this->assertSame('success', $model->getDetails()['deployment_status'] ?? null);
+        $this->assertFalse($mechanics->startedApplication);
     }
 
     public function test_deploy_from_archive_ingests_and_starts_without_wiping_or_persisting_status(): void
@@ -288,7 +392,7 @@ class DeploymentWorkflowTest extends TestCase
         $this->assertNull($model->getDetails()['deployment_status'] ?? null);
     }
 
-    public function test_deploy_from_archive_throws_plain_exception_on_start_failure(): void
+    public function test_deploy_from_archive_names_an_unrecognised_start_failure(): void
     {
         $model = $this->dindModel(['deploy_strategy' => 'php']);
         $domain = new DomainModel();
@@ -300,14 +404,40 @@ class DeploymentWorkflowTest extends TestCase
 
         try {
             $workflow->deployFromArchive($this->silentDeployLogger(), '/project/app.zip');
-            $this->fail('Expected Exception');
+            $this->fail('Expected ProblemException');
         } catch (ProblemException $e) {
-            $this->fail('deployFromArchive must not throw ProblemException: ' . $e->getMessage());
-        } catch (\Exception $e) {
+            $this->assertSame('app_did_not_start', $e->problems[0]['code']);
             $this->assertStringContainsString('Failed to start app', $e->getMessage());
         }
 
+        $this->assertSame('failed', $model->getDetails()['deployment_status'] ?? null);
         $this->assertFalse($mechanics->deletedProject);
+    }
+
+    /**
+     * The rebuild answered `rebuild_failed` for a failure the same deploy log
+     * explained as a base image: the rule was looked for in the sentence the
+     * explainer had already written, which no rule matches.
+     */
+    public function test_a_failed_rebuild_carries_the_rule_that_explained_it(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'dockerfile']);
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+
+        $mechanics = new RecordingDeployMechanics($model, $domain);
+        $mechanics->startResult = ['exit_code' => 1, 'stdout' => '', 'stderr' => "Image project-app Building\n"
+            . 'failed to solve: example.org/base:1: failed to resolve source metadata for example.org/base:1: '
+            . 'example.org/base:1: not found'];
+        $workflow = new DeploymentWorkflow(new StubDindProject($model), $mechanics);
+
+        try {
+            $workflow->rebuildFromSource($this->silentDeployLogger(), null);
+            $this->fail('Expected ProblemException');
+        } catch (ProblemException $e) {
+            $this->assertSame('base-image-unavailable', $e->problems[0]['code']);
+            $this->assertStringContainsString('could not be downloaded', $e->getMessage());
+        }
     }
 
     public function test_workflow_exposes_rebuild_from_source(): void
@@ -376,6 +506,8 @@ final class StubDindProject implements DeployableDindProject
 final class RecordingDeployMechanics implements DeployMechanics
 {
     public ?\Throwable $prepareException = null;
+    public ?\Throwable $wipeRebuildException = null;
+    public ?\Throwable $archiveException = null;
 
     /** @var array{exit_code: int, stdout: string, stderr: string} */
     public array $startResult = ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
@@ -392,6 +524,11 @@ final class RecordingDeployMechanics implements DeployMechanics
     public ?string $sourceRebuildZipPath = null;
     public ?string $wipeRebuildZipPath = null;
     public ?string $archiveZipPath = null;
+    /** @var list<string> */
+    public array $serving = [];
+    /** @var list<string> */
+    public array $publicUrl = [];
+    public ?string $envHint = null;
 
     public function __construct(
         private ModelsUser $userModel,
@@ -450,11 +587,17 @@ final class RecordingDeployMechanics implements DeployMechanics
     {
         $this->ingestedWipeRebuild = true;
         $this->wipeRebuildZipPath = $zipPath;
+        if ($this->wipeRebuildException !== null) {
+            throw $this->wipeRebuildException;
+        }
     }
 
     public function ingestArchive(string $zipPath): void
     {
         $this->archiveZipPath = $zipPath;
+        if ($this->archiveException !== null) {
+            throw $this->archiveException;
+        }
     }
 
     public function reprepareApplicationFromCheckout(): void
@@ -480,17 +623,17 @@ final class RecordingDeployMechanics implements DeployMechanics
 
     public function servingWarnings(): array
     {
-        return [];
+        return $this->serving;
     }
 
     public function publicUrlWarnings(DomainModel $domain): array
     {
-        return [];
+        return $this->publicUrl;
     }
 
     public function customEnvFailureHint(): ?string
     {
-        return null;
+        return $this->envHint;
     }
 
     public function persistPartialSuccess(array $warnings): void

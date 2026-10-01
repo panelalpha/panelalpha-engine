@@ -36,6 +36,12 @@ class DeployPhaseTest extends TestCase
         $this->assertSame(PlatformStage::UPGRADE, PlatformStage::phaseFor('partial'));
     }
 
+    /** A redeploy that failed does not undo the install before it. */
+    public function test_a_failed_redeploy_of_a_deployed_account_is_still_upgrading(): void
+    {
+        $this->assertSame(PlatformStage::UPGRADE, PlatformStage::phaseFor('failed', true));
+    }
+
     public function test_the_env_var_name_is_the_one_the_entrypoint_reads(): void
     {
         $this->assertSame('PA_DEPLOY_PHASE', PlatformStage::PHASE_ENV);

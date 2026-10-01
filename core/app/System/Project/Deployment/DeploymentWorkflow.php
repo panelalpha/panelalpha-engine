@@ -134,12 +134,15 @@ final class DeploymentWorkflow
             throw self::deployProblem($match['rule'] ?? 'app_did_not_start', $summary, $stage);
         }
 
-        $warnings = array_merge($warnings, $mechanics->servingWarnings());
+        $serving = $mechanics->servingWarnings();
+        $warnings = array_merge($warnings, $serving);
         $warnings = array_merge($warnings, $mechanics->publicUrlWarnings($domain));
         self::logDomainNotices($deployLogger, $mechanics->user());
 
         if ($warnings !== []) {
-            $hint = $mechanics->customEnvFailureHint();
+            // Only an app that is not serving can have been broken by its variables,
+            // not a public name or certificate warning.
+            $hint = $serving !== [] ? $mechanics->customEnvFailureHint() : null;
             if ($hint !== null) {
                 $warnings[] = $hint;
             }
@@ -199,13 +202,14 @@ final class DeploymentWorkflow
                 throw self::deployProblem($match['rule'] ?? 'app_did_not_start', $message, $deployLogger->currentStage());
             }
 
+            $serving = $mechanics->servingWarnings();
             $warnings = array_merge(
-                $mechanics->servingWarnings(),
+                $serving,
                 $mechanics->publicUrlWarnings($domain),
             );
             self::logDomainNotices($deployLogger, $user);
             if ($warnings !== []) {
-                $hint = $mechanics->customEnvFailureHint();
+                $hint = $serving !== [] ? $mechanics->customEnvFailureHint() : null;
                 if ($hint !== null) {
                     $warnings[] = $hint;
                 }
@@ -235,10 +239,10 @@ final class DeploymentWorkflow
     /**
      * Wipe-and-redeploy from git or zip (HTTP/artisan rebuild path).
      *
-     * Finishes the deploy log but does not persist deployment_status — callers
-     * such as UserController::recordRebuildSucceeded own that.
-     * Throws plain \Exception (not ProblemException / FailureRetention) to
-     * match the historical HTTP rebuild contract.
+     * Finishes the deploy log and records a failure on the project; success is
+     * persisted by callers such as UserController::recordRebuildSucceeded.
+     * A start failure is thrown as a ProblemException carrying the explainer's
+     * rule; anything else as a plain \Exception.
      */
     public function rebuildFromSource(?DeployLogger $deployLogger = null, ?string $zipPath = null): void
     {
@@ -278,13 +282,13 @@ final class DeploymentWorkflow
             $this->startAndFinishSourceDeploy($deployLogger, $mechanics);
         } catch (DeployCancelledException $e) {
             $deployLogger->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
+            FailureRetention::retainAfterDeployCancelled($user, $e->getMessage());
             throw $e;
         } catch (\Exception $e) {
             $deployLogger->recordFailureOutput($e->getMessage());
-            $deployLogger->finish(
-                DeployLogger::STATUS_FAILED,
-                DeployFailureExplainer::explain($e->getMessage()) ?? $e->getMessage()
-            );
+            $message = DeployFailureExplainer::explain($e->getMessage()) ?? FailureOutput::withoutNoise($e->getMessage());
+            $deployLogger->finish(DeployLogger::STATUS_FAILED, $message);
+            FailureRetention::retainAfterDeployFailure($user, $message);
             throw $e;
         }
     }
@@ -294,17 +298,29 @@ final class DeploymentWorkflow
      *
      * Unlike {@see rebuildFromSource()} this does not wipe ~/project first: the
      * archive normally sits inside it. Same contract otherwise: the deploy log
-     * is finished here, deployment_status is not persisted, and failures are
-     * thrown as plain exceptions for the caller to map.
+     * is finished here, a failure is recorded on the project, and a start failure
+     * is a ProblemException; anything else is a plain exception for the caller to map.
      */
     public function deployFromArchive(?DeployLogger $deployLogger, string $zipPath): void
     {
         $mechanics = $this->resolveMechanics();
 
-        $deployLogger?->stage(DeployLogger::STAGE_CLONING);
-        $mechanics->ingestArchive($zipPath);
+        try {
+            $deployLogger?->stage(DeployLogger::STAGE_CLONING);
+            $mechanics->ingestArchive($zipPath);
 
-        $this->startAndFinishSourceDeploy($deployLogger, $mechanics);
+            $this->startAndFinishSourceDeploy($deployLogger, $mechanics);
+        } catch (\InvalidArgumentException $e) {
+            // A refused archive (the caller answers 422 on zip_path): nothing was replaced.
+            throw $e;
+        } catch (DeployCancelledException $e) {
+            FailureRetention::retainAfterDeployCancelled($mechanics->user(), $e->getMessage());
+            throw $e;
+        } catch (\Exception $e) {
+            $message = DeployFailureExplainer::explain($e->getMessage()) ?? FailureOutput::withoutNoise($e->getMessage());
+            FailureRetention::retainAfterDeployFailure($mechanics->user(), $message);
+            throw $e;
+        }
     }
 
     /**
@@ -326,8 +342,13 @@ final class DeploymentWorkflow
             $full = $hint !== null
                 ? "Failed to start app: {$message} | {$hint}"
                 : "Failed to start app: {$message}";
+            // The rule is matched here, on the output, as telemetry does: the
+            // sentence thrown on no longer carries anything a rule can match.
+            $region = trim(FailureOutput::select($raw));
+            $match = ($region !== '' ? DeployFailureExplainer::match($region) : null) ?? DeployFailureExplainer::match($raw);
+            $stage = $deployLogger?->currentStage();
             $deployLogger?->finish(DeployLogger::STATUS_FAILED, $full);
-            throw new \Exception($full);
+            throw self::deployProblem($match['rule'] ?? 'app_did_not_start', $full, $stage);
         }
 
         $this->finishSourceRebuildServing($deployLogger, $mechanics);

@@ -103,6 +103,26 @@ class DeployLoggerTest extends TestCase
         $this->assertNull($latest['problem']);
     }
 
+    /**
+     * A failed rebuild was finished by the workflow and again by the catch
+     * around it: two `Deploy failed` lines, two telemetry reports, and the
+     * second one's status replacing the first's.
+     */
+    public function test_a_second_finish_of_the_same_deploy_changes_nothing(): void
+    {
+        $logger = DeployLogger::start($this->username());
+        $logger->finish(DeployLogger::STATUS_FAILED, 'Failed to start app: the base image is missing');
+        $first = $logger->readLatest();
+
+        $logger->recordFailureOutput('Failed to start app: the base image is missing');
+        $logger->finish(DeployLogger::STATUS_FAILED, 'something else');
+
+        $messages = array_column($logger->read()['lines'], 'msg');
+        $finished = array_filter($messages, static fn (string $m): bool => str_starts_with($m, 'Deploy failed'));
+        $this->assertCount(1, $finished);
+        $this->assertSame($first, $logger->readLatest());
+    }
+
     public function test_log_level_wrappers_write_the_expected_level(): void
     {
         $logger = DeployLogger::start($this->username());
