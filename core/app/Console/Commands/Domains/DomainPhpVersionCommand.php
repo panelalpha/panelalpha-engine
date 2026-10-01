@@ -2,18 +2,14 @@
 
 namespace App\Console\Commands\Domains;
 
-use App\Console\Commands\Concerns\PrintsPhpSettings;
 use App\Http\Requests\DomainSetPhpVersionRequest;
 use App\Lib\Domains\DomainPhpVersion;
 use App\Models\Domain;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Validator;
-use Throwable;
 
 class DomainPhpVersionCommand extends Command
 {
-    use PrintsPhpSettings;
-
     protected $signature = 'domain:php-version
         {domain : Canonical domain name}
         {version? : Installed PHP version to set}';
@@ -30,35 +26,20 @@ class DomainPhpVersionCommand extends Command
         }
 
         $version = $this->argument('version');
-        if (is_string($version) && $version !== '') {
-            try {
-                Validator::make(['version' => $version], (new DomainSetPhpVersionRequest())->rules())->validate();
+        $setting = is_string($version) && $version !== '';
+        if ($setting) {
+            Validator::make(['version' => $version], (new DomainSetPhpVersionRequest())->rules())->validate();
+        }
 
-                $domainModel = Domain::findByName($domain);
-                if (!$domainModel) {
-                    return $this->rejectWithBody('"Not Found"');
-                }
+        $domainModel = Domain::findByNameOrFail($domain);
 
-                (new DomainPhpVersion())->set($domainModel, $version);
-            } catch (Throwable $e) {
-                return $this->rejectWithException($e);
-            }
+        if (!$setting) {
+            $this->line($domainModel->getPhpVersion() ?? '');
 
             return 0;
         }
 
-        try {
-            $domainModel = Domain::findByName($domain);
-            if (!$domainModel) {
-                return $this->rejectWithBody('"Not Found"');
-            }
-
-            $value = $domainModel->getPhpVersion();
-            $this->requireEncodable($value);
-        } catch (Throwable $e) {
-            return $this->rejectWithException($e);
-        }
-        $this->line($value ?? '');
+        (new DomainPhpVersion())->set($domainModel, (string) $version);
 
         return 0;
     }

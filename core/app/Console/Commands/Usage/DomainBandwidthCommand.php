@@ -15,19 +15,17 @@ class DomainBandwidthCommand extends UsageCommand
                             {--end= : Range end (Y-m-d)}
                             {--group-by=day : Bucket size (day or month)}';
 
-    protected $description = 'Show bandwidth over a date range for a domain (GET /projects/{username}/domains/{domain}/bandwidth)';
+    protected $description = 'Show bandwidth over a date range for a domain';
 
     public function handle(ProjectUsage $usage, Statistics $statistics): int
     {
-        return $this->answer(function () use ($usage, $statistics) {
-            $range = $this->validated([
-                'start' => $this->option('start'),
-                'end' => $this->option('end'),
-                'group_by' => $this->option('group-by'),
-            ], (new BandwidthSeriesRequest())->rules());
-            $domain = $this->domain($usage, $this->project());
+        $range = $this->validated([
+            'start' => $this->option('start'),
+            'end' => $this->option('end'),
+            'group_by' => $this->option('group-by'),
+        ], (new BandwidthSeriesRequest())->rules());
+        $domain = $this->domain($usage, $this->project());
 
-            return $statistics->domainBandwidth($domain->domain, $range['start'], $range['end'], $range['group_by']);
-        });
+        return $this->printJson($statistics->domainBandwidth($domain->domain, $range['start'], $range['end'], $range['group_by']));
     }
 }

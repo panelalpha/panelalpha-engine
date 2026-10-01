@@ -14,18 +14,16 @@ class DomainVisitorsCommand extends UsageCommand
                             {--start= : Range start (Y-m-d)}
                             {--end= : Range end (Y-m-d)}';
 
-    protected $description = 'Show visitor overview for a domain (GET /projects/{username}/domains/{domain}/visitors)';
+    protected $description = 'Show visitor overview for a domain';
 
     public function handle(ProjectUsage $usage, Statistics $statistics): int
     {
-        return $this->answer(function () use ($usage, $statistics) {
-            $range = $this->validated([
-                'start' => $this->option('start'),
-                'end' => $this->option('end'),
-            ], (new VisitorsRangeRequest())->rules());
-            $domain = $this->domain($usage, $this->project());
+        $range = $this->validated([
+            'start' => $this->option('start'),
+            'end' => $this->option('end'),
+        ], (new VisitorsRangeRequest())->rules());
+        $domain = $this->domain($usage, $this->project());
 
-            return $statistics->domainVisitors($domain->domain, $range['start'], $range['end']);
-        });
+        return $this->printJson($statistics->domainVisitors($domain->domain, $range['start'], $range['end']));
     }
 }

@@ -6,7 +6,6 @@ use App\Console\Commands\Concerns\PrintsPhpSettings;
 use App\Models\Domain;
 use App\System;
 use Illuminate\Console\Command;
-use Throwable;
 
 class DomainPhpDirectivesCommand extends Command
 {
@@ -26,17 +25,8 @@ class DomainPhpDirectivesCommand extends Command
             return 1;
         }
 
-        try {
-            $domainModel = Domain::findByName($domain);
-            if (!$domainModel) {
-                return $this->rejectWithBody('"Not Found"');
-            }
-
-            $settings = $domainModel->user->project(app(System::class))->php()->getDomainDirectives($domainModel);
-            $this->requireEncodable($settings);
-        } catch (Throwable $e) {
-            return $this->rejectWithException($e);
-        }
+        $domainModel = Domain::findByNameOrFail($domain);
+        $settings = $domainModel->user->project(app(System::class))->php()->getDomainDirectives($domainModel);
 
         $this->printDirectiveMap($settings);
 

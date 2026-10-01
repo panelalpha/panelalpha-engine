@@ -19,6 +19,8 @@ use Tests\Unit\Integrations\Statistics\FakeStatistics;
 /** Pins the output and exit codes of the project:usage / bandwidth / visitors commands. */
 class UsageCommandsTest extends TestCase
 {
+    use RendersCommandFailures;
+
     private FakeStatistics $statistics;
 
     private string $shimDir;
@@ -115,16 +117,20 @@ class UsageCommandsTest extends TestCase
 
     public function test_project_usage_unknown_project(): void
     {
-        $this->assertCommand(1, "HTTP 404: User not found\n", 'project:usage', ['project' => 'nobody']);
+        $this->assertFails("Project 'nobody' not found.\n", 'project:usage', ['project' => 'nobody']);
     }
 
-    public function test_project_usage_engine_failure_is_a_server_error(): void
+    public function test_project_usage_engine_failure_is_not_caught(): void
     {
         $this->shimSudo("echo 'du: cannot access' >&2; exit 2");
-        $this->assertCommand(1, "HTTP 500: Server Error\n", 'project:usage', ['project' => 'alice']);
 
-        config(['app.debug' => true]);
-        $this->assertCommand(1, "HTTP 500: du: cannot access\n (exit code 2)\n", 'project:usage', ['project' => 'alice']);
+        try {
+            Artisan::call('project:usage', ['project' => 'alice']);
+            $this->fail('the engine failure was swallowed');
+        } catch (\Throwable $e) {
+            $this->assertStringContainsString('du: cannot access', $e->getMessage());
+        }
+        $this->assertSame('', Artisan::output());
     }
 
     public function test_project_bandwidth(): void
@@ -137,16 +143,16 @@ class UsageCommandsTest extends TestCase
 
     public function test_project_bandwidth_validation_and_not_found(): void
     {
-        $this->assertCommand(1, "HTTP 422: The start field is required. (and 1 more error)\n", 'project:bandwidth', ['project' => 'alice']);
-        $this->assertCommand(1, "HTTP 422: The end must be a date after or equal to start.\n", 'project:bandwidth', [
+        $this->assertFails("The start field is required.\nThe end field is required.\n", 'project:bandwidth', ['project' => 'alice']);
+        $this->assertFails("The end must be a date after or equal to start.\n", 'project:bandwidth', [
             'project' => 'alice', '--start' => '2026-09-02', '--end' => '2026-09-01',
         ]);
-        $this->assertCommand(1, "HTTP 422: The selected group by is invalid.\n", 'project:bandwidth', [
+        $this->assertFails("The selected group by is invalid.\n", 'project:bandwidth', [
             'project' => 'alice', '--start' => '2026-09-01', '--end' => '2026-09-02', '--group-by' => 'week',
         ]);
         // Validation runs before the project lookup.
-        $this->assertCommand(1, "HTTP 422: The start field is required. (and 1 more error)\n", 'project:bandwidth', ['project' => 'nobody']);
-        $this->assertCommand(1, "HTTP 404: User not found\n", 'project:bandwidth', [
+        $this->assertFails("The start field is required.\nThe end field is required.\n", 'project:bandwidth', ['project' => 'nobody']);
+        $this->assertFails("Project 'nobody' not found.\n", 'project:bandwidth', [
             'project' => 'nobody', '--start' => '2026-09-01', '--end' => '2026-09-02',
         ]);
     }
@@ -156,9 +162,9 @@ class UsageCommandsTest extends TestCase
         $args = ['project' => 'alice', 'domain' => 'example.com', '--start' => '2026-09-01', '--end' => '2026-09-30'];
         $this->assertCommand(0, '{"2026-09-01":1000,"2026-09-02":2500}', 'project:domain:bandwidth', $args);
         $this->assertCommand(0, '{"2026-09-01":3500}', 'project:domain:bandwidth', $args + ['--group-by' => 'month']);
-        $this->assertCommand(1, "HTTP 404: Not found\n", 'project:domain:bandwidth', ['domain' => 'nope.com'] + $args);
-        $this->assertCommand(1, "HTTP 404: User not found\n", 'project:domain:bandwidth', ['project' => 'nobody'] + $args);
-        $this->assertCommand(1, "HTTP 422: The start does not match the format Y-m-d.\n", 'project:domain:bandwidth', [
+        $this->assertFails("Domain 'nope.com' not found for project 'alice'.\n", 'project:domain:bandwidth', ['domain' => 'nope.com'] + $args);
+        $this->assertFails("Project 'nobody' not found.\n", 'project:domain:bandwidth', ['project' => 'nobody'] + $args);
+        $this->assertFails("The start does not match the format Y-m-d.\n", 'project:domain:bandwidth', [
             'project' => 'nobody', 'domain' => 'nope.com', '--start' => '01-09-2026', '--end' => '2026-09-30',
         ]);
     }
@@ -168,9 +174,9 @@ class UsageCommandsTest extends TestCase
         $args = ['project' => 'alice', 'domain' => 'example.com', '--start' => '2026-09-01', '--end' => '2026-09-30'];
         $this->assertCommand(0, '{"unique":10,"total":63,"visits":{"records":{"2026-09-01":5},"total":5},"visits_length":{"0s-30s":8}}', 'project:domain:visitors', $args);
         $this->assertCommand(0, '{"unique":0,"total":0,"visits":{"records":[],"total":0},"visits_length":[]}', 'project:domain:visitors', ['domain' => 'other.com'] + $args);
-        $this->assertCommand(1, "HTTP 404: Not found\n", 'project:domain:visitors', ['domain' => 'nope.com'] + $args);
-        $this->assertCommand(1, "HTTP 404: User not found\n", 'project:domain:visitors', ['project' => 'nobody'] + $args);
-        $this->assertCommand(1, "HTTP 422: The end field is required.\n", 'project:domain:visitors', [
+        $this->assertFails("Domain 'nope.com' not found for project 'alice'.\n", 'project:domain:visitors', ['domain' => 'nope.com'] + $args);
+        $this->assertFails("Project 'nobody' not found.\n", 'project:domain:visitors', ['project' => 'nobody'] + $args);
+        $this->assertFails("The end field is required.\n", 'project:domain:visitors', [
             'project' => 'nobody', 'domain' => 'nope.com', '--start' => '2026-09-01',
         ]);
     }
@@ -180,14 +186,32 @@ class UsageCommandsTest extends TestCase
         $args = ['project' => 'alice', 'domain' => 'example.com', 'dimension' => 'pages', '--start' => '2026-09-01', '--end' => '2026-09-30'];
         $this->assertCommand(0, '[{"label":"\/","visits":20}]', 'project:domain:visitors-breakdown', $args);
         $this->assertCommand(0, '[]', 'project:domain:visitors-breakdown', ['dimension' => 'os'] + $args);
-        $this->assertCommand(1, "HTTP 404: Not found\n", 'project:domain:visitors-breakdown', ['domain' => 'nope.com'] + $args);
-        $this->assertCommand(1, "HTTP 404: User not found\n", 'project:domain:visitors-breakdown', ['project' => 'nobody'] + $args);
-        $this->assertCommand(1, "HTTP 422: The selected dimension is invalid.\n", 'project:domain:visitors-breakdown', [
+        $this->assertFails("Domain 'nope.com' not found for project 'alice'.\n", 'project:domain:visitors-breakdown', ['domain' => 'nope.com'] + $args);
+        $this->assertFails("Project 'nobody' not found.\n", 'project:domain:visitors-breakdown', ['project' => 'nobody'] + $args);
+        $this->assertFails("The selected dimension is invalid.\n", 'project:domain:visitors-breakdown', [
             'project' => 'nobody', 'dimension' => 'devices',
         ] + $args);
-        $this->assertCommand(1, "HTTP 422: The start field is required. (and 2 more errors)\n", 'project:domain:visitors-breakdown', [
-            'project' => 'alice', 'domain' => 'example.com', 'dimension' => 'devices',
-        ]);
+    }
+
+    public function test_every_validation_message_gets_its_own_line(): void
+    {
+        $this->assertFails(
+            "The start field is required.\nThe end field is required.\nThe selected dimension is invalid.\n",
+            'project:domain:visitors-breakdown',
+            ['project' => 'alice', 'domain' => 'example.com', 'dimension' => 'devices'],
+        );
+    }
+
+    public function test_no_output_mentions_http(): void
+    {
+        $runs = [
+            ['project:usage', ['project' => 'nobody']],
+            ['project:bandwidth', ['project' => 'alice']],
+            ['project:domain:visitors', ['project' => 'alice', 'domain' => 'nope.com', '--start' => '2026-09-01', '--end' => '2026-09-30']],
+        ];
+        foreach ($runs as [$command, $args]) {
+            $this->assertDoesNotMatchRegularExpression('/HTTP|\b(404|422|500)\b/', $this->failureOf($command, $args), $command);
+        }
     }
 
     public function test_commands_do_not_go_through_the_router(): void
@@ -239,6 +263,12 @@ class UsageCommandsTest extends TestCase
         $code = Artisan::call($command, $args);
         $this->assertSame($output, Artisan::output(), $command);
         $this->assertSame($exit, $code, $command);
+    }
+
+    /** @param array<string, mixed> $args */
+    private function assertFails(string $output, string $command, array $args): void
+    {
+        $this->assertSame($output, $this->failureOf($command, $args), $command);
     }
 
     private function shimSudo(string $body): void

@@ -2,12 +2,7 @@
 
 namespace App\Console\Commands\Git;
 
-use App\Console\Commands\Concerns\PrintsValidationErrors;
-use App\Exceptions\DeployAlreadyRunningException;
-use App\Exceptions\DockerErrorException;
-use App\Lib\DeployHook\DeployHookNotFound;
 use App\Models\User;
-use App\System\Project\Git\Exception as GitException;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -20,8 +15,6 @@ use Symfony\Component\Console\Output\OutputInterface;
  */
 trait PrintsGitJson
 {
-    use PrintsValidationErrors;
-
     protected function configure(): void
     {
         parent::configure();
@@ -56,27 +49,9 @@ trait PrintsGitJson
      */
     protected function runGit(string $rules, array $input, callable $action): int
     {
-        $username = (string) $this->argument('username');
-        try {
-            $params = $this->validated($rules, $input);
-            $user = User::findByUsername($username);
-            if ($user === null) {
-                $this->error("Project '{$username}' not found.");
-
-                return self::FAILURE;
-            }
-            $data = $action($user, $params);
-        } catch (ValidationException $e) {
-            return $this->failValidation($e);
-        } catch (DeployHookNotFound $e) {
-            $this->error("Deploy hook not found for checkout '{$e->path}' in project '{$username}'.");
-
-            return self::FAILURE;
-        } catch (GitException|DeployAlreadyRunningException|DockerErrorException $e) {
-            $this->error(trim($e->getMessage()));
-
-            return self::FAILURE;
-        }
+        $params = $this->validated($rules, $input);
+        $user = User::findByUsernameOrFail((string) $this->argument('username'));
+        $data = $action($user, $params);
 
         if ($data === null) {
             return self::SUCCESS;

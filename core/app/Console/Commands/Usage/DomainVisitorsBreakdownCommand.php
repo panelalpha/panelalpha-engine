@@ -15,19 +15,17 @@ class DomainVisitorsBreakdownCommand extends UsageCommand
                             {--start= : Range start (Y-m-d)}
                             {--end= : Range end (Y-m-d)}';
 
-    protected $description = 'Show a visitor breakdown for a domain (GET /projects/{username}/domains/{domain}/visitors/{dimension})';
+    protected $description = 'Show a visitor breakdown for a domain';
 
     public function handle(ProjectUsage $usage, Statistics $statistics): int
     {
-        return $this->answer(function () use ($usage, $statistics) {
-            $input = $this->validated([
-                'start' => $this->option('start'),
-                'end' => $this->option('end'),
-                'dimension' => $this->argument('dimension'),
-            ], (new VisitorsBreakdownRequest())->rules());
-            $domain = $this->domain($usage, $this->project());
+        $input = $this->validated([
+            'start' => $this->option('start'),
+            'end' => $this->option('end'),
+            'dimension' => $this->argument('dimension'),
+        ], (new VisitorsBreakdownRequest())->rules());
+        $domain = $this->domain($usage, $this->project());
 
-            return $statistics->domainVisitorBreakdown($domain->domain, $input['dimension'], $input['start'], $input['end']);
-        });
+        return $this->printJson($statistics->domainVisitorBreakdown($domain->domain, $input['dimension'], $input['start'], $input['end']));
     }
 }

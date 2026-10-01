@@ -9,8 +9,6 @@ use App\Models\User;
 use App\System;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Validator;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
-use Throwable;
 
 class ProjectPhpDirectivesCommand extends Command
 {
@@ -32,15 +30,10 @@ class ProjectPhpDirectivesCommand extends Command
             return 1;
         }
 
-        try {
-            Validator::make(['php_version' => $version], (new UserPhpListCustomIniSettingsRequest())->rules())->validate();
+        Validator::make(['php_version' => $version], (new UserPhpListCustomIniSettingsRequest())->rules())->validate();
 
-            $user = User::findByUsername($username) ?? throw new NotFoundHttpException('Not found');
-            $settings = (new CustomIniSettings(app(System::class)))->get($user, $version);
-            $this->requireEncodable($settings);
-        } catch (Throwable $e) {
-            return $this->rejectWithException($e);
-        }
+        $user = User::findByUsernameOrFail($username);
+        $settings = (new CustomIniSettings(app(System::class)))->get($user, $version);
 
         $this->printDirectiveMap($settings);
 

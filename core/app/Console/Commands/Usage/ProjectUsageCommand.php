@@ -8,10 +8,10 @@ class ProjectUsageCommand extends UsageCommand
 {
     protected $signature = 'project:usage {project : Project username}';
 
-    protected $description = 'Show resource usage for a project (GET /projects/{username}/usage)';
+    protected $description = 'Show resource usage for a project';
 
     public function handle(ProjectUsage $usage): int
     {
-        return $this->answer(fn () => $usage->summary($this->project()));
+        return $this->printJson($usage->summary($this->project()));
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Lib\Usage;
 
+use App\Exceptions\NotFoundException;
 use App\Integrations\Statistics\Statistics;
 use App\Models\Domain;
 use App\Models\User;
@@ -79,6 +80,12 @@ class ProjectUsage
     {
         /** @var ?Domain */
         return $user->domains()->getQuery()->where('domain', $domain)->first();
+    }
+
+    public function ownedDomainOrFail(User $user, string $domain): Domain
+    {
+        return $this->ownedDomain($user, $domain)
+            ?? throw new NotFoundException("Domain '{$domain}' not found for project '{$user->username}'.");
     }
 
     /**

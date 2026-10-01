@@ -18,11 +18,13 @@ use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /**
- * The five PHP-settings commands: what they print, and the exit code, for
- * success, not-found and validation failures.
+ * The five PHP-settings commands: what they print, and the exit code or the
+ * failure artisan prints, for success, not-found and validation failures.
  */
 class PhpSettingsCommandsTest extends TestCase
 {
+    use RendersCommandFailures;
+
     private string $tmpRoot;
 
     private System $system;
@@ -100,8 +102,8 @@ class PhpSettingsCommandsTest extends TestCase
         $this->account();
         $this->domain('a.example', ['www.a.example']);
 
-        $this->assertCommand(1, "\"Not Found\"\n", 'domain:php-directives', ['domain' => 'missing.example']);
-        $this->assertCommand(1, "\"Not Found\"\n", 'domain:php-directives', ['domain' => 'www.a.example']);
+        $this->assertFails("Domain 'missing.example' not found.\n", 'domain:php-directives', ['domain' => 'missing.example']);
+        $this->assertFails("Domain 'www.a.example' not found.\n", 'domain:php-directives', ['domain' => 'www.a.example']);
     }
 
     public function test_domain_directives_need_a_name(): void
@@ -116,35 +118,28 @@ class PhpSettingsCommandsTest extends TestCase
         $this->makeDocumentRoot('a.example');
         file_put_contents($this->userIni('a.example'), "memory_limit=\"unclosed\n");
 
-        $this->assertCommand(
-            1,
-            '{"message":"Directive file is not valid INI.","errors":{"settings":["Directive file is not valid INI."]}}' . "\n",
-            'domain:php-directives',
-            ['domain' => 'a.example'],
-        );
+        $this->assertFails("Directive file is not valid INI.\n", 'domain:php-directives', ['domain' => 'a.example']);
     }
 
-    public function test_a_server_fault_prints_the_api_server_error_body(): void
+    public function test_an_unexpected_fault_is_left_to_artisan(): void
     {
-        config(['app.debug' => false]);
         $this->account();
         $this->domain('a.example');
         $this->makeDocumentRoot('a.example');
         file_put_contents($this->userIni('a.example'), "memory_limit=256M\n");
         chmod($this->userIni('a.example'), 0);
 
-        $this->assertCommand(1, "{\n    \"message\": \"Server Error\"\n}\n", 'domain:php-directives', ['domain' => 'a.example']);
+        $this->expectExceptionMessage('Permission denied');
+        Artisan::call('domain:php-directives', ['domain' => 'a.example']);
     }
 
-    public function test_directives_that_cannot_be_json_encoded_are_a_server_error(): void
+    public function test_directives_that_cannot_be_json_encoded_are_not_printed_as_empty(): void
     {
-        config(['app.debug' => false]);
         $this->account();
         $this->writeAccountIni('8.2', "memory_limit=\"\xff\"\n");
 
-        $this->assertCommand(1, "{\n    \"message\": \"Server Error\"\n}\n", 'project:php-directives', [
-            'username' => 'alice', 'version' => '8.2',
-        ]);
+        $this->expectException(\JsonException::class);
+        Artisan::call('project:php-directives', ['username' => 'alice', 'version' => '8.2']);
     }
 
     // domain:php-directives:set
@@ -175,7 +170,7 @@ class PhpSettingsCommandsTest extends TestCase
 
     public function test_domain_directives_set_on_an_unknown_domain(): void
     {
-        $this->assertCommand(1, "\"Not Found\"\n", 'domain:php-directives:set', [
+        $this->assertFails("Domain 'missing.example' not found.\n", 'domain:php-directives:set', [
             'domain' => 'missing.example',
             '--settings' => '{"memory_limit":"256M"}',
         ]);
@@ -186,21 +181,29 @@ class PhpSettingsCommandsTest extends TestCase
         $this->account();
         $this->domain('a.example');
 
-        $this->assertCommand(
-            1,
-            '{"message":"Document root does not exist.","errors":{"document_root":["Document root does not exist."]}}' . "\n",
-            'domain:php-directives:set',
-            ['domain' => 'a.example', '--settings' => '{"memory_limit":"256M"}'],
-        );
+        $this->assertFails("Document root does not exist.\n", 'domain:php-directives:set', [
+            'domain' => 'a.example', '--settings' => '{"memory_limit":"256M"}',
+        ]);
 
         $this->makeDocumentRoot('a.example');
-        $this->assertCommand(
-            1,
-            '{"message":"Invalid INI.","errors":{"settings":["Invalid INI."]}}' . "\n",
-            'domain:php-directives:set',
-            ['domain' => 'a.example', '--settings' => '{"memory_limit":"256M; dropped"}'],
-        );
+        $this->assertFails("Invalid INI.\n", 'domain:php-directives:set', [
+            'domain' => 'a.example', '--settings' => '{"memory_limit":"256M; dropped"}',
+        ]);
         $this->assertFileDoesNotExist($this->userIni('a.example'));
+    }
+
+    public function test_a_docker_failure_prints_its_message(): void
+    {
+        $this->account();
+        $this->domain('a.example');
+        $this->makeDocumentRoot('a.example');
+        file_put_contents($this->userIni('a.example'), "memory_limit=256M\n");
+        $this->system->failWith = 'Error response from daemon: No such container: alice';
+
+        $this->assertFails("Error response from daemon: No such container: alice\n", 'domain:php-directives:set', [
+            'domain' => 'a.example', '--clear' => true,
+        ]);
+        $this->assertFileExists($this->userIni('a.example'));
     }
 
     public function test_domain_directives_set_checks_its_options(): void
@@ -229,8 +232,8 @@ class PhpSettingsCommandsTest extends TestCase
 
     public function test_domain_php_version_of_an_unknown_domain(): void
     {
-        $this->assertCommand(1, "\"Not Found\"\n", 'domain:php-version', ['domain' => 'missing.example']);
-        $this->assertCommand(1, "\"Not Found\"\n", 'domain:php-version', [
+        $this->assertFails("Domain 'missing.example' not found.\n", 'domain:php-version', ['domain' => 'missing.example']);
+        $this->assertFails("Domain 'missing.example' not found.\n", 'domain:php-version', [
             'domain' => 'missing.example', 'version' => '8.2',
         ]);
     }
@@ -240,12 +243,7 @@ class PhpSettingsCommandsTest extends TestCase
         $this->account();
         $this->domain('a.example', [], ['php_version' => '8.2']);
 
-        $this->assertCommand(
-            1,
-            '{"message":"Invalid value","errors":{"version":["Invalid value"]}}' . "\n",
-            'domain:php-version',
-            ['domain' => 'a.example', 'version' => '5.6'],
-        );
+        $this->assertFails("Invalid value\n", 'domain:php-version', ['domain' => 'a.example', 'version' => '5.6']);
         $this->assertSame('8.2', Domain::findByName('a.example')?->getPhpVersion());
     }
 
@@ -264,7 +262,7 @@ class PhpSettingsCommandsTest extends TestCase
 
     public function test_project_directives_of_an_unknown_project(): void
     {
-        $this->assertCommand(1, "{\n    \"message\": \"Not found\"\n}\n", 'project:php-directives', [
+        $this->assertFails("Project 'nobody' not found.\n", 'project:php-directives', [
             'username' => 'nobody', 'version' => '8.2',
         ]);
     }
@@ -272,15 +270,10 @@ class PhpSettingsCommandsTest extends TestCase
     public function test_project_directives_reject_an_unknown_version_and_a_dind_project(): void
     {
         $this->account();
-        $this->assertCommand(
-            1,
-            '{"message":"Invalid value","errors":{"php_version":["Invalid value"]}}' . "\n",
-            'project:php-directives',
-            ['username' => 'alice', 'version' => '5.6'],
-        );
+        $this->assertFails("Invalid value\n", 'project:php-directives', ['username' => 'alice', 'version' => '5.6']);
 
         $this->account('dind', 'bob');
-        $this->assertCommand(1, $this->dindRefusal(), 'project:php-directives', ['username' => 'bob', 'version' => '8.2']);
+        $this->assertFails($this->dindRefusal(), 'project:php-directives', ['username' => 'bob', 'version' => '8.2']);
     }
 
     public function test_project_directives_need_both_arguments(): void
@@ -313,7 +306,7 @@ class PhpSettingsCommandsTest extends TestCase
 
     public function test_project_directives_set_on_an_unknown_project(): void
     {
-        $this->assertCommand(1, "{\n    \"message\": \"Not found\"\n}\n", 'project:php-directives:set', [
+        $this->assertFails("Project 'nobody' not found.\n", 'project:php-directives:set', [
             'username' => 'nobody', 'version' => '8.2', '--clear' => true,
         ]);
     }
@@ -323,19 +316,12 @@ class PhpSettingsCommandsTest extends TestCase
         $this->account();
         $this->writeAccountIni('8.2', "memory_limit=256M\n");
 
-        $this->assertCommand(
-            1,
-            '{"message":"Invalid value","errors":{"php_version":["Invalid value"]}}' . "\n",
-            'project:php-directives:set',
-            ['username' => 'alice', 'version' => '5.6', '--settings' => '{"memory_limit":"64M"}'],
-        );
-        $this->assertCommand(
-            1,
-            '{"message":"Could not set php.ini directives. Invalid INI.",'
-                . '"errors":{"settings":["Could not set php.ini directives. Invalid INI."]}}' . "\n",
-            'project:php-directives:set',
-            ['username' => 'alice', 'version' => '8.2', '--settings' => '{"memory_limit":"256M; no"}'],
-        );
+        $this->assertFails("Invalid value\n", 'project:php-directives:set', [
+            'username' => 'alice', 'version' => '5.6', '--settings' => '{"memory_limit":"64M"}',
+        ]);
+        $this->assertFails("Could not set php.ini directives. Invalid INI.\n", 'project:php-directives:set', [
+            'username' => 'alice', 'version' => '8.2', '--settings' => '{"memory_limit":"256M; no"}',
+        ]);
         $this->assertCommand(1, "--settings values must be strings.\n", 'project:php-directives:set', [
             'username' => 'alice', 'version' => '8.2', '--settings' => '{"a":[]}',
         ]);
@@ -343,7 +329,7 @@ class PhpSettingsCommandsTest extends TestCase
         $this->assertSame(0, $this->restartCount('8.2'));
 
         $this->account('dind', 'bob');
-        $this->assertCommand(1, $this->dindRefusal(), 'project:php-directives:set', [
+        $this->assertFails($this->dindRefusal(), 'project:php-directives:set', [
             'username' => 'bob', 'version' => '8.2', '--clear' => true,
         ]);
     }
@@ -353,11 +339,12 @@ class PhpSettingsCommandsTest extends TestCase
         $this->account();
         $this->domain('a.example', [], ['php_version' => '8.2']);
         $this->makeDocumentRoot('a.example');
+        $this->writeAccountIni('8.2', "memory_limit=256M\n");
 
         Artisan::call('domain:php-directives', ['domain' => 'a.example']);
         Artisan::call('domain:php-directives:set', ['domain' => 'a.example', '--clear' => true]);
         Artisan::call('domain:php-version', ['domain' => 'a.example']);
-        Artisan::call('domain:php-version', ['domain' => 'a.example', 'version' => '5.6']);
+        $this->failureOf('domain:php-version', ['domain' => 'a.example', 'version' => '5.6']);
         Artisan::call('project:php-directives', ['username' => 'alice', 'version' => '8.2']);
         Artisan::call('project:php-directives:set', ['username' => 'alice', 'version' => '8.2', '--clear' => true]);
 
@@ -375,12 +362,18 @@ class PhpSettingsCommandsTest extends TestCase
         $this->assertSame($output, Artisan::output());
     }
 
+    /**
+     * @param array<string, mixed> $arguments
+     */
+    private function assertFails(string $output, string $command, array $arguments): void
+    {
+        $this->assertSame($output, $this->failureOf($command, $arguments));
+    }
+
     private function dindRefusal(): string
     {
-        $message = 'Custom PHP INI settings apply only to PHP hosting projects. '
-            . 'A dind project runs PHP from its own image; set php.ini there.';
-
-        return json_encode(['message' => $message, 'errors' => ['project' => [$message]]]) . "\n";
+        return 'Custom PHP INI settings apply only to PHP hosting projects. '
+            . "A dind project runs PHP from its own image; set php.ini there.\n";
     }
 
     private function account(string $template = 'default', string $username = 'alice'): User
@@ -465,6 +458,8 @@ class PhpSettingsCommandsTest extends TestCase
             /** @var list<array<int, string>> */
             public array $processJournal = [];
 
+            public ?string $failWith = null;
+
             public function __construct(private string $root)
             {
             }
@@ -503,30 +498,32 @@ class PhpSettingsCommandsTest extends TestCase
             {
                 $args = is_array($cmd) ? $cmd : [$cmd];
                 $this->processJournal[] = $args;
-                if (is_array($cmd) && ($cmd[1] ?? null) === 'cp' && isset($cmd[2], $cmd[3])) {
+                // A failing command changes nothing.
+                $applies = $this->failWith === null && is_array($cmd);
+                if ($applies && ($cmd[1] ?? null) === 'cp' && isset($cmd[2], $cmd[3])) {
                     copy($cmd[2], $cmd[3]);
                 }
-                if (is_array($cmd) && ($cmd[1] ?? null) === 'rm') {
+                if ($applies && ($cmd[1] ?? null) === 'rm') {
                     $path = $cmd[array_key_last($cmd)];
                     if (is_string($path) && is_file($path)) {
                         unlink($path);
                     }
                 }
 
-                return new class () extends Process {
-                    public function __construct()
+                return new class ($this->failWith) extends Process {
+                    public function __construct(private ?string $error)
                     {
                         parent::__construct(['true']);
                     }
 
                     public function getExitCode(): ?int
                     {
-                        return 0;
+                        return $this->error === null ? 0 : 1;
                     }
 
                     public function isSuccessful(): bool
                     {
-                        return true;
+                        return $this->error === null;
                     }
 
                     public function getOutput(): string
@@ -536,7 +533,7 @@ class PhpSettingsCommandsTest extends TestCase
 
                     public function getErrorOutput(): string
                     {
-                        return '';
+                        return $this->error ?? '';
                     }
                 };
             }

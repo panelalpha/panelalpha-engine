@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Exceptions\NotFoundException;
 use App\System;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -73,11 +74,8 @@ class Domain extends Model
 
     public static function findByNameOrFail(string $name): self
     {
-        $domain = self::findByName($name);
-        if (!$domain) {
-            abort(404, "Not Found");
-        }
-        return $domain;
+        return self::findByName($name)
+            ?? throw new NotFoundException("Domain '{$name}' not found.");
     }
 
     public static function findByNameOrAlias(string $domainName): ?self

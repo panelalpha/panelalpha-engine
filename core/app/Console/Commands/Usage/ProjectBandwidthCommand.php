@@ -13,18 +13,17 @@ class ProjectBandwidthCommand extends UsageCommand
                             {--end= : Range end (Y-m-d)}
                             {--group-by=day : Bucket size (day or month)}';
 
-    protected $description = 'Show bandwidth over a date range for a project (GET /projects/{username}/bandwidth)';
+    protected $description = 'Show bandwidth over a date range for a project';
 
     public function handle(ProjectUsage $usage): int
     {
-        return $this->answer(function () use ($usage) {
-            $range = $this->validated([
-                'start' => $this->option('start'),
-                'end' => $this->option('end'),
-                'group_by' => $this->option('group-by'),
-            ], (new BandwidthSeriesRequest())->rules());
+        $range = $this->validated([
+            'start' => $this->option('start'),
+            'end' => $this->option('end'),
+            'group_by' => $this->option('group-by'),
+        ], (new BandwidthSeriesRequest())->rules());
+        $user = $this->project();
 
-            return $usage->projectBandwidth($this->project(), $range['start'], $range['end'], $range['group_by']);
-        });
+        return $this->printJson($usage->projectBandwidth($user, $range['start'], $range['end'], $range['group_by']));
     }
 }

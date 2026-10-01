@@ -2,9 +2,11 @@
 
 namespace Tests\Unit\DeployHook;
 
+use App\Exceptions\NotFoundException;
 use App\Lib\DeployHook\DeployHooks;
 use App\Models\DeployHook;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Validation\ValidationException;
 
 /**
  * `php artisan git:deploy-hook`, running the same DeployHookActions as the
@@ -133,22 +135,26 @@ class GitDeployHookCommandTest extends DeployHookTestCase
         $this->assertSame($hook->public_id, DeployHook::firstOrFail()->public_id);
     }
 
-    public function test_an_unconnected_checkout_is_a_failure_exit(): void
+    public function test_an_unconnected_checkout_is_refused(): void
     {
         $this->user('main', ['git_repo' => '']);
 
-        [$exit] = $this->artisanRun(['username' => 'alice']);
-
-        $this->assertSame(1, $exit);
+        try {
+            $this->artisanRun(['username' => 'alice']);
+            $this->fail('the command did not fail');
+        } catch (ValidationException $e) {
+            $this->assertSame('The checkout is not connected to git, so there is nothing for a push to deploy.', $e->getMessage());
+        }
         $this->assertSame(0, DeployHook::count());
     }
 
-    public function test_rotating_a_missing_hook_fails(): void
+    public function test_rotating_a_missing_hook_is_not_found(): void
     {
         $this->user('main');
 
-        [$exit] = $this->artisanRun(['username' => 'alice', '--rotate' => true]);
+        $this->expectException(NotFoundException::class);
+        $this->expectExceptionMessage("Deploy hook not found for checkout 'project' in project 'alice'.");
 
-        $this->assertSame(1, $exit);
+        $this->artisanRun(['username' => 'alice', '--rotate' => true]);
     }
 }

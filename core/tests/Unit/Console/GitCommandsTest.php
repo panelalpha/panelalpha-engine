@@ -4,14 +4,17 @@ namespace Tests\Unit\Console;
 
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DockerErrorException;
+use App\Exceptions\NotFoundException;
 use App\Models\Admin;
 use App\Models\DeployHook;
 use App\Models\User;
 use App\System\Project\Git\CheckoutRedeploy;
+use App\System\Project\Git\Exception as GitException;
 use Illuminate\Routing\Events\RouteMatched;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Unit\DeployHook\DeployHookTestCase;
 use Tests\Unit\DeployHook\SpyCheckoutRedeploy;
@@ -24,6 +27,7 @@ use Tests\Unit\Git\FakesGitHost;
 class GitCommandsTest extends DeployHookTestCase
 {
     use FakesGitHost;
+    use RendersCommandFailures;
 
     private const PRETTY = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
     private const REPO = 'https://github.com/octocat/Hello-World.git';
@@ -129,10 +133,7 @@ class GitCommandsTest extends DeployHookTestCase
     #[DataProvider('everyCommand')]
     public function test_an_unknown_project_is_not_found(string $command, array $options): void
     {
-        [$exit, $output] = $this->runCommand($command, ['username' => 'nobody'] + $options);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("Project 'nobody' not found.\n", $output);
+        $this->assertSame("Project 'nobody' not found.\n", $this->failureOf($command, ['username' => 'nobody'] + $options));
     }
 
     /**
@@ -145,10 +146,7 @@ class GitCommandsTest extends DeployHookTestCase
     public function test_a_username_that_is_not_one_path_segment_is_not_found(string $command, array $options): void
     {
         foreach (['', 'a/b'] as $username) {
-            [$exit, $output] = $this->runCommand($command, ['username' => $username] + $options);
-
-            $this->assertSame(1, $exit, $username);
-            $this->assertSame("Project '{$username}' not found.\n", $output, $username);
+            $this->assertSame("Project '{$username}' not found.\n", $this->failureOf($command, ['username' => $username] + $options), $username);
         }
     }
 
@@ -164,7 +162,11 @@ class GitCommandsTest extends DeployHookTestCase
         });
 
         foreach (['alice', 'nobody'] as $username) {
-            $this->runCommand($command, ['username' => $username] + $options);
+            try {
+                $this->runCommand($command, ['username' => $username] + $options);
+            } catch (NotFoundException|ValidationException|GitException) {
+                // An unknown project, or a refusal; the router question is the same.
+            }
         }
 
         $this->assertSame(0, $routed);
@@ -198,29 +200,20 @@ class GitCommandsTest extends DeployHookTestCase
                 $this->user('main');
             }
 
-            [$exit, $output] = $this->runCommand($command, ['username' => $username] + $options);
-
-            $this->assertSame(1, $exit);
-            $this->assertSame("{$message}\n", $output);
+            $this->assertSame("{$message}\n", $this->failureOf($command, ['username' => $username] + $options));
         }
     }
 
     public function test_every_validation_message_is_printed_on_its_own_line(): void
     {
-        [$exit, $output] = $this->runCommand('git:commits', ['username' => 'nobody', '--limit' => 'abc', '--branch' => 'a..b']);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("The limit must be an integer.\nInvalid git ref name.\n", $output);
+        $this->assertSame("The limit must be an integer.\nInvalid git ref name.\n", $this->failureOf('git:commits', ['username' => 'nobody', '--limit' => 'abc', '--branch' => 'a..b']));
     }
 
     public function test_a_path_outside_the_home_is_refused(): void
     {
         $this->user('main');
 
-        [$exit, $output] = $this->runCommand('git:status', ['username' => 'alice', '--path' => '../../etc']);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("Invalid path\n", $output);
+        $this->assertSame("Invalid path\n", $this->failureOf('git:status', ['username' => 'alice', '--path' => '../../etc']));
     }
 
     /** @return array<string, array{string, array<string, mixed>, string}> */
@@ -316,10 +309,7 @@ class GitCommandsTest extends DeployHookTestCase
         $this->withRepository();
         $this->respond("'fetch' 'origin'", 1, "fatal: unable to access 'https://user:pw@github.com/x.git/': timeout");
 
-        [$exit, $output] = $this->runCommand('git:status', ['username' => 'alice', '--fetch' => true]);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("fatal: unable to access 'https://user:pw@github.com/x.git/': timeout\n", $output);
+        $this->assertSame("fatal: unable to access 'https://user:pw@github.com/x.git/': timeout\n", $this->failureOf('git:status', ['username' => 'alice', '--fetch' => true]));
     }
 
     public function test_status_fetch_on_an_unconnected_checkout_is_refused(): void
@@ -327,10 +317,7 @@ class GitCommandsTest extends DeployHookTestCase
         $this->user('main', ['git_repo' => '']);
         $this->withRepository();
 
-        [$exit, $output] = $this->runCommand('git:status', ['username' => 'alice', '--fetch' => true]);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("Git is not connected.\n", $output);
+        $this->assertSame("Git is not connected.\n", $this->failureOf('git:status', ['username' => 'alice', '--fetch' => true]));
     }
 
     // -- branches / commits -------------------------------------------------
@@ -360,10 +347,7 @@ class GitCommandsTest extends DeployHookTestCase
         $this->user('main');
         $this->withoutRepository();
 
-        [$exit, $output] = $this->runCommand('git:branches', ['username' => 'alice']);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("No git repository at path\n", $output);
+        $this->assertSame("No git repository at path\n", $this->failureOf('git:branches', ['username' => 'alice']));
     }
 
     public function test_commits_defaults_to_fifty(): void
@@ -436,12 +420,9 @@ class GitCommandsTest extends DeployHookTestCase
         $this->withRepository();
         $this->respond("'config' '--get' 'remote.origin.url'", 0, "https://github.com/someone/else.git\n");
 
-        [$exit, $output] = $this->runCommand('git:connect', [
+        $this->assertSame("Remote URL does not match the existing origin.\n", $this->failureOf('git:connect', [
             'username' => 'alice', '--repo-url' => self::REPO, '--branch' => 'main',
-        ]);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("Remote URL does not match the existing origin.\n", $output);
+        ]));
     }
 
     public function test_connect_repair_needs_no_url_or_branch(): void
@@ -449,20 +430,14 @@ class GitCommandsTest extends DeployHookTestCase
         $this->siteGitUser();
         $this->withoutRepository();
 
-        [$exit, $output] = $this->runCommand('git:connect', ['username' => 'alice', '--path' => 'wp-content', '--repair' => true]);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("Git is not connected.\n", $output);
+        $this->assertSame("Git is not connected.\n", $this->failureOf('git:connect', ['username' => 'alice', '--path' => 'wp-content', '--repair' => true]));
     }
 
     public function test_disconnect_on_the_deploy_checkout_is_refused(): void
     {
         $this->user('main');
 
-        [$exit, $output] = $this->runCommand('git:disconnect', ['username' => 'alice']);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("Git is managed by deploy.\n", $output);
+        $this->assertSame("Git is managed by deploy.\n", $this->failureOf('git:disconnect', ['username' => 'alice']));
     }
 
     public function test_disconnect_forgets_the_checkout_and_its_hook(): void
@@ -513,10 +488,7 @@ class GitCommandsTest extends DeployHookTestCase
     {
         $this->siteGitUser();
 
-        [$exit, $output] = $this->runCommand('git:update-credentials', ['username' => 'alice', '--token' => 'x']);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("Git is not connected.\n", $output);
+        $this->assertSame("Git is not connected.\n", $this->failureOf('git:update-credentials', ['username' => 'alice', '--token' => 'x']));
     }
 
     // -- pull / push / revert / change-branch -------------------------------
@@ -550,10 +522,7 @@ class GitCommandsTest extends DeployHookTestCase
     {
         $this->user('main', ['git_repo' => '']);
 
-        [$exit, $output] = $this->runCommand('git:pull', ['username' => 'alice']);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("Git is not connected.\n", $output);
+        $this->assertSame("Git is not connected.\n", $this->failureOf('git:pull', ['username' => 'alice']));
         $this->assertSame(0, $this->redeploy->requests);
     }
 
@@ -561,10 +530,7 @@ class GitCommandsTest extends DeployHookTestCase
     {
         $this->user('main', ['git_repo' => '']);
 
-        [$exit, $output] = $this->runCommand('git:push', ['username' => 'alice']);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("Git is not connected.\n", $output);
+        $this->assertSame("Git is not connected.\n", $this->failureOf('git:push', ['username' => 'alice']));
     }
 
     public function test_push_with_nothing_to_push(): void
@@ -600,10 +566,7 @@ class GitCommandsTest extends DeployHookTestCase
         $this->withRepository();
         $this->respond("'rev-parse' '--verify' 'HEAD'", 128, 'fatal: bad revision');
 
-        [$exit, $output] = $this->runCommand('git:revert', ['username' => 'alice']);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("Nothing to revert\n", $output);
+        $this->assertSame("Nothing to revert\n", $this->failureOf('git:revert', ['username' => 'alice']));
         $this->assertSame(0, $this->redeploy->requests);
     }
 
@@ -626,10 +589,7 @@ class GitCommandsTest extends DeployHookTestCase
         $this->withRepository();
         $this->respond("'status' '--porcelain'", 0, " M index.php\n");
 
-        [$exit, $output] = $this->runCommand('git:change-branch', ['username' => 'alice', '--branch' => 'dev']);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("Working tree is dirty.\n", $output);
+        $this->assertSame("Working tree is dirty.\n", $this->failureOf('git:change-branch', ['username' => 'alice', '--branch' => 'dev']));
     }
 
     // -- what a failed rebuild turns into -----------------------------------
@@ -640,10 +600,7 @@ class GitCommandsTest extends DeployHookTestCase
         $this->user('main');
         $this->withRepository();
 
-        [$exit, $output] = $this->runCommand('git:revert', ['username' => 'alice', '--ref' => 'abc123']);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("A deploy is already running for alice.\n", $output);
+        $this->assertSame("A deploy is already running for alice.\n", $this->failureOf('git:revert', ['username' => 'alice', '--ref' => 'abc123']));
     }
 
     public function test_a_docker_error_prints_its_message(): void
@@ -652,10 +609,7 @@ class GitCommandsTest extends DeployHookTestCase
         $this->user('main');
         $this->withRepository();
 
-        [$exit, $output] = $this->runCommand('git:revert', ['username' => 'alice', '--ref' => 'abc123']);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("Error response from daemon: container alice is restarting\n", $output);
+        $this->assertSame("Error response from daemon: container alice is restarting\n", $this->failureOf('git:revert', ['username' => 'alice', '--ref' => 'abc123']));
     }
 
     public function test_an_unexpected_failure_is_left_to_artisan(): void
@@ -707,10 +661,7 @@ class GitCommandsTest extends DeployHookTestCase
         $this->user('main');
 
         foreach ([['--rotate' => true], ['--delete' => true]] as $options) {
-            [$exit, $output] = $this->runCommand('git:deploy-hook', ['username' => 'alice'] + $options);
-
-            $this->assertSame(1, $exit);
-            $this->assertSame("Deploy hook not found for checkout 'project' in project 'alice'.\n", $output);
+            $this->assertSame("Deploy hook not found for checkout 'project' in project 'alice'.\n", $this->failureOf('git:deploy-hook', ['username' => 'alice'] + $options));
         }
     }
 
@@ -718,10 +669,7 @@ class GitCommandsTest extends DeployHookTestCase
     {
         $this->user('main', ['git_repo' => '']);
 
-        [$exit, $output] = $this->runCommand('git:deploy-hook', ['username' => 'alice']);
-
-        $this->assertSame(1, $exit);
-        $this->assertSame("The checkout is not connected to git, so there is nothing for a push to deploy.\n", $output);
+        $this->assertSame("The checkout is not connected to git, so there is nothing for a push to deploy.\n", $this->failureOf('git:deploy-hook', ['username' => 'alice']));
         $this->assertSame(0, DeployHook::count());
     }
 }

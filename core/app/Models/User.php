@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Exceptions\NotFoundException;
 use App\Lib\Host\ProjectMemory;
 use App\Lib\Limits\ResourceLimit;
 use App\Lib\Project\NewProjectDetails;
@@ -12,7 +13,6 @@ use App\System\Project\Dind\AppDatabase;
 use App\System\Services\Webserver\AbstractWebserver;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -232,11 +232,8 @@ class User extends Authenticatable
 
     public static function findByUsernameOrFail(string $username): User
     {
-        $user = self::findByUsername($username);
-        if ($user === null) {
-            throw new ModelNotFoundException();
-        }
-        return $user;
+        return self::findByUsername($username)
+            ?? throw new NotFoundException("Project '{$username}' not found.");
     }
 
     public static function existsByUsername(string $username): bool

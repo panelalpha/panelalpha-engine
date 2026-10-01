@@ -5,32 +5,18 @@ namespace App\Console\Commands\Usage;
 use App\Lib\Usage\ProjectUsage;
 use App\Models\Domain;
 use App\Models\User;
-use Closure;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\ValidationException;
-use Throwable;
 
-/**
- * Prints what the usage API answers: the JSON body, or `HTTP <status>: <message>`
- * on stderr with exit 1, the way these commands did when they dispatched the route.
- */
+/** Prints usage data as JSON; a failed lookup or validation throws for artisan to print. */
 abstract class UsageCommand extends Command
 {
-    /** @param Closure(): array<mixed> $build */
-    protected function answer(Closure $build): int
+    /** @param array<mixed> $data */
+    protected function printJson(array $data): int
     {
-        try {
-            $this->output->write(json_encode($build(), JSON_THROW_ON_ERROR));
-            return 0;
-        } catch (ValidationException $e) {
-            return $this->failWith(422, $e->getMessage());
-        } catch (UsageNotFound $e) {
-            return $this->failWith(404, $e->getMessage());
-        } catch (Throwable $e) {
-            report($e);
-            return $this->failWith(500, config('app.debug') ? $e->getMessage() : 'Server Error');
-        }
+        $this->output->write(json_encode($data, JSON_THROW_ON_ERROR));
+
+        return self::SUCCESS;
     }
 
     /**
@@ -45,19 +31,11 @@ abstract class UsageCommand extends Command
 
     protected function project(): User
     {
-        return User::findByUsername((string) $this->argument('project'))
-            ?? throw new UsageNotFound('User not found');
+        return User::findByUsernameOrFail((string) $this->argument('project'));
     }
 
     protected function domain(ProjectUsage $usage, User $user): Domain
     {
-        return $usage->ownedDomain($user, (string) $this->argument('domain'))
-            ?? throw new UsageNotFound('Not found');
-    }
-
-    private function failWith(int $status, string $message): int
-    {
-        $this->error(sprintf('HTTP %d: %s', $status, $message));
-        return 1;
+        return $usage->ownedDomainOrFail($user, (string) $this->argument('domain'));
     }
 }

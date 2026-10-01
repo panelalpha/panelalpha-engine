@@ -2,11 +2,14 @@
 
 namespace App\Exceptions;
 
+use App\System\Project\Git\Exception as GitException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\Console\Formatter\OutputFormatter;
+use Symfony\Component\Console\Output\ConsoleOutputInterface;
 use Throwable;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -76,6 +79,35 @@ class Handler extends ExceptionHandler
             // A stopped or restarting container is retryable, not a bad request.
             return new JsonResponse(['message' => $message], $e->isContainerUnavailable() ? 503 : 422);
         });
+    }
+
+    /**
+     * Failures a command's user can act on print as plain lines on stderr;
+     * anything else keeps artisan's own rendering.
+     *
+     * @param \Symfony\Component\Console\Output\OutputInterface $output
+     */
+    public function renderForConsole($output, Throwable $e)
+    {
+        $lines = match (true) {
+            $e instanceof ValidationException => collect($e->errors())->flatten()->all(),
+            $e instanceof NotFoundException,
+            $e instanceof DeployAlreadyRunningException,
+            $e instanceof DockerErrorException,
+            $e instanceof GitException => [$e->getMessage()],
+            default => null,
+        };
+
+        if ($lines === null) {
+            parent::renderForConsole($output, $e);
+
+            return;
+        }
+
+        $stderr = $output instanceof ConsoleOutputInterface ? $output->getErrorOutput() : $output;
+        foreach ($lines as $line) {
+            $stderr->writeln('<error>' . OutputFormatter::escape(trim((string) $line)) . '</error>');
+        }
     }
 
     /**
