@@ -58,12 +58,12 @@ class MysqlController extends Controller
                     ]),
                 ],
             )),
-            new OA\Response(response: 404, description: 'User not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     public function createPhpmyadminSsoToken(string $username): JsonResponse
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         $user->mysqlSsoTokens()->delete();
 

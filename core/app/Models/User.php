@@ -233,7 +233,7 @@ class User extends Authenticatable
     public static function findByUsernameOrFail(string $username): User
     {
         return self::findByUsername($username)
-            ?? throw new NotFoundException("Project '{$username}' not found.");
+            ?? throw new NotFoundException("Project '{$username}' not found.", self::class);
     }
 
     public static function existsByUsername(string $username): bool

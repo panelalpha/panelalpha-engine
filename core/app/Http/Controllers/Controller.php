@@ -13,15 +13,9 @@ class Controller extends BaseController
 {
     use AuthorizesRequests, DispatchesJobs, ValidatesRequests;
 
-    /** The project named in the route, or a JSON 404 carrying this endpoint's own message. */
-    protected function projectOr404(string $username, string $message = 'User not found'): User
+    /** The project named in the route, or a JSON 404 "Project not found". */
+    protected function projectOr404(string $username): User
     {
-        return User::findByUsername($username) ?? abort(new JsonResponse(['message' => $message], 404));
-    }
-
-    /** The project named in the route, or the plain `abort(404)` these endpoints have always used. */
-    protected function projectOrNotFound(string $username): User
-    {
-        return User::findByUsername($username) ?? abort(404, 'Not found');
+        return User::findByUsername($username) ?? abort(new JsonResponse(['message' => 'Project not found'], 404));
     }
 }

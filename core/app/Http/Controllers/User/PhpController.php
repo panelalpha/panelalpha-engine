@@ -30,7 +30,7 @@ class PhpController extends Controller
     )]
     public function listCustomIniSettings(string $username, UserPhpListCustomIniSettingsRequest $request, EngineSystem $system): JsonResponse
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         /** @var array{php_version: string} */
         $params = $request->validated();
@@ -62,7 +62,7 @@ class PhpController extends Controller
     )]
     public function updateCustomIniSettings(string $username, UserPhpUpdateCustomIniSettingsRequest $request, EngineSystem $system): JsonResponse
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         /** @var array{php_version: string, settings: array<string,string>} */
         $params = $request->validated();

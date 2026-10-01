@@ -40,7 +40,7 @@ class LogFileController extends Controller
             'all_webservers' => 'nullable',
         ]);
 
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         /** @var ?Domain $domain */
         $domain = $user->domains()->getQuery()->where('domain', $domain)->first();
@@ -83,7 +83,7 @@ class LogFileController extends Controller
             'all_webservers' => 'nullable',
         ]);
 
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         /** @var ?Domain $domain */
         $domain = $user->domains()->getQuery()->where('domain', $domain)->first();

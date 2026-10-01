@@ -26,7 +26,7 @@ class CronJobController extends Controller
             new OA\Response(response: 200, description: 'List of cron jobs', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/CronJob'))],
             )),
-            new OA\Response(response: 404, description: 'User not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     /**
@@ -35,7 +35,7 @@ class CronJobController extends Controller
      */
     public function index($username)
     {
-        $user = $this->projectOr404($username, 'Not found');
+        $user = $this->projectOr404($username);
 
         return new CronJobCollection($user->project()->cron()->list());
     }
@@ -81,7 +81,7 @@ class CronJobController extends Controller
      */
     public function store($username, CronJobStoreRequest $request)
     {
-        $user = $this->projectOr404($username, 'Not found');
+        $user = $this->projectOr404($username);
         $this->rejectDind($user);
 
         /**
@@ -141,7 +141,7 @@ class CronJobController extends Controller
      */
     public function update($username, $hash, CronJobUpdateRequest $request)
     {
-        $user = $this->projectOr404($username, 'Not found');
+        $user = $this->projectOr404($username);
         $this->rejectDind($user);
 
         /**
@@ -193,7 +193,7 @@ class CronJobController extends Controller
      */
     public function destroy($username, $hash)
     {
-        $user = $this->projectOr404($username, 'Not found');
+        $user = $this->projectOr404($username);
 
         $cron = $user->project()->cron();
         if (!$cron->exists($hash)) {

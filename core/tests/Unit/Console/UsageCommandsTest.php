@@ -251,7 +251,7 @@ class UsageCommandsTest extends TestCase
         $this->assertSame(404, $r->getStatusCode());
         $this->assertSame('{"message":"Not found"}', $r->getContent());
         $r = $this->get("/api/projects/nobody/usage");
-        $this->assertSame('{"message":"User not found"}', $r->getContent());
+        $this->assertSame('{"message":"Project not found"}', $r->getContent());
         $r = $this->getJson('/api/projects/alice/bandwidth');
         $this->assertSame(422, $r->getStatusCode());
         $this->assertSame('The start field is required. (and 2 more errors)', $r->json('message'));

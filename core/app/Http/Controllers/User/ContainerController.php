@@ -14,7 +14,7 @@ class ContainerController extends Controller
 {
     private function getDind(string $username): Dind
     {
-        $user = $this->projectOr404($username, 'Not found');
+        $user = $this->projectOr404($username);
         if ($user->getTemplate() !== 'dind') {
             abort(new JsonResponse(['message' => 'Container management is only available for dind users'], 403));
         }

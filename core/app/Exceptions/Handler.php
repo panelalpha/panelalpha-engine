@@ -2,6 +2,7 @@
 
 namespace App\Exceptions;
 
+use App\Models\User;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
@@ -55,8 +56,13 @@ class Handler extends ExceptionHandler
         // Laravel's own message names the model class (`No query results for
         // model [App\Models\BackupContainer] 5`); say what was missing instead.
         $this->map(ModelNotFoundException::class, function (ModelNotFoundException $e) {
+            // The API calls a User a project.
             $model = $e->getModel();
-            $what = $model === null ? '' : ucfirst(Str::snake(class_basename($model), ' ')) . ' ';
+            $what = match (true) {
+                $model === null => '',
+                $model === User::class => 'Project ',
+                default => ucfirst(Str::snake(class_basename($model), ' ')) . ' ',
+            };
 
             return new NotFoundHttpException($what === '' ? 'Not found' : $what . 'not found', $e);
         });

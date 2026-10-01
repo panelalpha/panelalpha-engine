@@ -46,7 +46,7 @@ class SshController extends Controller
     )]
     public function run(string $username, SshCommandRunRequest $request): JsonResponse
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         if ($user->getTemplate() !== 'dind') {
             throw ValidationException::withMessages([

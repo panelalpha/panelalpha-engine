@@ -310,7 +310,7 @@ class IpController extends Controller
             : User::findByUsername($params['username']);
         if (!$user) {
             throw ValidationException::withMessages([
-                'User not found.',
+                'Project not found.',
             ]);
         }
 
@@ -406,7 +406,7 @@ class IpController extends Controller
             : User::findByUsername($params['username']);
         if (!$user) {
             throw ValidationException::withMessages([
-                'User not found.',
+                'Project not found.',
             ]);
         }
 

@@ -90,7 +90,7 @@ class GitEndpointsTest extends DeployHookTestCase
         $response = $this->getJson('/api/projects/nobody/git/status');
 
         $response->assertStatus(404);
-        $this->assertSame('{"message":"User not found"}', $response->getContent());
+        $this->assertSame('{"message":"Project not found"}', $response->getContent());
     }
 
     public function test_a_bad_ref_is_a_422_naming_the_field(): void

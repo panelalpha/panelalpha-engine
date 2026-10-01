@@ -32,7 +32,7 @@ class WpCliController extends Controller
                     new OA\Property(property: 'stderr', type: 'string'),
                 ],
             )),
-            new OA\Response(response: 404, description: 'User not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     /**
@@ -42,7 +42,7 @@ class WpCliController extends Controller
      */
     public function run($username, WpCliCommandRunRequest $request)
     {
-        $user = $this->projectOrNotFound($username);
+        $user = $this->projectOr404($username);
 
         $args = [];
         foreach ($request->validated()['args'] as $arg) {

@@ -219,7 +219,7 @@ class SourceInspectionController extends Controller
         ?DeployPlan $plan = null,
         ?string $recipe = null
     ): JsonResponse {
-        $user = $this->projectOr404($username, 'Project not found');
+        $user = $this->projectOr404($username);
 
         try {
             // getHomeDir() honours an account whose home was recorded
