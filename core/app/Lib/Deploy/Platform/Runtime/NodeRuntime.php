@@ -1071,9 +1071,11 @@ final class NodeRuntime implements Runtime
     ): array {
         $runtime = $partial['runtime'];
         $build = '';
-        if ($runtime === 'nginx') {
+        if ($runtime === 'nginx' && trim((string) ($partial['workspace_relative'] ?? ''), '/') === '') {
             $build = self::nginxAssetBuildCommand($pm, $scripts, $partial);
         } else {
+            // A workspace app (a Next export under apps/) builds through its own
+            // `build:<slug>` or a filtered turbo, not every package in the repo.
             $build = JsPackageManager::resolveLifecycleCommand($pm, $scripts, 'build', $partial);
         }
 

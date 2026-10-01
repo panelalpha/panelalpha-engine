@@ -379,6 +379,8 @@ SH);
         $this->assertStringStartsWith('sudo docker image inspect', $store->hostBuildCommand('panelalpha/php:x', 'FROM php'));
         $this->assertStringStartsWith("printf '%s'", $store->hostBuildCommand('panelalpha/php:x', 'FROM php', true));
         $this->assertStringContainsString('--pull', $store->hostBuildCommand('panelalpha/php:x', 'FROM php', true));
+        // FROM a base only this host has: --pull would ask Docker Hub for it.
+        $this->assertStringNotContainsString('--pull', $store->hostBuildCommand('panelalpha/build-node:x', 'FROM panelalpha/php:y', false, false));
     }
 
     public function test_garbage_collect_drops_untagged_manifests(): void

@@ -44,7 +44,9 @@ class HostCompileRustLibrariesTest extends TestCase
                     return $this->exit($found ? 0 : 1);
                 }
                 $sh = array_search('sh', $cmd, true);
-                $this->containers[] = ['image' => (string) $cmd[$sh - 1], 'script' => (string) end($cmd)];
+                // Without the OOM report every host build script starts with.
+                $script = (string) preg_replace("/^trap '[^']*' EXIT; /", '', (string) end($cmd));
+                $this->containers[] = ['image' => (string) $cmd[$sh - 1], 'script' => $script];
 
                 return $this->exit(array_shift($this->exitCodes) ?? 0);
             }

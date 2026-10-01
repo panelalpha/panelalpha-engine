@@ -86,6 +86,13 @@ OUT;
             'missing image' => ['manifest for golang:1.99-alpine not found', 'could not be downloaded'],
             'no build script' => ['npm ERR! Missing script: "build"', 'no "build" script'],
             'dependency conflict' => ['npm ERR! code ERESOLVE', 'dependencies conflict'],
+            'angular multi-project workspace' => [
+                "Error: Cannot determine project for command.\n"
+                . 'This is a multi-project workspace and more than one project supports this command. '
+                . 'Run "ng build [project]" to execute the command for a specific project.',
+                'refused to guess',
+            ],
+            'angular project or target' => ['Cannot determine project or target for command.', 'refused to guess'],
             'private repo' => ['fatal: could not read Username for https://github.com', 'access token'],
             // A 2026-09-20 sweep clone of github.com/BookStackApp/BookStack (#188).
             'interrupted clone' => [

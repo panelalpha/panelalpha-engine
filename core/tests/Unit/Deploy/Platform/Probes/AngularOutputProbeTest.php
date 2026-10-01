@@ -62,6 +62,53 @@ class AngularOutputProbeTest extends ProbeTestCase
         $this->assertSame('dist/my-app/browser', $this->evaluate());
     }
 
+    public function test_the_application_builder_writes_a_string_output_path_into_browser(): void
+    {
+        // Angular 17+'s `application` builder puts the client bundle under
+        // `<outputPath>/browser` even when outputPath is a plain string
+        // (manthanank/expense-tracker-app, Angular 19).
+        foreach (['@angular-devkit/build-angular:application', '@angular/build:application'] as $builder) {
+            $this->writeJson('angular.json', [
+                'projects' => [
+                    'expense-tracker-app' => ['architect' => ['build' => [
+                        'builder' => $builder,
+                        'options' => ['outputPath' => 'dist/expense-tracker-app'],
+                    ]]],
+                ],
+            ]);
+
+            $this->assertSame('dist/expense-tracker-app/browser', $this->evaluate(), $builder);
+        }
+    }
+
+    public function test_the_legacy_browser_builder_writes_straight_into_output_path(): void
+    {
+        $this->writeJson('angular.json', [
+            'projects' => [
+                'my-app' => ['architect' => ['build' => [
+                    'builder' => '@angular-devkit/build-angular:browser',
+                    'options' => ['outputPath' => 'dist/my-app'],
+                ]]],
+            ],
+        ]);
+
+        $this->assertSame('dist/my-app', $this->evaluate());
+    }
+
+    public function test_an_empty_browser_part_flattens_into_base(): void
+    {
+        $this->writeJson('angular.json', [
+            'projects' => [
+                'ui' => ['architect' => ['build' => [
+                    'builder' => '@angular/build:application',
+                    'options' => ['outputPath' => ['base' => 'dist/raw/ui', 'browser' => '']],
+                ]]],
+            ],
+        ]);
+
+        $this->assertSame('dist/raw/ui', $this->evaluate());
+    }
+
     public function test_an_object_output_path_defaults_its_parts(): void
     {
         $this->writeJson('angular.json', [

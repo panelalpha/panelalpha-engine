@@ -467,6 +467,63 @@ class JsPackageManager
     }
 
     /**
+     * Whether the install's lifecycle scripts or $build call `php` or
+     * `composer`, following `npm run x` / `yarn x` into the scripts they name.
+     * selfoss's postinstall runs `composer install`, which a Node-only build
+     * image cannot.
+     *
+     * @param array<string, mixed> $package
+     */
+    public static function scriptsCallPhp(array $package, string $build): bool
+    {
+        $scripts = is_array($package['scripts'] ?? null) ? $package['scripts'] : [];
+        $pending = [$build];
+        foreach (['preinstall', 'install', 'postinstall', 'prepare'] as $hook) {
+            $pending[] = is_string($scripts[$hook] ?? null) ? $scripts[$hook] : '';
+        }
+        $seen = [];
+        while ($pending !== []) {
+            $body = (string) array_shift($pending);
+            if (preg_match('/(?:^|[\s;&|(])(?:php|composer)(?:\s|$)/', $body) === 1) {
+                return true;
+            }
+            preg_match_all('/\b(?:(?:npm|pnpm)\s+run(?:-script)?|yarn(?:\s+run)?)\s+([\w:.-]+)/', $body, $m);
+            foreach ($m[1] as $name) {
+                foreach (["pre{$name}", $name, "post{$name}"] as $script) {
+                    if (!isset($seen[$script]) && is_string($scripts[$script] ?? null)) {
+                        $seen[$script] = true;
+                        $pending[] = $scripts[$script];
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Yarn 2+ on Plug'n'Play, its default linker: the install writes no
+     * node_modules and its link step deletes any it finds. From file contents,
+     * so a caller reading through the account's filesystem can ask.
+     *
+     * @param array<string, mixed> $package
+     */
+    public static function isYarnPnp(array $package, ?string $yarnrc, ?string $yarnLock): bool
+    {
+        $field = $package['packageManager'] ?? null;
+        if (is_string($field) && $field !== '') {
+            if (preg_match('/^yarn@(\d+)/', $field, $m) !== 1 || (int) $m[1] < 2) {
+                return false;
+            }
+        } elseif ($yarnLock === null || ($yarnrc === null && preg_match('/^__metadata:/m', $yarnLock) !== 1)) {
+            return false;
+        }
+
+        return $yarnrc === null
+            || preg_match('/^\s*nodeLinker\s*:\s*[\'"]?(?:node-modules|pnpm)\b/m', $yarnrc) !== 1;
+    }
+
+    /**
      * @param array<string, mixed> $package
      */
     private static function corepackPnpmSpec(array $package): string

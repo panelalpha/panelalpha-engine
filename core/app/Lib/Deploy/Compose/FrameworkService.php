@@ -189,9 +189,11 @@ final class FrameworkService
         // commands before the serve one, so where a project has it, it *is*
         // the command. Running the start command directly is what left a
         // Django project's migrations unapplied.
+        // Doubled `$` for the same reason as shellCommand().
+        $provision = str_replace('$', '$$', HostRunProject::packageManagerPrefix($this->decision));
         $entrypoint = trim((string) ($this->decision['entrypoint'] ?? ''));
         if ($entrypoint !== '') {
-            $service['command'] = ['sh', '-c', 'exec ' . self::WORKDIR . '/' . $entrypoint];
+            $service['command'] = ['sh', '-c', $provision . 'exec ' . self::WORKDIR . '/' . $entrypoint];
 
             return $service + $this->mountedIdentity();
         }
@@ -206,7 +208,7 @@ final class FrameworkService
             $argv = json_decode($command, true);
             $service['command'] = is_array($argv) && array_is_list($argv) && $argv !== []
                 ? array_map('strval', $argv)
-                : ['sh', '-c', self::shellCommand($command)];
+                : ['sh', '-c', $provision . self::shellCommand($command)];
         }
 
         return $service + $this->mountedIdentity();

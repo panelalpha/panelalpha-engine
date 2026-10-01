@@ -351,7 +351,8 @@ class DeployFailureExplainer
                     . '|(?:task|process)\s+"?[\w\/.-]+"?\s+killed'
                     . '|^[ \t]*(?:\[ERROR\][ \t]+)?Killed[ \t]*$'
                     . '|oom-kill)/im',
-                static fn (array $m): string => preg_match('/^\s*(?:\[ERROR\]\s+)?Killed\s*$/', $m[1]) === 1
+                static fn (array $m, string $output = ''): string => preg_match('/^\s*(?:\[ERROR\]\s+)?Killed\s*$/', $m[1]) === 1
+                    || str_contains($output, 'host build container')
                     ? 'The build ran out of memory in the engine\'s build container, which is sized for '
                         . 'the server (DEPLOY_BUILD_MEMORY, 8 GB or half its RAM by default), not by the plan. '
                         . 'Raising the project\'s memory limit does not change it. The full build output is '
@@ -586,6 +587,15 @@ class DeployFailureExplainer
                 '/(Missing script: ["\']?build|npm ERR! missing script: build)/i',
                 static fn (): string =>
                     'The project has no "build" script in package.json, so there is nothing to compile.',
+            ],
+
+            // `ng build` in a workspace with several projects and nothing to pick one by.
+            'angular-project-ambiguous' => [
+                '/(Cannot determine project(?: or target)? for command|This is a multi-project workspace)/i',
+                static fn (): string =>
+                    'The Angular workspace has several projects and the build did not name one, so '
+                        . '`ng build` refused to guess. Add a "build" script to package.json that names '
+                        . 'the project to deploy (`ng build <project>`).',
             ],
 
             // `npm ci` refuses a lockfile that no longer matches package.json and

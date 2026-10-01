@@ -85,11 +85,11 @@ final class DindImageStore implements ImageStore
      * suppressing them is what makes the image seedable. The retry without the
      * flags covers hosts that only have the classic builder.
      */
-    public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false): string
+    public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false, bool $pull = true): string
     {
         $img = escapeshellarg($tag);
         $doc = escapeshellarg($dockerfile);
-        $build = "printf '%s' {$doc} | sudo docker build --pull";
+        $build = "printf '%s' {$doc} | sudo docker build" . ($pull ? ' --pull' : '');
         $always = "{$build} --provenance=false --sbom=false -t {$img} - || {$build} -t {$img} -";
 
         // $rebuild is prewarm's weekly refresh: same tag, fresh upstream layers.

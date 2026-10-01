@@ -68,6 +68,12 @@ class GitHistoryUseTest extends TestCase
             'git-rev-sync' => ['package.json', "{\"dependencies\": {\"git-rev-sync\": \"^3.0.0\"}}\n"],
             'gemspec' => ['Gemfile', "source 'https://rubygems.org'\ngemspec\n"],
             'make describe' => ['Makefile', "VERSION := \$(shell git describe --tags)\n"],
+            // go-vikunja/vikunja's magefile.go, trimmed.
+            'mage git runner' => ['magefile.go', "func runGitCommandWithOutput(ctx context.Context, arg ...string) ([]byte, error) {\n"
+                . "\tcmd := exec.CommandContext(ctx, \"git\", arg...)\n\treturn cmd.Output()\n}\n\n"
+                . "func getRawVersionNumber(ctx context.Context) string {\n"
+                . "\tversionBytes, err := runGitCommandWithOutput(ctx, \"describe\", \"--tags\", \"--always\", \"--abbrev=10\")\n"],
+            'mage sh.Output' => ['magefile.go', "out, _ := sh.Output(\"git\", \"rev-parse\", \"--short\", \"HEAD\")\n"],
         ];
     }
 
@@ -85,6 +91,7 @@ class GitHistoryUseTest extends TestCase
             'package.json' => "{\"repository\": \"git+https://github.com/x/y.git\"}\n",
             'Gemfile' => "source 'https://rubygems.org'\ngem 'rails'\n",
             'Makefile' => "build:\n\tgo build ./...\n",
+            'magefile.go' => "func Build() error {\n\treturn sh.Run(\"go\", \"build\", \"./...\")\n}\n",
         ]));
     }
 }

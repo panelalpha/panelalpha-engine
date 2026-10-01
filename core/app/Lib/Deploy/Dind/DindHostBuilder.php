@@ -36,6 +36,14 @@ final class DindHostBuilder implements HostBuilder
     /** Used only when no usable limit is handed in: an unreadable host, or direct construction in tests. */
     private const DEFAULT_MEMORY_LIMIT = '2g';
 
+    /**
+     * Printed by a failed host build whose memory cgroup OOM-killed a process.
+     * The kill itself leaves no text when the victim is not the shell's own
+     * child (yarn 4 exits 129 without a word), and the exit status alone
+     * cannot tell it apart.
+     */
+    public const OOM_REPORT = 'Out of memory: the kernel killed a process in the host build container';
+
     private string $memoryLimit;
 
     /**
@@ -157,7 +165,7 @@ final class DindHostBuilder implements HostBuilder
             $image,
             'sh',
             '-c',
-            $script,
+            self::reportingOom($script),
         ];
     }
 
@@ -393,7 +401,7 @@ final class DindHostBuilder implements HostBuilder
             $image,
             '-e',
             '-c',
-            $script,
+            self::reportingOom($script),
         ];
     }
 
@@ -445,8 +453,15 @@ final class DindHostBuilder implements HostBuilder
             ]),
             Images::COMPOSER_IMAGE,
             '-c',
-            self::composerCommand($phpVersion),
+            self::reportingOom(self::composerCommand($phpVersion)),
         ];
+    }
+
+    /** $script, saying OOM_REPORT on the way out when it failed on an OOM kill. */
+    private static function reportingOom(string $script): string
+    {
+        return 'trap \'rc=$?; if [ "$rc" -ne 0 ] && grep -qs "^oom_kill [1-9]" /sys/fs/cgroup/memory.events; '
+            . 'then echo "' . self::OOM_REPORT . '" >&2; fi; exit "$rc"\' EXIT; ' . $script;
     }
 
     /**

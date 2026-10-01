@@ -122,14 +122,19 @@ class HostCompile
         $cached = $this->prepareCache();
 
         $isNode = $isNginx || $isNitro || HostRunProject::isNode($decision['strategy'] ?? null);
-        $nodeImage = Images::nodeImage($projectDir);
+        // A host-run project is mounted from its app_root, so it is built
+        // there: its package.json, lockfile and node_modules are the ones the
+        // container sees at /app.
+        $appRoot = $isMounted ? AppRoot::relative($decision) : '';
+        $appDir = self::mountedAppDir($projectDir, $appRoot);
+        $nodeImage = Images::nodeImage($appDir);
         // A command runtime compiles in its own language image -- the one the
         // recipe resolved and the one the container will run, so a venv built
         // here works there and a binary linked here runs there.
         if (!$isNode) {
             $image = $this->commandRuntimeImage($decision, $projectDir) ?: $nodeImage;
         } elseif ($isNitro || $isMounted) {
-            $image = HostNodeBuild::runtimeImage($this->projectPackageManager($projectDir), $nodeImage);
+            $image = HostNodeBuild::runtimeImage($this->projectPackageManager($appDir), $nodeImage);
         } else {
             $image = HostNodeBuild::compilerImage(
                 $install,
@@ -149,7 +154,7 @@ class HostCompile
         // the cache the way a throwaway static compile's is.
         $isolateNodeModules = !$isNitro && !$isMounted;
         try {
-            $this->runContainer($projectDir, $image, $installCmd, $buildCmd, $recipeEnv, $isolateNodeModules && $cached, $isNode);
+            $this->runContainer($projectDir, $image, $installCmd, $buildCmd, $recipeEnv, $isolateNodeModules && $cached, $isNode, $appRoot);
         } catch (\Exception $e) {
             // Standalone Node must keep compile and runtime on the same
             // interpreter. Falling back to Node after a bun install leaves
@@ -175,11 +180,12 @@ class HostCompile
             $this->bundleRustRuntimeLibraries($projectDir, $image, trim((string) ($decision['image'] ?? '')));
         }
 
-        $output = NodeRuntime::safeOutputDir(
-            $decision['output_directory'] ?? null,
-            $isNitro ? '.output' : 'dist'
-        );
-        $this->assertBuildProduced($projectDir, $output, $isNitro, $isMounted, $isNode);
+        // The static strategy mounts the checkout itself, so that is where an
+        // index has to be.
+        $output = ($decision['strategy'] ?? null) === Strategies::STATIC
+            ? '.'
+            : NodeRuntime::safeOutputDir($decision['output_directory'] ?? null, $isNitro ? '.output' : 'dist');
+        $this->assertBuildProduced($appDir, $output, $isNitro, $isMounted, $isNode);
 
         $chown = $this->project->userModel()->getChownString();
         if (is_string($chown) && $chown !== '') {
@@ -191,13 +197,33 @@ class HostCompile
                 default => [$output],
             };
             foreach ($dirs as $dir) {
-                $path = $projectDir . '/' . $dir;
+                $path = $appDir . '/' . $dir;
                 if ($system->filesystem()->directoryExists($path)) {
                     $system->exec(['sudo', 'chown', '-R', $chown, $path], [], 60);
                 }
             }
         }
         $logger?->ok($isNginx ? 'Static assets compiled' : 'Application compiled');
+    }
+
+    /**
+     * The directory a host-run project is built in. Refused when it resolves
+     * outside the checkout: the chown after the compile runs on the host and
+     * would follow a symlinked app_root anywhere.
+     */
+    private static function mountedAppDir(string $projectDir, string $appRoot): string
+    {
+        if ($appRoot === '') {
+            return $projectDir;
+        }
+        $dir = rtrim($projectDir, '/') . '/' . $appRoot;
+        $real = realpath($dir);
+        $base = realpath($projectDir);
+        if ($real === false || $base === false || !is_dir($real) || !str_starts_with($real, rtrim($base, '/') . '/')) {
+            throw new \Exception("app_root '{$appRoot}' is not a directory inside the project");
+        }
+
+        return $dir;
     }
 
     /**
@@ -223,7 +249,8 @@ class HostCompile
         string $projectDir,
         array $files,
         string $appRoot = '',
-        string|false|null $frontendBuild = null
+        string|false|null $frontendBuild = null,
+        ?string $phpImage = null
     ): bool {
         $appRoot = AppRoot::relative(['app_root' => $appRoot]);
         $prefix = $appRoot === '' ? '' : $appRoot . '/';
@@ -298,6 +325,14 @@ class HostCompile
         $build = $declared ?? JsPackageManager::scriptCommand($pm, 'build');
         $nodeImage = Images::nodeImage($buildDir, $package);
         $image = HostNodeBuild::compilerImage($install, $nodeImage, $pm);
+        // A script that calls composer or php (selfoss's postinstall) exits
+        // 127 in a Node image, so the build runs in the PHP runtime with Node
+        // copied in.
+        if ($image === $nodeImage && $phpImage !== null && $phpImage !== ''
+            && JsPackageManager::scriptsCallPhp($package, $build)
+        ) {
+            $image = $this->project->innerDocker()->bases()->ensureNodeBuild($phpImage, $nodeImage) ?? $image;
+        }
         $installCmd = $install;
         $buildCmd = $build;
         if ($image === HostNodeBuild::BUN_IMAGE) {
@@ -309,7 +344,7 @@ class HostCompile
         try {
             $this->runContainer($projectDir, $image, $installCmd, $buildCmd, $recipeEnv, $cached, true, $buildRoot);
         } catch (\Exception $e) {
-            if ($image === $nodeImage) {
+            if ($image !== HostNodeBuild::BUN_IMAGE) {
                 throw $e;
             }
             $logger?->info('Bun compile failed, retrying with Node: ' . $e->getMessage());
@@ -638,8 +673,7 @@ class HostCompile
         );
 
         if (!$process->isSuccessful()) {
-            $message = FailureOutput::fromStreams($process->getErrorOutput(), $process->getOutput());
-            throw new \Exception($message !== '' ? $message : 'Host PHP build failed');
+            throw $this->hostBuildFailure($process, 'Host PHP build failed');
         }
 
         $logger?->ok('PHP dependencies resolved on host');
@@ -798,8 +832,7 @@ class HostCompile
         );
 
         if (!$process->isSuccessful()) {
-            $message = FailureOutput::fromStreams($process->getErrorOutput(), $process->getOutput());
-            throw new \Exception($message !== '' ? $message : 'Host Composer install failed');
+            throw $this->hostBuildFailure($process, 'Host Composer install failed');
         }
     }
 
@@ -887,6 +920,14 @@ class HostCompile
         if ($projectDir !== $account->projectDir()) {
             throw new \InvalidArgumentException('Refusing host build outside the account project directory');
         }
+        // The isolated node_modules is a bind mount, and Yarn PnP's link step
+        // deletes any node_modules it finds: rmdir gets EBUSY and the install
+        // aborts. A compiled frontend does not depend on the linker.
+        if ($isolateNodeModules && $isNode && !array_key_exists('YARN_NODE_LINKER', $env)
+            && $this->isYarnPnp($projectDir, $appRoot)
+        ) {
+            $env['YARN_NODE_LINKER'] = 'node-modules';
+        }
         $process = $this->runHostBuild(
             static fn (HostBuilder $builder): array => $builder->nodeBuildArgv(
                 $account,
@@ -902,9 +943,38 @@ class HostCompile
         );
 
         if (!$process->isSuccessful()) {
-            $message = FailureOutput::fromStreams($process->getErrorOutput(), $process->getOutput());
-            throw new \Exception($message !== '' ? $message : 'Host static asset compile failed');
+            throw $this->hostBuildFailure($process, 'Host static asset compile failed');
         }
+    }
+
+    private function isYarnPnp(string $projectDir, string $appRoot): bool
+    {
+        $prefix = trim($appRoot, '/') === '' ? '' : trim($appRoot, '/') . '/';
+        $tree = $this->project->projectTree();
+        $package = json_decode((string) $tree->readIn($projectDir, $prefix . 'package.json'), true);
+
+        return JsPackageManager::isYarnPnp(
+            is_array($package) ? $package : [],
+            $tree->readIn($projectDir, $prefix . '.yarnrc.yml'),
+            $tree->readIn($projectDir, $prefix . 'yarn.lock')
+        );
+    }
+
+    /**
+     * Why a host build container failed. An OOM kill may leave no text of its
+     * own, and the output's last lines were then reported as the cause.
+     */
+    private function hostBuildFailure(Process $process, string $fallback): \Exception
+    {
+        $message = FailureOutput::fromStreams($process->getErrorOutput(), $process->getOutput());
+        if ($process->getExitCode() === 137 || str_contains($process->getErrorOutput(), DindHostBuilder::OOM_REPORT)) {
+            $message = 'The host build container ran out of memory at its limit of '
+                . $this->hostBuilder()->memoryLimitMb() . ' MB and the kernel killed the build. That limit is set '
+                . 'for the server (DEPLOY_BUILD_MEMORY), not by the project\'s memory limit.'
+                . ($message === '' ? '' : "\n" . $message);
+        }
+
+        return new \Exception($message !== '' ? $message : $fallback);
     }
 
     /**

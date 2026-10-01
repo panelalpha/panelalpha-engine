@@ -246,8 +246,14 @@ class SharedBaseImages
             return $tag;
         }
 
+        // Our own PHP bases exist only on this host: --pull would look for
+        // them on Docker Hub and fail.
+        $pull = !$this->hostHasImage($image);
         try {
-            $host->cancellable($this->inner->imageStore()->hostBuildCommand($tag, $dockerfile), self::BUILD_TIMEOUT_SECONDS);
+            $host->cancellable(
+                $this->inner->imageStore()->hostBuildCommand($tag, $dockerfile, false, $pull),
+                self::BUILD_TIMEOUT_SECONDS
+            );
         } catch (\Exception $e) {
             $host->failDeployIfDiskFull($e->getMessage());
             $host->logInfo("Could not build {$tag}, building without Node: " . $e->getMessage());

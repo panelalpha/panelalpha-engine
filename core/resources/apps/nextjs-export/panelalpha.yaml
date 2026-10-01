@@ -9,14 +9,9 @@ output_directory: out
 requires:
   node:
     role: build
+# `output: "export"` or `next export`, in the root or the workspace app's own files.
 detect:
-  all:
-    - probe: next-workspace
-    - any:
-        -
-          contains: { glob: next.config, pattern: 'output\s*:\s*[''"]export[''"]', regex: true }
-        -
-          contains: { path: package.json, pattern: 'next export' }
+  probe: next-export
 commands:
   - id: npm-install
     stage: build
@@ -27,3 +22,4 @@ commands:
     stage: build
     run: '{{js.build:npx next build}}'
     description: "The project's own build script wins over this default when package.json defines one."
+output_from: next-workspace

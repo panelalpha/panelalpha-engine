@@ -23,11 +23,21 @@ final class GitHistoryUse
         // A gemspec's `git ls-files` lists the gem's files.
         'Gemfile' => '/^\s*gemspec\b/m',
         'Makefile' => self::HISTORY_COMMAND,
+        // Mage targets run git from Go: Vikunja's falls back to
+        // `exec.Command("git", ...)` with "describe" when no version is given.
+        'magefile.go' => self::GO_GIT_CALL,
     ];
 
+    /** A git history command spelled out, or `"git"` and a history subcommand as Go string arguments. */
+    private const GO_GIT_CALL = '/(?<![\w-])git(\s+-[cC]\s+\S+)*\s+(' . self::HISTORY_SUBCOMMANDS . ')\b'
+        . '|"git"(?=[\s\S]*"(?:' . self::HISTORY_SUBCOMMANDS . ')")'
+        . '|"(?:' . self::HISTORY_SUBCOMMANDS . ')"(?=[\s\S]*"git")/';
+
+    private const HISTORY_SUBCOMMANDS
+        = 'describe|rev-parse|rev-list|log|show|tag|status|diff|symbolic-ref|branch|submodule|lfs|ls-files|name-rev';
+
     /** `git [-C dir | -c k=v]... <subcommand>` for a subcommand that reads the local repository. */
-    private const HISTORY_COMMAND = '/(?<![\w-])git(\s+-[cC]\s+\S+)*\s+'
-        . '(describe|rev-parse|rev-list|log|show|tag|status|diff|symbolic-ref|branch|submodule|lfs|ls-files|name-rev)\b/';
+    private const HISTORY_COMMAND = '/(?<![\w-])git(\s+-[cC]\s+\S+)*\s+(' . self::HISTORY_SUBCOMMANDS . ')\b/';
 
     /** @return list<string> */
     public static function manifestFiles(): array

@@ -70,7 +70,7 @@ final class StageScript
             'default_phase' => PlatformStage::UPGRADE,
             'stage_blocks' => self::stageBlocks($manifest, $context, $overrides, $extraInstall, $prepend, $appConfig, $plan),
             'start_commands' => self::startCommands($manifest, $context, $overrides, $appConfig, $plan),
-            'serve' => self::serve($manifest, $overrides, $appConfig, $plan),
+            'serve' => self::serve($manifest, $overrides, $appConfig, $plan, $context),
         ]);
     }
 
@@ -178,7 +178,8 @@ final class StageScript
         PlatformManifest $manifest,
         array $overrides,
         ?AppConfig $appConfig,
-        ?DeployPlan $plan
+        ?DeployPlan $plan,
+        ?ProjectContext $context = null
     ): array {
         if (StageResolver::isOverridden(PlatformStage::START, $plan)) {
             $serve = self::serveIn($plan?->commandsFor(PlatformStage::START) ?? []);
@@ -198,7 +199,16 @@ final class StageScript
                 : (new ServeCommand($serve, []))->lines();
         }
 
-        $serve = $appConfig?->serveCommand() ?? $manifest->serveCommand();
+        $own = $appConfig?->serveCommand();
+        if ($own !== null) {
+            // Stated for this project on purpose. The overrides are the
+            // platform serve's resolution, keyed by id, and a recipe serve that
+            // shared that id ran the package.json default instead of its own.
+            $run = $context === null ? $own->run : PlatformValues::resolveJsPlaceholder($manifest, $context, $own->run);
+
+            return (new ServeCommand($own, [$own->id => $run]))->lines();
+        }
+        $serve = $manifest->serveCommand();
 
         return $serve === null ? [] : (new ServeCommand($serve, $overrides))->lines();
     }

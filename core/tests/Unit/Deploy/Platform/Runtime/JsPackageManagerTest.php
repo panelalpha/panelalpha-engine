@@ -599,4 +599,46 @@ class JsPackageManagerTest extends TestCase
 
         return $dir;
     }
+
+    public function test_scripts_calling_php_are_found_through_the_scripts_they_run(): void
+    {
+        $selfoss = ['scripts' => [
+            'postinstall' => 'npm run install-dependencies',
+            'install-dependencies' => 'npm run install-dependencies:client && npm run install-dependencies:server',
+            'install-dependencies:client' => 'npm ci --include=dev --prefix client/',
+            'install-dependencies:server' => 'composer install',
+        ]];
+        $this->assertTrue(JsPackageManager::scriptsCallPhp($selfoss, 'npm run build'));
+        $this->assertTrue(JsPackageManager::scriptsCallPhp(
+            ['scripts' => ['build' => 'yarn assets', 'preassets' => 'php artisan ziggy:generate']],
+            'yarn run build'
+        ));
+        $this->assertTrue(JsPackageManager::scriptsCallPhp([], 'php bin/console assets:install && npm run build'));
+
+        $this->assertFalse(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'vite build']], 'npm run build'));
+        // A path or a package name containing the word is not a call.
+        $this->assertFalse(JsPackageManager::scriptsCallPhp(
+            ['scripts' => ['postinstall' => 'node scripts/composer-check.js', 'build' => 'php-parser-cli']],
+            'npm run build'
+        ));
+        // A script naming itself does not loop.
+        $this->assertFalse(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'npm run build']], 'npm run build'));
+    }
+
+    public function test_yarn_berry_defaults_to_plug_n_play(): void
+    {
+        $berryLock = "__metadata:\n  version: 8\n";
+
+        // secretsanta: packageManager yarn@4.5.1 and no .yarnrc.yml.
+        $this->assertTrue(JsPackageManager::isYarnPnp(['packageManager' => 'yarn@4.5.1'], null, $berryLock));
+        $this->assertTrue(JsPackageManager::isYarnPnp([], null, $berryLock));
+        $this->assertTrue(JsPackageManager::isYarnPnp([], "nodeLinker: pnp\n", "# yarn lockfile v1\n"));
+
+        $this->assertFalse(JsPackageManager::isYarnPnp([], "nodeLinker: node-modules\n", $berryLock));
+        $this->assertFalse(JsPackageManager::isYarnPnp([], "nodeLinker: 'pnpm'\n", $berryLock));
+        $this->assertFalse(JsPackageManager::isYarnPnp([], null, "# yarn lockfile v1\n"));
+        $this->assertFalse(JsPackageManager::isYarnPnp(['packageManager' => 'yarn@1.22.22'], null, $berryLock));
+        $this->assertFalse(JsPackageManager::isYarnPnp(['packageManager' => 'pnpm@9.0.0'], null, $berryLock));
+        $this->assertFalse(JsPackageManager::isYarnPnp([], null, null));
+    }
 }

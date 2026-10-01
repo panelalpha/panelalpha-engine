@@ -8,6 +8,7 @@ use App\Lib\Deploy\Platform\Runtime\Requirement;
 use App\Lib\Deploy\Platform\Runtime\RuntimeRegistry;
 use App\Lib\Deploy\Platform\Probes\AngularOutputProbe;
 use App\Lib\Deploy\Platform\Probes\BundlerSpaProbe;
+use App\Lib\Deploy\Platform\Probes\NextWorkspaceProbe;
 use App\Lib\Deploy\Platform\Probes\ViteOutputDir;
 use App\Lib\Deploy\Platform\Runtime\DotnetRuntime;
 use App\Lib\Deploy\Platform\Runtime\GoRuntime;
@@ -77,6 +78,14 @@ final class PlatformValues
             $requirements
         );
         $decision['build_images'] = ImageResolver::buildImages($requirements);
+        // A recipe names its platform, so no detect ran to find the Next
+        // workspace; under an app_root it is looked for there.
+        if ($manifest->appRoot !== '' && $manifest->outputFrom === 'next-workspace'
+            && !isset($decision['workspace_relative'])
+        ) {
+            $workspace = (new NextWorkspaceProbe())->evaluate($runtimeContext);
+            $decision += is_array($workspace) ? $workspace : [];
+        }
         $decision['output_directory'] = self::outputDirectory($manifest, $context, $decision);
         $decision['runtime_image'] = self::runtimeImage($manifest, $runtimeContext);
         if (isset($manifest->requires['dotnet'])) {
@@ -88,8 +97,10 @@ final class PlatformValues
         }
         $decision['resolved_commands'] = self::resolvedCommands($manifest, $context);
 
-        if (self::isJsProject($manifest, $context)) {
-            return self::applyJs($manifest, $context, $decision);
+        // The JS toolchain is the application's too: under an app_root the
+        // repository root may have no package.json at all.
+        if (self::isJsProject($manifest, $runtimeContext)) {
+            return self::applyJs($manifest, $runtimeContext, $decision);
         }
 
         return self::applyResolvedCommands($manifest, $decision);
@@ -161,7 +172,9 @@ final class PlatformValues
         foreach (StageResolver::commandsFor(PlatformStage::BUILD, $manifest, $appConfig, null, $context) as $command) {
             // A resolver answers for the manifest's command, never for the app
             // config's replacement of it.
-            $run = in_array($command, $own, true) ? $command->run : ($resolved[$command->id] ?? $command->run);
+            $run = in_array($command, $own, true)
+                ? self::resolveJsPlaceholder($manifest, $context, $command->run, $decision)
+                : ($resolved[$command->id] ?? $command->run);
             if (trim($run) === '') {
                 continue;
             }
@@ -176,6 +189,52 @@ final class PlatformValues
         $decision['build_command'] = implode(' && ', $assets);
 
         return $decision;
+    }
+
+    /**
+     * A `{{js.install}}`, `{{js.build:…}}` or `{{js.start:…}}` an app config
+     * wrote in its own command, resolved the way the platform's are: a recipe
+     * uses the same vocabulary as the manifest it extends. Anything else is
+     * returned unchanged.
+     *
+     * @param array<string, mixed> $decision the platform's, for its output
+     *        directory and workspace
+     */
+    public static function resolveJsPlaceholder(
+        PlatformManifest $manifest,
+        ProjectContext $context,
+        string $run,
+        array $decision = []
+    ): string {
+        if (preg_match('/^\{\{js\.(install|build|start)(?::(.*))?\}\}$/s', trim($run), $m) !== 1) {
+            return $run;
+        }
+        [, $kind] = $m;
+        $default = isset($m[2]) ? trim($m[2]) : '';
+        $context = self::appRootContext($manifest, $context);
+        if (!$context->hasFile('package.json')) {
+            return $default;
+        }
+
+        $partial = [
+            'strategy' => $manifest->strategy,
+            'label' => $manifest->label,
+            // A start is only resolved for a Node runtime.
+            'runtime' => $kind === 'start' ? PlatformManifest::RUNTIME_NODE : $manifest->runtime,
+            'port_hint' => $manifest->port ?? 3000,
+            'output_directory' => $decision['output_directory'] ?? $manifest->outputDirectory,
+            'default_build' => $kind === 'build' ? $default : '',
+            'default_start' => $kind === 'start' ? $default : '',
+            'env' => $manifest->env,
+        ];
+        foreach (['workspace_package', 'workspace_slug', 'workspace_relative'] as $key) {
+            if (isset($decision[$key]) && is_string($decision[$key]) && $decision[$key] !== '') {
+                $partial[$key] = $decision[$key];
+            }
+        }
+        $resolved = NodeRuntime::finalizeProject($partial, $context->projectDir, $context->files);
+
+        return (string) ($resolved[$kind . '_command'] ?? $default);
     }
 
     /**
@@ -319,7 +378,10 @@ final class PlatformValues
      */
     private static function isJsProject(PlatformManifest $manifest, ProjectContext $context): bool
     {
+        // The static strategy serves the checkout as committed; a package.json
+        // beside it is tooling, and nothing a build produced would be served.
         return in_array($manifest->runtime, [PlatformManifest::RUNTIME_NODE, PlatformManifest::RUNTIME_NGINX], true)
+            && $manifest->strategy !== Strategies::STATIC
             && $context->hasFile('package.json');
     }
 
@@ -341,7 +403,7 @@ final class PlatformValues
             'runtime' => $manifest->runtime,
             'port_hint' => $manifest->port ?? 3000,
             'output_directory' => $decision['output_directory'],
-            'default_build' => self::placeholderDefault($decision['build_command'] ?? ''),
+            'default_build' => self::defaultBuild($manifest, $context, $decision),
             'default_start' => self::placeholderDefault($decision['start_command'] ?? ''),
             'env' => $manifest->env,
         ];
@@ -357,6 +419,21 @@ final class PlatformValues
             'strategy' => $manifest->strategy,
             'label' => $manifest->label,
         ]);
+    }
+
+    /**
+     * The manifest's default build, naming the Angular project whose output is
+     * served when the workspace holds several.
+     *
+     * @param array<string, mixed> $decision
+     */
+    private static function defaultBuild(PlatformManifest $manifest, ProjectContext $context, array $decision): string
+    {
+        $build = self::placeholderDefault($decision['build_command'] ?? '');
+
+        return $manifest->outputFrom === 'angular'
+            ? AngularOutputProbe::buildCommand($context->projectDir, $build)
+            : $build;
     }
 
     /**

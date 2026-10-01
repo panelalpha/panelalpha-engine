@@ -61,6 +61,32 @@ final class HostRunProject
     }
 
     /**
+     * Shell prefix that gives the run container the package manager the host
+     * build provisioned. pnpm and Yarn 2+ exist there only through corepack,
+     * and the run image is plain Node, so `pnpm start` exited 127. Empty for
+     * npm, Yarn 1 (shipped in the image) and every non-Node strategy.
+     *
+     * @param array<string, mixed> $decision
+     */
+    public static function packageManagerPrefix(array $decision): string
+    {
+        $strategy = is_string($decision['strategy'] ?? null) ? $decision['strategy'] : null;
+        $pm = $decision['package_manager'] ?? '';
+        $install = (string) ($decision['install_command'] ?? '');
+        $berry = $pm === 'yarn' && str_contains($install, '--immutable');
+        if (!self::isNode($strategy) || ($pm !== 'pnpm' && !$berry)) {
+            return '';
+        }
+        $prepare = HostNodeBuild::provisioning($install);
+        if ($prepare === '') {
+            return '';
+        }
+
+        return 'export COREPACK_HOME=/tmp/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0 npm_config_cache=/tmp/npm-cache'
+            . ' PATH=' . HostNodeBuild::PROVISIONED_PATH . ':$PATH && ' . $prepare . ' && ';
+    }
+
+    /**
      * The recipe's start command: the manifest resolves `{{js.start:…}}`
      * against the project's `package.json` scripts, else the framework's own
      * default.

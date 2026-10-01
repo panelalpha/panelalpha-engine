@@ -21,9 +21,10 @@ interface ImageStore
      *
      * How the shared bases the engine owns come into existence — nothing is
      * COPYed in, so the Dockerfile is all the input there is. Must be
-     * idempotent: a deploy calls it on every run.
+     * idempotent: a deploy calls it on every run. $pull false builds FROM an
+     * image only this host has.
      */
-    public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false): string;
+    public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false, bool $pull = true): string;
 
     /**
      * Push a host image to where accounts pull shared images from, so an

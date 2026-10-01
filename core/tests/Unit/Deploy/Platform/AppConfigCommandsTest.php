@@ -96,6 +96,59 @@ class AppConfigCommandsTest extends TestCase
         $this->assertStringNotContainsString('apache2-foreground', $script);
     }
 
+    /**
+     * Cronicle's recipe (extends express) named its start `serve`, the id
+     * express's own serve has, and the entrypoint ran package.json's `bin`
+     * instead: the resolved project default is keyed by that id.
+     */
+    public function test_an_app_config_serve_sharing_the_platforms_id_is_not_overridden(): void
+    {
+        $appConfig = $this->appConfig(
+            "  - {id: serve, stage: start, serve: true, run: \"node lib/main.js\"}\n"
+        );
+
+        $script = StageScript::render(
+            PlatformRegistry::find('express'),
+            null,
+            ['serve' => 'node bin/control.sh'],
+            [],
+            [],
+            $appConfig
+        );
+
+        $this->assertStringContainsString('exec node lib/main.js', $script);
+        $this->assertStringNotContainsString('bin/control.sh', $script);
+    }
+
+    public function test_an_app_config_serve_placeholder_is_resolved_for_the_project(): void
+    {
+        $dir = sys_get_temp_dir() . '/pa-serve-' . bin2hex(random_bytes(6));
+        mkdir($dir);
+        file_put_contents($dir . '/package.json', '{"scripts":{"start":"node server.js"}}');
+        file_put_contents($dir . '/yarn.lock', "# yarn lockfile v1\n");
+        $appConfig = $this->appConfig(
+            "  - {id: serve, stage: start, serve: true, run: \"{{js.start:node index.js}}\"}\n"
+        );
+
+        try {
+            $script = StageScript::render(
+                PlatformRegistry::find('express'),
+                \App\Lib\Deploy\Platform\ProjectContext::at($dir),
+                ['serve' => 'node bin/control.sh'],
+                [],
+                [],
+                $appConfig
+            );
+        } finally {
+            @unlink($dir . '/package.json');
+            @unlink($dir . '/yarn.lock');
+            @rmdir($dir);
+        }
+
+        $this->assertStringContainsString('exec yarn start', $script);
+        $this->assertStringNotContainsString('{{js.', $script);
+    }
+
     public function test_optional_and_timeout_survive_to_the_generated_script(): void
     {
         $script = $this->stageScript($this->appConfig(

@@ -478,6 +478,37 @@ class DetectProjectStrategyTest extends TestCase
         $this->assertSame('', $result['start_command']);
     }
 
+    public function test_nextjs_export_in_a_workspace_serves_the_workspace_out(): void
+    {
+        // jsoncrack.com: pnpm + turbo, no root next.config, and the export is
+        // declared in apps/www/next.config.js.
+        $this->writeFile('package.json', json_encode([
+            'name' => 'json-crack',
+            'scripts' => ['build' => 'turbo run build', 'build:www' => 'turbo run build --filter=www'],
+        ]));
+        $this->writeFile('pnpm-lock.yaml', "lockfileVersion: '9.0'\n");
+        $this->writeFile('pnpm-workspace.yaml', "packages:\n  - apps/*\n");
+        $this->writeFile('apps/www/package.json', json_encode([
+            'name' => 'www',
+            'dependencies' => ['next' => '16.0.0'],
+            'scripts' => ['build' => 'next build --webpack', 'start' => 'next start'],
+        ]));
+        $this->writeFile('apps/www/next.config.js', "const config = {\n  output: \"export\",\n};\nmodule.exports = config;\n");
+
+        $result = $this->detect();
+
+        $this->assertSame('Next.js (export)', $result['label']);
+        $this->assertSame(PlatformManifest::RUNTIME_NGINX, $result['runtime']);
+        $this->assertSame('apps/www/out', $result['output_directory']);
+        $this->assertSame('pnpm run build:www', $result['build_command']);
+        $this->assertSame('', $result['start_command']);
+
+        // Without the export the same workspace is still a Node-served app.
+        $this->writeFile('apps/www/next.config.js', "module.exports = {};\n");
+
+        $this->assertSame('Next.js', $this->detect()['label']);
+    }
+
     public function test_nextjs_wins_over_vite_when_both_present(): void
     {
         $this->writeFile('package.json', json_encode([
@@ -1112,6 +1143,73 @@ YAML
         $this->assertSame(Strategies::ANGULAR, $result['strategy']);
         $this->assertSame(PlatformManifest::RUNTIME_NGINX, $result['runtime']);
         $this->assertSame('dist/web/browser', $result['output_directory']);
+    }
+
+    public function test_angular_multi_project_workspace_builds_the_project_it_serves(): void
+    {
+        // Start9's angular.json: several applications and libraries, no
+        // defaultProject and no build script, so a bare `ng build` refuses.
+        $this->writeFile('package.json', json_encode(['dependencies' => ['@angular/core' => '20.0.0']]));
+        $app = static fn (string $base): array => ['projectType' => 'application', 'architect' => ['build' => [
+            'builder' => '@angular/build:application',
+            'options' => ['outputPath' => ['base' => $base, 'browser' => '']],
+        ]]];
+        $this->writeFile('angular.json', json_encode([
+            'projects' => [
+                'marketplace' => ['projectType' => 'library', 'architect' => ['build' => [
+                    'builder' => '@angular/build:ng-packagr',
+                    'options' => ['outputPath' => 'dist/marketplace'],
+                ]]],
+                'ui' => $app('projects/start-os/web/dist/raw/ui'),
+                'setup-wizard' => $app('projects/start-os/web/dist/raw/setup-wizard'),
+            ],
+        ]));
+
+        $result = $this->detect();
+
+        $this->assertSame(Strategies::ANGULAR, $result['strategy']);
+        $this->assertSame('projects/start-os/web/dist/raw/ui', $result['output_directory']);
+        $this->assertSame('npx ng build ui', $result['build_command']);
+    }
+
+    public function test_angular_default_project_decides_the_build_and_the_output(): void
+    {
+        $this->writeFile('package.json', json_encode(['dependencies' => ['@angular/core' => '12.0.0']]));
+        $this->writeFile('angular.json', json_encode([
+            'defaultProject' => 'admin',
+            'projects' => [
+                'site' => ['architect' => ['build' => ['options' => ['outputPath' => 'dist/site']]]],
+                'admin' => ['architect' => ['build' => ['options' => ['outputPath' => 'dist/admin']]]],
+            ],
+        ]));
+
+        $result = $this->detect();
+
+        $this->assertSame('dist/admin', $result['output_directory']);
+        $this->assertSame('npx ng build admin', $result['build_command']);
+    }
+
+    public function test_angular_single_project_and_own_build_script_are_left_alone(): void
+    {
+        $this->writeFile('package.json', json_encode([
+            'dependencies' => ['@angular/core' => '19.0.0'],
+            'scripts' => ['build' => 'ng build site'],
+        ]));
+        $this->writeFile('angular.json', json_encode([
+            'projects' => [
+                'site' => ['architect' => ['build' => ['options' => ['outputPath' => 'dist/site']]]],
+                'admin' => ['architect' => ['build' => ['options' => ['outputPath' => 'dist/admin']]]],
+            ],
+        ]));
+
+        $this->assertSame('npm run build', $this->detect()['build_command']);
+
+        $this->writeFile('package.json', json_encode(['dependencies' => ['@angular/core' => '19.0.0']]));
+        $this->writeFile('angular.json', json_encode([
+            'projects' => ['site' => ['architect' => ['build' => ['options' => ['outputPath' => 'dist/site']]]]],
+        ]));
+
+        $this->assertSame('npx ng build', $this->detect()['build_command']);
     }
 
     public function test_php_from_composer_json_without_artisan(): void

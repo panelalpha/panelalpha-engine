@@ -127,7 +127,8 @@ class PhpStrategy
             $projectDir,
             $files,
             $build->appRoot,
-            $frontendBuild === false || is_string($frontendBuild) ? $frontendBuild : null
+            $frontendBuild === false || is_string($frontendBuild) ? $frontendBuild : null,
+            $this->runtimeImage($build)
         );
         // No Dockerfile. The shared base image is the runtime -- Apache, the
         // extension set, composer and the entrypoint shim are all baked into

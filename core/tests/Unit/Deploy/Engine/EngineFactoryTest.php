@@ -101,7 +101,7 @@ final class FakeEngine implements ContainerEngine
     public function images(): ImageStore
     {
         return new class implements ImageStore {
-            public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false): string
+            public function hostBuildCommand(string $tag, string $dockerfile, bool $rebuild = false, bool $pull = true): string
             {
                 return 'buildah bud';
             }
