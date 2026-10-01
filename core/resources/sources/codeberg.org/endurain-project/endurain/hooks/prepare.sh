@@ -41,13 +41,14 @@ sed -i "s|^FERNET_KEY=.*|FERNET_KEY=${FERNET_KEY}|" .env
 sed -i "s|^ENDURAIN_HOST=.*|ENDURAIN_HOST=https://endurain.example.invalid|" .env
 
 # The example's bind mounts default to /var/opt/endurain, which only root can
-# create inside the account — and $HOME itself is not writable yet while the
-# prepare hook runs, but ~/project is (the clone just wrote it). Point
-# LOCAL_PATH there — compose interpolates it from .env — and create the tree
-# the app's start.sh demands, owned by the account user, which is the uid the
-# container runs as. Pre-creating matters: compose would create missing bind
-# sources as root and the container's non-root user could write nothing.
-DATA_DIR="${HOME}/project/endurain-data"
+# create inside the account and the hardener refuses. ~/project is emptied on
+# every deploy, so the data goes to ~/.panelalpha, the one writable directory
+# a redeploy keeps. Point LOCAL_PATH there — compose interpolates it from .env —
+# and create the tree the app's start.sh demands, owned by the account user,
+# which is the uid the container runs as. Pre-creating matters: compose would
+# create missing bind sources as root and the container's non-root user could
+# write nothing.
+DATA_DIR="${HOME}/.panelalpha/endurain"
 mkdir -p "${DATA_DIR}/backend/data" "${DATA_DIR}/backend/logs" "${DATA_DIR}/postgres" "${DATA_DIR}/redis"
 grep -q "^LOCAL_PATH=" .env || printf '\nLOCAL_PATH=%s\n' "${DATA_DIR}" >> .env
 # The image bakes in UID/GID 1000, but the data directories just created belong

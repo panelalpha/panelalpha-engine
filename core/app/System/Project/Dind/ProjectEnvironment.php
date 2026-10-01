@@ -5,6 +5,7 @@ namespace App\System\Project\Dind;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\Source\GitRepository;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\Lib\Deploy\Compose\ComposeInterpolation;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\Compose\ComposeRequiredEnv;
 use App\Lib\Deploy\Compose\ComposeYaml;
@@ -168,6 +169,25 @@ class ProjectEnvironment
         $logger?->info("Using default environment variables (source: {$source})");
         $user->setDetails(['used_custom_env_vars' => false]);
         $user->save();
+    }
+
+    /**
+     * What compose may interpolate the project's files with, for the hardener
+     * to check mount sources against: it runs before {@see apply()} writes
+     * `.env`, so this is every value that can end up there.
+     *
+     * @return array<string, list<?string>>
+     */
+    public function forInterpolation(): array
+    {
+        $tree = $this->dind->projectTree();
+        $projectDir = $this->dind->userAppDirPath();
+
+        return ComposeInterpolation::environment(
+            $tree->readIn($projectDir, '.env'),
+            $tree->readIn($projectDir, '.env.example'),
+            $this->dind->userModel()->getEnvVars()
+        );
     }
 
     /**

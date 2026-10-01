@@ -35,6 +35,18 @@ class ComposeHardenTest extends TestCase
         $this->assertArrayNotHasKey('LEFTHOOK', $result['services']['app']['environment']);
     }
 
+    /** The issue's compose: the service names `sock`, the volume binds the account's /var/run. */
+    public function test_a_named_volume_that_binds_a_path_becomes_a_plain_volume(): void
+    {
+        $hardened = ComposeHarden::apply([
+            'services' => ['app' => ['image' => 'alpine', 'command' => 'sleep infinity', 'volumes' => ['sock:/host-run']]],
+            'volumes' => ['sock' => ['driver' => 'local', 'driver_opts' => ['type' => 'none', 'o' => 'bind', 'device' => '/var/run']]],
+        ]);
+
+        $this->assertSame(['driver' => 'local'], $hardened['volumes']['sock']);
+        $this->assertSame(['sock:/host-run'], $hardened['services']['app']['volumes']);
+    }
+
     public function test_appends_to_list_style_environment(): void
     {
         $compose = [
@@ -441,30 +453,30 @@ YAML
             'volumes' => [
                 ['type' => 'bind', 'source' => '/var/run', 'target' => '/x'],
                 ['type' => 'bind', 'source' => '/run/', 'target' => '/y'],
-                ['type' => 'bind', 'source' => '/var/running', 'target' => '/app/running'],
+                ['type' => 'bind', 'source' => '/runner', 'target' => '/app/running'],
             ],
         ]]];
 
         $service = ComposeHarden::apply($compose)['services']['app'];
 
         $this->assertSame(
-            [['type' => 'bind', 'source' => '/var/running', 'target' => '/app/running']],
+            [['type' => 'bind', 'source' => '/runner', 'target' => '/app/running']],
             $service['volumes']
         );
     }
 
     public function test_a_path_that_only_starts_like_run_is_kept(): void
     {
-        // `/var/running` is not `/var/run`, and the socket pattern must not
-        // widen into a prefix match.
+        // `/runner` is not `/run`, and the socket pattern must not widen into a
+        // prefix match (all of /var is off limits on its own).
         $compose = ['services' => ['app' => [
             'image' => 'example/app',
-            'volumes' => ['/var/running:/app/running', './run:/app/run'],
+            'volumes' => ['/runner:/app/running', './run:/app/run'],
         ]]];
 
         $service = ComposeHarden::apply($compose)['services']['app'];
 
-        $this->assertSame(['/var/running:/app/running', './run:/app/run'], $service['volumes']);
+        $this->assertSame(['/runner:/app/running', './run:/app/run'], $service['volumes']);
     }
 
     public function test_a_build_base_service_is_not_restarted(): void
@@ -677,5 +689,20 @@ YAML
 
         $this->assertSame(5000, $result['published']);
         $this->assertContains('5000:5000', $result['compose']['services']['app']['ports']);
+    }
+
+    public function test_interpolated_mount_sources_are_checked_against_the_projects_env(): void
+    {
+        $compose = ComposeHarden::apply([
+            'services' => ['app' => [
+                'image' => 'acme/app',
+                'volumes' => ['${X}:/y', '${DATA_DIR:-./data}:/data'],
+                'configs' => ['c'],
+            ]],
+            'configs' => ['c' => ['file' => '${C:-/etc/shadow}'], 'ok' => ['file' => './app.conf']],
+        ], null, null, ['X' => ['/var/lib/docker']]);
+
+        $this->assertSame(['${DATA_DIR:-./data}:/data'], $compose['services']['app']['volumes']);
+        $this->assertSame(['ok'], array_keys($compose['configs']));
     }
 }

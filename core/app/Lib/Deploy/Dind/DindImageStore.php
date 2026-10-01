@@ -25,7 +25,8 @@ use App\Lib\Deploy\Engine\ImageStore;
 final class DindImageStore implements ImageStore
 {
     /**
-     * The local registry as an **account** addresses it.
+     * The local registry as an **account** addresses it: a read-only instance,
+     * since every account can reach it and pulls from it by tag.
      *
      * Every account's daemon is created with this in `insecure-registries`
      * ({@see \App\System\Project\Dind}), and the name resolves on
@@ -45,16 +46,22 @@ final class DindImageStore implements ImageStore
      * installed.
      *
      * Loopback needs no daemon configuration: docker treats 127.0.0.0/8 as
-     * insecure by default. The repository path is what the registry stores, so
-     * an image pushed to one address is pulled from the other.
+     * insecure by default. The loopback port belongs to the writer
+     * ({@see CACHE_REGISTRY_WRITER_CONTAINER}), which shares the read-only
+     * instance's storage, so an image pushed to one address is pulled from the other.
+     * The writer runs in the host's network namespace and listens here only,
+     * so no account can reach it; core reaches it through the host's loopback too.
      */
     public const HOST_CACHE_REGISTRY = '127.0.0.1:5000';
 
-    /** The registry's container name, which is what the probe asks the daemon about. */
+    /** The read-only registry's container name, which is what the pull probe asks the daemon about. */
     public const CACHE_REGISTRY_CONTAINER = 'panelalpha-cache-registry';
 
-    /** What {@see loadFromHostCommand()} says when the registry is down, so callers can tell. */
-    public const REGISTRY_DOWN = 'panelalpha-cache-registry is not running';
+    /** The writable instance on the same storage, on the host's loopback only. */
+    public const CACHE_REGISTRY_WRITER_CONTAINER = 'panelalpha-cache-registry-writer';
+
+    /** What {@see loadFromHostCommand()} says when a registry is down, so callers can tell. */
+    public const REGISTRY_DOWN = 'panelalpha-cache-registry or its writer is not running';
 
     /**
      * Pushes hold this shared; prewarm's tag deletion and garbage-collect hold it
@@ -107,7 +114,7 @@ final class DindImageStore implements ImageStore
     public static function garbageCollectArgv(): array
     {
         return [
-            'sudo', 'docker', 'exec', self::CACHE_REGISTRY_CONTAINER,
+            'sudo', 'docker', 'exec', self::CACHE_REGISTRY_WRITER_CONTAINER,
             'registry', 'garbage-collect', '--delete-untagged', self::REGISTRY_CONFIG,
         ];
     }
@@ -132,7 +139,9 @@ final class DindImageStore implements ImageStore
             . " && {$exec} docker tag {$pullRef} {$img}"
             . " && { {$exec} docker image rm {$pullRef} >/dev/null 2>&1 || true; }";
 
-        return "{ {$this->registryRunning()} || { echo '" . self::REGISTRY_DOWN . "' >&2; false; }; }"
+        $running = $this->registryRunning() . ' && ' . $this->registryRunning(self::CACHE_REGISTRY_WRITER_CONTAINER);
+
+        return "{ {$running} || { echo '" . self::REGISTRY_DOWN . "' >&2; false; }; }"
             . ' && ' . self::sharedLock("{ {$attempt}; } || { sleep 2; {$attempt}; }");
     }
 
@@ -205,9 +214,9 @@ final class DindImageStore implements ImageStore
     }
 
     /** Asked of the daemon, which answers the same from core and from the host. */
-    private function registryRunning(): string
+    private function registryRunning(string $container = self::CACHE_REGISTRY_CONTAINER): string
     {
-        return 'sudo docker inspect -f "{{.State.Running}}" ' . self::CACHE_REGISTRY_CONTAINER
+        return 'sudo docker inspect -f "{{.State.Running}}" ' . $container
             . ' 2>/dev/null | grep -qx true';
     }
 

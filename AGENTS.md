@@ -778,11 +778,25 @@ as insecure by default.
 It is a required compose service, behind no profile: a PHP base exists on no
 public registry, so without `cache-registry` it has no way into an account.
 
-Measured on 10.10.10.25 (2026-09-24, DokuWiki, 1.09GB PHP base, empty account),
+**Two containers, one storage.** Every account reaches `panelalpha-cache-registry`
+and pulls from it by tag, so it runs read-only (`maintenance.readonly`, storage
+mounted `:ro`): anything but GET/HEAD answers 405. The host pushes to
+`panelalpha-cache-registry-writer`, core deletes tags there, and garbage-collect
+runs inside it. The writer runs with `network_mode: host` and listens on the
+host's `127.0.0.1:5000` only (debug listener off), so no account can resolve or
+route to it, guard or no guard: accounts older than the egress guard have none,
+and a tenant can remove its own. Core reaches it with `nsenter --net` into the
+host's namespace (`CacheRegistry::hostArgv()`). Measured 2026-09-30 with
+throwaway copies on a dev host: `docker push` to the writer, then `docker pull`
+from the read-only one works; a push, manifest PUT or DELETE against the read-only
+one is 405; a tag deleted and collected on the writer is 404 on the reader at once
+(the descriptor cache is off on both).
+
+Measured on a dev host (2026-09-24, DokuWiki, 1.09GB PHP base, empty account),
 just before `save | load` was removed: `save | load` 21s, registry first push
 17s, already pushed 15s; `node:22` 11s against 10s.
 
-Measured on 178.104.84.45, 984MB and 989MB PHP bases, into a real account:
+Measured on a dev host, 984MB and 989MB PHP bases, into a real account:
 
 | | `save \| load` | registry, first push | registry, already pushed |
 |---|---|---|---|
@@ -795,7 +809,7 @@ The registry is not about compression — the wire is loopback. It is that
 asks what is missing, and pulls compressed blobs.
 
 **Roughly 1.7-2x on realistic seeds, not the 17x an earlier measurement on
-10.10.10.25 recorded.** That figure was a plain base against the imagick variant
+a dev host recorded.** That figure was a plain base against the imagick variant
 of the *same minor* -- one differing layer, so the pull moved almost nothing.
 Two different PHP minors share only the Debian base; the PHP build and the
 extension layers are most of the gigabyte and are unique to each. The last row
@@ -892,7 +906,7 @@ the PHP base images there would turn an 842MB uncompressed save/load into a
 compressed pull over loopback. Not done; it is the obvious next lever on
 cold-deploy time.
 
-### Reference figures (10.10.10.25, 2026-08-28)
+### Reference figures (a dev host, 2026-08-28)
 
 Straight from `scripts/benchmark-deploys.sh`, both PHP base images present:
 
@@ -957,7 +971,7 @@ leaves that message and nothing else. Check for the image itself:
 docker images | grep panelalpha/php     # empty means every PHP deploy is paying full price
 ```
 
-On 10.10.10.25 it had never built, because **host `docker build` had no network
+On a dev host it had never built, because **host `docker build` had no network
 at all**:
 
 ```

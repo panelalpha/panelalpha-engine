@@ -189,7 +189,7 @@ class PrewarmImages extends Command
     private function publish(System $system, array $catalog): void
     {
         if (!$this->registryRunning($system)) {
-            $this->warn('panelalpha-cache-registry is not running; nothing published.');
+            $this->warn('panelalpha-cache-registry-writer is not running; nothing published.');
 
             return;
         }
@@ -278,7 +278,7 @@ class PrewarmImages extends Command
     {
         try {
             return trim((string) $system->exec(
-                ['sudo', 'docker', 'inspect', '-f', '{{.State.Running}}', DindImageStore::CACHE_REGISTRY_CONTAINER],
+                ['sudo', 'docker', 'inspect', '-f', '{{.State.Running}}', DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER],
                 [],
                 30
             )) === 'true';
@@ -291,7 +291,7 @@ class PrewarmImages extends Command
     {
         try {
             $out = (string) $system->exec(
-                ['sudo', 'docker', 'exec', DindImageStore::CACHE_REGISTRY_CONTAINER, 'du', '-sk', '/var/lib/registry'],
+                ['sudo', 'docker', 'exec', DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER, 'du', '-sk', '/var/lib/registry'],
                 [],
                 300
             );

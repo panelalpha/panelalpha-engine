@@ -4,7 +4,9 @@ namespace Tests\Unit\Deploy\Dind;
 
 use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\Engine\EngineAccount;
+use App\System\Project\Dind\TenantEgressGuard;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Yaml;
 
 /**
  * Getting an image into an account through registries only.
@@ -33,7 +35,8 @@ class DindImageStoreTest extends TestCase
 echo "$*" >> "$STATE/calls"
 key() { printf '%s' "$1" | tr '/:' '__'; }
 if [ "$1" = inspect ]; then
-  [ -e "$STATE/registry-running" ] && echo true || echo false; exit 0
+  # inspect -f FORMAT NAME; down-NAME stops just that container.
+  [ -e "$STATE/registry-running" ] && [ ! -e "$STATE/down-$4" ] && echo true || echo false; exit 0
 fi
 if [ "$1" = compose ]; then
   shift 6   # compose -f FILE exec -T SERVICE, then the inner "docker"
@@ -279,7 +282,24 @@ SH);
         [$code, , $err] = $this->sh((new DindImageStore())->loadFromHostCommand($this->account(), self::IMAGE));
 
         $this->assertNotSame(0, $code);
-        $this->assertStringContainsString('panelalpha-cache-registry is not running', $err);
+        $this->assertStringContainsString(DindImageStore::REGISTRY_DOWN, $err);
+    }
+
+    public function test_a_stopped_writer_fails_the_push_but_not_the_pull(): void
+    {
+        $this->state('registry-running');
+        $this->state('down-' . DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER);
+        $this->has('host', self::IMAGE);
+
+        [$code, , $err] = $this->sh((new DindImageStore())->loadFromHostCommand($this->account(), self::IMAGE));
+        $this->assertNotSame(0, $code);
+        $this->assertStringContainsString(DindImageStore::REGISTRY_DOWN, $err);
+        $this->assertStringNotContainsString('push -q', $this->calls());
+
+        $this->has('cache', self::IMAGE);
+        [$code, $out] = $this->seed(true);
+        $this->assertSame(0, $code);
+        $this->assertSame('Pulled base image ' . self::IMAGE . ' from the cache registry', $out);
     }
 
     public function test_the_parallel_seed_runs_every_safe_image(): void
@@ -366,7 +386,38 @@ SH);
         $argv = DindImageStore::garbageCollectArgv();
 
         $this->assertContains('--delete-untagged', $argv);
-        $this->assertContains(DindImageStore::CACHE_REGISTRY_CONTAINER, $argv);
+        // The accounts' instance mounts the storage read-only; only the writer can collect.
+        $this->assertContains(DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER, $argv);
+        $this->assertNotContains(DindImageStore::CACHE_REGISTRY_CONTAINER, $argv);
+    }
+
+    /** Accounts pull from this registry by tag, so none of them may write to it. */
+    public function test_the_registry_accounts_reach_is_read_only_and_the_writer_is_not_theirs(): void
+    {
+        $services = [];
+        foreach (Yaml::parseFile(dirname(__DIR__, 5) . '/docker-compose.yml')['services'] as $service) {
+            if (is_string($service['container_name'] ?? null)) {
+                $services[$service['container_name']] = $service;
+            }
+        }
+        $reader = $services[DindImageStore::CACHE_REGISTRY_CONTAINER];
+        $writer = $services[DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER];
+
+        $this->assertSame(['enabled' => true], json_decode($reader['environment']['REGISTRY_STORAGE_MAINTENANCE_READONLY'], true));
+        $this->assertSame('false', $reader['environment']['REGISTRY_STORAGE_DELETE_ENABLED']);
+        $this->assertSame(['cache-registry-data:/var/lib/registry:ro'], $reader['volumes']);
+        $this->assertArrayNotHasKey('ports', $reader);
+
+        // On no docker network an account is on, and listening on the host's loopback only.
+        $this->assertSame('host', $writer['network_mode']);
+        $this->assertArrayNotHasKey('networks', $writer);
+        $this->assertArrayNotHasKey('ports', $writer);
+        $this->assertSame(DindImageStore::HOST_CACHE_REGISTRY, $writer['environment']['REGISTRY_HTTP_ADDR']);
+        $this->assertSame('', $writer['environment']['REGISTRY_HTTP_DEBUG_ADDR']);
+        $this->assertSame(['cache-registry-data:/var/lib/registry'], $writer['volumes']);
+
+        $this->assertContains(DindImageStore::CACHE_REGISTRY_CONTAINER, TenantEgressGuard::REGISTRY_NAMES);
+        $this->assertNotContains(DindImageStore::CACHE_REGISTRY_WRITER_CONTAINER, TenantEgressGuard::REGISTRY_NAMES);
     }
 
     public function test_the_probe_is_the_registry_container(): void

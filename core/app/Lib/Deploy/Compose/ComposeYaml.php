@@ -87,11 +87,17 @@ final class ComposeYaml
      * had one, and as a map everywhere else, as before.
      *
      * @param array<mixed> $compose
+     * @param string ...$included files merged into $source ({@see ComposeInclude})
      */
-    public static function dump(array $compose, string $source, int $inline, int $indent): string
+    public static function dump(array $compose, string $source, int $inline, int $indent, string ...$included): string
     {
+        $sequences = self::emptySequences($source);
+        foreach ($included as $raw) {
+            $sequences += self::emptySequences($raw);
+        }
+
         return Yaml::dump(
-            self::emptiesMarked($compose, '', self::emptySequences($source)),
+            self::emptiesMarked($compose, '', $sequences),
             $inline,
             $indent,
             Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE | Yaml::DUMP_OBJECT_AS_MAP

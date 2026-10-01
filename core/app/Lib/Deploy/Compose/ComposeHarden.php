@@ -32,10 +32,12 @@ class ComposeHarden
      * @param array<string, mixed> $compose
      * @param array<array-key, mixed>|null $asWritten the repository's own services, when
      *        `$compose` carries a prepared copy of them, for the one-shot decision only
+     * @param array<string, list<?string>|string> $env what compose may interpolate the file with
      * @return array<string, mixed>
      */
-    public static function apply(array $compose, ?int $accountMemoryMb = null, ?array $asWritten = null): array
+    public static function apply(array $compose, ?int $accountMemoryMb = null, ?array $asWritten = null, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
     {
+        [$compose] = ServiceHardener::withoutUnsafeFileSources($compose, $env, $accountUser, $projectDir);
         if (!is_array($compose['services'] ?? null)) {
             return $compose;
         }
@@ -56,9 +58,10 @@ class ComposeHarden
                 if (in_array((string) $name, $oneShot, true)) {
                     $service['restart'] = 'no';
                 }
-                $compose['services'][$name] = ServiceHardener::harden((string) $name, $service, $accountMemoryMb);
+                $compose['services'][$name] = ServiceHardener::harden((string) $name, $service, $accountMemoryMb, $env, $accountUser, $projectDir);
             }
         }
+        [$compose] = ServiceHardener::withoutHostPathEntries($compose);
 
         return $compose;
     }
@@ -110,6 +113,7 @@ class ComposeHarden
      * @param callable(string): list<int>|null $imagePorts resolves an image to
      *        the ports it declares; null when nobody can ask the daemon
      * @param ?string $projectIdentity owner/repo being deployed
+     * @param array<string, list<?string>|string> $env what compose may interpolate the file with
      * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>}
      */
     public static function extractRuntimeSidecars(
@@ -119,7 +123,10 @@ class ComposeHarden
         ?string $projectIdentity = null,
         ?int $accountMemoryMb = null,
         ?string $placeholderSeed = null,
-        ?SidecarPasswords $passwords = null
+        ?SidecarPasswords $passwords = null,
+        array $env = [],
+        ?string $accountUser = null,
+        ?string $projectDir = null
     ): array {
         return RuntimeSidecars::fromFile(
             $composePath,
@@ -128,7 +135,10 @@ class ComposeHarden
             $projectIdentity,
             $accountMemoryMb,
             $placeholderSeed,
-            $passwords
+            $passwords,
+            $env,
+            $accountUser,
+            $projectDir
         );
     }
 
@@ -136,6 +146,7 @@ class ComposeHarden
      * As {@see extractRuntimeSidecars()}, from already-read YAML.
      *
      * @param callable(string): list<int>|null $imagePorts
+     * @param array<string, list<?string>|string> $env what compose may interpolate the file with
      * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>}
      */
     public static function extractRuntimeSidecarsFromYaml(
@@ -145,7 +156,10 @@ class ComposeHarden
         ?string $projectIdentity = null,
         ?int $accountMemoryMb = null,
         ?string $placeholderSeed = null,
-        ?SidecarPasswords $passwords = null
+        ?SidecarPasswords $passwords = null,
+        array $env = [],
+        ?string $accountUser = null,
+        ?string $projectDir = null
     ): array {
         return RuntimeSidecars::fromYaml(
             $raw,
@@ -154,7 +168,10 @@ class ComposeHarden
             $projectIdentity,
             $accountMemoryMb,
             $placeholderSeed,
-            $passwords
+            $passwords,
+            $env,
+            $accountUser,
+            $projectDir
         );
     }
 

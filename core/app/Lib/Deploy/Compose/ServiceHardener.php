@@ -6,6 +6,7 @@ use App\Lib\Deploy\Port\EnvVarDefault;
 use App\Lib\Deploy\Sidecar\ComposeService;
 use App\Lib\Deploy\Sidecar\SidecarDialects;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
+use Symfony\Component\Yaml\Tag\TaggedValue;
 
 /**
  * Makes one service from a customer's compose file safe to run inside an
@@ -29,6 +30,11 @@ final class ServiceHardener
      * @var list<string>
      */
     private const FORBIDDEN_KEYS = [
+        // The run file resolves `extends` before hardening; any left here came
+        // through a path with no file reader (a compose override, a harvested
+        // sidecar), where an unresolved `extends` would merge in an unhardened
+        // service. Drop it rather than let Compose pull that service in.
+        'extends',
         'privileged',
         'pid',
         'ipc',
@@ -41,6 +47,13 @@ final class ServiceHardener
         'group_add',
         'sysctls',
         'device_cgroup_rules',
+        // Opt out of the account's cgroup view, its runtime or its OOM
+        // handling; storage_opt only fails off xfs+pquota.
+        'cgroupns_mode',
+        'runtime',
+        'oom_kill_disable',
+        'oom_score_adj',
+        'storage_opt',
     ];
 
     /**
@@ -67,11 +80,20 @@ final class ServiceHardener
     /**
      * Host paths an application service is never given. `/` covers the whole
      * filesystem; the rest are the parts of it that carry the daemon's state
-     * or the host's identity.
+     * or the host's identity. "Host" is the account container: its /home
+     * holds the inner daemon's data-root (~/docker), /run the s6 scan dir,
+     * /var the crontabs and /usr the binaries s6 runs as root.
      *
      * @var list<string>
      */
     private const FORBIDDEN_SOURCE_PREFIXES = [
+        // The account container's own boot scripts (the egress guard among
+        // them), and /run: the inner daemon's and containerd's sockets, s6's
+        // scan directory /run/service.
+        '/entrypoint.d',
+        '/entrypoint.sh',
+        '/run',
+        '/var/run',
         '/var/lib/docker',
         '/var/lib/containerd',
         '/etc',
@@ -79,6 +101,11 @@ final class ServiceHardener
         '/sys',
         '/proc',
         '/dev',
+        '/home',
+        '/root',
+        '/usr',
+        '/opt',
+        '/var',
     ];
 
     private const NODE_COMMAND_PATTERN = '/\b(node|nodejs|npm|npx|pnpm|yarn|bun)\b/';
@@ -103,11 +130,12 @@ final class ServiceHardener
 
     /**
      * @param array<string, mixed> $service
+     * @param array<string, list<?string>|string> $env what compose may interpolate with ({@see ComposeInterpolation})
      * @return array<string, mixed>
      */
-    public static function harden(string $name, array $service, ?int $accountMemoryMb = null): array
+    public static function harden(string $name, array $service, ?int $accountMemoryMb = null, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
     {
-        $service = self::withoutEscapes($service);
+        $service = self::withoutEscapes($service, $env, $accountUser, $projectDir);
         $service = self::withRestartPolicy($service);
         $service = self::withoutDeployResources($service);
         $service = self::withMemoryLimit($name, $service, $accountMemoryMb);
@@ -244,14 +272,62 @@ final class ServiceHardener
         return in_array(trim($host, '[]'), self::LOOPBACK_HOSTS, true);
     }
 
+    /** A source compose reads as a path, spelled so it is checked as one: `data` is `./data`. */
+    private static function asPath(string $source): string
+    {
+        $source = trim($source);
+
+        return $source === '' || preg_match('#^[./~$]#', $source) === 1 ? $source : './' . $source;
+    }
+
+    /**
+     * The top-level entries that mount a path of their own: a service only
+     * names them, so its mount checks never see the path. A volume keeps its
+     * name and loses `driver_opts` unless they are a tmpfs (a bind, overlay or
+     * device mount can name any path of the account container); a secret or
+     * config whose `file:` is a forbidden source is removed.
+     *
+     * @param array<string, mixed> $compose
+     * @return array{0: array<string, mixed>, 1: list<string>} the file, and what was removed
+     */
+    public static function withoutHostPathEntries(array $compose): array
+    {
+        $removed = [];
+        foreach ((is_array($compose['volumes'] ?? null) ? $compose['volumes'] : []) as $name => $volume) {
+            $options = is_array($volume) ? ($volume['driver_opts'] ?? null) : null;
+            if ($options === null) {
+                continue;
+            }
+            $isTmpfs = is_array($options)
+                && strtolower(trim((string) ($options['type'] ?? ''))) === 'tmpfs'
+                && preg_match('/(^|,)\s*r?bind\s*(,|$)/', (string) ($options['o'] ?? '')) !== 1;
+            if (!$isTmpfs) {
+                unset($compose['volumes'][$name]['driver_opts']);
+                $removed[] = "volume {$name}: driver_opts";
+            }
+        }
+        foreach (['secrets', 'configs'] as $section) {
+            foreach ((is_array($compose[$section] ?? null) ? $compose[$section] : []) as $name => $entry) {
+                $file = is_array($entry) ? ($entry['file'] ?? null) : null;
+                if (is_string($file) && self::isForbiddenSource($file)) {
+                    unset($compose[$section][$name]);
+                    $removed[] = rtrim($section, 's') . " {$name}: file {$file}";
+                }
+            }
+        }
+
+        return [$compose, $removed];
+    }
+
     /**
      * Only the isolation part of {@see harden()}: no limits or defaults, so a
      * compose override that sets none does not start overriding its base.
      *
      * @param array<string, mixed> $service
+     * @param array<string, list<?string>|string> $env
      * @return array<string, mixed>
      */
-    public static function withoutEscapes(array $service): array
+    public static function withoutEscapes(array $service, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
     {
         foreach (self::FORBIDDEN_KEYS as $key) {
             unset($service[$key]);
@@ -263,7 +339,7 @@ final class ServiceHardener
         if (is_array($service['volumes'] ?? null)) {
             $kept = array_values(array_filter(
                 $service['volumes'],
-                static fn ($volume): bool => !self::isForbiddenMount($volume)
+                static fn ($volume): bool => !self::isForbiddenMount($volume, $env, $accountUser, $projectDir)
             ));
             // Dropped when empty: an empty PHP array dumps as `volumes: {  }` --
             // a map, not a sequence -- and Compose refuses the whole file with
@@ -276,6 +352,43 @@ final class ServiceHardener
         }
 
         return $service;
+    }
+
+    /**
+     * Top-level secrets and configs whose `file:` is a forbidden source, or
+     * interpolates to one, removed: Compose bind-mounts that file into every
+     * service that names the entry.
+     *
+     * @param array<string, mixed> $compose
+     * @param array<string, list<?string>|string> $env
+     * @return array{0: array<string, mixed>, 1: list<string>} the file, and what was removed
+     */
+    public static function withoutUnsafeFileSources(array $compose, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
+    {
+        $removed = [];
+        foreach (['secrets', 'configs'] as $section) {
+            // An override may tag the block (`!override`); the tag is no way around the check.
+            $block = $compose[$section] ?? null;
+            $tag = $block instanceof TaggedValue ? $block->getTag() : null;
+            $entries = $block instanceof TaggedValue ? $block->getValue() : $block;
+            if (!is_array($entries)) {
+                continue;
+            }
+            $before = count($removed);
+            foreach ($entries as $name => $entry) {
+                $entry = $entry instanceof TaggedValue ? $entry->getValue() : $entry;
+                $file = is_array($entry) ? ($entry['file'] ?? null) : null;
+                if (is_string($file) && self::isForbiddenSourceIn(self::asPath($file), $env, $accountUser, $projectDir)) {
+                    unset($entries[$name]);
+                    $removed[] = rtrim($section, 's') . " {$name}: file {$file}";
+                }
+            }
+            if (count($removed) > $before) {
+                $compose[$section] = $tag === null ? $entries : new TaggedValue($tag, $entries);
+            }
+        }
+
+        return [$compose, $removed];
     }
 
     /**
@@ -474,9 +587,35 @@ final class ServiceHardener
     }
 
     /**
-     * @param mixed $volume
+     * {@see isForbiddenSource()} for a source Compose will interpolate: every
+     * value it can take is checked, and one that cannot be told is refused.
+     * `${DATA_DIR:-./data}` stays allowed; `${X:-/var/run}` does not.
+     *
+     * @param array<string, list<?string>|string> $env
      */
-    private static function isForbiddenMount($volume): bool
+    private static function isForbiddenSourceIn(string $source, array $env, ?string $accountUser = null, ?string $projectDir = null): bool
+    {
+        if (!str_contains($source, '$')) {
+            return self::isForbiddenSource($source, $accountUser, $projectDir);
+        }
+        $candidates = ComposeInterpolation::candidates($source, $env);
+        if ($candidates === null) {
+            return true;
+        }
+        foreach ($candidates as $candidate) {
+            if (preg_match(self::DOCKER_SOCKET_PATTERN, trim($candidate)) === 1 || self::isForbiddenSource($candidate, $accountUser, $projectDir)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param mixed $volume
+     * @param array<string, list<?string>|string> $env
+     */
+    private static function isForbiddenMount($volume, array $env = [], ?string $accountUser = null, ?string $projectDir = null): bool
     {
         if (is_string($volume)) {
             if (preg_match(self::DOCKER_SOCKET_PATTERN, $volume) === 1) {
@@ -487,7 +626,7 @@ final class ServiceHardener
             // leading slash and is not one of these.
             $source = self::splitFields(trim($volume))[0] ?? '';
 
-            return self::isForbiddenSource($source);
+            return self::isForbiddenSourceIn($source, $env, $accountUser, $projectDir);
         }
         if (!is_array($volume)) {
             return false;
@@ -495,13 +634,17 @@ final class ServiceHardener
 
         $source = (string) ($volume['source'] ?? '');
         $target = (string) ($volume['target'] ?? '');
+        if (($volume['type'] ?? null) === 'bind') {
+            // The long form's bind source is a path even without a leading `./`.
+            $source = self::asPath($source);
+        }
 
         // The socket's directory counts here too: `source: /var/run` in the long
         // form hands over the daemon exactly like `/var/run:/var/run` does.
         return in_array($source, self::DOCKER_SOCKETS, true)
             || in_array($target, self::DOCKER_SOCKETS, true)
             || preg_match(self::DOCKER_SOCKET_PATTERN, trim($source)) === 1
-            || self::isForbiddenSource($source);
+            || self::isForbiddenSourceIn($source, $env, $accountUser, $projectDir);
     }
 
     /**
@@ -510,17 +653,39 @@ final class ServiceHardener
      * was the case that prompted this -- it reads and writes the whole
      * filesystem the service's daemon is running on.
      */
-    private static function isForbiddenSource(string $source): bool
+    private static function isForbiddenSource(string $source, ?string $accountUser = null, ?string $projectDir = null): bool
     {
         $source = trim($source);
+        // Docker follows symlinks in a bind source, and a checkout keeps them.
+        if ($projectDir !== null && str_starts_with($projectDir, '/') && preg_match('#^[./]#', $source) === 1
+            && LinkedSource::escapes($source, $projectDir)
+        ) {
+            return true;
+        }
+        // `~` and $HOME are root's home, or the account's, which holds ~/docker.
+        if (preg_match('#^(~|\$HOME\b|\$\{HOME\})#', $source) === 1) {
+            return true;
+        }
+        if (str_starts_with($source, '.')) {
+            return self::leavesProject($source);
+        }
         if (!str_starts_with($source, '/')) {
             return false;
         }
-        if (rtrim($source, '/') === '') {
+        // Normalised first, so `/home/u/.panelalpha/../docker` is /home/u/docker.
+        $source = self::normalisedAbsolute($source);
+        if ($source === '/') {
             // The root of the filesystem, the worst one of all.
             return true;
         }
-        $source = rtrim($source, '/');
+        // The account's own ~/.panelalpha: the one writable tree a rebuild keeps,
+        // which recipe hooks record in .env by its absolute path.
+        if ($accountUser !== null && preg_match('/^[a-z_][a-z0-9_.-]*$/i', $accountUser) === 1) {
+            $keep = "/home/{$accountUser}/.panelalpha";
+            if ($source === $keep || str_starts_with($source, $keep . '/')) {
+                return false;
+            }
+        }
 
         foreach (self::FORBIDDEN_SOURCE_PREFIXES as $prefix) {
             if ($source === $prefix || str_starts_with($source, $prefix . '/')) {
@@ -529,5 +694,48 @@ final class ServiceHardener
         }
 
         return false;
+    }
+
+    private static function normalisedAbsolute(string $source): string
+    {
+        $segments = [];
+        foreach (explode('/', $source) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+            if ($segment === '..') {
+                array_pop($segments);
+                continue;
+            }
+            $segments[] = $segment;
+        }
+
+        return '/' . implode('/', $segments);
+    }
+
+    /**
+     * A relative bind resolves against ~/project (the run file sits there), so
+     * `../../../etc` is /etc. One level up is the account's home: allowed
+     * (`../.panelalpha/...`, WeTTY's `../:/account`), except its docker/
+     * data-root.
+     */
+    private static function leavesProject(string $source): bool
+    {
+        $segments = ['project'];
+        foreach (explode('/', $source) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+            if ($segment === '..') {
+                if ($segments === []) {
+                    return true;
+                }
+                array_pop($segments);
+                continue;
+            }
+            $segments[] = $segment;
+        }
+
+        return ($segments[0] ?? null) === 'docker';
     }
 }

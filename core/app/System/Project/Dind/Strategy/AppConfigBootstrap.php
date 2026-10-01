@@ -105,7 +105,7 @@ class AppConfigBootstrap
         if ($appConfig->composeMode() === AppConfig::COMPOSE_OVERRIDE) {
             // Layered over the run file as written, so it gets the run file's
             // isolation rules first (engine#48, item 9).
-            $hardened = ComposeOverride::harden($content);
+            $hardened = ComposeOverride::harden($content, null, $this->dind->environment()->forInterpolation(), $this->dind->userModel()->username, $this->dind->userAppDirPath());
             if ($hardened['yaml'] === null) {
                 throw new \InvalidArgumentException('The app config\'s compose override could not be read as YAML.');
             }

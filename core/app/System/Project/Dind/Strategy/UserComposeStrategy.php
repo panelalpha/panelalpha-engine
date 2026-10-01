@@ -5,7 +5,9 @@ namespace App\System\Project\Dind\Strategy;
 use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
+use App\Lib\Deploy\Compose\ComposeExtends;
 use App\Lib\Deploy\Compose\ComposeHarden;
+use App\Lib\Deploy\Compose\ComposeInclude;
 use App\Lib\Deploy\Compose\ComposeOverride;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\DeployLog\DeployLogger;
@@ -93,7 +95,9 @@ class UserComposeStrategy
         $logger = $this->dind->shell()->logger();
         $system = $this->dind->system();
         $runPath = $this->dind->userAppComposeFilePath();
-        $this->writeClientOverride($projectDir, $chown, $logger);
+        // Mount sources may be written as `${VAR}`; the hardener checks what they interpolate to.
+        $env = $this->dind->environment()->forInterpolation();
+        $this->writeClientOverride($projectDir, $chown, $logger, $env);
         $missing = ComposeFileInspector::missingComposeDockerfileRefs($composePath, $projectDir);
         $raw = $system->filesystem()->fileGetContents($composePath);
         // Through ComposeYaml, not Yaml::parse: this was the one unguarded
@@ -115,6 +119,26 @@ class UserComposeStrategy
             $parsed = NestedCompose::rebase($parsed, $nested);
             $logger?->info("Running {$nested}/" . basename($composePath) . ' from the project root, its relative paths rewritten to match');
         }
+        // Included services are hardened and scanned like the file's own;
+        // left as `include:` they ran exactly as written.
+        $included = [];
+        if (array_key_exists('include', $parsed)) {
+            $read = fn (string $relative): ?string => $this->dind->projectTree()->read(rtrim($projectDir, '/') . '/' . $relative);
+            ['compose' => $parsed, 'sources' => $included] = ComposeInclude::flatten($parsed, $read);
+            $logger?->info('Merged the files this compose file includes into the run file');
+        }
+        // A service's `extends:` is merged into it before hardening; left as
+        // written, the extended service's escapes were merged back in by
+        // Compose at run time, past the hardener.
+        if (isset($parsed['services']) && is_array($parsed['services'])) {
+            $fs = $system->filesystem();
+            $read = function (string $relative) use ($fs, $projectDir): ?string {
+                $path = rtrim($projectDir, '/') . '/' . $relative;
+
+                return $fs->fileExists($path) ? $fs->fileGetContents($path) : null;
+            };
+            $parsed = ComposeExtends::resolve($parsed, $read);
+        }
         if (!isset($parsed['services']) || !is_array($parsed['services'])) {
             if ($missing !== []) {
                 throw new \InvalidArgumentException(
@@ -126,7 +150,12 @@ class UserComposeStrategy
             // whatever runs `compose up` against it — copy the source through
             // verbatim rather than leaving composeFileToRun() pointing at
             // nothing.
-            $system->filesystem()->filePutContents($runPath, $raw, $chown, '644');
+            $system->filesystem()->filePutContents(
+                $runPath,
+                $included === [] ? $raw : ComposeYaml::dump($parsed, $raw, 6, 2, ...$included),
+                $chown,
+                '644'
+            );
 
             return;
         }
@@ -184,7 +213,7 @@ class UserComposeStrategy
         // The account's own ceiling, so a project the operator has given more
         // memory actually gets it. Null when none is set, which keeps the
         // built-in defaults.
-        $parsed = ComposeHarden::apply($parsed, $this->dind->userModel()->effectiveMemoryLimit());
+        $parsed = ComposeHarden::apply($parsed, $this->dind->userModel()->effectiveMemoryLimit(), null, $env, $this->dind->userModel()->username, $this->dind->userAppDirPath());
         $parsed = $this->fillPlaceholders($parsed, $logger);
         // A tracked .env's overrides (ADR-0001 D3). ProjectEnvironment decides
         // on every deploy whether the file should exist; this only keeps it
@@ -192,7 +221,7 @@ class UserComposeStrategy
         if ($system->filesystem()->fileExists($projectDir . '/' . EngineArtifacts::ENV_OVERRIDES)) {
             [$parsed, ] = ComposeEnvFiles::attach($parsed, EngineArtifacts::ENV_OVERRIDES);
         }
-        $system->filesystem()->filePutContents($runPath, ComposeYaml::dump($parsed, $raw, 6, 2), $chown, '644');
+        $system->filesystem()->filePutContents($runPath, ComposeYaml::dump($parsed, $raw, 6, 2, ...$included), $chown, '644');
         $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
         $logger?->info('Hardened compose for hosting (resource limits, restart policy, isolation)');
     }
@@ -203,8 +232,10 @@ class UserComposeStrategy
      * owns ({@see Paths::composeFiles()} layers the copy). It used to be
      * layered as written, bringing back `privileged:` and host mounts the run
      * file had just been cleared of (engine#48, item 9).
+     *
+     * @param array<string, list<?string>> $env
      */
-    private function writeClientOverride(string $projectDir, ?string $chown, ?DeployLogger $logger): void
+    private function writeClientOverride(string $projectDir, ?string $chown, ?DeployLogger $logger, array $env): void
     {
         $fs = $this->dind->system()->filesystem();
         $source = rtrim($projectDir, '/') . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
@@ -217,7 +248,8 @@ class UserComposeStrategy
             return;
         }
 
-        $hardened = ComposeOverride::harden($fs->fileGetContents($source));
+        $read = fn (string $relative): ?string => $this->dind->projectTree()->read(rtrim($projectDir, '/') . '/' . $relative);
+        $hardened = ComposeOverride::harden($fs->fileGetContents($source), $read, $env, $this->dind->userModel()->username, $this->dind->userAppDirPath());
         if ($hardened['yaml'] === null) {
             throw new \InvalidArgumentException(
                 'The compose override in this project (' . Paths::CLIENT_OVERRIDE_FILENAME . ') could not be read as YAML.'

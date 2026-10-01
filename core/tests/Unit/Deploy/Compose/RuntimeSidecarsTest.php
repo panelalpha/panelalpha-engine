@@ -982,6 +982,22 @@ YAML, true, null, 'foodcoops/foodsoft');
         $this->assertSame($kept, isset($result['services']['db']));
     }
 
+    public function test_a_harvested_sidecars_mounts_are_checked_as_compose_interpolates_them(): void
+    {
+        $yaml = <<<'YAML'
+        services:
+          db:
+            image: mysql:8
+            volumes:
+              - ${DB_DIR}:/var/lib/mysql
+              - ${INIT_DIR:-./initdb}:/docker-entrypoint-initdb.d
+        YAML;
+
+        $result = RuntimeSidecars::fromYaml($yaml, true, null, 'github.com/acme/shop', null, null, null, ['DB_DIR' => ['/var/lib/docker/volumes']]);
+
+        $this->assertSame(['${INIT_DIR:-./initdb}:/docker-entrypoint-initdb.d'], $result['services']['db']['volumes']);
+    }
+
     /** @return array<string, array{string, bool}> */
     public static function imageReferences(): array
     {

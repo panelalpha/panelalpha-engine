@@ -36,6 +36,91 @@ class ServiceHardenerTest extends TestCase
         }
     }
 
+    public function test_the_keys_that_opt_out_of_the_accounts_limits_are_stripped(): void
+    {
+        $service = ServiceHardener::withoutEscapes([
+            'image' => 'acme/app',
+            'cgroupns_mode' => 'host',
+            'runtime' => 'runc',
+            'oom_kill_disable' => true,
+            'oom_score_adj' => -1000,
+            'storage_opt' => ['size' => '20G'],
+        ]);
+
+        $this->assertSame(['image' => 'acme/app'], $service);
+    }
+
+    public function test_binds_of_the_account_containers_own_filesystem_are_removed(): void
+    {
+        $service = ServiceHardener::withoutEscapes([
+            'image' => 'acme/app',
+            'volumes' => [
+                '/home/acct/docker:/d',
+                '/root:/r',
+                '/usr/bin:/b',
+                '/opt:/o',
+                '/var/spool/cron:/c',
+                '/run/service:/s',
+                '~/docker:/d2',
+                '${HOME}:/h',
+                '../../../etc:/e',
+                '../docker/volumes:/v',
+                ['type' => 'bind', 'source' => '../../..', 'target' => '/all'],
+                './data:/data',
+                '.cache:/cache',
+                '../.panelalpha/app/config.json:/config.json',
+                '../:/account',
+                'named:/named',
+                '/srv/data:/srv',
+            ],
+        ]);
+
+        $this->assertSame([
+            './data:/data',
+            '.cache:/cache',
+            '../.panelalpha/app/config.json:/config.json',
+            '../:/account',
+            'named:/named',
+            '/srv/data:/srv',
+        ], $service['volumes']);
+    }
+
+    public function test_only_the_accounts_own_panelalpha_tree_is_bound_by_absolute_path(): void
+    {
+        $service = ServiceHardener::withoutEscapes([
+            'image' => 'acme/app',
+            'volumes' => [
+                '/home/acct/.panelalpha:/state',
+                '/home/acct/.panelalpha/trac:/data',
+                ['type' => 'bind', 'source' => '/home/acct//.panelalpha/./conduit/data', 'target' => '/c'],
+                '/home/acct/.panelalpha/../docker:/d',
+                '/home/acct/.panelalpha/x/../../project:/p',
+                '/home/acct/.panelalphax:/x',
+                '/home/acct/project:/project',
+                '/home/acct:/home',
+                '/home/other/.panelalpha:/other',
+                '/home/.panelalpha:/h',
+                '/home:/all',
+                '/root/.panelalpha/trac:/r',
+                '/tmp/../home/acct/.panelalpha/ok:/ok',
+                '/tmp/../etc:/e',
+            ],
+        ], accountUser: 'acct');
+
+        $this->assertSame([
+            '/home/acct/.panelalpha:/state',
+            '/home/acct/.panelalpha/trac:/data',
+            ['type' => 'bind', 'source' => '/home/acct//.panelalpha/./conduit/data', 'target' => '/c'],
+            '/tmp/../home/acct/.panelalpha/ok:/ok',
+        ], $service['volumes']);
+
+        // Without an account nothing under /home is allowed.
+        $this->assertArrayNotHasKey(
+            'volumes',
+            ServiceHardener::withoutEscapes(['volumes' => ['/home/acct/.panelalpha/trac:/data']])
+        );
+    }
+
     public function test_a_capability_beyond_the_default_set_is_stripped(): void
     {
         foreach ([['ALL'], ['SYS_ADMIN', 'NET_ADMIN', 'SYS_PTRACE', 'SYS_MODULE'], 'ALL', []] as $caps) {
@@ -135,6 +220,68 @@ class ServiceHardenerTest extends TestCase
         $this->assertCount(2, $service['volumes']);
     }
 
+    /** The account container's boot scripts and runtime sockets are not the app's to mount. */
+    public function test_binds_of_the_account_containers_boot_and_run_paths_are_removed(): void
+    {
+        foreach ([
+            '/entrypoint.d:/x',
+            '/entrypoint.sh:/x',
+            '/run/service:/s',
+            '/run/containerd:/c',
+            '/var/run/service:/s',
+        ] as $mount) {
+            $service = ServiceHardener::harden('app', ['image' => 'acme/app', 'volumes' => [$mount, 'data:/data']]);
+            $this->assertSame(['data:/data'], $service['volumes'], $mount);
+        }
+        $long = ServiceHardener::withoutEscapes(['volumes' => [['type' => 'bind', 'source' => '/entrypoint.d', 'target' => '/e']]]);
+        $this->assertArrayNotHasKey('volumes', $long);
+    }
+
+    /**
+     * A named volume of the local driver mounts whatever `device:` says, and
+     * the service only names the volume.
+     */
+    public function test_top_level_volumes_lose_driver_options_that_mount_a_path(): void
+    {
+        [$compose, $removed] = ServiceHardener::withoutHostPathEntries([
+            'services' => ['app' => ['image' => 'alpine', 'volumes' => ['sock:/host-run', 'cache:/cache', 'data:/data']]],
+            'volumes' => [
+                'sock' => ['driver' => 'local', 'driver_opts' => ['type' => 'none', 'o' => 'bind', 'device' => '/var/run']],
+                'lower' => ['driver_opts' => ['type' => 'overlay', 'o' => 'lowerdir=/etc,upperdir=/u,workdir=/w', 'device' => 'overlay']],
+                'sneaky' => ['driver_opts' => ['type' => 'tmpfs', 'o' => 'bind', 'device' => '/']],
+                'cache' => ['driver_opts' => ['type' => 'tmpfs', 'device' => 'tmpfs', 'o' => 'size=100m']],
+                'data' => null,
+                'plain' => ['labels' => ['a' => 'b']],
+            ],
+        ]);
+
+        $this->assertSame(['driver' => 'local'], $compose['volumes']['sock']);
+        $this->assertSame([], $compose['volumes']['lower']);
+        $this->assertSame([], $compose['volumes']['sneaky']);
+        $this->assertSame(['type' => 'tmpfs', 'device' => 'tmpfs', 'o' => 'size=100m'], $compose['volumes']['cache']['driver_opts']);
+        $this->assertNull($compose['volumes']['data']);
+        $this->assertSame(['labels' => ['a' => 'b']], $compose['volumes']['plain']);
+        $this->assertSame(['volume sock: driver_opts', 'volume lower: driver_opts', 'volume sneaky: driver_opts'], $removed);
+    }
+
+    /** Compose bind-mounts a file-backed secret or config into the service. */
+    public function test_secrets_and_configs_from_a_forbidden_file_are_removed(): void
+    {
+        [$compose, $removed] = ServiceHardener::withoutHostPathEntries([
+            'services' => ['app' => ['image' => 'alpine', 'secrets' => ['s', 'ok']]],
+            'secrets' => [
+                's' => ['file' => '/var/run/docker.sock'],
+                'ok' => ['file' => './secrets/db_password.txt'],
+                'env' => ['environment' => 'DB_PASSWORD'],
+            ],
+            'configs' => ['c' => ['file' => '/etc/shadow'], 'nginx' => ['file' => './nginx.conf']],
+        ]);
+
+        $this->assertSame(['ok', 'env'], array_keys($compose['secrets']));
+        $this->assertSame(['nginx'], array_keys($compose['configs']));
+        $this->assertSame(['secret s: file /var/run/docker.sock', 'config c: file /etc/shadow'], $removed);
+    }
+
     public function test_the_kept_volumes_are_reindexed(): void
     {
         // A gap serialises as a YAML map where compose wants a sequence.
@@ -144,6 +291,71 @@ class ServiceHardenerTest extends TestCase
         ]);
 
         $this->assertSame([0], array_keys($service['volumes']));
+    }
+
+    public function test_a_mount_source_is_checked_as_compose_interpolates_it(): void
+    {
+        // Compose substitutes the default when NOPE is unset, and X from .env.
+        $env = ['X' => ['/var/run'], 'DOCS' => ['/etc'], 'DATA_DIR' => ['./storage']];
+        foreach ([
+            '${NOPE:-/var/run}:/x',
+            '${X}:/y',
+            '$X/docker.sock:/sock',
+            '${SOCK:-/var/run/docker.sock}:/docker.sock',
+            '${DOCS}/nginx:/conf:ro',
+            '${ROOT:-/}:/hostfs',
+            '${A:-${B:-/proc}}:/p',
+            '${HOME}/.ssh:/ssh',
+            '${BROKEN:-/data:/data',
+        ] as $mount) {
+            $service = ServiceHardener::withoutEscapes(['volumes' => [$mount, 'data:/data']], $env);
+
+            $this->assertSame(['data:/data'], $service['volumes'], $mount);
+        }
+
+        $long = ServiceHardener::withoutEscapes(['volumes' => [
+            ['type' => 'bind', 'source' => '${X}', 'target' => '/x'],
+            ['type' => 'bind', 'source' => '${DATA_DIR:-./data}', 'target' => '/data'],
+        ]], $env);
+        $this->assertSame(['${DATA_DIR:-./data}'], array_column($long['volumes'], 'source'));
+    }
+
+    public function test_an_interpolated_mount_that_stays_safe_is_kept_as_written(): void
+    {
+        $kept = [
+            '${DATA_DIR:-./data}:/data',
+            '${DATA_DIR}/uploads:/uploads',
+            '${UNSET_ROOT}/srv:/srv',
+            '${VOLUME_NAME:-pgdata}:/var/lib/postgresql/data',
+            './a$$b:/b',
+        ];
+        $service = ServiceHardener::withoutEscapes(['volumes' => $kept], ['DATA_DIR' => ['./storage', '/srv/app']]);
+
+        $this->assertSame($kept, $service['volumes']);
+    }
+
+    public function test_a_file_backed_secret_or_config_is_checked_as_compose_interpolates_it(): void
+    {
+        [$compose, $removed] = ServiceHardener::withoutUnsafeFileSources([
+            'secrets' => [
+                'sock' => ['file' => '${NOPE:-/var/run/docker.sock}'],
+                'shadow' => ['file' => '${X}/shadow'],
+                'token' => ['file' => '${TOKEN_FILE:-./secrets/token}'],
+                'env' => ['environment' => 'TOKEN'],
+            ],
+            'configs' => [
+                'passwd' => ['file' => '/etc/passwd'],
+                'nginx' => ['file' => './nginx.conf'],
+            ],
+        ], ['X' => ['/etc']]);
+
+        $this->assertSame(['token', 'env'], array_keys($compose['secrets']));
+        $this->assertSame(['nginx'], array_keys($compose['configs']));
+        $this->assertSame([
+            'secret sock: file ${NOPE:-/var/run/docker.sock}',
+            'secret shadow: file ${X}/shadow',
+            'config passwd: file /etc/passwd',
+        ], $removed);
     }
 
     public function test_a_service_that_would_never_restart_is_given_a_policy(): void

@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\CacheManager;
 
 use App\Lib\Deploy\CacheManager\CacheRegistry;
+use App\Lib\Deploy\Dind\DindImageStore;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -77,6 +78,54 @@ class CacheRegistryTest extends TestCase
         $this->assertSame('sha256:abc', $registry->digest('panelalpha/php:8.2-pa1'));
         $this->assertTrue($registry->delete('panelalpha/php:8.2-pa1', 'sha256:abc'));
         $this->assertNull($registry->digest('panelalpha/php:gone'));
+    }
+
+    /** The accounts' instance answers 405 to a DELETE; tags are removed on the writer. */
+    public function test_by_default_it_talks_to_the_writer(): void
+    {
+        $sent = [];
+        $registry = new CacheRegistry(static function (string $method, string $url) use (&$sent): ?array {
+            $sent[] = "{$method} {$url}";
+
+            return null;
+        });
+
+        $registry->delete('node:20', 'sha256:abc');
+
+        $this->assertSame(['DELETE http://' . DindImageStore::HOST_CACHE_REGISTRY . '/v2/node/manifests/sha256:abc'], $sent);
+    }
+
+    /** The writer listens on the host's loopback only, which core's own network namespace is not. */
+    public function test_requests_are_made_from_the_hosts_network_namespace(): void
+    {
+        $this->assertSame(
+            ['sudo', 'nsenter', '--target', '1', '--net', 'curl', '-sS', '-i', '--connect-timeout', '2', '--max-time', '30',
+                '-X', 'DELETE', 'http://127.0.0.1:5000/v2/node/manifests/sha256:abc'],
+            CacheRegistry::hostArgv('DELETE', 'http://127.0.0.1:5000/v2/node/manifests/sha256:abc', [])
+        );
+
+        $head = CacheRegistry::hostArgv('HEAD', 'http://127.0.0.1:5000/v2/node/manifests/20', ['Accept' => 'a, b']);
+        $this->assertContains('--head', $head);
+        $this->assertNotContains('-X', $head);
+        $this->assertSame(['-H', 'Accept: a, b', 'http://127.0.0.1:5000/v2/node/manifests/20'], array_slice($head, -3));
+    }
+
+    public function test_curl_output_is_read_as_status_headers_and_body(): void
+    {
+        $raw = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nLink: </v2/_catalog?last=b&n=1000>; rel=\"next\"\r\n"
+            . "Docker-Content-Digest: sha256:abc\r\n\r\n{\"repositories\":[\"a\"]}";
+
+        $this->assertSame([
+            'status' => 200,
+            'headers' => [
+                'content-type' => 'application/json',
+                'link' => '</v2/_catalog?last=b&n=1000>; rel="next"',
+                'docker-content-digest' => 'sha256:abc',
+            ],
+            'body' => '{"repositories":["a"]}',
+        ], CacheRegistry::parseResponse($raw));
+        $this->assertSame(202, CacheRegistry::parseResponse("HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n")['status']);
+        $this->assertNull(CacheRegistry::parseResponse(''));
     }
 
     public function test_only_what_the_catalogue_does_not_keep_is_unwanted(): void

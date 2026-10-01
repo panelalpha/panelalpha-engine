@@ -84,6 +84,7 @@ final class RuntimeSidecars
      *        derive from; null leaves them unset
      * @param ?SidecarPasswords $passwords a datastore password nobody set;
      *        null keeps the legacy `app`
+     * @param array<string, list<?string>|string> $env what compose may interpolate the kept services with
      */
     private function __construct(
         private readonly array $services,
@@ -93,11 +94,15 @@ final class RuntimeSidecars
         private readonly ?string $projectIdentity,
         private readonly ?int $accountMemoryMb = null,
         private readonly ?string $placeholderSeed = null,
-        private readonly ?SidecarPasswords $passwords = null
+        private readonly ?SidecarPasswords $passwords = null,
+        private readonly array $env = [],
+        private readonly ?string $accountUser = null,
+        private readonly ?string $projectDir = null
     ) {
     }
 
     /**
+     * @param array<string, list<?string>|string> $env
      * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>}
      */
     public static function fromFile(
@@ -107,12 +112,15 @@ final class RuntimeSidecars
         ?string $projectIdentity = null,
         ?int $accountMemoryMb = null,
         ?string $placeholderSeed = null,
-        ?SidecarPasswords $passwords = null
+        ?SidecarPasswords $passwords = null,
+        array $env = [],
+        ?string $accountUser = null,
+        ?string $projectDir = null
     ): array {
         $raw = is_file($composePath) && is_readable($composePath) ? @file_get_contents($composePath) : null;
 
         return is_string($raw) && $raw !== ''
-            ? self::fromYaml($raw, $backingServicesOnly, $imagePorts, $projectIdentity, $accountMemoryMb, $placeholderSeed, $passwords)
+            ? self::fromYaml($raw, $backingServicesOnly, $imagePorts, $projectIdentity, $accountMemoryMb, $placeholderSeed, $passwords, $env, $accountUser, $projectDir)
             : self::EMPTY;
     }
 
@@ -120,6 +128,7 @@ final class RuntimeSidecars
      * Customer project files are often unreadable by www-data, so the caller
      * sudo-copies and hands the text over.
      *
+     * @param array<string, list<?string>|string> $env
      * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>}
      */
     public static function fromYaml(
@@ -129,7 +138,10 @@ final class RuntimeSidecars
         ?string $projectIdentity = null,
         ?int $accountMemoryMb = null,
         ?string $placeholderSeed = null,
-        ?SidecarPasswords $passwords = null
+        ?SidecarPasswords $passwords = null,
+        array $env = [],
+        ?string $accountUser = null,
+        ?string $projectDir = null
     ): array {
         $parsed = self::parse($raw);
         if ($parsed === null) {
@@ -144,7 +156,10 @@ final class RuntimeSidecars
             $projectIdentity,
             $accountMemoryMb,
             $placeholderSeed,
-            $passwords
+            $passwords,
+            $env,
+            $accountUser,
+            $projectDir
         );
 
         $result = $extractor->extract();
@@ -444,7 +459,10 @@ final class RuntimeSidecars
             $this->accountMemoryMb,
             // keep() already stripped `ports`, so the one-shot rules read the
             // original file to see them.
-            $this->services
+            $this->services,
+            $this->env,
+            $this->accountUser,
+            $this->projectDir
         );
         $services = is_array($hardened['services'] ?? null) ? $hardened['services'] : [];
 

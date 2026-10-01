@@ -65,7 +65,10 @@ class RuntimeSidecars
                 $this->projectIdentity(),
                 $this->accountMemoryMb(),
                 $this->placeholderSeed(),
-                $this->passwords()
+                $this->passwords(),
+                $this->dind->environment()->forInterpolation(),
+                $this->dind->userModel()->username,
+                $this->dind->userAppDirPath()
             );
             if ($extracted['services'] !== []) {
                 $names = implode(', ', array_keys($extracted['services']));
@@ -119,7 +122,10 @@ class RuntimeSidecars
                 $this->projectIdentity(),
                 $this->accountMemoryMb(),
                 $this->placeholderSeed(),
-                $this->passwords()
+                $this->passwords(),
+                $this->dind->environment()->forInterpolation(),
+                $this->dind->userModel()->username,
+                $this->dind->userAppDirPath()
             );
             if ($extracted['services'] !== []) {
                 $names = implode(', ', array_keys($extracted['services']));

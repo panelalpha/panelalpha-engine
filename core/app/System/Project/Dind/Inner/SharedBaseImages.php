@@ -314,8 +314,8 @@ class SharedBaseImages
             // registry is the only way in: fail with the cause, not a later side effect.
             if (str_contains($e->getMessage(), DindImageStore::REGISTRY_DOWN)) {
                 throw new \RuntimeException(
-                    'The image cache (panelalpha-cache-registry) is not running, and a PHP deploy '
-                    . 'cannot get its base image without it. Start it with `docker compose up -d cache-registry`.'
+                    'The image cache (panelalpha-cache-registry or its writer) is not running, and a PHP deploy '
+                    . 'cannot get its base image without it. Start it with `docker compose up -d cache-registry cache-registry-writer`.'
                 );
             }
             $host->logInfo(

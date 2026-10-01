@@ -40,7 +40,7 @@ final class LighthouseTarget
         'panelalpha-*',
         'core', 'core-db', 'mail', 'metrics', 'sites-dns', 'sites-db',
         'sites-phpmyadmin', 'sites-http', 'ftp', 'sftp', 'cache-registry',
-        'registry-proxy', 'lighthouse',
+        'cache-registry-writer', 'registry-proxy', 'lighthouse',
     ];
 
     /** @param Closure(string): bool $isOwnDomain */

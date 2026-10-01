@@ -8,6 +8,8 @@ use App\System\Filesystem as SystemFilesystem;
 use App\System\Project\Dind;
 use App\System\Project\Dind\DeployStrategy;
 use App\System\Project\Dind\Paths;
+use App\System\Project\Dind\ProjectEnvironment;
+use App\System\Project\Dind\ProjectFiles;
 use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\Strategy\AccountSecrets;
 use App\System\Project\Dind\Strategy\UserComposeStrategy;
@@ -97,7 +99,7 @@ class UserComposeStrategyTest extends TestCase
         };
     }
 
-    private function stubbedDind(System $system, string $composeSourcePath): Dind
+    private function stubbedDind(System $system, string $composeSourcePath, string $appDir = ''): Dind
     {
         $model = new \App\Models\User();
         $model->username = 'acme';
@@ -109,7 +111,11 @@ class UserComposeStrategyTest extends TestCase
         $dind->method('publicAppUrl')->willReturn(null);
         $dind->method('userAppComposeFilePath')->willReturn(self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE);
         $dind->method('userAppExistingComposeFilePath')->willReturn($composeSourcePath);
+        if ($appDir !== '') {
+            $dind->method('userAppDirPath')->willReturn($appDir);
+        }
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
+        $dind->method('projectTree')->willReturnCallback(fn (): ProjectFiles => new ProjectFiles($dind));
 
         // A DeployStrategy whose only override is secrets(): fillPlaceholders()
         // reaches it unconditionally, and the real AccountSecrets derives its
@@ -195,6 +201,47 @@ class UserComposeStrategyTest extends TestCase
         $this->assertSame(['volumes' => ['./x:/x']], Yaml::parse($this->copiedTo[$copyPath])['services']['app']);
     }
 
+    public function test_mount_sources_are_checked_against_the_projects_env(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $overridePath = self::PROJECT_DIR . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
+        $system = $this->stubbedSystem([
+            self::PROJECT_DIR . '/.env' => "SOCK=/var/run/docker.sock\nDATA_DIR=./storage\n",
+            $clientPath => "services:\n  app:\n    image: acme/app:latest\n    volumes:\n"
+                . "      - \${SOCK}:/sock\n      - \${NOPE:-/etc}:/conf\n      - \${DATA_DIR:-./data}:/data\n",
+            $overridePath => "services:\n  app:\n    volumes:\n      - \${SOCK}:/also-sock\n      - ./x:/x\n",
+        ]);
+        $dind = $this->stubbedDind($system, $clientPath);
+        $dind->method('userAppDirPath')->willReturn(self::PROJECT_DIR);
+        $dind->method('projectTree')->willReturnCallback(fn (): ProjectFiles => new ProjectFiles($dind));
+        $dind->method('environment')->willReturnCallback(fn (): ProjectEnvironment => new ProjectEnvironment($dind));
+
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertSame(['${DATA_DIR:-./data}:/data'], $run['services']['app']['volumes']);
+        $override = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_CLIENT_OVERRIDE]);
+        $this->assertSame(['./x:/x'], $override['services']['app']['volumes']);
+    }
+
+    public function test_services_the_clients_override_includes_are_hardened_in_the_copy(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $system = $this->stubbedSystem([
+            $clientPath => "services:\n  app:\n    image: acme/app:latest\n",
+            self::PROJECT_DIR . '/' . Paths::CLIENT_OVERRIDE_FILENAME => "include:\n  - evil.yml\n",
+            self::PROJECT_DIR . '/evil.yml' => "services:\n  x:\n    image: alpine\n    privileged: true\n"
+                . "    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n",
+        ]);
+        $dind = $this->stubbedDind($system, $clientPath);
+
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $copy = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_CLIENT_OVERRIDE]);
+        $this->assertArrayNotHasKey('include', $copy);
+        $this->assertSame(['image' => 'alpine'], $copy['services']['x']);
+    }
+
     /**
      * Domain Watchdog disables its worker's inherited healthcheck with
      * `test: []`; written back as `test: {}` Compose refused the whole project
@@ -244,6 +291,34 @@ class UserComposeStrategyTest extends TestCase
         $this->assertEquals(new \stdClass(), $run->{'x-notes'}, 'a top-level {} must stay a map');
     }
 
+    public function test_a_bind_through_a_committed_symlink_is_removed_from_the_run_file_and_the_override(): void
+    {
+        // The checkout as core sees it; the stubbed file map stands in for the reads.
+        $root = sys_get_temp_dir() . '/ucs-link-' . bin2hex(random_bytes(4));
+        $appDir = $root . '/acme/project';
+        mkdir($appDir . '/keep', 0755, true);
+        symlink('/var/run', $appDir . '/data');
+
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $overridePath = self::PROJECT_DIR . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
+        $system = $this->stubbedSystem([
+            $clientPath => "services:\n  app:\n    image: acme/app:latest\n    volumes:\n      - ./data:/sock\n      - ./keep:/keep\n",
+            $overridePath => "services:\n  app:\n    volumes:\n      - ./data/docker.sock:/o\n      - ./keep:/k\n",
+        ]);
+        $dind = $this->stubbedDind($system, $clientPath, $appDir);
+
+        try {
+            (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+        } finally {
+            exec('rm -rf ' . escapeshellarg($root));
+        }
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertSame(['./keep:/keep'], $run['services']['app']['volumes']);
+        $override = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_CLIENT_OVERRIDE]);
+        $this->assertSame(['./keep:/k'], $override['services']['app']['volumes']);
+    }
+
     public function test_refresh_run_file_is_a_noop_when_the_project_ships_no_compose_file(): void
     {
         $system = $this->stubbedSystem([]);
@@ -285,5 +360,74 @@ class UserComposeStrategyTest extends TestCase
         $this->assertContains('./docker/config:/etc/app:ro', $app['volumes']);
         $this->assertContains('data:/var/lib/app', $app['volumes']);
         $this->assertContains('./docker/.env', (array) $app['env_file']);
+    }
+
+    public function test_the_accounts_own_panelalpha_tree_may_be_bound_by_absolute_path(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $overridePath = self::PROJECT_DIR . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
+        $system = $this->stubbedSystem([
+            $clientPath => "services:\n  app:\n    image: acme/app:latest\n    volumes:\n"
+                . "      - /home/acme/.panelalpha/app:/data\n      - /home/acme/docker:/d\n",
+            $overridePath => "services:\n  app:\n    volumes:\n      - /home/acme/.panelalpha/conf:/conf\n"
+                . "      - /home/other/.panelalpha:/other\n",
+        ]);
+        $dind = $this->stubbedDind($system, $clientPath);
+
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertSame(['/home/acme/.panelalpha/app:/data'], $run['services']['app']['volumes']);
+        $override = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_CLIENT_OVERRIDE]);
+        $this->assertSame(['/home/acme/.panelalpha/conf:/conf'], $override['services']['app']['volumes']);
+    }
+
+    /**
+     * onetimesecret: the root file only `include:`s its stack. The included
+     * services are hardened like the file's own, with their paths from the root.
+     */
+    public function test_an_include_only_compose_file_is_flattened_and_hardened(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $system = $this->stubbedSystem([
+            $clientPath => "include:\n  - path: docker/compose/simple.yml\n",
+            self::PROJECT_DIR . '/docker/compose/simple.yml' => <<<'YAML'
+            services:
+              app:
+                image: onetimesecret/onetimesecret:latest
+                container_name: onetime-app
+                privileged: true
+                ports:
+                  - "3000:3000"
+                volumes:
+                  - ./data:/app/data
+                  - /var/run/docker.sock:/var/run/docker.sock
+                healthcheck:
+                  test: []
+            YAML,
+        ]);
+        $dind = $this->stubbedDind($system, $clientPath);
+
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $dumped = $this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE];
+        $run = Yaml::parse($dumped);
+        $this->assertArrayNotHasKey('include', $run);
+        $app = $run['services']['app'];
+        $this->assertArrayNotHasKey('privileged', $app);
+        $this->assertArrayHasKey('mem_limit', $app);
+        $this->assertSame(['./docker/compose/data:/app/data'], $app['volumes']);
+        $this->assertStringContainsString('test: []', $dumped);
+    }
+
+    public function test_an_include_that_cannot_be_read_fails_the_deploy(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $system = $this->stubbedSystem([$clientPath => "include:\n  - missing.yml\n"]);
+        $dind = $this->stubbedDind($system, $clientPath);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('includes missing.yml');
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
     }
 }

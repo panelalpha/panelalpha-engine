@@ -20,29 +20,47 @@ use Symfony\Component\Yaml\Yaml;
 final class ComposeOverride
 {
     /**
+     * @param (callable(string): ?string)|null $read project-relative path => contents, for
+     *        the files it `include:`s; without one an include is refused
+     * @param array<string, list<?string>|string> $env what compose may interpolate the file with
+     * @param ?string $accountUser whose ~/.panelalpha a service may bind by its absolute path
      * @return array{yaml: ?string, removed: list<string>} yaml is null when
      *         the file cannot be read, and so cannot be checked
      */
-    public static function harden(string $raw): array
+    public static function harden(string $raw, ?callable $read = null, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
     {
         $parsed = self::parse($raw);
         if ($parsed === null) {
             return ['yaml' => null, 'removed' => []];
         }
-        if (!is_array($parsed['services'] ?? null)) {
-            return ['yaml' => $raw, 'removed' => []];
+        // Compose layers an included file's services as written; merged in
+        // here, they get the same checks as the override's own.
+        $sources = null;
+        if (array_key_exists('include', $parsed)) {
+            if ($read === null) {
+                throw new \InvalidArgumentException(
+                    'A compose override cannot use include: here; list the services in the override itself.'
+                );
+            }
+            ['compose' => $parsed, 'sources' => $sources] = ComposeInclude::flatten($parsed, $read);
         }
-
-        $removed = [];
-        foreach ($parsed['services'] as $name => $service) {
+        // A top-level volume redefined here applies to the base file's services too.
+        [$parsed, $removed] = ServiceHardener::withoutHostPathEntries($parsed);
+        foreach (is_array($parsed['services'] ?? null) ? $parsed['services'] : [] as $name => $service) {
             if (!is_array($service)) {
                 continue;
             }
-            [$clean, $dropped] = self::withoutEscapes($service);
+            [$clean, $dropped] = self::withoutEscapes($service, $env, $accountUser, $projectDir);
             foreach ($dropped as $what) {
                 $removed[] = $name . ': ' . $what;
             }
             $parsed['services'][$name] = $clean;
+        }
+        [$parsed, $files] = ServiceHardener::withoutUnsafeFileSources($parsed, $env, $accountUser, $projectDir);
+        $removed = [...$removed, ...$files];
+
+        if ($sources !== null) {
+            return ['yaml' => ComposeYaml::dump($parsed, $raw, 6, 2, ...$sources), 'removed' => $removed];
         }
 
         return $removed === []
@@ -69,9 +87,10 @@ final class ComposeOverride
 
     /**
      * @param array<string, mixed> $service
+     * @param array<string, list<?string>|string> $env
      * @return array{0: array<string, mixed>, 1: list<string>}
      */
-    private static function withoutEscapes(array $service): array
+    private static function withoutEscapes(array $service, array $env, ?string $accountUser, ?string $projectDir): array
     {
         $tag = null;
         $plain = [];
@@ -83,7 +102,7 @@ final class ComposeOverride
             $plain[$key] = $value;
         }
 
-        $clean = ServiceHardener::withoutEscapes($plain);
+        $clean = ServiceHardener::withoutEscapes($plain, $env, $accountUser, $projectDir);
 
         $dropped = [];
         foreach (array_keys($plain) as $key) {

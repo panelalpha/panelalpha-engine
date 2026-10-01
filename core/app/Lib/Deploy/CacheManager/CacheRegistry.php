@@ -3,12 +3,15 @@
 namespace App\Lib\Deploy\CacheManager;
 
 use App\Lib\Deploy\Dind\DindImageStore;
-use GuzzleHttp\Client;
+use Symfony\Component\Process\Process;
 
 /**
- * What panelalpha-cache-registry holds, and removing tags from it, over its
- * HTTP API as core addresses it. Removing a tag frees nothing by itself; the
+ * What panelalpha-cache-registry holds, and removing tags from it, over the
+ * writer's HTTP API (the accounts' instance is read-only). Removing a tag frees nothing by itself; the
  * garbage-collect after it does ({@see DindImageStore::garbageCollectArgv()}).
+ *
+ * The writer listens on the host's loopback only, so requests are made from
+ * the host's network namespace ({@see hostArgv()}).
  */
 final class CacheRegistry
 {
@@ -24,8 +27,8 @@ final class CacheRegistry
 
     public function __construct(?callable $send = null, ?string $base = null)
     {
-        $this->send = $send ?? self::httpSend(...);
-        $this->base = $base ?? 'http://' . DindImageStore::CACHE_REGISTRY;
+        $this->send = $send ?? self::hostSend(...);
+        $this->base = $base ?? 'http://' . DindImageStore::HOST_CACHE_REGISTRY;
     }
 
     /**
@@ -136,23 +139,65 @@ final class CacheRegistry
     }
 
     /**
+     * curl run in the host's network namespace; core's own loopback is not the host's.
+     *
+     * @param array<string, string> $headers
+     * @return list<string>
+     */
+    public static function hostArgv(string $method, string $url, array $headers): array
+    {
+        $argv = [
+            'sudo', 'nsenter', '--target', '1', '--net',
+            'curl', '-sS', '-i', '--connect-timeout', '2', '--max-time', '30',
+        ];
+        // -X HEAD would wait for a body that never comes.
+        array_push($argv, ...($method === 'HEAD' ? ['--head'] : ['-X', $method]));
+        foreach ($headers as $name => $value) {
+            array_push($argv, '-H', "{$name}: {$value}");
+        }
+        $argv[] = $url;
+
+        return $argv;
+    }
+
+    /**
+     * curl -i output as a status, lower-cased headers and the body.
+     *
+     * @return array{status: int, headers: array<string, string>, body: string}|null
+     */
+    public static function parseResponse(string $raw): ?array
+    {
+        $split = preg_split('/\r?\n\r?\n/', $raw, 2);
+        $lines = preg_split('/\r?\n/', $split[0]);
+        if (preg_match('#^HTTP/\S+\s+(\d{3})#', $lines[0] ?? '', $m) !== 1) {
+            return null;
+        }
+
+        $headers = [];
+        foreach (array_slice($lines, 1) as $line) {
+            $colon = strpos($line, ':');
+            if ($colon !== false) {
+                $headers[strtolower(trim(substr($line, 0, $colon)))] = trim(substr($line, $colon + 1));
+            }
+        }
+
+        return ['status' => (int) $m[1], 'headers' => $headers, 'body' => $split[1] ?? ''];
+    }
+
+    /**
      * @param array<string, string> $headers
      * @return array{status: int, headers: array<string, string>, body: string}|null
      */
-    private static function httpSend(string $method, string $url, array $headers): ?array
+    private static function hostSend(string $method, string $url, array $headers): ?array
     {
+        $process = new Process(self::hostArgv($method, $url, $headers));
+        $process->setTimeout(40);
         try {
-            $response = (new Client(['connect_timeout' => 2, 'timeout' => 30, 'http_errors' => false]))
-                ->request($method, $url, ['headers' => $headers]);
+            $process->run();
         } catch (\Throwable $e) {
             return null;
         }
 
-        $flat = [];
-        foreach ($response->getHeaders() as $name => $values) {
-            $flat[strtolower($name)] = implode(', ', $values);
-        }
-
-        return ['status' => $response->getStatusCode(), 'headers' => $flat, 'body' => (string) $response->getBody()];
+        return $process->isSuccessful() ? self::parseResponse($process->getOutput()) : null;
     }
 }

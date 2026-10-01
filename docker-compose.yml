@@ -243,8 +243,12 @@ services:
   # fallback any more (#156), so this is not behind a profile.
   #
   # The container name is load-bearing: every account daemon is created with
-  # `panelalpha-cache-registry:5000` in its `insecure-registries`, and that is
-  # the name DindImageStore probes and pushes to.
+  # `panelalpha-cache-registry:5000` in its `insecure-registries`, and the
+  # account egress guard lets that name through on :5000.
+  #
+  # Accounts share it and pull by tag, so it is read-only: a tenant that could
+  # push `composer:2` here would be building every other account. Writes go to
+  # cache-registry-writer below, on the same storage and off every network.
   cache-registry:
     # Same pin as registry-proxy. 3.x keeps the storage layout, so 2.x data carries over.
     image: registry:3.1.1
@@ -252,16 +256,48 @@ services:
     container_name: panelalpha-cache-registry
     restart: unless-stopped
     environment:
+      # The stock config also serves debug, metrics and pprof on :5001 to the engine network.
+      REGISTRY_HTTP_DEBUG_ADDR: ""
       # The stock 3.x config logs at debug.
       REGISTRY_LOG_LEVEL: ${CACHE_REGISTRY_LOG_LEVEL:-info}
       # Prewarm's garbage-collect deletes blobs behind the running server; with the
       # stock in-memory descriptor cache a re-push then skips them as "already exists"
       # and they serve 200 with 0 bytes until a restart. Uncached, a stat hits disk.
       REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR: none
+      # GET and HEAD only; everything else answers 405. The purge is the writer's job.
+      REGISTRY_STORAGE_MAINTENANCE_READONLY: '{"enabled": true}'
+      REGISTRY_STORAGE_MAINTENANCE_UPLOADPURGING: '{"enabled": false}'
+      REGISTRY_STORAGE_DELETE_ENABLED: "false"
       # Collect at 1.5x the live heap instead of 2x; the registry idles most of the day.
       GOGC: ${REGISTRY_GOGC:-50}
-    ports:
-      - "127.0.0.1:5000:5000"
+    volumes:
+      - cache-registry-data:/var/lib/registry:ro
+    mem_limit: ${MEM_LIMIT_CACHE_REGISTRY:-1G}
+    memswap_limit: ${MEMSWAP_LIMIT_CACHE_REGISTRY:-0}
+  # The same storage, writable: the host pushes to it, core lists and deletes
+  # tags through the host's loopback, prewarm garbage-collects inside it.
+  #
+  # It is on no docker network, so no account can resolve or reach it: it
+  # listens on the host's 127.0.0.1:5000 only, and loopback cannot be routed
+  # to from a bridge. The egress guard is not what keeps accounts out, since
+  # older accounts have none and a tenant can remove its own.
+  cache-registry-writer:
+    image: registry:3.1.1
+    pull_policy: missing
+    container_name: panelalpha-cache-registry-writer
+    restart: unless-stopped
+    network_mode: host
+    # An upgrade recreates cache-registry first, which frees 127.0.0.1:5000
+    # where an older install published it.
+    depends_on:
+      - cache-registry
+    environment:
+      REGISTRY_HTTP_ADDR: 127.0.0.1:5000
+      # The stock config also serves debug and metrics on :5001, every interface.
+      REGISTRY_HTTP_DEBUG_ADDR: ""
+      REGISTRY_LOG_LEVEL: ${CACHE_REGISTRY_LOG_LEVEL:-info}
+      REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR: none
+      GOGC: ${REGISTRY_GOGC:-50}
     volumes:
       - cache-registry-data:/var/lib/registry
     mem_limit: ${MEM_LIMIT_CACHE_REGISTRY:-1G}
@@ -298,6 +334,8 @@ services:
     container_name: panelalpha-registry-proxy
     restart: unless-stopped
     environment:
+      # No debug listener on :5001, as for cache-registry.
+      REGISTRY_HTTP_DEBUG_ADDR: ""
       REGISTRY_PROXY_REMOTEURL: https://registry-1.docker.io
       REGISTRY_PROXY_USERNAME: ${REGISTRY_PROXY_USERNAME:-}
       REGISTRY_PROXY_PASSWORD: ${REGISTRY_PROXY_PASSWORD:-}
