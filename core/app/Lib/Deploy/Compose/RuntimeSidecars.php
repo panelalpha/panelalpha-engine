@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\Port\EnvVarDefault;
 use App\Lib\Deploy\Sidecar\ComposeService;
 use App\Lib\Deploy\Sidecar\SidecarCredentials;
@@ -16,7 +17,7 @@ use Symfony\Component\Yaml\Yaml;
  * services, published host ports and networks that do not exist in an account
  * are dropped; what survives is hardened and has its credentials pinned.
  *
- * @phpstan-type SidecarExtract array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>, app_mounts: list<string>, build_image: ?string, app_aliases: list<string>}
+ * @phpstan-type SidecarExtract array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>, app_mounts: list<string>, build_image: ?string, app_aliases: list<string>, dropped_mounts?: list<string>}
  */
 final class RuntimeSidecars
 {
@@ -37,6 +38,9 @@ final class RuntimeSidecars
 
     /** @var array<string, true> lowercase names of services left out */
     private array $dropped = [];
+
+    /** @var list<string> `service: mount` binds taken off kept services */
+    private array $droppedMounts = [];
 
     /** @var array<string, string> env harvested from services that were dropped */
     private array $harvested = [];
@@ -288,6 +292,7 @@ final class RuntimeSidecars
     private function keep(string $name, array $service): void
     {
         unset($service['ports'], $service['networks'], $service['extra_hosts'], $service['profiles']);
+        $service = $this->withoutDependencyBinds($name, $service);
         if ($this->placeholderSeed !== null && isset($service['environment'])) {
             $service['environment'] = SidecarCredentials::withRequiredSecrets($service['environment'], $this->placeholderSeed);
         }
@@ -296,6 +301,39 @@ final class RuntimeSidecars
             $service,
             $this->dropped + [self::WORKSTATION_APP => true]
         );
+    }
+
+    /**
+     * A bind from `vendor/` or `node_modules/` is the workstation's installed
+     * dependencies, which a deployment's checkout never has (Sail's MySQL
+     * init script lives in require-dev laravel/sail). Docker would create a
+     * directory at the missing path and the entrypoint fails on it.
+     *
+     * @param array<string, mixed> $service
+     * @return array<string, mixed>
+     */
+    private function withoutDependencyBinds(string $name, array $service): array
+    {
+        if (!is_array($service['volumes'] ?? null)) {
+            return $service;
+        }
+        $kept = [];
+        foreach ($service['volumes'] as $volume) {
+            $source = trim(is_array($volume) ? (string) ($volume['source'] ?? '') : explode(':', (string) $volume, 2)[0]);
+            // A path, never a named volume called `vendor`: those carry no slash.
+            if (preg_match('#^(\./)*(vendor|node_modules)(/|$)#', $source) === 1 && str_contains($source, '/')) {
+                $this->droppedMounts[] = $name . ': ' . (is_array($volume) ? $source : (string) $volume);
+                continue;
+            }
+            $kept[] = $volume;
+        }
+        if ($kept === []) {
+            unset($service['volumes']);
+        } else {
+            $service['volumes'] = $kept;
+        }
+
+        return $service;
     }
 
     /**
@@ -501,6 +539,7 @@ final class RuntimeSidecars
             'app_env' => $this->appEnv,
             'app_mounts' => $this->appMounts,
             'app_aliases' => $this->appAliases,
+            'dropped_mounts' => $this->droppedMounts,
         ];
     }
 
@@ -527,7 +566,33 @@ final class RuntimeSidecars
     private function isWorkstationOnly(string $name, array $service): bool
     {
         return DevServices::isDevSidecar($name, $service)
-            || ComposeFileInspector::isWorkstationAppService($service);
+            || ComposeFileInspector::isWorkstationAppService($service)
+            // A stock image running the checkout from a bind (BookStack's node
+            // asset watcher) is workstation tooling too, not a backing service.
+            // A job on the image this file builds (dpaste's migration) stays.
+            || (ComposeFileInspector::mountsWholeProjectRoot($service)
+                && !ServiceRole::isKnownDatastore($name, $service)
+                && !$this->runsAnImageThisFileBuilds($service));
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     */
+    private function runsAnImageThisFileBuilds(array $service): bool
+    {
+        $image = ImageTransfer::normalizeImageRef($service['image'] ?? null);
+        if ($image === null) {
+            return false;
+        }
+        foreach ($this->services as $other) {
+            if (is_array($other) && isset($other['build'])
+                && ImageTransfer::normalizeImageRef($other['image'] ?? null) === $image
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

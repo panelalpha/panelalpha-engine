@@ -178,6 +178,53 @@ final class HostIngressTest extends TestCase
         }
     }
 
+    /**
+     * not-th.re: Traefik as the stack's own path router, from a file provider
+     * with no Docker socket, and a gate that only reuses the image. Dropping
+     * them left nothing serving behind a successful deploy.
+     */
+    public function test_a_traefik_that_only_routes_the_stacks_own_paths_is_kept(): void
+    {
+        $compose = ['services' => [
+            'proxy' => [
+                'image' => 'docker.io/library/traefik:v3.7.13',
+                'command' => ['--providers.file.directory=/etc/traefik/dynamic', '--entrypoints.web.address=:80'],
+                'ports' => ['8080:80'],
+                'volumes' => ['./traefik:/etc/traefik/dynamic:ro'],
+            ],
+            'ready' => ['image' => 'traefik:v3.7.13', 'entrypoint' => ['/bin/sh', '-c', 'exit 0']],
+            'gate' => ['image' => 'traefik:v3', 'command' => 'sh -c "exit 0"'],
+            'api' => ['image' => 'acme/api'],
+            'ui' => ['image' => 'acme/ui'],
+        ]];
+
+        $result = ComposeHarden::withoutHostIngress($compose);
+
+        $this->assertSame($compose, $result['compose']);
+        $this->assertSame([], $result['dropped']);
+    }
+
+    public function test_a_traefik_that_discovers_containers_is_dropped_and_lost_path_routing_is_named(): void
+    {
+        foreach ([
+            ['command' => ['--providers.docker=true', '--providers.file.directory=/x']],
+            ['command' => '--providers.file.filename=/x.yml', 'volumes' => ['/var/run/docker.sock:/var/run/docker.sock:ro']],
+            ['environment' => ['TRAEFIK_PROVIDERS_DOCKER' => 'true']],
+            ['command' => 'traefik --providers.swarm'],
+        ] as $config) {
+            $compose = ['services' => [
+                'traefik' => ['image' => 'traefik:v3'] + $config,
+                'api' => ['image' => 'acme/api', 'labels' => ['traefik.http.routers.api.rule=PathPrefix(`/api`)']],
+                'ui' => ['image' => 'acme/ui', 'labels' => ['traefik.http.routers.ui.rule' => 'Host(`x`)']],
+            ]];
+
+            $result = ComposeHarden::withoutHostIngress($compose);
+
+            $this->assertArrayNotHasKey('traefik', $result['compose']['services'], json_encode($config));
+            $this->assertStringContainsString('routed request paths between services (api)', $result['dropped'][1]);
+        }
+    }
+
     public function test_an_ordinary_nginx_or_a_lone_proxy_is_kept(): void
     {
         $compose = ['services' => [

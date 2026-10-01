@@ -351,6 +351,33 @@ YAML);
     }
 
     /**
+     * Rustrak's session key refuses 48 characters ("at least 64 are required");
+     * its message says how long a key it wants, and every reference agrees.
+     */
+    public function test_a_required_secret_is_as_long_as_its_message_asks(): void
+    {
+        $compose = ['services' => [
+            'server' => ['environment' => [
+                'SESSION_SECRET_KEY=${SESSION_SECRET_KEY:?generate one with openssl rand -hex 32}',
+                'OTHER_KEY=${SESSION_SECRET_KEY:?set it}',
+                'JWT_SECRET=${JWT_SECRET:?must be 32 characters}',
+            ]],
+        ]];
+
+        $env = ComposePlaceholders::fill($compose, 'seed')['compose']['services']['server']['environment'];
+        $key = substr($env[0], strlen('SESSION_SECRET_KEY='));
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $key);
+        $this->assertSame('OTHER_KEY=' . $key, $env[1]);
+        // Shorter hints never shorten the value an existing deploy already uses.
+        $this->assertSame('JWT_SECRET=' . ComposePlaceholders::generatedSecret('JWT_SECRET', 'seed'), $env[2]);
+        $this->assertSame(
+            $key,
+            ComposePlaceholders::requiredSecret('SESSION_SECRET_KEY', '${SESSION_SECRET_KEY:?openssl rand -hex 32}', 'seed')
+        );
+    }
+
+    /**
      * Etherpad reads one postgres password from both the app and the database.
      * Deriving from the variable rather than the key is what keeps them equal.
      */

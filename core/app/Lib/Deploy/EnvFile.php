@@ -19,6 +19,23 @@ use App\Lib\Deploy\Env\EnvExampleCopies;
 class EnvFile
 {
     /**
+     * An env file's text as UTF-8: a UTF-8 BOM dropped, UTF-16 with a BOM
+     * converted (DumbPad ships its .env.example as UTF-16LE). Null when NUL
+     * bytes remain, since Compose refuses such a file whatever is done to it.
+     */
+    public static function asUtf8(string $raw): ?string
+    {
+        if (str_starts_with($raw, "\xEF\xBB\xBF")) {
+            $raw = substr($raw, 3);
+        } elseif (str_starts_with($raw, "\xFF\xFE") || str_starts_with($raw, "\xFE\xFF")) {
+            $from = $raw[0] === "\xFF" ? 'UTF-16LE' : 'UTF-16BE';
+            $raw = (string) mb_convert_encoding(substr($raw, 2), 'UTF-8', $from);
+        }
+
+        return str_contains($raw, "\0") ? null : $raw;
+    }
+
+    /**
      * @return array<int, array<string, string>>
      */
     public static function parse(string $contents): array

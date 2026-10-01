@@ -67,6 +67,38 @@ class ComposePublicUrlTest extends TestCase
     }
 
     /** cmintey/wishlist's shape: `ORIGIN=` set and empty kills adapter-node. */
+    /**
+     * Invio runs its backend on :3000 beside the frontend it publishes on
+     * :8000; BACKEND_URL is a hop inside the container, not the site.
+     */
+    public function test_a_localhost_url_on_a_port_nothing_publishes_is_left_alone(): void
+    {
+        $result = $this->fill([
+            'app' => ['image' => 'invio', 'ports' => ['8000:8000'], 'environment' => [
+                'BACKEND_URL' => 'http://localhost:3000',
+                'ORIGIN' => 'http://localhost:8000',
+                'BASE_URL' => 'http://localhost',
+            ]],
+            'admin' => ['image' => 'x', 'ports' => [['target' => 9000, 'published' => '9090']], 'environment' => [
+                'ADMIN_URL' => 'http://localhost:9090',
+            ]],
+        ]);
+        $services = $result['compose']['services'];
+
+        $this->assertSame('http://localhost:3000', $services['app']['environment']['BACKEND_URL']);
+        $this->assertSame(self::URL, $services['app']['environment']['ORIGIN']);
+        $this->assertSame(self::URL, $services['app']['environment']['BASE_URL']);
+        $this->assertSame(self::URL, $services['admin']['environment']['ADMIN_URL']);
+        $this->assertSame(['ORIGIN', 'BASE_URL', 'ADMIN_URL'], $result['urls']);
+    }
+
+    public function test_a_stack_that_publishes_nothing_is_rewritten_as_before(): void
+    {
+        $result = $this->fill(['app' => ['image' => 'x', 'environment' => ['APP_URL' => 'http://localhost:3000']]]);
+
+        $this->assertSame(self::URL, $result['compose']['services']['app']['environment']['APP_URL']);
+    }
+
     public function test_an_empty_public_url_key_is_filled(): void
     {
         $result = $this->fill([

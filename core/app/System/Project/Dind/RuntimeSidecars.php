@@ -73,6 +73,9 @@ class RuntimeSidecars
             if ($extracted['services'] !== []) {
                 $names = implode(', ', array_keys($extracted['services']));
                 $this->dind->shell()->logger()?->info("Keeping runtime services from compose: {$names}");
+                foreach ($extracted['dropped_mounts'] ?? [] as $mount) {
+                    $this->dind->shell()->logger()?->info("Dropped the bind {$mount}: installed dependencies are not in a deployment's checkout");
+                }
 
                 return $extracted;
             }

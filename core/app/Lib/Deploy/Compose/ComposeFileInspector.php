@@ -31,6 +31,9 @@ class ComposeFileInspector
      */
     private const HOST_UID_VARS = 'WWWGROUP|WWWUSER|PUID|PGID|USER_ID|GROUP_ID|HOST_UID|HOST_GID|UID|GID';
 
+    /** @var list<string> */
+    private const PROJECT_ROOT_SOURCES = ['.', './', '${PWD}', '$PWD'];
+
     /**
      * Docker Compose V2 filename priority.
      *
@@ -502,6 +505,24 @@ class ComposeFileInspector
     }
 
     /**
+     * The service mounts the whole checkout (`.`/`./`/`${PWD}`), with or
+     * without `build:`: it runs the repository's own code from a laptop's
+     * working tree.
+     *
+     * @param array<string, mixed> $service
+     */
+    public static function mountsWholeProjectRoot(array $service): bool
+    {
+        foreach ((array) ($service['volumes'] ?? []) as $volume) {
+            if (in_array(self::readBindVolume($volume)[0], self::PROJECT_ROOT_SOURCES, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @param array<string, mixed> $service
      */
     private static function serviceBindsProjectRoot(array $service): bool
@@ -538,7 +559,7 @@ class ComposeFileInspector
             if ($source === null) {
                 continue;
             }
-            if (in_array($source, ['.', './', '${PWD}', '$PWD'], true)) {
+            if (in_array($source, self::PROJECT_ROOT_SOURCES, true)) {
                 return $source;
             }
             if (!str_starts_with($source, './')) {

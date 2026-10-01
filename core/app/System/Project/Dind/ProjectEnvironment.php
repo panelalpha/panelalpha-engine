@@ -67,12 +67,19 @@ class ProjectEnvironment
 
         $baseContents = null;
         $source = 'none';
+        $example = null;
+        if (!$fs->fileExists($envPath) && $fs->fileExists($examplePath)) {
+            $example = EnvFile::asUtf8((string) $fs->fileGetContents($examplePath));
+            if ($example === null) {
+                $logger?->warn('Ignored .env.example: it is not a text file Docker Compose can read (NUL bytes in an unrecognised encoding)');
+            }
+        }
         if ($fs->fileExists($envPath)) {
             $baseContents = $fs->fileGetContents($envPath);
             $source = 'after-clone';
-        } elseif ($fs->fileExists($examplePath)) {
+        } elseif ($example !== null) {
             $seed = $this->dind->strategy()->secrets()->for('compose-placeholders');
-            $baseContents = self::withGeneratedSecrets((string) $fs->fileGetContents($examplePath), $seed);
+            $baseContents = self::withGeneratedSecrets($example, $seed);
             [$baseContents, $replaced] = self::withoutPublishedSecrets($baseContents, $seed, $overrides);
             foreach ($replaced as $key) {
                 $logger?->info("Replaced the published placeholder in {$key} from .env.example with a generated secret");
@@ -673,7 +680,7 @@ class ProjectEnvironment
             }
             $contents = $copy['example'] === ''
                 ? ''
-                : (string) $fs->fileGetContents($copy['example']);
+                : (EnvFile::asUtf8((string) $fs->fileGetContents($copy['example'])) ?? '');
             // The root copy's secrets rule: a template's key is everybody's.
             // Plainpad's server/.env.example (its app_root) ships APP_KEY={KEY}.
             // A real .env used as a source is left as it is.

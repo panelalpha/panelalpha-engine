@@ -22,6 +22,13 @@ final class HostIngress
 
     private const ROUTED_PORT_LABEL = '/^traefik\.http\.services\.[^.]+\.loadbalancer\.server\.port$/i';
 
+    private const ROUTER_RULE_LABEL = '/^traefik\.http\.routers\.[^.]+\.rule$/i';
+
+    /** Traefik discovering containers: what makes it a host's ingress. */
+    private const CONTAINER_PROVIDER_PATTERN = '/providers[._](docker|swarm)|docker\.sock/i';
+
+    private const FILE_PROVIDER_PATTERN = '/providers[._]file/i';
+
     /**
      * @param array<string, mixed> $compose
      * @return array{compose: array<string, mixed>, dropped: list<string>} dropped: one log line each
@@ -35,6 +42,11 @@ final class HostIngress
         foreach ($proxies as $name => $image) {
             unset($services[$name]);
             $dropped[] = "Dropped service {$name} ({$image}): the engine's proxy routes traffic to this app";
+        }
+        $pathRouted = $proxies === [] ? [] : self::pathRoutedServices($services);
+        if ($pathRouted !== []) {
+            $dropped[] = 'Traefik routed request paths between services (' . implode(', ', $pathRouted) . '); '
+                . "the engine's proxy sends the whole domain to one service, so the others are not reachable from outside";
         }
 
         $external = self::externalNetworks($compose['networks'] ?? null);
@@ -77,7 +89,7 @@ final class HostIngress
         $proxies = [];
         foreach ($services as $name => $service) {
             $image = is_array($service) && is_string($service['image'] ?? null) ? $service['image'] : '';
-            if ($image !== '' && self::isProxyImage($image)) {
+            if ($image !== '' && self::isProxyImage($image) && !self::isStackRouter($image, $service)) {
                 $proxies[(string) $name] = $image;
             }
         }
@@ -85,10 +97,91 @@ final class HostIngress
         return count($proxies) < count($services) ? $proxies : [];
     }
 
-    private static function isProxyImage(string $image): bool
+    /**
+     * A Traefik that is not a host's ingress: it runs something other than
+     * Traefik on the image (a one-shot gate), or routes the stack's own paths
+     * from a file provider with no way to discover containers (not-th.re's
+     * `/api` -> api, `/` -> ui). Dropping that leaves one service reachable.
+     *
+     * @param array<string, mixed> $service
+     */
+    private static function isStackRouter(string $image, array $service): bool
+    {
+        $segments = explode('/', self::repositoryOf($image));
+        if (end($segments) !== 'traefik') {
+            return false;
+        }
+        if (!self::runsTraefik($service)) {
+            return true;
+        }
+
+        $evidence = implode(' ', [
+            ComposeCommand::asString($service['command'] ?? null),
+            ComposeCommand::asString($service['entrypoint'] ?? null),
+            json_encode($service['environment'] ?? []) ?: '',
+            json_encode($service['volumes'] ?? []) ?: '',
+        ]);
+
+        return preg_match(self::CONTAINER_PROVIDER_PATTERN, $evidence) !== 1
+            && preg_match(self::FILE_PROVIDER_PATTERN, $evidence) === 1;
+    }
+
+    /**
+     * The image's entrypoint runs Traefik unless the file replaces it, or
+     * hands it a command that is not a flag or `traefik` itself.
+     *
+     * @param array<string, mixed> $service
+     */
+    private static function runsTraefik(array $service): bool
+    {
+        $entrypoint = ComposeCommand::asString($service['entrypoint'] ?? null);
+        if ($entrypoint !== '') {
+            return str_contains(strtolower($entrypoint), 'traefik');
+        }
+        $command = ltrim(ComposeCommand::asString($service['command'] ?? null));
+        if ($command === '') {
+            return true;
+        }
+
+        return str_starts_with($command, '-') || preg_match('#^(\S*/)?traefik(\s|$)#', $command) === 1;
+    }
+
+    /**
+     * Services a Traefik router rule sends a path to, which one published
+     * port cannot reproduce.
+     *
+     * @param array<mixed> $services
+     * @return list<string>
+     */
+    private static function pathRoutedServices(array $services): array
+    {
+        $names = [];
+        foreach ($services as $name => $service) {
+            $labels = is_array($service) && is_array($service['labels'] ?? null) ? $service['labels'] : [];
+            foreach ($labels as $key => $value) {
+                if (is_int($key)) {
+                    [$key, $value] = array_pad(explode('=', (string) $value, 2), 2, '');
+                }
+                if (preg_match(self::ROUTER_RULE_LABEL, trim((string) $key)) === 1
+                    && preg_match('/\bPath(Prefix)?\(/', (string) $value) === 1) {
+                    $names[] = (string) $name;
+                    break;
+                }
+            }
+        }
+
+        return $names;
+    }
+
+    private static function repositoryOf(string $image): string
     {
         // Digest and tag off: `docker.io/library/traefik:v3.1@sha256:…` -> `docker.io/library/traefik`.
-        $repository = strtolower((string) preg_replace(['/@.*$/', '#:[^/]*$#'], '', trim($image)));
+        return strtolower((string) preg_replace(['/@.*$/', '#:[^/]*$#'], '', trim($image)));
+    }
+
+    private static function isProxyImage(string $image): bool
+    {
+        $repository = self::repositoryOf($image);
         $segments = explode('/', $repository);
 
         if (in_array(end($segments), self::PROXY_IMAGES, true)) {

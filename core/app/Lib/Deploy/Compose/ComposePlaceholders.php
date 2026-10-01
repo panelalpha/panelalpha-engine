@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\Port\PortMapping;
 use App\Lib\Deploy\Sidecar\ServiceRole;
 
 /**
@@ -99,7 +100,15 @@ class ComposePlaceholders
      * Only the whole value, for {@see requiredSecret()}; {@see fill()} finds
      * every reference itself with REFERENCE_PATTERN.
      */
-    private const REQUIRED_VAR_PATTERN = '/^\$\{([A-Za-z_][A-Za-z0-9_]*):\?[^}]*\}$/';
+    private const REQUIRED_VAR_PATTERN = '/^\$\{([A-Za-z_][A-Za-z0-9_]*):\?([^}]*)\}$/';
+
+    /**
+     * A length the `:?` message asks for: `openssl rand -hex 32` is 64
+     * characters, "at least 64 characters" is 64.
+     */
+    private const LENGTH_HINT_PATTERN = '/rand\s+-hex\s+(\d+)|(\d+)\s*(?:characters|chars)\b/i';
+
+    private const MAX_HINTED_LENGTH = 256;
 
     /**
      * Any `${VAR}` / `${VAR<op>word}` reference, or Compose's `$$` escape so a
@@ -160,6 +169,7 @@ class ComposePlaceholders
         $touchedUrls = [];
         $touchedPublished = [];
         $publicUrl = self::normalisedPublicUrl($publicUrl);
+        $publishedPorts = self::publishedPorts($services);
 
         foreach ($services as $name => $service) {
             if (!is_array($service) || !isset($service['environment'])) {
@@ -167,7 +177,7 @@ class ComposePlaceholders
             }
             $services[$name]['environment'] = self::rewriteEnvironment(
                 $service['environment'],
-                static function (string $key, string $value) use ($replacements, $seed, $publicUrl, $accountEnv, &$touchedSecrets, &$touchedUrls, &$touchedPublished): string {
+                static function (string $key, string $value) use ($replacements, $seed, $publicUrl, $accountEnv, $publishedPorts, &$touchedSecrets, &$touchedUrls, &$touchedPublished): string {
                     $published = self::isPublishedSecret($key, $value);
                     // APP_KEY skips the hex filler: Laravel needs base64:<32 bytes>.
                     $filled = $published && strcasecmp($key, 'APP_KEY') === 0
@@ -191,7 +201,7 @@ class ComposePlaceholders
 
                         return self::publishedSecret($key, $seed, $value);
                     }
-                    if ($publicUrl !== null && self::isLocalPublicUrl($key, $value)) {
+                    if ($publicUrl !== null && self::isLocalPublicUrl($key, $value, $publishedPorts)) {
                         $touchedUrls[$key] = true;
 
                         return $publicUrl;
@@ -244,7 +254,34 @@ class ComposePlaceholders
             return null;
         }
 
-        return self::generatedSecret($m[1], $seed);
+        // fill() reads no message past a `$`, so neither does this.
+        return self::requiredSecretValue($m[1], $seed, str_contains($m[2], '$') ? 0 : self::hintedLength($m[2]));
+    }
+
+    /**
+     * The generated value of a required variable: {@see generatedSecret()},
+     * lengthened when its message asks for more than that. Rustrak's
+     * `openssl rand -hex 32` key refuses 48 characters ("at least 64 are
+     * required"). Never shortened, so a value that already works stays put.
+     */
+    public static function requiredSecretValue(string $name, string $seed, int $length = 0): string
+    {
+        return $length > 48
+            ? self::generatedSecretOfLength($name, $seed, $length)
+            : self::generatedSecret($name, $seed);
+    }
+
+    /** The length a required variable's `:?` message asks for, or 0. */
+    public static function hintedLength(string $message): int
+    {
+        $length = 0;
+        preg_match_all(self::LENGTH_HINT_PATTERN, $message, $matches, PREG_SET_ORDER);
+        foreach ($matches as $m) {
+            $asked = ($m[1] ?? '') !== '' ? 2 * (int) $m[1] : (int) ($m[2] ?? 0);
+            $length = max($length, min($asked, self::MAX_HINTED_LENGTH));
+        }
+
+        return $length;
     }
 
     public static function isSecretKey(string $key): bool
@@ -420,7 +457,8 @@ class ComposePlaceholders
                     continue;
                 }
                 if (self::isSecretKey($name) || (self::isSecretKey($key) && trim($value) === $ref[0])) {
-                    $names[$name] = true;
+                    // The longest any reference asks for, so every reference agrees.
+                    $names[$name] = max($names[$name] ?? 0, self::hintedLength($ref[2]));
                 }
             }
 
@@ -429,14 +467,14 @@ class ComposePlaceholders
 
         $values = [];
         $generated = [];
-        foreach (array_keys($names) as $name) {
+        foreach ($names as $name => $length) {
             $name = (string) $name;
             $own = (string) ($accountEnv[$name] ?? '');
             if ($own !== '') {
                 $values[$name] = self::composeLiteral($own);
                 continue;
             }
-            $values[$name] = self::generatedSecret($name, $seed);
+            $values[$name] = self::requiredSecretValue($name, $seed, $length);
             $generated[] = $name;
         }
 
@@ -590,12 +628,22 @@ class ComposePlaceholders
         return $value;
     }
 
-    private static function isLocalPublicUrl(string $key, string $value): bool
+    /**
+     * @param array<int, true> $publishedPorts
+     */
+    private static function isLocalPublicUrl(string $key, string $value, array $publishedPorts = []): bool
     {
         if (preg_match(self::PUBLIC_URL_KEY_PATTERN, $key) !== 1) {
             return false;
         }
-        if (preg_match(self::LOCAL_URL_PATTERN, trim($value)) !== 1) {
+        if (preg_match(self::LOCAL_URL_PATTERN, trim($value), $m) !== 1) {
+            return false;
+        }
+        // A port nothing in the stack publishes is a hop inside the container
+        // (Invio's frontend reaching its own backend on :3000), never the
+        // address a browser was given.
+        $port = (int) ltrim($m[2] ?? '', ':');
+        if ($port > 0 && $publishedPorts !== [] && !isset($publishedPorts[$port])) {
             return false;
         }
 
@@ -611,6 +659,34 @@ class ComposePlaceholders
         // The whole value is replaced by the public origin, so the placeholder's
         // port is discarded either way -- any localhost port is fair game here.
         return true;
+    }
+
+    /**
+     * Every port a service publishes, host and container side.
+     *
+     * @param array<array-key, mixed> $services
+     * @return array<int, true>
+     */
+    private static function publishedPorts(array $services): array
+    {
+        $ports = [];
+        foreach ($services as $service) {
+            foreach (is_array($service) ? (array) ($service['ports'] ?? []) : [] as $entry) {
+                if (is_array($entry)) {
+                    $candidates = [$entry['target'] ?? null, $entry['published'] ?? null];
+                } else {
+                    $mapping = PortMapping::parse($entry);
+                    $candidates = $mapping === null ? [] : [$mapping->hostPort, $mapping->containerPort];
+                }
+                foreach ($candidates as $port) {
+                    if (is_numeric($port) && (int) $port > 0) {
+                        $ports[(int) $port] = true;
+                    }
+                }
+            }
+        }
+
+        return $ports;
     }
 
     /**

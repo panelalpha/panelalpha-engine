@@ -417,6 +417,81 @@ class RuntimeSidecarsTest extends TestCase
         $this->assertArrayNotHasKey('ports', $result['services']['app']);
     }
 
+    /**
+     * BookStack's workstation file: its node asset watcher runs the checkout
+     * from a bind on a stock image, cannot write the host-built node_modules
+     * in an account and restart-loops, so every deploy ended partial.
+     */
+    public function test_an_image_service_running_the_checkout_from_a_bind_is_dropped(): void
+    {
+        $result = $this->extract(<<<'YAML'
+        services:
+          app:
+            build: .
+            volumes:
+              - ./:/app
+            depends_on:
+              node:
+                condition: service_started
+          db:
+            image: mysql:8.4
+            volumes:
+              - ./:/backup:ro
+          node:
+            image: node:22-alpine
+            working_dir: /app
+            user: node
+            volumes:
+              - ./:/app
+            entrypoint: /app/dev/docker/entrypoint.node.sh
+          worker:
+            image: acme/worker
+            volumes:
+              - ./storage:/data
+        YAML, false);
+
+        $this->assertSame(['db', 'worker'], array_keys($result['services']));
+    }
+
+    /**
+     * Sail's mysql binds a script from require-dev laravel/sail, which a
+     * `--no-dev` install never has: Docker made a directory there and the
+     * entrypoint failed sourcing it (Bagisto).
+     */
+    public function test_a_kept_sidecar_loses_binds_into_installed_dependencies(): void
+    {
+        $result = $this->extract(<<<'YAML'
+        services:
+          laravel.test:
+            build:
+              context: ./vendor/laravel/sail/runtimes/8.3
+              args:
+                WWWGROUP: '${WWWGROUP}'
+            volumes:
+              - '.:/var/www/html'
+          mysql:
+            image: 'mysql/mysql-server:8.0'
+            volumes:
+              - 'sail-mysql:/var/lib/mysql'
+              - './vendor/laravel/sail/database/mysql/create-testing-database.sh:/docker-entrypoint-initdb.d/10-create-testing-database.sh'
+              - {type: bind, source: ./node_modules/x, target: /x}
+              - 'vendor:/opt/vendor'
+              - './docker/my.cnf:/etc/mysql/conf.d/my.cnf'
+        volumes:
+          sail-mysql:
+          vendor:
+        YAML, false);
+
+        $this->assertSame(
+            ['sail-mysql:/var/lib/mysql', 'vendor:/opt/vendor', './docker/my.cnf:/etc/mysql/conf.d/my.cnf'],
+            $result['services']['mysql']['volumes']
+        );
+        $this->assertSame([
+            'mysql: ./vendor/laravel/sail/database/mysql/create-testing-database.sh:/docker-entrypoint-initdb.d/10-create-testing-database.sh',
+            'mysql: ./node_modules/x',
+        ], $result['dropped_mounts']);
+    }
+
     public function test_a_file_with_no_services_contributes_nothing(): void
     {
         $empty = ['services' => [], 'volumes' => [], 'env' => [], 'app_env' => [], 'app_mounts' => [], 'build_image' => null, 'app_aliases' => []];

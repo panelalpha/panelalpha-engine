@@ -69,6 +69,25 @@ YAML;
         $this->assertSame(ComposePlaceholders::generatedSecret('VALKEY_PASSWORD', self::SEED), $missing['VALKEY_PASSWORD']);
     }
 
+    public function test_a_hinted_length_matches_what_compose_placeholders_writes(): void
+    {
+        $yaml = <<<'YAML'
+services:
+  server:
+    image: rustrak/server
+    command: serve --key ${SESSION_SECRET_KEY:?generate one with openssl rand -hex 32}
+YAML;
+
+        $missing = ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml]], [], self::SEED);
+
+        $this->assertSame(64, strlen($missing['SESSION_SECRET_KEY']));
+        $this->assertSame(
+            ComposePlaceholders::requiredSecretValue('SESSION_SECRET_KEY', self::SEED, 64),
+            $missing['SESSION_SECRET_KEY']
+        );
+        $this->assertStringStartsWith(ComposePlaceholders::generatedSecret('SESSION_SECRET_KEY', self::SEED), $missing['SESSION_SECRET_KEY']);
+    }
+
     public function test_a_value_already_set_is_left_alone(): void
     {
         $files = [['dir' => 'docker/compose', 'yaml' => self::OTS_SIMPLE]];
@@ -128,6 +147,43 @@ YAML;
         $this->assertSame([], ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml('${DB_PASS:-secret}')]], [], self::SEED));
         $this->assertSame([], ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml('${DB_PASS}')]], ['DB_PASS' => 'x'], self::SEED));
         $this->assertSame([], ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml('literal')]], [], self::SEED));
+    }
+
+    /**
+     * Shynet: the database's user, password and name are bare variables the
+     * app reads from the same `.env`. Left empty, postgres fell back to its
+     * own defaults and the app connected as nobody (502 behind a success).
+     */
+    public function test_a_databases_user_and_name_variables_get_the_engines_defaults(): void
+    {
+        $yaml = <<<'YAML'
+services:
+  shynet:
+    image: milesmcc/shynet:latest
+    env_file:
+      - .env
+  db:
+    image: postgres
+    environment:
+      - "POSTGRES_USER=${DB_USER}"
+      - "POSTGRES_PASSWORD=${DB_PASSWORD}"
+      - "POSTGRES_DB=${DB_NAME}"
+YAML;
+
+        $missing = ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml]], [], self::SEED);
+
+        $this->assertSame('app', $missing['DB_USER']);
+        $this->assertSame('app', $missing['DB_NAME']);
+        $this->assertSame(ComposePlaceholders::generatedSecret('DB_PASSWORD', self::SEED), $missing['DB_PASSWORD']);
+        $this->assertSame(['DB_PASSWORD'], array_keys(
+            ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml]], ['DB_USER' => 'shynet', 'DB_NAME' => 'shynet'], self::SEED)
+        ));
+        // A default the author wrote is theirs.
+        $this->assertArrayNotHasKey('DB_USER', ComposeRequiredEnv::missing(
+            [['dir' => '', 'yaml' => str_replace('${DB_USER}', '${DB_USER:-shynet}', $yaml)]],
+            [],
+            self::SEED
+        ));
     }
 
     public function test_another_way_in_the_author_chose_is_kept(): void

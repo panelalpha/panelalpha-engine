@@ -22,6 +22,18 @@ class EnvFileTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_an_env_file_is_normalised_to_utf8(): void
+    {
+        $text = "# comment\r\nPORT=3000\r\nNAME=Zażółć\r\n";
+
+        $this->assertSame($text, EnvFile::asUtf8("\xFF\xFE" . mb_convert_encoding($text, 'UTF-16LE', 'UTF-8')));
+        $this->assertSame($text, EnvFile::asUtf8("\xFE\xFF" . mb_convert_encoding($text, 'UTF-16BE', 'UTF-8')));
+        $this->assertSame($text, EnvFile::asUtf8("\xEF\xBB\xBF" . $text));
+        $this->assertSame($text, EnvFile::asUtf8($text));
+        // UTF-16 with no BOM, or any other NUL-bearing bytes: not an env file.
+        $this->assertNull(EnvFile::asUtf8(mb_convert_encoding($text, 'UTF-16LE', 'UTF-8')));
+    }
+
     public function test_nested_env_example_copies_api_and_skips_existing_file(): void
     {
         mkdir($this->tmpDir . '/api', 0777, true);

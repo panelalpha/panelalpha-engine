@@ -53,6 +53,20 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertFalse($model->usedCustomEnvVars());
     }
 
+    public function test_a_utf16_example_is_read_as_text(): void
+    {
+        // DumbPad ships .env.example as UTF-16LE with a BOM and CRLF; copied
+        // byte for byte, compose refused `.env` on "\x00".
+        $utf16 = "\xFF\xFE" . mb_convert_encoding("# DumbPad\r\nPORT=3000\r\n\r\nDUMBPAD_PIN=\r\n", 'UTF-16LE', 'UTF-8');
+        file_put_contents($this->projectDir . '/.env.example', $utf16);
+
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+
+        $contents = (string) file_get_contents($this->projectDir . '/.env');
+        $this->assertStringNotContainsString("\0", $contents);
+        $this->assertSame('3000', $this->vars($contents)['PORT']);
+    }
+
     public function test_apply_comments_out_example_lines_compose_would_refuse(): void
     {
         // saltcorn: a .env.example meant to be `source`d (engine#135).
