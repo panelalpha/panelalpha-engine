@@ -151,8 +151,11 @@ class DeployStrategy
      */
     public function keepEngineFilesOutOfBuildContext(array $decision, string $projectDir, ?string $chown): void
     {
-        if (($decision['strategy'] ?? null) === Strategies::DOCKERFILE) {
+        $strategy = $decision['strategy'] ?? null;
+        if ($strategy === Strategies::DOCKERFILE) {
             $this->dockerfile()->keepEngineFilesOutOfContext($decision, $projectDir, $chown);
+        } elseif ($strategy === Strategies::COMPOSE || $strategy === Strategies::PAEMD) {
+            $this->userCompose()->keepEngineFilesOutOfContext($projectDir, $chown);
         }
     }
 

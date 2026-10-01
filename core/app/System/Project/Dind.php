@@ -304,9 +304,9 @@ class Dind implements DeployableDindProject, Runtime
         (new SourceFiles($this))->importProjectArchive($zipPath);
     }
 
-    public function applyProjectEnvVars(): void
+    public function applyProjectEnvVars(?string $composePath = null): void
     {
-        $this->projectEnvironment()->apply();
+        $this->projectEnvironment()->apply($composePath);
     }
 
     /** The login a manifest's `credentials:` declares, written into the account. */
@@ -517,7 +517,7 @@ class Dind implements DeployableDindProject, Runtime
      * `failed to connect to the docker API at unix:///var/run/docker.sock`,
      * which reads as a broken daemon rather than as "too early".
      *
-     * Measured on 10.10.10.25: the socket appears 5-6s after the container
+     * Measured on a dev host: the socket appears 5-6s after the container
      * starts, and the deploy path is slow enough (preparing, os user, dirs,
      * quota) not to notice. `Projects::copy()` is not: it copies the home dir
      * and prepares volumes five seconds in, inside the window. Issue #58 --

@@ -509,6 +509,37 @@ class RuntimeSidecarsTest extends TestCase
         ], $result['app_env']);
     }
 
+    public function test_a_test_variant_of_the_app_is_not_harvested(): void
+    {
+        // Zerobyte: every service builds the repo; the e2e ones turn rate
+        // limiting off and point Node at a test CA.
+        $yaml = <<<'YAML'
+        services:
+          zerobyte-dev:
+            build: .
+            environment:
+              - NODE_ENV=development
+            volumes:
+              - ./app:/app/app
+          zerobyte-e2e:
+            build: .
+            environment:
+              - DISABLE_RATE_LIMITING=true
+              - NODE_EXTRA_CA_CERTS=/tinyauth-ca/root.crt
+            volumes:
+              - ./playwright/data:/var/lib/zerobyte/data
+          zerobyte_test:
+            build: .
+            environment:
+              - TRUSTED_ORIGINS=https://localhost:5557
+            volumes:
+              - .:/app
+        YAML;
+        $result = RuntimeSidecars::fromYaml($yaml, false, null, 'github.com/nicotsx/zerobyte');
+
+        $this->assertSame(['NODE_ENV' => 'development'], $result['app_env']);
+    }
+
     public function test_dev_sidecars_are_not_harvested(): void
     {
         // vite also builds and bind-mounts the repo, but it is not the app.
@@ -583,6 +614,43 @@ class RuntimeSidecarsTest extends TestCase
         $this->assertSame('from-sidecar', $env['CFG_DATABASE']);
         $this->assertSame('app', $env['CFG_A']);
         $this->assertSame('account', $env['CFG_B']);
+    }
+
+    public function test_the_apps_own_url_to_a_kept_sidecar_keeps_its_driver(): void
+    {
+        // CTFd: the generic mysql:// made SQLAlchemy load MySQLdb, which the
+        // image does not ship.
+        $result = RuntimeSidecars::fromYaml(<<<'YAML'
+        services:
+          ctfd:
+            build: .
+            environment:
+              - DATABASE_URL=mysql+pymysql://ctfd:ctfd@db/ctfd
+              - REDIS_URL=redis://cache:6379
+            volumes:
+              - .:/opt/CTFd
+          db:
+            image: mariadb:10.11
+            environment:
+              - MARIADB_ROOT_PASSWORD=ctfd
+              - MARIADB_USER=ctfd
+              - MARIADB_PASSWORD=ctfd
+              - MARIADB_DATABASE=ctfd
+          cache:
+            image: redis:4
+        YAML, false, null, 'github.com/ctfd/ctfd');
+        $merger = new DindRuntimeSidecars($this->dindForMerger());
+        $env = $merger->mergeRuntimeSidecars(['env' => []], $result)['env'];
+
+        $this->assertSame('mysql+pymysql://ctfd:ctfd@db/ctfd', $env['DATABASE_URL']);
+        $this->assertSame('redis://cache:6379', $env['REDIS_URL']);
+        // What the app did not declare still comes from the sidecar.
+        $this->assertArrayHasKey('MARIADB_URL', $env);
+
+        // A URL whose password the sidecar does not run with is not kept.
+        $result['app_env']['DATABASE_URL'] = 'mysql+pymysql://ctfd:other@db/ctfd';
+        $env = $merger->mergeRuntimeSidecars(['env' => []], $result)['env'];
+        $this->assertSame('mysql://ctfd:ctfd@db:3306/ctfd', $env['DATABASE_URL']);
     }
 
     public function test_ports_the_image_declares_are_consulted(): void

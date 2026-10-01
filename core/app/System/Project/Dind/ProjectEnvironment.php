@@ -9,6 +9,7 @@ use App\Lib\Deploy\Compose\ComposeInterpolation;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\Compose\ComposeRequiredEnv;
 use App\Lib\Deploy\Compose\ComposeYaml;
+use App\Lib\Deploy\Compose\NestedCompose;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Compose\PublicUrlEnvironment;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
@@ -41,8 +42,10 @@ class ProjectEnvironment
      * After clone/setup (or before compose up on rebuild): write .env.default
      * from the current base, then optionally merge user-supplied env_vars
      * onto .env.
+     *
+     * @param ?string $composePath the compose file detection chose, when it is not at the root
      */
-    public function apply(): void
+    public function apply(?string $composePath = null): void
     {
         $user = $this->dind->userModel();
         $system = $this->dind->system();
@@ -154,6 +157,7 @@ class ProjectEnvironment
                 . implode(', ', $keys)
             );
             $this->materializeNestedEnvExamples($projectDir, $chown);
+            $this->withNestedComposeEnv($projectDir, $composePath, $chown);
             $user->setDetails(['used_custom_env_vars' => true]);
             $user->save();
 
@@ -166,6 +170,7 @@ class ProjectEnvironment
             $fs->filePutContents($envPath, $baseContents, $chown, '644');
         }
         $this->materializeNestedEnvExamples($projectDir, $chown);
+        $this->withNestedComposeEnv($projectDir, $composePath, $chown);
         $logger?->info("Using default environment variables (source: {$source})");
         $user->setDetails(['used_custom_env_vars' => false]);
         $user->save();
@@ -243,6 +248,58 @@ class ProjectEnvironment
         return $missing === []
             ? [$contents, []]
             : [EnvFile::merge($contents ?? '', $missing), array_keys($missing)];
+    }
+
+    /**
+     * A compose file kept under docker/ reads docker/.env when run on its own,
+     * but the run file is started from the root and reads the root .env. The
+     * nested file's keys go under the root's, the root's values winning.
+     */
+    private function withNestedComposeEnv(string $projectDir, ?string $composePath, ?string $chown): void
+    {
+        $strategy = $this->dind->userModel()->getDeployStrategy();
+        if ($composePath === null
+            || ($strategy !== Strategies::COMPOSE && $strategy !== Strategies::PAEMD)
+            || ($dir = NestedCompose::relativeDir($composePath, $projectDir)) === null
+        ) {
+            return;
+        }
+
+        $fs = $this->dind->system()->filesystem();
+        $nestedPath = "{$projectDir}/{$dir}/.env";
+        if (!$fs->fileExists($nestedPath)) {
+            return;
+        }
+        $rootPath = "{$projectDir}/.env";
+        $root = $fs->fileExists($rootPath) ? (string) $fs->fileGetContents($rootPath) : '';
+        $added = array_diff_key(
+            self::variables((string) $fs->fileGetContents($nestedPath)),
+            self::variables($root)
+        );
+        if ($added === []) {
+            return;
+        }
+
+        $fs->filePutContents($rootPath, EnvFile::merge($root, $added), $chown, '644');
+        $this->dind->shell()->logger()?->info(
+            "Compose reads {$dir}/.env when run from {$dir}/; carried its values into .env for the run from the project root: "
+            . implode(', ', array_keys($added))
+        );
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private static function variables(string $contents): array
+    {
+        $vars = [];
+        foreach (EnvFile::parse($contents) as $row) {
+            if (($row['type'] ?? '') === 'variable') {
+                $vars[(string) $row['key']] = (string) ($row['value'] ?? '');
+            }
+        }
+
+        return $vars;
     }
 
     /**

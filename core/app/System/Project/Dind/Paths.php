@@ -165,7 +165,12 @@ final class Paths
     private function clientOverrideIn(string $appDir): ?string
     {
         $fs = $this->project->system()->filesystem();
-        foreach ([EngineArtifacts::RUN_CLIENT_OVERRIDE, self::CLIENT_OVERRIDE_FILENAME] as $name) {
+        // Under an app config's replacing compose file only the copy counts:
+        // the deploy leaves none when the override is the repository's own.
+        $names = $fs->fileExists($appDir . '/' . EngineArtifacts::APP_CONFIG_COMPOSE)
+            ? [EngineArtifacts::RUN_CLIENT_OVERRIDE]
+            : [EngineArtifacts::RUN_CLIENT_OVERRIDE, self::CLIENT_OVERRIDE_FILENAME];
+        foreach ($names as $name) {
             if ($fs->fileExists($appDir . '/' . $name)) {
                 return $appDir . '/' . $name;
             }
@@ -191,18 +196,24 @@ final class Paths
      */
     public function composeCommand(array $rest): array
     {
-        $command = [
-            'docker',
-            'compose',
-            '--project-directory',
-            $this->appDir(),
-        ];
+        $command = self::composePrefix($this->appDir());
         foreach ($this->composeFiles() as $file) {
             $command[] = '-f';
             $command[] = $file;
         }
 
         return array_merge($command, $rest);
+    }
+
+    /**
+     * `docker exec` sets no PWD, so a `${PWD}/data` bind interpolated to
+     * `/data`; compose run by hand from the project has it as the project.
+     *
+     * @return list<string>
+     */
+    private static function composePrefix(string $appDir): array
+    {
+        return ['env', 'PWD=' . $appDir, 'docker', 'compose', '--project-directory', $appDir];
     }
 
     /**
@@ -227,12 +238,7 @@ final class Paths
     {
         $appDir = rtrim($appDir, '/');
         $files = $this->composeFilesIn($appDir);
-        $command = [
-            'docker',
-            'compose',
-            '--project-directory',
-            $appDir,
-        ];
+        $command = self::composePrefix($appDir);
         foreach ($files as $file) {
             $command[] = '-f';
             $command[] = $file;

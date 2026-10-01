@@ -264,10 +264,51 @@ class RuntimeSidecars
         $decision['volumes'] = array_merge($sidecars['volumes'], $decision['volumes'] ?? []);
         // Harvested app env < what the strategy generates < sidecar connection
         // env; the account's env_vars go on top later, in composeDecision().
+        $generated = $decision['env'] ?? [];
         $decision['env'] = array_merge($sidecars['app_env'] ?? [], $decision['env'] ?? [], $sidecars['env']);
+        // Except a connection URL the app's own service declared for a kept
+        // sidecar with the credentials it runs with: it carries the driver the
+        // app ships (CTFd's mysql+pymysql://), which the generic one drops.
+        foreach (self::urlsToKeptSidecars($sidecars['app_env'] ?? [], array_keys($sidecars['services'])) as $key => $url) {
+            if (isset($sidecars['env'][$key]) && !isset($generated[$key])
+                && self::sameCredentials($url, $sidecars['env'][$key])
+            ) {
+                $decision['env'][$key] = $url;
+            }
+        }
         $decision['depends_on'] = array_keys($sidecars['services']);
 
         return $decision;
+    }
+
+    private static function sameCredentials(string $a, string $b): bool
+    {
+        foreach ([PHP_URL_USER, PHP_URL_PASS] as $part) {
+            if (rawurldecode((string) parse_url($a, $part)) !== rawurldecode((string) parse_url($b, $part))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @param array<string, string> $env
+     * @param list<int|string> $services
+     * @return array<string, string>
+     */
+    private static function urlsToKeptSidecars(array $env, array $services): array
+    {
+        $names = array_map(static fn ($name): string => strtolower((string) $name), $services);
+        $urls = [];
+        foreach ($env as $key => $value) {
+            $host = str_contains($value, '://') ? parse_url($value, PHP_URL_HOST) : null;
+            if (is_string($host) && in_array(strtolower($host), $names, true)) {
+                $urls[(string) $key] = $value;
+            }
+        }
+
+        return $urls;
     }
 
     /**

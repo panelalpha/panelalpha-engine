@@ -16,6 +16,7 @@ use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\NestedCompose;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\System\Project\Dind\Paths;
+use App\System\Project\Dind\Source\GitRepository;
 
 /**
  * The project's own compose file, made fit to host.
@@ -97,7 +98,13 @@ class UserComposeStrategy
         $runPath = $this->dind->userAppComposeFilePath();
         // Mount sources may be written as `${VAR}`; the hardener checks what they interpolate to.
         $env = $this->dind->environment()->forInterpolation();
-        $this->writeClientOverride($projectDir, $chown, $logger, $env);
+        $this->writeClientOverride(
+            $projectDir,
+            $chown,
+            $logger,
+            basename($composePath) === EngineArtifacts::APP_CONFIG_COMPOSE,
+            $env
+        );
         $missing = ComposeFileInspector::missingComposeDockerfileRefs($composePath, $projectDir);
         $raw = $system->filesystem()->fileGetContents($composePath);
         // Through ComposeYaml, not Yaml::parse: this was the one unguarded
@@ -227,6 +234,43 @@ class UserComposeStrategy
     }
 
     /**
+     * The same `<Dockerfile>.dockerignore` a repository Dockerfile gets, for
+     * every `build:` in the run file: without it `.git` and the engine's files
+     * went into the image, and a Dockerfile copying its context into a docroot
+     * served them.
+     */
+    public function keepEngineFilesOutOfContext(string $projectDir, ?string $chown): void
+    {
+        $raw = $this->dind->projectTree()->read($this->dind->userAppComposeFilePath());
+        $parsed = $raw === null ? null : ComposeYaml::parse($raw);
+        if (!is_array($parsed['services'] ?? null)) {
+            return;
+        }
+
+        $projectDir = rtrim($projectDir, '/');
+        $written = [];
+        foreach ($parsed['services'] as $service) {
+            $build = is_array($service) ? ($service['build'] ?? null) : null;
+            if ((!is_string($build) && !is_array($build))
+                || ComposeFileInspector::composeBuildDockerfileAbsolute($projectDir, $build) === null
+            ) {
+                continue;
+            }
+            $context = trim((string) (is_string($build) ? $build : ($build['context'] ?? '.')), '/');
+            $context = ($context === '' || $context === '.') ? '' : (string) preg_replace('#^(\./)+#', '', $context);
+            $dockerfile = is_array($build) && is_string($build['dockerfile'] ?? null) && $build['dockerfile'] !== ''
+                ? $build['dockerfile']
+                : 'Dockerfile';
+            $contextDir = $context === '' ? $projectDir : $projectDir . '/' . $context;
+            if (str_starts_with($dockerfile, '/') || isset($written[$contextDir . "\0" . $dockerfile])) {
+                continue;
+            }
+            $written[$contextDir . "\0" . $dockerfile] = true;
+            $this->dind->strategy()->contextIgnore()->write($contextDir, $dockerfile, false, $chown);
+        }
+    }
+
+    /**
      * The repository's own `docker-compose.override.yml`, which compose layers
      * over the run file, copied with its escapes removed to a name the engine
      * owns ({@see Paths::composeFiles()} layers the copy). It used to be
@@ -235,21 +279,34 @@ class UserComposeStrategy
      *
      * @param array<string, list<?string>> $env
      */
-    private function writeClientOverride(string $projectDir, ?string $chown, ?DeployLogger $logger, array $env): void
+    private function writeClientOverride(string $projectDir, ?string $chown, ?DeployLogger $logger, bool $replaced, array $env): void
     {
         $fs = $this->dind->system()->filesystem();
         $source = rtrim($projectDir, '/') . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
         $copy = rtrim($projectDir, '/') . '/' . EngineArtifacts::RUN_CLIENT_OVERRIDE;
-        if (!$fs->fileExists($source)) {
+        $contents = $fs->fileExists($source) ? $fs->fileGetContents($source) : null;
+        // The repository's override belongs to the compose file an app config
+        // replaced; one a recipe wrote (prepare hook, files/) is still layered.
+        $committed = $contents !== null && $replaced
+            ? $this->committedVersion($projectDir, Paths::CLIENT_OVERRIDE_FILENAME)
+            : null;
+        $stale = $committed !== null && rtrim($committed) === rtrim((string) $contents);
+        if ($contents === null || $stale) {
             if ($fs->fileExists($copy)) {
                 $this->dind->system()->exec(['sudo', 'rm', '-f', $copy]);
+            }
+            if ($stale) {
+                $logger?->info(
+                    'Not layering the repository\'s ' . Paths::CLIENT_OVERRIDE_FILENAME
+                    . ': it was written for the compose file the app config replaces'
+                );
             }
 
             return;
         }
 
         $read = fn (string $relative): ?string => $this->dind->projectTree()->read(rtrim($projectDir, '/') . '/' . $relative);
-        $hardened = ComposeOverride::harden($fs->fileGetContents($source), $read, $env, $this->dind->userModel()->username, $this->dind->userAppDirPath());
+        $hardened = ComposeOverride::harden($contents, $read, $env, $this->dind->userModel()->username, $this->dind->userAppDirPath());
         if ($hardened['yaml'] === null) {
             throw new \InvalidArgumentException(
                 'The compose override in this project (' . Paths::CLIENT_OVERRIDE_FILENAME . ') could not be read as YAML.'
@@ -259,6 +316,21 @@ class UserComposeStrategy
             $logger?->warn('Removed from ' . Paths::CLIENT_OVERRIDE_FILENAME . ", not allowed in hosting: {$what}");
         }
         $fs->filePutContents($copy, $hardened['yaml'], $chown, '644');
+    }
+
+    /**
+     * $relative as the checked-out commit has it, or null when git has no
+     * such file (or there is no repository, as for an uploaded archive).
+     */
+    protected function committedVersion(string $projectDir, string $relative): ?string
+    {
+        try {
+            $git = GitRepository::forProjectDir($this->dind, $projectDir);
+
+            return $git->hasRepository() ? $git->readFromHead($relative) : null;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

@@ -243,6 +243,41 @@ class UserComposeStrategyTest extends TestCase
     }
 
     /**
+     * Damselfly: a recipe replaces the compose file, and the repository's
+     * Visual Studio override names a service (damselfly.web) that no longer
+     * exists. An override the recipe wrote itself is still layered.
+     */
+    public function test_a_replacing_app_config_compose_drops_the_repositorys_own_override_only(): void
+    {
+        $recipePath = self::PROJECT_DIR . '/' . EngineArtifacts::APP_CONFIG_COMPOSE;
+        $overridePath = self::PROJECT_DIR . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
+        $copyPath = self::PROJECT_DIR . '/' . EngineArtifacts::RUN_CLIENT_OVERRIDE;
+        $repoOverride = "services:\n  damselfly.web:\n    environment:\n      - ASPNETCORE_ENVIRONMENT=Development\n";
+        $strategy = fn (Dind $dind, ?string $committed): UserComposeStrategy => new class ($dind, $committed) extends UserComposeStrategy {
+            public function __construct(Dind $dind, private ?string $committed)
+            {
+                parent::__construct($dind);
+            }
+
+            protected function committedVersion(string $projectDir, string $relative): ?string
+            {
+                return $this->committed;
+            }
+        };
+
+        $files = [$recipePath => "services:\n  damselfly:\n    image: webreaper/damselfly:4.5.3\n", $overridePath => $repoOverride];
+        $strategy($this->stubbedDind($this->stubbedSystem($files), $recipePath), rtrim($repoOverride))
+            ->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+        $this->assertArrayNotHasKey($copyPath, $this->copiedTo, "the repository's override is not layered over the recipe's file");
+
+        $this->copiedTo = [];
+        $files[$overridePath] = "services:\n  damselfly:\n    environment:\n      - PUID=1001\n";
+        $strategy($this->stubbedDind($this->stubbedSystem($files), $recipePath), $repoOverride)
+            ->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+        $this->assertArrayHasKey($copyPath, $this->copiedTo, 'an override the recipe wrote is still layered');
+    }
+
+    /**
      * Domain Watchdog disables its worker's inherited healthcheck with
      * `test: []`; written back as `test: {}` Compose refused the whole project
      * ("healthcheck.test must be a string"). Empty maps must stay maps.

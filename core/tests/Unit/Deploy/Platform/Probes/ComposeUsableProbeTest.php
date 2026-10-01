@@ -43,6 +43,35 @@ class ComposeUsableProbeTest extends ProbeTestCase
         );
     }
 
+    /**
+     * Stretto's recipe: one service builds a deps image and binds the
+     * checkout, which reads as a workstation file in a repository but is what
+     * the recipe author wrote for the engine.
+     */
+    public function test_an_app_config_compose_is_not_second_guessed_as_a_workstation_file(): void
+    {
+        $recipe = <<<'YAML'
+        services:
+          app:
+            build: { context: ., dockerfile: Dockerfile.local }
+            working_dir: /app/src
+            volumes:
+              - .:/app/src
+        YAML;
+        $this->write(EngineArtifacts::APP_CONFIG_COMPOSE, $recipe);
+        $this->write('Dockerfile.local', "FROM node:20\n");
+
+        $this->assertSame(
+            ['compose_path' => $this->dir . '/' . EngineArtifacts::APP_CONFIG_COMPOSE],
+            $this->probe()->evaluate($this->context())
+        );
+
+        // The same file shipped by the repository is still a workstation file.
+        $this->write('docker-compose.yml', $recipe);
+        unlink($this->dir . '/' . EngineArtifacts::APP_CONFIG_COMPOSE);
+        $this->assertFalse($this->probe()->evaluate($this->context()));
+    }
+
     public function test_the_modern_filename_is_preferred(): void
     {
         // Repos mid-rename carry both. compose.yaml is the current spelling

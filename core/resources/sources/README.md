@@ -23,7 +23,7 @@ github.com/wordpress/wordpress/
 | `panelalpha.yaml` | — | **Required.** A platform manifest with extra keys — the same vocabulary as `core/resources/apps/<id>/panelalpha.yaml`: a `description`, `extends:` (the shipped recipe this repository is an instance of) and any manifest key overriding it, `env:`, `requires:`, staged `commands:` |
 | `hooks/precheck.sh` | Before `git clone` | Validate prerequisites (e.g. disk space) |
 | `hooks/prepare.sh` | After clone, before `docker compose up` | Generate config, set credentials, prepare a database. Responsible for creating a compose file if neither the repo nor `overrides/` ships one |
-| `overrides/docker-compose.yml` | After clone | Replaces the repo's own compose file, stashing anything that would shadow it. Written before the prepare hook, so the hook can rely on it |
+| `overrides/docker-compose.yml` | After clone | Replaces the repo's own compose file, stashing anything that would shadow it. The repo's committed `docker-compose.override.yml` is not layered over it; one the prepare hook or `files/` writes is. Written before the prepare hook, so the hook can rely on it |
 | `overrides/docker-compose.override.yml` | After clone | Layers over the repo's own compose file. Prefer this — the upstream file is never modified |
 | `overrides/entrypoint.sh` | Container boot | Replaces the generated entrypoint outright: no `install`, no `upgrade`, no `start`, no serve command |
 | `overrides/app.sh` | On demand | Called by the engine for app management (`info` / `install` / `users:list` / `users:add` / `users:delete` / `users:reset-password` / `users:sso`). Should print `MISSING_SNIPPET` to stderr and exit 1 if a required file is missing so the engine can reinstall it and retry |

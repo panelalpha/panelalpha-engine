@@ -8,6 +8,7 @@ use App\Lib\Deploy\CacheManager\RegistryImageConfig;
 use App\Lib\Deploy\CacheManager\BuiltImage;
 use App\Lib\Deploy\CacheManager\RailpackCache;
 use App\Lib\Deploy\Compose\DeployCompose;
+use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\Runtime\Images;
 
 /**
@@ -114,13 +115,33 @@ class ImageSeeding
         }
 
         $images = [];
-        foreach (DeployCompose::imageRefs($contents) as $image) {
+        $profiles = $this->activeProfiles(dirname($composePath) . '/.env');
+        foreach (DeployCompose::imageRefs($contents, activeProfiles: $profiles) as $image) {
             if (is_string($image) && $image !== '' && ImageTransfer::isSafeImageRef($image)) {
                 $images[] = $image;
             }
         }
 
         return $images;
+    }
+
+    /**
+     * COMPOSE_PROFILES as `compose up` will read it from the project's .env;
+     * none set means only unprofiled services start.
+     *
+     * @return list<string>
+     */
+    private function activeProfiles(string $envPath): array
+    {
+        $fs = $this->inner->dind()->system()->filesystem();
+        $contents = $fs->fileExists($envPath) ? $fs->fileGetContents($envPath) : '';
+        foreach (EnvFile::parse(is_string($contents) ? $contents : '') as $row) {
+            if (($row['type'] ?? '') === 'variable' && ($row['key'] ?? '') === 'COMPOSE_PROFILES') {
+                return array_values(array_filter(array_map('trim', explode(',', (string) ($row['value'] ?? '')))));
+            }
+        }
+
+        return [];
     }
 
     /**

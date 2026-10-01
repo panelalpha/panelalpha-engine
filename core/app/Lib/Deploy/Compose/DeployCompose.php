@@ -266,9 +266,11 @@ class DeployCompose
      * cache instead of pulled through the inner daemon's nested NAT. Capped so a
      * dozen sidecars do not serialise a dozen host pulls.
      *
+     * @param list<string>|null $activeProfiles when given, a service behind
+     *        any other `profiles:` is skipped: `compose up` will not start it
      * @return list<string>
      */
-    public static function imageRefs(string $composeYaml, int $limit = self::IMAGE_REF_LIMIT): array
+    public static function imageRefs(string $composeYaml, int $limit = self::IMAGE_REF_LIMIT, ?array $activeProfiles = null): array
     {
         $services = self::servicesIn($composeYaml);
         // A name the same file builds is the image this build produces, not a
@@ -279,7 +281,7 @@ class DeployCompose
 
         $images = [];
         foreach ($services as $service) {
-            if (isset($service['build'])) {
+            if (isset($service['build']) || !self::isActive($service, $activeProfiles)) {
                 continue;
             }
             $image = ImageTransfer::normalizeImageRef($service['image'] ?? null);
@@ -293,6 +295,20 @@ class DeployCompose
         }
 
         return $images;
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     * @param list<string>|null $activeProfiles null: every service counts
+     */
+    private static function isActive(array $service, ?array $activeProfiles): bool
+    {
+        $profiles = array_filter((array) ($service['profiles'] ?? []), static fn ($p): bool => is_string($p) && trim($p) !== '');
+        if ($activeProfiles === null || $profiles === [] || in_array('*', $activeProfiles, true)) {
+            return true;
+        }
+
+        return array_intersect($profiles, $activeProfiles) !== [];
     }
 
     /**

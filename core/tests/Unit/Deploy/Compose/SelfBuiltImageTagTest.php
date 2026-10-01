@@ -172,6 +172,28 @@ class SelfBuiltImageTagTest extends TestCase
         $this->assertNotContains('app:latest', $refs);
     }
 
+    /** docker-vscode-server: every service is behind a profile nobody set. */
+    public function test_image_refs_skip_a_service_behind_an_inactive_profile(): void
+    {
+        $compose = <<<'YAML'
+        services:
+          lint:
+            image: oxsecurity/megalinter:v7.3.0
+            profiles: ["dev"]
+          readme:
+            image: pandoc/minimal:2.19
+            profiles: [dev, docs]
+          db:
+            image: postgres:16
+        YAML;
+
+        $this->assertSame(['postgres:16'], DeployCompose::imageRefs($compose, activeProfiles: []));
+        $this->assertSame(['pandoc/minimal:2.19', 'postgres:16'], DeployCompose::imageRefs($compose, activeProfiles: ['docs']));
+        $this->assertCount(3, DeployCompose::imageRefs($compose, activeProfiles: ['*']));
+        // Teardown asks without profiles: every image the file names.
+        $this->assertCount(3, DeployCompose::imageRefs($compose));
+    }
+
     /** The dpaste shape: the app service builds and another service names it. */
     public function test_built_image_name_from_yaml_reads_the_reference_shape(): void
     {

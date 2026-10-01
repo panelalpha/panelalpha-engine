@@ -189,7 +189,7 @@ class PrepareFromSource
         }
 
         $this->dind->networking()->detectAndCreateProxyRules($user);
-        $this->dind->applyProjectEnvVars();
+        $this->dind->applyProjectEnvVars(is_string($decision['compose_path'] ?? null) ? $decision['compose_path'] : null);
         $this->dind->strategy()->keepEngineFilesOutOfBuildContext($decision, $projectDir, $chown);
     }
 

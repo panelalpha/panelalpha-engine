@@ -379,6 +379,47 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertSame(48, strlen($env['VALKEY_PASSWORD']));
     }
 
+    /**
+     * TaskingAI: docker/docker-compose.yml with docker/.env.example beside it.
+     * Run from the root, compose only reads the root .env.
+     */
+    public function test_a_nested_compose_files_env_is_carried_into_the_root_env(): void
+    {
+        mkdir($this->projectDir . '/docker');
+        $compose = $this->projectDir . '/docker/docker-compose.yml';
+        file_put_contents($compose, <<<'YAML'
+        services:
+          api:
+            image: taskingai/api
+            environment:
+              OBJECT_STORAGE_TYPE: ${OBJECT_STORAGE_TYPE}
+              POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+        YAML);
+        file_put_contents($this->projectDir . '/docker/.env.example', "OBJECT_STORAGE_TYPE=local\nPOSTGRES_PASSWORD=\n");
+
+        $this->dind($this->dindModel(['deploy_strategy' => 'compose']))->applyProjectEnvVars($compose);
+
+        $this->assertFileExists($this->projectDir . '/docker/.env');
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('local', $env['OBJECT_STORAGE_TYPE']);
+        $this->assertArrayHasKey('POSTGRES_PASSWORD', $env);
+    }
+
+    public function test_the_root_env_wins_over_a_nested_compose_files_env(): void
+    {
+        mkdir($this->projectDir . '/docker');
+        $compose = $this->projectDir . '/docker/docker-compose.yml';
+        file_put_contents($compose, "services:\n  api:\n    image: acme/api\n");
+        file_put_contents($this->projectDir . '/docker/.env', "MODE=nested\nONLY_NESTED=1\n");
+
+        $model = $this->dindModel(['deploy_strategy' => 'compose', 'env_vars' => ['MODE' => 'mine']]);
+        $this->forcedEnvironment($model, tracked: false)->apply($compose);
+
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('mine', $env['MODE']);
+        $this->assertSame('1', $env['ONLY_NESTED']);
+    }
+
     public function test_a_tracked_env_is_not_given_generated_values(): void
     {
         file_put_contents($this->projectDir . '/docker-compose.yml', "services:\n  db:\n    image: postgres:16\n    env_file: .env\n");

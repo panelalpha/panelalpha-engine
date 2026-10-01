@@ -32,10 +32,13 @@ final class ComposeUsableProbe implements PlatformProbe
                 continue;
             }
             $path = $context->path($candidate);
+            // An app config's file was written for the engine on purpose; the
+            // workstation and sidecars-only guesses are for a repository's own.
+            $guess = $candidate !== EngineArtifacts::APP_CONFIG_COMPOSE;
 
             if (ComposeFileInspector::isGeneratedBootstrapCompose($path)
-                || ComposeFileInspector::isLocalDevCompose($path)
-                || ComposeFileInspector::isSidecarsOnlyCompose($path)
+                || ($guess && ComposeFileInspector::isLocalDevCompose($path))
+                || ($guess && ComposeFileInspector::isSidecarsOnlyCompose($path))
                 || ComposeFileInspector::isLegacyV1Compose($path)
             ) {
                 continue;

@@ -29,6 +29,9 @@ final class RuntimeSidecars
     /** Sail's `laravel.test`: other services routinely depend on it, it never deploys. */
     private const WORKSTATION_APP = 'laravel.test';
 
+    /** Name words of a service that runs the app for a test suite (Zerobyte's `zerobyte-e2e`). */
+    private const TEST_VARIANT_WORDS = ['e2e', 'test', 'tests', 'testing', 'ci', 'cypress', 'playwright'];
+
     /** @var array<string, array<string, mixed>> */
     private array $kept = [];
 
@@ -226,7 +229,7 @@ final class RuntimeSidecars
 
         if ($this->isOptIn($service) || $this->isWorkstationOnly($name, $service) || !$this->hasImage($service)
             || $this->isBuiltHere($name, $service)) {
-            if ($isApp) {
+            if ($isApp && !self::isTestVariant($name)) {
                 $this->appMounts = self::namedMountsOf($service, array_keys($this->declaredVolumes));
                 // The replacement is built from the same repository, so the
                 // dropped service's env still applies (dpaste's DATABASE_URL).
@@ -273,7 +276,8 @@ final class RuntimeSidecars
         $this->harvested += SidecarCredentials::envFromDroppedAppService($service);
         // The app we build takes this service's place, so it keeps its settings;
         // mailpit and vite do not.
-        if (!DevServices::isDevSidecar($name, $service) && ComposeFileInspector::isWorkstationAppService($service)) {
+        if (!DevServices::isDevSidecar($name, $service) && !self::isTestVariant($name)
+            && ComposeFileInspector::isWorkstationAppService($service)) {
             $this->appEnv += SidecarCredentials::envFromWorkstationAppService($service, $this->placeholderSeed);
         }
     }
@@ -391,6 +395,17 @@ final class RuntimeSidecars
         }
 
         return $candidate;
+    }
+
+    /**
+     * A build of the app set up for a test run: its settings (rate limiting
+     * off, a test CA, e2e origins) must not reach the deployed app.
+     */
+    private static function isTestVariant(string $name): bool
+    {
+        $words = preg_split('/[._-]+/', strtolower($name)) ?: [];
+
+        return array_intersect($words, self::TEST_VARIANT_WORDS) !== [];
     }
 
     /**
