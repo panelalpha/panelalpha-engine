@@ -2,14 +2,16 @@
 
 namespace App\Console\Commands\Files;
 
-use App\Console\Commands\Concerns\DispatchesApiRoute;
+use App\Http\Requests\Files\UploadRequest;
+use App\Lib\Project\ProjectFiles;
+use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class FilesUploadCommand extends Command
 {
-    use DispatchesApiRoute;
-
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['files:upload'];
 
@@ -18,7 +20,7 @@ class FilesUploadCommand extends Command
                             {file : Local file to upload}
                             {--path= : Destination directory inside the project}';
 
-    protected $description = 'Upload a local file into a project (POST /projects/{username}/files/upload)';
+    protected $description = 'Upload a local file into a project';
 
     public function handle(): int
     {
@@ -35,21 +37,19 @@ class FilesUploadCommand extends Command
             return 1;
         }
 
-        // The endpoint takes multipart/form-data. UploadedFile in test mode
-        // skips the is_uploaded_file() check, which only ever holds for a real
-        // POST through PHP-FPM.
+        // Test mode skips the is_uploaded_file() check, which only ever holds
+        // for a real POST through PHP-FPM.
         $upload = new UploadedFile($file, basename($file), null, null, true);
 
-        $response = $this->dispatchApiRoute(
-            'POST',
-            '/projects/' . rawurlencode($project) . '/files/upload',
-            ['path' => $path],
-            ['file' => $upload]
-        );
+        Validator::make(['path' => $path, 'file' => $upload], (new UploadRequest())->rules())->validate();
+        $user = User::findByUsernameOrFail($project);
+        $dir = $user->project()->resolvePath($path);
 
-        if ($response->getStatusCode() >= 400) {
-            $this->error($this->errorMessage($response));
-            return 1;
+        try {
+            ProjectFiles::upload($user, $dir, $upload);
+        } catch (\Exception $e) {
+            // The file operation's own message says what to fix.
+            throw ValidationException::withMessages(['file' => $e->getMessage()]);
         }
 
         $this->info(sprintf('Uploaded %s to %s', basename($file), rtrim($path, '/') . '/' . basename($file)));

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Resources\ModsecRulesetCollection;
+use App\Lib\Modsec\AuditLogFiles;
 use App\System;
 use App\System\Services\Modsec;
 use App\Models\Setting;
@@ -218,11 +219,8 @@ class ModsecController extends Controller
     )]
     public function listAuditLogFiles(): JsonResponse
     {
-        $system = new System();
-        $files = $system->modsec()->listAuditLogFiles();
-
         return new JsonResponse([
-            'data' => $files,
+            'data' => (new AuditLogFiles())->list(),
         ]);
     }
 
@@ -238,17 +236,11 @@ class ModsecController extends Controller
     )]
     public function downloadAuditLogFile(string $filename): BinaryFileResponse
     {
-        $system = new System();
-        $files = $system->modsec()->listAuditLogFiles();
-
-        foreach ($files as $file) {
-            if ($file['file'] == $filename) {
-                return new BinaryFileResponse($file['path']);
-            }
-        }
-        abort(new JsonResponse([
+        $path = (new AuditLogFiles())->path($filename) ?? abort(new JsonResponse([
             'message' => 'File not found',
         ], 404));
+
+        return new BinaryFileResponse($path);
     }
 
     #[OA\Get(
@@ -265,36 +257,12 @@ class ModsecController extends Controller
     )]
     public function tailAuditLogFile(string $filename): JsonResponse
     {
-        $system = new System();
-        $files = $system->modsec()->listAuditLogFiles();
-
-        $tailSize = 1024 * 50;
-
-        foreach ($files as $file) {
-            if ($file['file'] == $filename) {
-
-                $file = fopen($file['path'], 'r');
-                fseek($file, -$tailSize, SEEK_END);
-                $data = fread($file, $tailSize);
-                fclose($file);
-
-                $logs = [];
-                $lines = explode("\n", $data);
-                for ($i = count($lines)-1; $i >=0; $i--) {
-                    /** @var mixed */
-                    $log = @json_decode($lines[$i]);
-                    if ($log) {
-                        /** @var mixed */
-                        $logs[] = $log;
-                    }
-                }
-                return new JsonResponse([
-                    'data' => $logs,
-                ]);
-            }
-        }
-        abort(new JsonResponse([
+        $logs = (new AuditLogFiles())->tail($filename) ?? abort(new JsonResponse([
             'message' => 'File not found',
         ], 404));
+
+        return new JsonResponse([
+            'data' => $logs,
+        ]);
     }
 }

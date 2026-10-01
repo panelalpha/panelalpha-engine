@@ -2,12 +2,13 @@
 
 namespace App\Console\Commands\Files;
 
-use App\Console\Commands\Concerns\DispatchesApiRoute;
+use App\Console\Commands\Concerns\StreamsFileToOutput;
+use App\Lib\Modsec\AuditLogFiles;
 use Illuminate\Console\Command;
 
 class ModsecAuditLogCommand extends Command
 {
-    use DispatchesApiRoute;
+    use StreamsFileToOutput;
 
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['modsec:audit-log'];
@@ -17,27 +18,25 @@ class ModsecAuditLogCommand extends Command
                             {--tail : Read the tail of the file instead of downloading the whole of it}
                             {--out= : Local file to write (default: stdout)}';
 
-    protected $description = 'List or download a ModSecurity audit log file (GET /modsec/audit-log/files)';
+    protected $description = 'List or download a ModSecurity audit log file';
 
     public function handle(): int
     {
         $filename = $this->argument('filename');
         $out = $this->option('out');
+        $logs = new AuditLogFiles();
 
         if (!is_string($filename) || $filename === '') {
-            return $this->writeResponseBody($this->dispatchApiRoute('GET', '/modsec/audit-log/files'), null);
+            $this->output->write(json_encode(['data' => $logs->list()], JSON_THROW_ON_ERROR));
+            return 0;
         }
 
-        $uri = '/modsec/audit-log/files/' . rawurlencode($filename);
         if ($this->option('tail')) {
-            // The tail endpoint answers with JSON, so it never needed a command
-            // of its own - it is here so one command covers the whole file.
-            return $this->writeResponseBody($this->dispatchApiRoute('GET', $uri . '/tail'), null);
+            // The tail is JSON, so --out does not apply to it.
+            $this->output->write(json_encode(['data' => $logs->tailOrFail($filename)], JSON_THROW_ON_ERROR));
+            return 0;
         }
 
-        return $this->writeResponseBody(
-            $this->dispatchApiRoute('GET', $uri),
-            is_string($out) && $out !== '' ? $out : null
-        );
+        return $this->streamFile($logs->pathOrFail($filename), is_string($out) && $out !== '' ? $out : null);
     }
 }

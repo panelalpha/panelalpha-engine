@@ -2,20 +2,16 @@
 
 namespace App\Console\Commands\Users;
 
-use App\Console\Commands\Concerns\DispatchesApiRoute;
 use App\Http\Requests\SshCommandRunRequest;
+use App\Lib\Project\ProjectShell;
+use App\Models\User;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Validator;
 use Symfony\Component\Console\Output\ConsoleOutputInterface;
 
-/**
- * The command runner behind POST /projects/{username}/ssh/command. It goes
- * through the route rather than the model so validation, the dind check and
- * the CLI all agree on what a run means.
- */
+/** One shell command in a project's container, run through the shared ProjectShell. */
 class ProjectSshCommand extends Command
 {
-    use DispatchesApiRoute;
-
     protected $signature = 'project:ssh
                             {project : Project username}
                             {cmd : Shell command line to run, quoted}
@@ -68,40 +64,20 @@ class ProjectSshCommand extends Command
             $params['cwd'] = $cwd;
         }
 
-        $response = $this->dispatchApiRoute(
-            'POST',
-            '/projects/' . rawurlencode($project) . '/ssh/command',
-            $params
-        );
+        Validator::make($params, (new SshCommandRunRequest())->rules())->validate();
+        $user = User::findByUsernameOrFail($project);
+        $result = ProjectShell::run($user, $command, $params['cwd'] ?? null, $timeout);
 
-        if ($response->getStatusCode() >= 400) {
-            $this->error($this->errorMessage($response));
-
-            return 1;
-        }
-
-        $body = (string)$response->getContent();
         if ($this->option('json')) {
-            $this->output->writeln($body);
+            $this->output->writeln(json_encode($result, JSON_THROW_ON_ERROR));
 
             return 0;
         }
 
-        /** @var mixed $result */
-        $result = json_decode($body, true);
-        if (!is_array($result)) {
-            $this->error('Unexpected response: ' . substr($body, 0, 200));
-
-            return 1;
-        }
-
-        $this->writeStreams(
-            is_string($result['stdout'] ?? null) ? $result['stdout'] : '',
-            is_string($result['stderr'] ?? null) ? $result['stderr'] : ''
-        );
+        $this->writeStreams($result['stdout'], $result['stderr']);
 
         // Hand back the command's own exit code, so `pae-artisan project:ssh …`
         // can be tested in a shell the same way the command would be.
-        return is_int($result['exit_code'] ?? null) ? $result['exit_code'] : 1;
+        return $result['exit_code'];
     }
 }

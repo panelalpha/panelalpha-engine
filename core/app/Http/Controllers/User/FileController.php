@@ -17,12 +17,11 @@ use App\Http\Requests\Files\StatRequest;
 use App\Http\Requests\Files\UploadRequest;
 use App\Http\Requests\Files\ZipRequest;
 use App\System as EngineSystem;
-use App\Lib\Helpers\FileStreamWrapper;
+use App\Lib\Project\ProjectFiles;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\UploadedFile;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
@@ -114,7 +113,7 @@ class FileController extends Controller
         try {
             $fileMan->remove($path, !empty($params['recursive']));
             if (basename($path) === '.htaccess') {
-                $this->handleHtaccess($path);
+                ProjectFiles::htaccessChanged($path);
             }
         } catch (\Exception $e) {
             return new JsonResponse([
@@ -447,10 +446,10 @@ class FileController extends Controller
         try {
             $fileMan->mv($sourcePath, $destPath);
             if (basename($sourcePath) === '.htaccess') {
-                $this->handleHtaccess($sourcePath);
+                ProjectFiles::htaccessChanged($sourcePath);
             }
             if (basename($destPath) === '.htaccess') {
-                $this->handleHtaccess($destPath);
+                ProjectFiles::htaccessChanged($destPath);
             }
         } catch (\Exception $e) {
             return new JsonResponse([
@@ -498,7 +497,7 @@ class FileController extends Controller
         try {
             $fileMan->cp($sourcePath, $destPath);
             if (basename($destPath) === '.htaccess') {
-                $this->handleHtaccess($destPath);
+                ProjectFiles::htaccessChanged($destPath);
             }
         } catch (\Exception $e) {
             return new JsonResponse([
@@ -598,12 +597,8 @@ class FileController extends Controller
         $path = $user->project()->resolvePath($params['path']);
         /** @var \Illuminate\Http\UploadedFile */
         $file = $request->file('file');
-        $fileMan = $user->project()->fileManager();
         try {
-            $fileMan->moveUploadedFile($path, $file);
-            if ($file->getClientOriginalName() === '.htaccess') {
-                $this->handleHtaccess($path);
-            }
+            ProjectFiles::upload($user, $path, $file);
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -644,20 +639,15 @@ class FileController extends Controller
         $params = $request->validated();
         $path = $user->project()->resolvePath($params['path']);
 
-        $system = new EngineSystem();
-        if (!$system->filesystem()->fileExists($path)) {
+        $source = ProjectFiles::readablePath($user, $path);
+        if ($source === null) {
             return new JsonResponse([
                 'message' => 'Invalid path',
             ], 404);
         }
 
-        FileStreamWrapper::register();
-        // The path is confined as a string only; the read runs as root and
-        // follows symlinks, so the helper re-checks the resolved file.
-        FileStreamWrapper::confineTo($user->project()->homeDirPath());
-
         /** @var BinaryFileResponse */
-        return response()->download('sudophp://' . $path);
+        return response()->download($source);
     }
 
     #[OA\Put(
@@ -694,7 +684,7 @@ class FileController extends Controller
         try {
             $fileMan->putContents($path, $params['contents']);
             if (basename($path) === '.htaccess') {
-                $this->handleHtaccess($path);
+                ProjectFiles::htaccessChanged($path);
             }
         } catch (\Exception $e) {
             return new JsonResponse([
@@ -705,18 +695,6 @@ class FileController extends Controller
         return new JsonResponse([
             'success' => true,
         ]);
-    }
-
-    private function handleHtaccess(string $path): void
-    {
-        try {
-            $system = new EngineSystem();
-            if ($system->webserver()->getCurrentWebserver() === 'openlitespeed') {
-                $system->webserver()->scheduleWebserverReloadInBackground();
-            }
-        } catch (\Exception $e) {
-            Log::warning('Failed to schedule OpenLiteSpeed reload after .htaccess change', ['path' => $path, 'error' => $e->getMessage()]);
-        }
     }
 
 }

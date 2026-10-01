@@ -2,12 +2,16 @@
 
 namespace App\Console\Commands\Files;
 
-use App\Console\Commands\Concerns\DispatchesApiRoute;
+use App\Console\Commands\Concerns\StreamsFileToOutput;
+use App\Http\Requests\Files\DownloadRequest;
+use App\Lib\Project\ProjectFiles;
+use App\Models\User;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Validator;
 
 class FilesDownloadCommand extends Command
 {
-    use DispatchesApiRoute;
+    use StreamsFileToOutput;
 
     /** The old spelling still answers, so nothing scripted against it breaks. */
     protected $aliases = ['files:download'];
@@ -17,7 +21,7 @@ class FilesDownloadCommand extends Command
                             {--path= : File path inside the project}
                             {--out= : Local file to write (default: stdout)}';
 
-    protected $description = 'Download a file from a project (GET /projects/{username}/files/download)';
+    protected $description = 'Download a file from a project';
 
     public function handle(): int
     {
@@ -30,12 +34,10 @@ class FilesDownloadCommand extends Command
             return 1;
         }
 
-        $response = $this->dispatchApiRoute(
-            'GET',
-            '/projects/' . rawurlencode($project) . '/files/download',
-            ['path' => $path]
-        );
+        Validator::make(['path' => $path], (new DownloadRequest())->rules())->validate();
+        $user = User::findByUsernameOrFail($project);
+        $source = ProjectFiles::readablePathOrFail($user, $path);
 
-        return $this->writeResponseBody($response, is_string($out) && $out !== '' ? $out : null);
+        return $this->streamFile($source, is_string($out) && $out !== '' ? $out : null);
     }
 }

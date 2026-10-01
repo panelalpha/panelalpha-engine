@@ -2,19 +2,20 @@
 
 namespace App\Console\Commands\Files;
 
-use App\Console\Commands\Concerns\DispatchesApiRoute;
+use App\Http\Requests\Files\ChmodRequest;
+use App\Models\User;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class FileChmodCommand extends Command
 {
-    use DispatchesApiRoute;
-
     protected $signature = 'project:file:chmod
                             {project : Project username}
                             {--path= : File or directory inside the project}
                             {--mode= : Three or four octal digits, such as 755}';
 
-    protected $description = 'Set the mode of a file or directory (PUT /projects/{username}/files/chmod)';
+    protected $description = 'Set the mode of a file or directory';
 
     public function handle(): int
     {
@@ -27,19 +28,15 @@ class FileChmodCommand extends Command
             return 1;
         }
 
-        $response = $this->dispatchApiRoute(
-            'PUT',
-            '/projects/' . rawurlencode($project) . '/files/chmod',
-            [
-                'path' => $path,
-                'mode' => $mode,
-            ]
-        );
+        Validator::make(['path' => $path, 'mode' => $mode], (new ChmodRequest())->rules())->validate();
+        $user = User::findByUsernameOrFail($project);
+        $resolved = $user->project()->resolvePath($path);
 
-        if ($response->getStatusCode() >= 400) {
-            $this->error($this->errorMessage($response));
-
-            return 1;
+        try {
+            $user->project()->fileManager()->chmod($resolved, $mode);
+        } catch (\Exception $e) {
+            // The file operation's own message says what to fix.
+            throw ValidationException::withMessages(['path' => $e->getMessage()]);
         }
 
         $this->info('Set mode ' . $mode . ' on ' . $path);
