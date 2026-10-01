@@ -99,9 +99,10 @@ class FireflySourceRecipeTest extends TestCase
     {
         $install = $this->ids(PlatformStage::INSTALL);
 
-        foreach (['key-generate', 'migrate', 'storage-link'] as $kept) {
+        foreach (['key-generate', 'migrate'] as $kept) {
             $this->assertContains($kept, $install, "the laravel recipe's {$kept} was lost");
         }
+        $this->assertContains('storage-link', $this->ids(PlatformStage::START), "the laravel recipe's storage-link was lost");
     }
 
     /**

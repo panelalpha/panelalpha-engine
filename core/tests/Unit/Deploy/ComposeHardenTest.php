@@ -187,10 +187,47 @@ class ComposeHardenTest extends TestCase
         $env = ComposeHarden::urlEnvironment('https://metube.example.com');
 
         $this->assertSame('https://metube.example.com', $env['BASE_URL']);
-        $this->assertSame('metube.example.com', $env['SERVER_NAME']);
         foreach (['HTTPS', 'SSL', 'FORCE_SSL'] as $key) {
             $this->assertArrayNotHasKey($key, $env, $key);
         }
+    }
+
+    /**
+     * phpLDAPadmin's FrankenPHP image sets `ENV SERVER_NAME=:8080`; the host
+     * name in its place made Caddy redirect every request to https on itself.
+     * The Apache spelling stays: `ServerName ${SERVERNAME}` needs it.
+     */
+    public function test_url_environment_for_an_image_leaves_its_caddy_site_address_alone(): void
+    {
+        $env = ComposeHarden::urlEnvironment('https://plab.example.com');
+
+        $this->assertArrayNotHasKey('SERVER_NAME', $env);
+        $this->assertSame('plab.example.com', $env['SERVERNAME']);
+        $this->assertSame('https://plab.example.com', $env['PUBLIC_URL']);
+    }
+
+    /**
+     * DVinyl's `.env.example` ships `BASE_URL=` ("sub-path, leave empty for
+     * root") and mounts every route under it; the full URL crash-looped it.
+     */
+    public function test_url_environment_leaves_out_a_base_url_the_project_uses_as_a_path(): void
+    {
+        $dvinyl = "# Base URL for serving on a sub-path, leave empty to serve from root (default)\nBASE_URL=\nPORT=3000\n";
+
+        $env = ComposeHarden::urlEnvironment('https://dvinyl.example.com', [null, $dvinyl]);
+        $this->assertArrayNotHasKey('BASE_URL', $env);
+        $this->assertSame('https://dvinyl.example.com', $env['APP_URL']);
+
+        $this->assertArrayNotHasKey('BASE_URL', ComposeHarden::urlEnvironment('https://a.example.com', ["BASE_URL=/tools\n"]));
+    }
+
+    public function test_url_environment_keeps_a_base_url_the_project_uses_as_a_whole_url(): void
+    {
+        $url = 'https://yarn.example.com';
+
+        $this->assertSame($url, ComposeHarden::urlEnvironment($url, ["BASE_URL=http://localhost:8000\n", null])['BASE_URL']);
+        // No env file at all (tube, yarnd): the full URL, as before.
+        $this->assertSame($url, ComposeHarden::urlEnvironment($url, [null, null])['BASE_URL']);
     }
 
     public function test_extract_runtime_sidecars_keeps_datastores_drops_dev_app(): void

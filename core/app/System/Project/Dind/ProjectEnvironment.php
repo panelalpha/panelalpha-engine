@@ -664,7 +664,7 @@ class ProjectEnvironment
         $key = ($row['type'] ?? '') === 'variable' ? (string) ($row['key'] ?? '') : '';
 
         return $key !== ''
-            && in_array($key, PublicUrlEnvironment::urlKeys(), true)
+            && in_array($key, PublicUrlEnvironment::blankFillKeys(), true)
             && !isset($overrides[$key])
             && trim(trim((string) ($row['value'] ?? '')), '"\'') === '';
     }

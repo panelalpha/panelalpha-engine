@@ -80,7 +80,10 @@ class DockerfileStrategy
             [
                 'build_args' => $this->buildArgs($decision),
                 'env' => array_merge(
-                    ComposeHarden::urlEnvironment($this->dind->publicAppUrl()),
+                    ComposeHarden::urlEnvironment($this->dind->publicAppUrl(), [
+                        $this->dind->projectTree()->readIn($projectDir, '.env'),
+                        $this->dind->projectTree()->readIn($projectDir, '.env.example'),
+                    ]),
                     $database['env'] ?? [],
                     $this->environment($projectDir),
                     $strategy->entrypoint()->deployPhaseEnvironment()

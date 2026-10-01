@@ -129,9 +129,10 @@ class ComposePlaceholders
      * Keys that hold the whole public URL. Set but empty, the app gets `''`,
      * which is worse than unset (SvelteKit: `Invalid ORIGIN: ''`), so an empty
      * one is filled. The short list on purpose: an empty `WEBHOOK_URL` is a
-     * third party's address, not ours.
+     * third party's address, not ours. BASE_URL is left out: blank there
+     * usually means "serve from /" ({@see PublicUrlEnvironment::blankFillKeys()}).
      */
-    private const BLANK_URL_KEYS = ['URL', 'PUBLIC_URL', 'BASE_URL', 'APP_URL', 'ASSET_URL', 'SITE_URL', 'ORIGIN'];
+    private const BLANK_URL_KEYS = ['URL', 'PUBLIC_URL', 'APP_URL', 'ASSET_URL', 'SITE_URL', 'ORIGIN'];
 
     /**
      * @param array<string, mixed> $compose

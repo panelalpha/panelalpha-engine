@@ -19,13 +19,21 @@ class ComposeHarden
 {
     /**
      * For the Dockerfile and Ruby strategies, which run an image the repository
-     * wrote: the URL aliases, without the generic HTTPS/SSL flags.
+     * wrote: the URL aliases, without the generic HTTPS/SSL flags, without
+     * SERVER_NAME, which is a Caddy/FrankenPHP site address: a hostname there
+     * turns on automatic HTTPS and every proxied request 308s to itself, and
+     * without a path-prefix key the project's own env file sets blank or to a path.
      *
+     * @param list<?string> $envFiles the project's `.env` / `.env.example`
      * @return array<string, string>
      */
-    public static function urlEnvironment(?string $publicUrl): array
+    public static function urlEnvironment(?string $publicUrl, array $envFiles = []): array
     {
-        return PublicUrlEnvironment::for($publicUrl, false);
+        return array_diff_key(
+            PublicUrlEnvironment::for($publicUrl, false),
+            ['SERVER_NAME' => true],
+            array_flip(PublicUrlEnvironment::pathPrefixKeysIn($envFiles))
+        );
     }
 
     /**

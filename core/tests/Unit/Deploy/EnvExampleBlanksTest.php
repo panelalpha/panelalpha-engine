@@ -212,6 +212,18 @@ class EnvExampleBlanksTest extends TestCase
         $this->assertSame('https://kept.example', $vars['PUBLIC_URL']);
     }
 
+    /** A blank BASE_URL is usually a sub-path prefix meaning "root" (DVinyl), not a missing URL. */
+    public function test_a_blank_base_url_is_left_blank(): void
+    {
+        $example = "BASE_URL=\nAPP_URL=\n";
+
+        $this->assertSame(['APP_URL'], ProjectEnvironment::blankPublicUrlKeys($example));
+        [$contents, $filled] = ProjectEnvironment::withPublicUrlBlanksFilled($example, 'https://dvinyl.example.net');
+
+        $this->assertSame(['APP_URL'], $filled);
+        $this->assertStringContainsString("BASE_URL=\n", $contents);
+    }
+
     public function test_an_account_override_or_no_address_leaves_the_blank_alone(): void
     {
         $this->assertSame([], ProjectEnvironment::blankPublicUrlKeys("ORIGIN=\n", ['ORIGIN' => 'https://mine.example']));

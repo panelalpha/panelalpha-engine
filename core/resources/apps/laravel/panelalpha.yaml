@@ -44,8 +44,9 @@ commands:
     description: 'Only on first deploy — regenerating APP_KEY later would invalidate every existing session and encrypted column. Skipped when the container already has a key: the engine writes one into .env, the env_file, and key:generate would only rewrite that file under the running app, so the next restart would run on a different key (#178).'
     run: 'case "${APP_KEY:-}" in base64:?*) echo "APP_KEY is already set; not generating one" ;; *) php artisan key:generate --force --no-interaction ;; esac'
   - id: storage-link
-    stage: install
-    run: 'php artisan storage:link'
+    stage: start
+    description: 'Every boot, not only on install: the public/storage symlink lives in the checkout, which each deploy re-clones, so after a rebuild every file on the public disk answered 404.'
+    run: 'test -e public/storage || test -L public/storage || php artisan storage:link'
     optional: true
   - id: migrate
     stage:

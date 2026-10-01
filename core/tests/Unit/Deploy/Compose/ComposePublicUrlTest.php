@@ -102,12 +102,14 @@ class ComposePublicUrlTest extends TestCase
     public function test_an_empty_public_url_key_is_filled(): void
     {
         $result = $this->fill([
-            'app' => ['image' => 'x', 'environment' => ['ORIGIN=', 'APP_URL=', 'WEBHOOK_URL=', 'DATABASE_URL=']],
+            'app' => ['image' => 'x', 'environment' => ['ORIGIN=', 'APP_URL=', 'WEBHOOK_URL=', 'DATABASE_URL=', 'BASE_URL=']],
         ]);
 
         $environment = $result['compose']['services']['app']['environment'];
         $this->assertContains('ORIGIN=' . self::URL, $environment);
         $this->assertContains('APP_URL=' . self::URL, $environment);
+        // A blank BASE_URL is a sub-path prefix meaning "root" in many apps.
+        $this->assertContains('BASE_URL=', $environment);
         // Someone else's address, or a sidecar's: not ours to invent.
         $this->assertContains('WEBHOOK_URL=', $environment);
         $this->assertContains('DATABASE_URL=', $environment);
