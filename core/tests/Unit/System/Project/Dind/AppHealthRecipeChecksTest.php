@@ -114,6 +114,7 @@ class AppHealthRecipeChecksTest extends TestCase
         $script = AppHealth::pathProbeScript('http', 8000, ['/api/health'], 3, ' Shop.Example.COM ');
 
         $this->assertStringContainsString("-H 'Host: shop.example.com' ", $script);
+        $this->assertStringContainsString("-H 'X-Forwarded-Proto: https' ", $script);
         $this->assertStringContainsString("'http://127.0.0.1:8000'", $script);
     }
 

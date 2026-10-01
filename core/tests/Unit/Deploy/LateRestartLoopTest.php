@@ -29,7 +29,26 @@ class LateRestartLoopTest extends TestCase
         $this->assertSame(AppHealth::CHECK_RESTART_LOOPING, $check['id']);
         $this->assertSame(CheckResult::STATUS_FAIL, $check['status']);
         $this->assertSame(HealthCheck::SEVERITY_ERROR, $check['severity'], 'error severity is what makes the deploy partial');
-        $this->assertStringContainsString('app (running, last exit 0, restarted 1 time)', $check['detail']);
+        // Running again: Docker has reset ExitCode to 0, which is not the crash's.
+        $this->assertStringContainsString('app (running, last exit unknown, restarted 1 time)', $check['detail']);
+    }
+
+    public function test_the_exit_code_is_quoted_while_the_container_is_down(): void
+    {
+        $after = '{"name":"/project-app-1","service":"app","state":"restarting","exit":1,"restarts":4}';
+
+        $check = AppHealth::restartLoopBetween(self::JUST_STARTED, $after);
+
+        $this->assertStringContainsString('app (restarting, last exit 1, restarted 4 times)', $check['detail']);
+    }
+
+    public function test_a_running_container_never_reads_as_a_clean_exit(): void
+    {
+        $after = '{"name":"/project-app-1","service":"app","state":"running","exit":0,"restarts":3}';
+
+        $check = AppHealth::restartLoopBetween(self::JUST_STARTED, $after);
+
+        $this->assertStringNotContainsString('last exit 0', $check['detail']);
     }
 
     public function test_the_state_the_host_actually_reported_is_a_loop(): void

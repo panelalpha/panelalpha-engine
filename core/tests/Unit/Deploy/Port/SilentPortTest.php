@@ -67,6 +67,22 @@ class SilentPortTest extends TestCase
         $this->assertStringContainsString('may expect HTTPS', SilentPort::diagnose('ofbiz', 8443, 8443, $sockets));
     }
 
+    public function test_docker_dns_and_loopback_internals_are_not_named_as_the_apps_port(): void
+    {
+        // Floppy while migrating: gunicorn on 127.0.0.1:8001 and Docker's DNS
+        // on 127.0.0.11, nginx not yet on 8000.
+        $sockets = [['addr' => '0100007F', 'port' => 8001], ['addr' => '0B00007F', 'port' => 42273]];
+
+        $this->assertStringContainsString('listens on no TCP port yet', SilentPort::diagnose('floppy', 8000, 8000, $sockets));
+    }
+
+    public function test_a_loopback_listener_on_the_target_is_still_named(): void
+    {
+        $sockets = [['addr' => '0000000000000000FFFF00000100007F', 'port' => 8081], ['addr' => '0B00007F', 'port' => 42273]];
+
+        $this->assertStringContainsString('8081 on 127.0.0.1 only', SilentPort::diagnose('app', 8081, 8081, $sockets));
+    }
+
     public function test_nothing_listening_yet_is_said_plainly(): void
     {
         $this->assertStringContainsString('listens on no TCP port yet', SilentPort::diagnose('app', 8080, 8080, []));

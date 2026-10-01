@@ -20,8 +20,11 @@ final class ListeningSockets
     /** `sl local_address rem_address st …` — state 0A is LISTEN. */
     private const LISTEN_LINE = '/^\s*\d+:\s+([0-9A-Fa-f]+):([0-9A-Fa-f]{4})\s+\S+\s+0A\s/';
 
-    /** IPv4 127.0.0.1 is little-endian in /proc; IPv6 ::1 is the v6 form. */
-    private const LOOPBACK = ['0100007F', '00000000000000000000000001000000'];
+    /** IPv6 ::1 as /proc prints it. */
+    private const LOOPBACK_V6 = '00000000000000000000000001000000';
+
+    /** ::ffff:0:0/96 as /proc prints it; the last eight digits are the IPv4 address. */
+    private const V4_MAPPED_PREFIX = '0000000000000000FFFF0000';
 
     /**
      * Ports a recipe would plausibly serve on, best first. Used only to break
@@ -62,7 +65,21 @@ final class ListeningSockets
      */
     public static function isLoopback(string $hexAddr): bool
     {
-        return in_array(strtoupper($hexAddr), self::LOOPBACK, true);
+        $hex = strtoupper($hexAddr);
+        if (strlen($hex) === 32) {
+            if ($hex === self::LOOPBACK_V6) {
+                return true;
+            }
+            // A JVM binds 127.0.0.1 as ::ffff:127.0.0.1 in tcp6.
+            if (!str_starts_with($hex, self::V4_MAPPED_PREFIX)) {
+                return false;
+            }
+            $hex = substr($hex, 24);
+        }
+
+        // All of 127.0.0.0/8, not just .1: Docker's embedded DNS listens on
+        // 127.0.0.11. IPv4 is little-endian in /proc, so the first octet is last.
+        return strlen($hex) === 8 && str_ends_with($hex, '7F');
     }
 
     /**

@@ -61,6 +61,18 @@ class AppHealthTest extends TestCase
         $this->assertStringNotContainsString('Host:', AppHealth::probeScript([8000], 4, 2, 1, '  '));
     }
 
+    public function test_probe_script_asks_as_a_visitor_on_https_does(): void
+    {
+        // Squidex: antiforgery refuses a request that is not secure, and the
+        // vhost marks a visitor's request as https.
+        $script = AppHealth::probeScript([5000], 4, 2, 1, 'squidex.example.com');
+
+        $this->assertStringContainsString("-H 'X-Forwarded-Proto: https' ", $script);
+        $this->assertStringContainsString("-H 'X-Forwarded-Host: squidex.example.com' ", $script);
+        $this->assertStringContainsString("-H 'X-Forwarded-Port: 443' ", $script);
+        $this->assertStringNotContainsString('X-Forwarded', AppHealth::probeScript([5000], 4, 2, 1));
+    }
+
     public function test_probe_script_falls_back_to_https_only_when_http_answers_nothing(): void
     {
         $script = AppHealth::probeScript([3000]);
@@ -481,7 +493,7 @@ class AppHealthTest extends TestCase
     public function test_a_fingerprint_line_is_parsed_into_code_hash_and_marker(): void
     {
         $this->assertSame(
-            ['code' => 404, 'hash' => 'deadbeef', 'default404' => true, 'hash2' => ''],
+            ['code' => 404, 'hash' => 'deadbeef', 'default404' => true, 'hash2' => '', 'location' => ''],
             AppHealth::parseFingerprint("404\tdeadbeef\tyes")
         );
     }
@@ -503,6 +515,65 @@ class AppHealthTest extends TestCase
         $this->assertStringContainsString('redirects to its own address', $verdict['detail']);
     }
 
+    /**
+     * OpenCloud: the vhost forwards plain http as `X-Forwarded-Proto: http`
+     * and the app upgrades it with a 308, while the local probe gets 200.
+     */
+    public function test_an_edge_redirect_to_https_on_the_same_address_is_reachable(): void
+    {
+        $verdict = AppHealth::compareFingerprints(
+            'cloud.panelalpha.online',
+            self::fingerprint(308, 'a-redirect') + ['location' => 'https://Cloud.panelalpha.online/'],
+            self::fingerprint(200, 'the-real-page')
+        );
+
+        $this->assertSame(AppHealth::REACH_OK, $verdict['verdict']);
+        $this->assertSame(308, $verdict['http_code']);
+        $this->assertStringContainsString('https://cloud.panelalpha.online/', $verdict['detail']);
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function redirectsElsewhere(): array
+    {
+        return [
+            'another host' => ['https://someone-else.example.com/'],
+            'plain http' => ['http://cloud.panelalpha.online/'],
+            'another path' => ['https://cloud.panelalpha.online/login'],
+            'another port' => ['https://cloud.panelalpha.online:8443/'],
+            'no location' => [''],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('redirectsElsewhere')]
+    public function test_an_edge_redirect_anywhere_else_still_differs(string $location): void
+    {
+        $verdict = AppHealth::compareFingerprints(
+            'cloud.panelalpha.online',
+            self::fingerprint(308, 'a-redirect') + ['location' => $location],
+            self::fingerprint(200, 'the-real-page')
+        );
+
+        $this->assertSame(AppHealth::REACH_DIFFERS, $verdict['verdict']);
+    }
+
+    public function test_the_edge_probe_reports_where_a_redirect_points(): void
+    {
+        $dir = sys_get_temp_dir() . '/pa-edge-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        // A fake curl answering the way OpenCloud's vhost does over plain http.
+        file_put_contents($dir . '/curl', "#!/bin/sh\nprintf '308 https://cloud.panelalpha.online/'\n");
+        chmod($dir . '/curl', 0o755);
+        file_put_contents($dir . '/edge.sh', AppHealth::edgeProbeScript('cloud.panelalpha.online', '203.0.113.10'));
+        $raw = (string) shell_exec('PATH=' . escapeshellarg($dir . ':' . getenv('PATH')) . ' bash ' . escapeshellarg($dir . '/edge.sh'));
+        array_map('unlink', glob($dir . '/*') ?: []);
+        rmdir($dir);
+
+        $edge = AppHealth::parseFingerprint($raw);
+        $this->assertSame(308, $edge['code']);
+        $this->assertSame('', $edge['hash2']);
+        $this->assertSame('https://cloud.panelalpha.online/', $edge['location']);
+    }
+
     public function test_two_answering_applications_that_differ_are_still_flagged(): void
     {
         // The exemption is for a local redirect, not for any difference: both
@@ -522,7 +593,7 @@ class AppHealthTest extends TestCase
     public function test_a_fingerprint_line_carries_the_second_hash_when_there_is_one(): void
     {
         $this->assertSame(
-            ['code' => 200, 'hash' => 'aaa', 'default404' => false, 'hash2' => 'bbb'],
+            ['code' => 200, 'hash' => 'aaa', 'default404' => false, 'hash2' => 'bbb', 'location' => ''],
             AppHealth::parseFingerprint("200\taaa\tno\tbbb")
         );
     }
@@ -664,6 +735,28 @@ class AppHealthTest extends TestCase
 
         $this->assertSame(2, substr_count($script, "-H 'Host: shop.example.com'"));
         $this->assertStringContainsString("'http://127.0.0.1:8080/'", $script);
+    }
+
+    /** Immich Kiosk stamps the current second into its page. */
+    public function test_the_app_probe_sees_a_per_second_timestamp_as_varying(): void
+    {
+        $dir = sys_get_temp_dir() . '/pa-app-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        file_put_contents($dir . '/curl', <<<'SH'
+            #!/bin/sh
+            while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out=$2; shift; done
+            date +%s >"$out"
+            printf 200
+            SH);
+        chmod($dir . '/curl', 0o755);
+        file_put_contents($dir . '/app.sh', AppHealth::appProbeScript('http', 3000, 2));
+        $raw = (string) shell_exec('PATH=' . escapeshellarg($dir . ':' . getenv('PATH')) . ' bash ' . escapeshellarg($dir . '/app.sh'));
+        array_map('unlink', glob($dir . '/*') ?: []);
+        rmdir($dir);
+
+        $app = AppHealth::parseFingerprint($raw);
+        $this->assertSame(200, $app['code']);
+        $this->assertNotSame($app['hash'], $app['hash2'], 'the two fetches must not share a second');
     }
 
     public function test_the_app_probe_sends_no_host_without_a_domain(): void

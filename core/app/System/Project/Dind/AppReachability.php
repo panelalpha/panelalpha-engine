@@ -83,7 +83,7 @@ final class AppReachability
         $app = self::parseFingerprint($this->dind->shell()->execQuiet(
             ['bash', '-c', self::appProbeScript((string) $served['scheme'], (int) $served['port'], $timeout, $domain)],
             [],
-            $timeout + 10
+            2 * $timeout + 10
         ));
 
         return self::awaitRoute(
@@ -172,6 +172,19 @@ final class AppReachability
             ];
         }
 
+        // The mirror image: the vhost forwards a plain-http request as
+        // `X-Forwarded-Proto: http`, and an app that knows its https URL
+        // (OpenCloud's 308) upgrades it. Visitors arrive over https and are
+        // served, so an upgrade to this same address is the healthy answer.
+        if ($edge['code'] >= 300 && $edge['code'] < 400 && self::upgradesToHttps($domain, (string) ($edge['location'] ?? ''))) {
+            return [
+                'verdict' => self::OK,
+                'domain' => $domain,
+                'http_code' => $edge['code'],
+                'detail' => $edge['code'] . ' (a redirect to https://' . $domain . '/, where visitors arrive)',
+            ];
+        }
+
         // The application does not reproduce its own bytes, so a difference
         // between it and the edge says nothing. Comparing what is left --
         // the status code -- still catches the domain that answers with
@@ -195,6 +208,20 @@ final class AppReachability
             'http_code' => $edge['code'],
             'detail' => "answered {$edge['code']} with a different response than the application itself",
         ];
+    }
+
+    /** Whether $location is https://$domain/ -- the edge's own `/`, only upgraded. */
+    private static function upgradesToHttps(string $domain, string $location): bool
+    {
+        $url = parse_url($location);
+        if (!is_array($url) || strtolower($url['scheme'] ?? '') !== 'https') {
+            return false;
+        }
+
+        return strtolower($url['host'] ?? '') === strtolower($domain)
+            && in_array($url['port'] ?? 443, [443], true)
+            && in_array($url['path'] ?? '/', ['', '/'], true)
+            && !isset($url['query']);
     }
 
     /** @return array{verdict: string, domain: ?string, http_code: ?int, detail: string} */
@@ -236,10 +263,13 @@ set -u
 host={$domain}
 addr={$ip}
 f=\$(mktemp)
-code=\$(curl -sS -m {$timeout} -o "\$f" -w '%{http_code}' -H "Host: \$host" "http://\$addr/" 2>/dev/null) || code=000
+out=\$(curl -sS -m {$timeout} -o "\$f" -w '%{http_code} %{redirect_url}' -H "Host: \$host" "http://\$addr/" 2>/dev/null) || out=000
+code=\${out%% *}
+location=\$(printf '%s' "\${out#* }" | tr -d '\t\r\n')
+[ "\$location" = "\$out" ] && location=
 marker=no
 if [ "\$code" = "404" ] && grep -q 'Page Not Found' "\$f" && grep -q 'error-page' "\$f"; then marker=yes; fi
-printf '%s\t%s\t%s' "\${code:-000}" "\$(head -c 2048 "\$f" | sha256sum | cut -d' ' -f1)" "\$marker"
+printf '%s\t%s\t%s\t\t%s' "\${code:-000}" "\$(head -c 2048 "\$f" | sha256sum | cut -d' ' -f1)" "\$marker" "\$location"
 rm -f "\$f"
 exit 0
 SH;
@@ -269,6 +299,9 @@ set -u
 f=\$(mktemp)
 g=\$(mktemp)
 code=\$(curl -sS -k -m {$timeout} {$host}-o "\$f" -w '%{http_code}' '{$scheme}://127.0.0.1:{$port}/' 2>/dev/null) || code=000
+# A second apart: a page stamping the current second (Immich Kiosk) must not
+# read as reproducible because both fetches landed in the same second.
+sleep 1
 curl -sS -k -m {$timeout} {$host}-o "\$g" '{$scheme}://127.0.0.1:{$port}/' >/dev/null 2>&1 || :
 printf '%s\t%s\t%s\t%s' "\${code:-000}" "\$(head -c 2048 "\$f" | sha256sum | cut -d' ' -f1)" "no" "\$(head -c 2048 "\$g" | sha256sum | cut -d' ' -f1)"
 rm -f "\$f" "\$g"
@@ -277,7 +310,7 @@ SH;
     }
 
     /**
-     * @return array{code: int, hash: string, default404: bool, hash2: string}
+     * @return array{code: int, hash: string, default404: bool, hash2: string, location: string}
      */
     public static function parseFingerprint(string $raw): array
     {
@@ -290,6 +323,8 @@ SH;
             // Only the application probe sends this: the hash of a second,
             // identical fetch. Empty from the edge probe, which fetches once.
             'hash2' => trim($parts[3] ?? ''),
+            // Only the edge probe sends this: where a redirect pointed.
+            'location' => trim($parts[4] ?? ''),
         ];
     }
 

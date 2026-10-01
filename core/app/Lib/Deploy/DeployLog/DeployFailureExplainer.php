@@ -447,11 +447,21 @@ class DeployFailureExplainer
             // found`, then builds it. A real failure that follows (an entrypoint that is not
             // there, a one-shot exiting non-zero) is the true cause and must win over that
             // noise. Confirmed on Bitpoll (init exit 1) and Limbas (missing entrypoint).
+            // runc's $PATH search skips a file without the execute bit, so this
+            // also means "there, but not executable".
             'container-entrypoint-missing' => [
                 '/exec:\s*"?([^"\n:]+)"?:\s*executable file not found/i',
                 static fn (array $m): string =>
                     "The application's container could not start: its entrypoint ({$m[1]}) was not "
-                        . 'found in the image. The full output is in the deploy log.',
+                        . 'found in the image, or is not executable (chmod +x). The full output is in the deploy log.',
+            ],
+            // An absolute-path entrypoint without the execute bit.
+            'container-entrypoint-not-executable' => [
+                '/exec:?\s*"?([^"\s:]+)"?:\s*permission denied/i',
+                static fn (array $m): string =>
+                    "The application's container could not start: its entrypoint ({$m[1]}) is not "
+                        . 'executable. Give it the execute bit (chmod +x, or RUN chmod +x in the Dockerfile). '
+                        . 'The full output is in the deploy log.',
             ],
             'container-start-failed' => [
                 '/(?:dependency failed to start:[^\n]*?exited \((\d+)\)'

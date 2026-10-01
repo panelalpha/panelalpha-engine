@@ -62,6 +62,33 @@ class SilentPortCheckTest extends TestCase
         ));
     }
 
+    public function test_a_port_that_answered_a_server_error_is_not_silent(): void
+    {
+        // foodsoft, Memtly: HTTP 500 on the port, and the check told them it
+        // "may expect HTTPS".
+        $this->assertNull($this->check(
+            [['port' => 3000, 'status' => AppHealth::STATUS_FAIL, 'http_code' => 500]],
+            '{"Name":"project-app-1","Service":"app","State":"running","Publishers":[{"TargetPort":3000,"PublishedPort":3000}]}',
+            "  sl  local_address rem_address   st\n   0: 00000000:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000 0 1 1\n"
+        ));
+    }
+
+    public function test_a_silent_port_is_still_explained_beside_one_that_answered_500(): void
+    {
+        $check = $this->check(
+            [
+                ['port' => 3000, 'status' => AppHealth::STATUS_FAIL, 'http_code' => 500],
+                ['port' => 4000, 'status' => AppHealth::STATUS_FAIL, 'http_code' => null],
+            ],
+            '{"Name":"project-app-1","Service":"app","State":"running","Publishers":[{"TargetPort":3000,"PublishedPort":3000},{"TargetPort":4000,"PublishedPort":4000}]}',
+            "  sl  local_address rem_address   st\n   0: 00000000:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000 0 1 1\n"
+        );
+
+        $this->assertSame(SilentPortCheck::ID, $check['id']);
+        $this->assertStringContainsString('app listens on 3000, not on 4000', $check['detail']);
+        $this->assertStringNotContainsString('may expect HTTPS', $check['detail']);
+    }
+
     public function test_no_container_publishing_the_port_means_no_verdict(): void
     {
         $this->assertNull($this->check([['port' => 4000, 'status' => AppHealth::STATUS_FAIL]], '', ''));

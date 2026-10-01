@@ -56,6 +56,13 @@ final class SilentPort
      */
     public static function diagnose(string $service, int $published, int $target, array $sockets): string
     {
+        // A loopback listener on another port is the app's own internals or
+        // Docker's embedded DNS (127.0.0.11, a random port), never the answer.
+        $sockets = array_values(array_filter(
+            $sockets,
+            static fn (array $s): bool => (int) $s['port'] === $target
+                || !ListeningSockets::isLoopback((string) $s['addr'])
+        ));
         if ($sockets === []) {
             return "{$service} is running but listens on no TCP port yet: it is still starting, "
                 . 'or waiting for something it needs.';

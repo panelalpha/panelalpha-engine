@@ -830,6 +830,45 @@ OUT;
         $this->assertStringNotContainsString('base image', (string) DeployFailureExplainer::explain($output));
     }
 
+    /** A bare-name entrypoint that is there but not executable reads the same as a missing one. */
+    public function test_a_path_search_miss_also_suggests_the_execute_bit(): void
+    {
+        $output = 'Error response from daemon: failed to create task for container: OCI runtime create failed: '
+            . 'runc create failed: unable to start container process: exec: "entrypoint.sh": executable file not found in $PATH: unknown';
+
+        $this->assertStringContainsString('or is not executable (chmod +x)', (string) DeployFailureExplainer::explain($output));
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function nonExecutableEntrypoints(): array
+    {
+        return [
+            'runc, quoted' => ['Error response from daemon: failed to create task for container: failed to create shim task: '
+                . 'OCI runtime create failed: runc create failed: unable to start container process: exec: "/entrypoint.sh": permission denied: unknown'],
+            'container output' => ['app-1  | exec /entrypoint.sh: permission denied'],
+            // As a current Docker prints it, verbatim but for the path.
+            'runc, error during init' => ['docker: Error response from daemon: failed to create task for container: failed to create shim task: '
+                . 'OCI runtime create failed: runc create failed: unable to start container process: error during container init: exec: "/entrypoint.sh": permission denied'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('nonExecutableEntrypoints')]
+    public function test_an_absolute_entrypoint_without_the_execute_bit_is_named(string $output): void
+    {
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('container-entrypoint-not-executable', $match['rule'] ?? null);
+        $this->assertStringContainsString('(/entrypoint.sh) is not executable', $match['message'] ?? '');
+        $this->assertStringContainsString('chmod +x', $match['message'] ?? '');
+    }
+
+    public function test_a_permission_denied_that_names_no_file_is_not_an_entrypoint(): void
+    {
+        $match = DeployFailureExplainer::match('exec user process caused: permission denied');
+
+        $this->assertNotSame('container-entrypoint-not-executable', $match['rule'] ?? null);
+    }
+
     /**
      * The same shape with a one-shot exiting non-zero rather than a bad
      * entrypoint -- Bitpoll (supported-apps#1085), whose init container exits 1.

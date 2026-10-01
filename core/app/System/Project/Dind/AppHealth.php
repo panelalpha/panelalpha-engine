@@ -9,6 +9,7 @@ use App\Lib\Deploy\Health\CheckResult;
 use App\Lib\Deploy\Health\CheckRunner;
 use App\Lib\Deploy\Health\HealthCheck;
 use App\Lib\Deploy\Health\ProbedResponse;
+use App\Lib\Deploy\Platform\PlatformManifest;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -56,6 +57,10 @@ class AppHealth
 
     /** The check {@see restartLoopCheck()} adds when it finds one. */
     public const CHECK_RESTART_LOOPING = 'app-restart-looping';
+
+    /** The check {@see withBlankPageCheck()} adds, and the serving word it sets. */
+    public const CHECK_BLANK_PAGE = 'app-blank-page';
+    public const SERVING_BLANK_PAGE = 'blank_page';
 
     /** Short: the deploy is already over and one `compose ps` is all this is. */
     private const RESTART_PROBE_TIMEOUT_SECONDS = 20;
@@ -115,7 +120,7 @@ class AppHealth
      *
      * @return array{healthy: bool|null, ports: list<array{port: int, scheme: ?string, status: string, http_code: ?int, time: ?float, detail: string}>, error?: string}
      */
-    public function check(int $timeout = 5, int $attempts = 3, int $delay = 2): array
+    public function check(int $timeout = 5, int $attempts = 3, int $delay = 2, bool $waitOnServerError = false): array
     {
         try {
             $ports = $this->ports();
@@ -137,7 +142,7 @@ class AppHealth
 
         try {
             $raw = $this->dind->shell()->execQuiet(
-                ['bash', '-c', self::probeScript($ports, $timeout, $attempts, $delay, $this->mainDomain())],
+                ['bash', '-c', self::probeScript($ports, $timeout, $attempts, $delay, $this->mainDomain(), $waitOnServerError)],
                 [],
                 self::timeBudget($ports, $timeout, $attempts, $delay)
             );
@@ -329,18 +334,65 @@ class AppHealth
     private function runChecks(array $results, int $timeout = 5): array
     {
         try {
-            $runner = self::checkRunnerFor($this->dind->userModel()->getDetails());
+            $details = $this->dind->userModel()->getDetails();
+            $runner = self::checkRunnerFor($details);
             $first = self::firstResponse($results);
 
-            return $runner->runByPath(
-                [HealthCheck::DEFAULT_PATH => $first] + $this->fetchPaths($runner->paths(), $results, $timeout),
-                $this->dind->userAppDirPath()
+            return self::withBlankPageCheck(
+                $runner->runByPath(
+                    [HealthCheck::DEFAULT_PATH => $first] + $this->fetchPaths($runner->paths(), $results, $timeout),
+                    $this->dind->userAppDirPath()
+                ),
+                self::stringOrNull($details[self::DETAIL_RUNTIME] ?? null),
+                $first
             );
         } catch (\Throwable $e) {
             Log::debug('Health checks could not run: ' . self::trimReason($e->getMessage()));
 
             return ['serving' => CheckRunner::SERVING_UNKNOWN, 'checks' => []];
         }
+    }
+
+    /**
+     * A PHP front page that answers 2xx with nothing in it is not serving.
+     *
+     * A fatal the application suppresses itself (PHP Server Monitor masks
+     * E_ERROR before config.php exists) ends every request with an empty 200,
+     * and no check can match text that is not there. PHP only: an empty 200
+     * from an API or a worker's status port can be correct.
+     *
+     * @param array{serving: string, checks: list<array<string, mixed>>} $verdict
+     * @return array{serving: string, checks: list<array<string, mixed>>}
+     */
+    public static function withBlankPageCheck(array $verdict, ?string $runtime, ProbedResponse $front): array
+    {
+        if ($runtime !== PlatformManifest::RUNTIME_PHP || !$front->statusMatches(['2xx']) || trim($front->body) !== '') {
+            return $verdict;
+        }
+
+        $outranked = false;
+        foreach ($verdict['checks'] as $check) {
+            $outranked = $outranked || (($check['status'] ?? null) === CheckResult::STATUS_FAIL
+                && ($check['severity'] ?? null) === HealthCheck::SEVERITY_ERROR);
+        }
+
+        $verdict['checks'][] = [
+            'id' => self::CHECK_BLANK_PAGE,
+            'group' => PlatformManifest::RUNTIME_PHP,
+            'status' => CheckResult::STATUS_FAIL,
+            'severity' => HealthCheck::SEVERITY_ERROR,
+            'title' => "The front page answered {$front->status} with an empty page.",
+            'detail' => "{$front->url} returned no content.",
+            'fix' => 'Usually a PHP fatal error the application suppresses. Read the container output, '
+                . 'or turn on the application\'s debug mode, to see it.',
+            'evidence' => ['url' => $front->url, 'http_code' => $front->status],
+        ];
+        // Errors outrank warnings, as in CheckRunner; an error already found says more than "empty".
+        if (!$outranked) {
+            $verdict['serving'] = self::SERVING_BLANK_PAGE;
+        }
+
+        return $verdict;
     }
 
     /**
@@ -413,7 +465,7 @@ class AppHealth
     ): string {
         $timeout = max(1, $timeout);
         $domain = $domain !== null && trim($domain) !== '' ? strtolower(trim($domain)) : null;
-        $hostHeader = $domain !== null ? '-H ' . escapeshellarg("Host: {$domain}") . ' ' : '';
+        $hostHeader = self::visitorHeaders($domain);
         $sample = ProbedResponse::SAMPLE_BYTES;
         $base = escapeshellarg(($scheme === 'https' ? 'https' : 'http') . '://127.0.0.1:' . $port);
         $list = implode(' ', array_map('escapeshellarg', $paths));
@@ -590,7 +642,7 @@ SH;
         return AppReachability::appProbeScript($scheme, $port, $timeout, $domain);
     }
 
-    /** @return array{code: int, hash: string, default404: bool, hash2: string} */
+    /** @return array{code: int, hash: string, default404: bool, hash2: string, location: string} */
     public static function parseFingerprint(string $raw): array
     {
         return AppReachability::parseFingerprint($raw);
@@ -684,7 +736,9 @@ SH;
 
         // Before the probe, so a restart while it waits still counts.
         $before = $this->containerSnapshot();
-        $report = $this->observe(self::DEPLOY_TIMEOUT, self::DEPLOY_ATTEMPTS, self::DEPLOY_DELAY);
+        // Right after `compose up` a 500 may be a frontend whose backend is
+        // still booting (Pingvin Share X), so keep asking until the budget runs out.
+        $report = $this->observe(self::DEPLOY_TIMEOUT, self::DEPLOY_ATTEMPTS, self::DEPLOY_DELAY, true);
         if ($report === null) {
             return;
         }
@@ -696,6 +750,8 @@ SH;
 
         if ($report['healthy'] === null) {
             $logger->dim('Health check: the application publishes no port to probe');
+            // No port is fine for a worker; a service restarting forever is not.
+            $this->reportChecks($this->withLateRestartLoop($report, $before), $logger);
             return;
         }
 
@@ -728,11 +784,17 @@ SH;
             }
         }
 
+        // Nothing to probe means nothing was waited for either: give a
+        // crashing service the same few seconds to show it.
+        $wait = ($report['healthy'] ?? null) === null;
         foreach ((array) ($report['ports'] ?? []) as $port) {
             if (is_array($port) && ($port['status'] ?? null) === self::STATUS_OK) {
-                sleep(self::SETTLE_SECONDS);
+                $wait = true;
                 break;
             }
+        }
+        if ($wait) {
+            $this->settle();
         }
 
         $after = $this->containerSnapshot();
@@ -745,6 +807,11 @@ SH;
         $this->remember($report);
 
         return $report;
+    }
+
+    protected function settle(): void
+    {
+        sleep(self::SETTLE_SECONDS);
     }
 
     /** `docker inspect` of the stack in {@see INSPECT_FORMAT}; null when it could not be asked. */
@@ -793,11 +860,14 @@ SH;
             if ($row['state'] !== self::STATE_RESTARTING && !$grew) {
                 continue;
             }
+            // Docker resets ExitCode to 0 when it starts the container again,
+            // so the code is only the crash's while it is down.
+            $down = in_array($row['state'], [self::STATE_RESTARTING, self::STATE_EXITED], true);
             $looping[] = sprintf(
-                '%s (%s, last exit %d, restarted %d time%s)',
+                '%s (%s, last exit %s, restarted %d time%s)',
                 $row['service'] ?? $row['name'],
                 $row['state'],
-                $row['exit'],
+                $down ? (string) $row['exit'] : 'unknown',
                 $row['restarts'],
                 $row['restarts'] === 1 ? '' : 's'
             );
@@ -919,10 +989,10 @@ SH;
      *
      * @return array<string, mixed>|null
      */
-    public function observe(int $timeout = 5, int $attempts = 3, int $delay = 2): ?array
+    public function observe(int $timeout = 5, int $attempts = 3, int $delay = 2, bool $waitOnServerError = false): ?array
     {
         try {
-            $report = $this->check($timeout, $attempts, $delay);
+            $report = $this->check($timeout, $attempts, $delay, $waitOnServerError);
         } catch (\Throwable $e) {
             Log::warning('App health check failed to run: ' . $e->getMessage());
 
@@ -1158,7 +1228,8 @@ SH;
         int $timeout = 5,
         int $attempts = 3,
         int $delay = 2,
-        ?string $domain = null
+        ?string $domain = null,
+        bool $waitOnServerError = false
     ): string {
         $timeout = max(1, $timeout);
         $attempts = max(1, $attempts);
@@ -1169,8 +1240,9 @@ SH;
         // ALLOWED_HOSTS, Laravel TrustHosts, Phorge's site URIs) refuses
         // `Host: 127.0.0.1` while serving its domain fine (#165, #190).
         $domain = $domain !== null && trim($domain) !== '' ? strtolower(trim($domain)) : null;
-        $hostHeader = $domain !== null ? '-H ' . escapeshellarg("Host: {$domain}") . ' ' : '';
+        $hostHeader = self::visitorHeaders($domain);
         $ownName = $domain !== null ? ' || [ "$host" = ' . escapeshellarg($domain) . ' ]' : '';
+        $waitCodes = $waitOnServerError ? '000|500|502|503|504' : '000|502|503|504';
 
         return <<<SH
 set -u
@@ -1286,8 +1358,9 @@ for port in {$list}; do
         fi
         # A proxy bundled in the image (Caddy, nginx) binds the port at once
         # and answers 502-504 until its backend is up: keep waiting on those.
+        # A deploy waits on 500 too: the app may still be warming up.
         case "\${result%% *}" in
-            000|502|503|504) ;;
+            {$waitCodes}) ;;
             *) break ;;
         esac
         [ "\$attempt" -ge {$attempts} ] && break
@@ -1298,6 +1371,23 @@ for port in {$list}; do
 done
 exit 0
 SH;
+    }
+
+    /**
+     * curl flags for the headers the account vhost adds for a visitor on
+     * https. An app that insists on a secure request (ASP.NET antiforgery in
+     * Squidex) answers 500 to plain http without them.
+     */
+    private static function visitorHeaders(?string $domain): string
+    {
+        if ($domain === null) {
+            return '';
+        }
+
+        return implode(' ', array_map(
+            static fn (string $header): string => '-H ' . escapeshellarg($header),
+            ["Host: {$domain}", 'X-Forwarded-Proto: https', "X-Forwarded-Host: {$domain}", 'X-Forwarded-Port: 443']
+        )) . ' ';
     }
 
     /**

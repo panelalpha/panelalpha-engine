@@ -66,6 +66,7 @@ When the answer is no, it names what it found instead. The common ones:
 | `directory_listing` | A list of files instead of a page. |
 | `error_page` | Your application is running and returning an error. |
 | `php_error` | A fatal PHP error is on the page. |
+| `blank_page` | Your PHP application answered with an empty page. Usually a fatal error the application hides; its container output or debug mode shows it. |
 | `database_error` | The application is up but cannot reach its database. |
 | `dev_server` | A development server is running, not a production build. Fix your start command. |
 | `no_root_route` | Nothing is set up at `/`. |

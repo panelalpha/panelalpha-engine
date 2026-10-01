@@ -36,6 +36,11 @@ final class SilentPortCheck
             if (($result['status'] ?? null) === AppHealth::STATUS_OK) {
                 return null;
             }
+            // A port that answered a 5xx is not silent: that is an application
+            // error, which the response checks already report.
+            if (($result['http_code'] ?? null) !== null) {
+                continue;
+            }
             $silent[] = (int) ($result['port'] ?? 0);
         }
         if ($silent === []) {
