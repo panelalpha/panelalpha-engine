@@ -10,6 +10,7 @@ use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\ComposeInclude;
 use App\Lib\Deploy\Compose\ComposeOverride;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
+use App\Lib\Deploy\Compose\ServiceHardener;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Compose\ComposeYaml;
@@ -215,6 +216,12 @@ class UserComposeStrategy
 
         foreach (ComposeHarden::oneShotServices($parsed) as $name) {
             $logger?->info("Service {$name} runs once and exits; not restarting it");
+        }
+
+        foreach ($parsed['services'] as $name => $service) {
+            if (is_array($service) && ServiceHardener::requestsMemlockUlimit($service)) {
+                $logger?->info("Removed ulimits.memlock from service {$name}: an account cannot raise its locked-memory limit");
+            }
         }
 
         // The account's own ceiling, so a project the operator has given more

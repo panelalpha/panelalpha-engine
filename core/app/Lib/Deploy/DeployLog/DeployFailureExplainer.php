@@ -316,6 +316,19 @@ class DeployFailureExplainer
                     'The build ran out of disk space. Free some space in the account or move to a larger plan.',
             ],
 
+            // An account's user namespace maps ids 0-65535 only, so restoring a
+            // higher owner fails with EINVAL. Flutter's gradle-wrapper.tgz is
+            // uid 397546 and Flutter blames the network for it.
+            'owner-id-out-of-range' => [
+                '/(?:Cannot change ownership to uid (\d+), gid (\d+)|lchown ([^\n:]+)): invalid argument/i',
+                static fn (array $m): string => (($m[1] ?? '') !== ''
+                    ? "A file in the build is owned by uid {$m[1]}, gid {$m[2]}"
+                    : 'A file in the build (' . trim($m[3]) . ') is owned by a user or group id') . ' '
+                        . 'that cannot exist in an account, which holds ids 0-65535 only. Extract archives '
+                        . 'without restoring their owner (tar --no-same-owner, or TAR_OPTIONS=--no-same-owner '
+                        . 'in the Dockerfile), or use an image whose files are owned by ids below 65536.',
+            ],
+
             // Java refusing to allocate inside the heap it was given (the fix is how the
             // engine sizes the heap), not the kernel killing a cgroup (`out-of-memory`).
             // Ranked above `out-of-memory` because one Maven log can carry both, and a

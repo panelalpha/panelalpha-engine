@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind\Inner;
 
 use App\System\Project\Dind\InnerDocker;
+use App\Lib\Deploy\Dind\RegistryConfigSync;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\CacheManager\RegistryImageConfig;
 use App\Lib\Deploy\CacheManager\BuiltImage;
@@ -340,10 +341,19 @@ class ImageSeeding
     }
 
     /**
-     * Once per deploy, on the first image question: an account created before the
-     * cache registry or registry-proxy existed has a daemon that trusts neither,
-     * because its daemon.json is written only at creation. Add both and reload
-     * it in place, and rewrite the account's init script so a restart keeps them.
+     * Once per deploy, on the first image question.
+     *
+     * An account created after the mount shipped reads that file directly:
+     * {@see \App\System\Project\Dind::rewriteDaemonJsonInPlace()} keeps the
+     * same inode the bind mount already serves (refusing a symlink there,
+     * engine#524), so HUPing the account's own dockerd from the host (never a
+     * shell inside the account) is enough to pick it up, no restart needed.
+     *
+     * An account that predates the mount has no mount to tell apart from one
+     * that is simply missing, so it only gets the plain, symlink-safe render
+     * {@see \App\System\Project\Dind::setupDaemonJson()} writes anyway -- its
+     * own init script still writes a correct daemon.json on its own next
+     * boot, and it gets the mount itself the next time it is recreated.
      */
     private function ensureRegistryConfig(): void
     {
@@ -352,20 +362,74 @@ class ImageSeeding
         }
         $this->registryConfigChecked = true;
 
-        $shell = $this->inner->dind()->shell();
-        $store = $this->inner->imageStore();
+        $dind = $this->inner->dind();
+        $fs = $dind->system()->filesystem();
+        $path = $dind->daemonJsonPath();
+        $rendered = $dind->daemonJsonContents();
+
         try {
-            if (trim((string) $shell->execQuiet($store->registryConfigArgv(), [], 30)) !== 'changed') {
+            $current = $fs->fileExists($path) ? $fs->fileGetContents($path) : null;
+            if ($current === $rendered) {
                 return;
             }
-            // Registry mirrors and trusted registries apply on SIGHUP, so nothing restarts.
-            $shell->execQuiet($this->inner->dind()->services()->signalArgv('docker', 'HUP'), [], 30);
-            $this->inner->dind()->setupEntrypointInitScripts();
+
+            if (!$this->accountHasDaemonJsonMount()) {
+                // No bind mount to keep live: a plain, symlink-safe render,
+                // which is what this account gets when it is next recreated
+                // either way. Nothing to signal -- its own init script is
+                // what applies this on its own next boot.
+                $dind->setupDaemonJson();
+
+                return;
+            }
+
+            // Mounted: write the existing inode in place so the running
+            // container's view changes too, then HUP its dockerd to read it.
+            if (!$dind->rewriteDaemonJsonInPlace()) {
+                return;
+            }
+            $pid = $this->dockerdHostPid();
+            if ($pid === null) {
+                return;
+            }
+            $dind->system()->execOnHost($this->inner->imageStore()->hostSignalDockerdArgv($pid));
             $this->inner->host()->logInfo('Pointed this account\'s Docker at the engine\'s image registries');
         } catch (\Exception $e) {
             // Not fatal: public images still come straight from their registries.
             $this->inner->host()->logDim('Could not update this account\'s registry settings: ' . trim($e->getMessage()));
         }
+    }
+
+    /** Whether the running container already binds daemon.json from the host, or still carries its own. */
+    private function accountHasDaemonJsonMount(): bool
+    {
+        try {
+            $json = $this->inner->dind()->system()->exec(
+                $this->inner->imageStore()->hostAccountMountsArgv($this->inner->dind()->engineAccount()),
+                [],
+                15
+            );
+        } catch (\Exception $e) {
+            return false;
+        }
+
+        return RegistryConfigSync::hasDaemonJsonMount((string) $json);
+    }
+
+    /** The account's dockerd, by the PID the host can actually signal -- the account is its own PID namespace. */
+    private function dockerdHostPid(): ?int
+    {
+        try {
+            $output = $this->inner->dind()->system()->exec(
+                $this->inner->imageStore()->hostAccountProcessesArgv($this->inner->dind()->engineAccount()),
+                [],
+                15
+            );
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        return RegistryConfigSync::dockerdHostPid((string) $output);
     }
 
     public function hasImage(string $image): bool

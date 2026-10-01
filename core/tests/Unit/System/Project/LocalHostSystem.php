@@ -44,6 +44,7 @@ final class LocalHostSystem extends System
             $ok = match ($flag) {
                 '-f' => is_file($path),
                 '-d' => is_dir($path),
+                '-L' => is_link($path),
                 default => false,
             };
             $exit = $ok ? 0 : 1;

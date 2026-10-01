@@ -131,9 +131,19 @@ final class FakeEngine implements ContainerEngine
                 return ['podman', 'images'];
             }
 
-            public function registryConfigArgv(): array
+            public function hostAccountMountsArgv(EngineAccount $account): array
             {
-                return ['true'];
+                return ['podman', 'inspect', $account->username];
+            }
+
+            public function hostAccountProcessesArgv(EngineAccount $account): array
+            {
+                return ['podman', 'top', $account->username];
+            }
+
+            public function hostSignalDockerdArgv(int $pid): array
+            {
+                return ['kill', '-HUP', (string) $pid];
             }
 
             public function imageIdArgv(string $image): array

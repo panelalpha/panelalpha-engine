@@ -39,6 +39,14 @@ class AccountServicesTemplateTest extends TestCase
         }
     }
 
+    /** Apps, not the daemon supervising them, are what the account's OOM killer takes. */
+    public function test_dockerd_is_shielded_from_the_accounts_oom_killer(): void
+    {
+        $run = (string) file_get_contents($this->projectTemplateDir() . '/services/docker/run');
+
+        $this->assertMatchesRegularExpression('/echo -\d+ > \/proc\/self\/oom_score_adj[^\n]*\nexec dockerd/', $run);
+    }
+
     /** A new account's connector stays down until a tunnel is attached. */
     public function test_cloudflared_ships_down_and_takes_its_token_from_env(): void
     {

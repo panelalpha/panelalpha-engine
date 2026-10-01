@@ -112,10 +112,36 @@ final class ContainerOperations
                 ? $this->project->userAppComposeCommand(['up', '-d', '--remove-orphans'])
                 : $this->project->userAppComposeCommand([$action]);
 
-            return ['stdout' => $this->shell->execAsUser($cmd, [], 600), 'stderr' => '', 'exit_code' => 0];
+            $stdout = $this->shell->execAsUser($cmd, [], 600);
+            $cleanup = self::cleanupArgvAfter($action);
+            if ($cleanup !== null) {
+                try {
+                    $this->shell->execAsUser($cleanup, [], 120);
+                } catch (\Exception) {
+                    // Disk left for the next down to reclaim; the stop itself worked.
+                }
+            }
+
+            return ['stdout' => $stdout, 'stderr' => '', 'exit_code' => 0];
         } catch (\Exception $e) {
             return ['stdout' => '', 'stderr' => $e->getMessage(), 'exit_code' => 1];
         }
+    }
+
+    /**
+     * What runs after `$action` succeeded. `down` leaves the anonymous volumes
+     * of images that declare VOLUME behind, and the next `up` makes new ones,
+     * so every rebuild leaked one (330 MB per Shinobi rebuild). Only volumes
+     * labelled anonymous: named ones are the app's data, and a daemon older
+     * than 23 (no label) prunes nothing instead of everything unused.
+     *
+     * @return list<string>|null
+     */
+    public static function cleanupArgvAfter(string $action): ?array
+    {
+        return $action === 'down'
+            ? ['docker', 'volume', 'prune', '-f', '--filter', 'label=com.docker.volume.anonymous']
+            : null;
     }
 
     /**

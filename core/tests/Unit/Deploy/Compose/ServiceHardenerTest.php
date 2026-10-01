@@ -123,7 +123,7 @@ class ServiceHardenerTest extends TestCase
 
     public function test_a_capability_beyond_the_default_set_is_stripped(): void
     {
-        foreach ([['ALL'], ['SYS_ADMIN', 'NET_ADMIN', 'SYS_PTRACE', 'SYS_MODULE'], 'ALL', []] as $caps) {
+        foreach ([['ALL'], ['SYS_ADMIN', 'SYS_PTRACE', 'SYS_MODULE'], 'ALL', []] as $caps) {
             $service = ServiceHardener::harden('app', ['image' => 'acme/app', 'cap_add' => $caps]);
 
             $this->assertArrayNotHasKey('cap_add', $service, json_encode($caps));
@@ -152,7 +152,23 @@ class ServiceHardenerTest extends TestCase
             'cap_add' => ['ALL', 'CAP_CHOWN', 'sys_admin', 'setuid', ' NET_BIND_SERVICE ', 'cap_net_admin', 42],
         ]);
 
-        $this->assertSame(['CAP_CHOWN', 'setuid', 'NET_BIND_SERVICE'], $service['cap_add']);
+        $this->assertSame(['CAP_CHOWN', 'setuid', 'NET_BIND_SERVICE', 'cap_net_admin'], $service['cap_add']);
+    }
+
+    public function test_net_admin_is_kept_for_binaries_that_carry_it_as_a_file_capability(): void
+    {
+        // NetAlertX: python3 has cap_net_admin+eip, and without it in the
+        // bounding set execve fails with EPERM before any network work.
+        $service = ServiceHardener::harden('netalertx', [
+            'image' => 'ghcr.io/netalertx/netalertx:26.9.0',
+            'cap_drop' => ['ALL'],
+            'cap_add' => ['NET_ADMIN', 'NET_RAW', 'NET_BIND_SERVICE', 'CHOWN', 'SETUID', 'SETGID'],
+        ]);
+
+        $this->assertSame(
+            ['NET_ADMIN', 'NET_RAW', 'NET_BIND_SERVICE', 'CHOWN', 'SETUID', 'SETGID'],
+            $service['cap_add']
+        );
     }
 
     public function test_a_single_capability_written_as_a_string_is_kept_as_a_list(): void
@@ -160,6 +176,60 @@ class ServiceHardenerTest extends TestCase
         $service = ServiceHardener::harden('app', ['image' => 'acme/app', 'cap_add' => 'NET_BIND_SERVICE']);
 
         $this->assertSame(['NET_BIND_SERVICE'], $service['cap_add']);
+    }
+
+    public function test_a_memlock_ulimit_an_account_cannot_grant_is_removed(): void
+    {
+        // Elasticsearch's documented setting; runc fails with "error setting
+        // rlimit type 8" because the account's own limit is 8 MB.
+        $service = ServiceHardener::harden('es', [
+            'image' => 'elasticsearch:8.19.0',
+            'ulimits' => ['memlock' => ['soft' => -1, 'hard' => -1], 'nofile' => 65536],
+        ]);
+        $this->assertSame(['nofile' => 65536], $service['ulimits']);
+
+        $service = ServiceHardener::harden('es', ['image' => 'opensearch', 'ulimits' => ['memlock' => -1]]);
+        $this->assertArrayNotHasKey('ulimits', $service);
+    }
+
+    public function test_every_service_may_ping_as_a_non_root_user(): void
+    {
+        // The account's daemon runs in a user namespace and skips Docker's
+        // default ping_group_range, so `ping` as nagios failed.
+        $service = ServiceHardener::harden('nagios', ['image' => 'manios/nagios:4.5.14']);
+
+        $this->assertSame(['net.ipv4.ping_group_range' => '0 65535'], $service['sysctls']);
+    }
+
+    public function test_only_network_namespaced_sysctls_survive_in_either_form(): void
+    {
+        $map = ServiceHardener::withoutEscapes(['sysctls' => [
+            'kernel.shm_rmid_forced' => 1,
+            'vm.overcommit_memory' => 1,
+            'net.ipv4.ip_unprivileged_port_start' => 80,
+        ]]);
+        $list = ServiceHardener::withoutEscapes(['sysctls' => [
+            'kernel.domainname=x',
+            'net.ipv4.ping_group_range=0 1000',
+        ]]);
+
+        $this->assertSame(['net.ipv4.ip_unprivileged_port_start' => 80], $map['sysctls']);
+        $this->assertSame(['net.ipv4.ping_group_range=0 1000'], $list['sysctls']);
+        $this->assertArrayNotHasKey('sysctls', ServiceHardener::withoutEscapes(['sysctls' => ['kernel.msgmax' => 1]]));
+    }
+
+    public function test_the_ping_range_is_added_beside_the_services_own_sysctls_and_never_over_them(): void
+    {
+        $list = ServiceHardener::harden('app', ['image' => 'a', 'sysctls' => ['net.ipv4.ip_unprivileged_port_start=0']]);
+        $own = ServiceHardener::harden('app', ['image' => 'a', 'sysctls' => ['net.ipv4.ping_group_range' => '1000 1000']]);
+        $shared = ServiceHardener::harden('app', ['image' => 'a', 'network_mode' => 'service:vpn']);
+
+        $this->assertSame(
+            ['net.ipv4.ip_unprivileged_port_start=0', 'net.ipv4.ping_group_range=0 65535'],
+            $list['sysctls']
+        );
+        $this->assertSame(['net.ipv4.ping_group_range' => '1000 1000'], $own['sysctls']);
+        $this->assertArrayNotHasKey('sysctls', $shared);
     }
 
     public function test_host_networking_is_stripped(): void
@@ -528,7 +598,7 @@ class ServiceHardenerTest extends TestCase
         foreach (['nginx:alpine', 'php:8.3-fpm', 'python:3.12', 'ruby:3.3', 'golang:1.22'] as $image) {
             $service = ServiceHardener::harden('app', ['image' => $image]);
 
-            $this->assertArrayNotHasKey('environment', $service, $image);
+            $this->assertArrayNotHasKey('NODE_OPTIONS', $service['environment'], $image);
         }
     }
 
@@ -557,7 +627,28 @@ class ServiceHardenerTest extends TestCase
             'environment' => ['APP_ENV=production'],
         ]);
 
-        $this->assertSame(['APP_ENV=production', 'NODE_OPTIONS=--max-old-space-size=268'], $service['environment']);
+        $this->assertSame(
+            ['APP_ENV=production', 'NODE_OPTIONS=--max-old-space-size=268', 'OMP_NUM_THREADS=1', 'MKL_NUM_THREADS=1', 'OPENBLAS_NUM_THREADS=1'],
+            $service['environment']
+        );
+    }
+
+    public function test_thread_pools_are_sized_to_the_cpu_quota_not_the_hosts_cores(): void
+    {
+        // Kokoro under cpus: 0.75 ran torch with one thread per host core:
+        // 57.5 s per request against 2.3 s with the pool matched to the quota.
+        $default = ServiceHardener::harden('kokoro', ['image' => 'ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.0']);
+        $raised = ServiceHardener::harden('kokoro', ['image' => 'python:3.12', 'cpus' => '2.5']);
+        $own = ServiceHardener::harden('kokoro', [
+            'image' => 'python:3.12',
+            'cpus' => 2,
+            'environment' => ['OMP_NUM_THREADS=4'],
+        ]);
+
+        $this->assertSame('1', $default['environment']['OMP_NUM_THREADS']);
+        $this->assertSame('1', $default['environment']['OPENBLAS_NUM_THREADS']);
+        $this->assertSame('3', $raised['environment']['MKL_NUM_THREADS']);
+        $this->assertSame(['OMP_NUM_THREADS=4', 'MKL_NUM_THREADS=2', 'OPENBLAS_NUM_THREADS=2'], $own['environment']);
     }
 
     /**

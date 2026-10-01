@@ -27,8 +27,9 @@ services:
       - /run/service:mode=755,size=4m,exec
     volumes:
       - /home/{{ $user }}/:/home/{{ $user }}/
-      - ./entrypoint.sh:/entrypoint.sh
-      - ./entrypoint.d/:/entrypoint.d/
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ./entrypoint.d/:/entrypoint.d/:ro
+      - ./daemon.json:/etc/docker/daemon.json:ro
       - ./services/:/etc/s6/account/:ro
     tty: true
     {{ !empty($cpu_limit) ? ("cpus: " . $cpu_limit) : "" }}

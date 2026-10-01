@@ -23,7 +23,7 @@ class TenantEgressGuardServiceTest extends TestCase
 
         $written = [];
         $filesystem = $this->createStub(System\Filesystem::class);
-        $filesystem->method('filePutContents')->willReturnCallback(
+        $filesystem->method('writeFileReplacingPath')->willReturnCallback(
             function (string $path, string $contents) use (&$written): void {
                 $written[basename($path)] = $contents;
             }

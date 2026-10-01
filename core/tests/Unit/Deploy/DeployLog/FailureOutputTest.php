@@ -41,6 +41,25 @@ class FailureOutputTest extends TestCase
         $this->assertStringContainsString('_resolveFilename', $selected);
     }
 
+    /** mydia's Flutter precache: the tar lines, not BuildKit's summary below them, name the cause. */
+    public function test_an_owner_id_out_of_range_leads_the_region(): void
+    {
+        $output = <<<'OUT'
+        #18 141.6 [2/11] Gradle Wrapper                                               46ms
+        #18 141.7 /usr/bin/tar: gradlew: Cannot change ownership to uid 397546, gid 5000: Invalid argument
+        #18 141.7 /usr/bin/tar: Exiting with failure status due to previous errors
+        #18 141.7 Flutter could not download and/or extract https://storage.googleapis.com/gradle-wrapper.tgz. Ensure you have network connectivity.
+        #18 141.7 The original exception was: ProcessException: The command failed with exit code 2
+        #18 ERROR: process "/bin/sh -c flutter precache --web" did not complete successfully: exit code: 1
+        ------
+        failed to solve: process "/bin/sh -c flutter precache --web" did not complete successfully: exit code: 1
+        OUT;
+
+        $match = DeployFailureExplainer::match(FailureOutput::select($output));
+
+        $this->assertSame('owner-id-out-of-range', $match['rule'] ?? null);
+    }
+
     public function test_the_kernel_writing_npm_warnings_is_the_same_case(): void
     {
         $output = "npm warn deprecated a@1\nnpm warn deprecated b@2\nnpm error code 127\nnpm error path /app\n";

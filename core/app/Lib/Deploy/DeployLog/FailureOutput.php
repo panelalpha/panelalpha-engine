@@ -43,6 +43,9 @@ final class FailureOutput
      */
     private const CAUSE = [
         '/^#\d+ ERROR:/',                       // BuildKit's own error line
+        // tar restoring an owner the account's id range cannot hold; Flutter
+        // prints its network advice after it.
+        '/Cannot change ownership to uid \d+, gid \d+: Invalid argument/',
         '/^failed to solve:/',                    // ...and the summary that names it
         '/^Error response from daemon:/',         // the daemon refusing to run a container
         '/^runc create failed:/',

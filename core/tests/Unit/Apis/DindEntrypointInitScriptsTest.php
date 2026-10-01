@@ -6,10 +6,11 @@ use App\System\Project\Dind\AccountTemplate;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The init scripts an account runs before s6 starts dockerd.
+ * The init scripts an account runs before s6 starts dockerd, and the
+ * daemon.json rendered next to them.
  *
- * They run from `/entrypoint.sh` as `entrypoint.d/*.sh` one-shots ahead of
- * `exec s6-svscan` — so this is the hook for anything that must be true
+ * The scripts run from `/entrypoint.sh` as `entrypoint.d/*.sh` one-shots ahead
+ * of `exec s6-svscan` — so this is the hook for anything that must be true
  * before the nested Docker daemon comes up, without rebuilding the account image.
  *
  * Since `/run` became a tmpfs it starts empty on every boot, and the
@@ -19,7 +20,7 @@ use PHPUnit\Framework\TestCase;
  */
 class DindEntrypointInitScriptsTest extends TestCase
 {
-    private function script(): string
+    private function template(): AccountTemplate
     {
         // Mocks rather than stubs, because the property and accessors are
         // typed against the concrete classes. Only username and uid are read.
@@ -37,7 +38,23 @@ class DindEntrypointInitScriptsTest extends TestCase
         $property->setAccessible(true);
         $property->setValue($template, $dind);
 
-        return $template->entrypointInitScripts()['useradd.sh'] ?? '';
+        return $template;
+    }
+
+    private function script(): string
+    {
+        return $this->template()->entrypointInitScripts()['useradd.sh'] ?? '';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function daemonJson(): array
+    {
+        $json = json_decode($this->template()->daemonJson(), true);
+        $this->assertIsArray($json, 'daemonJson() did not return valid JSON');
+
+        return $json;
     }
 
     /**
@@ -72,10 +89,28 @@ class DindEntrypointInitScriptsTest extends TestCase
         $this->assertStringContainsString('acme', $script);
     }
 
-    public function test_the_daemon_data_root_is_still_written(): void
+    public function test_the_daemon_data_root_dir_is_still_created(): void
     {
-        $this->assertStringContainsString('/etc/docker/daemon.json', $this->script());
-        $this->assertStringContainsString('data-root', $this->script());
+        $this->assertStringContainsString('mkdir -p "/home/$(hostname)/docker"', $this->script());
+    }
+
+    /**
+     * daemon.json moved to a host-rendered, bind-mounted file (engine#312):
+     * nothing inside the account writes it any more, so running anything in
+     * the account to patch an old account's registry settings is no longer
+     * needed in the first place.
+     */
+    public function test_the_init_script_no_longer_writes_daemon_json(): void
+    {
+        $script = $this->script();
+
+        $this->assertStringNotContainsString('/etc/docker/daemon.json', $script);
+        $this->assertStringNotContainsString('cat >', $script);
+    }
+
+    public function test_the_daemon_data_root_matches_the_mkdir_above(): void
+    {
+        $this->assertSame('/home/acme/docker', $this->daemonJson()['data-root'] ?? null);
     }
 
     /**
@@ -100,18 +135,14 @@ class DindEntrypointInitScriptsTest extends TestCase
         $this->assertContains('panelalpha-cache-registry:5000', $this->daemonJson()['insecure-registries'] ?? []);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function daemonJson(): array
+    /** Without it, a dockerd OOM kill left every container Exited after s6 restarted it. */
+    public function test_containers_outlive_a_daemon_restart(): void
     {
-        $script = $this->script();
-        $this->assertMatchesRegularExpression('/cat > \/etc\/docker\/daemon\.json <<EOF\n(.+)\nEOF/', $script, 'daemon.json heredoc not found');
-        preg_match('/cat > \/etc\/docker\/daemon\.json <<EOF\n(.+)\nEOF/', $script, $m);
+        $this->assertTrue($this->daemonJson()['live-restore'] ?? null);
+    }
 
-        $json = json_decode($m[1], true);
-        $this->assertIsArray($json, 'daemon.json is not valid JSON: ' . $m[1]);
-
-        return $json;
+    public function test_the_account_group_matches_its_username(): void
+    {
+        $this->assertSame('acme', $this->daemonJson()['group'] ?? null);
     }
 }

@@ -417,11 +417,13 @@ YAML
         $service = ComposeHarden::apply($compose)['services']['app'];
 
         foreach (
-            ['cap_add', 'security_opt', 'userns_mode', 'cgroup_parent', 'group_add', 'sysctls', 'device_cgroup_rules']
+            ['cap_add', 'security_opt', 'userns_mode', 'cgroup_parent', 'group_add', 'device_cgroup_rules']
             as $key
         ) {
             $this->assertArrayNotHasKey($key, $service, "{$key} survived hardening");
         }
+        // Only the engine's own network-namespaced default is left.
+        $this->assertSame(['net.ipv4.ping_group_range' => '0 65535'], $service['sysctls']);
     }
 
     public function test_removes_docker_socket_mounted_through_its_parent_directory(): void

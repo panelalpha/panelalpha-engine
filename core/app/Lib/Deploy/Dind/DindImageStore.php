@@ -247,44 +247,41 @@ final class DindImageStore implements ImageStore
     }
 
     /**
-     * Inside the account: make its daemon trust the cache registry and mirror
-     * Docker Hub through registry-proxy, keeping everything else in its
-     * daemon.json. Prints `changed` when it had to, so the caller reloads.
-     * Accounts created before either entry existed never got it: their
-     * daemon.json is written once, at creation.
+     * On the host: the account's own container, so a registry refresh can
+     * tell a daemon.json that is bind-mounted from one an old init script
+     * still writes by hand. {@see \App\System\Project\Dind\AccountTemplate::daemonJson()}
+     * is only mounted into accounts created after it shipped.
      *
      * @return list<string>
      */
-    public function registryConfigArgv(): array
+    public function hostAccountMountsArgv(EngineAccount $account): array
     {
-        $script = <<<'PY'
-import json, sys
-path = '/etc/docker/daemon.json'
-try:
-    config = json.load(open(path))
-except Exception:
-    sys.exit(3)
-trusted = config.get('insecure-registries', [])
-mirrors = config.get('registry-mirrors', [])
-changed = False
-for registry in (CACHE, PROXY):
-    if registry not in trusted:
-        trusted.append(registry)
-        changed = True
-if MIRROR not in mirrors:
-    mirrors.insert(0, MIRROR)
-    changed = True
-if changed:
-    config['insecure-registries'] = trusted
-    config['registry-mirrors'] = mirrors
-    with open(path, 'w') as f:
-        json.dump(config, f)
-print('changed' if changed else 'ok')
-PY;
-        $values = "CACHE = '" . self::CACHE_REGISTRY . "'\nPROXY = '" . self::PROXY_REGISTRY
-            . "'\nMIRROR = 'http://" . self::PROXY_REGISTRY . "'\n";
+        return ['sudo', 'docker', 'inspect', '--format', '{{json .Mounts}}', '--', $account->username];
+    }
 
-        return ['python3', '-c', $values . $script];
+    /**
+     * On the host: every process the account's container runs, with the PID
+     * as the host sees it. The account is its own PID namespace, so that PID
+     * -- not the one `docker compose exec` would show -- is the one a signal
+     * sent from the host can reach.
+     *
+     * @return list<string>
+     */
+    public function hostAccountProcessesArgv(EngineAccount $account): array
+    {
+        return ['sudo', 'docker', 'top', $account->username, '-eo', 'pid,comm'];
+    }
+
+    /**
+     * No sudo: this one goes through System::execOnHost(), which already
+     * enters the host namespace as root -- where that PID exists, unlike the
+     * core container's own PID namespace.
+     *
+     * @return list<string>
+     */
+    public function hostSignalDockerdArgv(int $pid): array
+    {
+        return ['kill', '-HUP', (string) $pid];
     }
 
     /**

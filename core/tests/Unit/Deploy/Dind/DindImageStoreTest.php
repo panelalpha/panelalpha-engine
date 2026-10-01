@@ -163,37 +163,31 @@ SH);
     }
 
     /**
-     * @return array{0: string, 1: array<string, mixed>}
+     * engine#312: nothing runs inside the account to patch its registry
+     * settings any more. daemon.json is rendered and rewritten on the host
+     * ({@see \App\System\Project\Dind\AccountTemplate::daemonJson()}); these
+     * three are the host-side argv a live refresh needs instead.
      */
-    private function mergeDaemonJson(string $json): array
+    public function test_the_account_mounts_are_asked_on_the_host(): void
     {
-        $path = $this->dir . '/daemon.json';
-        file_put_contents($path, $json);
-        $argv = (new DindImageStore())->registryConfigArgv();
-        $script = str_replace('/etc/docker/daemon.json', $path, $argv[2]);
-        [, $out] = $this->sh('python3 -c ' . escapeshellarg($script));
-
-        return [$out, json_decode((string) file_get_contents($path), true)];
+        $this->assertSame(
+            ['sudo', 'docker', 'inspect', '--format', '{{json .Mounts}}', '--', 'demo'],
+            (new DindImageStore())->hostAccountMountsArgv($this->account())
+        );
     }
 
-    public function test_an_old_account_gets_both_registries_and_keeps_the_rest(): void
+    public function test_the_account_processes_are_asked_on_the_host(): void
     {
-        [$out, $config] = $this->mergeDaemonJson('{"data-root": "/home/demo/docker", "group": "demo"}');
-
-        $this->assertSame('changed', $out);
-        $this->assertSame('/home/demo/docker', $config['data-root']);
-        $this->assertSame(['panelalpha-cache-registry:5000', 'panelalpha-registry-proxy:5000'], $config['insecure-registries']);
-        $this->assertSame(['http://panelalpha-registry-proxy:5000'], $config['registry-mirrors']);
+        $this->assertSame(
+            ['sudo', 'docker', 'top', 'demo', '-eo', 'pid,comm'],
+            (new DindImageStore())->hostAccountProcessesArgv($this->account())
+        );
     }
 
-    public function test_a_current_account_is_left_alone(): void
+    /** No sudo: execOnHost() already enters the host namespace as root. */
+    public function test_the_dockerd_signal_carries_no_sudo_and_no_interpreter(): void
     {
-        $current = '{"insecure-registries": ["panelalpha-cache-registry:5000", "panelalpha-registry-proxy:5000"],'
-            . ' "registry-mirrors": ["http://panelalpha-registry-proxy:5000"]}';
-
-        [$out] = $this->mergeDaemonJson($current);
-
-        $this->assertSame('ok', $out, 'no reload when nothing changed');
+        $this->assertSame(['kill', '-HUP', '4321'], (new DindImageStore())->hostSignalDockerdArgv(4321));
     }
 
     public function test_the_cache_registry_comes_first(): void

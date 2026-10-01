@@ -47,7 +47,6 @@ final class ServiceHardener
         'cgroup_parent',
         'cgroup',
         'group_add',
-        'sysctls',
         'device_cgroup_rules',
         // Opt out of the account's cgroup view, its runtime or its OOM
         // handling; storage_opt only fails off xfs+pquota.
@@ -59,15 +58,35 @@ final class ServiceHardener
     ];
 
     /**
-     * Docker's default capability set. Re-adding one after `cap_drop: [ALL]`
-     * never exceeds a default container, so these are all `cap_add` may keep.
+     * Docker's default capability set, plus NET_ADMIN. Re-adding one after
+     * `cap_drop: [ALL]` never exceeds a default container's reach, so these
+     * are all `cap_add` may keep.
      *
      * @var list<string>
      */
     private const DEFAULT_CAPABILITIES = [
         'CHOWN', 'DAC_OVERRIDE', 'FSETID', 'FOWNER', 'MKNOD', 'NET_RAW', 'SETGID',
         'SETUID', 'SETFCAP', 'SETPCAP', 'NET_BIND_SERVICE', 'SYS_CHROOT', 'KILL', 'AUDIT_WRITE',
+        // Not a default, but it only administers the service's own network
+        // namespace, and images whose binaries carry it as a file capability
+        // cannot exec them without it (EPERM at execve).
+        'NET_ADMIN',
     ];
+
+    /**
+     * Sysctls scoped to the service's own network namespace; every other one
+     * is removed ({@see withNamespacedSysctls()}).
+     *
+     * @var list<string>
+     */
+    private const NAMESPACED_SYSCTLS = ['net.ipv4.ping_group_range', 'net.ipv4.ip_unprivileged_port_start'];
+
+    /**
+     * Docker's default lets any group open ICMP sockets, but a daemon in a user
+     * namespace (the account's) skips it, so non-root ping fails. The upper end
+     * is the account's own gid range.
+     */
+    private const PING_GROUP_RANGE = '0 65535';
 
     /** @var list<string> */
     private const DOCKER_SOCKETS = ['/var/run/docker.sock', '/run/docker.sock'];
@@ -125,6 +144,15 @@ final class ServiceHardener
     // caps a fork bomb. A per-service pids_limit overrides this default.
     private const PIDS_LIMIT = 1024;
 
+    /**
+     * Thread pools sized from the visible core count (OpenMP, MKL, OpenBLAS).
+     * A CPU quota does not hide the host's cores, so torch under `cpus: 0.75`
+     * ran one thread per host core and was ~12x slower than with one.
+     *
+     * @var list<string>
+     */
+    private const THREAD_POOL_VARIABLES = ['OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS'];
+
     private const LEGACY_POSTGRES_DATA = '/var/lib/postgresql/data';
 
     /** @var list<string> */
@@ -152,8 +180,36 @@ final class ServiceHardener
         $service = self::withNodeHeapCap($name, $service, $accountMemoryMb);
         $service = self::withReachablePublishedPorts($service, $keepLoopbackPorts);
         $service = self::withLegacyPostgresDataDir($service);
+        $service = self::withPingGroupRange($service);
 
-        return self::withProcessLimits($name, $service);
+        $service = self::withProcessLimits($name, $service);
+
+        return self::isDatabase($name, $service) ? $service : self::withThreadPoolsSizedToCpus($service);
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     * @return array<string, mixed>
+     */
+    private static function withThreadPoolsSizedToCpus(array $service): array
+    {
+        $cpus = EnvVarDefault::resolve(trim((string) ($service['cpus'] ?? $service['cpu_count'] ?? '')));
+        if (!is_numeric($cpus) || (float) $cpus <= 0) {
+            return $service;
+        }
+
+        $threads = (string) max(1, (int) ceil((float) $cpus));
+        $defaults = [];
+        foreach (self::THREAD_POOL_VARIABLES as $variable) {
+            if (!ServiceEnvironment::hasKey($service['environment'] ?? null, $variable)) {
+                $defaults[$variable] = $threads;
+            }
+        }
+        if ($defaults !== []) {
+            $service['environment'] = ServiceEnvironment::withDefaults($service['environment'] ?? [], $defaults);
+        }
+
+        return $service;
     }
 
     /**
@@ -434,6 +490,8 @@ final class ServiceHardener
             unset($service[$key]);
         }
         $service = self::withSafeCapabilities($service);
+        $service = self::withoutMemlockUlimit($service);
+        $service = self::withNamespacedSysctls($service);
         if (($service['network_mode'] ?? null) === 'host') {
             unset($service['network_mode']);
         }
@@ -493,7 +551,42 @@ final class ServiceHardener
     }
 
     /**
-     * Keeps the `cap_add` entries that are in Docker's default set, so a service
+     * True when the service asks for a locked-memory ulimit, which
+     * {@see withoutEscapes()} removes.
+     *
+     * @param array<string, mixed> $service
+     */
+    public static function requestsMemlockUlimit(array $service): bool
+    {
+        return is_array($service['ulimits'] ?? null) && array_key_exists('memlock', $service['ulimits']);
+    }
+
+    /**
+     * An account cannot raise RLIMIT_MEMLOCK above its own 8 MB, so runc refuses
+     * to start a service asking for Elasticsearch's documented `memlock: -1`.
+     * Dropping it leaves the account's limit, which is what any lower request
+     * would have got anyway.
+     *
+     * @param array<string, mixed> $service
+     * @return array<string, mixed>
+     */
+    private static function withoutMemlockUlimit(array $service): array
+    {
+        if (!self::requestsMemlockUlimit($service)) {
+            return $service;
+        }
+
+        unset($service['ulimits']['memlock']);
+        // An empty map would still be valid, but says nothing.
+        if ($service['ulimits'] === []) {
+            unset($service['ulimits']);
+        }
+
+        return $service;
+    }
+
+    /**
+     * Keeps the `cap_add` entries in {@see DEFAULT_CAPABILITIES}, so a service
      * that drops everything and adds back CHOWN/SETUID/SETGID can still drop to
      * its own user. ALL, SYS_ADMIN and the rest are removed as before.
      *
@@ -526,6 +619,73 @@ final class ServiceHardener
         }
 
         return $service;
+    }
+
+    /**
+     * `sysctls` as a map or as `key=value` entries, keeping only
+     * {@see NAMESPACED_SYSCTLS}; dropped entirely when nothing is left.
+     *
+     * @param array<string, mixed> $service
+     * @return array<string, mixed>
+     */
+    private static function withNamespacedSysctls(array $service): array
+    {
+        if (!array_key_exists('sysctls', $service)) {
+            return $service;
+        }
+
+        $sysctls = (array) $service['sysctls'];
+        $kept = [];
+        foreach ($sysctls as $key => $value) {
+            if (in_array(self::sysctlName($key, $value), self::NAMESPACED_SYSCTLS, true)) {
+                $kept[$key] = $value;
+            }
+        }
+
+        if ($kept === []) {
+            unset($service['sysctls']);
+        } else {
+            $service['sysctls'] = array_is_list($sysctls) ? array_values($kept) : $kept;
+        }
+
+        return $service;
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     * @return array<string, mixed>
+     */
+    private static function withPingGroupRange(array $service): array
+    {
+        // A service sharing another's network namespace cannot set net.* sysctls.
+        if (preg_match('/^(service|container):/', (string) ($service['network_mode'] ?? '')) === 1) {
+            return $service;
+        }
+
+        $sysctls = $service['sysctls'] ?? [];
+        if (!is_array($sysctls)) {
+            return $service;
+        }
+        foreach ($sysctls as $key => $value) {
+            if (self::sysctlName($key, $value) === 'net.ipv4.ping_group_range') {
+                return $service;
+            }
+        }
+
+        if ($sysctls !== [] && array_is_list($sysctls)) {
+            $sysctls[] = 'net.ipv4.ping_group_range=' . self::PING_GROUP_RANGE;
+        } else {
+            $sysctls['net.ipv4.ping_group_range'] = self::PING_GROUP_RANGE;
+        }
+        $service['sysctls'] = $sysctls;
+
+        return $service;
+    }
+
+    /** A sysctl's name, from a map key or a `key=value` list entry. */
+    private static function sysctlName(int|string $key, mixed $value): string
+    {
+        return trim(is_string($key) ? $key : (is_string($value) ? explode('=', $value, 2)[0] : ''));
     }
 
     /**

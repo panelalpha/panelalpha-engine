@@ -72,12 +72,28 @@ interface ImageStore
     public function imageIdArgv(string $image): array;
 
     /**
-     * Inside the account: point its daemon at the engine's registries, printing
-     * `changed` when that needed a reload.
+     * On the host: the account's own container's mounts, so a registry
+     * refresh can tell whether its daemon.json is a file this engine renders
+     * and can safely rewrite in place, or still an older account's own.
      *
      * @return list<string>
      */
-    public function registryConfigArgv(): array;
+    public function hostAccountMountsArgv(EngineAccount $account): array;
+
+    /**
+     * On the host: the account's processes with their host-visible PIDs, so
+     * its daemon can be signalled from the host without a shell inside it.
+     *
+     * @return list<string>
+     */
+    public function hostAccountProcessesArgv(EngineAccount $account): array;
+
+    /**
+     * On the host: signal the account's daemon, found by a host-visible PID.
+     *
+     * @return list<string>
+     */
+    public function hostSignalDockerdArgv(int $pid): array;
 
     /**
      * Inside the account: $image's declared ports as JSON, in the

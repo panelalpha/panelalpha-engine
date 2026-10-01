@@ -102,6 +102,17 @@ OUT;
                 . 'fatal: expected flush after ref listing',
                 'not the repository',
             ],
+            // Mydia's flutter-builder stage: Flutter's own message blames the network.
+            'owner id above the account range' => [
+                "#23 54.46 /usr/bin/tar: gradle/wrapper/gradle-wrapper.jar: Cannot change ownership to uid 397546, gid 5000: Invalid argument\n"
+                . "#23 54.49 Flutter could not download and/or extract https://storage.googleapis.com/x/gradle-wrapper.tgz. Ensure you have network connectivity\n"
+                . 'failed to solve: process "/bin/sh -c flutter precache --web" did not complete successfully: exit code: 1',
+                'owned by uid 397546, gid 5000',
+            ],
+            'layer owned above the account range' => [
+                'failed to register layer: lchown /opt/app/bin: invalid argument',
+                'ids 0-65535',
+            ],
             'missing repo' => ['fatal: repository https://github.com/x/y not found', 'was not found'],
             'php too old' => [
                 'requires php ^8.4 but your php version (8.1.2) does not satisfy',

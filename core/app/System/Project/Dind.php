@@ -633,16 +633,62 @@ class Dind implements DeployableDindProject, Runtime
         $this->outerLifecycle()->tearDown();
     }
 
+    /**
+     * engine#524: each script is replaced by renaming a temp file over it,
+     * never by removing everything up front and writing the real names back
+     * in -- a tenant who still has entrypoint.d mounted read-write could
+     * otherwise put a symlink where a name briefly did not exist and have
+     * this write through it. Names this account no longer needs (e.g. the
+     * egress guard once it is off) are cleared with a plain unlink, which
+     * never opens whatever is there.
+     */
     public function setupEntrypointInitScripts(): void
     {
         $scriptFiles = $this->accountTemplate()->entrypointInitScripts();
         $dir = $this->projectDirPath() . '/entrypoint.d';
-        $this->system()->runProcess("sudo mkdir -p {$dir} && sudo rm -f {$dir}/*.sh");
+        $fs = $this->system()->filesystem();
+        $this->system()->runProcess("sudo mkdir -p {$dir}");
         foreach ($scriptFiles as $name => $script) {
-            $this->system()->filesystem()->filePutContents("{$dir}/{$name}", $script);
+            $fs->writeFileReplacingPath("{$dir}/{$name}", $script);
+        }
+        foreach (['useradd.sh', TenantEgressGuard::FILE] as $name) {
+            if (!isset($scriptFiles[$name])) {
+                $this->system()->runProcess("sudo rm -f {$dir}/{$name}");
+            }
         }
         // The guard runs once at boot from entrypoint.d; its service keeps it applied.
         $this->services()->configure(TenantEgressGuard::SERVICE, isset($scriptFiles[TenantEgressGuard::FILE]));
+    }
+
+    public function daemonJsonPath(): string
+    {
+        return $this->projectDirPath() . '/daemon.json';
+    }
+
+    public function daemonJsonContents(): string
+    {
+        return $this->accountTemplate()->daemonJson();
+    }
+
+    /** Renders the current daemon.json to the host: a fresh account, or one without the bind mount yet. */
+    public function setupDaemonJson(): void
+    {
+        $this->system()->filesystem()->writeFileReplacingPath($this->daemonJsonPath(), $this->daemonJsonContents());
+    }
+
+    /**
+     * For an account whose compose already bind-mounts daemon.json: a rename
+     * would swap in a new inode the mount would not show until the container
+     * is recreated, so this writes the existing file's content in place
+     * instead. Refuses when the path is a symlink (engine#524) -- the mount
+     * itself is read-only, so only an account from before it existed could
+     * still have one there.
+     *
+     * @return bool whether it wrote
+     */
+    public function rewriteDaemonJsonInPlace(): bool
+    {
+        return $this->system()->filesystem()->overwriteFileUnlessSymlink($this->daemonJsonPath(), $this->daemonJsonContents());
     }
 
     protected function requireUserModel(): ModelsUser

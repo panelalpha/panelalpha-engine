@@ -50,4 +50,15 @@ class ContainerOperationsRunFileTest extends TestCase
             ContainerOperations::regeneratesRunFile($action, $strategy, $hasGitRepo, $hasClientCompose)
         );
     }
+
+    public function test_down_is_followed_by_a_prune_of_anonymous_volumes_only(): void
+    {
+        $this->assertSame(
+            ['docker', 'volume', 'prune', '-f', '--filter', 'label=com.docker.volume.anonymous'],
+            ContainerOperations::cleanupArgvAfter('down')
+        );
+        foreach (['up', 'start', 'stop', 'restart', 'pull'] as $action) {
+            $this->assertNull(ContainerOperations::cleanupArgvAfter($action), $action);
+        }
+    }
 }
