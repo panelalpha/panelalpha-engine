@@ -67,6 +67,10 @@ Desde el primer momento, PanelAlpha Engine te da a ti y a tu IA todo lo que nece
 - Dominios, SSL, cron, FTP/SFTP, bases de datos, logs
 - Integración sencilla con Cloudflare para DNS, túneles y caché
 
+## Cómo funciona
+
+<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs every operation and manages databases, files and isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
+
 ## Por qué esto tiene que existir
 
 La IA ha sacado la creación de software de sus límites de siempre. Más gente puede convertir una idea en un producto que funciona, los equipos pequeños construyen mucho más que antes, y el open source está lleno de proyectos que merecen ser tuyos. Lo que casi no ha cambiado al mismo ritmo es el trabajo necesario para ejecutarlo tú mismo. La mayoría de las herramientas self-hosted todavía esperan que entiendas y gestiones Docker, un servidor web, certificados, bases de datos, copias de seguridad, un cortafuegos y las actualizaciones que vienen después.
@@ -87,7 +91,7 @@ La IA ha sacado la creación de software de sus límites de siempre. Más gente 
 
 Necesitas un servidor **nuevo** con Debian 12/13 o Ubuntu 22.04/24.04/26.04, con al menos 2 GB de RAM y 1 CPU, y entras como `root` por SSH.
 
-**One-line app installation command** es la forma más rápida de empezar: instala Engine y pone una aplicación en línea de una vez. Solo tienes que añadir después de `--repo` el repositorio Git que quieras usar, y el instalador se ocupa de las dos partes: instala Engine y empieza enseguida a preparar el proyecto con el repositorio que le diste.
+**One-line app installation command** es la forma más rápida de empezar. Solo añade después de `--repo` el repositorio Git que quieras usar, y el instalador empieza enseguida a preparar Engine y a poner tu aplicación en línea de una vez.
 
 Por ejemplo, si quieres instalar Engine y desplegar n8n a la vez, esto es todo lo que necesitas:
 
@@ -95,7 +99,7 @@ Por ejemplo, si quieres instalar Engine y desplegar n8n a la vez, esto es todo l
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
-Al terminar, muestra la dirección de tu nuevo sitio y, si no pasas `--no-password`, la contraseña que lo abre. Repositorios privados, una contraseña propia y un servidor que ya tiene Engine: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
+Al terminar, muestra la dirección de tu nuevo sitio y, si no pasas `--no-password`, la contraseña que lo abre. Para repositorios privados, una contraseña propia o una aplicación en un servidor que ya tiene Engine, consulta: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
 
 ¿Prefieres hacer los dos pasos por separado? Usa el comando de abajo para instalar solo Engine y despliega tu aplicación más tarde desde tu asistente (mira el paso 2):
 
@@ -103,7 +107,7 @@ Al terminar, muestra la dirección de tu nuevo sitio y, si no pasas `--no-passwo
 curl -fsSL https://get.panelalpha.com/engine | sh
 ```
 
-Ya está. Tu servidor está listo. Nombre propio, tu propio certificado TLS o un servidor detrás de NAT: [opciones de instalación](docs/02-getting-started/install.md).
+Ya está. Tu servidor está listo. Para un nombre propio, tu propio certificado TLS o un servidor detrás de NAT, consulta: [opciones de instalación](docs/02-getting-started/install.md).
 
 ### Paso 2: Conecta tu agente de IA
 

@@ -67,6 +67,10 @@ PanelAlpha Engine 是你装在 VPS 上的软件，用来托管用 AI 构建和 v
 - 域名、SSL、定时任务、FTP/SFTP、数据库、日志
 - 轻松接入 Cloudflare，用于 DNS、隧道和缓存
 
+## 工作原理
+
+<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs every operation and manages databases, files and isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
+
 ## 为什么需要这个
 
 AI 已经把软件创造从旧的限制里解放出来。更多人能把想法变成能跑的产品，小团队能做出比以前多得多的东西，开源也涌现出大量值得拿来用的项目。几乎没跟上同样速度的，是自己跑起来所需的那份工作。大多数自托管工具仍然要求你理解并管理 Docker、Web 服务器、证书、数据库、备份、防火墙，以及之后的更新。
@@ -87,7 +91,7 @@ AI 已经把软件创造从旧的限制里解放出来。更多人能把想法�
 
 你需要一台**全新**的服务器，系统为 Debian 12/13 或 Ubuntu 22.04/24.04/26.04，至少 2 GB 内存和 1 核 CPU，并以 `root` 通过 SSH 登录。
 
-**One-line app installation command** 是最快的上手方式：它安装 Engine，并一次性让一个应用上线。你只需在 `--repo` 后面加上想使用的 Git 仓库，安装程序就会完成两件事：安装 Engine，并立即用你提供的仓库开始创建项目。
+**One-line app installation command** 是最快的上手方式。只需在 `--repo` 后面加上想使用的 Git 仓库，安装程序就会立即开始安装 Engine，并一次性让你的应用上线。
 
 例如，想同时安装 Engine 并部署 n8n，只需这一条：
 
@@ -95,7 +99,7 @@ AI 已经把软件创造从旧的限制里解放出来。更多人能把想法�
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
-完成后，它会显示新网站的地址；如果你没有传 `--no-password`，还会显示打开网站用的密码。私有仓库、自定义密码，以及已经装有 Engine 的服务器： [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command)。
+完成后，它会显示新网站的地址；如果你没有传 `--no-password`，还会显示打开网站用的密码。私有仓库、自定义密码，或在已经装有 Engine 的服务器上运行应用，请参阅：[One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command)。
 
 想把这两步分开做？用下面的命令只安装 Engine，稍后再通过你的助手部署应用（见第 2 步）：
 
@@ -103,7 +107,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 curl -fsSL https://get.panelalpha.com/engine | sh
 ```
 
-就这样，服务器已经就绪。自定义名称、自备 TLS 证书，或者服务器在 NAT 后面：[安装选项](docs/02-getting-started/install.md)。
+就这样，服务器已经就绪。如需自定义名称、自备 TLS 证书，或服务器在 NAT 后面，请参阅：[安装选项](docs/02-getting-started/install.md)。
 
 ### 第 2 步：连接你的 AI 智能体
 
