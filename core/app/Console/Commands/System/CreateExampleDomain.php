@@ -4,20 +4,16 @@ namespace App\Console\Commands\System;
 
 use App\System;
 use App\Lib\Helper;
-use App\Models\Admin;
+use App\Lib\Project\NewProjectInput;
+use App\Lib\Project\ProjectCreator;
 use App\Models\Domain;
 use App\Models\MysqlDatabase;
 use App\Models\MysqlUser;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Console\Command;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\App;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 
 class CreateExampleDomain extends Command
@@ -50,7 +46,7 @@ class CreateExampleDomain extends Command
         return $repo;
     }
 
-    public function handle(): int
+    public function handle(ProjectCreator $creator): int
     {
         $alreadyCreated = !empty(Setting::get('example-domain-created'));
         if ($alreadyCreated) {
@@ -121,32 +117,11 @@ class CreateExampleDomain extends Command
         Log::debug("create-example-domain: creating user with params", [
             'params' => $params,
         ]);
-        $response = $this->callApi('POST', '/projects', $params);
-
-        if ($response->getStatusCode() >= 400) {
-            /** @var mixed $data */
-            $data = $response->getData(true);
-            $error = 'unknown response';
-            if (is_array($data) && !empty($data['message']) && is_string($data['message'])) {
-                $error = $data['message'];
-            } else if ($content = $response->getContent()) {
-                $error = $content;
-            }
-            $this->error('ERROR during API call POST /users: ' . $error);
-            return 1;
-        }
+        $creator->queue(NewProjectInput::fromArray($params));
         Setting::set('example-domain-created', '1');
 
-        $user = User::findByUsername($params['username']);
-        if (!$user) {
-            $this->error('Something went wrong during user creation.');
-            return 1;
-        }
-        $domain = Domain::findByName($params['domain']);
-        if (!$domain) {
-            $this->error('Something went wrong during domain creation.');
-            return 1;
-        }
+        $user = User::findByUsernameOrFail($params['username']);
+        $domain = Domain::findByNameOrFail($params['domain']);
 
         // Flag this domain as an example domain for proper identification during deletion
         $domain->setAsExampleDomain();
@@ -287,23 +262,5 @@ class CreateExampleDomain extends Command
             return true;
         }
         return false;
-    }
-
-    private function callApi(string $method, string $uri, array|null $body = null): JsonResponse
-    {
-        // rootAccount(): on a fresh install there is no admins row to find.
-        Auth::setUser(Admin::rootAccount());
-
-        if (is_array($body)) {
-            $body = json_encode($body);
-        }
-
-        $request = Request::create("/api$uri", $method, content: $body);
-        $request->headers->set('Content-Type', 'application/json');
-        App::instance('request', $request);
-
-        $response = Route::dispatch($request);
-        assert($response instanceof JsonResponse);
-        return $response;
     }
 }

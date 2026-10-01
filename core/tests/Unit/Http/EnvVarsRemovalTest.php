@@ -2,7 +2,7 @@
 
 namespace Tests\Unit\Http;
 
-use App\Http\Controllers\UserController;
+use App\Lib\Deploy\EnvVarOverrides;
 use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
 use Illuminate\Http\Request;
 use Tests\TestCase;
@@ -44,9 +44,6 @@ class EnvVarsRemovalTest extends TestCase
      */
     private function mergedEnvVars(mixed $incoming, array $stored): array
     {
-        $controller = (new \ReflectionClass(UserController::class))->newInstanceWithoutConstructor();
-        $method = new \ReflectionMethod(UserController::class, 'mergedEnvVars');
-
-        return $method->invoke($controller, $incoming, $stored);
+        return EnvVarOverrides::applyIncoming($incoming, $stored);
     }
 }

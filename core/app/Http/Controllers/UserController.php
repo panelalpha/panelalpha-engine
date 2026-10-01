@@ -14,7 +14,6 @@ use App\Http\Requests\UserVerifyNewUsernameRequest;
 use App\Http\Resources\TaskResource;
 use App\Http\Resources\UserCollection;
 use App\Http\Resources\UserResource;
-use App\Jobs\DeployProject;
 use App\System;
 use App\Lib\Helper;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
@@ -22,34 +21,23 @@ use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\PlatformStage;
-use App\Lib\Deploy\Source\GitRemoteProbe;
 use App\Lib\Deploy\Source\GitUrl;
-use App\Lib\Deploy\ProjectName;
-use App\Integrations\Tunnels\PanelAlphaConnect;
-use App\Lib\Domains\DomainAllocationException;
-use App\Lib\Domains\DomainAllocator;
-use App\Lib\Project\NewProjectDetails;
-use App\Lib\Project\ProvisionChecks;
-use App\Lib\Project\SystemProvisionEnvironment;
-use App\Rules\ProjectName as ProjectNameRule;
+use App\Lib\Project\NewProjectInput;
+use App\Lib\Project\ProjectCreator;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Domains\MainDomainRename;
 use App\Lib\Limits\ResourceLimit;
 use App\Lib\Vault\RequestVault;
 use App\Models\Domain;
 use App\Models\Setting;
-use App\Models\Task;
-use App\Models\Tunnel;
 use App\System\Project\Dind;
 use App\System\Project\Dind\AppHealth;
 use App\System\Project as ProjectAggregate;
 use App\Models\User;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
@@ -276,7 +264,7 @@ class UserController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function storeAsync(UserStoreRequest $request): JsonResponse
+    public function storeAsync(UserStoreRequest $request, ProjectCreator $creator): JsonResponse
     {
         // Reject before provision so a stream-oriented client does not leave
         // an account with no matching HTTP response shape.
@@ -284,25 +272,7 @@ class UserController extends Controller
             abort(400, 'X-Deploy-Stream is not supported on POST /projects; use POST /users for a synchronous create.');
         }
 
-        // Parsed before provision: a malformed plan or recipe id must not
-        // leave an account behind with no deploy queued for it.
-        $plan = DeployPlanInput::parse($request->input(DeployPlanInput::FIELD));
-        $stages = $plan?->toArray();
-        $recipe = RecipeChoiceInput::parse($request->input(RecipeChoiceInput::FIELD));
-
-        $user = $this->provision($request);
-
-        $task = Task::start(
-            jobType: DeployProject::class,
-            queue: 'default',
-            username: $user->username,
-            details: [
-                'username' => $user->username,
-                'domain' => $user->domain,
-                'action' => 'deploy',
-            ],
-        );
-        DeployProject::dispatch($user->username, $stages, $recipe)->attachTask($task);
+        $task = $creator->queue(self::newProjectInput($request));
 
         return TaskResource::make($task)->response()->setStatusCode(202);
     }
@@ -452,303 +422,39 @@ class UserController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function store(UserStoreRequest $request): UserResource|StreamedResponse
+    public function store(UserStoreRequest $request, ProjectCreator $creator): UserResource|StreamedResponse
     {
         // Validate the streaming opt-in up front so an unknown value never
         // leaves a half-created account behind.
         $streamDeploy = $this->wantsDeployStream($request);
 
-        // What this deploy was told to run, and which recipe to run it from,
-        // if anything. Armed before provision, so a malformed one is a 422
-        // with no account behind it, and gone with the response: nothing
-        // about either is stored, so the next deploy is back on detection.
-        DeployPlanInput::arm($request);
-        RecipeChoiceInput::arm($request);
-
-        $user = $this->provision($request);
-
-        $deployLogger = null;
-        if ($user->hasGitProject() || $user->getTemplate() === 'dind') {
-            $deployLogger = DeployLogger::startSafely($user->username);
-            if ($deployLogger !== null) {
-                $gitRepo = $user->getGitRepo();
-                $deployLogger->info($gitRepo
-                    ? "Deploy started (source: git, repo: " . GitUrl::sanitize($gitRepo) . ")"
-                    : 'Deploy started (source: dind template)');
-            }
-        }
+        $user = $creator->provisionForDeploy(self::newProjectInput($request));
+        $deployLogger = $creator->startDeployLog($user);
 
         if ($deployLogger !== null && $streamDeploy) {
             return $this->respondWithDeployStream(
-                fn () => $this->runDeployPipeline($user, $deployLogger),
+                fn () => $creator->deploy($user, $deployLogger),
                 $deployLogger,
                 static fn () => ['username' => $user->username, 'domain' => $user->domain]
             );
         }
 
-        $this->runDeployPipeline($user, $deployLogger);
+        $creator->deploy($user, $deployLogger);
 
         return new UserResource($user);
     }
 
-    /**
-     * Validate, allocate a domain, and persist the user + main domain.
-     * Shared by the sync and async create paths; does not start a deploy.
-     */
-    private function provision(UserStoreRequest $request): User
+    /** The create as ProjectCreator takes it: validated fields, plus the raw ones it reads itself. */
+    private static function newProjectInput(UserStoreRequest $request): NewProjectInput
     {
-        /** @var array{
-         *   username?: ?string,
-         *   domain?: ?string,
-         *   domain_redirect_url?: ?string,
-         *   email: string,
-         *   disk_space_limit?: int,
-         *   memory_limit?: int,
-         *   cpu_limit?: float,
-         *   device_read_bps?: int,
-         *   device_write_bps?: int,
-         *   bandwidth_limit?: int,
-         *   mysql_databases_limit?: int,
-         *   ftp_accounts_limit?: int,
-         *   sftp_accounts_limit?: int,
-         *   addon_domains_limit?: int,
-         *   subdomains_limit?: int,
-         *   inodes_limit?: int,
-         *   php_fpm_pool_settings?: string,
-         *   lsphp_settings?: string,
-         *   redis_config?: string,
-         *   dedicated_ipv4?: bool,
-         *   dedicated_ipv6?: bool,
-         *   template?: string,
-         *   tunnel?: ?string,
-         *   git_repo?: string,
-         *   git_branch?: string,
-         *   git_token?: string,
-         *   env_vars?: array<string, string>,
-         * } $params
-         */
-        $params = $request->validated();
-
-        if (
-            !empty($params['domain'])
-            && Str::startsWith($params['domain'], 'www.')
-        ) {
-            $params['domain'] = Str::after($params['domain'], 'www.');
-        }
-
-        // Nothing here is required of the caller: a create with no body at all
-        // names itself after whatever the request does carry -- the repository,
-        // the domain, the recipe -- and takes a plain "app" when it carries
-        // nothing. The one-line installer (`--repo`) relies on it, and so does
-        // every agent that has a repository and no opinion about the name.
-        if (empty($params['username'])) {
-            $params['username'] = Helper::generateUsernameFrom(ProjectName::base(
-                $params['git_repo'] ?? null,
-                $params['domain'] ?? null,
-                $params['recipe'] ?? null,
-            ));
-        }
-        if (empty($params['username'])) {
-            throw ProblemException::one(
-                $request->nameField(),
-                'username_required',
-                'No project name was given and none could be generated; pass `name` ('
-                    . ProjectNameRule::EXPECTED . ').'
-            );
-        }
-
-        // Everything knowable from the request alone, asked at once and
-        // answered at once. {@see ProvisionChecks}
-        $nameField = $request->nameField();
-        $problems = (new ProvisionChecks(new SystemProvisionEnvironment()))->problems($params, $nameField);
-
-        if ($problems !== []) {
-            throw ProblemException::of($problems);
-        }
-
-        // Vault references are read once the name is known to be free, so a
-        // project entry is assigned to this project, and before the allocator
-        // spends a label on a create that would fail here. The project stores
-        // the secrets themselves; nothing reads the vault on its behalf later.
-        $params['git_token'] = RequestVault::get('git_token', $params['username']);
-        if (isset($params['env_vars']) && is_array($params['env_vars'])) {
-            $params['env_vars'] = RequestVault::get('env_vars', $params['username']);
-        }
-
-        // After the local checks because it is the only one that leaves the
-        // machine; before the allocator because everything past it spends a
-        // panelalpha.online label, and those are never released.
-        if (!empty($params['git_repo'])) {
-            $probe = (new GitRemoteProbe())->problem(
-                'git_repo',
-                $params['git_repo'],
-                // The token the clone will use. None sent means an anonymous
-                // probe, as the clone will be.
-                $params['git_token'],
-                'git_token',
-                // Asked in the same round trip: a branch the remote lacks
-                // used to be accepted here and fail the deploy at clone.
-                $params['git_branch'] ?? null,
-            );
-            if ($probe !== null) {
-                throw ProblemException::of([$probe]);
-            }
-        }
-
-        // The name, and everything about it worth reporting. Chosen before
-        // anything is created: a panelalpha.online label is bought from the
-        // licensing proxy, and a label that turns out to be taken has to be
-        // discovered while another one can still be picked -- not after an
-        // account has been built around the first guess.
-        try {
-            $allocated = (new DomainAllocator())->allocate(
-                $params['username'],
-                $params['domain'] ?? null,
-                $params['tunnel'] ?? null,
-            );
-        } catch (DomainAllocationException $e) {
-            throw ProblemException::one('domain', $e->reason, $e->getMessage());
-        }
-        $params['domain'] = $allocated->domain;
-
-        // The allocator only offers a name it has just found free, so this
-        // catches a race rather than a mistake -- kept because losing one is
-        // worth a 422 rather than a duplicate.
-        if (Domain::existsByName($params['domain'])) {
-            throw ProblemException::one(
-                'domain',
-                'domain_taken',
-                "{$params['domain']} is already on this engine."
-            );
-        }
-
-        // Auto-set template to 'dind' for Git repo users
-        if (!empty($params['git_repo']) && empty($params['template'])) {
-            $params['template'] = 'dind';
-        }
-
-        $dedicatedIpv4 = !empty($params['dedicated_ipv4']);
-        $dedicatedIpv6 = !empty($params['dedicated_ipv6']);
-
-        /** @var User */
-        $user = User::make([
-            'username' => $params['username'],
-            'domain' => $params['domain'],
-            'email' => $params['email'] ?? null,
-            'details' => NewProjectDetails::build(
-                $params,
-                $allocated->toDetails(),
-                $this->mergedEnvVars($params['env_vars'] ?? [], []),
-            ),
-        ]);
-
-        if (!empty($params['password']) && is_string($params['password'])) {
-            $details = $user->getDetails();
-            $details['site_password_enabled'] = true;
-            $details['site_password_hash'] = password_hash($params['password'], PASSWORD_BCRYPT);
-            $details['site_password_version'] = 1;
-            $user->details = $details;
-        }
-
-        // Asked again with the username on the model, which the check above
-        // cannot see: that one builds a fresh `System` from `$params` while
-        // this row is only in memory, so a username that already has a home
-        // directory or an OS user passes it and is caught here instead -- as a
-        // bare \Exception thrown inside the deploy pipeline's `preparing`
-        // stage, surfacing as `code: deploy_failed` rather than as a 422 about
-        // the name.
-        //
-        // What leaves such debris is a deploy that failed *after* createDirs()
-        // and whose rollback did not finish: suroi's test found `/home/suroi`
-        // with no database row and no container at all. Naming it here means
-        // the caller hears "that name is taken" and can choose another, which
-        // is the only thing it can do about it either way.
-        if ($user->project()->hostingExists()) {
-            throw ProblemException::one('username', 'name_unavailable', 'Username not available.');
-        }
-
-        if (
-            Domain::domainOrAliasExists($params['domain'])
-        ) {
-            throw ProblemException::one('domain', 'domain_taken', 'Domain name not available.');
-        }
-
-        $redirectEnabled = false;
-        $redirectUrl = null;
-        if (!empty($params['domain_redirect_url'])) {
-            $redirectEnabled = true;
-            $redirectUrl = $params['domain_redirect_url'];
-        }
-
-        // Free to take, and worth taking. A name whose zone answers only for
-        // the exact label registered gets no `www.`: it would resolve, reach
-        // something that has never heard of it, and fail TLS on the way.
-        $aliasAvailable = DomainPlan::wwwAliasWouldAnswer($params['domain'])
-            && !Domain::domainOrAliasExists('www.' . $params['domain']);
-
-        $domain = self::saveNewProject($user, fn (User $user): Domain => Domain::make([
-            'user_id' => $user->id,
-            'domain' => $params['domain'],
-            'type' => 'main',
-            'details' => [
-                'document_root' => "/{$params['domain']}/public_html",
-                'redirect_enabled' => $redirectEnabled,
-                'redirect_url' => $redirectUrl,
-                'aliases' => $aliasAvailable ? ['www.' . $params['domain']] : [],
-            ],
-        ]), $nameField);
-
-        if ($dedicatedIpv4) {
-            $user->assignFreeDedicatedIpv4();
-        }
-
-        if ($dedicatedIpv6) {
-            $user->assignFreeDedicatedIpv6();
-        }
-
-        // The public name was bought before the account existed; this is the
-        // row that ties it to the domain it now serves. Attached to the
-        // project's own domain by construction, which is the one arrangement
-        // where the Host the proxy forwards is the name a visitor typed.
-        if ($allocated->tunnelProvider === Tunnel::PROVIDER_PANELALPHA && $allocated->allocation !== null) {
-            PanelAlphaConnect::recordPanelAlphaTunnel($user, $domain, $allocated->allocation);
-        }
-
-        return $user;
-    }
-
-    /**
-     * Two creates of one name can both pass the checks in provision(); the
-     * unique index picks the winner, and the loser gets the 422 a sequential
-     * duplicate gets instead of a 500 (engine#8). One transaction, so the
-     * loser leaves no user row without its main domain.
-     *
-     * @param \Closure(User): Domain $mainDomain
-     * @param string $nameField the field the caller sent the name as
-     */
-    private static function saveNewProject(User $user, \Closure $mainDomain, string $nameField = 'username'): Domain
-    {
-        try {
-            return DB::transaction(function () use ($user, $mainDomain): Domain {
-                $user->save();
-                $domain = $mainDomain($user);
-                $domain->save();
-
-                return $domain;
-            });
-        } catch (UniqueConstraintViolationException $e) {
-            if (User::existsByUsername($user->username)) {
-                throw ProblemException::one(
-                    $nameField,
-                    'name_taken',
-                    "A project named '{$user->username}' already exists. Choose another name."
-                );
-            }
-            if (Domain::domainOrAliasExists($user->domain)) {
-                throw ProblemException::one('domain', 'domain_taken', "{$user->domain} is already on this engine.");
-            }
-            throw $e;
-        }
+        return new NewProjectInput(
+            $request->validated(),
+            $request->nameField(),
+            $request->input('git_token'),
+            $request->input('env_vars'),
+            $request->input(DeployPlanInput::FIELD),
+            $request->input(RecipeChoiceInput::FIELD),
+        );
     }
 
     /**
@@ -795,17 +501,6 @@ class UserController extends Controller
     }
 
     /**
-     * The synchronous deploy pipeline shared by the classic JSON response,
-     * the streamed NDJSON variant, and the async DeployProject job. Throws
-     * ValidationException after finishing the deploy log (cancelled/failed)
-     * and cleaning up on errors.
-     */
-    public function runDeployPipeline(User $user, ?DeployLogger $deployLogger, ?callable $beforeRollback = null): void
-    {
-        $user->project()->runDeployment($deployLogger, $beforeRollback);
-    }
-
-    /**
      * Opt-in NDJSON streaming of the deploy log, negotiated via the
      * X-Deploy-Stream request header. Unknown values are rejected.
      */
@@ -819,55 +514,6 @@ class UserController extends Controller
             return true;
         }
         abort(400, "Unsupported X-Deploy-Stream value: {$value}");
-    }
-
-    /**
-     * The overrides to store for a deploy that sent `env_vars`.
-     *
-     * Merged onto what the project already carries, so a caller correcting one
-     * variable does not have to resend the rest — and does not silently drop a
-     * secret an earlier deploy set. An empty value removes the key; an
-     * explicit `null` clears every override. {@see EnvVarOverrides}
-     *
-     * @param array<string, string> $stored
-     * @return array<string, string>
-     */
-    private function mergedEnvVars(mixed $incoming, array $stored): array
-    {
-        if ($incoming === null) {
-            return [];
-        }
-
-        return EnvVarOverrides::merge($stored, $this->normalizeEnvVars($incoming));
-    }
-
-    /**
-     * @param mixed $envVars
-     * @return array<string, string>
-     */
-    private function normalizeEnvVars(mixed $envVars): array
-    {
-        if (!is_array($envVars)) {
-            return [];
-        }
-        $result = [];
-        foreach ($envVars as $key => $value) {
-            if (!is_string($key) || !preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
-                continue;
-            }
-            // ConvertEmptyStringsToNull turns the documented `""` (remove this key) into null.
-            if ($value === null) {
-                $result[$key] = '';
-
-                continue;
-            }
-            if (!is_string($value) && !is_numeric($value)) {
-                continue;
-            }
-            $result[$key] = (string) $value;
-        }
-
-        return $result;
     }
 
     /**
@@ -1048,7 +694,7 @@ class UserController extends Controller
         RecipeChoiceInput::arm($request);
         if (array_key_exists('env_vars', $params)) {
             $user->setDetails([
-                'env_vars' => $this->mergedEnvVars(
+                'env_vars' => EnvVarOverrides::applyIncoming(
                     is_array($params['env_vars'] ?? null) ? RequestVault::get('env_vars', $user->username) : null,
                     $user->getEnvVars()
                 ),
@@ -1274,7 +920,7 @@ class UserController extends Controller
         RecipeChoiceInput::arm($request);
         if (array_key_exists('env_vars', $params)) {
             $user->setDetails([
-                'env_vars' => $this->mergedEnvVars($params['env_vars'] ?? null, $user->getEnvVars()),
+                'env_vars' => EnvVarOverrides::applyIncoming($params['env_vars'] ?? null, $user->getEnvVars()),
             ]);
             $user->save();
         }

@@ -45,4 +45,46 @@ final class EnvVarOverrides
 
         return $stored;
     }
+
+    /**
+     * The overrides to store for a deploy that sent `env_vars`, merged onto
+     * what the project already carries. An explicit null clears them all.
+     *
+     * @param array<string, string> $stored
+     * @return array<string, string>
+     */
+    public static function applyIncoming(mixed $incoming, array $stored): array
+    {
+        if ($incoming === null) {
+            return [];
+        }
+
+        return self::merge($stored, self::normalize($incoming));
+    }
+
+    /** @return array<string, string> */
+    private static function normalize(mixed $envVars): array
+    {
+        if (!is_array($envVars)) {
+            return [];
+        }
+        $result = [];
+        foreach ($envVars as $key => $value) {
+            if (!is_string($key) || !preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
+                continue;
+            }
+            // ConvertEmptyStringsToNull turns the documented `""` (remove this key) into null.
+            if ($value === null) {
+                $result[$key] = '';
+
+                continue;
+            }
+            if (!is_string($value) && !is_numeric($value)) {
+                continue;
+            }
+            $result[$key] = (string) $value;
+        }
+
+        return $result;
+    }
 }

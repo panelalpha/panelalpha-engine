@@ -1553,22 +1553,28 @@ json_field() { # json_field <name> <json>
     printf '%s' "$2" | sed -n "s/.*\"$1\":\"\\([^\"]*\\)\".*/\\1/p" | head -n1
 }
 
-# Prefer a concrete failure line from project:create output (HTTP 4xx/5xx or
-# "Deploy failed: …"); otherwise the last non-empty line.
+# The reason project:create gave: its first unindented line (the deploy log it
+# streams is indented, and the reason follows it on stderr), else the log's
+# "Deploy failed: …", else the last non-empty line. Never the "Deploy log:"
+# hint, nor the "In <file> line <n>:" header artisan puts above an exception.
 deploy_error_reason() {
-    local out="$1" line reason=""
+    local out="$1" line reason="" failed=""
     while IFS= read -r line; do
         case "$line" in
-        *'HTTP 4'* | *'HTTP 5'*)
-            reason=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+        '' | [[:space:]]* | 'Deploy log:'* | 'In '*' line '*':') ;;
+        *)
+            [ -n "$reason" ] || reason=$(printf '%s' "$line" | sed -E 's/[[:space:]]+$//')
             ;;
+        esac
+        case "$line" in
         *'Deploy failed:'*)
-            reason=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/.*Deploy failed:[[:space:]]*//; s/[[:space:]]+$//')
+            failed=$(printf '%s' "$line" | sed -E 's/.*Deploy failed:[[:space:]]*//; s/[[:space:]]+$//')
             ;;
         esac
     done <<EOF
 $out
 EOF
+    [ -n "$reason" ] || reason="$failed"
     if [ -z "$reason" ]; then
         reason=$(printf '%s\n' "$out" | sed '/^[[:space:]]*$/d' | tail -n1 | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
     fi
@@ -1593,15 +1599,20 @@ deploy_repository() {
         args+=("--email=${INSTALL_EMAIL}")
     fi
 
-    # --json: JSON on stdout, live deploy log on stderr. Stream stderr to the
-    # caller's stdout (TUI tails it) via fd 3 so it is not swallowed by >$out_file.
+    # --json: JSON on stdout; the live deploy log, then any failure reason, on
+    # stderr. stderr is streamed to the caller's stdout (TUI tails it) via fd 3.
+    # A pipeline rather than >(tee …): bash waits for tee, so the reason -- the
+    # last line written -- is in $err_file before it is read.
     local out_file err_file result ec=0
     out_file=$(mktemp)
     err_file=$(mktemp)
 
     exec 3>&1
-    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
-        php artisan "${args[@]}" >"$out_file" 2> >(tee "$err_file" >&3) || ec=$?
+    {
+        docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core \
+            php artisan "${args[@]}" 2>&1 >"$out_file" | tee "$err_file" >&3
+        ec=${PIPESTATUS[0]}
+    } || true
     exec 3>&-
 
     result=$(

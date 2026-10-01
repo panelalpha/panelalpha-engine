@@ -2,34 +2,36 @@
 
 namespace App\Console\Commands\Users;
 
-use App\Console\Commands\Concerns\DispatchesApiRoute;
+use App\Exceptions\DeployAlreadyRunningException;
+use App\Exceptions\DockerErrorException;
+use App\Http\Resources\UserResource;
 use App\Lib\Deploy\DeployLog\DeployLineFormat;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Domains\PublicUrl;
+use App\Lib\Project\NewProjectInput;
+use App\Lib\Project\ProjectCreator;
 use App\Models\Domain;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Console\Command;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\Console\Output\ConsoleOutputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\HttpFoundation\Response;
 
 /**
- * The command behind POST /users, and what the one-line installer
+ * The CLI twin of POST /users, and what the one-line installer
  * (`installer.sh --repo …`) calls once the engine is up. Every detail is
  * optional: the account name, the domain and the template are generated from
  * the repository, so `pae project:create --repo owner/repo` is a whole install.
  *
- * The synchronous route on purpose -- the deploy runs in this process, so the
+ * The synchronous create on purpose -- the deploy runs in this process, so the
  * command exits when the application is actually live and its exit code says
- * whether it is. The async POST /projects would hand back a task id and leave
- * the caller polling.
+ * whether it is. A queued create would hand back a task id and leave the
+ * caller polling.
  */
 class Create extends Command
 {
-    use DispatchesApiRoute;
-
     /** The plural spellings the other project commands answer to. */
     protected $aliases = ['projects:create', 'users:create'];
 
@@ -48,7 +50,7 @@ class Create extends Command
 
     protected $description = 'Create a project and deploy a repository into it; details not given are generated';
 
-    public function handle(): int
+    public function handle(ProjectCreator $creator): int
     {
         $params = [];
         foreach ([
@@ -92,21 +94,29 @@ class Create extends Command
         $this->followDeployLog();
 
         try {
-            $response = $this->dispatchApiRoute('POST', '/users', $params);
+            $user = $creator->create(NewProjectInput::fromArray($params));
+        } catch (ValidationException | DeployAlreadyRunningException | DockerErrorException $e) {
+            // The hint first: the console renderer prints the reason after it.
+            $this->pointAtDeployLog($params);
+
+            throw $e;
         } finally {
             DeployLogger::stopStreaming();
         }
-        if ($response->getStatusCode() >= 400) {
-            $this->error($this->errorMessage($response));
-            // A failed deploy is rolled back but its log is kept, and the
-            // sentence above is a summary of it.
-            if (isset($params['git_repo'])) {
-                $this->line('Deploy log: pae project:deploy:list');
-            }
-            return 1;
-        }
 
-        return $this->report($response);
+        return $this->report((string) (new UserResource($user))->response()->getContent());
+    }
+
+    /**
+     * A failed deploy is rolled back but its log is kept.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function pointAtDeployLog(array $params): void
+    {
+        if (isset($params['git_repo'])) {
+            $this->line('Deploy log: pae project:deploy:list');
+        }
     }
 
     /**
@@ -202,11 +212,8 @@ class Create extends Command
     }
 
     /** The created project, as JSON or as the two lines an installer prints. */
-    private function report(Response $response): int
+    private function report(string $body): int
     {
-        $body = $response->getContent();
-        $body = $body === false ? '' : $body;
-
         if ($this->option('json')) {
             $this->output->writeln($body);
             return 0;

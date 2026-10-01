@@ -14,6 +14,7 @@ final class ProvisionCutoverTest extends TestCase
         $root = dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'app';
         $paths = [
             'Http/Controllers/UserController.php',
+            'Lib/Project/ProjectCreator.php',
             'Http/Controllers/User/StagingController.php',
             'Console/Commands/Users/Rebuild.php',
             'Console/Commands/Users/RecoverDind.php',

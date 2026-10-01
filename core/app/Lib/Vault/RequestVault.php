@@ -34,7 +34,18 @@ class RequestVault
      */
     public static function get(string $field, ?string $project, ?string $type = null): mixed
     {
-        $value = request()->input($field);
+        return self::resolve($field, request()->input($field), $project, $type);
+    }
+
+    /**
+     * {@see get()} for a value the caller already holds, such as a create
+     * that did not come in as a request.
+     *
+     * @return mixed the value, with every reference read
+     * @throws ValidationException naming `$field` when a reference cannot be used
+     */
+    public static function resolve(string $field, mixed $value, ?string $project, ?string $type = null): mixed
+    {
         $type ??= $field;
 
         return is_array($value)
