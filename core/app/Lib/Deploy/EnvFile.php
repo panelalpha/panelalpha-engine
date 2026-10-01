@@ -56,12 +56,18 @@ class EnvFile
                 $rows[] = ['type' => 'comment', 'text' => $line];
                 continue;
             }
-            if (preg_match('/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/s', $line, $m)) {
-                $rows[] = [
+            // `KEY = "v"` is accepted by Compose's dotenv too; the space is not part of the value.
+            if (preg_match('/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=[ \t]*(.*)$/s', $line, $m)) {
+                $row = [
                     'type' => 'variable',
                     'key' => $m[1],
                     'value' => self::unquote($m[2]),
                 ];
+                // Single quotes keep `$` literal; remember so a rewrite does too.
+                if (strlen($m[2]) >= 2 && $m[2][0] === "'" && str_ends_with($m[2], "'")) {
+                    $row['literal'] = true;
+                }
+                $rows[] = $row;
                 continue;
             }
             $rows[] = ['type' => 'comment', 'text' => $line];
@@ -83,7 +89,7 @@ class EnvFile
                     if ($key === '') {
                         continue 2;
                     }
-                    $lines[] = $key . '=' . self::quote((string) ($row['value'] ?? ''));
+                    $lines[] = $key . '=' . self::quote((string) ($row['value'] ?? ''), ($row['literal'] ?? false) === true);
                     break;
                 case 'comment':
                     $lines[] = (string) ($row['text'] ?? '');
@@ -125,12 +131,13 @@ class EnvFile
             $key = $row['key'] ?? '';
             if ($key !== '' && array_key_exists($key, $filtered)) {
                 $rows[$i]['value'] = $filtered[$key];
+                $rows[$i]['literal'] = true;
                 $seen[$key] = true;
             }
         }
         foreach ($filtered as $key => $value) {
             if (!isset($seen[$key])) {
-                $rows[] = ['type' => 'variable', 'key' => $key, 'value' => $value];
+                $rows[] = ['type' => 'variable', 'key' => $key, 'value' => $value, 'literal' => true];
             }
         }
 
@@ -208,10 +215,23 @@ class EnvFile
         return rtrim($value);
     }
 
-    private static function quote(string $value): string
+    /**
+     * $literal: the value is meant as written (a value the engine was given), so
+     * a `$` in it must not reach Compose's interpolation (bcrypt hashes, passwords).
+     */
+    private static function quote(string $value, bool $literal = false): string
     {
         if ($value === '') {
             return '';
+        }
+        if ($literal && str_contains($value, '$')) {
+            if (preg_match("/['\n\r]/", $value) !== 1) {
+                return "'" . $value . "'";
+            }
+            // Cannot be single-quoted; `$$` is Compose's escape inside double quotes.
+            $escaped = str_replace(['\\', '"', "\n", "\r", "\t", '$'], ['\\\\', '\\"', '\\n', '\\r', '\\t', '$$'], $value);
+
+            return '"' . $escaped . '"';
         }
         $needsQuoting = preg_match('/[\s"\'#\\\\]/', $value) === 1
             || $value[0] === '"' || $value[0] === "'";

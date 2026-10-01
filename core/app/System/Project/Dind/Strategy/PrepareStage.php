@@ -90,7 +90,7 @@ class PrepareStage
             . " && timeout --foreground --kill-after=30 {$innerTimeout} bash "
             . escapeshellarg($setupScriptPath);
         $shell = $this->dind->shell();
-        $shell->execAsUser(['bash', '-c', $script], [], $timeout);
+        $shell->execAsUserWithProjectEnv(['bash', '-c', $script], $timeout);
         $shell->exec(['rm', '-f', $setupScriptPath]);
     }
 }

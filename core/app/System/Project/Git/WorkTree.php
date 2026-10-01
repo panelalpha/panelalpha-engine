@@ -167,10 +167,12 @@ abstract class WorkTree
     }
 
     /**
-     * Shallow clone into this instance's absolute path (no -C; clone creates the dir).
+     * Shallow clone into this instance's absolute path, or $into (no -C; clone creates the dir).
      */
-    public function clone(string $repoUrl, ?string $branch, ?string $token): void
+    public function clone(string $repoUrl, ?string $branch, ?string $token, ?string $into = null): void
     {
+        $target = $into ?? $this->absolutePath;
+
         if ($token !== null && $token !== '') {
             try {
                 GitUrl::assertSafeForToken($repoUrl);
@@ -179,16 +181,25 @@ abstract class WorkTree
             }
         }
 
-        $cmd = ['git', '-c', 'safe.directory=' . $this->absolutePath, 'clone', '--depth=1'];
+        $cmd = ['git', '-c', 'safe.directory=' . $target, 'clone', '--depth=1'];
         if ($branch !== null && $branch !== '') {
             GitRef::assertName($branch);
             $cmd[] = '--branch';
             $cmd[] = $branch;
         }
         $cmd[] = $repoUrl;
-        $cmd[] = $this->absolutePath;
+        $cmd[] = $target;
 
-        $this->execute($cmd, $token);
+        try {
+            $this->execute($cmd, $token);
+        } catch (GitException $e) {
+            if (preg_match('/expected flush after ref listing/i', $e->getMessage()) !== 1) {
+                throw $e;
+            }
+            // GitHub's edge at times refuses older git's HTTP/2 fingerprint once the refs
+            // are listed; the same request over HTTP/1.1 is let through.
+            $this->execute(['git', '-c', 'http.version=HTTP/1.1', ...array_slice($cmd, 1)], $token);
+        }
     }
 
     /**

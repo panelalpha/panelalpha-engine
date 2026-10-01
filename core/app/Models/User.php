@@ -1242,9 +1242,11 @@ class User extends Authenticatable
      */
     public function markDeploySucceeded(): void
     {
+        // A failed deploy's message would otherwise sit beside the success.
         $this->setDetails([
             'deployment_status' => 'success',
             'deployment_warnings' => [],
+            'error' => null,
         ]);
     }
 

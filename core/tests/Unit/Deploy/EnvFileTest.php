@@ -245,6 +245,29 @@ class EnvFileTest extends TestCase
         $this->assertSame('', $values['EMPTY']);
     }
 
+    public function test_parse_ignores_spaces_around_the_equals_sign(): void
+    {
+        $rows = EnvFile::parse("HATSU_LOG = \"info,tokio::net=debug\"\nHATSU_DOMAIN =  hatsu.local\nSINGLE = 'a b'\n");
+        $values = array_column($rows, 'value', 'key');
+
+        $this->assertSame('info,tokio::net=debug', $values['HATSU_LOG']);
+        $this->assertSame('hatsu.local', $values['HATSU_DOMAIN']);
+        $this->assertSame('a b', $values['SINGLE']);
+    }
+
+    public function test_merge_does_not_corrupt_spaced_example_lines(): void
+    {
+        $merged = EnvFile::merge(
+            "HATSU_LOG = \"info,tokio::net=debug,sqlx::query=warn\"\nHATSU_DOMAIN = \"hatsu.local\"\n",
+            ['HATSU_PRIMARY_ACCOUNT' => 'blog.rust-lang.org']
+        );
+
+        $this->assertSame(
+            "HATSU_LOG=info,tokio::net=debug,sqlx::query=warn\nHATSU_DOMAIN=hatsu.local\nHATSU_PRIMARY_ACCOUNT=blog.rust-lang.org\n",
+            $merged
+        );
+    }
+
     public function test_serialise_round_trips_and_quotes_only_when_needed(): void
     {
         $source = "# header\n\nPLAIN=simple\nSPACED=\"two words\"\n";
@@ -301,6 +324,35 @@ class EnvFileTest extends TestCase
         $this->assertSame(
             "SECRET=\"a b#c\"\n",
             EnvFile::merge("SECRET=old\n", ['SECRET' => 'a b#c'])
+        );
+    }
+
+    public function test_merge_keeps_a_dollar_in_a_given_value_away_from_compose_interpolation(): void
+    {
+        $hash = 'admin:$2y$10$NBMM7ztxyz';
+
+        $this->assertSame(
+            "TINYAUTH_AUTH_USERS='admin:\$2y\$10\$NBMM7ztxyz'\n",
+            EnvFile::merge('', ['TINYAUTH_AUTH_USERS' => $hash])
+        );
+        $this->assertSame(
+            "PASS=\"it's \$\$HOME\"\n",
+            EnvFile::merge("PASS=old\n", ['PASS' => "it's \$HOME"]),
+            'a value with a quote as well falls back to compose\'s $$ escape'
+        );
+        $this->assertSame($hash, EnvFile::parse(EnvFile::merge('', ['A' => $hash]))[0]['value']);
+    }
+
+    public function test_merge_leaves_the_repository_interpolation_alone(): void
+    {
+        $merged = EnvFile::merge(
+            "DATABASE_URL=postgres://\${DB_USER}@db/app\nSINGLE='lit\$eral'\n",
+            ['DB_USER' => 'app']
+        );
+
+        $this->assertSame(
+            "DATABASE_URL=postgres://\${DB_USER}@db/app\nSINGLE='lit\$eral'\nDB_USER=app\n",
+            $merged
         );
     }
 

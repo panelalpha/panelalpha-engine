@@ -339,16 +339,14 @@ class SpoolTest extends TestCase
     }
 
     /**
-     * The outbox's parent is claimed whatever it is named -- here the shared
-     * temp dir, which is why these tests fake the runner. Never `/` itself.
+     * A custom TELEMETRY_SPOOL_DIR such as /srv/outbox must not hand /srv to
+     * www-data: outside the storage layout only the outbox itself is claimed.
      */
-    public function test_the_parent_is_claimed_whatever_it_is_named(): void
+    public function test_a_parent_outside_the_storage_layout_is_left_alone(): void
     {
         $this->spool()->ensureDirectory();
 
-        $chowned = $this->chowned();
-        $this->assertContains(dirname($this->dir), $chowned);
-        $this->assertNotContains('/', $chowned);
+        $this->assertSame([$this->dir], $this->chowned());
     }
 
     /** In the storage layout the walk claims outbox, telemetry and app, and stops there. */

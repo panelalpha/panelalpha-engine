@@ -115,7 +115,10 @@ final class DindDeployMechanics implements DeployMechanics
     public function syncHostingForSourceRebuild(?string $zipPath): void
     {
         $project = $this->aggregate();
-        $this->stopApplicationBeforeWipe();
+        // A git re-clone stops the app itself, once the new source is in hand.
+        if (!$this->reclonesOnRebuild($zipPath)) {
+            $this->stopApplicationBeforeWipe();
+        }
         $project->prepareLinuxIsolation();
         if ($zipPath !== null && $zipPath !== '') {
             $project->importProjectArchive($zipPath);
@@ -146,11 +149,19 @@ final class DindDeployMechanics implements DeployMechanics
         );
     }
 
+    private function reclonesOnRebuild(?string $zipPath): bool
+    {
+        return $this->user()->hasGitProject() && ($zipPath === null || $zipPath === '');
+    }
+
     public function ingestForWipeRebuild(?string $zipPath): void
     {
-        if ($this->user()->hasGitProject() && ($zipPath === null || $zipPath === '')) {
+        if ($this->reclonesOnRebuild($zipPath)) {
             $this->dind->preCheckFromSources();
-            (new GitRepository($this->dind))->cloneConfiguredRepository();
+            // Cloned beside ~/project first: a failed clone must not take the running app down.
+            (new GitRepository($this->dind))->cloneConfiguredRepository(
+                fn () => $this->stopApplicationBeforeWipe(),
+            );
             // Re-clone lands on the same ~/project the wipe just cleared; bootstrap it
             // like ingestApplicationSource() does, or the app config's files never come back.
             $this->dind->prepareFromSources();
@@ -218,6 +229,7 @@ final class DindDeployMechanics implements DeployMechanics
         $this->user()->setDetails([
             'deployment_warnings' => $warnings,
             'deployment_status' => 'partial',
+            'error' => null,
         ]);
         $this->user()->save();
     }

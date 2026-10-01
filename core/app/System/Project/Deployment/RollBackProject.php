@@ -20,10 +20,10 @@ final class RollBackProject implements FailureDisposition
         $this->destroy($user);
     }
 
-    /** The template path never kept the log tail of a cancelled deploy. */
+    /** The rollback deletes the deploy log, so a cancel needs the tail kept as much as a failure. */
     public function hookRunsOnCancel(): bool
     {
-        return false;
+        return true;
     }
 
     public function hookName(): string

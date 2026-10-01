@@ -146,6 +146,7 @@ final class TemplateDeployMechanics implements DeployMechanics
         $this->user()->setDetails([
             'deployment_warnings' => $warnings,
             'deployment_status' => 'partial',
+            'error' => null,
         ]);
         $this->user()->save();
     }

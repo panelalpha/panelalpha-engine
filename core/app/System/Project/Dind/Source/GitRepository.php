@@ -50,21 +50,21 @@ class GitRepository extends WorkTree
 
     /**
      * Clone the account's configured git remote into ~/project (no deploy preparation).
+     *
+     * With $beforeReplacing the clone lands in a staging directory first, and
+     * ~/project is only emptied (after $beforeReplacing ran) once it succeeded,
+     * so a failed clone leaves the running app and its files alone.
      */
-    public function cloneConfiguredRepository(): void
+    public function cloneConfiguredRepository(?callable $beforeReplacing = null): void
     {
         $user = $this->project->userModel();
-        $system = $this->project->system();
         $gitRepo = $user->getGitRepoOrFail();
-        $chown = $user->getChownString();
         $gitProjectDir = $this->tree()->appDirPath();
         $logger = $this->project->shell()->logger();
 
-        $system->exec(['sudo', 'mkdir', '-p', $gitProjectDir]);
-        if ($chown) {
-            $system->exec(['sudo', 'chown', $chown, $gitProjectDir]);
+        if ($beforeReplacing === null) {
+            $this->emptyDirectoryFor($gitProjectDir);
         }
-        $this->tree()->clearContents($gitProjectDir);
 
         $gitToken = $user->getGitToken();
         $safeRepo = GitUrl::sanitize($gitRepo);
@@ -76,7 +76,11 @@ class GitRepository extends WorkTree
         }
 
         try {
-            $this->clone($gitRepo, $branch, $gitToken);
+            if ($beforeReplacing === null) {
+                $this->clone($gitRepo, $branch, $gitToken);
+            } else {
+                $this->cloneThenReplace($gitRepo, $branch, $gitToken, $gitProjectDir, $beforeReplacing);
+            }
             $this->adoptCheckout($gitRepo, $branch, $gitToken);
         } catch (GitException $e) {
             throw new \RuntimeException($e->getMessage(), 0, $e);
@@ -85,6 +89,43 @@ class GitRepository extends WorkTree
         $logger?->ok('Repository cloned');
         $this->fetchSubmodules($gitToken);
         $this->allowUntrustedGitDirectory();
+    }
+
+    private function cloneThenReplace(
+        string $gitRepo,
+        ?string $branch,
+        ?string $gitToken,
+        string $gitProjectDir,
+        callable $beforeReplacing,
+    ): void {
+        $stagingDir = $this->tree()->stagingDirPath();
+        $this->tree()->removeStaging($stagingDir);
+        $this->emptyDirectoryFor($stagingDir, clear: false);
+
+        try {
+            $this->clone($gitRepo, $branch, $gitToken, $stagingDir);
+        } catch (\Throwable $e) {
+            $this->tree()->removeStaging($stagingDir);
+            throw $e;
+        }
+
+        $beforeReplacing();
+        $this->emptyDirectoryFor($gitProjectDir);
+        $this->tree()->moveStagingInto($stagingDir, $gitProjectDir);
+    }
+
+    private function emptyDirectoryFor(string $dir, bool $clear = true): void
+    {
+        $system = $this->project->system();
+        $chown = $this->project->userModel()->getChownString();
+
+        $system->exec(['sudo', 'mkdir', '-p', $dir]);
+        if ($chown) {
+            $system->exec(['sudo', 'chown', $chown, $dir]);
+        }
+        if ($clear) {
+            $this->tree()->clearContents($dir);
+        }
     }
 
     public function allowUntrustedGitDirectory(): void

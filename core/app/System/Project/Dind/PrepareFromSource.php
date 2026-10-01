@@ -243,7 +243,7 @@ class PrepareFromSource
         try {
             // Hooks explain a refusal on stdout; the failure message is built
             // from stderr, so without this it only names the script.
-            $this->dind->shell()->execAsUser(['bash', '-c', 'exec bash "$0" 1>&2', $path]);
+            $this->dind->shell()->execAsUserWithProjectEnv(['bash', '-c', 'exec bash "$0" 1>&2', $path]);
         } catch (DeployCancelledException $e) {
             throw $e;
         } catch (\Exception $e) {

@@ -855,6 +855,12 @@ class UserController extends Controller
             if (!is_string($key) || !preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
                 continue;
             }
+            // ConvertEmptyStringsToNull turns the documented `""` (remove this key) into null.
+            if ($value === null) {
+                $result[$key] = '';
+
+                continue;
+            }
             if (!is_string($value) && !is_numeric($value)) {
                 continue;
             }
@@ -1179,6 +1185,7 @@ class UserController extends Controller
             $user->setDetails([
                 'deployment_status' => 'partial',
                 'deployment_warnings' => $warnings,
+                'error' => null,
             ]);
             $user->save();
 

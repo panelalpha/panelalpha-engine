@@ -33,6 +33,9 @@ final class ShellOperations
         . 'tr "\0" "\n" < "$d/environ" 2>/dev/null | grep -qxF "$1" && kill -s $sig "${d#/proc/}" 2>/dev/null; '
         . 'done; [ $sig = TERM ] && sleep 3; done; true';
 
+    /** A hook's shell needs these itself; a project env var of the same name is not exported to it. */
+    private const HOOK_RESERVED_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'PWD', 'IFS', 'BASH_ENV', 'ENV'];
+
     public function __construct(
         private DindProject $project,
     ) {
@@ -134,6 +137,48 @@ final class ShellOperations
         $cmdStr = implode(' ', array_map('escapeshellarg', $cmd));
 
         return $this->exec(['su', '-s', '/bin/bash', $username, '-c', $cmdStr], $env, $timeout);
+    }
+
+    /**
+     * execAsUser() with the project's env vars exported, so a recipe hook can
+     * check them (a precheck refusing a deploy for a missing token). The values
+     * go through a 0600 file in the home, never argv or the deploy log.
+     *
+     * @param list<string> $cmd
+     */
+    public function execAsUserWithProjectEnv(array $cmd, int $timeout = 600): string
+    {
+        $user = $this->project->userModel();
+        $lines = [];
+        foreach ($user->getEnvVars() as $key => $value) {
+            if (!in_array($key, self::HOOK_RESERVED_ENV, true)) {
+                $lines[] = $key . '=' . escapeshellarg((string) $value);
+            }
+        }
+        if ($lines === []) {
+            return $this->execAsUser($cmd, [], $timeout);
+        }
+
+        $path = rtrim($this->project->homeDirPath(), '/') . '/.panelalpha-hook-env-' . bin2hex(random_bytes(8));
+        $this->project->system()->filesystem()->filePutContents(
+            $path,
+            implode("\n", $lines) . "\n",
+            $user->getChownString() ?: $this->project->username(),
+            '600',
+        );
+        try {
+            return $this->execAsUser(
+                ['bash', '-c', 'set -a && . "$1" && set +a && shift && exec "$@"', 'hook-env', $path, ...$cmd],
+                [],
+                $timeout,
+            );
+        } finally {
+            try {
+                $this->execQuiet(['rm', '-f', $path]);
+            } catch (\Throwable) {
+                // The hook's own outcome matters more; the file is the account's, 0600.
+            }
+        }
     }
 
     public function runShellAsUser(string $command, ?string $cwd = null, int $timeout = 300): Process
