@@ -5,12 +5,10 @@ namespace App\Http\Controllers\User;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\UserPhpListCustomIniSettingsRequest;
 use App\Http\Requests\UserPhpUpdateCustomIniSettingsRequest;
-use App\Models\User;
+use App\Lib\Project\CustomIniSettings;
 use App\System as EngineSystem;
-use App\System\Project\PhpHosting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
-use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
 class PhpController extends Controller
@@ -33,18 +31,10 @@ class PhpController extends Controller
     public function listCustomIniSettings(string $username, UserPhpListCustomIniSettingsRequest $request, EngineSystem $system): JsonResponse
     {
         $user = $this->projectOrNotFound($username);
-        $this->requirePhpHosting($user, $system);
 
         /** @var array{php_version: string} */
         $params = $request->validated();
-        $versions = $system->php()->listAvailablePhpVersions();
-        if (!in_array($params['php_version'], $versions)) {
-            throw ValidationException::withMessages([
-                'php_version' => 'Invalid value',
-            ]);
-        }
-
-        $data = $user->project($system)->php()->getCustomIniSettings($params['php_version']);
+        $data = (new CustomIniSettings($system))->get($user, $params['php_version']);
 
         return new JsonResponse([
             'data' => $data,
@@ -73,41 +63,11 @@ class PhpController extends Controller
     public function updateCustomIniSettings(string $username, UserPhpUpdateCustomIniSettingsRequest $request, EngineSystem $system): JsonResponse
     {
         $user = $this->projectOrNotFound($username);
-        $this->requirePhpHosting($user, $system);
 
         /** @var array{php_version: string, settings: array<string,string>} */
         $params = $request->validated();
-        $versions = $system->php()->listAvailablePhpVersions();
-        if (!in_array($params['php_version'], $versions)) {
-            throw ValidationException::withMessages([
-                'php_version' => 'Invalid value',
-            ]);
-        }
-
-        try {
-            // The version in the body is the identity of the set. Other
-            // installed versions keep whatever they already have.
-            $user->project($system)->php()->updateCustomIniSettings($params['php_version'], $params['settings']);
-        } catch (\Exception $e) {
-            throw ValidationException::withMessages([
-                'settings' => 'Could not set php.ini directives. ' . $e->getMessage(),
-            ]);
-        }
+        (new CustomIniSettings($system))->replace($user, $params['php_version'], $params['settings']);
 
         return new JsonResponse(null, Response::HTTP_NO_CONTENT);
-    }
-
-    /**
-     * The file is mounted into the project's own PHP containers. A dind app
-     * runs PHP from its own image, which never reads it.
-     */
-    private function requirePhpHosting(User $user, EngineSystem $system): void
-    {
-        if (!$user->project($system)->runtime() instanceof PhpHosting) {
-            throw ValidationException::withMessages([
-                'project' => 'Custom PHP INI settings apply only to PHP hosting projects. '
-                    . 'A dind project runs PHP from its own image; set php.ini there.',
-            ]);
-        }
     }
 }

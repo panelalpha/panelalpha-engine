@@ -5,11 +5,11 @@ namespace App\Http\Controllers;
 use App\Http\Requests\DomainReplacePhpDirectivesRequest;
 use App\Http\Requests\DomainSetPhpVersionRequest;
 use App\Http\Resources\DomainResource;
+use App\Lib\Domains\DomainPhpVersion;
 use App\System;
 use App\Models\Domain;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
-use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
 class DomainController extends Controller
@@ -84,24 +84,7 @@ class DomainController extends Controller
 
         /** @var array{version: string} */
         $params = $request->validated();
-
-        $system = new System();
-        $versions = $system->php()->listAvailablePhpVersions();
-
-        if (!in_array($params['version'], $versions)) {
-            throw ValidationException::withMessages([
-                'version' => 'Invalid value',
-            ]);
-        }
-
-        $domainModel->setPhpVersion($params['version']);
-        $domainModel->save();
-        $domainModel->projectDomain()->rebuild();
-
-        $domainModel->getUser()->project()->syncPhpHandlersScripts();
-        $domainModel->getUser()->project()->runEntrypointScriptsSync();
-        // A 204 has no body to flag a pending reload in; reloadWebserver() logs it.
-        $system->reloadWebserver();
+        (new DomainPhpVersion())->set($domainModel, $params['version']);
 
         return new JsonResponse(null, Response::HTTP_NO_CONTENT);
     }

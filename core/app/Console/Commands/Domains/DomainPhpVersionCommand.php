@@ -2,12 +2,17 @@
 
 namespace App\Console\Commands\Domains;
 
-use App\Console\Commands\Concerns\CallsEngineApi;
+use App\Console\Commands\Concerns\PrintsPhpSettings;
+use App\Http\Requests\DomainSetPhpVersionRequest;
+use App\Lib\Domains\DomainPhpVersion;
+use App\Models\Domain;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Validator;
+use Throwable;
 
 class DomainPhpVersionCommand extends Command
 {
-    use CallsEngineApi;
+    use PrintsPhpSettings;
 
     protected $signature = 'domain:php-version
         {domain : Canonical domain name}
@@ -26,25 +31,34 @@ class DomainPhpVersionCommand extends Command
 
         $version = $this->argument('version');
         if (is_string($version) && $version !== '') {
-            $response = $this->dispatchEngine('PUT', "/domains/{$domain}/php-version", [
-                'version' => $version,
-            ]);
-            if ($response->getStatusCode() >= 400) {
-                return $this->rejectEngineResponse($response);
+            try {
+                Validator::make(['version' => $version], (new DomainSetPhpVersionRequest())->rules())->validate();
+
+                $domainModel = Domain::findByName($domain);
+                if (!$domainModel) {
+                    return $this->rejectWithBody('"Not Found"');
+                }
+
+                (new DomainPhpVersion())->set($domainModel, $version);
+            } catch (Throwable $e) {
+                return $this->rejectWithException($e);
             }
 
             return 0;
         }
 
-        $response = $this->dispatchEngine('GET', "/domains/{$domain}/php-version");
-        if ($response->getStatusCode() >= 400) {
-            return $this->rejectEngineResponse($response);
-        }
+        try {
+            $domainModel = Domain::findByName($domain);
+            if (!$domainModel) {
+                return $this->rejectWithBody('"Not Found"');
+            }
 
-        /** @var mixed $payload */
-        $payload = json_decode((string) $response->getContent(), true);
-        $value = is_array($payload) ? ($payload['data'] ?? '') : '';
-        $this->line(is_scalar($value) ? (string) $value : '');
+            $value = $domainModel->getPhpVersion();
+            $this->requireEncodable($value);
+        } catch (Throwable $e) {
+            return $this->rejectWithException($e);
+        }
+        $this->line($value ?? '');
 
         return 0;
     }

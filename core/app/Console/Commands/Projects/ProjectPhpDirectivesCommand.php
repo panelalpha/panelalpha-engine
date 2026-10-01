@@ -2,12 +2,19 @@
 
 namespace App\Console\Commands\Projects;
 
-use App\Console\Commands\Concerns\CallsEngineApi;
+use App\Console\Commands\Concerns\PrintsPhpSettings;
+use App\Http\Requests\UserPhpListCustomIniSettingsRequest;
+use App\Lib\Project\CustomIniSettings;
+use App\Models\User;
+use App\System;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Validator;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Throwable;
 
 class ProjectPhpDirectivesCommand extends Command
 {
-    use CallsEngineApi;
+    use PrintsPhpSettings;
 
     protected $signature = 'project:php-directives
         {username : Hosting account username}
@@ -25,26 +32,17 @@ class ProjectPhpDirectivesCommand extends Command
             return 1;
         }
 
-        $response = $this->dispatchEngine(
-            'GET',
-            '/projects/' . rawurlencode($username) . '/php/custom-ini-settings?php_version=' . rawurlencode($version),
-        );
-        if ($response->getStatusCode() >= 400) {
-            return $this->rejectEngineResponse($response);
+        try {
+            Validator::make(['php_version' => $version], (new UserPhpListCustomIniSettingsRequest())->rules())->validate();
+
+            $user = User::findByUsername($username) ?? throw new NotFoundHttpException('Not found');
+            $settings = (new CustomIniSettings(app(System::class)))->get($user, $version);
+            $this->requireEncodable($settings);
+        } catch (Throwable $e) {
+            return $this->rejectWithException($e);
         }
 
-        /** @var mixed $payload */
-        $payload = json_decode((string) $response->getContent(), true);
-        $data = is_array($payload) ? ($payload['data'] ?? []) : [];
-        $map = [];
-        if (is_array($data)) {
-            foreach ($data as $key => $value) {
-                if (is_string($key) && is_string($value)) {
-                    $map[$key] = $value;
-                }
-            }
-        }
-        $this->printDirectiveMap($map);
+        $this->printDirectiveMap($settings);
 
         return 0;
     }
