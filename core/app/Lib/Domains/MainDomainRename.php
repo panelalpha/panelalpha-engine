@@ -69,7 +69,9 @@ final class MainDomainRename
                 $newDomain->addAlias('www.' . $newFqdn);
                 continue;
             }
-            $newDomain->addAlias($alias);
+            // Not addAlias(): the old row, this same domain, still holds it, so
+            // the availability check would find it taken.
+            $newDomain->setDetails(['aliases' => [...$newDomain->getAliases(), $alias]]);
         }
 
         return $newDomain;

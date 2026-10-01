@@ -81,4 +81,31 @@ class ProjectUpdateTest extends TestCase
         $this->assertSame('/old.test/public_html', $renamed->getDetails()['document_root'], 'the document root does not move');
         $this->assertFalse($renamed->exists, 'built, not saved');
     }
+
+    /** Its other aliases are still held by the old row, which is this same domain. */
+    public function test_the_renamed_main_domain_keeps_its_other_aliases(): void
+    {
+        $user = $this->makeUser('alice', ['template' => 'wordpress'], 'old.test');
+        $domain = $this->makeMainDomain($user, 'old.test');
+        $domain->setDetails(['aliases' => ['www.old.test', 'shop.test']]);
+        $domain->save();
+
+        $renamed = MainDomainRename::replacement($domain, 'new.test');
+
+        $this->assertSame(['www.new.test', 'shop.test'], $renamed->getAliases());
+    }
+
+    public function test_a_www_alias_another_domain_holds_is_still_refused(): void
+    {
+        $user = $this->makeUser('alice', ['template' => 'wordpress'], 'old.test');
+        $domain = $this->makeMainDomain($user, 'old.test');
+        $domain->setDetails(['aliases' => ['www.old.test']]);
+        $domain->save();
+        $other = $this->makeMainDomain($this->makeUser('bob', ['template' => 'wordpress'], 'bob.test'), 'bob.test');
+        $other->setDetails(['aliases' => ['www.new.test']]);
+        $other->save();
+
+        $this->expectExceptionMessage('Domain already exists');
+        MainDomainRename::replacement($domain, 'new.test');
+    }
 }

@@ -17,6 +17,12 @@ server {
         default_type text/plain;
     }
 @endif
+    # Connection: upgrade only when the client asked to upgrade. Set per server,
+    # not in a main-config map, so a vhost never needs a newer nginx.conf.
+    set $pa_connection_upgrade "";
+    if ($http_upgrade) {
+        set $pa_connection_upgrade upgrade;
+    }
     location / {
         @if(!empty($suspended))
             error_page 503 /account-suspended.html;
@@ -41,7 +47,7 @@ server {
             proxy_set_header X-Forwarded-Host $host;
             proxy_set_header X-Forwarded-Port $server_port;
             proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
+            proxy_set_header Connection $pa_connection_upgrade;
             proxy_read_timeout 3600s;
             proxy_send_timeout 3600s;
             set $userhost {{ $user }};
@@ -109,6 +115,12 @@ server {
         access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/access.log combined;
         access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/bytes.log bytes;
         error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/error.log error;
+        # Connection: upgrade only when the client asked to upgrade. Set per server,
+        # not in a main-config map, so a vhost never needs a newer nginx.conf.
+        set $pa_connection_upgrade "";
+        if ($http_upgrade) {
+            set $pa_connection_upgrade upgrade;
+        }
         location / {
             @if(!empty($suspended))
                 error_page 503 /account-suspended.html;
@@ -131,7 +143,7 @@ server {
                 proxy_set_header X-Forwarded-Host $host;
                 proxy_set_header X-Forwarded-Port $server_port;
                 proxy_set_header Upgrade $http_upgrade;
-                proxy_set_header Connection "upgrade";
+                proxy_set_header Connection $pa_connection_upgrade;
                 proxy_read_timeout 3600s;
                 proxy_send_timeout 3600s;
                 proxy_ssl_server_name on;

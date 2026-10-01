@@ -269,7 +269,7 @@ final class ProjectIpAddresses
     {
         /** @var Collection<array-key, IpSubnet> */
         $subnets = IpSubnet::query()
-            ->where('family', 4)
+            ->where('family', 6)
             ->where('is_shared', 0)
             ->get();
         /** @var array<IpSubnet> */

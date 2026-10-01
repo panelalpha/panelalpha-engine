@@ -43,6 +43,12 @@ http {
 
     client_max_body_size 0;
 
+    # The 4k page-size default turns an upstream's large headers (a Next.js or
+    # SvelteKit Link: preload list, many cookies) into a 502. Bodies still stream.
+    proxy_buffer_size 32k;
+    proxy_buffers 8 32k;
+    proxy_busy_buffers_size 64k;
+
     include /opt/panelalpha/shared-hosting/webserver-config/nginx-proxy/cloudflare-realip[.]conf;
     include /etc/nginx/conf.d/*.conf;
 

@@ -43,19 +43,6 @@ abstract class ProjectFleetCommand extends Command
     {
     }
 
-    /**
-     * Whether a project that threw makes the whole run fail.
-     *
-     * True everywhere except the Apache module commands, which have always
-     * exited 0 even when every project failed. That looks like a bug rather
-     * than a decision, but changing it is a separate call: a script reading
-     * the exit code would start seeing failures it never saw before.
-     */
-    protected function failuresAreFatal(): bool
-    {
-        return true;
-    }
-
     public function handle(): int
     {
         $projects = $this->selectedProjects();
@@ -79,6 +66,6 @@ abstract class ProjectFleetCommand extends Command
 
         $this->afterAll();
 
-        return $this->failuresAreFatal() ? (int) !$ok : 0;
+        return (int) !$ok;
     }
 }

@@ -19,6 +19,12 @@ server {
         default_type text/plain;
     }
 @endif
+    # Connection: upgrade only when the client asked to upgrade. Set per server,
+    # not in a main-config map, so a vhost never needs a newer nginx.conf.
+    set $pa_connection_upgrade "";
+    if ($http_upgrade) {
+        set $pa_connection_upgrade upgrade;
+    }
     location / {
         @if(!empty($suspended))
             error_page 503 /account-suspended.html;
@@ -43,7 +49,7 @@ server {
             proxy_set_header X-Forwarded-Host $host;
             proxy_set_header X-Forwarded-Port $server_port;
             proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
+            proxy_set_header Connection $pa_connection_upgrade;
             proxy_read_timeout 3600s;
             proxy_send_timeout 3600s;
             set $proxyupstream {{ $proxy_http['host'] }};
@@ -121,6 +127,12 @@ server {
         access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/access.log combined;
         access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/bytes.log bytes;
         error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/error.log error;
+        # Connection: upgrade only when the client asked to upgrade. Set per server,
+        # not in a main-config map, so a vhost never needs a newer nginx.conf.
+        set $pa_connection_upgrade "";
+        if ($http_upgrade) {
+            set $pa_connection_upgrade upgrade;
+        }
         location / {
             @if(!empty($suspended))
                 error_page 503 /account-suspended.html;
@@ -143,12 +155,27 @@ server {
                 proxy_set_header X-Forwarded-Host $host;
                 proxy_set_header X-Forwarded-Port $server_port;
                 proxy_set_header Upgrade $http_upgrade;
-                proxy_set_header Connection "upgrade";
+                proxy_set_header Connection $pa_connection_upgrade;
                 proxy_read_timeout 3600s;
                 proxy_send_timeout 3600s;
                 proxy_ssl_server_name on;
                 proxy_ssl_name $host;
                 set $proxyupstream {{ $proxy_https['host'] }};
+                # proxy_pass speaks HTTP/1.1 upstream, which loses gRPC's trailers
+                # (grpc-status). gRPC-Web (application/grpc-web*) stays on proxy_pass.
+                grpc_read_timeout 3600s;
+                grpc_send_timeout 3600s;
+                grpc_set_header Host $host;
+                grpc_set_header X-Real-IP $remote_addr;
+                grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                grpc_set_header X-Forwarded-Proto $scheme;
+                grpc_set_header X-Forwarded-Host $host;
+                grpc_set_header X-Forwarded-Port $server_port;
+                grpc_ssl_server_name on;
+                grpc_ssl_name $host;
+                if ($http_content_type ~* "^application/grpc(\+[^;]*)?\s*(;|$)") {
+                    grpc_pass {{ ($proxy_https['protocol'] ?? 'http') === 'https' ? 'grpcs' : 'grpc' }}://$proxyupstream:{{ $proxy_https['port'] }};
+                }
                 @if(($proxy_https['protocol'] ?? 'http') === 'https')
                 proxy_pass https://$proxyupstream:{{ $proxy_https['port'] }};
                 @else
@@ -224,6 +251,12 @@ server {
     server_name  {{ $domain }}@if (!empty($aliases)) {{ implode(' ', $aliases) }}@endif;
     access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/access.log combined;
     error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/error.log error;
+    # Connection: upgrade only when the client asked to upgrade. Set per server,
+    # not in a main-config map, so a vhost never needs a newer nginx.conf.
+    set $pa_connection_upgrade "";
+    if ($http_upgrade) {
+        set $pa_connection_upgrade upgrade;
+    }
     location / {
         @if(!empty($suspended))
             return 503;
@@ -238,7 +271,7 @@ server {
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
+            proxy_set_header Connection $pa_connection_upgrade;
             proxy_read_timeout 3600s;
             proxy_send_timeout 3600s;
             set $proxyupstream {{ $extra['host'] }};

@@ -62,7 +62,12 @@ class IpSubnet extends Model
 
         $usedBig = [];
         foreach ($reserved as $ip) {
-            $usedBig[(string) BigInteger::fromBytes(inet_pton($ip), false)] = true;
+            // An unset default IP arrives as '', which inet_pton() cannot read.
+            $packed = inet_pton($ip);
+            if ($packed === false) {
+                continue;
+            }
+            $usedBig[(string) BigInteger::fromBytes($packed, false)] = true;
         }
         foreach ($this->listAssignedIpAddresses() as $ip) {
             $usedBig[(string) BigInteger::fromBytes(inet_pton($ip), false)] = true;

@@ -43,6 +43,15 @@ class ProxyRuleCreateCommandTest extends TestCase
         );
     }
 
+    public function test_a_given_listen_ip_is_stored(): void
+    {
+        $this->create('--scope=user --project=alice --transport=tcp --listen-ip=10.0.0.5 --listen-port=5432 --upstream-host=alice --upstream-port=5432')
+            ->expectsOutputToContain('Listen: 10.0.0.5:5432')
+            ->assertExitCode(0);
+
+        $this->assertSame('10.0.0.5', ProxyRule::query()->sole()->listen_ip);
+    }
+
     public function test_a_stream_rule_has_no_server_name_or_protocol(): void
     {
         $this->create('--scope=user --project=alice --transport=tcp --listen-port=5432 --server-name=db.test --upstream-host=alice --upstream-port=5432 --upstream-protocol=https')
@@ -51,6 +60,32 @@ class ProxyRuleCreateCommandTest extends TestCase
         $rule = ProxyRule::query()->sole();
         $this->assertNull($rule->server_name);
         $this->assertNull($rule->upstream_protocol);
+    }
+
+    public function test_a_system_rule_needs_no_project(): void
+    {
+        $this->create('--scope=system --transport=tcp --listen-port=5432 --upstream-host=db --upstream-port=5432')
+            ->expectsOutputToContain('Rule created successfully')
+            ->assertExitCode(0);
+
+        $rule = ProxyRule::query()->sole();
+        $this->assertSame('system', $rule->owner_scope);
+        $this->assertNull($rule->username);
+    }
+
+    public function test_a_user_rule_needs_an_existing_project(): void
+    {
+        $args = '--transport=tcp --listen-port=5432 --upstream-host=db --upstream-port=5432';
+
+        $this->create("--scope=user {$args}")
+            ->expectsQuestion('Username (for user-owned rule)', '')
+            ->expectsOutputToContain('A user-owned rule needs an existing project (--project).')
+            ->assertExitCode(1);
+        $this->create("--scope=user --project=nobody {$args}")
+            ->expectsOutputToContain('A user-owned rule needs an existing project (--project).')
+            ->assertExitCode(1);
+
+        $this->assertSame(0, ProxyRule::query()->count());
     }
 
     public function test_an_http_rule_with_no_server_name_is_a_wildcard(): void
@@ -76,13 +111,31 @@ class ProxyRuleCreateCommandTest extends TestCase
         $this->assertSame(2, ProxyRule::query()->count());
     }
 
+    /** The values the API validates before they reach the shared nginx config verbatim. */
+    public function test_values_written_into_the_proxy_config_are_validated(): void
+    {
+        $base = '--scope=user --project=alice --transport=http --listen-port=80 --upstream-port=80';
+        $cases = [
+            ["{$base} --listen-ip=10.0.0.999 --server-name=s.test --upstream-host=h", 'The listen ip must be "*" or an IP address.'],
+            ["{$base} --server-name='s.test; return 200' --upstream-host=h", 'The server name must be "_" or a hostname.'],
+            ["{$base} --server-name=s.test --upstream-host='h;'", 'The upstream host must be a hostname or an IP address.'],
+            ["{$base} --server-name=s.test --upstream-host=h --upstream-protocol=ftp", 'The selected upstream protocol is invalid.'],
+        ];
+
+        foreach ($cases as [$args, $message]) {
+            $this->create($args)->expectsOutputToContain($message)->assertExitCode(1);
+        }
+
+        $this->assertSame(0, ProxyRule::query()->count());
+    }
+
     public function test_bad_input_is_refused_before_anything_is_stored(): void
     {
         $http = '--scope=user --project=alice --transport=http --server-name=s.test';
         $cases = [
             ['--scope=global --project=alice --transport=http --listen-port=80 --upstream-host=h --upstream-port=80', [], "Scope must be 'system' or 'user'."],
-            // 0 is falsy, so it is asked for rather than refused outright.
-            ["{$http} --listen-port=0 --upstream-host=h --upstream-port=80", ['Listen port (1-65535)' => '0'], 'Invalid port number.'],
+            ["{$http} --listen-port=0 --upstream-host=h --upstream-port=80", [], 'Invalid port number.'],
+            ["{$http} --listen-port=80 --upstream-host=h --upstream-port=0", [], 'Invalid upstream port number.'],
             ["{$http} --listen-port=http --upstream-host=h --upstream-port=80", [], 'Invalid port number.'],
             ["{$http} --listen-port=80 --upstream-port=80", ['Upstream host' => ''], 'Invalid upstream host.'],
             ["{$http} --listen-port=80 --upstream-host=h --upstream-port=70000", [], 'Invalid upstream port number.'],
