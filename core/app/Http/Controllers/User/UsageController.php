@@ -8,6 +8,7 @@ use App\Http\Requests\VisitorsBreakdownRequest;
 use App\Http\Requests\VisitorsRangeRequest;
 use App\Integrations\Statistics\Statistics;
 use App\Lib\Usage\ProjectUsage;
+use App\System;
 use Illuminate\Http\JsonResponse;
 use OpenApi\Attributes as OA;
 
@@ -29,11 +30,11 @@ class UsageController extends Controller
             new OA\Response(response: 404, description: 'User not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
-    public function getUsage(string $username): JsonResponse
+    public function getUsage(string $username, System $system): JsonResponse
     {
         $user = $this->projectOr404($username);
 
-        return new JsonResponse($this->usage->summary($user));
+        return new JsonResponse($this->usage->summary($user, $system));
     }
 
     #[OA\Get(

@@ -5,6 +5,7 @@ namespace App\Lib\Usage;
 use App\Integrations\Statistics\Statistics;
 use App\Models\Domain;
 use App\Models\User;
+use App\System;
 use Illuminate\Support\Facades\DB;
 
 /** Resource usage and transfer for a project, shared by the API and the CLI. */
@@ -17,9 +18,9 @@ class ProjectUsage
     /**
      * @return array<string, array{usage: mixed, maximum: mixed}>
      */
-    public function summary(User $user): array
+    public function summary(User $user, ?System $system = null): array
     {
-        $diskUsage = $user->project()->fileManager()->diskUsage();
+        $diskUsage = $user->project($system)->fileManager()->diskUsage();
 
         $query = "SELECT ";
         $query .= "(SELECT COUNT(*) FROM domains WHERE user_id = ? AND type = 'addon') AS addon_domains, ";

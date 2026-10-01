@@ -215,9 +215,9 @@ test.describe('CSF enable and disable are idempotent', () => {
         await delay(CSF_DISABLE_DELAY_MS);
       }
 
-      // 502 counts: disabling flushes iptables, which can momentarily drop the
-      // proxy-to-backend connection and surface as a transient gateway error.
-      expectOneOf((await authedRequest.put('csf/disable')).status(), [200, 204, 502]);
+      // The disable is queued and answered 202. 502 counts: the earlier disable
+      // flushes iptables, which can momentarily drop the proxy-to-backend connection.
+      expectOneOf((await authedRequest.put('csf/disable')).status(), [202, 502]);
     }
   );
 });

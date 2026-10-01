@@ -138,6 +138,18 @@ class FireflySourceRecipeTest extends TestCase
         }
     }
 
+    /**
+     * Firefly's Vite frontend is the resources/assets/v3 workspace; the root
+     * package.json has no build script, so the default pass compiles nothing.
+     */
+    public function test_the_frontend_is_built_from_its_workspace(): void
+    {
+        $recipe = SourceRecipes::for(self::URL);
+
+        $this->assertNotNull($recipe);
+        $this->assertSame('npm run build --workspace resources/assets/v3', $recipe->frontendBuild);
+    }
+
     public function test_the_extended_recipe_is_the_shipped_laravel_one(): void
     {
         $shipped = PlatformRegistry::find('laravel');

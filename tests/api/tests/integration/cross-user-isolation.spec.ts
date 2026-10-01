@@ -1,5 +1,6 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
+import { getDomainBasePath } from '@/helpers/file-path-helpers';
 import { rand } from '@/helpers/random';
 
 /**
@@ -30,8 +31,11 @@ test.describe('cross-user isolation', () => {
         userFactory.createSimpleUser(),
       ]);
 
-      const secretPath = `public_html/${rand('iso')}.txt`;
+      // The home root is root-owned; write where a hosting user can, and make sure the
+      // file is really there, or every denial below proves nothing.
+      const secretPath = `${getDomainBasePath(victim.domain)}/${rand('iso')}.txt`;
       await api.putFileContents(victim.username, secretPath, `isolation-secret-${Date.now()}`);
+      expect((await api.fileExists(victim.username, secretPath)).exists).toBe(true);
 
       const [addonDomain, database, ftpAccount, cronJob] = await Promise.all([
         domainFactory.createAddonDomain(victim.username, victim.domain),
@@ -107,7 +111,7 @@ test.describe('cross-user isolation', () => {
             args: [
               'eval',
               'echo 1',
-              `--path=/home/${victim.username}/domains/${victim.domain}/public_html`,
+              `--path=/home/${victim.username}${getDomainBasePath(victim.domain)}`,
             ],
           },
         });

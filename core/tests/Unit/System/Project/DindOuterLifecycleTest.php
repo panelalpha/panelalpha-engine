@@ -8,7 +8,8 @@ use App\System;
 use App\System\Filesystem;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind;
-use PHPUnit\Framework\TestCase;
+use Illuminate\Support\Facades\Log;
+use Tests\TestCase;
 
 class DindOuterLifecycleTest extends TestCase
 {
@@ -44,7 +45,7 @@ class DindOuterLifecycleTest extends TestCase
         $project = $this->dindWithStubbedTemplate($system, $model);
 
         mkdir($this->homeRoot . '/alice/.panelalpha', 0777, true);
-        mkdir($system->projectDirPath('alice'), 0777, true);
+        is_dir($system->projectDirPath('alice')) || mkdir($system->projectDirPath('alice'), 0777, true);
 
         $project->materialize();
 
@@ -125,9 +126,11 @@ class DindOuterLifecycleTest extends TestCase
         };
 
         $project = $this->dindWithStubbedTemplate($system, $model);
-        mkdir($system->projectDirPath('alice'), 0777, true);
+        is_dir($system->projectDirPath('alice')) || mkdir($system->projectDirPath('alice'), 0777, true);
         $project->materialize();
 
+        // remove() logs the data-root wipe the fake refuses; keep that off the test log.
+        Log::spy();
         try {
             $project->start();
             $this->fail('Expected start to throw');
@@ -189,7 +192,7 @@ class DindOuterLifecycleTest extends TestCase
         $model = $this->dindModel();
         $system = $this->recordingSystem();
         $project = $this->dindWithStubbedTemplate($system, $model);
-        mkdir($system->projectDirPath('alice'), 0777, true);
+        is_dir($system->projectDirPath('alice')) || mkdir($system->projectDirPath('alice'), 0777, true);
 
         $project->materialize();
 

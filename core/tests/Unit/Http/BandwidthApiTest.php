@@ -6,9 +6,12 @@ use App\Http\Middleware\Authenticate;
 use App\Integrations\Statistics\Statistics;
 use App\Models\Domain;
 use App\Models\User;
+use App\System;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Symfony\Component\Process\Process;
+use Tests\Support\FakeProcess;
 use Tests\TestCase;
 use Tests\Unit\Integrations\Statistics\FakeStatistics;
 
@@ -84,6 +87,13 @@ class BandwidthApiTest extends TestCase
             ],
         ];
         $this->app->instance(Statistics::class, $this->statistics);
+        // /usage measures the home with `du` through sudo; answer it here instead of on this machine.
+        $this->app->instance(System::class, new class extends System {
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                return in_array('du', (array) $cmd, true) ? FakeProcess::ok("12\t/home/alice\n") : FakeProcess::forCommand($cmd);
+            }
+        });
 
         $this->withoutMiddleware(Authenticate::class);
     }
@@ -146,6 +156,7 @@ class BandwidthApiTest extends TestCase
         $response = $this->getJson("/api/projects/{$user->username}/usage");
 
         $response->assertOk();
+        $response->assertJsonPath('storage.usage', 12);
         $response->assertJsonPath('bandwidth.usage', 4000);
         $response->assertJsonPath('bandwidth.maximum', 10 * 1024 * 1024);
     }

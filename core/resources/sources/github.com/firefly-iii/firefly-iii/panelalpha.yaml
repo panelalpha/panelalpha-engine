@@ -22,6 +22,11 @@ description: >-
   is what its docs tell an operator to run, and `laravel-passport-keys`
   reports "Encryption keys exist already" rather than rotating them.
 extends: laravel
+# The frontend is an npm workspace (resources/assets/v3) and the root
+# package.json has no `build` script, so without this nothing is compiled,
+# public/build/manifest.json is missing and every page is a Vite 500. The
+# engine's install at the root installs the workspace too.
+frontend_build: npm run build --workspace resources/assets/v3
 commands:
   - id: firefly-database
     stage:
