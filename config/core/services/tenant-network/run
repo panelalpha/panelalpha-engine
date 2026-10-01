@@ -1,0 +1,15 @@
+#!/bin/sh
+# engine#529: each port of pash-tenants is bound to the container Docker put on
+# it, and a port not bound yet carries nothing. Docker attaches containers on
+# its own too (restart policies, a daemon restart), so this re-applies the
+# host's tenant firewall whenever a container joins or leaves the network, and
+# in full every minute in case an event was missed. Runs in the host's
+# namespaces.
+SCRIPT=/opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh
+exec nsenter --target 1 --all sh -c "
+while :; do
+    [ -f $SCRIPT ] && sh $SCRIPT >/dev/null 2>&1
+    timeout 60 docker events --filter type=network --filter network=pash-tenants \
+        --filter event=connect --filter event=disconnect --format x 2>/dev/null |
+        while read -r _; do sh $SCRIPT >/dev/null 2>&1; done
+done"

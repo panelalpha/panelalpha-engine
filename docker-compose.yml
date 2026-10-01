@@ -100,6 +100,13 @@ services:
     ports:
       - "127.0.0.54:53:53/udp"
     command: UDP4-RECVFROM:53,fork,reuseaddr UDP4-SENDTO:127.0.0.11:53
+    # The proxy resolves accounts by name through it, so it sees their network.
+    # Accounts get no rule to reach it.
+    networks:
+      default:
+        gw_priority: 1
+      tenants:
+        ipv4_address: ${TENANT_NETWORK_PREFIX:-10.200}.0.5
   metrics:
     profiles: ["metrics", "full"]
     build:
@@ -216,6 +223,14 @@ services:
       - "--aria-pagecache-buffer-size=${SITES_DB_ARIA_PAGECACHE_BUFFER_SIZE:-8M}"
     mem_limit: ${MEM_LIMIT_SITES_DB:-${MEM_LIMIT_DATABASE_USERS:-3G}}
     memswap_limit: ${MEMSWAP_LIMIT_SITES_DB:-${MEMSWAP_LIMIT_DATABASE_USERS:-0}}
+    # Accounts reach it on pash-tenants at this address only, through the
+    # host's allow rule (engine#519); recreating it must not move it.
+    # tenant-network-firewall.sh and TenantNetwork assume .0.2.
+    networks:
+      default:
+        gw_priority: 1
+      tenants:
+        ipv4_address: ${TENANT_NETWORK_PREFIX:-10.200}.0.2
   sites-phpmyadmin:
     profiles: ["phpmyadmin", "full"]
     build:
@@ -274,6 +289,11 @@ services:
       - cache-registry-data:/var/lib/registry:ro
     mem_limit: ${MEM_LIMIT_CACHE_REGISTRY:-1G}
     memswap_limit: ${MEMSWAP_LIMIT_CACHE_REGISTRY:-0}
+    networks:
+      default:
+        gw_priority: 1
+      tenants:
+        ipv4_address: ${TENANT_NETWORK_PREFIX:-10.200}.0.3
   # The same storage, writable: the host pushes to it, core lists and deletes
   # tags through the host's loopback, prewarm garbage-collects inside it.
   #
@@ -354,6 +374,11 @@ services:
       - registry-proxy-data:/var/lib/registry
     mem_limit: ${MEM_LIMIT_REGISTRY_PROXY:-1G}
     memswap_limit: ${MEMSWAP_LIMIT_REGISTRY_PROXY:-0}
+    networks:
+      default:
+        gw_priority: 1
+      tenants:
+        ipv4_address: ${TENANT_NETWORK_PREFIX:-10.200}.0.4
   lighthouse:
     profiles: ["lighthouse", "full"]
     build:
@@ -377,4 +402,8 @@ volumes:
 networks:
   default:
     name: pash-default-network
+    external: true
+  # DinD accounts (engine#519). Made by scripts/tenant-network-firewall.sh --create.
+  tenants:
+    name: pash-tenants
     external: true

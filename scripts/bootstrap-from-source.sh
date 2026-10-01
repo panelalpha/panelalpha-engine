@@ -104,6 +104,8 @@ command -v ssh-keygen >/dev/null || MISSING+=(openssh-client)
 command -v curl >/dev/null || MISSING+=(curl)
 command -v rsync >/dev/null || MISSING+=(rsync)
 command -v ipcalc >/dev/null || MISSING+=(ipcalc)
+# engine#529, as in installer.sh: its nftables.service stays disabled.
+command -v nft >/dev/null || MISSING+=(nftables)
 [ "$QUOTA" != 1 ] || command -v setquota >/dev/null || MISSING+=(quota)
 if [ ${#MISSING[@]} -gt 0 ]; then
     step "Installing ${MISSING[*]}"
@@ -271,6 +273,9 @@ docker network inspect pash-default-network >/dev/null 2>&1 || {
     step "Creating pash-default-network"
     bash scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
 }
+# engine#519: the accounts' network; sites-db and the registries join it.
+DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash scripts/tenant-network-firewall.sh --create --restart-docker \
+    || warn "Could not create the tenant network"
 
 # ----------------------------------------------------------------------- vendor
 if [ "$FORCE_COMPOSER" = 1 ] || [ ! -d core/vendor ]; then
@@ -429,6 +434,7 @@ if [ "$HARDEN" = 1 ]; then
     service docker restart || warn "Could not restart Docker"
     # engine#246, as in installer.sh: the build network, while Docker's chains are fresh.
     bash scripts/build-network-firewall.sh --create panelalpha-build || warn "Could not create the build network"
+    bash scripts/tenant-network-firewall.sh --create --restart-docker || warn "Could not apply the tenant network firewall"
 fi
 
 # Same as installer.sh: without it no project disk limit is enforced (#244).
@@ -440,6 +446,11 @@ else
 fi
 
 step "Starting the stack"
+# As in installer.sh: sites-db and the registries join pash-tenants (engine#519).
+docker network inspect pash-tenants >/dev/null 2>&1 || {
+    echo "The accounts' network pash-tenants could not be created; the tenant-network-firewall messages above say why." >&2
+    exit 1
+}
 # A host that ran the old stack still has dockerhub-mirror on registry-proxy's port.
 bash scripts/retire-dockerhub-mirror.sh .env
 # shellcheck disable=SC2086
@@ -453,6 +464,10 @@ done
 
 step "Running migrations"
 docker compose exec -T core php artisan migrate --force
+
+step "Moving accounts onto the tenant network"
+# engine#519, as in installer.sh: live, and never fails the bootstrap.
+docker compose exec -T core php artisan project:network:move --all || warn "Some accounts could not be moved onto the tenant network"
 
 IP_WAS_SET=0
 if ! docker compose exec -T core php artisan settings:exists default_ipv4 >/dev/null 2>&1; then

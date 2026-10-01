@@ -127,6 +127,6 @@ class ManifestDatabase
     /** @return list<string> */
     protected function extraHosts(): array
     {
-        return AppDatabase::extraHosts();
+        return AppDatabase::extraHosts($this->dind);
     }
 }

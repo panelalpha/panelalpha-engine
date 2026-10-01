@@ -5,13 +5,15 @@ namespace App\System\Project\Dind;
 /**
  * Egress rules inside a DinD account, for the code the tenant runs (engine#217).
  *
- * Every account sits on pash-default-network with core, the shared MySQL,
- * SFTP, FTP, phpMyAdmin and every other account, and reaches the host on any
- * port. Until accounts get their own networks, the account's own network
- * namespace is where its traffic can be filtered: its apps' traffic is
- * forwarded through it (inner DOCKER-USER, FORWARD) and its own processes,
- * tenant crontabs included, leave through OUTPUT. Inner services cannot
- * undo this: ServiceHardener drops privileged, cap_add and network_mode: host.
+ * A second layer. The boundary is the host's firewall on pash-tenants
+ * ({@see \App\Lib\Deploy\Dind\TenantNetwork}, engine#519): the tenant holds
+ * the inner Docker socket, and a privileged `--net=host` container of their
+ * own edits these rules. Accounts not yet moved off pash-default-network,
+ * which they share with core, SFTP, FTP and phpMyAdmin, have only this one.
+ * Its apps' traffic is forwarded through the account's namespace (inner
+ * DOCKER-USER, FORWARD) and its own processes, tenant crontabs included,
+ * leave through OUTPUT; ServiceHardener keeps privileged, cap_add and
+ * network_mode: host out of the compose the engine runs.
  *
  * On the account's own network it lets through only the shared MySQL (3306)
  * and the two image registries (5000). On any address of the host itself only

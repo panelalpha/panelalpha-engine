@@ -35,6 +35,7 @@ APP_LITE_DIR="$PANELALPHA_DIR/app-lite"
 APP_DIR="$PANELALPHA_DIR/app"
 ENGINE_TMP_DIR="$PANELALPHA_DIR/tmp/engine"
 DOCKER_NETWORK_NAME="pash-default-network"
+TENANT_NETWORK_NAME="pash-tenants"
 
 DEBUG_MODE=0
 ASSUME_YES=0
@@ -54,7 +55,7 @@ Always removes:
   - engine users / projects (unless --keep-projects)
   - pae / pae-artisan registration, sysctl/monit deconfigure
   - engine-installer.sh, log/engine-*, tmp/engine, letsencrypt cron
-  - Docker network $DOCKER_NETWORK_NAME (when unused)
+  - Docker networks $TENANT_NETWORK_NAME and $DOCKER_NETWORK_NAME (when unused)
 
 Does NOT remove:
   - $APP_LITE_DIR or $APP_DIR (panel)
@@ -155,7 +156,7 @@ confirm_uninstall() {
     fi
     echo "  - pae command, sysctl/monit config written by the engine"
     echo "  - engine-installer.sh, log/engine-*, tmp/engine, letsencrypt cron"
-    echo "  - Docker network $DOCKER_NETWORK_NAME (if unused)"
+    echo "  - Docker networks $TENANT_NETWORK_NAME and $DOCKER_NETWORK_NAME (if unused)"
     if has_panel; then
         echo ""
         echo_warning "Panel detected (app-lite and/or app). It will be LEFT in place."
@@ -399,16 +400,18 @@ clean_engine_sidecars() {
 }
 
 remove_docker_network() {
+    local name
     if ! command -v docker >/dev/null 2>&1; then
         return 0
     fi
-    if ! docker network inspect "$DOCKER_NETWORK_NAME" >/dev/null 2>&1; then
-        return 0
-    fi
-
-    echo_info "Removing Docker network $DOCKER_NETWORK_NAME..."
-    docker network rm "$DOCKER_NETWORK_NAME" >/dev/null 2>&1 ||
-        echo_warning "Could not remove Docker network $DOCKER_NETWORK_NAME (it may still be in use)."
+    for name in "$TENANT_NETWORK_NAME" "$DOCKER_NETWORK_NAME"; do
+        docker network inspect "$name" >/dev/null 2>&1 || continue
+        echo_info "Removing Docker network $name..."
+        docker network rm "$name" >/dev/null 2>&1 ||
+            echo_warning "Could not remove Docker network $name (it may still be in use)."
+    done
+    # The accounts' port bindings (tenant-network-firewall.sh).
+    command -v nft >/dev/null 2>&1 && nft delete table bridge pa_tenants 2>/dev/null || true
 }
 
 restore_systemd_resolved_if_requested() {

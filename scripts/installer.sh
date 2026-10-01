@@ -773,6 +773,10 @@ before_install() {
     fi
     apt-get -o DPkg::Lock::Timeout=300 update --fix-missing -y
     ensure_packages jq unzip lsb-release apt-transport-https ca-certificates curl ipcalc quota at
+    # nft binds each port of the accounts' network to its container (engine#529).
+    # The package's own nftables.service ships disabled and must stay so: its
+    # default config flushes every rule on the host, Docker's and CSF's too.
+    ensure_packages nftables
 
     detect_distro
 
@@ -1042,6 +1046,8 @@ harden_host() {
     # engine#246: host builds run on panelalpha-build. Made here, while
     # Docker's chains are fresh: after a CSF flush the engine cannot create it.
     bash /opt/panelalpha/shared-hosting/scripts/build-network-firewall.sh --create panelalpha-build || true
+    # engine#519: the accounts' network, likewise; the stack names it.
+    bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker || true
 }
 
 # Without it every setquota the engine runs is a no-op (#244). Never fatal: a
@@ -1183,6 +1189,8 @@ EOF
 
     # create docker network if not exists
     bash /opt/panelalpha/shared-hosting/scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
+    # The accounts' network (engine#519); sites-db and the registries join it.
+    DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker || true
 
     # make sure systemd-resolved is disabled / no conflicts with sites-dns
     disable_systemd_resolved || true
@@ -1200,12 +1208,21 @@ EOF
     remove_renamed_containers
     bash /opt/panelalpha/shared-hosting/scripts/retire-dockerhub-mirror.sh /opt/panelalpha/shared-hosting/.env
 
+    # sites-db and the registries join pash-tenants (engine#519): without it the
+    # stack cannot start, so stop here and say why rather than at compose.
+    docker network inspect pash-tenants >/dev/null 2>&1 ||
+        echo_error "The accounts' network pash-tenants could not be created; the tenant-network-firewall messages above say why"
+
     # run docker stack
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml up -d
 
     # run database migrations
     wait_for_database
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan migrate --force
+    # engine#519: accounts from before it leave core's network for pash-tenants,
+    # live. Already-moved and stopped ones are left alone, and one that cannot
+    # move keeps working where it is, so it never fails the update.
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan project:network:move --all || true
     if [ "$ENABLE_NAT" = 1 ]; then
         docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:nat:build --replace-default-ipv4 || true
     fi

@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Deploy\Dind\TenantNetwork;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -16,6 +17,7 @@ final class OuterLifecycle
 
     public function up(): void
     {
+        $this->prepareTenantNetwork();
         $path = $this->project->composeFilePath();
         $this->project->system()->exec([
             'sudo',
@@ -27,6 +29,26 @@ final class OuterLifecycle
             '-d',
             '--remove-orphans',
         ]);
+        // engine#529: a port is bound to its container's address only once the
+        // container exists, and until then the bridge drops its frames.
+        $this->prepareTenantNetwork();
+    }
+
+    /**
+     * The account joins pash-tenants, which compose cannot start without, and
+     * whose firewall a reboot or a CSF restart drops (engine#519). One that
+     * cannot be applied is a warning, not an account left down: with no rules
+     * enable_icc still drops traffic between the network's members.
+     */
+    private function prepareTenantNetwork(): void
+    {
+        try {
+            $this->project->system()->exec(TenantNetwork::firewallArgv(), [], 60);
+        } catch (\Exception $e) {
+            $this->project->shell()->logger()?->warn(
+                'The tenant network firewall could not be applied: ' . trim($e->getMessage())
+            );
+        }
     }
 
     public function down(): void

@@ -74,6 +74,7 @@ The settings themselves are ordinary lines in `.env-core` and you can still edit
 | `pae project:push {project} {target}` | Pushes state between a staging pair. |
 | `pae project:limit:get --project={project}` | Shows disk, memory and CPU limits. |
 | `pae project:limit:set --project={project} --memory-limit=512` | Changes a limit. Memory is in megabytes and may not exceed what projects may have on this server. Every project has a memory limit, so it can be changed but not removed. |
+| `pae project:network:move --all` | Moves projects created before this version onto the network that keeps projects apart from each other and from the engine. Each project stays up, and its application restarts once. A stopped project is left alone; start it and run the command again. `--project={project}` moves one. |
 | `pae project:ssh {project} '{command}'` | Runs one command inside the project. |
 | `pae project:delete {project}` | Deletes the project and everything in it. Asks you to confirm. |
 

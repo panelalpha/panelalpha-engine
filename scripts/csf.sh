@@ -87,6 +87,7 @@ install_csf() {
 
     install_docker_build_rules
     install_core_publish_rules
+    install_tenant_network_rules
 
     # CSF's own installer enables the units but never starts them, and the
     # TESTING = 0 above only takes effect once the ruleset is applied — so an
@@ -208,6 +209,32 @@ install_core_publish_rules() {
 [ -f $script ] && sh $script || true
 EOF
         echo "csf: added core publish rules to csfpost.sh"
+    fi
+    chmod 700 "$post"
+}
+
+# engine#519: accounts run on pash-tenants, and CSF knows only the compose
+# bridge. Its flush removes the account rules with Docker's chains, and without
+# them accounts lose the database, the registries and the internet, and the
+# proxy cannot reach them past TCP_OUT. The subnet stays out of csf.allow on
+# purpose: that file trusts it inbound too.
+install_tenant_network_rules() {
+    local post script
+    post="/usr/local/csf/bin/csfpost.sh"
+    script="/opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh"
+    mkdir -p "$(dirname "$post")"
+    [ -f "$post" ] || printf '#!/bin/sh\n' >"$post"
+
+    if grep -q "panelalpha-tenant-network" "$post" 2>/dev/null; then
+        echo "csf: tenant network rules already present in csfpost.sh"
+    else
+        cat >>"$post" <<EOF
+
+# panelalpha-tenant-network: what accounts may reach (engine#519).
+docker network inspect pash-tenants >/dev/null 2>&1 && \\
+  sh $script || true
+EOF
+        echo "csf: added tenant network rules to csfpost.sh"
     fi
     chmod 700 "$post"
 }

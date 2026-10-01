@@ -458,7 +458,7 @@ class PhpStrategy
             // nested Docker resolves none of the engine's names. Pin it — and
             // do not also start a sidecar, which would leave the app with two
             // databases and its data in whichever one it reached first.
-            $extraHosts = AppDatabase::extraHosts();
+            $extraHosts = AppDatabase::extraHosts($this->dind);
 
             return $extraHosts === [] ? $decision : $decision + ['extra_hosts' => $extraHosts];
         }

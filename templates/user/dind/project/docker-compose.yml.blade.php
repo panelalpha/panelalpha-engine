@@ -48,7 +48,9 @@ services:
           rate: '{{ $device_write_bps }}'
 @endif
 @endif
+# Accounts only, never core: no traffic between members, and the host holds
+# them to sites-db and the registries (engine#519, tenant-network-firewall.sh).
 networks:
   default:
-    name: pash-default-network
+    name: pash-tenants
     external: true
