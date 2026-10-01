@@ -28,19 +28,25 @@ All it takes is just [three simple steps to set it up](#getting-started).
 
 <!-- TODO screenshot: this GIF should show a full deploy driven from an assistant chat, cropped to the chat window and the returned project address. Keep the frame no wider than the text column so it does not overflow on mobile. -->
 
+## How it works
+
+<img src="assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs every operation and manages databases, files and isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880" style="max-width: 100%; height: auto; margin-top: 0.5em; margin-bottom: 1.5em;">
+
 ## Getting started
 
 ### 1. Install on your VPS
 
 You need a **fresh** VPS and `root` access over SSH. Full requirements and options are on the [Install](02-getting-started/install.md) page.
 
-**One-line app installation command** is the fastest way to get started, as it installs the engine and puts an application online in one go. You simply add whatever Git repo you want to use after `--repo` and the installer takes care of both parts: it installs the engine and immediately starts setting up the project from the repository you provided. For example, if you want to install the engine and deploy n8n at the same time, this is all you need:
+**One-line app installation command** is the fastest way to get started. Just add the Git repository you want to use after `--repo`, and the installer immediately starts setting up engine and getting your application online in one go.
+
+For example, if you want to install the engine and deploy n8n at the same time, this is all you need:
 
 ```bash
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
-When it finishes, it prints the address of your new site and, unless you pass `--no-password`, the password that opens it. Private repositories, a password of your own, and running it on a server that already has the engine: [One-line app installation command](02-getting-started/install.md#one-line-app-installation-command).
+When it finishes, it prints the address of your new site and, unless you pass `--no-password`, the password that opens it. For private repositories, your own password, or running an app on a server that already has the engine, see: [One-line app installation command](02-getting-started/install.md#one-line-app-installation-command).
 
 <img src="assets/installer-repo-success.png" alt="Installer finished: the address and password of the deployed application, then the Claude Code command" style="max-width: 100%; height: auto; margin-top: 1.5em; margin-bottom: 1.5em;">
 

@@ -67,6 +67,10 @@ PanelAlpha Engine - це програмне забезпечення, яке в�
 - Домени, SSL, cron, FTP/SFTP, бази даних, логи
 - Просте підключення Cloudflare для DNS, тунелів і кешування
 
+## Як це працює
+
+<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs every operation and manages databases, files and isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
+
 ## Чому це має існувати
 
 ШІ вивів створення програм зі старих меж. Більше людей можуть перетворити ідею на робочий продукт, невеликі команди будують значно більше, ніж раніше, а open source повний проєктів, які варто зробити своїми. Те, що майже не прискорилося так само, - це робота, потрібна, щоб вести це самостійно. Більшість self-hosted інструментів досі очікує, що ви розумієте і керуєте Docker, вебсервером, сертифікатами, базами даних, резервними копіями, фаєрволом і оновленнями, які потім ідуть за цим.
@@ -87,7 +91,7 @@ PanelAlpha Engine - це програмне забезпечення, яке в�
 
 Вам потрібен **чистий** сервер із Debian 12/13 або Ubuntu 22.04/24.04/26.04, щонайменше 2 ГБ RAM і 1 CPU, і ви заходите як `root` через SSH.
 
-**One-line app installation command** — найшвидший спосіб почати: вона встановлює Engine і одразу виводить застосунок в інтернет. Достатньо після `--repo` вказати Git-репозиторій, який ви хочете використати, і інсталятор виконає обидві частини: встановить Engine та відразу почне створювати проєкт із вказаного репозиторію.
+**One-line app installation command** — найшвидший спосіб почати. Просто вкажіть після `--repo` Git-репозиторій, який хочете використати, і інсталятор одразу почне налаштовувати Engine та за один раз виведе ваш застосунок в інтернет.
 
 Наприклад, щоб встановити Engine і водночас розгорнути n8n, потрібно лише це:
 
@@ -95,7 +99,7 @@ PanelAlpha Engine - це програмне забезпечення, яке в�
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
-Наприкінці він виведе адресу вашого нового сайту і, якщо ви не вказали `--no-password`, пароль, який його відкриває. Приватні репозиторії, власний пароль і сервер, на якому Engine вже є: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
+Наприкінці він виведе адресу вашого нового сайту і, якщо ви не вказали `--no-password`, пароль, який його відкриває. Про приватні репозиторії, власний пароль або запуск застосунку на сервері, де Engine вже є, див.: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
 
 Хочете виконати ці два кроки окремо? Скористайтеся командою нижче, щоб встановити лише Engine, а застосунок розгорніть пізніше через свого асистента (див. крок 2):
 
@@ -103,7 +107,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 curl -fsSL https://get.panelalpha.com/engine | sh
 ```
 
-Це все. Сервер готовий. Власна назва, власний сертифікат TLS чи сервер за NAT: [опції встановлення](docs/02-getting-started/install.md).
+Це все. Сервер готовий. Про власну назву, власний сертифікат TLS чи сервер за NAT див.: [опції встановлення](docs/02-getting-started/install.md).
 
 ### Крок 2: Підключіть свого ШІ-агента
 

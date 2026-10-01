@@ -69,6 +69,10 @@ PanelAlpha Engine برنامج تثبّته على خادم VPS لاستضافة
 - نطاقات وSSL وcron وFTP/SFTP وقواعد بيانات وسجلات
 - تكامل سهل مع Cloudflare للـ DNS والأنفاق والتخزين المؤقت
 
+## كيف يعمل
+
+<p align="center"><img src="docs/assets/architecture.gif" alt="PanelAlpha Engine architecture: your AI agent, Git host, REST API clients and SSH reach the engine API on port 2011; core runs every operation and manages databases, files and isolated project containers; visitors reach projects through nginx-proxy on ports 80 and 443; backups go to an external store and Cloudflare tunnels connect into projects" width="880"></p>
+
 ## لماذا يجب أن يوجد هذا
 
 الذكاء الاصطناعي أخرج إنشاء البرمجيات من حدوده القديمة. مزيد من الناس يستطيعون تحويل فكرة إلى منتج يعمل، والفرق الصغيرة تبني أكثر بكثير مما قبل، والمصدر المفتوح يزدهر بمشاريع تستحق أن تجعلها ملكك. ما لم يتغير بالسرعة نفسها تقريباً هو العمل المطلوب لتشغيل ذلك بنفسك. معظم أدوات الاستضافة الذاتية ما زالت تتوقع أن تفهم وتدير دوكر وخادم ويب وشهادات وقواعد بيانات ونسخاً احتياطياً وجدار حماية ثم التحديثات التي تلي ذلك.
@@ -89,7 +93,7 @@ PanelAlpha Engine برنامج تثبّته على خادم VPS لاستضافة
 
 تحتاج خادماً **نظيفاً** يعمل بـ Debian 12/13 أو Ubuntu 22.04/24.04/26.04، بذاكرة 2 غيغابايت ومعالج واحد على الأقل، وتدخل إليه بحساب `root` عبر SSH.
 
-**One-line app installation command** هو أسرع طريقة للبدء: يثبّت Engine وينشر تطبيقاً على الإنترنت دفعة واحدة. ما عليك سوى إضافة مستودع Git الذي تريده بعد `--repo`، ويتولى المُثبّت الجزأين: يثبّت Engine ثم يبدأ فوراً بإعداد المشروع من المستودع الذي قدّمته.
+**One-line app installation command** هو أسرع طريقة للبدء. ما عليك سوى إضافة مستودع Git الذي تريده بعد `--repo`، ويبدأ المُثبّت فوراً بإعداد Engine ونشر تطبيقك على الإنترنت دفعة واحدة.
 
 مثلاً، لتثبيت Engine ونشر n8n في الوقت نفسه، هذا كل ما تحتاجه:
 
@@ -97,7 +101,7 @@ PanelAlpha Engine برنامج تثبّته على خادم VPS لاستضافة
 curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.com/n8n-io/n8n
 ```
 
-في النهاية يعرض عنوان موقعك الجديد، وإذا لم تمرّر `--no-password` فيعرض أيضاً كلمة المرور التي تفتحه. المستودعات الخاصة، وكلمة مرور من اختيارك، وخادم عليه Engine أصلاً: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
+في النهاية يعرض عنوان موقعك الجديد، وإذا لم تمرّر `--no-password` فيعرض أيضاً كلمة المرور التي تفتحه. للمستودعات الخاصة، أو كلمة مرور من اختيارك، أو تشغيل تطبيق على خادم عليه Engine أصلاً، راجع: [One-line app installation command](docs/02-getting-started/install.md#one-line-app-installation-command).
 
 تفضّل تنفيذ الخطوتين منفصلتين؟ استخدم الأمر أدناه لتثبيت Engine فقط، وانشر تطبيقك لاحقاً من خلال مساعدك (انظر الخطوة 2):
 
@@ -105,7 +109,7 @@ curl -fsSL https://get.panelalpha.com/engine | sh -s -- --repo https://github.co
 curl -fsSL https://get.panelalpha.com/engine | sh
 ```
 
-هذا كل شيء. خادمك جاهز. اسم خاص، أو شهادة TLS خاصة بك، أو خادم خلف NAT: [خيارات التثبيت](docs/02-getting-started/install.md).
+هذا كل شيء. خادمك جاهز. لاسم خاص، أو شهادة TLS خاصة بك، أو خادم خلف NAT، راجع: [خيارات التثبيت](docs/02-getting-started/install.md).
 
 ### الخطوة 2: اربط وكيلك الذكي
 
