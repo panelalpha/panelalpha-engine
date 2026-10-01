@@ -273,6 +273,36 @@ YAML;
         $this->assertFalse(ComposeFileInspector::isSidecarsOnlyComposeYaml('services: {}'));
     }
 
+    /** Zabbix web + server carry MYSQL_* only to connect; the stack is an app. */
+    public function test_database_clients_carrying_its_credentials_are_not_sidecars(): void
+    {
+        $zabbix = <<<'YAML'
+        services:
+          mysql:
+            image: mysql:8.0
+            environment:
+              MYSQL_DATABASE: zabbix
+              MYSQL_USER: zabbix
+              MYSQL_PASSWORD: zabbix_pwd
+              MYSQL_ROOT_PASSWORD: root_pwd
+          zabbix-server:
+            image: zabbix/zabbix-server-mysql:alpine-7.0-latest
+            environment:
+              DB_SERVER_HOST: mysql
+              MYSQL_USER: zabbix
+              MYSQL_PASSWORD: zabbix_pwd
+          zabbix-web:
+            image: zabbix/zabbix-web-nginx-mysql:alpine-7.0-latest
+            ports: ["9080:8080"]
+            environment:
+              DB_SERVER_HOST: mysql
+              MYSQL_USER: zabbix
+              MYSQL_PASSWORD: zabbix_pwd
+        YAML;
+
+        $this->assertFalse(ComposeFileInspector::isSidecarsOnlyComposeYaml($zabbix));
+    }
+
     public function test_datastores_with_their_consoles_are_still_only_sidecars(): void
     {
         // Vendure's compose, in miniature: five database servers, a search
@@ -302,6 +332,18 @@ YAML;
         // One real application service is still enough to make it a stack.
         $withApp = $devEnvironment . "\n  shop:\n    image: ghcr.io/acme/shop:stable\n";
         $this->assertFalse(ComposeFileInspector::isSidecarsOnlyComposeYaml($withApp));
+    }
+
+    public function test_an_application_published_on_a_datastore_port_number_is_not_a_sidecar(): void
+    {
+        // OpenCloud serves on 9200, which is Elasticsearch's port by number only.
+        $opencloud = "services:\n  opencloud:\n    image: opencloudeu/opencloud-rolling:8.0.1\n"
+            . "    ports:\n      - \"3000:9200\"\n";
+        $this->assertFalse(ComposeFileInspector::isSidecarsOnlyComposeYaml($opencloud));
+
+        $elasticsearch = "services:\n  search:\n    image: elasticsearch:8.13.0\n"
+            . "    ports:\n      - \"9200:9200\"\n";
+        $this->assertTrue(ComposeFileInspector::isSidecarsOnlyComposeYaml($elasticsearch));
     }
 
     public function test_is_workstation_app_service_matches_bind_mount_or_undefaulted_host_uid(): void

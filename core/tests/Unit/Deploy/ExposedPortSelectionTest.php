@@ -136,4 +136,14 @@ class ExposedPortSelectionTest extends TestCase
     {
         $this->assertSame(8080, DockerfileFinder::exposedPortIn("ENV P=22\nEXPOSE \$P\nEXPOSE 8080\n"));
     }
+
+    /** rapidbay's torrent port, TCP and UDP, came before its web UI. */
+    public function test_a_torrent_or_udp_port_does_not_win_over_the_web_port(): void
+    {
+        $rapidbay = "EXPOSE 6881\nEXPOSE 6881/udp\nEXPOSE 5000  # HTTP port\n";
+
+        $this->assertSame(5000, DockerfileFinder::exposedPortIn($rapidbay));
+        $this->assertSame(8080, DockerfileFinder::exposedPortIn("EXPOSE 7000/udp 8080\n"));
+        $this->assertSame([6881, 5000], DockerfileFinder::exposedPortsIn($rapidbay));
+    }
 }

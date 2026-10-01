@@ -383,4 +383,215 @@ class ComposePortScanTest extends TestCase
         $this->assertSame([8080], $scan['all']);
         $this->assertSame([], $scan['refused']);
     }
+
+    /** PhantomBot's long-syntax port was invisible, so the default 8080 was used. */
+    public function test_a_long_syntax_port_is_published(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          phantombot:
+            image: gameflixtv/phantombot
+            ports:
+              - target: 25000
+                published: 25000
+                protocol: tcp
+                mode: host
+        YAML);
+
+        $this->assertSame(['all' => [25000], 'primary' => 25000, 'refused' => []], ComposePortScan::of($path));
+    }
+
+    /** a profiled service never starts, so its preferred 8080 is not the site. */
+    public function test_a_service_behind_a_profile_offers_no_port(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          telegram-files:
+            image: ghcr.io/jarvis2f/telegram-files
+            ports: ["${PORT:-6543}:80"]
+          telegram-files-qbittorrent:
+            image: lscr.io/linuxserver/qbittorrent
+            profiles: [share]
+            # as the hardened run file has it, loopback removed
+            ports:
+              - "8080:8080"
+              - "${PEER_LISTEN_PORT:-51413}:51413/udp"
+        YAML);
+
+        $this->assertSame(['all' => [6543], 'primary' => 6543, 'refused' => []], ComposePortScan::of($path));
+    }
+
+    /** Profilarr's parser only exposes 5000; the app publishes 6868. */
+    public function test_an_expose_only_port_ranks_after_a_published_one(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          profilarr:
+            image: ghcr.io/dictionarry-hub/profilarr:2.2.0
+            ports: ['6868:6868']
+          parser:
+            image: ghcr.io/dictionarry-hub/profilarr-parser:2.2.0
+            expose: ['5000']
+        YAML);
+
+        $this->assertSame([6868, 5000], ComposePortScan::of($path)['all']);
+    }
+
+    /** With nothing published anywhere, expose: still decides by preference. */
+    public function test_expose_only_stacks_still_rank_by_preference(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          api:
+            image: acme/api
+            expose: ['9999']
+          web:
+            image: acme/web
+            expose: ['3000']
+        YAML);
+
+        $this->assertSame([3000, 9999], ComposePortScan::of($path)['all']);
+    }
+
+    /** 9Router publishes 20128 and depends on headroom, which publishes 8787. */
+    public function test_a_dependency_of_a_publishing_service_is_not_the_site(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          9router:
+            image: decolua/9router
+            ports: ["20128:20128"]
+            depends_on: [headroom]
+          headroom:
+            image: acme/headroom
+            ports: ["8787:8787"]
+        YAML);
+
+        $this->assertSame([20128, 8787], ComposePortScan::of($path)['all']);
+    }
+
+    /** A front proxy depends on the app; the proxy is the site, not the app behind it. */
+    public function test_a_front_proxy_wins_over_the_app_it_depends_on(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          proxy:
+            image: acme/proxy
+            ports: ["8088:8088"]
+            depends_on:
+              app:
+                condition: service_healthy
+          app:
+            image: acme/app
+            ports: ["80:80"]
+        YAML);
+
+        $this->assertSame(8088, ComposePortScan::primaryOf($path));
+    }
+
+    /** A worker that publishes nothing does not push the app it depends on back. */
+    public function test_a_dependent_without_ports_does_not_demote(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          app:
+            image: acme/app
+            ports: ["8080:8080"]
+          worker:
+            image: acme/app
+            depends_on: [app]
+          admin:
+            image: acme/admin
+            ports: ["9999:9999"]
+        YAML);
+
+        $this->assertSame([8080, 9999], ComposePortScan::of($path)['all']);
+    }
+
+    /** Stepifi's web server is 3000 inside, published on 3169; 3001 serves nothing. */
+    public function test_a_published_port_ranks_by_its_container_port(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          app:
+            build: .
+            ports:
+              - "${PORT:-3169}:3000"
+              - "${BULL_BOARD_PORT:-3001}:3001"
+        YAML);
+
+        $this->assertSame([3169, 3001], ComposePortScan::of($path)['all']);
+    }
+
+    /** The service's own healthcheck names its web port; its other ports follow. */
+    public function test_the_port_the_healthcheck_probes_wins_within_its_service(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          app:
+            image: acme/app
+            ports:
+              - "5004:5004"
+              - "6077:6077"
+            healthcheck:
+              test: ["CMD", "curl", "-f", "http://localhost:6077/health"]
+        YAML);
+
+        $this->assertSame([6077, 5004], ComposePortScan::of($path)['all']);
+    }
+
+    /** The healthcheck ranks only within its own service: a front door elsewhere still wins. */
+    public function test_a_healthcheck_does_not_outrank_another_services_web_port(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          web:
+            image: nginx
+            ports: ["80:80"]
+          app:
+            image: acme/app
+            ports: ["4000:4000"]
+            healthcheck:
+              test: curl -f http://127.0.0.1:4000/
+        YAML);
+
+        $this->assertSame([80, 4000], ComposePortScan::of($path)['all']);
+    }
+
+    /** OpenCloud serves on 9200, Elasticsearch's port; the image is no datastore. */
+    public function test_a_datastore_port_on_an_application_image_is_the_last_resort(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          opencloud:
+            image: opencloudeu/opencloud-rolling:8.0.1
+            ports: ["3000:9200"]
+        YAML);
+
+        $this->assertSame(['all' => [3000], 'primary' => 3000, 'refused' => []], ComposePortScan::of($path));
+    }
+
+    /** Beside a real web port the same binding stays refused, and a real datastore never counts. */
+    public function test_a_datastore_port_on_an_application_image_does_not_beat_a_web_port(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          app:
+            image: acme/app
+            ports: ["8000:8000"]
+          search:
+            image: acme/search-proxy
+            ports: ["9200:9200"]
+          es:
+            image: elasticsearch:8.14.0
+            ports: ["9201:9200"]
+        YAML);
+
+        $scan = ComposePortScan::of($path);
+        $this->assertSame([8000], $scan['all']);
+        $this->assertSame([9200, 9201], array_column($scan['refused'], 'port'));
+
+        $alone = $this->compose("services:\n  es:\n    image: elasticsearch:8.14.0\n    ports: [\"9200:9200\"]\n");
+        $this->assertSame([], ComposePortScan::of($alone)['all']);
+    }
 }

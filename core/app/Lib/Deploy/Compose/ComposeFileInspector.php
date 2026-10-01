@@ -419,7 +419,10 @@ class ComposeFileInspector
             // ships five database servers, Elasticsearch, Redis, Keycloak,
             // Jaeger, Loki and Grafana, and not one line of Vendure -- so
             // deploying it would run a stack that contains no application.
-            if (!SidecarEngine::isKnownDatastore((string) $name, $service)
+            // A published port's number alone does not make one: OpenCloud
+            // serves on 9200, Elasticsearch's port.
+            $identity = isset($service['ports']) ? array_diff_key($service, ['ports' => true, 'expose' => true]) : $service;
+            if (!SidecarEngine::isKnownDatastore((string) $name, $identity)
                 && !DevServices::isDevSidecar((string) $name, $service)
             ) {
                 return false;

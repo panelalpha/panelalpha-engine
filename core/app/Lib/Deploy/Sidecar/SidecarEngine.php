@@ -240,6 +240,9 @@ class SidecarEngine
     private static function fromDeclaredEnvironment(ComposeService $service): ?string
     {
         $keys = $service->environmentKeys();
+        if (CredentialNames::namesARemoteHost($service->environment())) {
+            return null;
+        }
         foreach (CredentialNames::serverPrefixes($keys) as $prefix) {
             if (!CredentialNames::isClientPrefix($prefix, $keys)) {
                 return SidecarDialects::canonical($prefix);

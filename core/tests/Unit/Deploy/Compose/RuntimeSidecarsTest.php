@@ -148,6 +148,34 @@ class RuntimeSidecarsTest extends TestCase
         $this->assertNull($result['build_image']);
     }
 
+    /** Playerr's docker-compose.casaos.yml is the app itself on `playerr:latest`. */
+    public function test_a_template_service_named_after_the_repository_is_not_a_backing_service(): void
+    {
+        $casaos = "services:\n  playerr:\n    image: playerr:latest\n    ports:\n      - '2727:2727'\n";
+        $this->assertSame([], RuntimeSidecars::fromYaml($casaos, true, null, 'github.com/Maikboarder/Playerr')['services']);
+
+        $byImage = "services:\n  web:\n    image: maikboarder/playerr:latest\n  db:\n    image: postgres:16\n";
+        $this->assertSame(['db'], array_keys(RuntimeSidecars::fromYaml($byImage, true, null, 'github.com/maikboarder/playerr')['services']));
+
+        // A datastore keeps its place even in a repository of the same name.
+        $redis = "services:\n  redis:\n    image: redis:7\n";
+        $this->assertSame(['redis'], array_keys(RuntimeSidecars::fromYaml($redis, true, null, 'github.com/acme/redis')['services']));
+    }
+
+    /**
+     * rapidbay's example file, deployed from an archive: no repository name to
+     * match, but the app `links:` its indexer, so it is the top of the stack.
+     */
+    public function test_a_template_app_that_links_its_dependency_is_not_a_backing_service(): void
+    {
+        $template = "services:\n  jackett:\n    image: linuxserver/jackett\n    ports:\n      - 9117:9117\n"
+            . "  rapidbay:\n    image: hauxir/rapidbay:latest\n    environment:\n"
+            . "      - JACKETT_HOST=http://jackett:9117\n    ports:\n      - 5000:5000\n    links:\n      - jackett\n";
+        $result = RuntimeSidecars::fromYaml($template, true);
+
+        $this->assertSame(['jackett'], array_keys($result['services']));
+    }
+
     public function test_only_the_backing_services_are_kept(): void
     {
         // The app service is the thing being deployed, not a dependency of it;

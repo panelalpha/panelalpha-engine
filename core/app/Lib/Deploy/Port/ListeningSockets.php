@@ -88,9 +88,14 @@ final class ListeningSockets
      * bound: a recipe's guess, or an app that ignores $PORT (PocketBase),
      * would otherwise be a green deploy behind a 502.
      *
+     * A port the image itself declares ($declared, its Dockerfile's EXPOSE)
+     * outranks the generic preference: rapidbay listens on 80 (a stock nginx
+     * page) and on its declared 5000.
+     *
      * @param list<array{addr: string, port: int}> $sockets
+     * @param list<int> $declared
      */
-    public static function chooseAppPort(array $sockets, int $expected): ?int
+    public static function chooseAppPort(array $sockets, int $expected, array $declared = []): ?int
     {
         $reachable = self::reachablePorts($sockets);
         if ($reachable === [] || in_array($expected, $reachable, true)) {
@@ -105,7 +110,7 @@ final class ListeningSockets
             return null;
         }
 
-        foreach (self::WEB_PORT_PREFERENCE as $preferred) {
+        foreach ([...$declared, ...self::WEB_PORT_PREFERENCE] as $preferred) {
             if (in_array($preferred, $reachable, true)) {
                 return $preferred;
             }

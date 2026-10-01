@@ -169,6 +169,33 @@ class ServiceHardenerTest extends TestCase
         $this->assertArrayNotHasKey('network_mode', $service);
     }
 
+    /** Hypermind ran on host networking with PORT=3000 and published nothing. */
+    public function test_a_host_networked_service_publishes_its_port_env(): void
+    {
+        $service = ServiceHardener::harden('hypermind', [
+            'image' => 'ghcr.io/lklynet/hypermind:latest',
+            'network_mode' => 'host',
+            'environment' => ['PORT=3000'],
+        ]);
+
+        $this->assertArrayNotHasKey('network_mode', $service);
+        $this->assertSame(['3000:3000'], $service['ports']);
+
+        $mapForm = ServiceHardener::harden('app', ['image' => 'a', 'network_mode' => 'host', 'environment' => ['PORT' => 8080]]);
+        $this->assertSame(['8080:8080'], $mapForm['ports']);
+    }
+
+    public function test_a_host_networked_service_that_already_publishes_is_left_alone(): void
+    {
+        $service = ServiceHardener::harden('app', [
+            'image' => 'acme/app', 'network_mode' => 'host', 'ports' => ['8000:8000'], 'environment' => ['PORT=3000'],
+        ]);
+        $this->assertSame(['8000:8000'], $service['ports']);
+
+        $noPort = ServiceHardener::harden('app', ['image' => 'acme/app', 'network_mode' => 'host']);
+        $this->assertArrayNotHasKey('ports', $noPort);
+    }
+
     public function test_another_network_mode_is_left_alone(): void
     {
         // `service:db` and `none` are legitimate and confer nothing.

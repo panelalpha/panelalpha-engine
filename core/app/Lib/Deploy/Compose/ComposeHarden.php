@@ -53,12 +53,18 @@ class ComposeHarden
         $oneShot = self::oneShotServices(
             is_array($asWritten) ? ['services' => $asWritten] + $compose : $compose
         );
+        $publishers = array_keys(array_filter(
+            $compose['services'],
+            static fn ($service): bool => is_array($service) && ServiceHardener::publishesWebPort($service)
+        ));
         foreach ($compose['services'] as $name => $service) {
             if (is_array($service)) {
                 if (in_array((string) $name, $oneShot, true)) {
                     $service['restart'] = 'no';
                 }
-                $compose['services'][$name] = ServiceHardener::harden((string) $name, $service, $accountMemoryMb, $env, $accountUser, $projectDir);
+                // A loopback binding stays loopback when another service is the front door.
+                $keepLoopback = array_diff($publishers, [$name]) !== [];
+                $compose['services'][$name] = ServiceHardener::harden((string) $name, $service, $accountMemoryMb, $keepLoopback, $env, $accountUser, $projectDir);
             }
         }
         [$compose] = ServiceHardener::withoutHostPathEntries($compose);

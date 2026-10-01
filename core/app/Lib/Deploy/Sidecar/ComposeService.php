@@ -93,6 +93,28 @@ final class ComposeService
     }
 
     /**
+     * The environment as uppercased name => value, list or map form.
+     *
+     * @return array<string, string>
+     */
+    public function environment(): array
+    {
+        $environment = $this->service['environment'] ?? null;
+        $values = [];
+        foreach (is_array($environment) ? $environment : [] as $key => $value) {
+            if (is_int($key)) {
+                [$key, $value] = array_pad(explode('=', is_string($value) ? $value : '', 2), 2, '');
+            }
+            $key = strtoupper(trim((string) $key));
+            if ($key !== '') {
+                $values[$key] = is_scalar($value) ? (string) $value : '';
+            }
+        }
+
+        return $values;
+    }
+
+    /**
      * @return list<string> lowercase service names
      */
     public function dependencyNames(): array
@@ -105,6 +127,12 @@ final class ComposeService
         $names = [];
         foreach ($dependsOn as $key => $value) {
             $names[] = strtolower((string) (is_int($key) ? $value : $key));
+        }
+        // A link (`jackett` or `db:alias`) is a dependency just as depends_on is.
+        foreach ((array) ($this->service['links'] ?? []) as $link) {
+            if (is_string($link)) {
+                $names[] = strtolower(trim(explode(':', $link, 2)[0]));
+            }
         }
 
         return array_values(array_filter($names, static fn (string $n): bool => $n !== ''));

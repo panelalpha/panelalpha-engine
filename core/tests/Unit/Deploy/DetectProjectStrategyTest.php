@@ -91,6 +91,16 @@ class DetectProjectStrategyTest extends TestCase
         $this->assertSame(Strategies::COMPOSE, $result['strategy']);
     }
 
+    public function test_a_compose_app_on_a_datastore_port_number_is_still_a_compose_deploy(): void
+    {
+        $this->writeFile(
+            'docker-compose.yml',
+            "services:\n  opencloud:\n    image: opencloudeu/opencloud-rolling:8.0.1\n    ports:\n      - \"3000:9200\"\n"
+        );
+
+        $this->assertSame(Strategies::COMPOSE, $this->detect()['strategy']);
+    }
+
     /**
      * One case per branch of the strategy dispatch, so the table that replaced
      * five hand-written `if`s cannot lose one silently.

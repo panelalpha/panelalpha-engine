@@ -3,6 +3,8 @@
 namespace App\Lib\Deploy\Compose;
 
 use App\Lib\Deploy\Port\EnvVarDefault;
+use App\Lib\Deploy\Port\InternalPorts;
+use App\Lib\Deploy\Port\PortMapping;
 use App\Lib\Deploy\Sidecar\ComposeService;
 use App\Lib\Deploy\Sidecar\SidecarDialects;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
@@ -133,17 +135,67 @@ final class ServiceHardener
      * @param array<string, list<?string>|string> $env what compose may interpolate with ({@see ComposeInterpolation})
      * @return array<string, mixed>
      */
-    public static function harden(string $name, array $service, ?int $accountMemoryMb = null, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
-    {
+    public static function harden(
+        string $name,
+        array $service,
+        ?int $accountMemoryMb = null,
+        bool $keepLoopbackPorts = false,
+        array $env = [],
+        ?string $accountUser = null,
+        ?string $projectDir = null
+    ): array {
+        $service = self::withHostNetworkPortPublished($service);
         $service = self::withoutEscapes($service, $env, $accountUser, $projectDir);
         $service = self::withRestartPolicy($service);
         $service = self::withoutDeployResources($service);
         $service = self::withMemoryLimit($name, $service, $accountMemoryMb);
         $service = self::withNodeHeapCap($name, $service, $accountMemoryMb);
-        $service = self::withReachablePublishedPorts($service);
+        $service = self::withReachablePublishedPorts($service, $keepLoopbackPorts);
         $service = self::withLegacyPostgresDataDir($service);
 
         return self::withProcessLimits($name, $service);
+    }
+
+    /**
+     * `network_mode: host` is removed by {@see withoutEscapes()}, and a service
+     * that relied on it publishes nothing: Hypermind listens on its `PORT=3000`
+     * and the domain 502'd. The port its `PORT` env names is published instead.
+     *
+     * @param array<string, mixed> $service
+     * @return array<string, mixed>
+     */
+    private static function withHostNetworkPortPublished(array $service): array
+    {
+        if (($service['network_mode'] ?? null) !== 'host' || !empty($service['ports']) || !empty($service['expose'])) {
+            return $service;
+        }
+        $port = self::environmentValue($service['environment'] ?? null, 'PORT');
+        if ($port === null || !ctype_digit($port) || (int) $port < 1 || (int) $port > 65535) {
+            return $service;
+        }
+        $service['ports'] = [$port . ':' . $port];
+
+        return $service;
+    }
+
+    /**
+     * One variable from a service's `environment:`, list or map form.
+     */
+    private static function environmentValue(mixed $environment, string $name): ?string
+    {
+        if (!is_array($environment)) {
+            return null;
+        }
+        foreach ($environment as $key => $value) {
+            if (is_int($key) && is_string($value) && str_starts_with($value, $name . '=')) {
+                return trim(substr($value, strlen($name) + 1), " \"'");
+            }
+            if ($key === $name && is_scalar($value)) {
+                return trim((string) $value);
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -189,10 +241,14 @@ final class ServiceHardener
      * its own network. PortMapping discards the binding, so the app publishes no
      * port the engine can find and detection falls back to a dead default.
      *
+     * With $keepLoopback (another service in the file publishes a web port) a
+     * loopback binding is a sidecar kept local on purpose, and stays: Poznote's
+     * MCP server on `127.0.0.1:8045` next to its web server.
+     *
      * @param array<string, mixed> $service
      * @return array<string, mixed>
      */
-    private static function withReachablePublishedPorts(array $service): array
+    private static function withReachablePublishedPorts(array $service, bool $keepLoopback = false): array
     {
         $ports = $service['ports'] ?? null;
         if (!is_array($ports)) {
@@ -201,7 +257,11 @@ final class ServiceHardener
 
         foreach ($ports as $index => $port) {
             if (is_string($port)) {
-                $ports[$index] = self::withoutLoopbackHost($port);
+                $port = self::withDefaultedHostPort($port);
+                $ports[$index] = $keepLoopback ? $port : self::withoutLoopbackHost($port);
+                continue;
+            }
+            if ($keepLoopback) {
                 continue;
             }
             // The long form says the same thing in a field of its own.
@@ -214,6 +274,47 @@ final class ServiceHardener
         $service['ports'] = $ports;
 
         return $service;
+    }
+
+    /**
+     * Whether a service publishes a port the site could be served on, once
+     * its host-port variables are defaulted.
+     *
+     * @param array<string, mixed> $service
+     */
+    public static function publishesWebPort(array $service): bool
+    {
+        $ports = self::withHostNetworkPortPublished($service)['ports'] ?? null;
+        foreach (is_array($ports) ? $ports : [] as $port) {
+            $mapping = PortMapping::parse(is_string($port) ? self::withDefaultedHostPort($port) : $port);
+            if ($mapping !== null && !InternalPorts::coversBinding($mapping, $service)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * `${HTTP_WEB_PORT}:80` with the variable unset publishes 80 on a random
+     * host port the engine cannot know. It defaults to the container port,
+     * `${HTTP_WEB_PORT:-80}:80`, so an operator who sets it still chooses.
+     */
+    private static function withDefaultedHostPort(string $port): string
+    {
+        $parts = self::splitFields(trim($port));
+        $count = count($parts);
+        if ($count < 2 || $count > 3) {
+            return $port;
+        }
+        $host = trim($parts[$count - 2]);
+        $container = explode('/', $parts[$count - 1])[0];
+        if (preg_match('/^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$/', $host, $m) !== 1 || !ctype_digit(trim($container))) {
+            return $port;
+        }
+        $parts[$count - 2] = '${' . $m[1] . ':-' . trim($container) . '}';
+
+        return implode(':', $parts);
     }
 
     private static function withoutLoopbackHost(string $port): string

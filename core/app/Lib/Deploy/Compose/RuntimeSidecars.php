@@ -3,6 +3,7 @@
 namespace App\Lib\Deploy\Compose;
 
 use App\Lib\Deploy\Port\EnvVarDefault;
+use App\Lib\Deploy\Sidecar\ComposeService;
 use App\Lib\Deploy\Sidecar\SidecarCredentials;
 use App\Lib\Deploy\Sidecar\SidecarEngine;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
@@ -253,7 +254,8 @@ final class RuntimeSidecars
         // evidence of what the service is.
         $this->ports[$name] = SidecarEngine::allPorts($service, $observedPorts);
 
-        if ($this->backingServicesOnly && !$this->isBacking($name, $service, $observedPorts)) {
+        if ($this->backingServicesOnly
+            && (!$this->isBacking($name, $service, $observedPorts) || $this->isNamedAfterTheProject($name, $service, $observedPorts))) {
             $this->drop($name, $service);
 
             return;
@@ -595,6 +597,29 @@ final class RuntimeSidecars
         }
 
         return trim($parts[1]) !== '';
+    }
+
+    /**
+     * A template service named after the repository, or running an image of
+     * that name, is the application in an app-store variant file (Playerr's
+     * docker-compose.casaos.yml runs `playerr:latest`), not a backing service.
+     * A recognised datastore is never this.
+     *
+     * @param array<string, mixed> $service
+     * @param list<int> $observedPorts
+     */
+    private function isNamedAfterTheProject(string $name, array $service, array $observedPorts): bool
+    {
+        $identity = strtolower(trim((string) $this->projectIdentity, " \t/"));
+        $repo = $identity === '' ? '' : (string) array_slice(explode('/', $identity), -1)[0];
+        if ($repo === '' || SidecarEngine::isKnownDatastore($name, $service, $observedPorts)) {
+            return false;
+        }
+        $image = strtolower(explode('@', ComposeService::of($service)->image(), 2)[0]);
+        $segments = explode('/', $image);
+        $imageName = explode(':', (string) end($segments), 2)[0];
+
+        return strtolower($name) === $repo || $imageName === $repo;
     }
 
     /**

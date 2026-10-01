@@ -41,10 +41,11 @@ class DetectAppPort
      * already being served.
      *
      * @param list<array{addr: string, port: int}> $sockets
+     * @param list<int> $declared ports the image declares, preferred
      */
-    public static function chooseAppPort(array $sockets, int $expected): ?int
+    public static function chooseAppPort(array $sockets, int $expected, array $declared = []): ?int
     {
-        return ListeningSockets::chooseAppPort($sockets, $expected);
+        return ListeningSockets::chooseAppPort($sockets, $expected, $declared);
     }
 
     /**

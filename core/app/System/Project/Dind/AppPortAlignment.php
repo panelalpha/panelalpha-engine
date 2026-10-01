@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Compose\ComposeYaml;
+use App\Lib\Deploy\Detect\DockerfileFinder;
 use App\Lib\Deploy\DetectAppPort;
 use App\Lib\Deploy\Port\PublishedPort;
 use App\Lib\Deploy\Telemetry\Telemetry;
@@ -19,8 +20,12 @@ final class AppPortAlignment
 
     private const SETTLE_INTERVAL_SECONDS = 2;
 
+    /**
+     * @param (\Closure(int): void)|null $sleep
+     */
     public function __construct(
         private DindProject $project,
+        private ?\Closure $sleep = null,
     ) {
     }
 
@@ -52,8 +57,21 @@ final class AppPortAlignment
                 return;
             }
 
-            $actual = $this->settledPort($mapping->container);
+            $actual = $this->settledPort(
+                $mapping->container,
+                $this->declaredPorts(dirname($composePath), $parsed['services']['app']['build'] ?? null)
+            );
             if ($actual === null) {
+                return;
+            }
+            // A socket is not a website: epmd, php-fpm and SSH bind first and
+            // never answer HTTP, and forwarding there leaves the site dead.
+            if (self::answersHttp($this->httpStatusOf($actual)) === false) {
+                $logger?->warn(
+                    "Application is listening on port {$actual}, not {$mapping->container}, but {$actual} "
+                        . "does not answer HTTP; still forwarding to {$mapping->container}"
+                );
+
                 return;
             }
 
@@ -82,9 +100,73 @@ final class AppPortAlignment
         }
     }
 
-    private function settledPort(int $expected): ?int
+    /**
+     * @param list<int> $declared
+     */
+    private function settledPort(int $expected, array $declared): ?int
     {
-        return self::awaitPort($expected, fn (): array => $this->listeningSockets());
+        return self::awaitPort($expected, fn (): array => $this->listeningSockets(), $this->sleep, $declared);
+    }
+
+    /**
+     * Whether the probe of a candidate port got an HTTP answer: false for
+     * `000` (nothing HTTP answered), null when the probe could not run.
+     */
+    public static function answersHttp(string $probeOutput): ?bool
+    {
+        $code = trim($probeOutput);
+        if (preg_match('/^\d{3}$/', $code) !== 1) {
+            return null;
+        }
+
+        return $code !== '000';
+    }
+
+    /** The status the app container answers on $port, over http then https; '' when it cannot be asked. */
+    private function httpStatusOf(int $port): string
+    {
+        $composeFile = escapeshellarg($this->project->userAppComposeFileToRun());
+        $projectDir = escapeshellarg($this->project->userAppDirPath());
+        $script = <<<SH
+cid=\$(docker compose --project-directory {$projectDir} -f {$composeFile} ps -q app 2>/dev/null | head -1)
+[ -n "\$cid" ] || exit 0
+ip=\$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "\$cid" 2>/dev/null | awk '{print \$1}')
+[ -n "\$ip" ] || exit 0
+for scheme in http https; do
+    code=\$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "\$scheme://\$ip:{$port}/" 2>/dev/null)
+    [ -n "\$code" ] && [ "\$code" != 000 ] && break
+done
+echo "\${code:-000}"
+SH;
+
+        try {
+            return $this->project->shell()->execQuiet(['bash', '-c', $script], [], 30);
+        } catch (\Exception $e) {
+            return '';
+        }
+    }
+
+    /**
+     * The TCP ports the built Dockerfile EXPOSEs.
+     *
+     * @param mixed $build the app service's `build:` value
+     * @return list<int>
+     */
+    private function declaredPorts(string $composeDir, $build): array
+    {
+        if (is_string($build)) {
+            $build = ['context' => $build];
+        }
+        if (!is_array($build)) {
+            return [];
+        }
+        $context = is_string($build['context'] ?? null) ? $build['context'] : '.';
+        $dockerfile = is_string($build['dockerfile'] ?? null) ? $build['dockerfile'] : 'Dockerfile';
+        $contents = $this->project->projectTree()->read(
+            $composeDir . '/' . trim($context, '/') . '/' . ltrim($dockerfile, '/')
+        );
+
+        return $contents === null ? [] : DockerfileFinder::exposedPortsIn($contents);
     }
 
     /**
@@ -94,8 +176,9 @@ final class AppPortAlignment
      *
      * @param callable(): list<array{addr: string, port: int}> $sockets
      * @param (callable(int): void)|null $sleep
+     * @param list<int> $declared ports the Dockerfile EXPOSEs
      */
-    public static function awaitPort(int $expected, callable $sockets, ?callable $sleep = null): ?int
+    public static function awaitPort(int $expected, callable $sockets, ?callable $sleep = null, array $declared = []): ?int
     {
         $sleep ??= static fn (int $seconds) => sleep($seconds);
         $candidate = null;
@@ -107,7 +190,7 @@ final class AppPortAlignment
             if (DetectAppPort::servesPort($seen, $expected)) {
                 return null;
             }
-            $candidate = DetectAppPort::chooseAppPort($seen, $expected) ?? $candidate;
+            $candidate = DetectAppPort::chooseAppPort($seen, $expected, $declared) ?? $candidate;
         }
 
         return $candidate;

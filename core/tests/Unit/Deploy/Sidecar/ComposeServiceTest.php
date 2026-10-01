@@ -132,6 +132,13 @@ class ComposeServiceTest extends TestCase
         $this->assertSame(['db'], $map->dependencyNames());
     }
 
+    public function test_links_are_dependencies_too(): void
+    {
+        $service = ComposeService::of(['depends_on' => ['db'], 'links' => ['Jackett', 'cache:redis']]);
+
+        $this->assertSame(['db', 'jackett', 'cache'], $service->dependencyNames());
+    }
+
     public function test_a_service_with_no_dependencies_reports_none(): void
     {
         $this->assertSame([], ComposeService::of(['image' => 'redis:7'])->dependencyNames());

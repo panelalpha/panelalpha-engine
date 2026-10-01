@@ -31,8 +31,46 @@ final class PortMapping
         if (is_int($mapping)) {
             return $mapping > 0 ? new self($mapping, null) : null;
         }
+        if (is_array($mapping)) {
+            return self::fromLongSyntax($mapping);
+        }
 
         return is_string($mapping) ? self::fromString($mapping) : null;
+    }
+
+    /**
+     * `{target: 25000, published: "25000", host_ip: 127.0.0.1}`. Without
+     * `published` it reads like a bare `25000`.
+     *
+     * @param array<array-key, mixed> $mapping
+     */
+    private static function fromLongSyntax(array $mapping): ?self
+    {
+        $hostIp = $mapping['host_ip'] ?? null;
+        if (is_string($hostIp) && in_array(trim($hostIp, '[] '), self::LOOPBACK_HOSTS, true)) {
+            return null;
+        }
+        $target = self::scalarPort($mapping['target'] ?? null);
+        if ($target <= 0) {
+            return null;
+        }
+        $published = $mapping['published'] ?? null;
+        if ($published === null || $published === '') {
+            return new self($target, null);
+        }
+        $hostPort = self::scalarPort($published);
+
+        return $hostPort > 0 ? new self($hostPort, $target) : null;
+    }
+
+    /** A port given as int or string, env defaults resolved; a range reads as its first port. */
+    private static function scalarPort(mixed $value): int
+    {
+        if (is_int($value)) {
+            return $value;
+        }
+
+        return is_string($value) ? self::portOf(EnvVarDefault::resolve($value)) : 0;
     }
 
     private static function fromString(string $mapping): ?self

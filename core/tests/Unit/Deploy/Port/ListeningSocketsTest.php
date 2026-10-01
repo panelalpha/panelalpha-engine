@@ -131,6 +131,18 @@ class ListeningSocketsTest extends TestCase
         $this->assertSame(3000, ListeningSockets::chooseAppPort($sockets, 8080));
     }
 
+    /** rapidbay's image runs a stock nginx on 80 beside its declared 5000. */
+    public function test_a_port_the_image_declares_outranks_the_generic_preference(): void
+    {
+        $sockets = [
+            ['addr' => '00000000', 'port' => 80],
+            ['addr' => '00000000', 'port' => 5000],
+        ];
+
+        $this->assertSame(80, ListeningSockets::chooseAppPort($sockets, 6881));
+        $this->assertSame(5000, ListeningSockets::chooseAppPort($sockets, 6881, [6881, 5000]));
+    }
+
     public function test_an_unrecognised_port_is_chosen_by_number(): void
     {
         $sockets = [

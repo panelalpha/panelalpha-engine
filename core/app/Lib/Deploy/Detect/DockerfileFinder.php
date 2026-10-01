@@ -37,7 +37,7 @@ final class DockerfileFinder
     /** A whole `EXPOSE` line: every port on it, `3000/tcp` forms included. */
     private const EXPOSE_LINE_PATTERN = '/^[ \t]*EXPOSE[ \t]+(.+)$/mi';
 
-    private const PORT_TOKEN_PATTERN = '/\b(\d{1,5})(?:\/(?:tcp|udp))?\b/i';
+    private const PORT_TOKEN_PATTERN = '/\b(\d{1,5})(?:\/(tcp|udp))?\b/i';
 
     /** A whole `COPY` or `ADD` line, after continuations have been joined. */
     private const COPY_LINE_PATTERN = '/^[ \t]*(?:COPY|ADD)[ \t]+(.+)$/mi';
@@ -84,8 +84,45 @@ final class DockerfileFinder
      */
     public static function exposedPortIn(string $contents): ?int
     {
-        if (preg_match_all(self::EXPOSE_LINE_PATTERN, $contents, $lines) === 0) {
+        $declared = self::exposedDeclarations($contents);
+        if ($declared === []) {
             return null;
+        }
+
+        // A `/udp` port cannot serve HTTP: rapidbay's `EXPOSE 6881/udp`.
+        foreach ($declared as [$port, $protocol]) {
+            if ($protocol !== 'udp' && InternalPorts::isWebCandidate($port)) {
+                return $port;
+            }
+        }
+
+        return $declared[0][0];
+    }
+
+    /**
+     * Every TCP port the `EXPOSE` lines declare, in written order.
+     *
+     * @return list<int>
+     */
+    public static function exposedPortsIn(string $contents): array
+    {
+        $ports = [];
+        foreach (self::exposedDeclarations($contents) as [$port, $protocol]) {
+            if ($protocol !== 'udp') {
+                $ports[$port] = true;
+            }
+        }
+
+        return array_keys($ports);
+    }
+
+    /**
+     * @return list<array{0: int, 1: string}> port and lowercased protocol ('' when unstated)
+     */
+    private static function exposedDeclarations(string $contents): array
+    {
+        if (preg_match_all(self::EXPOSE_LINE_PATTERN, $contents, $lines) === 0) {
+            return [];
         }
 
         $declared = self::declaredValues($contents);
@@ -95,28 +132,18 @@ final class DockerfileFinder
             // `EXPOSE ${PORT}` after `ENV PORT=8080` states a port as plainly
             // as a literal. A name the file never defines is skipped.
             $line = self::substitute($line, $declared);
-            if (preg_match_all(self::PORT_TOKEN_PATTERN, $line, $tokens) === 0) {
+            if (preg_match_all(self::PORT_TOKEN_PATTERN, $line, $tokens, PREG_SET_ORDER) === 0) {
                 continue;
             }
-            foreach ($tokens[1] as $token) {
-                $port = (int) $token;
+            foreach ($tokens as $token) {
+                $port = (int) $token[1];
                 if ($port > 0 && $port <= 65535) {
-                    $ports[] = $port;
+                    $ports[] = [$port, strtolower($token[2] ?? '')];
                 }
             }
         }
 
-        if ($ports === []) {
-            return null;
-        }
-
-        foreach ($ports as $port) {
-            if (InternalPorts::isWebCandidate($port)) {
-                return $port;
-            }
-        }
-
-        return $ports[0];
+        return $ports;
     }
 
     /**
