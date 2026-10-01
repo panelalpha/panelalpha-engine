@@ -14,7 +14,8 @@ use App\Lib\Deploy\Platform\ProjectContext;
  *
  * Sources in precedence: `composer.lock` `platform-overrides`, then
  * `platform`, then the constraints, then `require.php`. Of the minors
- * satisfying every constraint the **lowest** wins, and an unrecognised
+ * satisfying every constraint the **lowest** wins, except that a project with
+ * no lock gets the default minor when it satisfies them; an unrecognised
  * constraint disqualifies a minor instead of passing it.
  */
 final class PhpRuntime implements Runtime
@@ -111,19 +112,19 @@ final class PhpRuntime implements Runtime
 
         $constraints = self::phpConstraints($composerJson, $composerLock);
         if ($constraints !== []) {
+            // Without a lock the build runs `composer update`, which takes the
+            // newest releases, and those routinely need more than the project's
+            // floor (Aimeos: `^8.1` beside laravel/framework ^13, which needs
+            // 8.3). The default minor when the floor allows it, as for Node.
+            $default = self::defaultMinor();
+            if (self::decodeObject($composerLock) === []
+                && in_array($default, self::minors(), true)
+                && self::allowsMinor($constraints, $default)
+            ) {
+                return new Requirement('php', $default, implode(', ', $constraints), self::sourceFor($composerJson, $composerLock));
+            }
             foreach (self::minors() as $minor) {
-                $candidate = $minor . '.999999';
-                $compatible = true;
-                foreach ($constraints as $constraint) {
-                    // An unrecognised constraint disqualifies the minor. Reading
-                    // it as compatible would let a garbage `require.php` select
-                    // the *oldest* PHP the engine ships.
-                    if (self::constraintAllowsVersion($constraint, $candidate) !== true) {
-                        $compatible = false;
-                        break;
-                    }
-                }
-                if ($compatible) {
+                if (self::allowsMinor($constraints, $minor)) {
                     return new Requirement(
                         'php',
                         $minor,
@@ -149,6 +150,23 @@ final class PhpRuntime implements Runtime
         }
 
         return new Requirement('php', "{$major}.{$minor}", implode(', ', $constraints), 'composer.json require.php');
+    }
+
+    /**
+     * @param list<string> $constraints
+     */
+    private static function allowsMinor(array $constraints, string $minor): bool
+    {
+        foreach ($constraints as $constraint) {
+            // An unrecognised constraint disqualifies the minor. Reading it as
+            // compatible would let a garbage `require.php` select the *oldest*
+            // PHP the engine ships.
+            if (self::constraintAllowsVersion($constraint, $minor . '.999999') !== true) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

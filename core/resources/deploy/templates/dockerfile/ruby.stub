@@ -13,6 +13,7 @@ ENV BUNDLE_WITHOUT="development:test"
 WORKDIR /app
 COPY Gemfile ./
 COPY Gemfile.lock* ./
+COPY .ruby-version* .tool-versions* ./
 RUN bundle install --jobs 4 --retry 3 \
  && rm -rf ~/.bundle /usr/local/bundle/ruby/*/cache
 
@@ -22,5 +23,9 @@ COPY . .
 {{# frontend_stage }}
 COPY --from=assets /app/public ./public
 {{/ frontend_stage }}
+{{# assets_precompile }}
+RUN SECRET_KEY_BASE_DUMMY=1 bundle exec rails assets:precompile \
+ || echo "PANELALPHA: rails assets:precompile failed; the app starts without precompiled assets"
+{{/ assets_precompile }}
 EXPOSE {{ port }}
 CMD {{ start_command }}

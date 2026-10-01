@@ -340,17 +340,28 @@ final class JavaRuntime implements Runtime
      * The largest non-`-plain`/`-sources`/`-javadoc` jar wins, resolved at start
      * time; a multi-module reactor's is found in the shallowest directory below
      * (four levels at most), skipping wrapper jars and copy-dependencies. Depth
-     * sorts before size.
+     * sorts before size. Quarkus's fast-jar launcher comes first, and a jar
+     * without a Main-Class (a frontend webjar) is passed over; with neither
+     * unzip nor jar in the image every candidate counts as runnable.
      */
     public static function startCommand(bool $gradle): string
     {
         $dir = $gradle ? 'build/libs' : 'target';
+        $quarkus = ($gradle ? 'build' : 'target') . '/quarkus-app/quarkus-run.jar';
 
-        return 'jar="$(ls -S ' . $dir . '/*.jar 2>/dev/null'
+        return 'has_main() { if command -v unzip >/dev/null 2>&1; then'
+            . ' unzip -p "$1" META-INF/MANIFEST.MF 2>/dev/null | grep -qi "^Main-Class:";'
+            . ' elif command -v jar >/dev/null 2>&1; then'
+            . ' d="$(mktemp -d)"; (cd "$d" && jar xf "$1" META-INF/MANIFEST.MF) >/dev/null 2>&1;'
+            . ' grep -qi "^Main-Class:" "$d/META-INF/MANIFEST.MF" 2>/dev/null; r=$?; rm -rf "$d"; return $r;'
+            . ' fi; };'
+            . ' runnable() { while IFS= read -r j; do has_main "$PWD/$j" && { printf "%s\n" "$j"; return 0; }; done; return 0; };'
+            . ' jar="$(ls ' . $quarkus . ' */' . $quarkus . ' 2>/dev/null | head -1)";'
+            . ' [ -n "$jar" ] || jar="$(ls -S ' . $dir . '/*.jar 2>/dev/null'
             . ' | grep -v -- "-plain\.jar$"'
             . ' | grep -v -- "-sources\.jar$"'
             . ' | grep -v -- "-javadoc\.jar$"'
-            . ' | head -1)";'
+            . ' | runnable)";'
             . ' [ -n "$jar" ] || jar="$(find . -mindepth 2 -maxdepth 4 -name "*.jar"'
             . ' -not -path "./.git/*"'
             . ' -not -path "./gradle/*"'
@@ -361,7 +372,7 @@ final class JavaRuntime implements Runtime
             . ' | grep -v -- "-plain\.jar$"'
             . ' | grep -v -- "-sources\.jar$"'
             . ' | grep -v -- "-javadoc\.jar$"'
-            . ' | sort -k1,1n -k2,2nr | head -1 | cut -d" " -f3-)";'
+            . ' | sort -k1,1n -k2,2nr | cut -d" " -f3- | runnable)";'
             . ' [ -n "$jar" ] || { echo "PANELALPHA: no runnable jar in ' . $dir . '"; exit 1; };'
             . ' exec java -jar "$jar"';
     }

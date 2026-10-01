@@ -114,11 +114,12 @@ class InnerDocker
     /**
      * @param list<string> $extras
      * @param list<string> $packages
+     * @param list<string> $required
      * @return array{tag: ?string, baked: list<string>}
      */
-    public function ensurePhpBaseImage(string $phpImage, array $extras = [], array $packages = []): array
+    public function ensurePhpBaseImage(string $phpImage, array $extras = [], array $packages = [], array $required = []): array
     {
-        return $this->bases()->ensurePhp($phpImage, $extras, $packages);
+        return $this->bases()->ensurePhp($phpImage, $extras, $packages, $required);
     }
 
     /**

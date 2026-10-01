@@ -29,7 +29,8 @@ class ComposeFileInspector
      * was accepted as deployable and then died on `useradd: invalid user ID
      * '-d'` once the empty argument shifted the rest of the command along.
      */
-    private const HOST_UID_VARS = 'WWWGROUP|WWWUSER|PUID|PGID|USER_ID|GROUP_ID|HOST_UID|HOST_GID|UID|GID';
+    private const HOST_UID_VARS = 'WWWGROUP|WWWUSER|PUID|PGID|USER_ID|GROUP_ID|USERID|GROUPID|USER_UID|USER_GID'
+        . '|HOST_UID|HOST_GID|HOSTUID|HOSTGID|UID|GID';
 
     /** @var list<string> */
     private const PROJECT_ROOT_SOURCES = ['.', './', '${PWD}', '$PWD'];

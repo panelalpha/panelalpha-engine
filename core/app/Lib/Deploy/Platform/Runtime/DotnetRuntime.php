@@ -153,6 +153,7 @@ final class DotnetRuntime implements Runtime
             }
             if (preg_match('/<OutputType>\s*Library\s*<\/OutputType>/i', $contents) === 1
                 || self::targetsOnlyWindows($contents)
+                || self::looksLikeBenchmark($relative, $contents)
             ) {
                 continue;
             }
@@ -181,9 +182,20 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
+     * A BenchmarkDotNet harness is an Exe but never the app: Kavita.Benchmark
+     * sorted before Kavita.Server and was published instead.
+     */
+    private static function looksLikeBenchmark(string $relative, string $contents): bool
+    {
+        return preg_match('/(^|[\/.])benchmarks?([\/.]|$)/i', $relative) === 1
+            || preg_match('/<PackageReference\s+Include\s*=\s*"BenchmarkDotNet"/i', $contents) === 1;
+    }
+
+    /**
      * The highest `net<major>.<minor>` any project file targets, solution-wide
      * -- the SDK that builds the newest builds the rest. `netstandard2.0` and
-     * `net48` are library targets and are ignored.
+     * `net48` are library targets and are ignored. Only `<TargetFramework(s)>`
+     * values count: Emby's HintPath `sqlite3.net45.1.1.11` read as sdk:45.1.
      */
     public static function targetFramework(string $projectDir): ?string
     {
@@ -196,11 +208,7 @@ final class DotnetRuntime implements Runtime
             if (!is_string($contents)) {
                 continue;
             }
-            if (preg_match_all('/net(\d+)\.(\d+)/i', $contents, $matches, PREG_SET_ORDER) < 1) {
-                continue;
-            }
-            foreach ($matches as $m) {
-                $version = $m[1] . '.' . $m[2];
+            foreach (self::declaredFrameworks($contents) as $version) {
                 if ($best === null || version_compare($version, $best, '>')) {
                     $best = $version;
                 }
@@ -208,6 +216,50 @@ final class DotnetRuntime implements Runtime
         }
 
         return $best;
+    }
+
+    /**
+     * "<project> targets .NET Framework v4.7" when the project that would be
+     * published is a classic .NET Framework one (`<TargetFrameworkVersion>`, no
+     * `<TargetFramework>`), which `dotnet publish` on Linux cannot build.
+     */
+    public static function legacyFrameworkEntry(string $projectDir): ?string
+    {
+        $entry = self::entryProject($projectDir);
+        if ($entry === null) {
+            return null;
+        }
+        $contents = @file_get_contents(rtrim($projectDir, '/') . '/' . $entry);
+        if (!is_string($contents)
+            || preg_match('/<TargetFrameworks?>/i', $contents) === 1
+            || preg_match('/<TargetFrameworkVersion>\s*([^<]+?)\s*<\/TargetFrameworkVersion>/i', $contents, $m) !== 1
+        ) {
+            return null;
+        }
+
+        return $entry . ' targets .NET Framework ' . $m[1];
+    }
+
+    /**
+     * `X.Y` of every `netX.Y` (or `netX.Y-<platform>`) a project file's
+     * `<TargetFramework>` / `<TargetFrameworks>` names.
+     *
+     * @return list<string>
+     */
+    private static function declaredFrameworks(string $contents): array
+    {
+        preg_match_all('/<TargetFrameworks?>\s*([^<]*?)\s*<\/TargetFrameworks?>/i', $contents, $elements);
+
+        $versions = [];
+        foreach ($elements[1] as $list) {
+            foreach (explode(';', $list) as $framework) {
+                if (preg_match('/^net(\d+)\.(\d+)(?:-|$)/i', trim($framework), $m) === 1) {
+                    $versions[] = $m[1] . '.' . $m[2];
+                }
+            }
+        }
+
+        return $versions;
     }
 
     /**
@@ -366,6 +418,8 @@ final class DotnetRuntime implements Runtime
      * The entry assembly is the one with a runtimeconfig beside it -- a publish
      * directory holds dozens of library DLLs and no name distinguishes them.
      * With nothing runnable this exits instead of restart-looping behind a 502.
+     * It runs from inside the publish directory: ASP.NET takes its content root,
+     * and so wwwroot, from the working directory.
      */
     public static function startCommand(): string
     {
@@ -376,6 +430,6 @@ final class DotnetRuntime implements Runtime
             . ' || { echo "PANELALPHA: dotnet publish produced no runnable assembly in ' . $dir . '/";'
             . ' echo "PANELALPHA: published files: $(ls ' . $dir . ' 2>/dev/null | head -n 20)";'
             . ' exit 1; };'
-            . ' exec dotnet "${cfg%.runtimeconfig.json}.dll"';
+            . ' cd ' . $dir . ' && exec dotnet "$(basename "${cfg%.runtimeconfig.json}").dll"';
     }
 }

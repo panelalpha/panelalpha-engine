@@ -74,8 +74,34 @@ class RuntimeResolutionTest extends TestCase
         ];
     }
 
+    /** With a lock the packages are pinned, so the floor is enough. */
     #[\PHPUnit\Framework\Attributes\DataProvider('phpConstraints')]
     public function test_php_picks_the_lowest_minor_satisfying_the_constraint(string $constraint, string $expected): void
+    {
+        $this->write('composer.json', json_encode(['require' => ['php' => $constraint]]));
+        $this->write('composer.lock', json_encode(['packages' => []]));
+
+        $this->assertSame($expected, RuntimeRegistry::get('php')->resolve($this->context())?->version);
+    }
+
+    /** @return array<string, array{0: string, 1: string}> */
+    public static function locklessPhpConstraints(): array
+    {
+        return [
+            'caret 8.1'      => ['^8.1', '8.3'],
+            'gte 7.4'        => ['>=7.4', '8.3'],
+            'caret 8.4'      => ['^8.4', '8.4'],
+            'bounded range'  => ['>=8.1 <8.3', '8.1'],
+        ];
+    }
+
+    /**
+     * Aimeos: `^8.1` with no lock resolved to 8.1, and the fresh `composer
+     * update` then failed on laravel/framework ^13, which needs 8.3. Without a
+     * lock the default minor wins whenever the constraint allows it.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('locklessPhpConstraints')]
+    public function test_a_project_without_a_lock_gets_the_default_minor_its_floor_allows(string $constraint, string $expected): void
     {
         $this->write('composer.json', json_encode(['require' => ['php' => $constraint]]));
 
@@ -194,7 +220,7 @@ class RuntimeResolutionTest extends TestCase
         $this->assertNull(PhpRuntime::lockedPlatform(json_encode(['platform-overrides' => ['php' => '7.2']])));
 
         // No lock, no statement: the constraint path stays in charge.
-        $this->write('composer.json', json_encode(['require' => ['php' => '^8.2']]));
+        $this->write('composer.json', json_encode(['require' => ['php' => '~8.2.0']]));
         $this->assertSame('8.2', RuntimeRegistry::get('php')->resolve($this->context())?->version);
     }
 

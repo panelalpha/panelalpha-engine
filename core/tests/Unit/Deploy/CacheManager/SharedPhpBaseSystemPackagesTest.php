@@ -101,6 +101,23 @@ class SharedPhpBaseSystemPackagesTest extends TestCase
         $this->assertSame(['build ' . PhpBaseImage::tag(self::PHP, ['grpc'])], $this->background);
     }
 
+    /**
+     * Wallabag requires ext-tidy: on the plain base the host composer install
+     * aborts, so the first deploy after a base bump failed until the
+     * background build finished minutes later.
+     */
+    public function test_a_variant_carrying_a_required_extension_is_built_now(): void
+    {
+        $tag = (string) PhpBaseImage::tag(self::PHP, ['tidy']);
+        $this->onHost = [(string) PhpBaseImage::tag(self::PHP)];
+
+        $result = $this->bases()->ensurePhp(self::PHP, ['tidy'], [], ['iconv', 'tidy']);
+
+        $this->assertSame(['tag' => $tag, 'baked' => ['tidy']], $result);
+        $this->assertSame(['build ' . $tag, 'load ' . $tag], $this->foreground);
+        $this->assertSame([], $this->background);
+    }
+
     private function bases(): SharedBaseImages
     {
         $store = $this->createStub(ImageStore::class);

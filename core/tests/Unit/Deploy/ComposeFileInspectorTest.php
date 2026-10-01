@@ -412,6 +412,27 @@ DOCKER
         $this->assertTrue(ComposeFileInspector::isHostUidMappedDockerfile($crater));
     }
 
+    /** OSPOS's dev stage: `$USERID` is not `$UID`, so it needs its own name in the list. */
+    public function test_userid_and_groupid_are_recognised_as_a_host_uid_map(): void
+    {
+        $ospos = $this->writeFile('Dockerfile.ospos', <<<'DOCKER'
+FROM ospos AS ospos_dev
+ARG USERID
+ARG GROUPID
+RUN ( addgroup --gid $GROUPID ospos || true ) && ( adduser --uid $USERID --gid $GROUPID ospos )
+DOCKER
+        );
+        $this->assertTrue(ComposeFileInspector::isHostUidMappedDockerfile($ospos));
+
+        $defaulted = $this->writeFile('Dockerfile.ospos-defaulted', <<<'DOCKER'
+FROM php:8.3-apache
+ARG USERID=1000
+RUN adduser --uid $USERID app
+DOCKER
+        );
+        $this->assertFalse(ComposeFileInspector::isHostUidMappedDockerfile($defaulted));
+    }
+
     /** A numeric default is still a decision, in either case. */
     public function test_a_defaulted_lowercase_uid_is_not_mapped(): void
     {

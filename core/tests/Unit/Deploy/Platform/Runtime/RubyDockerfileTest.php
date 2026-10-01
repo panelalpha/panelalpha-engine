@@ -75,6 +75,41 @@ class RubyDockerfileTest extends TestCase
         $this->assertGreaterThan($nodeEnvPos, $buildPos);
     }
 
+    /** Production Rails does not compile assets on the fly; the image has to carry them. */
+    public function test_a_rails_app_on_the_asset_pipeline_precompiles_its_assets(): void
+    {
+        $dir = $this->projectDir([
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'rails', '~> 7.2'\ngem 'sprockets-rails'\n",
+            'config/application.rb' => "module App; end\n",
+        ]);
+
+        $dockerfile = RubyDockerfile::generate($dir, ['gemfile' => true], 3000);
+
+        $this->assertStringContainsString('RUN SECRET_KEY_BASE_DUMMY=1 bundle exec rails assets:precompile', $dockerfile);
+        // After the source is in place, and not fatal for an app that cannot boot without its database.
+        $this->assertGreaterThan(strpos($dockerfile, 'COPY . .'), strpos($dockerfile, 'assets:precompile'));
+        $this->assertStringContainsString('|| echo "PANELALPHA: rails assets:precompile failed', $dockerfile);
+    }
+
+    /** Rails 6/7.0 pull sprockets-rails in through the rails gem, so only the lockfile names it. */
+    public function test_the_asset_pipeline_is_also_found_in_the_lockfile(): void
+    {
+        $dir = $this->projectDir([
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'rails', '~> 7.0'\n",
+            'Gemfile.lock' => "GEM\n  specs:\n    rails (7.0.8)\n      sprockets-rails (>= 2.0.0)\n    sprockets-rails (3.4.2)\n",
+            'config/application.rb' => "module App; end\n",
+        ]);
+        $withPipeline = RubyDockerfile::generate($dir, ['gemfile' => true], 3000);
+
+        $apiOnly = $this->projectDir([
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'rails', '~> 8.0'\n",
+            'config/application.rb' => "module App; end\n",
+        ]);
+
+        $this->assertStringContainsString('assets:precompile', $withPipeline);
+        $this->assertStringNotContainsString('assets:precompile', RubyDockerfile::generate($apiOnly, ['gemfile' => true], 3000));
+    }
+
     public function test_is_rails_app_requires_gemfile_and_application_rb(): void
     {
         $dir = $this->projectDir([
@@ -99,6 +134,22 @@ class RubyDockerfileTest extends TestCase
 
         $this->assertStringContainsString('EXPOSE 8080', $docker);
         $this->assertStringContainsString('"-p","8080"', $docker);
+    }
+
+    /** Bundler reads `ruby file: ".ruby-version"` while parsing the Gemfile, before the source is copied. */
+    public function test_version_files_are_in_place_before_bundle_install(): void
+    {
+        $dir = $this->projectDir([
+            '.ruby-version' => "3.3.6\n",
+            'Gemfile' => "source 'https://rubygems.org'\nruby file: \".ruby-version\"\ngem 'rails'\n",
+            'config/application.rb' => "module App; end\n",
+        ]);
+
+        $dockerfile = RubyDockerfile::generate($dir, ['gemfile' => true], 3000);
+
+        $copy = strpos($dockerfile, 'COPY .ruby-version* .tool-versions* ./');
+        $this->assertNotFalse($copy);
+        $this->assertLessThan(strpos($dockerfile, 'RUN bundle install'), $copy);
     }
 
     public function test_deployment_mode_only_when_a_lockfile_is_present(): void

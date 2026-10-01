@@ -24,6 +24,9 @@ detect:
     # same test: `path: manage.py` yielded the root layout to Django and then
     # claimed the subdirectory one, which has no migrate and no collectstatic.
     - probe: django
+    # A requirements.txt for docs or lint tooling beside a go.mod, Cargo.toml,
+    # package.json... with no Python entry point: the other stack is the app.
+    - probe: python-nothing-to-start
 commands:
   - id: pip-install
     stage: build

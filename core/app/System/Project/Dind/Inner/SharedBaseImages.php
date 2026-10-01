@@ -52,10 +52,12 @@ class SharedBaseImages
      * @param list<string> $extras extensions to bake in on top of the standard
      *                             set, so the account never compiles them
      * @param list<string> $packages the manifest's `system_packages:`
+     * @param list<string> $required extensions the project's composer files
+     *                               require: a variant carrying one is not deferred
      * @return array{tag: ?string, baked: list<string>} baked is what $tag has
      *         beyond the standard set, so the caller knows what not to install
      */
-    public function ensurePhp(string $phpImage, array $extras = [], array $packages = []): array
+    public function ensurePhp(string $phpImage, array $extras = [], array $packages = [], array $required = []): array
     {
         $extras = PhpBaseImage::normalizeExtras($extras);
         $packages = PhpBaseImage::normalizeSystemPackages($packages);
@@ -64,7 +66,8 @@ class SharedBaseImages
         }
         if ($extras !== []) {
             $tag = PhpBaseImage::tag($phpImage, $extras);
-            if ($tag !== null && $this->providePhp($tag, $phpImage, $extras)) {
+            $needed = array_values(array_intersect($extras, array_map('strtolower', $required)));
+            if ($tag !== null && $this->providePhp($tag, $phpImage, $extras, [], $needed)) {
                 return ['tag' => $tag, 'baked' => $extras];
             }
         }
@@ -270,9 +273,15 @@ class SharedBaseImages
      *
      * @param list<string> $extras
      * @param list<string> $packages
+     * @param list<string> $required the extras composer will refuse to install without
      */
-    public function providePhp(string $tag, string $phpImage, array $extras = [], array $packages = []): bool
-    {
+    public function providePhp(
+        string $tag,
+        string $phpImage,
+        array $extras = [],
+        array $packages = [],
+        array $required = []
+    ): bool {
         if (!ImageTransfer::isSafeImageRef($tag)) {
             return false;
         }
@@ -297,7 +306,9 @@ class SharedBaseImages
         // nothing to run. Better a first deploy on this minor that waits for
         // the compile and says so than a green deploy serving nothing.
         // System packages are not deferrable either: the plain base lacks them.
-        if (!$this->hostHasImage($tag) && $extras !== [] && $packages === []) {
+        // Nor is an extension the project requires: composer's platform check
+        // aborts on the plain base (Wallabag's ext-tidy).
+        if (!$this->hostHasImage($tag) && $extras !== [] && $packages === [] && $required === []) {
             $this->queueBackgroundBuild('PHP', $tag, $dockerfile);
 
             return false;
@@ -305,7 +316,8 @@ class SharedBaseImages
         if (!$this->hostHasImage($tag)) {
             $this->inner->host()->logInfo(
                 "Shared PHP base image {$tag} has not been built on this host yet; building it now"
-                . ($packages === [] ? '' : ' with ' . implode(', ', $packages)) . '. '
+                . ($packages === [] ? '' : ' with ' . implode(', ', $packages))
+                . ($required === [] ? '' : ', since this project requires ' . implode(', ', $required)) . '. '
                 . 'Later deploys on this PHP version load it in seconds. '
                 . '`php artisan system:image:prewarm` builds it ahead of time.'
             );

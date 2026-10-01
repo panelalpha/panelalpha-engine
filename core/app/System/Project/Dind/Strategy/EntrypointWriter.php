@@ -159,7 +159,7 @@ class EntrypointWriter
         }
 
         $plan = app(DeployPlanContext::class)->get();
-        $manifest = PlatformRegistry::forDecision($decision);
+        $manifest = PlatformRegistry::forDecisionOrAppConfig($decision, $appConfig);
         $unresolved = self::unresolvedPlatformWarning($decision, $manifest);
         if ($unresolved !== null) {
             $this->dind->shell()->logger()?->warn($unresolved);

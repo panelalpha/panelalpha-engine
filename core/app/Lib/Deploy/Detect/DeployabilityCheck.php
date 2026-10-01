@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\Detect;
 use App\Lib\Deploy\Compose\AppRoot;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Lib\Deploy\Platform\Runtime\DotnetRuntime;
 use App\Lib\Deploy\Platform\Strategies;
 use InvalidArgumentException;
 
@@ -60,6 +61,7 @@ final class DeployabilityCheck
             $this->strategy === Strategies::DOCKERFILE => $this->assertDockerfile(),
             $this->strategy === Strategies::COMPOSE => $this->assertCompose(),
             $this->strategy === Strategies::STATIC => $this->assertStaticEntry(),
+            $this->strategy === Strategies::DOTNET => $this->assertModernDotnet(),
             Strategies::isJsFramework($this->strategy) => $this->assertRootFile('package.json', 'Framework'),
             isset(self::REQUIRED_ROOT_FILE[$this->strategy]) && !$this->namedByItsOwnManifest()
                 => $this->assertRootFile(...self::REQUIRED_ROOT_FILE[$this->strategy]),
@@ -145,6 +147,18 @@ final class DeployabilityCheck
         if ($missing !== [] && !is_file($this->path('Dockerfile'))) {
             throw new InvalidArgumentException(
                 'Compose file builds from ' . $missing[0] . ' which does not exist.'
+            );
+        }
+    }
+
+    /** Otherwise the SDK image is picked from nothing and the build fails without saying why. */
+    private function assertModernDotnet(): void
+    {
+        $legacy = DotnetRuntime::legacyFrameworkEntry(AppRoot::path($this->projectDir, $this->decision));
+        if ($legacy !== null) {
+            throw new InvalidArgumentException(
+                $legacy . ' (a <TargetFrameworkVersion> project). The .NET SDK on Linux builds only'
+                . ' SDK-style projects targeting .NET 5 or newer (<TargetFramework>net8.0</TargetFramework>).'
             );
         }
     }

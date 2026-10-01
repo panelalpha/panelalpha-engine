@@ -63,7 +63,7 @@ class UserComposeStrategy
         // earlier deploy.
         if (!$this->dind->system()->filesystem()->fileExists("{$projectDir}/.env")) {
             $prepare = $this->dind->strategy()->prepare();
-            $prepare->run($projectDir, $prepare->manifestFor($decision), $appConfig);
+            $prepare->run($projectDir, $prepare->manifestFor($decision, $appConfig), $appConfig);
         }
     }
 

@@ -56,9 +56,28 @@ final class RubyDockerfile
             'bundle_deployment' => $this->app->hasLockfile(),
             'environment' => EnvironmentLines::of(RubyEnvironment::for($this->app)),
             'frontend_stage' => FrontendStage::render($this->app),
+            'assets_precompile' => $this->precompilesAssets(),
             'port' => $this->port,
             'start_command' => RubyServer::command($this->app, $this->port),
         ]);
+    }
+
+    /**
+     * Production Rails serves only precompiled Sprockets/Propshaft assets, so
+     * without this every asset tag raises AssetNotFound. SECRET_KEY_BASE_DUMMY
+     * boots the app without the real key; a failure does not fail the build,
+     * since some apps cannot boot without their database.
+     */
+    private function precompilesAssets(): bool
+    {
+        if (!$this->app->isRails()) {
+            return false;
+        }
+        $gemfile = $this->app->gemfile();
+
+        return $gemfile->requiresAny(['sprockets-rails', 'sprockets', 'propshaft', 'sass-rails'])
+            || $gemfile->locks('sprockets-rails')
+            || $gemfile->locks('propshaft');
     }
 
     /**

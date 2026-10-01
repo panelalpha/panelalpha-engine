@@ -229,7 +229,7 @@ class DeployStrategy
         // Every other strategy generates its own build definition below, so
         // the platform's prepare runs first — it may write the very files the
         // generator is about to read.
-        $this->prepare()->run($projectDir, $this->prepare()->manifestFor($decision), $appConfig);
+        $this->prepare()->run($projectDir, $this->prepare()->manifestFor($decision, $appConfig), $appConfig);
 
         if ($strategy === Strategies::DOCKERFILE) {
             $this->dockerfile()->apply($decision, $projectDir, $chown);

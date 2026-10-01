@@ -2,7 +2,9 @@
 
 namespace Tests\Unit\Deploy\Platform\Runtime;
 
+use App\Lib\Deploy\Detect\DeployabilityCheck;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Platform\Runtime\DotnetRuntime;
 use PHPUnit\Framework\TestCase;
 
@@ -140,6 +142,48 @@ class DotnetRuntimeTest extends TestCase
         $this->write('Older/Older.csproj', '<Project><TargetFramework>net48</TargetFramework></Project>');
 
         $this->assertNull(DotnetRuntime::targetFramework($this->dir));
+    }
+
+    /** Emby: a NuGet HintPath `sqlite3.net45.1.1.11` is not a target framework (it read as sdk:45.1). */
+    public function test_only_target_framework_elements_are_read(): void
+    {
+        $this->write('Server/Server.csproj', <<<'XML'
+<Project ToolsVersion="15.0">
+  <PropertyGroup><TargetFrameworkVersion>v4.7</TargetFrameworkVersion></PropertyGroup>
+  <Reference Include="SQLitePCLRaw.provider.sqlite3">
+    <HintPath>..\packages\SQLitePCLRaw.provider.sqlite3.net45.1.1.11\lib\net45\SQLitePCLRaw.provider.sqlite3.dll</HintPath>
+  </Reference>
+</Project>
+XML);
+        $this->write('Lib/Lib.csproj', '<Project Sdk="Microsoft.NET.Sdk"><TargetFrameworks>netstandard2.0;net8.0-windows;net9.0</TargetFrameworks></Project>');
+
+        $this->assertSame('9.0', DotnetRuntime::targetFramework($this->dir));
+
+        unlink($this->dir . '/Lib/Lib.csproj');
+        $this->assertNull(DotnetRuntime::targetFramework($this->dir));
+        $this->assertSame(DotnetRuntime::VERSION, (new DotnetRuntime())->resolve($this->context())?->version);
+    }
+
+    /** A classic .NET Framework app cannot be published by the Linux SDK; that is said before the build. */
+    public function test_a_classic_dotnet_framework_entry_project_is_refused(): void
+    {
+        $this->write('Server/Server.csproj', '<Project ToolsVersion="15.0"><PropertyGroup>'
+            . '<OutputType>Exe</OutputType><TargetFrameworkVersion>v4.7</TargetFrameworkVersion></PropertyGroup></Project>');
+
+        $this->assertSame('Server/Server.csproj targets .NET Framework v4.7', DotnetRuntime::legacyFrameworkEntry($this->dir));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Server/Server.csproj targets .NET Framework v4.7');
+        DeployabilityCheck::assert(['strategy' => Strategies::DOTNET], $this->dir);
+    }
+
+    public function test_an_sdk_style_entry_project_is_deployable(): void
+    {
+        $this->write('Server/Server.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup>'
+            . '<TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>');
+
+        $this->assertNull(DotnetRuntime::legacyFrameworkEntry($this->dir));
+        DeployabilityCheck::assert(['strategy' => Strategies::DOTNET], $this->dir);
     }
 
     /** global.json pins an SDK and is meant literally, so it outranks the target. */
@@ -364,6 +408,27 @@ class DotnetRuntimeTest extends TestCase
         $this->assertStringContainsString('dotnet publish -c Release', DotnetRuntime::buildCommand($this->dir));
     }
 
+    /** Kavita: its BenchmarkDotNet harness is an Exe too, and sorts before the server. */
+    public function test_a_benchmark_project_is_never_the_entry_project(): void
+    {
+        $this->write('Kavita.Benchmark/Kavita.Benchmark.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>Exe</OutputType></PropertyGroup></Project>');
+        $this->write('Kavita.Server/Kavita.Server.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>Exe</OutputType></PropertyGroup></Project>');
+
+        $this->assertSame('Kavita.Server/Kavita.Server.csproj', DotnetRuntime::entryProject($this->dir));
+
+        // Named anything, a BenchmarkDotNet reference gives it away.
+        rename($this->dir . '/Kavita.Benchmark', $this->dir . '/Perf');
+        rename($this->dir . '/Perf/Kavita.Benchmark.csproj', $this->dir . '/Perf/Perf.csproj');
+        file_put_contents($this->dir . '/Perf/Perf.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType>'
+            . '</PropertyGroup><ItemGroup><PackageReference Include="BenchmarkDotNet" Version="0.15.8" /></ItemGroup></Project>');
+        $this->write('Kavita.Server/Kavita.Server.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>Exe</OutputType></PropertyGroup></Project>');
+
+        $this->assertSame('Kavita.Server/Kavita.Server.csproj', DotnetRuntime::entryProject($this->dir));
+    }
+
     /**
      * The entry assembly is found by its runtimeconfig, because a publish
      * directory holds dozens of library DLLs and no naming rule separates
@@ -379,6 +444,22 @@ class DotnetRuntimeTest extends TestCase
         // restart-looping behind a 502 with an empty deploy log.
         $this->assertStringContainsString('PANELALPHA:', $start);
         $this->assertStringContainsString('exit 1', $start);
+    }
+
+    /** ASP.NET looks for wwwroot under the working directory, so the app starts from out/. */
+    public function test_the_start_command_runs_the_assembly_from_the_publish_directory(): void
+    {
+        $this->write('out/Memtly.runtimeconfig.json', '{}');
+        $this->write('out/Memtly.dll', '');
+        $this->write('bin/dotnet', "#!/bin/sh\necho \"$(pwd) $*\"\n");
+        chmod($this->dir . '/bin/dotnet', 0755);
+
+        $command = 'cd ' . escapeshellarg($this->dir) . ' && PATH=' . escapeshellarg($this->dir . '/bin') . ':$PATH sh -c '
+            . escapeshellarg(DotnetRuntime::startCommand());
+        exec($command . ' 2>&1', $output, $status);
+
+        $this->assertSame(0, $status, implode("\n", $output));
+        $this->assertSame([realpath($this->dir) . '/out Memtly.dll'], $output);
     }
 
     /** The shell in the start command has to be valid, since sh runs it. */

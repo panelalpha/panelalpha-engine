@@ -239,7 +239,8 @@ class PhpStrategy
         return $this->dind->innerDocker()->ensurePhpBaseImage(
             PhpRuntime::imageFor($composerJson, $composerLock),
             PhpBaseImage::bakeableExtras(PhpBaseImage::missingExtensions($extensions)),
-            $systemPackages
+            $systemPackages,
+            PhpExtensions::requiredFor(new ComposerManifest($composerJson, $composerLock))
         );
     }
 

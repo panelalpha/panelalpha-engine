@@ -227,7 +227,7 @@ class HostCompilePhpPlatformPinTest extends TestCase
     {
         $script = $this->script($this->build([
             'phpBB/composer.json' => (string) json_encode([
-                'require' => ['php' => '^8.2'],
+                'require' => ['php' => '~8.2.0'],
                 'config' => ['platform' => ['php' => '7.4']],
             ]),
         ], $this->phpDecision(), 'phpBB'));
