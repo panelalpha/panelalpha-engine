@@ -7,15 +7,13 @@ use App\Http\Requests\BandwidthSeriesRequest;
 use App\Http\Requests\VisitorsBreakdownRequest;
 use App\Http\Requests\VisitorsRangeRequest;
 use App\Integrations\Statistics\Statistics;
-use App\Models\Domain;
-use App\Models\User;
+use App\Lib\Usage\ProjectUsage;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
 use OpenApi\Attributes as OA;
 
 class UsageController extends Controller
 {
-    public function __construct(private Statistics $statistics)
+    public function __construct(private Statistics $statistics, private ProjectUsage $usage)
     {
     }
 
@@ -35,53 +33,7 @@ class UsageController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        $diskUsage = $user->project()->fileManager()->diskUsage();
-
-        $query = "SELECT ";
-        $query .= "(SELECT COUNT(*) FROM domains WHERE user_id = ? AND type = 'addon') AS addon_domains, ";
-        $query .= "(SELECT COUNT(*) FROM domains WHERE user_id = ? AND type = 'sub') AS subdomains, ";
-        $query .= "(SELECT COUNT(*) FROM ftp_accounts WHERE user_id = ?) AS ftp_accounts, ";
-        $query .= "(SELECT COUNT(*) FROM sftp_accounts WHERE user_id = ?) AS sftp_accounts, ";
-        $query .= "(SELECT COUNT(*) FROM mysql_databases WHERE user_id = ?) AS mysql_databases";
-
-        $result = DB::select($query, array_fill(0, 5, $user->id));
-        /** @var object $counters */
-        $counters = $result[0];
-
-        $limitMb = $user->getBandwidthLimit();
-
-        $data = [
-            'storage' => [
-                'usage' => $diskUsage,
-                'maximum' => $user->getDiskSpaceLimit(),
-            ],
-            'bandwidth' => [
-                'usage' => $this->statistics->projectCalendarMonthBytes($this->domainNames($user)),
-                'maximum' => $limitMb === null ? null : $limitMb * 1024 * 1024,
-            ],
-           'addon_domains' => [
-              'usage' => $counters->addon_domains,
-              'maximum' => $user->getAddonDomainsLimit(),
-            ],
-            'subdomains' => [
-              'usage' => $counters->subdomains,
-              'maximum' => $user->getSubdomainsLimit(),
-            ],
-            'ftp_accounts' => [
-              'usage' => $counters->ftp_accounts,
-              'maximum' => $user->getFtpAccountsLimit(),
-            ],
-            'sftp_accounts' => [
-              'usage' => $counters->sftp_accounts,
-              'maximum' => $user->getSftpAccountsLimit(),
-            ],
-            'mysql_databases' => [
-              'usage' => $counters->mysql_databases,
-              'maximum' => $user->getMysqlDatabasesLimit(),
-            ],
-        ];
-
-        return new JsonResponse($data);
+        return new JsonResponse($this->usage->summary($user));
     }
 
     #[OA\Get(
@@ -114,8 +66,8 @@ class UsageController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        return new JsonResponse($this->statistics->projectBandwidth(
-            $this->domainNames($user),
+        return new JsonResponse($this->usage->projectBandwidth(
+            $user,
             $request->validated('start'),
             $request->validated('end'),
             $request->validated('group_by'),
@@ -153,8 +105,7 @@ class UsageController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?Domain $owned */
-        $owned = $user->domains()->getQuery()->where('domain', $domain)->first();
+        $owned = $this->usage->ownedDomain($user, $domain);
         if (!$owned) {
             abort(new JsonResponse([
                 'message' => 'Not found',
@@ -191,8 +142,7 @@ class UsageController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?Domain $owned */
-        $owned = $user->domains()->getQuery()->where('domain', $domain)->first();
+        $owned = $this->usage->ownedDomain($user, $domain);
         if (!$owned) {
             abort(new JsonResponse([
                 'message' => 'Not found',
@@ -238,8 +188,7 @@ class UsageController extends Controller
     {
         $user = $this->projectOr404($username);
 
-        /** @var ?Domain $owned */
-        $owned = $user->domains()->getQuery()->where('domain', $domain)->first();
+        $owned = $this->usage->ownedDomain($user, $domain);
         if (!$owned) {
             abort(new JsonResponse([
                 'message' => 'Not found',
@@ -252,13 +201,5 @@ class UsageController extends Controller
             $request->validated('start'),
             $request->validated('end'),
         ));
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function domainNames(User $user): array
-    {
-        return $user->domains()->pluck('domain')->all();
     }
 }

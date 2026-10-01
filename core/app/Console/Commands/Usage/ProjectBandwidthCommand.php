@@ -2,13 +2,11 @@
 
 namespace App\Console\Commands\Usage;
 
-use App\Console\Commands\Concerns\DispatchesApiRoute;
-use Illuminate\Console\Command;
+use App\Http\Requests\BandwidthSeriesRequest;
+use App\Lib\Usage\ProjectUsage;
 
-class ProjectBandwidthCommand extends Command
+class ProjectBandwidthCommand extends UsageCommand
 {
-    use DispatchesApiRoute;
-
     protected $signature = 'project:bandwidth
                             {project : Project username}
                             {--start= : Range start (Y-m-d)}
@@ -17,15 +15,16 @@ class ProjectBandwidthCommand extends Command
 
     protected $description = 'Show bandwidth over a date range for a project (GET /projects/{username}/bandwidth)';
 
-    public function handle(): int
+    public function handle(ProjectUsage $usage): int
     {
-        $project = rawurlencode((string) $this->argument('project'));
-        $response = $this->dispatchApiRoute('GET', "/projects/{$project}/bandwidth", [
-            'start' => $this->option('start'),
-            'end' => $this->option('end'),
-            'group_by' => $this->option('group-by'),
-        ]);
+        return $this->answer(function () use ($usage) {
+            $range = $this->validated([
+                'start' => $this->option('start'),
+                'end' => $this->option('end'),
+                'group_by' => $this->option('group-by'),
+            ], (new BandwidthSeriesRequest())->rules());
 
-        return $this->writeResponseBody($response, null);
+            return $usage->projectBandwidth($this->project(), $range['start'], $range['end'], $range['group_by']);
+        });
     }
 }

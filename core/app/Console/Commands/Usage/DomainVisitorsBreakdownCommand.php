@@ -2,13 +2,12 @@
 
 namespace App\Console\Commands\Usage;
 
-use App\Console\Commands\Concerns\DispatchesApiRoute;
-use Illuminate\Console\Command;
+use App\Http\Requests\VisitorsBreakdownRequest;
+use App\Integrations\Statistics\Statistics;
+use App\Lib\Usage\ProjectUsage;
 
-class DomainVisitorsBreakdownCommand extends Command
+class DomainVisitorsBreakdownCommand extends UsageCommand
 {
-    use DispatchesApiRoute;
-
     protected $signature = 'project:domain:visitors-breakdown
                             {project : Project username}
                             {domain : Domain hostname}
@@ -18,16 +17,17 @@ class DomainVisitorsBreakdownCommand extends Command
 
     protected $description = 'Show a visitor breakdown for a domain (GET /projects/{username}/domains/{domain}/visitors/{dimension})';
 
-    public function handle(): int
+    public function handle(ProjectUsage $usage, Statistics $statistics): int
     {
-        $project = rawurlencode((string) $this->argument('project'));
-        $domain = rawurlencode((string) $this->argument('domain'));
-        $dimension = rawurlencode((string) $this->argument('dimension'));
-        $response = $this->dispatchApiRoute('GET', "/projects/{$project}/domains/{$domain}/visitors/{$dimension}", [
-            'start' => $this->option('start'),
-            'end' => $this->option('end'),
-        ]);
+        return $this->answer(function () use ($usage, $statistics) {
+            $input = $this->validated([
+                'start' => $this->option('start'),
+                'end' => $this->option('end'),
+                'dimension' => $this->argument('dimension'),
+            ], (new VisitorsBreakdownRequest())->rules());
+            $domain = $this->domain($usage, $this->project());
 
-        return $this->writeResponseBody($response, null);
+            return $statistics->domainVisitorBreakdown($domain->domain, $input['dimension'], $input['start'], $input['end']);
+        });
     }
 }
