@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Http\Requests\Git\GitPathRequest;
+use App\Lib\Git\GitActions;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class GitDisconnectCommand extends Command
@@ -18,6 +21,7 @@ class GitDisconnectCommand extends Command
     {
         $path = $this->resolvePath();
 
-        return $this->dispatchGit('POST', '/git/disconnect', ['path' => $path]);
+        return $this->runGit(GitPathRequest::class, ['path' => $path],
+            fn (User $user, array $params) => app(GitActions::class)->disconnect($user, $params));
     }
 }

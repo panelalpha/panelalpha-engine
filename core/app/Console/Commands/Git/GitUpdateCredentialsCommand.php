@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Http\Requests\Git\GitUpdateCredentialsRequest;
+use App\Lib\Git\GitActions;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class GitUpdateCredentialsCommand extends Command
@@ -24,6 +27,7 @@ class GitUpdateCredentialsCommand extends Command
             $params['token'] = (string) $this->option('token');
         }
 
-        return $this->dispatchGit('PUT', '/git/update-credentials', $params);
+        return $this->runGit(GitUpdateCredentialsRequest::class, $params,
+            fn (User $user, array $valid) => app(GitActions::class)->updateCredentials($user, $valid));
     }
 }

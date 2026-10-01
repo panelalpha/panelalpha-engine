@@ -11,14 +11,9 @@ use App\Http\Requests\Git\GitPullRequest;
 use App\Http\Requests\Git\GitRevertRequest;
 use App\Http\Requests\Git\GitStatusRequest;
 use App\Http\Requests\Git\GitUpdateCredentialsRequest;
-use App\Lib\DeployHook\DeployHooks;
-use App\System\Project\Git;
-use App\System\Project\Git\CheckoutRedeploy;
+use App\Lib\Git\GitActions;
 use App\System\Project\Git\Exception as GitException;
-use App\Lib\Deploy\Source\GitUrl;
-use App\Models\User;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
 class GitController extends Controller
@@ -53,11 +48,12 @@ class GitController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function status(string $username, GitStatusRequest $request): JsonResponse
+    public function status(string $username, GitStatusRequest $request, GitActions $git): JsonResponse
     {
         $params = $request->validated();
+        $user = $this->projectOr404($username);
 
-        return $this->runGit($username, $params['path'] ?? null, fn (Git $git) => $git->status($request->boolean('fetch')));
+        return $this->respond(fn () => $git->status($user, $params, $request->boolean('fetch')));
     }
 
     #[OA\Get(
@@ -79,11 +75,11 @@ class GitController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function branches(string $username, GitPathRequest $request): JsonResponse
+    public function branches(string $username, GitPathRequest $request, GitActions $git): JsonResponse
     {
-        $params = $request->validated();
+        $user = $this->projectOr404($username);
 
-        return $this->runGit($username, $params['path'] ?? null, fn (Git $git) => $git->branches());
+        return $this->respond(fn () => $git->branches($user, $request->validated()));
     }
 
     #[OA\Get(
@@ -107,15 +103,11 @@ class GitController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function commits(string $username, GitCommitsRequest $request): JsonResponse
+    public function commits(string $username, GitCommitsRequest $request, GitActions $git): JsonResponse
     {
-        $params = $request->validated();
-        $limit = isset($params['limit']) ? (int) $params['limit'] : null;
-        $branch = isset($params['branch']) && is_string($params['branch']) && $params['branch'] !== ''
-            ? $params['branch']
-            : null;
+        $user = $this->projectOr404($username);
 
-        return $this->runGit($username, $params['path'] ?? null, fn (Git $git) => $git->commits($limit, $branch));
+        return $this->respond(fn () => $git->commits($user, $request->validated()));
     }
 
     #[OA\Post(
@@ -148,17 +140,11 @@ class GitController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function connect(string $username, GitConnectRequest $request): JsonResponse
+    public function connect(string $username, GitConnectRequest $request, GitActions $git): JsonResponse
     {
-        $params = $request->validated();
+        $user = $this->projectOr404($username);
 
-        return $this->runGit($username, $params['path'] ?? null, fn (Git $git) => call_user_func(
-            [$git, 'connect'],
-            $params['repo_url'] ?? '',
-            $params['branch'] ?? '',
-            $params['token'] ?? null,
-            (bool) ($params['repair'] ?? false),
-        ));
+        return $this->respond(fn () => $git->connectRemote($user, $request->validated()));
     }
 
     #[OA\Post(
@@ -182,15 +168,11 @@ class GitController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function disconnect(string $username, GitPathRequest $request, DeployHooks $hooks): JsonResponse
+    public function disconnect(string $username, GitPathRequest $request, GitActions $git): JsonResponse
     {
-        $params = $request->validated();
+        $user = $this->projectOr404($username);
 
-        return $this->runGit(
-            $username,
-            $params['path'] ?? null,
-            fn (Git $git, User $user) => $hooks->disconnectAndForget($user, $git),
-        );
+        return $this->respond(fn () => $git->disconnect($user, $request->validated()));
     }
 
     #[OA\Put(
@@ -218,16 +200,11 @@ class GitController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function changeBranch(string $username, GitChangeBranchRequest $request): JsonResponse
+    public function changeBranch(string $username, GitChangeBranchRequest $request, GitActions $git): JsonResponse
     {
-        $params = $request->validated();
+        $user = $this->projectOr404($username);
 
-        return $this->runGit(
-            $username,
-            $params['path'] ?? null,
-            fn (Git $git) => $git->changeBranch($params['branch']),
-            true,
-        );
+        return $this->respond(fn () => $git->changeBranch($user, $request->validated()));
     }
 
     #[OA\Put(
@@ -253,16 +230,11 @@ class GitController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function updateCredentials(string $username, GitUpdateCredentialsRequest $request): JsonResponse
+    public function updateCredentials(string $username, GitUpdateCredentialsRequest $request, GitActions $git): JsonResponse
     {
-        $params = $request->validated();
-        $provided = array_key_exists('token', $params);
+        $user = $this->projectOr404($username);
 
-        return $this->runGit(
-            $username,
-            $params['path'] ?? null,
-            fn (Git $git) => $git->updateCredentials($provided ? ($params['token'] ?? null) : null, $provided),
-        );
+        return $this->respond(fn () => $git->updateCredentials($user, $request->validated()));
     }
 
     #[OA\Post(
@@ -294,16 +266,11 @@ class GitController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function pull(string $username, GitPullRequest $request): JsonResponse
+    public function pull(string $username, GitPullRequest $request, GitActions $git): JsonResponse
     {
-        $params = $request->validated();
+        $user = $this->projectOr404($username);
 
-        return $this->runGit(
-            $username,
-            $params['path'] ?? null,
-            fn (Git $git) => $git->pull($params['strategy'] ?? null),
-            true,
-        );
+        return $this->respond(fn () => $git->pull($user, $request->validated()));
     }
 
     #[OA\Post(
@@ -327,11 +294,11 @@ class GitController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function push(string $username, GitPathRequest $request): JsonResponse
+    public function push(string $username, GitPathRequest $request, GitActions $git): JsonResponse
     {
-        $params = $request->validated();
+        $user = $this->projectOr404($username);
 
-        return $this->runGit($username, $params['path'] ?? null, fn (Git $git) => $git->push());
+        return $this->respond(fn () => $git->push($user, $request->validated()));
     }
 
     #[OA\Post(
@@ -357,49 +324,20 @@ class GitController extends Controller
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function revert(string $username, GitRevertRequest $request): JsonResponse
-    {
-        $params = $request->validated();
-
-        return $this->runGit(
-            $username,
-            $params['path'] ?? null,
-            fn (Git $git) => $git->revert($params['ref'] ?? null),
-            true,
-        );
-    }
-
-    private function resolveUser(string $username): User
+    public function revert(string $username, GitRevertRequest $request, GitActions $git): JsonResponse
     {
         $user = $this->projectOr404($username);
 
-        return $user;
+        return $this->respond(fn () => $git->revert($user, $request->validated()));
     }
 
-    /**
-     * @param callable(Git, User): mixed $action
-     */
-    private function runGit(string $username, ?string $path, callable $action, bool $redeployIfManaged = false): JsonResponse
+    /** The action's data, or the git layer's refusal with the status it carries. */
+    private function respond(callable $action): JsonResponse
     {
-        $user = $this->resolveUser($username);
-
         try {
-            $project = $user->project();
-            $git = $project->git($path);
-            $data = $action($git, $user);
-            if ($redeployIfManaged) {
-                app(CheckoutRedeploy::class)->afterMutation($git, $project);
-            }
-
-            return new JsonResponse(['data' => $data]);
+            return new JsonResponse(['data' => $action()]);
         } catch (GitException $e) {
-            if ($e->httpStatus === 422) {
-                throw ValidationException::withMessages(['git' => $e->getMessage()]);
-            }
-
-            return new JsonResponse([
-                'message' => GitUrl::sanitize($e->getMessage()),
-            ], $e->httpStatus);
+            return new JsonResponse(['message' => $e->getMessage()], $e->httpStatus);
         }
     }
 }

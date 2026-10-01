@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Http\Requests\Git\GitStatusRequest;
+use App\Lib\Git\GitActions;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class GitStatusCommand extends Command
@@ -24,6 +27,8 @@ class GitStatusCommand extends Command
             $params['fetch'] = '1';
         }
 
-        return $this->dispatchGit('GET', '/git/status', $params);
+        return $this->runGit(GitStatusRequest::class, $params,
+            fn (User $user, array $valid) => app(GitActions::class)
+                ->status($user, $valid, filter_var($valid['fetch'] ?? false, FILTER_VALIDATE_BOOLEAN)));
     }
 }

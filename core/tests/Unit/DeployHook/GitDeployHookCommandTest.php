@@ -5,38 +5,13 @@ namespace Tests\Unit\DeployHook;
 use App\Lib\DeployHook\DeployHooks;
 use App\Models\DeployHook;
 use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 /**
- * `php artisan git:deploy-hook` -- the CLI spelling of the REST management
- * surface. It runs the route in-process as the root admin, so these tests go
- * through the real router and controller.
+ * `php artisan git:deploy-hook`, running the same DeployHookActions as the
+ * deploy-hook endpoints.
  */
 class GitDeployHookCommandTest extends DeployHookTestCase
 {
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        Schema::create('admins', function ($table) {
-            $table->id();
-            $table->string('name');
-            $table->string('email')->unique();
-            $table->timestamp('email_verified_at')->nullable();
-            $table->string('password')->nullable();
-            $table->rememberToken();
-            $table->timestamps();
-        });
-        DB::table('admins')->insert(['name' => 'root', 'email' => 'root@example.test']);
-    }
-
-    protected function tearDown(): void
-    {
-        Schema::dropIfExists('admins');
-        parent::tearDown();
-    }
-
     /**
      * @param array<string, mixed> $arguments
      * @return array{int, string}
@@ -158,7 +133,7 @@ class GitDeployHookCommandTest extends DeployHookTestCase
         $this->assertSame($hook->public_id, DeployHook::firstOrFail()->public_id);
     }
 
-    public function test_an_error_from_the_api_is_a_failure_exit(): void
+    public function test_an_unconnected_checkout_is_a_failure_exit(): void
     {
         $this->user('main', ['git_repo' => '']);
 

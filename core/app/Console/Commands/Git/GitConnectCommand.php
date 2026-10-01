@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Http\Requests\Git\GitConnectRequest;
+use App\Lib\Git\GitActions;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class GitConnectCommand extends Command
@@ -54,6 +57,7 @@ class GitConnectCommand extends Command
             $params['token'] = (string) $token;
         }
 
-        return $this->dispatchGit('POST', '/git/connect', $params);
+        return $this->runGit(GitConnectRequest::class, $params,
+            fn (User $user, array $valid) => app(GitActions::class)->connectRemote($user, $valid));
     }
 }

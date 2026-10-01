@@ -2,6 +2,10 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Http\Requests\Git\DeployHookCreateRequest;
+use App\Http\Requests\Git\GitPathRequest;
+use App\Lib\DeployHook\DeployHookActions;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class GitDeployHookCommand extends Command
@@ -28,9 +32,13 @@ class GitDeployHookCommand extends Command
         $params = ['path' => $this->resolvePath()];
 
         if ($this->option('delete')) {
-            $exit = $this->dispatchGit('DELETE', '/git/deploy-hook', $params);
+            $exit = $this->runGit(GitPathRequest::class, $params, function (User $user, array $valid) {
+                app(DeployHookActions::class)->delete($user, $valid);
+
+                return null;
+            });
             if ($exit === self::SUCCESS) {
-                // The API answers 204; say so, in the JSON the other git commands speak.
+                // Deleting returns nothing; say so, in the JSON the other git commands speak.
                 $this->line((string) json_encode(['data' => ['deleted' => true]], JSON_THROW_ON_ERROR));
             }
 
@@ -38,7 +46,8 @@ class GitDeployHookCommand extends Command
         }
 
         if ($this->option('rotate')) {
-            return $this->dispatchGit('POST', '/git/deploy-hook/rotate', $params);
+            return $this->runGit(GitPathRequest::class, $params,
+                fn (User $user, array $valid) => app(DeployHookActions::class)->rotate($user, $valid));
         }
 
         $provider = trim((string) ($this->option('provider') ?? ''));
@@ -48,6 +57,7 @@ class GitDeployHookCommand extends Command
 
         // Create is idempotent: for a checkout that has a hook this shows it,
         // without the secret.
-        return $this->dispatchGit('POST', '/git/deploy-hook', $params);
+        return $this->runGit(DeployHookCreateRequest::class, $params,
+            fn (User $user, array $valid) => app(DeployHookActions::class)->create($user, $valid));
     }
 }

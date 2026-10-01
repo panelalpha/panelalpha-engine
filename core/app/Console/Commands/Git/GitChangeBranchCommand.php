@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Http\Requests\Git\GitChangeBranchRequest;
+use App\Lib\Git\GitActions;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class GitChangeBranchCommand extends Command
@@ -26,9 +29,9 @@ class GitChangeBranchCommand extends Command
             return 1;
         }
 
-        return $this->dispatchGit('PUT', '/git/change-branch', [
+        return $this->runGit(GitChangeBranchRequest::class, [
             'path' => $path,
             'branch' => $branch,
-        ]);
+        ], fn (User $user, array $params) => app(GitActions::class)->changeBranch($user, $params));
     }
 }

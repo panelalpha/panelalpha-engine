@@ -2,6 +2,9 @@
 
 namespace App\Console\Commands\Git;
 
+use App\Http\Requests\Git\GitPullRequest;
+use App\Lib\Git\GitActions;
+use App\Models\User;
 use Illuminate\Console\Command;
 
 class GitPullCommand extends Command
@@ -25,6 +28,7 @@ class GitPullCommand extends Command
             $params['strategy'] = $strategy;
         }
 
-        return $this->dispatchGit('POST', '/git/pull', $params);
+        return $this->runGit(GitPullRequest::class, $params,
+            fn (User $user, array $valid) => app(GitActions::class)->pull($user, $valid));
     }
 }
