@@ -6,6 +6,7 @@ use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind as DindProject;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Deploy\DetectAppPort;
+use App\Lib\Deploy\Platform\Strategies;
 use App\Models\ProxyRule;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
@@ -50,10 +51,13 @@ class Networking
         // Detect all public ports from the user's compose file, via the same
         // resolver every other reader of the inner compose file goes through.
         $composePath = $this->project->userAppComposeFileForPorts();
-        $portDetection = DetectAppPort::detectAllPorts($composePath);
-        $primaryPort = $portDetection['primary'] ?? 8080;
+        $portDetection = DetectAppPort::detectAllPorts($composePath, $this->project->environment()->forPortDetection());
+        $recipePort = self::recipeComposePort($user);
+        $primaryPort = $recipePort ?? $portDetection['primary'] ?? 8080;
 
-        $this->project->shell()->logger()?->info("Detected application port: {$primaryPort}");
+        $this->project->shell()->logger()?->info(
+            "Detected application port: {$primaryPort}" . ($recipePort !== null ? " (the recipe's port:)" : '')
+        );
 
         // Store primary port in user details (fallback for legacy vhost / bridge)
         $user->setAppPort($primaryPort);
@@ -69,7 +73,7 @@ class Networking
         // Update the domain's :80/:443 rules in place, replacing legacy generated rows
         // (*:appPort → localhost); a delete-and-recreate would drop an operator's edits.
         try {
-            ProxyRule::syncGeneratedHttpPair($user->username, $fqdn, $primaryPort);
+            ProxyRule::syncGeneratedHttpPair($user->username, $fqdn, $primaryPort, $user->getAppPortScheme());
         } catch (\Exception $e) {
             Log::warning("Failed to create proxy rules for {$user->username} {$fqdn}", [
                 'error' => $e->getMessage(),
@@ -102,6 +106,22 @@ class Networking
                 'Webserver reload after proxy rules failed: ' . AppHealth::trimReason($e->getMessage())
             );
         }
+    }
+
+    /**
+     * A compose recipe's own `port:` wins over the scan: the scan never routes
+     * an image-named datastore, and an app that is one (Qdrant, MinIO) says so
+     * in its recipe. The shipped compose manifest declares no port.
+     */
+    public static function recipeComposePort(User $user): ?int
+    {
+        $details = $user->getDetails();
+        $port = $details['deploy_port'] ?? null;
+        if (($details['deploy_strategy'] ?? null) !== Strategies::COMPOSE || !is_int($port)) {
+            return null;
+        }
+
+        return $port >= 1 && $port <= 65535 ? $port : null;
     }
 
     /**

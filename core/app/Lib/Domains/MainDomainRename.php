@@ -42,7 +42,7 @@ final class MainDomainRename
             && $user->getTemplate() === 'dind'
             && ($appPort = $user->getAppPort()) !== null
         ) {
-            ProxyRule::ensureGeneratedHttpPair($user->username, $newFqdn, $appPort);
+            ProxyRule::ensureGeneratedHttpPair($user->username, $newFqdn, $appPort, $user->getAppPortScheme());
         }
 
         $newDomain->projectDomain()->create();

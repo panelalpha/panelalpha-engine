@@ -107,9 +107,26 @@ class AppHealth
      */
     public function ports(): array
     {
-        $ports = DetectAppPort::detectAllPorts($this->dind->userAppComposeFileToRun())['all'];
+        $ports = DetectAppPort::detectAllPorts($this->dind->userAppComposeFileToRun(), $this->dind->environment()->forPortDetection())['all'];
 
-        return array_values(array_map('intval', $ports));
+        return self::withRecipePort(
+            array_values(array_map('intval', $ports)),
+            Networking::recipeComposePort($this->dind->userModel())
+        );
+    }
+
+    /**
+     * The port a compose recipe states is the one the site is routed to, so
+     * it is probed too, even when the scan refused it as a datastore's.
+     *
+     * @param list<int> $ports
+     * @return list<int>
+     */
+    public static function withRecipePort(array $ports, ?int $recipePort): array
+    {
+        return $recipePort === null || in_array($recipePort, $ports, true)
+            ? $ports
+            : [$recipePort, ...$ports];
     }
 
     /**
@@ -145,7 +162,7 @@ class AppHealth
 
         try {
             $raw = $this->dind->shell()->execQuiet(
-                ['bash', '-c', self::probeScript($ports, $timeout, $attempts, $delay, $this->mainDomain(), $waitOnServerError)],
+                ['bash', '-c', self::probeScript($ports, $timeout, $attempts, $delay, $this->mainDomain(), $waitOnServerError, $this->httpsPorts())],
                 [],
                 self::timeBudget($ports, $timeout, $attempts, $delay)
             );
@@ -182,6 +199,19 @@ class AppHealth
             'domain' => $this->reachability($results, $timeout),
             'checks' => $checks,
         ];
+    }
+
+    /**
+     * The app port when the recipe declared it HTTPS-only (`port_scheme: https`).
+     *
+     * @return list<int>
+     */
+    private function httpsPorts(): array
+    {
+        $user = $this->dind->userModel();
+        $port = $user->getAppPort();
+
+        return $user->getAppPortScheme() === 'https' && $port !== null ? [$port] : [];
     }
 
     /** The name visitors use, or null before the project has one. */
@@ -567,7 +597,25 @@ SH;
         }
 
         // find(), not all(): a source recipe's id resolves only there.
-        return \App\Lib\Deploy\Platform\PlatformRegistry::find($platform);
+        $manifest = \App\Lib\Deploy\Platform\PlatformRegistry::find($platform);
+        $home = self::stringOrNull($details['home_dir'] ?? null);
+        if ($manifest !== null || $home === null) {
+            return $manifest;
+        }
+
+        // A repository's own manifest with an id of its own is registered nowhere.
+        try {
+            $appConfig = \App\Lib\Deploy\Platform\AppConfig\AppConfig::load(
+                new \App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource(),
+                rtrim($home, '/') . '/project'
+            );
+
+            return \App\Lib\Deploy\Platform\PlatformRegistry::forDecisionOrAppConfig(['platform' => $platform], $appConfig);
+        } catch (\Throwable $e) {
+            Log::debug('Project manifest unreadable for health checks: ' . self::trimReason($e->getMessage()));
+
+            return null;
+        }
     }
 
     /**
@@ -1184,12 +1232,13 @@ SH;
     }
 
     /**
-     * Did every port that was probed fail?
+     * Did every port that was probed give no HTTP answer at all?
      *
      * The strict reading on purpose. One failing port out of three is a
      * partially wrong recipe worth a log line; *nothing* answering is an
      * application that is not serving, and that is the only case confident
-     * enough to change what a deploy reports.
+     * enough to change what a deploy reports. A 5xx is an answer: the
+     * `no-server-error` check reports it, and this line would point at ports.
      *
      * @param array<string, mixed> $details
      */
@@ -1208,7 +1257,7 @@ SH;
         }
 
         foreach ($ports as $port) {
-            if (is_array($port) && ($port['status'] ?? null) === self::STATUS_OK) {
+            if (is_array($port) && (($port['status'] ?? null) === self::STATUS_OK || is_int($port['http_code'] ?? null))) {
                 return false;
             }
         }
@@ -1250,7 +1299,12 @@ SH;
      * TLS itself is not reported down. `-k` throughout — a self-signed
      * certificate on 127.0.0.1 is not what this check is about.
      *
+     * $httpsPorts are asked over https first: a recipe declared them
+     * HTTPS-only, and nginx answers plain http there with a 400 that would
+     * pass for the app.
+     *
      * @param list<int> $ports
+     * @param list<int> $httpsPorts
      */
     public static function probeScript(
         array $ports,
@@ -1258,8 +1312,10 @@ SH;
         int $attempts = 3,
         int $delay = 2,
         ?string $domain = null,
-        bool $waitOnServerError = false
+        bool $waitOnServerError = false,
+        array $httpsPorts = []
     ): string {
+        $secureList = implode(' ', array_map('intval', $httpsPorts));
         $timeout = max(1, $timeout);
         $attempts = max(1, $attempts);
         $delay = max(0, $delay);
@@ -1377,12 +1433,16 @@ for port in {$list}; do
     attempt=1
     while :; do
         scheme=http
-        result=\$(probe http "\$port")
+        other=https
+        case " {$secureList} " in
+            *" \$port "*) scheme=https; other=http ;;
+        esac
+        result=\$(probe "\$scheme" "\$port")
         if [ "\${result%% *}" = "000" ]; then
-            secure=\$(probe https "\$port")
-            if [ "\${secure%% *}" != "000" ]; then
-                scheme=https
-                result=\$secure
+            second=\$(probe "\$other" "\$port")
+            if [ "\${second%% *}" != "000" ]; then
+                scheme=\$other
+                result=\$second
             fi
         fi
         # A proxy bundled in the image (Caddy, nginx) binds the port at once
@@ -1405,7 +1465,8 @@ SH;
     /**
      * curl flags for the headers the account vhost adds for a visitor on
      * https. An app that insists on a secure request (ASP.NET antiforgery in
-     * Squidex) answers 500 to plain http without them.
+     * Squidex) answers 500 to plain http without them, and one that trusts its
+     * proxy requires the client address (OpenClaw answers 403 without it).
      */
     private static function visitorHeaders(?string $domain): string
     {
@@ -1415,9 +1476,18 @@ SH;
 
         return implode(' ', array_map(
             static fn (string $header): string => '-H ' . escapeshellarg($header),
-            ["Host: {$domain}", 'X-Forwarded-Proto: https', "X-Forwarded-Host: {$domain}", 'X-Forwarded-Port: 443']
+            [
+                "Host: {$domain}", 'X-Forwarded-Proto: https', "X-Forwarded-Host: {$domain}", 'X-Forwarded-Port: 443',
+                'X-Forwarded-For: ' . self::PROBE_CLIENT, 'X-Real-IP: ' . self::PROBE_CLIENT,
+            ]
         )) . ' ';
     }
+
+    /**
+     * The client address the probe claims: a documentation address (RFC 5737),
+     * so the app answers an outside visitor, never a loopback "local" client.
+     */
+    private const PROBE_CLIENT = '192.0.2.1';
 
     /**
      * Ceiling for the whole probe: every port may burn both schemes on every

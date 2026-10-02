@@ -70,6 +70,8 @@ class AppHealthTest extends TestCase
         $this->assertStringContainsString("-H 'X-Forwarded-Proto: https' ", $script);
         $this->assertStringContainsString("-H 'X-Forwarded-Host: squidex.example.com' ", $script);
         $this->assertStringContainsString("-H 'X-Forwarded-Port: 443' ", $script);
+        $this->assertStringContainsString("-H 'X-Forwarded-For: 192.0.2.1' ", $script);
+        $this->assertStringContainsString("-H 'X-Real-IP: 192.0.2.1' ", $script);
         $this->assertStringNotContainsString('X-Forwarded', AppHealth::probeScript([5000], 4, 2, 1));
     }
 
@@ -77,8 +79,9 @@ class AppHealthTest extends TestCase
     {
         $script = AppHealth::probeScript([3000]);
 
-        $this->assertStringContainsString('probe http "$port"', $script);
-        $this->assertStringContainsString('probe https "$port"', $script);
+        $this->assertStringContainsString("scheme=http\n        other=https", $script);
+        $this->assertStringContainsString('probe "$scheme" "$port"', $script);
+        $this->assertStringContainsString('probe "$other" "$port"', $script);
         $this->assertStringContainsString('if [ "${result%% *}" = "000" ]; then', $script);
     }
 
@@ -378,7 +381,7 @@ class AppHealthTest extends TestCase
             AppHealth::DETAIL_CHECKED => true,
             AppHealth::DETAIL_HEALTHY => false,
             AppHealth::DETAIL_PORTS => [
-                ['port' => 3000, 'status' => 'fail', 'http_code' => 502],
+                ['port' => 3000, 'status' => 'fail', 'http_code' => null],
                 ['port' => 8080, 'status' => 'fail', 'http_code' => null],
             ],
         ]));
@@ -392,6 +395,29 @@ class AppHealthTest extends TestCase
                 ['port' => 8080, 'status' => 'ok', 'http_code' => 200],
             ],
         ]));
+    }
+
+    /** A 5xx is an answer: no-server-error describes it, not the silent-port line. */
+    public function test_a_port_answering_5xx_has_answered(): void
+    {
+        $this->assertFalse(AppHealth::nothingAnswered([
+            AppHealth::DETAIL_CHECKED => true,
+            AppHealth::DETAIL_HEALTHY => false,
+            AppHealth::DETAIL_PORTS => [
+                ['port' => 3000, 'status' => 'fail', 'http_code' => 502],
+                ['port' => 8080, 'status' => 'fail', 'http_code' => null],
+            ],
+        ]));
+
+        $details = [
+            AppHealth::DETAIL_CHECKED => true,
+            AppHealth::DETAIL_HEALTHY => false,
+            AppHealth::DETAIL_PORTS => [['port' => 8080, 'status' => 'fail', 'http_code' => 500]],
+            AppHealth::DETAIL_CHECKS => [
+                ['id' => 'no-server-error', 'severity' => 'error', 'message' => 'The site returned 500 instead of a page.'],
+            ],
+        ];
+        $this->assertSame(['The site returned 500 instead of a page.'], AppHealth::servingWarnings($details));
     }
 
     public function test_a_worker_publishing_no_port_is_never_called_unhealthy(): void

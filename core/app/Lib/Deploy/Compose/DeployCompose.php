@@ -55,7 +55,11 @@ class DeployCompose
         // Nitro (Nuxt, TanStack Start) deletes and recreates `.output` on every
         // build, so a container left running keeps a bind mount of the removed
         // directory and answers 500 for every static file.
+        // nginx reads panelalpha.nginx.conf at start only, and an archive redeploy's
+        // `rsync --delete` replaces that file: the old container keeps the old config.
         return $runtime === PlatformManifest::RUNTIME_PHP
+            || $runtime === PlatformManifest::RUNTIME_NGINX
+            || in_array($strategy, [Strategies::STATIC, Strategies::FALLBACK], true)
             || HostRunProject::isStrategy($strategy)
             || StandaloneNodeServe::isStandaloneStrategy($strategy);
     }

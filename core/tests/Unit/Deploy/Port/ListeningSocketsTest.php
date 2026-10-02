@@ -143,6 +143,21 @@ class ListeningSocketsTest extends TestCase
         $this->assertSame(5000, ListeningSockets::chooseAppPort($sockets, 6881, [6881, 5000]));
     }
 
+    /** engine#88: php-fpm on 9000 beside the real server on 8081; both stay candidates. */
+    public function test_every_candidate_is_ranked_so_a_non_http_first_choice_can_be_passed_over(): void
+    {
+        $sockets = [
+            ['addr' => '00000000', 'port' => 8081],
+            ['addr' => '00000000', 'port' => 9000],
+            ['addr' => '00000000', 'port' => 4369],
+            ['addr' => '00000000', 'port' => 2222],
+        ];
+
+        $this->assertSame([9000, 8081], ListeningSockets::rankedAppPorts($sockets, 8080));
+        $this->assertSame(9000, ListeningSockets::chooseAppPort($sockets, 8080));
+        $this->assertSame([], ListeningSockets::rankedAppPorts([...$sockets, ['addr' => '00000000', 'port' => 8080]], 8080));
+    }
+
     public function test_an_unrecognised_port_is_chosen_by_number(): void
     {
         $sockets = [

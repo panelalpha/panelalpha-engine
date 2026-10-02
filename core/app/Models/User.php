@@ -1254,6 +1254,19 @@ class User extends Authenticatable
         $this->setDetails(['app_port' => $value]);
     }
 
+    /** 'https' when the recipe declares the app port speaks TLS, else null (plain http). */
+    public function getAppPortScheme(): ?string
+    {
+        $scheme = $this->getDetails()['app_port_scheme'] ?? null;
+
+        return $scheme === 'https' ? 'https' : null;
+    }
+
+    public function setAppPortScheme(?string $value): void
+    {
+        $this->setDetails(['app_port_scheme' => $value === 'https' ? 'https' : null]);
+    }
+
     public function getDeploymentStatus(): string
     {
         $details = $this->getDetails();

@@ -618,6 +618,19 @@ class UserComposeStrategyTest extends TestCase
         (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
     }
 
+    /** Nothing published: the port the service's PORT names is, not the 8080 guess. */
+    public function test_a_service_that_publishes_nothing_is_published_on_the_port_it_names(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $clientYaml = "services:\n  web:\n    image: acme/app:latest\n    environment:\n      - PORT=9494\n";
+        $dind = $this->stubbedDind($this->stubbedSystem([$clientPath => $clientYaml]), $clientPath);
+
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertSame(['9494:9494'], $run['services']['web']['ports']);
+    }
+
     /** engine#173: the run file inlines env_vars and generated passwords. */
     public function test_the_run_file_is_written_owner_only(): void
     {

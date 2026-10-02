@@ -69,6 +69,27 @@ class PortMappingTest extends TestCase
         $this->assertNull(PortMapping::parse('${APP_PORT}:8000'));
     }
 
+    /** BorgWarehouse: Compose refuses to start without it, so it is set; read it as the container port. */
+    public function test_a_required_host_port_reads_as_the_container_port(): void
+    {
+        $mapping = PortMapping::parse('${WEB_SERVER_PORT:?WEB_SERVER_PORT variable missing}:3000');
+        $this->assertSame(3000, $mapping->hostPort);
+        $this->assertSame(3000, $mapping->containerPort);
+
+        $mapping = PortMapping::parse('0.0.0.0:${WEB_PORT?unset}:8000/tcp');
+        $this->assertSame(8000, $mapping->hostPort);
+        $this->assertSame(8000, $mapping->containerPort);
+
+        $mapping = PortMapping::parse(['target' => 3000, 'published' => '${WEB_SERVER_PORT:?missing}']);
+        $this->assertSame(3000, $mapping->hostPort);
+    }
+
+    public function test_a_required_container_port_is_still_not_a_mapping(): void
+    {
+        $this->assertNull(PortMapping::parse('${PORT:?missing}'));
+        $this->assertNull(PortMapping::parse('8080:${PORT:?missing}')?->containerPort);
+    }
+
     public function test_a_zero_or_negative_port_is_not_a_mapping(): void
     {
         $this->assertNull(PortMapping::parse(0));

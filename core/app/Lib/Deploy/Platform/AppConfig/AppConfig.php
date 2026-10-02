@@ -68,6 +68,7 @@ final class AppConfig
         private readonly array $env,
         private readonly ?array $manifest,
         private readonly ?CredentialSpec $credentials,
+        private readonly ?string $portScheme = null,
     ) {
     }
 
@@ -126,6 +127,7 @@ final class AppConfig
             $config?->env() ?? [],
             $config?->manifest(),
             $config?->credentials(),
+            $config?->portScheme(),
         );
     }
 
@@ -173,6 +175,7 @@ final class AppConfig
                 $raw['credentials'] ?? null,
                 static fn (string $m): ManifestException => new ManifestException(self::YAML_FILENAME . ": {$m}")
             ),
+            self::readPortScheme($raw),
         );
     }
 
@@ -208,6 +211,7 @@ final class AppConfig
             $config?->env() ?? [],
             $config?->manifest(),
             $config?->credentials(),
+            $config?->portScheme(),
         );
 
         return $appConfig->isEmpty() ? null : $appConfig;
@@ -246,7 +250,8 @@ final class AppConfig
             && $this->requires === []
             && $this->env === []
             && $this->manifest === null
-            && $this->credentials === null;
+            && $this->credentials === null
+            && $this->portScheme === null;
     }
 
     /**
@@ -386,6 +391,15 @@ final class AppConfig
         return $this->credentials;
     }
 
+    /**
+     * `port_scheme`: what the app's port speaks. Read here as well as in the
+     * manifest, since a compose recipe declares it without being a manifest.
+     */
+    public function portScheme(): ?string
+    {
+        return $this->portScheme;
+    }
+
     // -- YAML reading ------------------------------------------------------
 
     /**
@@ -431,6 +445,19 @@ final class AppConfig
         }
 
         return $value;
+    }
+
+    /** @param array<string, mixed> $raw */
+    private static function readPortScheme(array $raw): ?string
+    {
+        $scheme = $raw['port_scheme'] ?? null;
+        if ($scheme !== null && !in_array($scheme, PlatformManifest::PORT_SCHEMES, true)) {
+            throw new ManifestException(
+                self::YAML_FILENAME . ": 'port_scheme' must be one of " . implode(', ', PlatformManifest::PORT_SCHEMES)
+            );
+        }
+
+        return $scheme;
     }
 
     /** @param array<string, mixed> $raw */
@@ -497,8 +524,8 @@ final class AppConfig
         if (isset($raw[self::EXTENDS_KEY])) {
             $manifest[self::EXTENDS_KEY] = $raw[self::EXTENDS_KEY];
         }
-        // `credentials` rides along too: a compose recipe declares a login without being a manifest.
-        $describes = array_diff(array_keys($manifest), ['requires', 'credentials', self::EXTENDS_KEY]) !== [];
+        // `credentials` and `port_scheme` ride along too: a compose recipe declares them without being a manifest.
+        $describes = array_diff(array_keys($manifest), ['requires', 'credentials', 'port_scheme', self::EXTENDS_KEY]) !== [];
 
         $inherit = $raw[self::EXTENDS_KEY] ?? null;
         if ($inherit !== null) {

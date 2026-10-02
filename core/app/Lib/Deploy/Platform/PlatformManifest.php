@@ -37,7 +37,7 @@ final class PlatformManifest
      * @var list<string>
      */
     public const KNOWN_KEYS = [
-        '$schema', 'id', 'strategy', 'label', 'priority', 'runtime', 'port',
+        '$schema', 'id', 'strategy', 'label', 'priority', 'runtime', 'port', 'port_scheme',
         'image', 'runtime_image', 'requires', 'output_directory', 'output_from',
         'commands_from', 'env', 'detect', 'extra', 'commands', 'database',
         'app_root',
@@ -53,6 +53,9 @@ final class PlatformManifest
     /** Databases a manifest can ask the engine to provision. */
     public const DATABASES = ['mysql'];
 
+    /** What the app's port speaks; the account's :80/:443 rules proxy to it with this. */
+    public const PORT_SCHEMES = ['http', 'https'];
+
     /**
      * @param array<string, mixed> $detect
      * @param list<PlatformCommand> $commands
@@ -66,6 +69,7 @@ final class PlatformManifest
         public readonly int $priority,
         public readonly string $runtime,
         public readonly ?int $port,
+        public readonly ?string $portScheme,
         public readonly ?string $image,
         public readonly array $requires,
         /**
@@ -180,6 +184,7 @@ final class PlatformManifest
             $reader->integer('priority', 'must be an integer — higher is checked first'),
             $runtime = $reader->enum('runtime', self::RUNTIMES, self::RUNTIME_COMMAND),
             $reader->port('port'),
+            $reader->optionalEnum('port_scheme', self::PORT_SCHEMES),
             $reader->optionalText('image', 'must be a non-empty string when present'),
             self::readRequires($reader),
             $reader->optionalText('runtime_image', 'must be a non-empty string when present'),
@@ -701,6 +706,7 @@ final class PlatformManifest
             'compose_path' => null,
             'dockerfile' => null,
             'port_hint' => $this->port,
+            'port_scheme' => $this->portScheme,
             'runtime' => $this->runtime,
             'runtime_image' => $this->runtimeImage,
             'output_directory' => $this->outputDirectory,

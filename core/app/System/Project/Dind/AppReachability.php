@@ -70,10 +70,9 @@ final class AppReachability
 
         $served = self::firstAnsweringPort($ports);
         if ($served === null) {
-            // Nothing answered in the container, which report() has already
-            // said. Routing cannot be judged against a silent application, and
-            // saying "unreachable" here would blame the proxy for the app.
-            return self::skipped($domain, 'the application is not answering, so there is nothing to compare');
+            // No port served a page (silent, or a 5xx), which report() has
+            // already said. Saying "unreachable" here would blame the proxy for the app.
+            return self::skipped($domain, 'no port served a page, so there is nothing to compare');
         }
 
         // The address the vhost listens on, which is the address a visitor

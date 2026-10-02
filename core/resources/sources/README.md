@@ -160,6 +160,12 @@ Under the framework strategies (`laravel`, `php`, the Node/Python/Ruby recipes, 
 
 ---
 
+### The routed port of a compose recipe (`port`)
+
+The compose strategy routes the site to the port it reads from the compose file, and that scan never picks a datastore's: a service whose image is `qdrant/qdrant`, `minio/minio` or `couchdb`, or a port like 6333, is a sidecar there. When the application *is* that product, say so with `extends: compose` and `port:` in the recipe's `panelalpha.yaml`. The stated port is routed instead of the scanned one, and the recipe's own `overrides/docker-compose.yml` is used even when every service in it is a datastore image. Publish the port in that compose file.
+
+---
+
 ### The PHP frontend build (`frontend_build`)
 
 A PHP application gets a host Node pass after Composer: the engine installs `package.json`'s dependencies (lockfile, cache, a git-capable image when a dependency is a repository) and runs its `build` script. With no `build` script there is no pass. `frontend_build` changes that, `runtime: php` only:
@@ -198,6 +204,18 @@ A `username` or `email` value may contain `{random}` (8 hex characters), `{host}
 On every deploy and rebuild, before `hooks/prepare.sh` runs, the engine writes `~/.panelalpha/app-credentials.env` (0600, the account's). A compose service reads it with `env_file: ../.panelalpha/app-credentials.env`, a hook with `. ~/.panelalpha/app-credentials.env`. Stored values are kept; a field with no stored value is taken from `app-credentials.env` itself or from `adopt_from` when either sets it (an account a recipe seeded before the engine owned the login keeps its password), and generated otherwise; a field the project's own `env_vars` set takes that value; a field no longer declared is dropped. `GET /projects/{name}/app-credentials` returns them and `GET /projects/{name}` says they exist. Passwords are masked in the deploy log and telemetry.
 
 Seed only when the application has no user yet, so a password changed in the application stays changed; the API keeps returning the seeded one. Do not generate a password in `hooks/prepare.sh` any more.
+
+---
+
+### An HTTPS-only application port (`port_scheme`)
+
+The account's web server reaches the application over plain HTTP. An application that serves only TLS on its port (UniFi Network Application on 8443, with a self-signed certificate) declares it next to `port:`:
+
+```yaml
+port_scheme: https
+```
+
+The project's generated :80 and :443 proxy rules then use an `https` upstream, without verifying the application's certificate, and no re-encrypting nginx sidecar is needed. `http` (or no key) is the default. It works for a compose recipe too, where it is the only manifest key the file has. The value is stored on the project at every deploy, so a redeploy, a domain rename or a later rule sync keeps it.
 
 ---
 

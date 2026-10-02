@@ -97,9 +97,23 @@ final class ListeningSockets
      */
     public static function chooseAppPort(array $sockets, int $expected, array $declared = []): ?int
     {
+        return self::rankedAppPorts($sockets, $expected, $declared)[0] ?? null;
+    }
+
+    /**
+     * Every port {@see chooseAppPort()} could answer, best first, so a caller
+     * that finds the first one does not speak HTTP can try the next: php-fpm
+     * on 9000 ranks above a real server on 8081.
+     *
+     * @param list<array{addr: string, port: int}> $sockets
+     * @param list<int> $declared
+     * @return list<int>
+     */
+    public static function rankedAppPorts(array $sockets, int $expected, array $declared = []): array
+    {
         $reachable = self::reachablePorts($sockets);
         if ($reachable === [] || in_array($expected, $reachable, true)) {
-            return null;
+            return [];
         }
 
         // A port that cannot serve HTTP is not an answer to "where is the
@@ -107,17 +121,19 @@ final class ListeningSockets
         // read 3000 while traffic went to sshd. Empty means "not yet".
         $reachable = array_values(array_filter($reachable, InternalPorts::isWebCandidate(...)));
         if ($reachable === []) {
-            return null;
+            return [];
         }
 
+        $ranked = [];
         foreach ([...$declared, ...self::WEB_PORT_PREFERENCE] as $preferred) {
-            if (in_array($preferred, $reachable, true)) {
-                return $preferred;
+            if (in_array($preferred, $reachable, true) && !in_array($preferred, $ranked, true)) {
+                $ranked[] = $preferred;
             }
         }
-        sort($reachable);
+        $rest = array_values(array_diff($reachable, $ranked));
+        sort($rest);
 
-        return $reachable[0];
+        return [...$ranked, ...$rest];
     }
 
     /**

@@ -72,7 +72,7 @@ final class PhpEntryExplainer implements Explainer
                 return [
                     'detail' => 'The entry point is ' . $entry . ', so the document root should be '
                         . $dir . ' rather than the project root, which has no index to serve.',
-                    'fix' => 'Set `docroot: ' . $dir . '` in panelalpha.yaml and redeploy.',
+                    'fix' => self::docrootFix($context, $dir),
                 ];
             }
 
@@ -100,7 +100,7 @@ final class PhpEntryExplainer implements Explainer
             return [
                 'detail' => 'index.php is not in any of the usual places, but ' . $dir . '/index.php exists, '
                     . 'so the document root should most likely be ' . $dir . ' rather than the project root.',
-                'fix' => 'Set `docroot: ' . $dir . '` in panelalpha.yaml and redeploy.',
+                'fix' => self::docrootFix($context, $dir),
             ];
         }
 
@@ -108,9 +108,26 @@ final class PhpEntryExplainer implements Explainer
             'detail' => 'There is no index.php anywhere in ~/project, so nothing in this project '
                 . 'is a front page.',
             'fix' => 'Add an index.php, or set `docroot` in panelalpha.yaml to the directory that '
-                . 'holds the application. A repository that is a library rather than a site has no '
+                . 'holds the application, with `extends: ' . self::platformOf($context) . '` when the file has no `id` '
+                . 'or `extends` of its own. A repository that is a library rather than a site has no '
                 . 'front page to serve.',
         ];
+    }
+
+    /**
+     * A panelalpha.yaml with `docroot:` alone is refused: changing how the app
+     * is served needs `extends` naming the platform to start from.
+     */
+    public static function docrootFix(ProjectContext $context, string $dir): string
+    {
+        return 'Set `docroot: ' . $dir . '` in panelalpha.yaml and redeploy. A file with no `id` or `extends` '
+            . 'of its own also needs `extends: ' . self::platformOf($context) . '`, the platform to start from.';
+    }
+
+    /** The shipped PHP platform this project deploys as: Composer or not. */
+    private static function platformOf(ProjectContext $context): string
+    {
+        return $context->isFile('composer.json') ? 'php' : 'php-plain';
     }
 
     /**

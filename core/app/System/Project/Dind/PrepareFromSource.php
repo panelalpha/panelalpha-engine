@@ -189,8 +189,11 @@ class PrepareFromSource
             $this->gitForProjectDir($projectDir)->allowUntrustedGitDirectory();
         }
 
-        $this->dind->networking()->detectAndCreateProxyRules($user);
+        // Kept on the project so every later rule sync (a rename, a port re-detect) proxies with it.
+        $user->setAppPortScheme($decision['port_scheme'] ?? $appConfig?->portScheme());
         $this->dind->applyProjectEnvVars(is_string($decision['compose_path'] ?? null) ? $decision['compose_path'] : null);
+        // After .env exists: compose publishes a host port taken from it.
+        $this->dind->networking()->detectAndCreateProxyRules($user);
         $this->dind->strategy()->keepEngineFilesOutOfBuildContext($decision, $projectDir, $chown);
     }
 

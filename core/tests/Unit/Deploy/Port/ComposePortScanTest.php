@@ -207,6 +207,28 @@ class ComposePortScanTest extends TestCase
         $this->assertSame(8090, ComposePortScan::primaryOf($path));
     }
 
+    /** BorgWarehouse's own compose file, as published; it was routed to 8080 and answered 502. */
+    public function test_a_required_host_port_variable_is_read_as_the_container_port(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          borgwarehouse:
+            container_name: borgwarehouse
+            image: borgwarehouse/borgwarehouse
+            ports:
+              - '${WEB_SERVER_PORT:?WEB_SERVER_PORT variable missing}:3000'
+              - '${SSH_SERVER_PORT:?SSH_SERVER_PORT variable missing}:22'
+            env_file:
+              - .env
+          apprise:
+            container_name: apprise
+            image: caronc/apprise
+            user: 'www-data:www-data'
+        YAML);
+
+        $this->assertSame(['all' => [3000, 22], 'primary' => 3000, 'refused' => []], ComposePortScan::of($path));
+    }
+
     public function test_duplicate_ports_across_services_appear_once(): void
     {
         $path = $this->compose(<<<'YAML'
@@ -593,5 +615,51 @@ class ComposePortScanTest extends TestCase
 
         $alone = $this->compose("services:\n  es:\n    image: elasticsearch:8.14.0\n    ports: [\"9200:9200\"]\n");
         $this->assertSame([], ComposePortScan::of($alone)['all']);
+    }
+
+    /**
+     * Poznote: the hardener defaults `${HTTP_WEB_PORT}` to 80, but `.env`
+     * (from its .env.template) sets 8040, and compose publishes 8040.
+     */
+    public function test_a_host_port_variable_is_read_from_the_projects_env(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          webserver:
+            image: ghcr.io/timothepoznanski/poznote
+            ports:
+              - "${HTTP_WEB_PORT:-80}:80"
+          mcp-server:
+            image: ghcr.io/timothepoznanski/poznote-mcp
+            ports:
+              - "127.0.0.1:${POZNOTE_MCP_PORT:-8045}:8045"
+        YAML);
+
+        $this->assertSame(80, ComposePortScan::of($path)['primary']);
+        $this->assertSame(
+            ['all' => [8040], 'primary' => 8040, 'refused' => []],
+            ComposePortScan::of($path, ['HTTP_WEB_PORT' => '8040', 'POZNOTE_MCP_PORT' => '8046'])
+        );
+    }
+
+    public function test_env_substitution_follows_composes_operators(): void
+    {
+        $path = $this->compose(<<<'YAML'
+        services:
+          a:
+            image: acme/a
+            ports:
+              - "${EMPTY:-3000}:3000"
+              - "${EMPTY_DASH-3100}:3100"
+              - "$BARE:3200"
+              - "${UNSET:-3300}:3300"
+              - target: 80
+                published: "${LONG}"
+        YAML);
+
+        $scan = ComposePortScan::of($path, ['EMPTY' => '', 'EMPTY_DASH' => '', 'BARE' => '3201', 'LONG' => '3401']);
+
+        // `:-` takes the default for an empty value, `-` only for an unset one.
+        $this->assertEqualsCanonicalizing([3000, 3201, 3300, 3401], $scan['all']);
     }
 }

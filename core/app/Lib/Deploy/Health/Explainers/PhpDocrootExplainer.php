@@ -44,7 +44,7 @@ final class PhpDocrootExplainer implements Explainer
                 ? [
                     'detail' => 'The entry point is ' . $entry . ', so the document root should be '
                         . dirname($entry) . ' rather than the project root.',
-                    'fix' => 'Set `docroot: ' . dirname($entry) . '` in panelalpha.yaml and redeploy.',
+                    'fix' => PhpEntryExplainer::docrootFix($context, dirname($entry)),
                 ]
                 : [
                     'detail' => 'index.php is at the project root and is being served rather than run.',

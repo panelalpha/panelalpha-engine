@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\Platform;
 use App\Lib\Deploy\Platform\AppConfig\LocalAppConfigSource;
 use App\Lib\Deploy\Platform\AppConfig\AppConfigLocator;
 use App\Lib\Deploy\Platform\Probes\ComposeUsableProbe;
+use App\Lib\Deploy\Platform\Probes\DockerfileProbe;
 use App\Lib\Deploy\Platform\Probes\ProbeRegistry;
 
 /**
@@ -109,7 +110,10 @@ final class PlatformSelector
             return null;
         }
 
-        $decision = $manifest->describe($context, self::composeProbeData($manifest, $context));
+        $decision = $manifest->describe(
+            $context,
+            self::probeData($manifest, $context, $hit['config']->manifest() ?? [])
+        );
         // So a deploy log and an inspection say why this recipe was chosen.
         $decision['source_recipe'] = AppConfigLocator::describe($hit);
 
@@ -117,22 +121,30 @@ final class PlatformSelector
     }
 
     /**
-     * Where the compose file is, for a recipe that runs one. A recipe is found
-     * by its path, so no detect ran and nothing else fills `compose_path`
-     * (engine#221, #183). Compose only: other strategies' probes would change
-     * what existing recipes build.
+     * Where the compose file or Dockerfile is, for a recipe that runs one. A
+     * recipe is found by its path, so no detect ran and nothing else fills
+     * `compose_path` (engine#221, #183) or `dockerfile`/`port_hint`. Other
+     * strategies' probes would change what existing recipes build.
      *
+     * @param array<string, mixed> $declared the keys the recipe itself states
      * @return array<string, mixed>
      */
-    private static function composeProbeData(PlatformManifest $manifest, ProjectContext $context): array
+    private static function probeData(PlatformManifest $manifest, ProjectContext $context, array $declared): array
     {
-        if ($manifest->strategy !== Strategies::COMPOSE) {
+        $found = match ($manifest->strategy) {
+            Strategies::COMPOSE => (new ComposeUsableProbe())->evaluate($context),
+            Strategies::DOCKERFILE => (new DockerfileProbe())->evaluate($context),
+            default => false,
+        };
+        if (!is_array($found)) {
             return [];
         }
+        // A recipe's own `port:` outranks the Dockerfile's EXPOSE; an inherited one does not.
+        if (($declared['port'] ?? null) !== null) {
+            unset($found['port_hint']);
+        }
 
-        $found = (new ComposeUsableProbe())->evaluate($context);
-
-        return is_array($found) ? $found : [];
+        return $found;
     }
 
     /**

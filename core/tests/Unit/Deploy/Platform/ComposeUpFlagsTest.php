@@ -133,19 +133,28 @@ class ComposeUpFlagsTest extends TestCase
     }
 
     /**
-     * Everything else either builds an image — which recreates the container
-     * on its own — or serves prebuilt output that a restart would not change.
+     * nginx reads its config once, at start. A static archive redeploy from
+     * about.html to home.html wrote a new panelalpha.nginx.conf (a new inode,
+     * after `rsync --delete` removed the old one); the container that `up`
+     * left running kept `try_files /about.html` and answered 404.
      */
-    public function test_nothing_else_is_force_recreated(): void
+    public function test_an_nginx_served_site_must_replace_its_container(): void
     {
         $runtimes = [
-            Strategies::RAILPACK => null,
-            Strategies::STATIC => PlatformManifest::RUNTIME_NGINX,
-            // Vite empties `dist/` but keeps the directory, so the mount holds.
+            Strategies::STATIC => null,
+            Strategies::FALLBACK => null,
             Strategies::VITE => PlatformManifest::RUNTIME_NGINX,
         ];
         foreach ($runtimes as $strategy => $runtime) {
-            $this->assertFalse(DeployCompose::forceRecreate($strategy, $runtime), $strategy);
+            $this->assertTrue(DeployCompose::forceRecreate($strategy, $runtime), $strategy);
+        }
+    }
+
+    /** Everything else builds an image, which recreates the container on its own. */
+    public function test_nothing_else_is_force_recreated(): void
+    {
+        foreach ([Strategies::RAILPACK, Strategies::DOCKERFILE, Strategies::COMPOSE] as $strategy) {
+            $this->assertFalse(DeployCompose::forceRecreate($strategy, null), $strategy);
         }
     }
 }

@@ -21,6 +21,9 @@ final class AppPortAlignment
 
     private const SETTLE_INTERVAL_SECONDS = 2;
 
+    /** Each probe can take 10s (http, then https) on a socket that never answers. */
+    private const MAX_PROBED = 3;
+
     /**
      * @param (\Closure(int): void)|null $sleep
      */
@@ -58,19 +61,26 @@ final class AppPortAlignment
                 return;
             }
 
-            $actual = $this->settledPort(
+            $candidates = $this->settledCandidates(
                 $mapping->container,
                 $this->declaredPorts(dirname($composePath), $parsed['services']['app']['build'] ?? null)
             );
-            if ($actual === null) {
+            if ($candidates === []) {
                 return;
             }
             // A socket is not a website: epmd, php-fpm and SSH bind first and
             // never answer HTTP, and forwarding there leaves the site dead.
-            if (self::answersHttp($this->httpStatusOf($actual)) === false) {
+            $actual = self::firstAnsweringHttp(
+                $candidates,
+                fn (int $port): ?bool => self::answersHttp($this->httpStatusOf($port))
+            );
+            if ($actual === null) {
+                $probed = array_slice($candidates, 0, self::MAX_PROBED);
+                $listed = implode(', ', $probed);
                 $logger?->warn(
-                    "Application is listening on port {$actual}, not {$mapping->container}, but {$actual} "
-                        . "does not answer HTTP; still forwarding to {$mapping->container}"
+                    'Application is listening on port' . (count($probed) > 1 ? 's' : '') . " {$listed}, not {$mapping->container}, but "
+                        . (count($probed) > 1 ? 'none of them answers' : "{$listed} does not answer")
+                        . " HTTP; still forwarding to {$mapping->container}"
                 );
 
                 return;
@@ -103,10 +113,29 @@ final class AppPortAlignment
 
     /**
      * @param list<int> $declared
+     * @return list<int>
      */
-    private function settledPort(int $expected, array $declared): ?int
+    private function settledCandidates(int $expected, array $declared): array
     {
-        return self::awaitPort($expected, fn (): array => $this->listeningSockets(), $this->sleep, $declared);
+        return self::awaitCandidates($expected, fn (): array => $this->listeningSockets(), $this->sleep, $declared);
+    }
+
+    /**
+     * The first candidate whose probe did not rule HTTP out, trying at most
+     * {@see MAX_PROBED}; null when every one tried answered nothing.
+     *
+     * @param list<int> $candidates best first
+     * @param callable(int): ?bool $answersHttp null when the probe could not run
+     */
+    public static function firstAnsweringHttp(array $candidates, callable $answersHttp): ?int
+    {
+        foreach (array_slice($candidates, 0, self::MAX_PROBED) as $port) {
+            if ($answersHttp($port) !== false) {
+                return $port;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -181,20 +210,35 @@ SH;
      */
     public static function awaitPort(int $expected, callable $sockets, ?callable $sleep = null, array $declared = []): ?int
     {
+        return self::awaitCandidates($expected, $sockets, $sleep, $declared)[0] ?? null;
+    }
+
+    /**
+     * {@see awaitPort()}, with every candidate of the last poll that saw one,
+     * best first.
+     *
+     * @param callable(): list<array{addr: string, port: int}> $sockets
+     * @param (callable(int): void)|null $sleep
+     * @param list<int> $declared
+     * @return list<int>
+     */
+    public static function awaitCandidates(int $expected, callable $sockets, ?callable $sleep = null, array $declared = []): array
+    {
         $sleep ??= static fn (int $seconds) => sleep($seconds);
-        $candidate = null;
+        $candidates = [];
         for ($attempt = 0; $attempt < self::SETTLE_ATTEMPTS; $attempt++) {
             if ($attempt > 0) {
                 $sleep(self::SETTLE_INTERVAL_SECONDS);
             }
             $seen = $sockets();
             if (DetectAppPort::servesPort($seen, $expected)) {
-                return null;
+                return [];
             }
-            $candidate = DetectAppPort::chooseAppPort($seen, $expected, $declared) ?? $candidate;
+            $ranked = DetectAppPort::rankedAppPorts($seen, $expected, $declared);
+            $candidates = $ranked !== [] ? $ranked : $candidates;
         }
 
-        return $candidate;
+        return $candidates;
     }
 
     /**

@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../_schema.json
+#
+# The application's own web installer, served at `/` itself.
+#
+# not-an-open-installer is asked only when the redirects from `/` end under an
+# installer path. Matomo without config.ini.php and Nextcloud before its first
+# administrator answer `/` with a 200 and the wizard, no redirect, so that
+# check never looked and the deploy said `serving: ok` (#521).
+#
+# Asked wherever the probe lands, so the markers carry it alone. Each was
+# measured on the unfinished installer of the stock image and is absent from
+# the same application's other pages: Matomo's installer stylesheet is linked
+# only from plugins/Installation/templates/layout.twig (its `&rsaquo;
+# Installation` title is WordPress's too), and Nextcloud's login page loads
+# core-login.js, not core-install.js. Same severity and verdict as
+# not-an-open-installer, for the same reason.
+id: not-an-open-installer-at-root
+severity: warning
+serving: unclaimed_install
+expect:
+  body_not:
+    - 'module=Installation&amp;action=getInstallationCss'
+    - '/dist/core-install.js'
+message: 'The site is serving the application''s own installer, and whoever opens it first can complete it and become its administrator.'
+fix: 'Open the site now and finish the installer yourself, or deploy with a recipe that installs the application before it is exposed.'

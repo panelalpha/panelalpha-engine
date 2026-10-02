@@ -17,6 +17,8 @@ use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\NamedVolumes;
 use App\Lib\Deploy\Compose\NestedCompose;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
+use App\Lib\Deploy\Port\ComposePortScan;
+use App\Lib\Deploy\Port\UnpublishedAppPort;
 use App\System\Project\Dind\Paths;
 use App\System\Project\Dind\Source\GitRepository;
 
@@ -236,6 +238,7 @@ class UserComposeStrategy
         // The DinD proxy routes the domain to the account container on the
         // detected primary port; a service that only expose:s it binds nothing
         // there, so publish it explicitly or the domain 502s.
+        $parsed = $this->withUnpublishedAppPort($parsed, $composePath, $projectDir, $logger);
         $binding = ComposeHarden::withPublishedPrimaryPort($parsed);
         $parsed = $binding['compose'];
         if ($binding['published'] !== null) {
@@ -278,6 +281,54 @@ class UserComposeStrategy
         $system->filesystem()->filePutContents($runPath, ComposeYaml::dump($parsed, $raw, 6, 2, ...$included), $chown, EngineArtifacts::RUN_COMPOSE_MODE);
         $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
         $logger?->info('Hardened compose for hosting (resource limits, restart policy, isolation)');
+    }
+
+    /**
+     * A compose file that publishes no port was routed to 8080 whatever the
+     * app listens on; the port it names some other way is exposed instead
+     * ({@see UnpublishedAppPort}), and a remaining guess is said to be one.
+     *
+     * @param array<string, mixed> $parsed
+     * @return array<string, mixed>
+     */
+    private function withUnpublishedAppPort(array $parsed, string $composePath, string $projectDir, ?DeployLogger $logger): array
+    {
+        if (isset(ComposePortScan::ofParsed($parsed)['primary'])) {
+            return $parsed;
+        }
+        // A host-network service's PORT is published by the hardener later on.
+        foreach ($parsed['services'] ?? [] as $service) {
+            if (is_array($service) && ServiceHardener::publishesWebPort($service)) {
+                return $parsed;
+            }
+        }
+
+        $others = [];
+        foreach (['docker-compose.*.yml', 'docker-compose.*.yaml', 'compose.*.yml', 'compose.*.yaml'] as $pattern) {
+            foreach (glob(rtrim($projectDir, '/') . '/' . $pattern) ?: [] as $path) {
+                if (basename($path) === basename($composePath) || Paths::isEngineComposeFile($path)) {
+                    continue;
+                }
+                $raw = $this->dind->projectTree()->read($path);
+                if ($raw !== null) {
+                    $others[basename($path)] = $raw;
+                }
+            }
+        }
+
+        $found = UnpublishedAppPort::apply(
+            $parsed,
+            fn (string $image): array => $this->dind->innerDocker()->declaredImagePorts($image),
+            $others
+        );
+        if ($found === null) {
+            $logger?->warn('No service publishes a port and none names one, so the domain is routed to 8080, which is a guess. Publish the port the application listens on in the compose file.');
+
+            return $parsed;
+        }
+        $logger?->info("No service publishes a port; {$found['service']} listens on {$found['port']}, from {$found['source']}");
+
+        return $found['compose'];
     }
 
     /**

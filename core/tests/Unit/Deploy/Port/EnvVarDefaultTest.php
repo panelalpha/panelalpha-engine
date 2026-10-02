@@ -37,6 +37,13 @@ class EnvVarDefaultTest extends TestCase
         $this->assertSame(':8000', EnvVarDefault::resolve('$APP_PORT:8000'));
     }
 
+    public function test_a_required_variable_resolves_to_nothing(): void
+    {
+        // The error message may hold colons; it must not leak into the split.
+        $this->assertSame(':3000', EnvVarDefault::resolve('${WEB_SERVER_PORT:?WEB_SERVER_PORT variable missing}:3000'));
+        $this->assertSame(':3000', EnvVarDefault::resolve('${WEB_SERVER_PORT?error: unset}:3000'));
+    }
+
     public function test_several_variables_in_one_value_are_all_resolved(): void
     {
         $this->assertSame('127.0.0.1:8090:8000', EnvVarDefault::resolve('${HOST:-127.0.0.1}:${PORT:-8090}:8000'));

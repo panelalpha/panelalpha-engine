@@ -24,11 +24,14 @@ final class ComposePortScan
     private const DEFAULT_PRIMARY = 8080;
 
     /**
+     * @param array<string, string> $env the project's `.env`, which compose
+     *        interpolates host ports with: `${HTTP_WEB_PORT:-80}:80` publishes
+     *        8040 when `.env` says HTTP_WEB_PORT=8040 (Poznote)
      * @return Scan
      */
-    public static function of(string $composePath): array
+    public static function of(string $composePath, array $env = []): array
     {
-        return self::fromServices(self::services($composePath));
+        return self::fromServices(self::withEnv(self::services($composePath), $env));
     }
 
     /**
@@ -99,6 +102,56 @@ final class ComposePortScan
         $services = is_array($parsed) && is_array($parsed['services'] ?? null) ? $parsed['services'] : [];
 
         return array_filter($services, 'is_array');
+    }
+
+    /**
+     * Port entries with the variables `.env` sets substituted; the rest are
+     * left for {@see EnvVarDefault}.
+     *
+     * @param array<array-key, array<string, mixed>> $services
+     * @param array<string, string> $env
+     * @return array<array-key, array<string, mixed>>
+     */
+    private static function withEnv(array $services, array $env): array
+    {
+        if ($env === []) {
+            return $services;
+        }
+        foreach ($services as $name => $service) {
+            foreach (['ports', 'expose'] as $key) {
+                if (!is_array($service[$key] ?? null)) {
+                    continue;
+                }
+                foreach ($service[$key] as $index => $entry) {
+                    if (is_string($entry)) {
+                        $services[$name][$key][$index] = self::interpolated($entry, $env);
+                    } elseif (is_array($entry) && is_string($entry['published'] ?? null)) {
+                        $services[$name][$key][$index]['published'] = self::interpolated($entry['published'], $env);
+                    }
+                }
+            }
+        }
+
+        return $services;
+    }
+
+    /**
+     * @param array<string, string> $env
+     */
+    private static function interpolated(string $value, array $env): string
+    {
+        return (string) preg_replace_callback(
+            '/\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-?])([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)/',
+            static function (array $m) use ($env): string {
+                $name = ($m[4] ?? '') !== '' ? $m[4] : $m[1];
+                if (!array_key_exists($name, $env)) {
+                    return $m[0];
+                }
+
+                return ($m[2] ?? '') === ':-' && $env[$name] === '' ? (string) $m[3] : $env[$name];
+            },
+            $value
+        );
     }
 
     /**

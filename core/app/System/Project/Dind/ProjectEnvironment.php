@@ -189,6 +189,24 @@ class ProjectEnvironment
     }
 
     /**
+     * The `.env` compose interpolates the run file with, once {@see apply()}
+     * has written it: a host port taken from it is the port compose publishes.
+     *
+     * @return array<string, string>
+     */
+    public function forPortDetection(): array
+    {
+        $env = [];
+        foreach (EnvFile::parse($this->dind->projectTree()->readIn($this->dind->userAppDirPath(), '.env') ?? '') as $row) {
+            if (($row['type'] ?? '') === 'variable') {
+                $env[(string) $row['key']] = (string) ($row['value'] ?? '');
+            }
+        }
+
+        return $env;
+    }
+
+    /**
      * What compose may interpolate the project's files with, for the hardener
      * to check mount sources against: it runs before {@see apply()} writes
      * `.env`, so this is every value that can end up there.
