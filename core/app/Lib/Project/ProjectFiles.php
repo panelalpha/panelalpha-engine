@@ -25,16 +25,17 @@ final class ProjectFiles
      * A stream path that reads the resolved file $path, or null when there is
      * no such file.
      */
-    public static function readablePath(User $user, string $path): ?string
+    public static function readablePath(User $user, string $path, ?System $system = null): ?string
     {
-        if (!(new System())->filesystem()->fileExists($path)) {
+        $system ??= new System();
+        if (!$system->filesystem()->fileExists($path)) {
             return null;
         }
 
         FileStreamWrapper::register();
         // The path is confined as a string only; the read runs as root and
         // follows symlinks, so the helper re-checks the resolved file.
-        FileStreamWrapper::confineTo($user->project()->homeDirPath());
+        FileStreamWrapper::confineTo($user->project($system)->homeDirPath());
 
         return 'sudophp://' . $path;
     }

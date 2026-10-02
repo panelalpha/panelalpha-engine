@@ -137,8 +137,9 @@ class Exim
             throw new \InvalidArgumentException('Invalid test email address.');
         }
 
+        // example.invalid is reserved (RFC 2606), so no third party owns it.
         $message = ""
-            . "From: Tester <wordpress@userdomain.com>\n"
+            . "From: PanelAlpha Engine <noreply@example.invalid>\n"
             . "To: {$email}\n"
             . "Subject: Test email from PanelAlpha Engine\n\n"
             . "This is a test email sent from PanelAlpha Engine.\n";
@@ -154,7 +155,9 @@ class Exim
             'mail',
             'bash',
             '-c',
-            "echo " . escapeshellarg($message) . " | exim4 -v -odf $to"
+            // Null envelope sender: a failed test generates no bounce, and exim
+            // never rewrites an empty sender into the From: address.
+            "echo " . escapeshellarg($message) . " | exim4 -v -odf -f '<>' $to"
         ]);
 
         $stdout = $process->getOutput();

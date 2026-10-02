@@ -74,7 +74,7 @@ class GitCommitsTool extends ApiTool
             'name' => $schema->string()->required(),
             'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
             'branch' => $schema->string(),
-            'limit' => $schema->integer(),
+            'limit' => $schema->integer()->min(1),
         ];
     }
 }

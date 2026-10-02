@@ -69,7 +69,6 @@ return [
     \App\Mcp\Tools\Api\AppUsers\AppInfoTool::class,
     \App\Mcp\Tools\Api\AppUsers\AppInstallTool::class,
     \App\Mcp\Tools\Api\AppUsers\AppRoleListTool::class,
-    \App\Mcp\Tools\Api\AppUsers\AppSsoLoginTool::class,
     \App\Mcp\Tools\Api\AppUsers\AppUserListTool::class,
     \App\Mcp\Tools\Api\AppUsers\AppUserCreateTool::class,
     \App\Mcp\Tools\Api\AppUsers\AppUserDeleteTool::class,

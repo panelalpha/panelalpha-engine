@@ -309,7 +309,7 @@ PHP base image has no JRE.
 
 ## Measurements
 
-All on `mariusz.panelalpha.tools` (8 cores, 15.6 GB, other tenants deploying
+All on a dev host (8 cores, 15.6 GB, other tenants deploying
 concurrently), against the engine at `/opt/panelalpha/shared-hosting/core` —
 which carries the unmerged patch widening `PhpDocroot::LATE_CANDIDATES`. The
 docroot conclusion was checked against both that and stock `development-2.0.0`
@@ -480,22 +480,7 @@ Over the real public HTTPS domain (`https://tinerec-9c9c.panelalpha.online`),
 
 ## Engine defects found
 
-1. **`api:call` is broken on this engine, and it is the documented no-token
-   escape hatch.** `app/Http/Middleware/EnsureTokenMayUseApi.php:31` does
-   `$request->user()?->currentAccessToken()`.
-   `app/Console/Commands/Api/Call.php:40-44` authenticates an anonymous
-   `Illuminate\Foundation\Auth\User` subclass, which does not use
-   `HasApiTokens`, so that call is `BadMethodCallException: Call to undefined
-   method …::currentAccessToken()` and **every** `php artisan api:call` returns
-   HTTP 500 `{"message":"Server Error"}` — including `GET /test-connection`.
-   The command's own description is "Call an internal API route and bypass
-   middleware"; it now bypasses everything except the middleware that breaks
-   it. Fix: guard the call (`instanceof HasApiTokens`, or `method_exists`), or
-   have `Call.php` set `ApiTool::VIA_ATTRIBUTE` on the request the way
-   `ApiTool` does. Cost: an operator or script on the host has to mint a real
-   token instead, which is what this work did.
-
-2. **`NodeRuntime::invokesGit()` does not recognise `git -C` or `git -c`.**
+1. **`NodeRuntime::invokesGit()` does not recognise `git -C` or `git -c`.**
    `app/Lib/Deploy/Platform/Runtime/NodeRuntime.php:334-341` requires the
    subcommand to follow `git` immediately:
 
@@ -513,7 +498,7 @@ Over the real public HTTPS domain (`https://tinerec-9c9c.panelalpha.online`),
    between the binary and the subcommand, e.g.
    `git(?:\s+-[cC]\s*\S+)*\s+(?:rev-parse|…)`.
 
-3. **The generated Apache vhost cannot serve a URL containing an encoded
+2. **The generated Apache vhost cannot serve a URL containing an encoded
    slash, and nothing outside the engine can fix it.**
    `resources/deploy/templates/apache-vhost.stub` does not set
    `AllowEncodedSlashes`, so it is Off, and Apache answers its own 404 to any
@@ -531,7 +516,7 @@ Over the real public HTTPS domain (`https://tinerec-9c9c.panelalpha.online`),
    here: the branding logo is a broken image on the login page and in the
    header of every tine deployment.
 
-4. **`PhpDocroot`'s "found nothing" fallback serves the whole repository, and
+3. **`PhpDocroot`'s "found nothing" fallback serves the whole repository, and
    the verdict says the opposite.** When `detect()` returns `''` no
    `PA_DOCROOT` is emitted and `/usr/local/bin/panelalpha-serve` falls back to
    `/app`, which for a repository-shaped project is the entire checkout. On the
@@ -546,7 +531,7 @@ Over the real public HTTPS domain (`https://tinerec-9c9c.panelalpha.online`),
    as an empty site, and `missing_entry` is worth a check that says what *is*
    reachable.
 
-5. **engine#199 confirmed, and harmless here.**
+4. **engine#199 confirmed, and harmless here.**
    `app/System/Project/Dind/HostCompile.php:401-412` calls
    `PhpHostBuild::script($install, $build, $hasComposer)` — three of its six
    parameters — so `$composerLock` is null, `mayRunPlugins(null)` is false and
@@ -559,12 +544,12 @@ Over the real public HTTPS domain (`https://tinerec-9c9c.panelalpha.online`),
    changes nothing. The deploy log says so out loud: `The "php-http/discovery"
    plugin was not loaded as plugins are disabled.`
 
-6. **engine#185 confirmed** — the base image loads no php.ini at all, so
+5. **engine#185 confirmed** — the base image loads no php.ini at all, so
    `memory_limit` is 128M, `post_max_size` 8M, `upload_max_filesize` 2M and
    `display_errors` On until a recipe ships `PHP_INI_SCAN_DIR`. For groupware
    the attachment ceilings are the ones that bite.
 
-7. **engine#173 confirmed** — `POST /projects/{u}/rebuild` re-clones
+6. **engine#173 confirmed** — `POST /projects/{u}/rebuild` re-clones
    `~/project`, visible in the rebuild log as `Cloning into
    '/home/tinerec/project'...`. Everything this recipe keeps outside the
    checkout survived; anything left in it would not have.

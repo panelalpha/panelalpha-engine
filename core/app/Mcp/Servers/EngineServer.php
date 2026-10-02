@@ -4,6 +4,7 @@ namespace App\Mcp\Servers;
 
 use App\Auth\TokenAbilities;
 use App\Mcp\ToolPolicy;
+use App\Mcp\ToolSearch\PagedToolSearch;
 use App\Mcp\Tools\MetricsLatestTool;
 use App\Mcp\Tools\ProjectListSummaryTool;
 use Laravel\Mcp\Server;
@@ -11,6 +12,7 @@ use Laravel\Mcp\Server\Contracts\Transport;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Version;
+use Laravel\Mcp\Server\Tools\ToolSearch;
 
 #[Name('PanelAlpha Engine')]
 #[Version('1.0.0')]
@@ -70,7 +72,7 @@ class EngineServer extends Server
      * ToolSearch::class (see ToolPolicy::layout()). The default value stays a
      * plain list, since ToolRegistry reads it.
      *
-     * @var array<int|string, class-string<\Laravel\Mcp\Server\Tool>|array<int, class-string<\Laravel\Mcp\Server\Tool>>>
+     * @var array<int|string, class-string<\Laravel\Mcp\Server\Tool>|\Laravel\Mcp\Server\Tool|array<int, class-string<\Laravel\Mcp\Server\Tool>>>
      */
     protected array $tools = [
         MetricsLatestTool::class,
@@ -107,5 +109,13 @@ class EngineServer extends Server
 
         // Last, so the catalogue holds exactly what the filters above left.
         $this->tools = (new ToolPolicy())->layout($this->tools);
+
+        // The package builds a plain ToolSearch from that key, whose
+        // search_tools cannot page; register the paged pair in its place.
+        if (isset($this->tools[ToolSearch::class])) {
+            $catalogue = new PagedToolSearch($this->tools[ToolSearch::class]);
+            unset($this->tools[ToolSearch::class]);
+            $this->tools = [...$this->tools, ...$catalogue->tools()];
+        }
     }
 }

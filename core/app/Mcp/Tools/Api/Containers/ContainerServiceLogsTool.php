@@ -70,7 +70,7 @@ class ContainerServiceLogsTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'service' => $schema->string()->required(),
-            'lines' => $schema->integer(),
+            'lines' => $schema->integer()->max(500),
         ];
     }
 }

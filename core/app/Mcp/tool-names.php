@@ -206,7 +206,6 @@ return [
     'GET /projects/{username}/app/info' => 'app_info',
     'POST /projects/{username}/app/install' => 'app_install',
     'GET /projects/{username}/app/roles' => 'app_role_list',
-    'GET /projects/{username}/app/sso-token' => 'app_sso_login',
     'GET /projects/{username}/app/users' => 'app_user_list',
     'POST /projects/{username}/app/users' => 'app_user_create',
     'DELETE /projects/{username}/app/users/{userId}' => 'app_user_delete',

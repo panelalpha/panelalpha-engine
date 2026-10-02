@@ -281,10 +281,18 @@ bash scripts/tenant-network-firewall.sh --install-units \
     || warn "Could not install the tenant network's boot units"
 
 # ----------------------------------------------------------------------- vendor
-if [ "$FORCE_COMPOSER" = 1 ] || [ ! -d core/vendor ]; then
+# The upload excludes core/vendor, so a redeploy that brings a new composer.lock
+# must install again. The stamp records the lock the vendor tree was built from.
+COMPOSER_LOCK_STAMP=core/vendor/.pa-composer-lock
+composer_needed() {
+    [ "$FORCE_COMPOSER" = 1 ] || [ ! -d core/vendor ] ||
+        [ "$(cat "$COMPOSER_LOCK_STAMP" 2>/dev/null)" != "$(sha256sum core/composer.lock | cut -d' ' -f1)" ]
+}
+if composer_needed; then
     step "Installing composer dependencies"
     resolve_composer_image "${ENGINE_DIR}/core" "${ENGINE_DIR}"
     docker run --rm -v "${ENGINE_DIR}/core:/app" -w /app "$COMPOSER_IMAGE" composer install
+    sha256sum core/composer.lock | cut -d' ' -f1 >"$COMPOSER_LOCK_STAMP"
 fi
 
 # --------------------------------------------------------------------- the stack

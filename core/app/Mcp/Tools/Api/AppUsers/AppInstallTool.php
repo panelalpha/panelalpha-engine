@@ -74,7 +74,7 @@ class AppInstallTool extends ApiTool
             'title' => $schema->string()->description('Example: My Site.')->required(),
             'admin_user' => $schema->string()->description('Example: admin.')->required(),
             'admin_email' => $schema->string()->description('Example: admin@example.com.')->required(),
-            'admin_password' => $schema->string()->required(),
+            'admin_password' => $schema->string()->min(8)->required(),
         ];
     }
 }

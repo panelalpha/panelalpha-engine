@@ -261,6 +261,9 @@ class AppUserController extends Controller
         path: '/projects/{username}/app/sso-token',
         summary: 'Consume an SSO token and redirect into the app (no bearer auth)',
         tags: ['App Users'],
+        // A browser redeems this; as a tool it burns the single-use token and
+        // hands the session cookie to the agent. app_user_sso_create is the login.
+        x: ['mcp-hide' => true],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'token', in: 'query', required: true, schema: new OA\Schema(type: 'string')),

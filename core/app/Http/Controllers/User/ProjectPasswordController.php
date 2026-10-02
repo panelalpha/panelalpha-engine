@@ -24,7 +24,7 @@ class ProjectPasswordController extends Controller
             content: new OA\JsonContent(
                 required: ['password'],
                 properties: [
-                    new OA\Property(property: 'password', type: 'string', minLength: 1, example: 's3cret'),
+                    new OA\Property(property: 'password', type: 'string', minLength: 1, description: 'Site password.', example: 's3cret'),
                 ],
             ),
         ),

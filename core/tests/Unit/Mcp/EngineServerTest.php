@@ -257,6 +257,31 @@ class EngineServerTest extends TestCase
         $this->assertSame('project_create', $found[0]);
     }
 
+    public function test_browsing_the_catalogue_pages_through_every_tool(): void
+    {
+        config(['mcp-tools.tool_search' => true]);
+
+        $first = $this->callCatalogue('search_tools', ['query' => '', 'limit' => 50]);
+        $this->assertTrue($first['hasMore']);
+
+        $seen = [];
+        $offset = 0;
+        for ($page = 0; $page < 100; $page++) {
+            $out = $this->callCatalogue('search_tools', ['query' => '', 'limit' => 50, 'offset' => $offset]);
+            $this->assertNotSame([], $out['tools']);
+            array_push($seen, ...array_column($out['tools'], 'name'));
+            if (!$out['hasMore']) {
+                $this->assertArrayNotHasKey('nextOffset', $out);
+                break;
+            }
+            $offset = $out['nextOffset'];
+        }
+
+        $this->assertSame($seen, array_values(array_unique($seen)), 'no tool is returned twice');
+        $this->assertContains('mysql_database_list', $seen);
+        $this->assertGreaterThan(100, count($seen), 'the whole catalogue, not the first page');
+    }
+
     public function test_search_results_carry_the_annotations_tools_list_would(): void
     {
         config(['mcp-tools.tool_search' => true]);

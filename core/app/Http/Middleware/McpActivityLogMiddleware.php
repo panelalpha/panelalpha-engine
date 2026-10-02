@@ -5,7 +5,6 @@ namespace App\Http\Middleware;
 use App\Models\McpActivityLog;
 use App\Models\PersonalAccessToken;
 use Closure;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -47,7 +46,9 @@ class McpActivityLogMiddleware
             return $response;
         }
 
-        $reply = $response instanceof JsonResponse ? $response->getData(true) : null;
+        // laravel/mcp answers a direct call with a plain Response, not a
+        // JsonResponse, so read the body whatever the class.
+        $reply = json_decode((string)$response->getContent(), true);
         $this->log($request, $toolName, $arguments, is_array($reply) ? $reply : null, $response->isSuccessful());
 
         return $response;

@@ -255,7 +255,7 @@ differs is the Drupal:
 
 ## Verification
 
-Everything below was measured on `mariusz.panelalpha.tools`, over the account's
+Everything below was measured on a dev host, over the account's
 real public HTTPS domain, on 2026-09-20.
 
 ### Timings
@@ -422,19 +422,6 @@ and the manifest no longer has them. A recipe that writes `stage: build` gets no
 error, no log line and no command. This is engine #171 with the file and line.
 It should either apply them (merge into `install_command`/`build_command`
 alongside the manifest's) or refuse them at load time.
-
-**3. `php artisan api:call` is broken on this build.**
-`Api\Call` authenticates an anonymous `Illuminate\Foundation\Auth\User`
-(`core/app/Console/Commands/Api/Call.php:40`) and dispatches through the route,
-which runs the `api` middleware group. `EnsureTokenMayUseApi::handle()` does
-`$request->user()?->currentAccessToken()`
-(`core/app/Http/Middleware/EnsureTokenMayUseApi.php:31`) — the null-safe
-operator guards a missing *user*, not a user that does not use `HasApiTokens` —
-so every call returns 500 `Server Error` with
-`BadMethodCallException: Call to undefined method …@anonymous::currentAccessToken()`.
-The command's own description says it bypasses middleware; it does not. Either
-the anonymous user should be an `App\Models\Admin` (or use `HasApiTokens`), or
-the middleware should check `method_exists`/`instanceof HasApiTokens`.
 
 Not an engine defect, but worth knowing: **`vendor/bin/dr` cannot work on any
 project whose packages move**. Composer's `BinaryInstaller` skips a bin link

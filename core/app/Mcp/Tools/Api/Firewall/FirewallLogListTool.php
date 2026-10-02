@@ -51,7 +51,7 @@ class FirewallLogListTool extends ApiTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'limit' => $schema->integer(),
+            'limit' => $schema->integer()->min(1)->max(1000),
             'type' => $schema->string()->description('One of: blocked, ban, unban.'),
             'address' => $schema->string()->description('Only entries for this IPv4 or IPv6 address.'),
         ];

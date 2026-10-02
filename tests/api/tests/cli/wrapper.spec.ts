@@ -5,10 +5,9 @@ test.describe('pae-artisan wrapper', () => {
     test.skip(!hostExec, 'pae-artisan is not reachable from this runner.');
   });
 
-  test('list includes api:call, api:token:create and mcp:check', async ({ hostExec }) => {
+  test('list includes api:token:create and mcp:check', async ({ hostExec }) => {
     const listed = await hostExec!.pae(['list']);
     expect(listed.exitCode).toBe(0);
-    expect(listed.stdout).toContain('api:call');
     expect(listed.stdout).toContain('api:token:create');
     expect(listed.stdout).toContain('mcp:check');
   });
@@ -22,8 +21,8 @@ test.describe('pae-artisan wrapper', () => {
     const artisan = await hostExec!.pae(['list']);
     const aliased = await hostExec!.run('pae', ['list']).catch(() => null);
     test.skip(aliased?.exitCode !== 0, 'The pae alias is not installed.');
-    expect(aliased!.stdout).toContain('api:call');
-    expect(artisan.stdout).toContain('api:call');
+    expect(aliased!.stdout).toContain('api:token:create');
+    expect(artisan.stdout).toContain('api:token:create');
   });
 
   test('pae-command.sh without args prints usage', async ({ hostExec }) => {

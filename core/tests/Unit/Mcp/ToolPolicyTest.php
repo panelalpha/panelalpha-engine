@@ -3,7 +3,6 @@
 namespace Tests\Unit\Mcp;
 
 use App\Mcp\ToolPolicy;
-use App\Mcp\Tools\Api\AppUsers\AppSsoLoginTool;
 use App\Mcp\Tools\Api\System\SystemEximConfigGetTool;
 use App\Mcp\Tools\Api\Deploy\SourceInspectTool;
 use App\Mcp\Tools\Api\Domains\DomainListTool;
@@ -286,7 +285,6 @@ class ToolPolicyTest extends TestCase
 
     private const CREDENTIAL_READS = [
         SystemEximConfigGetTool::class,
-        AppSsoLoginTool::class,
     ];
 
     /**

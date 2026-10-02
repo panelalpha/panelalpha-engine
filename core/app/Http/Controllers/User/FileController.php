@@ -22,6 +22,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\UploadedFile;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\File\Exception\FileNotFoundException;
 use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
@@ -627,7 +628,7 @@ class FileController extends Controller
     /**
      * @return BinaryFileResponse|JsonResponse
      */
-    public function download(string $username, DownloadRequest $request)
+    public function download(string $username, DownloadRequest $request, EngineSystem $system)
     {
         $user = $this->projectOr404($username);
 
@@ -637,17 +638,24 @@ class FileController extends Controller
          * }
          */
         $params = $request->validated();
-        $path = $user->project()->resolvePath($params['path']);
+        $path = $user->project($system)->resolvePath($params['path']);
 
-        $source = ProjectFiles::readablePath($user, $path);
+        $source = ProjectFiles::readablePath($user, $path, $system);
         if ($source === null) {
             return new JsonResponse([
                 'message' => 'Invalid path',
             ], 404);
         }
 
-        /** @var BinaryFileResponse */
-        return response()->download($source);
+        try {
+            /** @var BinaryFileResponse */
+            return response()->download($source);
+        } catch (FileNotFoundException) {
+            // `test -f` follows a symlink out of the home; the wrapper refuses it.
+            return new JsonResponse([
+                'message' => 'Invalid path',
+            ], 404);
+        }
     }
 
     #[OA\Put(

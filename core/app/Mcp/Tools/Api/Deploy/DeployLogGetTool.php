@@ -82,7 +82,7 @@ class DeployLogGetTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'offset' => $schema->integer(),
-            'max_bytes' => $schema->integer()->description('Page size in bytes, at least 1024. This tool sends 49152 when it is omitted.'),
+            'max_bytes' => $schema->integer()->min(1024)->description('Page size in bytes, at least 1024. This tool sends 49152 when it is omitted.'),
         ];
     }
 }

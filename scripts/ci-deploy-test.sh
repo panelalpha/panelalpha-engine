@@ -6,9 +6,10 @@
 # Exit code reflects pass/fail, so this is meant to be dropped straight into a
 # CI job.
 #
-# Every engine call goes through `pae-artisan api:call`, which dispatches the
-# API route in-process inside the core container - no token and no network hop,
-# so this must run on the engine host.
+# Every engine call goes through `pae-artisan`'s own project commands
+# (project:create, project:deploy:check, project:delete, ...), run inside the
+# core container - no token and no network hop, so this must run on the
+# engine host.
 #
 # Usage:
 #   ci-deploy-test.sh --git https://github.com/you/app.git [options]
@@ -66,7 +67,7 @@ Examples:
 
   ci-deploy-test.sh --git git@github.com:you/app.git --git-token "$GIT_TOKEN" \
       --env APP_ENV=testing --verify-path /health \
-      --verify-cmd 'pae-artisan api:call POST "/projects/$USERNAME/wp-cli/command" \'"'"'{"command":"core is-installed"}\'"'"' --raw'
+      --verify-cmd 'pae-artisan domain:wp-cli "$DOMAIN" core is-installed'
 
   ci-deploy-test.sh --git https://github.com/you/app.git \
       --dump-log-json build/deploy-failure.json
@@ -214,8 +215,8 @@ command -v curl >/dev/null 2>&1 || {
 
 # --- pre-flight -----------------------------------------------------------
 if [[ "$SKIP_DOCTOR" -eq 0 ]]; then
-    log_info "Checking engine reachability (api:call GET /system/info)..."
-    if ! "$PAE" api:call GET /system/info --raw >/dev/null; then
+    log_info "Checking engine reachability (system:database:test)..."
+    if ! "$PAE" system:database:test >/dev/null; then
         log_error "The engine did not answer — is the core container up? (Skip with --skip-doctor.)"
         exit 1
     fi
@@ -234,16 +235,18 @@ fetch_json_or_null() {
 }
 
 # Bundles everything an automated fix/retry pipeline needs into one JSON file:
-# - deploy_log_stream: the raw stdout/stderr Artisan printed while deploying
+# - deploy_log_stream: the live deploy log `project:create` wrote to stderr
 #   (tee'd to DEPLOY_STREAM_LOG below). This is the ONLY reliable source for a
 #   hard failure: on a hard failure the engine deletes the account (including
 #   its DB row) as part of rollback (UserController::runDeployPipeline), so by
 #   the time cleanup() runs, GET /projects/{username}/deploy-log 404s — the
 #   account it belongs to is already gone. The stream was captured live,
 #   before that deletion happened, so it still has the real error.
-# - deploy_log_api / app: the structured deploy-log and account-details calls.
-#   These succeed (and are more structured/complete) for partial/fallback
-#   outcomes, where the account is deliberately kept — null on hard failures.
+# - deploy_log_api / app: the structured deploy-log, and the account details
+#   `project:create --json` printed on its own stdout when it succeeded (see
+#   APP_JSON below). These are complete for partial/fallback outcomes, where
+#   the account is deliberately kept — app is null on hard failures, because
+#   there was never a successful create to capture it from.
 dump_diagnostics() {
     local out="$1"
     log_info "Writing failure diagnostics to $out"
@@ -257,7 +260,8 @@ dump_diagnostics() {
     # The deploy log is a file on disk (DeployLogger), so unlike the account
     # row it survives the rollback that deletes the account on a hard failure.
     deploy_log="$(fetch_json_or_null "$PAE" project:deploy:log "$USERNAME" --raw --tail 500)"
-    app="$(fetch_json_or_null "$PAE" api:call GET "/projects/$USERNAME" --raw)"
+    app="${APP_JSON:-null}"
+    echo "$app" | jq -e . >/dev/null 2>&1 || app='null'
 
     if ! jq -n \
         --arg username "$USERNAME" \
@@ -291,10 +295,10 @@ cleanup() {
     fi
 
     if [[ "$KEEP" -eq 1 ]]; then
-        log_warn "Keeping hosting account '$USERNAME' (--keep). Delete manually with: $PAE api:call DELETE /projects/$USERNAME"
+        log_warn "Keeping hosting account '$USERNAME' (--keep). Delete manually with: $PAE project:delete $USERNAME --force"
     else
         log_info "Cleaning up hosting account '$USERNAME'..."
-        "$PAE" api:call DELETE "/projects/$USERNAME" --raw >/dev/null 2>&1 \
+        "$PAE" project:delete "$USERNAME" --force >/dev/null 2>&1 \
             || log_warn "Could not delete '$USERNAME' — it may not have been created, or needs manual cleanup."
     fi
 
@@ -311,58 +315,55 @@ trap cleanup EXIT
 # --- deploy -----------------------------------------------------------------
 log_info "Deploying '$GIT_REPO' (branch: ${BRANCH:-default}) as '$USERNAME' -> https://$DOMAIN"
 
-# The CLI used to assemble this body; do it here instead, matching the shape
-# POST /projects expects (git_repo/git_branch/git_token/username/domain/email/env_vars).
-env_json='{}'
+create_args=(project:create --json
+    --project="$USERNAME"
+    --domain="$DOMAIN"
+    --email="${EMAIL:-admin@localhost.localdomain}"
+    --repo="$GIT_REPO")
+[[ -n "$BRANCH" ]] && create_args+=(--branch="$BRANCH")
+[[ -n "$GIT_TOKEN" ]] && create_args+=(--git-token="$GIT_TOKEN")
 for kv in "${ENV_VARS[@]:-}"; do
     [[ -n "$kv" ]] || continue
     if [[ "$kv" != *=* ]]; then
         log_error "Invalid --env '$kv' (expected KEY=VALUE)"
         exit 1
     fi
-    env_json="$(jq -n --argjson acc "$env_json" --arg k "${kv%%=*}" --arg v "${kv#*=}" '$acc + {($k): $v}')"
+    create_args+=(--env-var="$kv")
 done
 
-deploy_body="$(jq -n \
-    --arg git_repo "$GIT_REPO" \
-    --arg git_branch "$BRANCH" \
-    --arg git_token "$GIT_TOKEN" \
-    --arg username "$USERNAME" \
-    --arg domain "$DOMAIN" \
-    --arg email "${EMAIL:-admin@localhost.localdomain}" \
-    --argjson env_vars "$env_json" \
-    '{git_repo: $git_repo, username: $username, domain: $domain, email: $email}
-     + (if $git_branch != "" then {git_branch: $git_branch} else {} end)
-     + (if $git_token != "" then {git_token: $git_token} else {} end)
-     + (if ($env_vars | length) > 0 then {env_vars: $env_vars} else {} end)')"
-
-# `api:call` dispatches the route in-process, so this call blocks for the whole
-# build and prints the final JSON rather than a live log; a non-2xx status exits
-# non-zero. NOTE: a "partial" deploy (container started but exited non-zero) and
+# `project:create` runs the deploy synchronously and exits non-zero on a hard
+# failure. NOTE: a "partial" deploy (container started but exited non-zero) and
 # an "unrecognized project" deploy (engine falls back to a placeholder page, see
 # UserController::runDeployPipeline / DeployStrategy::applyFallbackCompose) both
-# still return 2xx — they are caught explicitly below.
+# still exit 0 — they are caught explicitly below.
 #
-# Output is tee'd to DEPLOY_STREAM_LOG for the diagnostics bundle. On a hard
-# failure the engine deletes the account as part of its rollback, so the account
-# row is gone by the time cleanup() runs; the deploy log survives it, because
-# DeployLogger writes files (read back with project:deploy:log).
+# `--json` sends the created project's JSON to stdout and the live deploy log
+# to stderr instead, so the two can be told apart: the log is tee'd to
+# DEPLOY_STREAM_LOG for the diagnostics bundle (and still shown on this
+# terminal), the JSON is captured in APP_JSON for the outcome check below. On a
+# hard failure the engine deletes the account as part of its rollback, so the
+# account row is gone by the time cleanup() runs; the deploy log survives it,
+# because DeployLogger writes files (read back with project:deploy:log).
 DEPLOY_STREAM_LOG="$(mktemp)"
-if ! "$PAE" api:call POST /projects "$deploy_body" --raw 2>&1 | tee "$DEPLOY_STREAM_LOG"; then
-    log_error "Deploy failed. Response and last deploy-log entries:"
+CREATE_JSON_FILE="$(mktemp)"
+APP_JSON=""
+if ! "$PAE" "${create_args[@]}" >"$CREATE_JSON_FILE" 2> >(tee "$DEPLOY_STREAM_LOG" >&2); then
+    log_error "Deploy failed. Last deploy-log entries:"
     tail -n 40 "$DEPLOY_STREAM_LOG" || true
     "$PAE" project:deploy:log "$USERNAME" --tail 40 2>/dev/null || true
     exit 1
 fi
+APP_JSON="$(cat "$CREATE_JSON_FILE")"
+rm -f "$CREATE_JSON_FILE"
 
 # --- verify: deploy actually recognized and ran the project -------------------
-# POST /projects only reports failure on status=failed/cancelled. A "partial" deploy
-# (app container failed to start) or a "fallback" strategy (engine couldn't
-# detect how to run the project — no compose/Dockerfile/manifest, or the
-# Railpack build itself failed) both still report success and 0 exit code.
+# project:create only exits non-zero on status=failed/cancelled. A "partial"
+# deploy (app container failed to start) or a "fallback" strategy (engine
+# couldn't detect how to run the project — no compose/Dockerfile/manifest, or
+# the Railpack build itself failed) both still report success and exit 0.
 # Both are only visible in the account's stored details, so check them here.
 log_info "Checking deploy outcome (deployment_status / deploy_strategy)..."
-app_json="$("$PAE" api:call GET "/projects/$USERNAME" --raw)"
+app_json="$APP_JSON"
 deployment_status="$(echo "$app_json" | jq -r '(.data // .).details.deployment_status // "unknown"')"
 deploy_strategy="$(echo "$app_json" | jq -r '(.data // .).details.deploy_strategy // "unknown"')"
 deploy_label="$(echo "$app_json" | jq -r '(.data // .).details.deploy_label // "unknown"')"
@@ -389,28 +390,25 @@ if [[ "$deploy_strategy" == "fallback" || "$deploy_label" == "Unknown" ]]; then
 fi
 log_info "Deploy outcome OK: status=$deployment_status strategy=$deploy_strategy label=$deploy_label"
 
-# --- verify: containers are actually running ---------------------------------
-log_info "Checking container status..."
-containers_json="$("$PAE" api:call GET "/projects/$USERNAME/containers" --raw)"
-if ! echo "$containers_json" | jq -e '.data // . | length > 0' >/dev/null 2>&1; then
-    log_error "No containers reported for '$USERNAME'."
+# --- verify: the application actually answers ---------------------------------
+log_info "Checking application health..."
+health_json="$("$PAE" project:deploy:check "$USERNAME" --json)"
+if echo "$health_json" | jq -e 'has("error")' >/dev/null 2>&1; then
+    log_error "Could not check '$USERNAME': $(echo "$health_json" | jq -r '.error')"
     exit 1
 fi
-# `docker compose ps --format json` capitalises its keys (Service/State/Status); the
-# lowercase spellings matched nothing, so this filter silently never fired.
-bad_containers="$(echo "$containers_json" | jq -r '(.data // .)[] | select((.State // .state) == "exited" or (.State // .state) == "restarting") | (.Service // .service)')"
-if [[ -n "$bad_containers" ]]; then
-    log_error "Container(s) not healthy: $bad_containers"
-    echo "$containers_json" | jq '.'
+if ! echo "$health_json" | jq -e '.healthy != false' >/dev/null 2>&1; then
+    log_error "'$USERNAME' did not answer on every published port."
+    echo "$health_json" | jq '.'
     exit 1
 fi
-log_info "Containers OK: $(echo "$containers_json" | jq -r '(.data // .)[] | "\(.Service // .service)=\(.State // .state)"' | tr '\n' ' ')"
+log_info "Application health OK: $(echo "$health_json" | jq -r '.healthy')"
 
 # --- verify: HTTP check -------------------------------------------------------
 if [[ "$SKIP_HTTP_VERIFY" -eq 0 ]]; then
-    engine_ip="$("$PAE" api:call GET /system/info --raw | jq -r '.data.default_ipv4 // empty')"
+    engine_ip="$("$PAE" settings:get default_ipv4 2>/dev/null | tr -d '\r\n[:space:]')"
     if [[ -z "$engine_ip" ]]; then
-        log_warn "Could not determine engine IPv4 from 'system info'; skipping HTTP verification."
+        log_warn "Could not determine engine IPv4 from 'settings:get default_ipv4'; skipping HTTP verification."
     else
         status_min="${VERIFY_STATUS%-*}"
         status_max="${VERIFY_STATUS#*-}"

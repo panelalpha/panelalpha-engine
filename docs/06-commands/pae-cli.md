@@ -281,11 +281,7 @@ Only run one of these when you understand what it does, or when support hands yo
 
 ## Anything not on this page
 
-A few operations have no command of their own: databases, cron jobs, FTP accounts. **Ask your assistant to do those.** If you have no assistant, call the API as the engine:
-
-```bash
-pae api:call GET /projects
-```
+A few operations have no command of their own: databases, cron jobs, FTP accounts. **Ask your assistant to do those.**
 
 Installing, updating and removing the engine are scripts rather than `pae` commands: [Install](../02-getting-started/install.md), [Updating](../02-getting-started/updating.md), [Uninstall](../02-getting-started/uninstall.md).
 
@@ -299,7 +295,7 @@ bash /opt/panelalpha/shared-hosting/scripts/pae-command.sh register
 ```
 
 **A command needs a project name and I do not know it.**
-List them with `pae api:call GET /projects` - the value you want is `username`.
+List them with `pae project:deploy:list` - the value you want is `username`.
 
 **A destructive command is asking me to confirm and I am in a script.**
 Most take `--force` to skip the prompt. Be certain before you use it: `pae project:delete --all --force` deletes every project on your VPS with no further questions.

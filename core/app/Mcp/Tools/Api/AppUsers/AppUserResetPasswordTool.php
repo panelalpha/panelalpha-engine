@@ -70,7 +70,7 @@ class AppUserResetPasswordTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'userId' => $schema->string()->required(),
-            'password' => $schema->string()->required(),
+            'password' => $schema->string()->min(8)->required(),
         ];
     }
 }

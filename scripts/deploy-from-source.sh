@@ -2,7 +2,7 @@
 # Upload this working tree to a host and bring the engine up from it, in one
 # command. Run it from your workstation, not from the engine host.
 #
-#   bash scripts/deploy-from-source.sh root@10.10.10.25
+#   bash scripts/deploy-from-source.sh root@a dev host
 #   bash scripts/deploy-from-source.sh root@host -- --no-sysbox --ip 1.2.3.4
 #
 # Everything after `--` is passed through to scripts/bootstrap-from-source.sh.
@@ -44,7 +44,8 @@ done
 EXCLUDES=(
     .git .idea .aider-desk .aider.input.history .github .claude
     .env .env-core version crt
-    core/.env core/.env.backup
+    # .pae-backup is the copy `pae configure` keeps of .env-core before each edit.
+    core/.env core/.env.backup core/.env.pae-backup
     users logs webserver-logs webserver-config
     nginx-proxy-conf.d nginx-proxy-logs
     pureftpd data awstats-config awstats-data litespeed-config build

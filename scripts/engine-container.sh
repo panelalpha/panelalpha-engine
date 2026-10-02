@@ -290,25 +290,6 @@ eval "$SCRIPT"
 RUNNER
 }
 
-ensure_admin() {
-    # api:call authenticates as the first `admins` row and a fresh install has
-    # none, so it dies with Auth::setUser(null). On a real deployment the panel
-    # creates it. The password is random and unused: api:call dispatches routes
-    # in-process, the row only supplies an authenticated principal.
-    local count
-    count=$(docker exec -w "$GUEST_DIR" "$NAME" docker compose exec -T core \
-        php artisan tinker --execute='echo \DB::table("admins")->count();' 2>/dev/null | tr -dc '0-9')
-    if [ -n "$count" ] && [ "$count" != 0 ]; then
-        step "An admin already exists (api:call can authenticate)"
-        return 0
-    fi
-    step "Creating the CI admin so api:call can authenticate"
-    docker exec -w "$GUEST_DIR" "$NAME" docker compose exec -T core php artisan tinker --execute='
-$a = new class extends \Illuminate\Foundation\Auth\User { protected $table = "admins"; protected $guarded = []; };
-$a->fill(["name" => "ci", "email" => "ci@engine.local", "password" => bcrypt(bin2hex(random_bytes(16)))])->save();
-echo "ok";' >/dev/null 2>&1 || warn "Could not create the CI admin — api:call will fail"
-}
-
 ensure_webserver_bound() {
     # nginx cannot rebind a wildcard listener to `listen <ip>:80` on a reload,
     # so it keeps the old config and tenant vhosts 502 with an empty error log.
@@ -379,7 +360,6 @@ up)
     assert_home_is_a_volume
     seed_storage
     install_engine
-    ensure_admin
     ensure_webserver_bound
     report
     ;;
