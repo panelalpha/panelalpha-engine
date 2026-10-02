@@ -68,6 +68,7 @@ class DeployLoggerTest extends TestCase
 
     public function test_a_known_problem_is_written_to_the_log_line_by_line(): void
     {
+        config(['system.version' => '2.0.2']);
         $logger = DeployLogger::start($this->username());
         $write = new \ReflectionMethod(DeployLogger::class, 'writeProblem');
         $write->invoke($logger, [
@@ -88,6 +89,32 @@ class DeployLoggerTest extends TestCase
             'Fixed in engine version 2.0.3',
         ], array_column($lines, 'msg'));
         $this->assertSame(DeployLogger::LEVEL_WARN, $lines[0]['level']);
+
+        $logger->finish(DeployLogger::STATUS_SUCCESS);
+    }
+
+    /**
+     * OSPOS on an engine that already had the composer-in-npm-scripts fix:
+     * "Fixed in engine 2.1.1" was printed for a failure 2.1.1 did not prevent.
+     */
+    public function test_a_fix_this_engine_already_has_is_not_claimed(): void
+    {
+        config(['system.version' => '2.1.1']);
+        $logger = DeployLogger::start($this->username());
+        $write = new \ReflectionMethod(DeployLogger::class, 'writeProblem');
+        $write->invoke($logger, [
+            'title' => 'PHP frontend build calls Composer from a Node-only build container',
+            'body_why' => 'An npm script runs composer, which the Node image does not have.',
+            'body_fix' => 'Fixed in engine 2.1.1: a frontend build whose npm scripts call composer or php runs in the PHP image.',
+            'fixed_in_version' => '2.1.1',
+        ], null);
+
+        $this->assertSame([
+            'Known problem: PHP frontend build calls Composer from a Node-only build container',
+            'Why:',
+            'An npm script runs composer, which the Node image does not have.',
+            'This engine already includes the fix released in 2.1.1; this failure is a case it does not cover',
+        ], array_column($logger->read()['lines'], 'msg'));
 
         $logger->finish(DeployLogger::STATUS_SUCCESS);
     }

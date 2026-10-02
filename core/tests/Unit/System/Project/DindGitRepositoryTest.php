@@ -172,6 +172,29 @@ class DindGitRepositoryTest extends TestCase
         $this->assertSame(array_slice($calls[0], 1), array_slice($calls[1], 3));
     }
 
+    public function test_clone_takes_its_timeout_from_deploy_clone_timeout(): void
+    {
+        $timeouts = [];
+        $runner = function (array $cmd, ?string $token, int $timeout) use (&$timeouts): string {
+            $timeouts[] = $timeout;
+
+            return '';
+        };
+
+        (new TestableGitRepository($this->dindProject(), $runner))->clone('https://github.com/org/repo', 'main', null);
+
+        $container = new \Illuminate\Container\Container;
+        $container->instance('config', new \Illuminate\Config\Repository(['deploy' => ['clone_timeout' => 1800]]));
+        \Illuminate\Container\Container::setInstance($container);
+        try {
+            (new TestableGitRepository($this->dindProject(), $runner))->clone('https://github.com/org/repo', 'main', null);
+        } finally {
+            \Illuminate\Container\Container::setInstance(null);
+        }
+
+        $this->assertSame([600, 1800], $timeouts);
+    }
+
     public function test_clone_does_not_retry_other_failures(): void
     {
         $runner = new FakeGitRunner;

@@ -174,7 +174,7 @@ List the users on this WordPress site.
 Update all plugins on this site.
 ```
 
-WP-CLI, backups and domains work on WordPress that is already on this engine. The WordPress user, install and one-click-login actions need a WordPress site in its own container. Traditional PHP hosting can still change PHP and use WP-CLI: [If WordPress is already on this engine](../05-capabilities/wordpress-and-apps.md#if-wordpress-is-already-on-this-engine).
+Backups and domains work on WordPress that is already on this engine. The WordPress user, install and one-click-login actions need a WordPress site in its own container. WP-CLI and changing PHP need traditional PHP hosting: [If WordPress is already on this engine](../05-capabilities/wordpress-and-apps.md#if-wordpress-is-already-on-this-engine).
 
 **Change the PHP version on traditional WordPress**
 

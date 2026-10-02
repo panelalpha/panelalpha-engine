@@ -120,6 +120,8 @@ class ProxyRuleCreateCommandTest extends TestCase
             ["{$base} --server-name='s.test; return 200' --upstream-host=h", 'The server name must be "_" or a hostname.'],
             ["{$base} --server-name=s.test --upstream-host='h;'", 'The upstream host must be a hostname or an IP address.'],
             ["{$base} --server-name=s.test --upstream-host=h --upstream-protocol=ftp", 'The selected upstream protocol is invalid.'],
+            ['--scope=user --project=alice --transport=HTTP --listen-port=80 --upstream-host=h --upstream-port=80', 'The selected transport is invalid.'],
+            ['--scope=user --project=alice --transport=tcp4 --listen-port=80 --upstream-host=h --upstream-port=80', 'The selected transport is invalid.'],
         ];
 
         foreach ($cases as [$args, $message]) {

@@ -23,6 +23,15 @@ class TrimStringsEnvVarsTest extends TestCase
         $this->assertSame('shop', $request->input('name'));
     }
 
+    /** files/put-contents: yarn --immutable rejected a lockfile that lost its final newline. */
+    public function test_file_contents_are_written_byte_for_byte(): void
+    {
+        $request = $this->trimmed(['path' => ' /project/yarn.lock ', 'contents' => "  line1\nline2\n\n"]);
+
+        $this->assertSame("  line1\nline2\n\n", $request->input('contents'));
+        $this->assertSame('/project/yarn.lock', $request->input('path'));
+    }
+
     /** @param array<string, mixed> $body */
     private function trimmed(array $body): Request
     {

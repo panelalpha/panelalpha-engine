@@ -51,6 +51,13 @@ return [
     'prewarm_reserve' => env('DEPLOY_PREWARM_RESERVE', ''),
 
     /*
+     * Seconds the deploy's `git clone` may take before it is stopped and the
+     * deploy fails as `clone-timed-out`. Raise it for very large repositories
+     * on a slow link.
+     */
+    'clone_timeout' => (int) env('DEPLOY_CLONE_TIMEOUT', 600),
+
+    /*
      * Free disk the engine host must have for a deploy to start, checked on
      * the Docker root and /home. Below it the deploy is refused with that
      * reason instead of failing later on ENOSPC. A size (3G, 512M); 0 or `off`

@@ -522,6 +522,58 @@ OUT;
     }
 
     /** Rust's best-effort `apt-get update` as the account, wrapped in `|| true`. */
+    /**
+     * technomancy-dev/00 on a Debian 11 base: apt says why above `#8 ERROR:`, and
+     * the region started at that line, so the deploy read "A build step failed".
+     * Real streams of `docker compose up --build`, joined as AppLauncher does.
+     */
+    public function test_apts_own_error_lines_lead_a_failed_package_install(): void
+    {
+        $stdout = "#8 3.263 Get:9 http://deb.debian.org/debian bullseye/main amd64 libncurses5 amd64 6.2+20201114-2+deb11u2 [96.8 kB]\n"
+            . "#8 3.264 Get:10 http://deb.debian.org/debian bullseye/main amd64 pandoc-data all 2.9.2.1-1+deb11u1 [377 kB]\n"
+            . "#8 3.278 Get:11 http://deb.debian.org/debian bullseye/main amd64 pandoc amd64 2.9.2.1-1+deb11u1 [18.5 MB]\n"
+            . "#8 3.445 Fetched 19.5 MB in 0s (81.8 MB/s)\n"
+            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/o/openssl/openssl_1.1.1w-0%2bdeb11u8_amd64.deb  404  Not Found [IP: 151.101.2.132 80]\n"
+            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/c/ca-certificates/ca-certificates_20250419%7edeb12u1%7edeb11u1_all.deb  404  Not Found [IP: 151.101.2.132 80]\n"
+            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/g/glibc/libc-l10n_2.31-13%2bdeb11u14_all.deb  404  Not Found [IP: 151.101.2.132 80]\n"
+            . "#8 3.445 E: Failed to fetch http://deb.debian.org/debian-security/pool/updates/main/g/glibc/locales_2.31-13%2bdeb11u14_all.deb  404  Not Found [IP: 151.101.2.132 80]\n"
+            . "#8 3.445 E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?\n"
+            . "#8 ERROR: process \"/bin/sh -c apt-get update -y &&     apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates pandoc     && apt-get clean && rm -f /var/lib/apt/lists/*_*\" did not complete successfully: exit code: 100\n";
+        $stderr = " Image project-app Building \n"
+            . "Dockerfile:77\n"
+            . "\n"
+            . "--------------------\n"
+            . "\n"
+            . "  76 |     \n"
+            . "\n"
+            . "  77 | >>> RUN apt-get update -y && \\\n"
+            . "\n"
+            . "  78 | >>>     apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates pandoc \\\n"
+            . "\n"
+            . "  79 | >>>     && apt-get clean && rm -f /var/lib/apt/lists/*_*\n"
+            . "\n"
+            . "  80 |     \n"
+            . "\n"
+            . "--------------------\n"
+            . "\n"
+            . "failed to solve: process \"/bin/sh -c apt-get update -y &&     apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates pandoc     && apt-get clean && rm -f /var/lib/apt/lists/*_*\" did not complete successfully: exit code: 100\n"
+            . "\n";
+        $raw = FailureOutput::failedBuildStep($stdout) . "\n" . $stderr;
+
+        $region = FailureOutput::select($raw);
+
+        $this->assertStringStartsWith('#8 3.445 E: Failed to fetch', $region);
+        $this->assertSame('package-archive-gone', DeployFailureExplainer::match($region)['rule'] ?? null);
+    }
+
+    public function test_a_bare_apt_error_leads(): void
+    {
+        $this->assertStringStartsWith(
+            "E: Unable to locate package libfoo-dev",
+            FailureOutput::select("Reading package lists...\nE: Unable to locate package libfoo-dev\nexit code: 100")
+        );
+    }
+
     public function test_apt_lists_permission_line_is_noise(): void
     {
         $this->assertSame('', FailureOutput::select(
@@ -545,6 +597,146 @@ OUT;
             at ChildProcess.handleSubShellExit (/app/node_modules/gulp-run/command.js:166:13)
         [18:02:31] 'default' errored after 38 ms
         ERR;
+
+    /**
+     * electerm-web's out-of-sync lockfile on npm 11: the usage text after EUSAGE
+     * is longer than WINDOW, so the region began mid-usage and the deploy quoted
+     * it. Real stderr of the host build.
+     */
+    public function test_an_npm_error_block_longer_than_the_window_leads_from_its_start(): void
+    {
+        $stderr = <<<'NPMUSAGE'
+Unable to find image 'node:24-bookworm' locally
+24-bookworm: Pulling from library/node
+4cc81be23c06: Pulling fs layer
+240de4f9ec20: Pulling fs layer
+496e07b192ff: Pulling fs layer
+7f25c0042239: Pulling fs layer
+26d180362d43: Download complete
+4cc81be23c06: Download complete
+f133ed9f16b1: Download complete
+496e07b192ff: Download complete
+7f25c0042239: Download complete
+7f25c0042239: Pull complete
+240de4f9ec20: Download complete
+240de4f9ec20: Pull complete
+4cc81be23c06: Pull complete
+496e07b192ff: Pull complete
+Digest: sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4
+Status: Downloaded newer image for node:24-bookworm
+npm error code EUSAGE
+npm error
+npm error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync. Please update your lock file with `npm install` before continuing.
+npm error
+npm error Missing: @types/react@19.3.0 from lock file
+npm error
+npm error Clean install a project
+npm error
+npm error Usage:
+npm error npm ci
+npm error
+npm error Options:
+npm error [--install-strategy <hoisted|nested|shallow|linked>] [--legacy-bundling]
+npm error [--global-style] [--omit <dev|optional|peer> [--omit <dev|optional|peer> ...]]
+npm error [--include <prod|dev|optional|peer> [--include <prod|dev|optional|peer> ...]]
+npm error [--strict-peer-deps] [--foreground-scripts] [--ignore-scripts]
+npm error [--allow-directory <all|none|root>] [--allow-file <all|none|root>]
+npm error [--allow-git <all|none|root>] [--allow-remote <all|none|root>]
+npm error [--allow-scripts <package-list> [--allow-scripts <package-list> ...]]
+npm error [--strict-allow-scripts] [--dangerously-allow-all-scripts] [--no-audit]
+npm error [--no-bin-links] [--no-fund] [--dry-run]
+npm error [-w|--workspace <workspace-name> [-w|--workspace <workspace-name> ...]]
+npm error [--workspaces] [--include-workspace-root] [--install-links]
+npm error
+npm error   --install-strategy
+npm error     Sets the strategy for installing packages in node_modules.
+npm error
+npm error   --legacy-bundling
+npm error     Instead of hoisting package installs in `node_modules`, install packages
+npm error
+npm error   --global-style
+npm error     Only install direct dependencies in the top level `node_modules`,
+npm error
+npm error   --omit
+npm error     Dependency types to omit from the installation tree on disk.
+npm error
+npm error   --include
+npm error     Option that allows for defining which types of dependencies to install.
+npm error
+npm error   --strict-peer-deps
+npm error     If set to `true`, and `--legacy-peer-deps` is not set, then _any_
+npm error
+npm error   --foreground-scripts
+npm error     Run all build scripts (ie, `preinstall`, `install`, and
+npm error
+npm error   --ignore-scripts
+npm error     If true, npm does not run scripts specified in package.json files.
+npm error
+npm error   --allow-directory
+npm error     Limits the ability for npm to install dependencies from directories.
+npm error
+npm error   --allow-file
+npm error     Limits the ability for npm to install dependencies from tarball files.
+npm error
+npm error   --allow-git
+npm error     Limits the ability for npm to fetch dependencies from git references.
+npm error
+npm error   --allow-remote
+npm error     Limits the ability for npm to fetch dependencies from urls.
+npm error
+npm error   --allow-scripts
+npm error     Comma-separated list of packages whose install-time lifecycle scripts
+npm error
+npm error   --strict-allow-scripts
+npm error     If `true`, turn the install-script policy from a warning into a hard
+npm error
+npm error   --dangerously-allow-all-scripts
+npm error     If `true`, bypass the `allowScripts` policy entirely and run every
+npm error
+npm error   --audit
+npm error     When "true" submit audit reports alongside the current npm command to the
+npm error
+npm error   --bin-links
+npm error     Tells npm to create symlinks (or `.cmd` shims on Windows) for package
+npm error
+npm error   --fund
+npm error     When "true" displays the message at the end of each `npm install`
+npm error
+npm error   --dry-run
+npm error     Indicates that you don't want npm to make any changes and that it should
+npm error
+npm error   -w|--workspace
+npm error     Enable running a command in the context of the configured workspaces of the
+npm error
+npm error   --workspaces
+npm error     Set to true to run the command in the context of **all** configured
+npm error
+npm error   --include-workspace-root
+npm error     Include the workspace root when workspaces are enabled for a command.
+npm error
+npm error   --install-links
+npm error     When set file: protocol dependencies will be packed and installed as
+npm error
+npm error aliases: clean-install, ic, install-clean, isntall-clean
+npm error
+npm error Run "npm help ci" for more info
+npm error A complete log of this run can be found in: /var/cache/pa-js/npm/_logs/2026-10-02T08_57_27_453Z-debug-0.log
+NPMUSAGE;
+
+        $region = FailureOutput::select($stderr);
+
+        $this->assertStringStartsWith('npm error code EUSAGE', $region);
+        $match = DeployFailureExplainer::match($region);
+        $this->assertSame('npm-lockfile-out-of-sync', $match['rule'] ?? null);
+        $this->assertStringContainsString('(npm: Missing: @types/react@19.3.0 from lock file)', $match['message']);
+    }
+
+    public function test_an_npm_error_block_inside_the_window_is_unchanged(): void
+    {
+        $output = "> build\nnpm error code ELIFECYCLE\nnpm error errno 1\nnpm error app@1.0.0 build: `vite build`";
+
+        $this->assertStringStartsWith('npm error code ELIFECYCLE', FailureOutput::select($output));
+    }
 
     public function test_docker_runs_image_pull_is_not_the_reason(): void
     {

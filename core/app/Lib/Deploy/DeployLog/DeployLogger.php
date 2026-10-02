@@ -538,13 +538,20 @@ class DeployLogger
      * Monitoring's fix for this failure, as log lines, so every reader of the
      * log sees it and not only the `problem` field.
      *
+     * A fix released in this engine's version or earlier did not prevent this
+     * failure, so its "fixed in" and how-to-fix text would be a false claim:
+     * only the title and the cause are written then.
+     *
      * @param array<string, ?string> $problem
      */
     private function writeProblem(array $problem, ?string $stage): void
     {
         $this->writeLine(self::LEVEL_WARN, 'Known problem: ' . ($problem['title'] ?? 'PanelAlpha has a fix for this failure'), $stage);
 
-        foreach (['body_why' => 'Why', 'body_fix' => 'How to fix'] as $field => $label) {
+        $fixedIn = $problem['fixed_in_version'] ?? null;
+        $alreadyHere = $fixedIn !== null && self::engineHasRelease($fixedIn);
+        $fields = $alreadyHere ? ['body_why' => 'Why'] : ['body_why' => 'Why', 'body_fix' => 'How to fix'];
+        foreach ($fields as $field => $label) {
             $lines = array_values(array_filter(
                 array_map('trim', explode("\n", (string) ($problem[$field] ?? ''))),
                 static fn (string $line): bool => $line !== ''
@@ -558,9 +565,27 @@ class DeployLogger
             }
         }
 
-        if (($problem['fixed_in_version'] ?? null) !== null) {
-            $this->writeLine(self::LEVEL_INFO, 'Fixed in engine version ' . $problem['fixed_in_version'], $stage);
+        if ($alreadyHere) {
+            $this->writeLine(
+                self::LEVEL_INFO,
+                "This engine already includes the fix released in {$fixedIn}; this failure is a case it does not cover",
+                $stage
+            );
+        } elseif ($fixedIn !== null) {
+            $this->writeLine(self::LEVEL_INFO, 'Fixed in engine version ' . $fixedIn, $stage);
         }
+    }
+
+    /** Whether the running engine is $version or newer; false when either is not a version. */
+    private static function engineHasRelease(string $version): bool
+    {
+        $running = config('system.version');
+        $pattern = '/^\d+(\.\d+)*$/';
+        if (!is_string($running) || preg_match($pattern, $running) !== 1 || preg_match($pattern, trim($version)) !== 1) {
+            return false;
+        }
+
+        return version_compare($running, trim($version), '>=');
     }
 
     private static function finishMessage(string $status, ?string $error): string

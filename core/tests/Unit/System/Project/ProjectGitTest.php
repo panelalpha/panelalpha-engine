@@ -126,11 +126,13 @@ class ProjectGitTest extends TestCase
         ];
         $git = $this->testable($model, 'public_html', $runner);
 
-        $git->connect('https://github.com/org/repo.git', 'main', 'pat-secret');
+        $status = $git->connect('https://github.com/org/repo.git', 'main', 'pat-secret');
 
         $joined = $this->joined($runner);
-        $this->assertTrue($this->commandsContain($joined, 'fetch origin'));
+        $this->assertTrue($this->commandsContain($joined, 'fetch --depth=1 origin main'), 'one branch, shallow, as the deploy clones');
         $this->assertTrue($this->commandsContain($joined, 'reset --hard origin/main'));
+        $this->assertTrue($this->commandsContain($joined, 'config --unset panelalpha.connecting'));
+        $this->assertArrayNotHasKey('sync_error', $status);
         $this->assertTrue($this->commandsContain($joined, 'branch --set-upstream-to=origin/main main'));
         $this->assertFalse($this->commandsContain($joined, 'clean -fd'), 'connect() must not delete untracked files the way pull(force) does');
     }
@@ -150,13 +152,78 @@ class ProjectGitTest extends TestCase
             'branch --show-current' => "main\n",
             'rev-parse --abbrev-ref @{upstream}' => '',
         ];
-        $runner->failIfContains = ['fetch origin'];
+        $runner->failIfContains = ['fetch --depth=1'];
         $git = $this->testable($model, 'public_html', $runner);
 
         $status = $git->connect('https://github.com/org/repo.git', 'main', 'pat-secret');
 
         $this->assertTrue($status['connected']);
         $this->assertNotNull($model->getSiteGit('public_html'));
+        // ...but it says the work tree is empty instead of leaving the caller to find out.
+        $this->assertStringStartsWith('Connected, but fetching main failed', $status['sync_error'] ?? '');
+    }
+
+    /**
+     * WordPress/WordPress took longer than the client's timeout to connect, and
+     * every git call meanwhile answered "Git is not connected." -- which reads as
+     * broken, not as "wait".
+     */
+    public function test_calls_during_a_running_connect_are_told_to_wait(): void
+    {
+        $model = $this->phpHostingModel();
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'config --get panelalpha.connecting' => (time() - 30) . "\n",
+        ];
+        $git = $this->testable($model, 'public_html', $runner);
+
+        foreach ([
+            'pull' => fn () => $git->pull(),
+            'repair' => fn () => $git->connect('https://github.com/org/repo.git', 'main', null, true),
+            'connect' => fn () => $git->connect('https://github.com/org/repo.git', 'main', null),
+        ] as $call => $run) {
+            try {
+                $run();
+                $this->fail("{$call} must refuse while the first connect runs");
+            } catch (GitException $e) {
+                $this->assertSame(409, $e->httpStatus, $call);
+                $this->assertStringContainsString('still fetching', $e->getMessage(), $call);
+            }
+        }
+        $this->assertNull($model->getSiteGit('public_html'));
+    }
+
+    public function test_a_stale_connect_marker_is_ignored(): void
+    {
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'config --get panelalpha.connecting' => (time() - 7200) . "\n",
+        ];
+        $git = $this->testable($this->phpHostingModel(), 'public_html', $runner);
+
+        try {
+            $git->pull();
+            $this->fail('Expected GitException');
+        } catch (GitException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertSame('Git is not connected.', $e->getMessage());
+        }
+    }
+
+    /** A bare `fetch origin` on the shallow checkout connect leaves pulls every branch's full history. */
+    public function test_pull_fetches_only_the_connected_branch(): void
+    {
+        $runner = new FakeGitRunner();
+        $runner->stdout = $this->connectedRepoStdout();
+        $git = $this->testable($this->connectedPhpHostingModel(), 'public_html', $runner);
+
+        $git->pull();
+
+        $fetches = array_values(array_filter($this->joined($runner), fn (string $c): bool => str_contains($c, ' fetch ')));
+        $this->assertCount(1, $fetches);
+        $this->assertStringEndsWith('fetch origin main', $fetches[0]);
     }
 
     public function test_disconnect_blocked_on_deploy_managed_checkout(): void

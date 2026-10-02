@@ -65,6 +65,7 @@ final class Files
                 $system->exec(['sudo', 'chown', $chown, $tmp]);
             }
             $system->exec($archive->extractArgv($uid, $gid, $staged, $tmp), [], 600);
+            $system->exec($archive->normaliseModesArgv($uid, $gid, $tmp), [], 120);
 
             // Listed as root: ~/.panelalpha is the account's alone (0700), so
             // core's PHP would see an empty directory and never unwrap it.

@@ -16,12 +16,12 @@ List the projects on this engine.
 Inspect this project. Tell me if it is WordPress, and where its files are.
 ```
 
-From there you can add a domain, take a backup, change PHP, run WP-CLI, or manage WordPress users, using the requests later on this page.
+From there you can add a domain, take a backup, change PHP, run WP-CLI, or manage WordPress users, using the requests later on this page. Which of these work depends on the kind of WordPress it is.
 
 There are two kinds of WordPress on this engine, and they are not the same:
 
 - **Traditional PHP hosting.** Files live in `public_html`. Uploads show up on the site without a rebuild. You can change that domain's PHP version, set PHP memory, use FTP, backups, domains and WP-CLI. WordPress users, the install wizard and one-click login are not available on this kind. Neither is a Cloudflare tunnel.
-- **Its own container.** Files live in `project/`. This is what you get when the engine sets WordPress up for you, or when you deploy it from git. WordPress users, one-click login and the install wizard work here, as do WP-CLI, backups and domains.
+- **Its own container.** Files live in `project/`. This is what you get when the engine sets WordPress up for you, or when you deploy it from git. WordPress users, one-click login and the install wizard work here, as do backups and domains. WP-CLI does not: the engine runs it only on traditional PHP hosting. Ask the assistant to run a command in the project instead.
 
 If an action is refused, see [Troubleshooting](#troubleshooting). Older versions called a project a "user". If output still says `username`, that is the project's name.
 
@@ -113,7 +113,7 @@ Run `wp core version` on this site.
 Update all plugins on this site.
 ```
 
-Commands run as that site's own user, in the right directory, so you do not need to know where the files are.
+Commands run as that site's own user, in the right directory, so you do not need to know where the files are. This works on traditional PHP hosting only. On WordPress in its own container the engine refuses it; use the WordPress user and install actions above, or ask the assistant to run a command in the project.
 
 ## Deploying a WordPress project from your own repository
 

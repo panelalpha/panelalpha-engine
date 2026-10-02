@@ -3,7 +3,10 @@
 namespace App\Console\Commands\System;
 
 use App\Models\ProxyRule;
+use App\Rules\UpstreamHost;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class ProxyRuleUpdateCommand extends Command
 {
@@ -59,6 +62,18 @@ class ProxyRuleUpdateCommand extends Command
 
         if (empty($updates)) {
             $this->error('No updates provided.');
+            return 1;
+        }
+
+        // The same rules as PUT /proxy-rules/{id}: these go into the shared proxy config verbatim.
+        $validator = Validator::make($updates, [
+            'upstream_host' => [new UpstreamHost()],
+            'upstream_protocol' => [Rule::in(['http', 'https'])],
+        ]);
+        if ($validator->fails()) {
+            foreach ($validator->errors()->all() as $message) {
+                $this->error($message);
+            }
             return 1;
         }
 

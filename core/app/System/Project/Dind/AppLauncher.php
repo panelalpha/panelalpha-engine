@@ -341,6 +341,13 @@ final class AppLauncher
         ?string $resolvedImage = null
     ): void {
         $innerDocker = $this->project->innerDocker();
+        // First: the reclaim is `docker system prune -af`, which removes every image
+        // no container uses -- including a base fetched moments ago, which then has
+        // to come from Docker Hub, where panelalpha/* does not exist. The preloads
+        // below put back whatever the run file names.
+        if (!DeployCompose::skipReclaimBeforeBuild($strategy, $runtime)) {
+            $innerDocker->reclaimStorageIfNeeded();
+        }
 
         if ($resolvedImage !== null && $resolvedImage !== '') {
             $innerDocker->ensureImage($resolvedImage);
@@ -358,9 +365,6 @@ final class AppLauncher
             $innerDocker->preloadFrameworkBaseImages($strategy, $runtime);
         }
         $innerDocker->preloadComposeImages($this->project->userAppComposeFileToRun());
-        if (!DeployCompose::skipReclaimBeforeBuild($strategy, $runtime)) {
-            $innerDocker->reclaimStorageIfNeeded();
-        }
     }
 
     /**

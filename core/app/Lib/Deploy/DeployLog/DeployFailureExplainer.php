@@ -192,6 +192,33 @@ class DeployFailureExplainer
                         . 'or network call; deploy again, and if it stalls at the same point, check that step.',
             ],
 
+            // Symfony's ProcessTimedOutException: the message is the quoted command line
+            // and nothing else, so name the step from it. Early: that command line is
+            // not output, and later rules could match words in it.
+            'clone-timed-out' => [
+                "/The process \"[^\n]*'clone'[^\n]*\" exceeded the timeout of (\\d+) seconds/",
+                static fn (array $m): string =>
+                    'The repository did not finish cloning within ' . self::duration((int) $m[1])
+                        . ' and the clone was stopped. It is most likely very large, or the link to its git '
+                        . 'host is slow. Deploy a smaller branch or an archive of the code, or ask the server '
+                        . 'administrator to raise DEPLOY_CLONE_TIMEOUT.',
+            ],
+
+            'build-timed-out' => [
+                "/The process \"[^\n]*'up'[^\n]*'--build'[^\n]*\" exceeded the timeout of (\\d+) seconds/",
+                static fn (array $m): string =>
+                    'Building and starting the application did not finish within ' . self::duration((int) $m[1])
+                        . ' and was stopped. The build output is in the deploy log; a build that runs this long '
+                        . 'is usually waiting on a package registry or download that does not answer.',
+            ],
+
+            'step-timed-out' => [
+                '/The process "[^\n]*" exceeded the timeout of (\d+) seconds/',
+                static fn (array $m): string =>
+                    'A deploy step did not finish within ' . self::duration((int) $m[1])
+                        . ' and was stopped. The full output is in the deploy log.',
+            ],
+
             // A service the app depends on never came up, quoted with what it printed
             // ({@see DependencyFailure}). Early for the same reason: the quote is another
             // program's output, which rules below could otherwise match.
@@ -590,6 +617,21 @@ class DeployFailureExplainer
                         . 'reaches end of life (Debian 11, CentOS 7). The Dockerfile has to move to a supported base image.',
             ],
 
+            // node-gyp found its toolchain but could not download the Node headers (wud: the
+            // build could not reach unofficial-builds.nodejs.org). Before the toolchain rule,
+            // whose `gyp ERR!` it also prints.
+            'native-build-headers-download-failed' => [
+                '/gyp ERR! stack .*?\b(ConnectTimeoutError|ETIMEDOUT|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|socket hang up)\b/i',
+                static function (array $m, string $output = ''): string {
+                    $url = preg_match('/gyp http GET (https?:\/\/\S+)/i', $output, $get) === 1 ? " ({$get[1]})" : '';
+
+                    return 'A dependency compiles a native addon during install, and node-gyp could not download '
+                        . "the Node.js headers it needs{$url}: the request failed with {$m[1]}. The build image "
+                        . 'has its toolchain; this is a network failure during the build. Deploy again; if it '
+                        . 'keeps failing, the server cannot reach that address.';
+                },
+            ],
+
             // node-gyp needs a Python interpreter and a C toolchain the slim Node images do
             // not carry. pnpm 10+ runs install scripts by default, so the first dependency
             // with a native addon ends the build with gyp output and no diagnosis.
@@ -603,7 +645,10 @@ class DeployFailureExplainer
                         . 'to webpack 5, or set NODE_OPTIONS=--openssl-legacy-provider for the build.',
             ],
             'native-build-toolchain-missing' => [
-                '/(gyp ERR!|Could not find any Python installation to use|node-gyp: (?:command )?not found)/i',
+                // Toolchain evidence only: a bare `gyp ERR!` is any node-gyp failure.
+                '/(Could not find any Python installation to use|node-gyp: (?:command )?not found'
+                    . '|gyp ERR! stack Error: not found: (?:make|g\+\+|gcc|cc|c\+\+)\b'
+                    . '|make(?:\[\d+\])?: (?:g\+\+|gcc|cc|c\+\+): (?:Command not found|No such file or directory))/i',
                 static fn (): string =>
                     'A dependency has to be compiled during install, and this build image has no '
                         . 'Python or C toolchain for it. Name an image that does in a panelalpha.yaml, '

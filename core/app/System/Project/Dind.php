@@ -580,6 +580,11 @@ class Dind implements DeployableDindProject, Runtime
 
     public function isRunning(): bool
     {
+        // No outer compose file, nothing running to ask about; recreateOuterCompose() writes it back.
+        if (!$this->exists()) {
+            return false;
+        }
+
         $command = "sudo docker compose -f {$this->composeFilePath()} ps --services --filter status=running";
         $result = trim($this->system()->exec($command));
 

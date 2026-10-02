@@ -24,7 +24,7 @@ class ProjectWpCliTest extends TestCase
         $project = new Project(new System(), $model);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('WP-CLI is only supported for PHP hosting projects.');
+        $this->expectExceptionMessage('WP-CLI runs only on traditional PHP hosting projects.');
 
         $project->runWpCli(['--version']);
     }

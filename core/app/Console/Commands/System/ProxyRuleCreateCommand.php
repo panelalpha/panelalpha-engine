@@ -111,6 +111,11 @@ class ProxyRuleCreateCommand extends Command
             0
         );
         assert(is_string($transport));
+        // Anything else is stored but never rendered, so the rule would silently do nothing.
+        if (!in_array($transport, ['http', 'tcp', 'udp'], true)) {
+            $this->error('The selected transport is invalid.');
+            return null;
+        }
 
         $listenPort = $this->port($this->option('listen-port') ?? $this->ask('Listen port (1-65535)'));
         if ($listenPort === null) {

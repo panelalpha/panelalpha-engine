@@ -87,9 +87,9 @@ final class UploadedArchive
     }
 
     /**
-     * Extraction runs as the account user, and never restores an owner or a
-     * mode the archive asked for: an upload does not get to choose who owns
-     * what it unpacks to.
+     * Extraction runs as the account user, and never restores an owner the
+     * archive asked for: an upload does not get to choose who owns what it
+     * unpacks to. Modes are evened out afterwards by {@see normaliseModesArgv()}.
      *
      * The account is named by uid and gid, not by username, because this
      * runs in the core container and the account's passwd entry exists only
@@ -101,12 +101,7 @@ final class UploadedArchive
      */
     public function extractArgv(int $uid, int $gid, string $staged, string $into): array
     {
-        $asAccount = [
-            'sudo', 'setpriv',
-            '--reuid', (string) $uid,
-            '--regid', (string) $gid,
-            '--clear-groups',
-        ];
+        $asAccount = self::asAccount($uid, $gid);
         if ($this->isZip) {
             return [...$asAccount, 'unzip', '-UU', '-o', $staged, '-d', $into];
         }
@@ -115,6 +110,25 @@ final class UploadedArchive
             ...$asAccount, 'tar',
             '--no-same-owner', '--no-same-permissions', '-xzf', $staged, '-C', $into,
         ];
+    }
+
+    /**
+     * Run after {@see extractArgv()}: files 0644, or 0755 when any execute bit
+     * is set, directories 0755, as a git checkout would give them. unzip and
+     * tar keep a member's own mode, and Python's zipfile.writestr() writes
+     * 0600; detection runs as another user and could not read such files.
+     *
+     * @return list<string>
+     */
+    public function normaliseModesArgv(int $uid, int $gid, string $dir): array
+    {
+        return [...self::asAccount($uid, $gid), 'chmod', '-R', 'u+rwX,go=rX', '--', $dir];
+    }
+
+    /** @return list<string> */
+    private static function asAccount(int $uid, int $gid): array
+    {
+        return ['sudo', 'setpriv', '--reuid', (string) $uid, '--regid', (string) $gid, '--clear-groups'];
     }
 
     private static function formatOf(string $path): bool

@@ -28,6 +28,12 @@ abstract class WorkTree
 
     protected const string BACKUP_REF = 'refs/panelalpha/backup';
 
+    /** Set in .git/config while connect() fetches, so other calls can say "wait" rather than "not connected". */
+    private const string CONNECTING_KEY = 'panelalpha.connecting';
+
+    /** A marker older than this outlived its request (git's own limit is 600 s per command). */
+    private const int CONNECTING_STALE_SECONDS = 1300;
+
     protected string $absolutePath;
     protected string $pathKey;
 
@@ -190,16 +196,25 @@ abstract class WorkTree
         $cmd[] = $repoUrl;
         $cmd[] = $target;
 
+        $timeout = self::cloneTimeout();
         try {
-            $this->execute($cmd, $token);
+            $this->execute($cmd, $token, $timeout);
         } catch (GitException $e) {
             if (preg_match('/expected flush after ref listing/i', $e->getMessage()) !== 1) {
                 throw $e;
             }
             // GitHub's edge at times refuses older git's HTTP/2 fingerprint once the refs
             // are listed; the same request over HTTP/1.1 is let through.
-            $this->execute(['git', '-c', 'http.version=HTTP/1.1', ...array_slice($cmd, 1)], $token);
+            $this->execute(['git', '-c', 'http.version=HTTP/1.1', ...array_slice($cmd, 1)], $token, $timeout);
         }
+    }
+
+    /** DEPLOY_CLONE_TIMEOUT, in seconds; 600 when unset or not positive. */
+    private static function cloneTimeout(): int
+    {
+        $seconds = app()->bound('config') ? (int) config('deploy.clone_timeout', 600) : 600;
+
+        return $seconds > 0 ? $seconds : 600;
     }
 
     /**
@@ -332,7 +347,7 @@ abstract class WorkTree
                 throw new GitException('Git is not connected.', 422);
             }
             $siteGit = $this->user()->getSiteGit($this->pathKey);
-            $this->git(['fetch', 'origin'], $siteGit['token'] ?? null);
+            $this->fetchBranch($siteGit['branch'] ?? '', $siteGit['token'] ?? null);
         }
 
         return $this->buildStatus($connected);
@@ -517,17 +532,31 @@ abstract class WorkTree
             $this->git(['ls-remote', '--heads', $repoUrl], $token);
         }
 
+        $syncError = null;
         if ($repoExists) {
+            if ($siteGit === null) {
+                $this->refuseWhileConnecting();
+            }
             $this->ensureOriginMatches($repoUrl);
         } else {
             $this->ensureWorkTreeDirectory();
             $this->initRepository($branch, $repoUrl);
-            $this->fetchAndSyncFreshInit($branch, $token);
+            $this->git(['config', self::CONNECTING_KEY, (string) time()]);
+            $syncError = $this->fetchAndSyncFreshInit($branch, $token);
         }
 
         $this->persistSiteGit($repoUrl, $branch, $token);
+        if (!$repoExists) {
+            $this->clearConnecting();
+        }
 
-        return $this->status();
+        $status = $this->status();
+        if ($syncError !== null) {
+            $status['sync_error'] = 'Connected, but fetching ' . $branch . ' failed, so the work tree has none of '
+                . "the repository's files yet. Pull to fetch them. git said: " . $syncError;
+        }
+
+        return $status;
     }
 
     /**
@@ -537,20 +566,61 @@ abstract class WorkTree
      * only touches paths git already tracks (the newly fetched ones), so it
      * cannot delete an unrelated file already sitting in a non-empty work
      * tree the way `git clean -fd` would -- best-effort: a bad repo/branch
-     * still leaves the repository connected, just empty, exactly as before.
+     * still leaves the repository connected, just empty, and says so.
+     * One branch at depth 1, as the deploy's clone: a full history
+     * (WordPress: 711 MB) outlives the client's request.
+     *
+     * @return ?string why the sync failed, null when it did not
      */
-    protected function fetchAndSyncFreshInit(string $branch, ?string $token): void
+    protected function fetchAndSyncFreshInit(string $branch, ?string $token): ?string
     {
         try {
-            $this->git(['fetch', 'origin'], $token);
+            $this->git(['fetch', '--depth=1', 'origin', $branch], $token);
             $this->git(['reset', '--hard', 'origin/' . $branch]);
             $this->setUpstreamTracking($branch);
+
+            return null;
         } catch (GitException $e) {
             Log::warning('git_connect: initial fetch/sync failed, repository left empty', [
                 'path' => $this->absolutePath,
                 'branch' => $branch,
                 'error' => $e->getMessage(),
             ]);
+
+            return $e->getMessage();
+        }
+    }
+
+    /** The connected branch only: on a shallow checkout a bare `fetch origin` pulls every branch's whole history. */
+    private function fetchBranch(string $branch, ?string $token): void
+    {
+        $this->git($branch === '' ? ['fetch', 'origin'] : ['fetch', 'origin', $branch], $token);
+    }
+
+    private function refuseWhileConnecting(): void
+    {
+        if ($this->connectInProgress()) {
+            throw new GitException('A git connect is still fetching this repository; try again when it has finished.', 409);
+        }
+    }
+
+    private function connectInProgress(): bool
+    {
+        try {
+            $since = (int) trim($this->git(['config', '--get', self::CONNECTING_KEY]));
+        } catch (GitException) {
+            return false;
+        }
+
+        return $since > 0 && time() - $since < self::CONNECTING_STALE_SECONDS;
+    }
+
+    private function clearConnecting(): void
+    {
+        try {
+            $this->git(['config', '--unset', self::CONNECTING_KEY]);
+        } catch (GitException) {
+            // Already gone.
         }
     }
 
@@ -617,7 +687,7 @@ abstract class WorkTree
         GitRef::assertName($branch);
         $token = $siteGit['token'] ?? null;
 
-        $this->git(['fetch', 'origin'], $token);
+        $this->fetchBranch($branch, $token);
         $this->createBackup();
 
         // ff is git's call, not ours (see FastForwardPull), and a refusal leaves
@@ -659,7 +729,7 @@ abstract class WorkTree
         GitRef::assertName($branch);
         $token = $siteGit['token'] ?? null;
 
-        $this->git(['fetch', 'origin'], $token);
+        $this->fetchBranch($branch, $token);
 
         $behind = $this->commitsBehind();
         if ($behind !== null && $behind > 0) {
@@ -699,7 +769,7 @@ abstract class WorkTree
         }
 
         $token = $siteGit['token'] ?? null;
-        $this->git(['fetch', 'origin'], $token);
+        $this->fetchBranch($branch, $token);
 
         try {
             $this->git(['rev-parse', '--verify', '--end-of-options', 'origin/' . $branch]);
@@ -734,6 +804,7 @@ abstract class WorkTree
     {
         $siteGit = $this->user()->getSiteGit($this->pathKey);
         if ($siteGit === null) {
+            $this->refuseWhileConnecting();
             throw new GitException('Git is not connected.', 422);
         }
 
@@ -912,6 +983,7 @@ abstract class WorkTree
         bool $repoExists,
     ): array {
         if ($siteGit === null && !$this->isDeployManaged()) {
+            $this->refuseWhileConnecting();
             throw new GitException('Git is not connected.', 422);
         }
         if ($repoExists) {

@@ -59,6 +59,32 @@ class ArchiveSafetyTest extends TestCase
         ArchiveSafety::assertRegularMembersOnly($listing);
     }
 
+    public function test_accepts_zip_members_without_file_type_bits(): void
+    {
+        // What zipfile.writestr() writes for a bare file name; unzip extracts it
+        // as a regular file.
+        ArchiveSafety::assertRegularMembersOnly(<<<'LISTING'
+        Archive:  bare.zip
+        Zip file size: 315 bytes, number of entries: 2
+        ?rw-------  2.0 unx       65 b- stor 26-Oct-02 11:42 docker-compose.yml
+        ?rw-------  2.0 unx       12 b- stor 26-Oct-02 11:42 sub/index.html
+        2 files, 77 bytes uncompressed, 77 bytes compressed:  0.0%
+        LISTING);
+
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_untyped_members_do_not_hide_a_symlink(): void
+    {
+        $listing = "?rw-------  2.0 unx   65 b- stor 26-Oct-02 11:42 docker-compose.yml\n"
+            . "lrwxrwxrwx  3.0 unx    4 bx stor 24-Jan-01 00:00 link -> /etc\n";
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/symbolic link/');
+
+        ArchiveSafety::assertRegularMembersOnly($listing);
+    }
+
     public function test_rejects_special_files(): void
     {
         $listing = "crw-rw-rw- root/root 0 2024-01-01 00:00 dev/null\n";

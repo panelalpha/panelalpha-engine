@@ -166,7 +166,10 @@ class Project
     public function runWpCli(array $args): array
     {
         if (!$this->runtime instanceof PhpHosting) {
-            throw new \RuntimeException('WP-CLI is only supported for PHP hosting projects.');
+            throw new \RuntimeException(
+                'WP-CLI runs only on traditional PHP hosting projects. For WordPress in its own container, '
+                . 'use the app endpoints (users, install, one-click login) or run the command with ssh/command.'
+            );
         }
 
         return $this->runtime->phpRuntime()->runWpCli($args);

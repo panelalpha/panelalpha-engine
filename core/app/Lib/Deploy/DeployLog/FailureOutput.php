@@ -49,6 +49,9 @@ final class FailureOutput
         '/^failed to solve:/',                    // ...and the summary that names it
         '/^Error response from daemon:/',         // the daemon refusing to run a container
         '/^runc create failed:/',
+        // apt's own error lines (`E: Failed to fetch ... 404`), above the step's `#N ERROR:`.
+        // The account's apt-lists denial is no finding (see NOISE).
+        '/^E: (?!List directory \/var\/lib\/apt\/lists\/partial is missing)/',
         '/^npm error (?!npm error)/',            // npm's own error block
         '/^npm ERR!/',
         '/^gyp ERR!/',
@@ -168,12 +171,15 @@ final class FailureOutput
                 return trim(implode("\n", array_slice($window, $i, self::CONTEXT)));
             }
         }
+        $offset = count($lines) - count($window);
         foreach ($window as $i => $line) {
             // A build step's own output carries BuildKit's `#13 249.2 ` prefix.
             $bare = (string) preg_replace(self::STEP_PREFIX, '', $line);
             foreach (self::CAUSE as $pattern) {
                 if (preg_match($pattern, $line) === 1 || preg_match($pattern, $bare) === 1) {
-                    return trim(implode("\n", array_slice($window, $i, self::CONTEXT)));
+                    $start = self::npmBlockStart($lines, $offset + $i);
+
+                    return trim(implode("\n", array_slice($lines, $start, self::CONTEXT)));
                 }
             }
         }
@@ -248,6 +254,27 @@ final class FailureOutput
         }
 
         return $stderr !== '' ? $stderr : $stdout;
+    }
+
+    /**
+     * Where the `npm error` block holding line $at begins. npm 11 prints a
+     * command's whole usage after EUSAGE, longer than WINDOW, so the window
+     * opened mid-block and `npm error code` and its reason were cut off.
+     *
+     * @param list<string> $lines
+     */
+    private static function npmBlockStart(array $lines, int $at): int
+    {
+        $isNpmError = static fn (string $l): bool =>
+            preg_match('/^npm error(?:\s|$)/', (string) preg_replace(self::STEP_PREFIX, '', $l)) === 1;
+        if (!$isNpmError($lines[$at])) {
+            return $at;
+        }
+        while ($at > 0 && $isNpmError($lines[$at - 1])) {
+            $at--;
+        }
+
+        return $at;
     }
 
     private static function isNoise(string $line): bool

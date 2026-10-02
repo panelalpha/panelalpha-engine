@@ -193,8 +193,9 @@ class GitRepository extends WorkTree
     }
 
     /** A fresh `git init` stays empty here until a pull: this class never synced it on connect. */
-    protected function fetchAndSyncFreshInit(string $branch, ?string $token): void
+    protected function fetchAndSyncFreshInit(string $branch, ?string $token): ?string
     {
+        return null;
     }
 
     protected function runCommand(array $cmd, int $timeout): string

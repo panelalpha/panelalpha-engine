@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\DeployLog;
 
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
+use App\Lib\Deploy\DeployLog\FailureOutput;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -642,8 +643,61 @@ OUT;
     /** It outranks the generic build failure, being the more specific answer. */
     public function test_it_wins_over_the_generic_build_rule(): void
     {
+        $output = "gyp ERR! stack Error: not found: make\n"
+            . "gyp ERR! not ok\n"
+            . 'ERROR: process "/bin/sh -c pnpm install" did not complete successfully: exit code: 1';
+
+        $this->assertSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule']);
+    }
+
+    /** A bare `gyp ERR!` is any node-gyp failure, not proof the toolchain is missing. */
+    public function test_a_gyp_failure_without_toolchain_evidence_is_not_a_missing_toolchain(): void
+    {
         $output = "gyp ERR! not ok\n"
             . 'ERROR: process "/bin/sh -c pnpm install" did not complete successfully: exit code: 1';
+
+        $this->assertNotSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    /**
+     * wud: Python and g++ were installed, but the build could not reach
+     * unofficial-builds.nodejs.org for the Node headers.
+     */
+    public function test_a_failed_headers_download_is_not_a_missing_toolchain(): void
+    {
+        $output = "#8 12.98 (13/30) Installing musl-dev (1.2.6-r2)\n"
+            . "#17 29.45 npm error gyp info find Python using Python version 3.14.7 found at \"/usr/bin/python3\"\n"
+            . "#17 29.45 npm error gyp http GET https://unofficial-builds.nodejs.org/download/release/v24.21.0/node-v24.21.0-headers.tar.gz\n"
+            . "#17 29.45 npm error gyp ERR! stack ConnectTimeoutError: Connect Timeout Error (attempted addresses: 45.55.98.129:443, timeout: 10000ms)\n"
+            . '#17 ERROR: process "/bin/sh -c npm ci" did not complete successfully: exit code: 1';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('native-build-headers-download-failed', $match['rule']);
+        $this->assertStringContainsString('node-v24.21.0-headers.tar.gz', $match['message']);
+        $this->assertStringContainsString('ConnectTimeoutError', $match['message']);
+        $this->assertStringNotContainsString('no Python or C toolchain', $match['message']);
+    }
+
+    /** The other ways node's fetch reports an unreachable host. */
+    public function test_other_network_errors_from_node_gyp_are_a_failed_download(): void
+    {
+        foreach ([
+            'gyp ERR! stack FetchError: request to https://nodejs.org/x failed, reason: getaddrinfo EAI_AGAIN nodejs.org',
+            'gyp ERR! stack Error: read ECONNRESET',
+            'gyp ERR! stack Error: connect ETIMEDOUT 104.20.22.46:443',
+        ] as $line) {
+            $this->assertSame('native-build-headers-download-failed', DeployFailureExplainer::match($line)['rule'], $line);
+        }
+    }
+
+    /** make running without a compiler is the missing toolchain. */
+    public function test_a_missing_compiler_under_node_gyp_is_explained(): void
+    {
+        $output = "gyp info spawn make\n"
+            . "make: g++: No such file or directory\n"
+            . "gyp ERR! build error\n"
+            . 'gyp ERR! stack Error: `make` failed with exit code: 2';
 
         $this->assertSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule']);
     }
@@ -673,6 +727,44 @@ OUT;
             . '[ELIFECYCLE] Command failed with exit code 127.';
 
         $this->assertSame('native-build-toolchain-missing', DeployFailureExplainer::match($output)['rule']);
+    }
+
+    /**
+     * Symfony's timeout text is the whole message: a quoted command line. These
+     * are the two from the ToolJet clone and the jellyfin build.
+     */
+    public function test_a_clone_that_ran_out_of_time_is_named_as_such(): void
+    {
+        $output = "The process \"'sudo' 'docker' 'compose' '-f' '/opt/panelalpha/shared-hosting/users/rp098/docker-compose.yml' "
+            . "'exec' '-T' 'dind' 'su' '-s' '/bin/bash' 'rp098' '-c' 'env' 'GIT_TERMINAL_PROMPT=0' 'git' '-c' "
+            . "'safe.directory=/home/rp098/project' 'clone' '--depth=1' '--branch' 'main' "
+            . "'https://github.com/ToolJet/ToolJet.git' '/home/rp098/project'\" exceeded the timeout of 600 seconds.";
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('clone-timed-out', $match['rule'] ?? null);
+        $this->assertStringStartsWith('The repository did not finish cloning within 10 minutes', $match['message']);
+    }
+
+    public function test_a_build_that_ran_out_of_time_is_named_as_such(): void
+    {
+        $output = "The process \"'sudo' 'docker' 'compose' '-f' '/opt/panelalpha/shared-hosting/users/rp1/docker-compose.yml' "
+            . "'exec' '-T' 'dind' 'su' '-s' '/bin/bash' 'rp1' '-c' 'docker' 'compose' '-p' 'project' "
+            . "'up' '-d' '--remove-orphans' '--build'\" exceeded the timeout of 3600 seconds.";
+
+        // As the deploy reports a start failure: the selected region, then the explainer.
+        $match = DeployFailureExplainer::match(trim(FailureOutput::select($output)));
+
+        $this->assertSame('build-timed-out', $match['rule'] ?? null);
+        $this->assertStringStartsWith('Building and starting the application did not finish within 60 minutes', $match['message']);
+    }
+
+    public function test_any_other_step_that_ran_out_of_time_is_still_explained(): void
+    {
+        $match = DeployFailureExplainer::match("The process \"'sudo' 'docker' 'pull' 'redis:8'\" exceeded the timeout of 300 seconds.");
+
+        $this->assertSame('step-timed-out', $match['rule'] ?? null);
+        $this->assertSame('A deploy step did not finish within 5 minutes and was stopped. The full output is in the deploy log.', $match['message']);
     }
 
     /**

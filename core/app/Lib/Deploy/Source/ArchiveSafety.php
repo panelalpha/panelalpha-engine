@@ -82,7 +82,9 @@ class ArchiveSafety
             if (preg_match('/^([bcdlpsD?-])[rwxsStT-]{9}[.+@]?\s/', $line, $match) !== 1) {
                 continue;
             }
-            if ($match[1] === '-' || $match[1] === 'd') {
+            // `?` is a member with no type bits (Python's zipfile.writestr()); unzip
+            // and GNU tar both extract it as a regular file.
+            if ($match[1] === '-' || $match[1] === 'd' || $match[1] === '?') {
                 continue;
             }
             if ($match[1] === 'l') {
