@@ -152,7 +152,25 @@ class ProxyRule extends Model
     }
 
     /**
+     * Upsert the domain's generated :80/:443 pair in place and drop every other
+     * generated row of the user (legacy *:appPort rows, a previous domain).
+     */
+    public static function syncGeneratedHttpPair(string $username, string $fqdn, int $upstreamPort): void
+    {
+        $keep = [];
+        foreach ([80, 443] as $listenPort) {
+            $rule = self::upsertGeneratedHttpRule($username, $fqdn, $listenPort, $upstreamPort, true);
+            if ($rule !== null) {
+                $keep[] = $rule->id;
+            }
+        }
+
+        self::forUser($username)->where('is_generated', true)->whereNotIn('id', $keep)->delete();
+    }
+
+    /**
      * Persist one generated HTTP listen → upstream rule for a project domain.
+     * Returns null when a hand-made rule already owns that domain and port.
      */
     public static function upsertGeneratedHttpRule(
         string $username,
@@ -160,30 +178,47 @@ class ProxyRule extends Model
         int $listenPort,
         int $upstreamPort,
         bool $isPrimary = false
-    ): void {
-        self::updateOrCreate(
-            [
-                'owner_scope' => 'user',
-                'username' => $username,
-                'transport' => 'http',
-                'listen_port' => $listenPort,
-                'server_name' => $fqdn,
+    ): ?self {
+        // The domain vhost renders one rule per port, and an operator's rule beats the default.
+        $handMade = self::query()
+            ->where('transport', 'http')
+            ->where('listen_port', $listenPort)
+            ->where('server_name', $fqdn)
+            ->where('is_generated', false)
+            ->exists();
+        if ($handMade) {
+            return null;
+        }
+
+        $key = [
+            'owner_scope' => 'user',
+            'username' => $username,
+            'transport' => 'http',
+            'listen_port' => $listenPort,
+            'server_name' => $fqdn,
+        ];
+        /** @var self $rule */
+        $rule = self::query()->where($key)->where('is_generated', true)->first() ?? new self($key);
+        $rule->fill([
+            'enabled' => true,
+            'listen_ip' => '*',
+            'upstream_host' => $username,
+            'upstream_port' => $upstreamPort,
+            'is_generated' => true,
+            'metadata' => [
+                'description' => ($isPrimary ? 'Primary' : 'Additional')
+                    . " {$listenPort}→{$upstreamPort} for {$username}",
+                'source' => 'auto-detected-from-compose',
+                'detected_port' => $upstreamPort,
             ],
-            [
-                'enabled' => true,
-                'listen_ip' => '*',
-                'upstream_host' => $username,
-                'upstream_port' => $upstreamPort,
-                'upstream_protocol' => 'http',
-                'is_generated' => true,
-                'metadata' => [
-                    'description' => ($isPrimary ? 'Primary' : 'Additional')
-                        . " {$listenPort}→{$upstreamPort} for {$username}",
-                    'source' => 'auto-detected-from-compose',
-                    'detected_port' => $upstreamPort,
-                ],
-            ]
-        );
+        ]);
+        // Nothing in a deploy declares the protocol, so an operator's switch to https stays.
+        if (!$rule->exists || $rule->upstream_protocol === null) {
+            $rule->upstream_protocol = 'http';
+        }
+        $rule->save();
+
+        return $rule;
     }
 
     /**

@@ -26,6 +26,7 @@ use App\Lib\Project\NewProjectInput;
 use App\Lib\Project\ProjectCreator;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Domains\MainDomainRename;
+use App\Lib\Domains\PublicUrl;
 use App\Lib\Limits\ResourceLimit;
 use App\Lib\Vault\RequestVault;
 use App\Models\Domain;
@@ -826,7 +827,13 @@ class UserController extends Controller
         // through the same helper in the deploy pipeline ({@see \App\System\Project\Deployment\DeploymentWorkflow::rebuildFromSource()}). Doing
         // it here as well would file a second terminal status for one rebuild
         // and report it twice.
-        $warnings = AppHealth::servingWarnings($user->getDetails());
+        //
+        // Both lists the pipeline finishes the log with: with the health one
+        // alone, a rebuild logged `partial` for its public URL and recorded `success`.
+        $warnings = array_merge(
+            AppHealth::servingWarnings($user->getDetails()),
+            PublicUrl::warnings((string) $user->domain, $user->getDetails()),
+        );
         if ($warnings !== []) {
             $user->setDetails([
                 'deployment_status' => 'partial',

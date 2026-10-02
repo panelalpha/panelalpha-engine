@@ -17,4 +17,7 @@ interface ProvisionEnvironment
     public function templateExists(string $template): bool;
 
     public function domainOrAliasExists(string $domain): bool;
+
+    /** Whether a non-shared subnet of that family (4 or 6) has an address to give. */
+    public function freeDedicatedIpExists(int $family): bool;
 }

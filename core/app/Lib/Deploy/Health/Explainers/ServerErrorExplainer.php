@@ -24,6 +24,9 @@ final class ServerErrorExplainer implements Explainer
     /** Faster than this and no application produced it -- it is the proxy. */
     private const PROXY_SECONDS = 0.01;
 
+    /** What a proxy answers when nothing is behind it; never a plain 500. */
+    private const GATEWAY_STATUSES = [502, 503, 504];
+
     public function id(): string
     {
         return 'server-error';
@@ -31,7 +34,9 @@ final class ServerErrorExplainer implements Explainer
 
     public function explain(ProjectContext $context, ProbedResponse $response): array
     {
-        if ($response->respondedWithin(self::PROXY_SECONDS)) {
+        $gateway = in_array($response->status, self::GATEWAY_STATUSES, true);
+
+        if ($gateway && $response->respondedWithin(self::PROXY_SECONDS)) {
             $ms = max(1, (int) round($response->time * 1000));
 
             return [
@@ -44,7 +49,7 @@ final class ServerErrorExplainer implements Explainer
             ];
         }
 
-        if ($response->time > 0.0) {
+        if ($response->time > 0.0 || !$gateway) {
             return [
                 'detail' => 'The application accepted the request and its own code answered ' . $response->status
                     . ', so this is a fault inside the running container.',

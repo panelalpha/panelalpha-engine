@@ -31,6 +31,8 @@ final class ProvisionChecks
             $this->template($params),
             $this->diskSpace($params),
             $this->domain($params),
+            $this->dedicatedIp($params, 4),
+            $this->dedicatedIp($params, 6),
         ]));
     }
 
@@ -134,6 +136,28 @@ final class ProvisionChecks
             'field' => 'domain',
             'code' => 'domain_taken',
             'message' => "{$domain} is already on this engine.",
+        ];
+    }
+
+    /**
+     * A dedicated IP the host cannot give is refused here: the project would
+     * otherwise be created on the shared IP and still report one.
+     *
+     * @param array<string, mixed> $params
+     *
+     * @return array<string, string>|null
+     */
+    private function dedicatedIp(array $params, int $family): ?array
+    {
+        $field = "dedicated_ipv{$family}";
+        if (empty($params[$field]) || $this->env->freeDedicatedIpExists($family)) {
+            return null;
+        }
+
+        return [
+            'field' => $field,
+            'code' => 'no_free_address',
+            'message' => "No non-shared IPv{$family} subnet has a free address. Add one, or create the project without {$field}.",
         ];
     }
 }

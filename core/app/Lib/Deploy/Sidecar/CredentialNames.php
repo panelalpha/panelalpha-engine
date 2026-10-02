@@ -165,7 +165,7 @@ final class CredentialNames
                 continue;
             }
             foreach (self::CLIENT_MARKERS as $marker) {
-                if (str_ends_with($key, $marker)) {
+                if (str_ends_with($key, $marker) && !in_array($key, SidecarDialects::serverSettingsFor($prefix), true)) {
                     return true;
                 }
             }

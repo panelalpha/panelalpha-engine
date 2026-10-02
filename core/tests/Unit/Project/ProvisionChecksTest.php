@@ -183,6 +183,26 @@ class ProvisionChecksTest extends TestCase
         );
     }
 
+    public function test_a_dedicated_ip_the_host_cannot_give_is_refused(): void
+    {
+        $env = new FakeProvisionEnvironment();
+        $env->freeFamilies = [4];
+
+        $problems = $this->checks($env)->problems($this->request([
+            'dedicated_ipv4' => true,
+            'dedicated_ipv6' => true,
+        ]));
+
+        $this->assertCount(1, $problems);
+        $this->assertSame('dedicated_ipv6', $problems[0]['field']);
+        $this->assertSame('no_free_address', $problems[0]['code']);
+    }
+
+    public function test_a_dedicated_ip_is_not_looked_for_unless_asked(): void
+    {
+        $this->assertSame([], $this->checks()->problems($this->request(['dedicated_ipv4' => false])));
+    }
+
     public function test_the_problem_list_is_a_list(): void
     {
         $env = new FakeProvisionEnvironment();
@@ -209,6 +229,9 @@ final class FakeProvisionEnvironment implements ProvisionEnvironment
     /** @var list<string> */
     public array $takenDomains = [];
 
+    /** @var list<int> */
+    public array $freeFamilies = [];
+
     public function usernameRowExists(string $username): bool
     {
         return in_array($username, $this->existingUsernames, true);
@@ -227,5 +250,10 @@ final class FakeProvisionEnvironment implements ProvisionEnvironment
     public function domainOrAliasExists(string $domain): bool
     {
         return in_array($domain, $this->takenDomains, true);
+    }
+
+    public function freeDedicatedIpExists(int $family): bool
+    {
+        return in_array($family, $this->freeFamilies, true);
     }
 }

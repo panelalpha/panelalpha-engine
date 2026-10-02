@@ -153,6 +153,38 @@ class SidecarEngineResolutionTest extends TestCase
         $this->assertNotSame('postgres', SidecarEngine::resolve('reports', $service));
     }
 
+    /** The server's own setting for where root may log in from; not a client's address. */
+    #[DataProvider('mysqlServersDeclaringRootHost')]
+    public function test_a_server_setting_named_like_a_host_is_not_a_client_marker(array $service): void
+    {
+        $this->assertSame('mysql', SidecarEngine::resolve('db', $service));
+        $this->assertTrue(SidecarEngine::isKnownDatastore('db', $service));
+    }
+
+    /** @return array<string, array{array<string, mixed>}> */
+    public static function mysqlServersDeclaringRootHost(): array
+    {
+        $env = ['MYSQL_ROOT_PASSWORD' => 'x', 'MYSQL_DATABASE' => 'app', 'MYSQL_USER' => 'u', 'MYSQL_PASSWORD' => 'p'];
+
+        return [
+            'repo build' => [['build' => './docker/mysql', 'environment' => $env + ['MYSQL_ROOT_HOST' => '%']]],
+            'unrecognised image' => [[
+                'image' => 'container-registry.oracle.com/mysql/community-server:8.4',
+                'environment' => $env + ['MYSQL_ROOT_HOST' => '%'],
+            ]],
+            'mariadb names' => [['build' => '.', 'environment' => [
+                'MARIADB_ROOT_PASSWORD' => 'x', 'MARIADB_USER' => 'u', 'MARIADB_PASSWORD' => 'p', 'MARIADB_ROOT_HOST' => '%',
+            ]]],
+        ];
+    }
+
+    public function test_a_real_host_setting_still_marks_a_mysql_client(): void
+    {
+        $client = ['build' => '.', 'environment' => ['MYSQL_HOST' => 'db', 'MYSQL_USER' => 'u', 'MYSQL_PASSWORD' => 'p']];
+
+        $this->assertFalse(SidecarEngine::isKnownDatastore('app', $client));
+    }
+
     // --- layer 3: ports ------------------------------------------------
 
     public function test_an_unknown_image_is_recognised_by_the_port_it_declares(): void
@@ -496,7 +528,7 @@ class SidecarEngineResolutionTest extends TestCase
                     $this->assertIsString($entry[$optional], "{$engine}.{$optional}");
                 }
             }
-            foreach (['aliases', 'init_vars'] as $list) {
+            foreach (['aliases', 'init_vars', 'server_settings'] as $list) {
                 if (isset($entry[$list])) {
                     $this->assertIsArray($entry[$list], "{$engine}.{$list}");
                 }

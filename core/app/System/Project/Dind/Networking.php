@@ -65,11 +65,15 @@ class Networking
             return;
         }
 
-        // Replace legacy generated rows (*:appPort → localhost) with domain :80/:443 rules.
-        ProxyRule::forUser($user->username)->where('is_generated', true)->delete();
-
-        $this->createDomainProxyRule($user->username, $fqdn, 80, $primaryPort, true);
-        $this->createDomainProxyRule($user->username, $fqdn, 443, $primaryPort, true);
+        // Update the domain's :80/:443 rules in place, replacing legacy generated rows
+        // (*:appPort → localhost); a delete-and-recreate would drop an operator's edits.
+        try {
+            ProxyRule::syncGeneratedHttpPair($user->username, $fqdn, $primaryPort);
+        } catch (\Exception $e) {
+            Log::warning("Failed to create proxy rules for {$user->username} {$fqdn}", [
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         if ($domain !== null && $domain->hasTunnels()) {
             try {

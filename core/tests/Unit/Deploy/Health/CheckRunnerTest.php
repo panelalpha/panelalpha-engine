@@ -211,6 +211,20 @@ class CheckRunnerTest extends TestCase
         $this->assertStringContainsString('running container', $app['detail']);
     }
 
+    /** A proxy with no upstream answers 502/503/504; a fast 500 is the app's own. */
+    public function test_a_fast_500_blames_the_app_not_a_proxy(): void
+    {
+        $this->write('index.html');
+
+        $fast = $this->check($this->probeTimed(500, 'Internal Server Error', 0.001), 'no-server-error');
+        $this->assertSame(CheckResult::STATUS_FAIL, $fast['status']);
+        $this->assertSame('Read the application log.', $fast['fix']);
+        $this->assertStringNotContainsString('proxy', $fast['detail']);
+
+        $untimed = $this->check($this->probe(500, 'Internal Server Error'), 'no-server-error');
+        $this->assertSame('Read the application log.', $untimed['fix']);
+    }
+
     /**
      * A silent application is the port probe's finding and it has already
      * been reported. Asking content questions of a response nobody received

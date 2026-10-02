@@ -59,6 +59,8 @@ return [
         'unambiguous_port' => true,
         'driver' => 'mysql',
         'init_vars' => ['MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD'],
+        // Read by the server itself (hosts root may log in from), though named like a client's.
+        'server_settings' => ['MYSQL_ROOT_HOST', 'MARIADB_ROOT_HOST'],
         'init_password' => [
             'passwords' => ['MYSQL_ROOT_PASSWORD', 'MARIADB_ROOT_PASSWORD'],
             'waivers' => [

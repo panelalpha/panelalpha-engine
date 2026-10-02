@@ -26,6 +26,7 @@ use App\Models\User;
 use App\Rules\ProjectName as ProjectNameRule;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -329,12 +330,12 @@ class ProjectCreator
             ],
         ]), $nameField);
 
-        if ($dedicatedIpv4) {
-            $user->assignFreeDedicatedIpv4();
+        if ($dedicatedIpv4 && !$user->assignFreeDedicatedIpv4()) {
+            self::dropUnassignedDedicatedIp($user, 'dedicated_ipv4');
         }
 
-        if ($dedicatedIpv6) {
-            $user->assignFreeDedicatedIpv6();
+        if ($dedicatedIpv6 && !$user->assignFreeDedicatedIpv6()) {
+            self::dropUnassignedDedicatedIp($user, 'dedicated_ipv6');
         }
 
         // The public name was bought before the account existed; this is the
@@ -380,5 +381,18 @@ class ProjectCreator
             }
             throw $e;
         }
+    }
+
+    /**
+     * ProvisionChecks refused a create with no free address, so only a race
+     * lands here: record that the project has none rather than report one.
+     */
+    private static function dropUnassignedDedicatedIp(User $user, string $key): void
+    {
+        $details = $user->getDetails();
+        $details[$key] = false;
+        $user->details = $details;
+        $user->save();
+        Log::warning("No free address left for {$key} of {$user->username}; created without one");
     }
 }
