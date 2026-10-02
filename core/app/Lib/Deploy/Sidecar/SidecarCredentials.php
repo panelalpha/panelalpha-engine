@@ -12,6 +12,9 @@ use App\Lib\Deploy\Compose\ComposePlaceholders;
  */
 class SidecarCredentials
 {
+    /** `${NAME}` with no default or `:?`; `$${...}` is compose's escape. */
+    private const BARE_REFERENCE = '/(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)\}/';
+
     /**
      * @param array<string, mixed> $service
      * @param list<int> $observedPorts ports the image declares, when known
@@ -91,6 +94,9 @@ class SidecarCredentials
 
         $username = self::resolvedComposeValue((string) ($credentials['username'] ?? ''), '');
         $password = self::resolvedComposeValue((string) ($credentials['password'] ?? ''), '');
+        if ($password === '') {
+            $password = self::requirePassOf($service['command'] ?? null);
+        }
         $database = self::resolvedComposeValue((string) ($credentials['database'] ?? ''), '');
 
         $env = [$prefix . '_HOST' => $name];
@@ -161,6 +167,30 @@ class SidecarCredentials
     }
 
     /**
+     * Secret-looking keys that {@see envFromWorkstationAppService()} would copy
+     * verbatim: a literal already sitting in the repository's compose file, the
+     * same for every deploy of it, not a per-account `${VAR:?}` reference.
+     *
+     * @param array<string, mixed> $service
+     * @return list<string>
+     */
+    public static function publishedSecretsIn(array $service): array
+    {
+        $out = [];
+        foreach (self::environmentMap($service['environment'] ?? null) as $key => $value) {
+            $key = trim((string) $key);
+            if ($key === '' || ComposeEnvironment::isReserved($key) || str_contains($value, '${')) {
+                continue;
+            }
+            if (trim($value) !== '' && ComposePlaceholders::isSecretKey($key)) {
+                $out[] = $key;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * A kept sidecar's `environment:` with `${VAR:?}` credentials settled as
      * the harvested app env settles them, so both sides agree.
      */
@@ -177,6 +207,74 @@ class SidecarCredentials
         }
 
         return $changed ? $map : $environment;
+    }
+
+    /** Redis's `--requirepass <literal>`, so its URL carries the password; '' otherwise. */
+    private static function requirePassOf(mixed $command): string
+    {
+        $text = is_array($command) ? implode(' ', array_filter($command, 'is_string')) : (is_string($command) ? $command : '');
+        if (preg_match('/--requirepass[ =]+("?)([^\s"]+)\1/', $text, $m) !== 1) {
+            return '';
+        }
+        $password = self::resolvedComposeValue($m[2], '');
+
+        return str_contains($password, '$') ? '' : $password;
+    }
+
+    /**
+     * A kept sidecar's bare `${SECRET}` in `environment:` or `command:` that
+     * nothing will set, replaced with a generated value. Compose would pass an
+     * empty string: redis then refuses `--requirepass` with no argument and
+     * meilisearch refuses an empty master key in production.
+     *
+     * @param array<string, mixed> $service
+     * @param array<string, list<?string>|string> $env what compose may interpolate the file with
+     * @return array{0: array<string, mixed>, 1: array<string, string>} the service, NAME => value generated
+     */
+    public static function withBareSecretsFilled(array $service, string $seed, array $env): array
+    {
+        $generated = [];
+        $fill = static function (string $text, ?string $key) use ($seed, $env, &$generated): string {
+            return (string) preg_replace_callback(
+                self::BARE_REFERENCE,
+                static function (array $m) use ($key, $seed, $env, &$generated): string {
+                    $name = $m[1];
+                    if (!ComposePlaceholders::isSecretKey($name) && ($key === null || !ComposePlaceholders::isSecretKey($key))) {
+                        return $m[0];
+                    }
+                    foreach ((array) ($env[$name] ?? []) as $candidate) {
+                        if (is_string($candidate) && trim($candidate) !== '') {
+                            return $m[0];
+                        }
+                    }
+
+                    return $generated[$name] ??= ComposePlaceholders::requiredSecretValue($name, $seed);
+                },
+                $text
+            );
+        };
+
+        if (isset($service['environment']) && is_array($service['environment'])) {
+            $map = self::environmentMap($service['environment']);
+            $filled = [];
+            foreach ($map as $key => $value) {
+                $filled[$key] = $fill((string) $value, (string) $key);
+            }
+            if ($filled !== $map) {
+                $service['environment'] = $filled;
+            }
+        }
+        $command = $service['command'] ?? null;
+        if (is_string($command)) {
+            $service['command'] = $fill($command, null);
+        } elseif (is_array($command)) {
+            $service['command'] = array_map(
+                static fn (mixed $part): mixed => is_string($part) ? $fill($part, null) : $part,
+                $command
+            );
+        }
+
+        return [$service, $generated];
     }
 
     private static function harvestedValue(string $key, string $value, ?string $seed): ?string

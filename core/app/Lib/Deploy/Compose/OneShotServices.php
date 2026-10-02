@@ -13,6 +13,9 @@ final class OneShotServices
 {
     private const COMPLETED = 'service_completed_successfully';
 
+    /** Commands that fix up files and return; a script of only these ends. */
+    private const FINITE_COMMANDS = ['chown', 'chmod', 'chgrp', 'mkdir', 'cp', 'touch', 'ln', 'rm', 'install', 'echo', 'true'];
+
     /**
      * @param array<string, mixed> $compose
      * @return list<string>
@@ -33,7 +36,8 @@ final class OneShotServices
             $completes = $waitedOn !== [] && array_unique($waitedOn) === [self::COMPLETED];
             if ($completes
                 || ($waitedOn === [] && (self::isBaseService($name, $service, $services)
-                    || self::isJob($name, $service)))) {
+                    || self::isJob($name, $service)
+                    || self::runsOnlyFileSetup($service)))) {
                 $oneShot[] = $name;
             }
         }
@@ -93,6 +97,36 @@ final class OneShotServices
     private static function isJob(string $name, array $service): bool
     {
         return ServiceRole::isJobService($name, $service);
+    }
+
+    /**
+     * Baserow's `volume-permissions-fixer` runs `chown 9999:9999 -R /baserow/media`
+     * and exits 0. Only a command made of file-setup steps, with no port or healthcheck.
+     *
+     * @param array<string, mixed> $service
+     */
+    private static function runsOnlyFileSetup(array $service): bool
+    {
+        foreach (['ports', 'expose', 'healthcheck'] as $key) {
+            if (!empty($service[$key])) {
+                return false;
+            }
+        }
+        $command = trim(ComposeCommand::asString($service['entrypoint'] ?? null) . ' '
+            . ComposeCommand::asString($service['command'] ?? null));
+        $command = (string) preg_replace('#^(/bin/|/usr/bin/)?(ba)?sh\s+-c\s+#', '', $command);
+        $command = trim($command, " \t\n\"'");
+        if ($command === '') {
+            return false;
+        }
+        foreach (preg_split('/&&?|\|\|?|;|\n/', $command) ?: [] as $step) {
+            $word = basename(strtok(trim($step), " \t") ?: '');
+            if (trim($step) !== '' && !in_array($word, self::FINITE_COMMANDS, true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

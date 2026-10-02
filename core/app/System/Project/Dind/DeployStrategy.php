@@ -16,6 +16,8 @@ use App\System\Project\Dind\Strategy\RailpackStrategy;
 use App\System\Project\Dind\Strategy\RubyStrategy;
 use App\System\Project\Dind\Strategy\UserComposeStrategy;
 use App\Lib\Deploy\Compose\ComposeEnvironment;
+use App\Lib\Deploy\Compose\ComposeOverride;
+use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\DeployCompose;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Strategies;
@@ -194,6 +196,7 @@ class DeployStrategy
      */
     public function bootstrap(?AppConfig $appConfig, string $projectDir, ?string $chown): void
     {
+        $this->userCompose()->noteRepositoryOverride($projectDir);
         $this->appConfigBootstrap()->run($appConfig, $projectDir, $chown);
     }
 
@@ -283,6 +286,39 @@ class DeployStrategy
         }
 
         $this->railpack()->applyFallback($projectDir, $chown, $sourceLabel);
+    }
+
+    /**
+     * An app config's override may name a service the run file no longer has,
+     * with nothing to build it from; compose would refuse the whole project.
+     */
+    public function dropUndefinedOverrideServices(?string $chown): void
+    {
+        $override = $this->dind->userAppComposeOverridePath();
+        $fs = $this->dind->system()->filesystem();
+        if (!$fs->fileExists($override)) {
+            return;
+        }
+        $defined = [];
+        foreach ($this->dind->userAppComposeFiles() as $file) {
+            if ($file === $override || !$fs->fileExists($file)) {
+                continue;
+            }
+            $services = ComposeYaml::parse($fs->fileGetContents($file))['services'] ?? null;
+            foreach (is_array($services) ? array_keys($services) : [] as $name) {
+                $defined[] = (string) $name;
+            }
+        }
+        $trimmed = ComposeOverride::withoutUndefinedServices($fs->fileGetContents($override), $defined);
+        if ($trimmed['dropped'] === [] || $trimmed['yaml'] === null) {
+            return;
+        }
+        foreach ($trimmed['dropped'] as $name) {
+            $this->dind->shell()->logger()?->warn(
+                "Not layering service {$name} from the app config's compose override: the application has no such service, and the override gives it no image or build"
+            );
+        }
+        $fs->filePutContents($override, $trimmed['yaml'], $chown, '644');
     }
 
     /**

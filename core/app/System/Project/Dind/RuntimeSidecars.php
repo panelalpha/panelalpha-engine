@@ -5,6 +5,7 @@ namespace App\System\Project\Dind;
 use App\System\Project\Dind as DindProject;
 use App\Lib\Deploy\Compose\ComposeHarden;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
+use App\Lib\Deploy\Compose\RuntimeSidecars as ComposeSidecars;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Compose\ServiceDependencies;
 use App\Lib\Deploy\Sidecar\EnvSidecars;
@@ -70,12 +71,18 @@ class RuntimeSidecars
                 $this->dind->userModel()->username,
                 $this->dind->userAppDirPath()
             );
+            $this->logDroppedProxies($extracted);
             if ($extracted['services'] !== []) {
                 $names = implode(', ', array_keys($extracted['services']));
                 $this->dind->shell()->logger()?->info("Keeping runtime services from compose: {$names}");
                 foreach ($extracted['dropped_mounts'] ?? [] as $mount) {
                     $this->dind->shell()->logger()?->info("Dropped the bind {$mount}: installed dependencies are not in a deployment's checkout");
                 }
+                $this->warnOfPublishedSecrets($extracted['published_secrets'] ?? []);
+                foreach ($extracted['replaced_mounts'] ?? [] as $mount) {
+                    $this->dind->shell()->logger()?->info("Moved the datastore bind {$mount} to a named volume: its data does not belong in the checkout");
+                }
+                $this->logHardeningRemovals($extracted);
 
                 return $extracted;
             }
@@ -113,6 +120,7 @@ class RuntimeSidecars
      */
     private function fromTemplates(string $projectDir, array $candidates, string $note = ''): ?array
     {
+        $rootBuildNames = $this->rootBuildNames($projectDir);
         foreach ($candidates as $candidate) {
             $raw = $this->dind->projectTree()->read($projectDir . '/' . $candidate);
             if ($raw === null) {
@@ -128,19 +136,60 @@ class RuntimeSidecars
                 $this->passwords(),
                 $this->dind->environment()->forInterpolation(),
                 $this->dind->userModel()->username,
-                $this->dind->userAppDirPath()
+                $this->dind->userAppDirPath(),
+                $rootBuildNames
             );
+            $this->logDroppedProxies($extracted);
             if ($extracted['services'] !== []) {
                 $names = implode(', ', array_keys($extracted['services']));
                 $this->dind->shell()->logger()?->info(
                     "Adding backing services described in {$candidate}{$note}: {$names}"
                 );
+                $this->warnOfPublishedSecrets($extracted['published_secrets'] ?? []);
+                $this->logHardeningRemovals($extracted);
 
                 return $extracted;
             }
         }
 
         return null;
+    }
+
+    /**
+     * A secret-like variable harvested with its literal value still tells
+     * every deploy of this repository the same thing an attacker can already
+     * read from it.
+     *
+     * @param array<string, list<string>> $byService
+     */
+    private function warnOfPublishedSecrets(array $byService): void
+    {
+        foreach ($byService as $service => $keys) {
+            $vars = implode(', ', $keys);
+            $this->dind->shell()->logger()?->warn(
+                "Compose service {$service} sets {$vars} to a literal value: it is published in the repository and shared by every deploy of it"
+            );
+        }
+    }
+
+    /**
+     * @param array{dropped_proxies?: list<string>} $extracted
+     */
+    private function logDroppedProxies(array $extracted): void
+    {
+        foreach ($extracted['dropped_proxies'] ?? [] as $proxy) {
+            $this->dind->shell()->logger()?->info("Dropped service {$proxy}: the engine's proxy routes traffic to this app");
+        }
+    }
+
+    /**
+     * @param array{hardening_removed?: list<string>} $extracted
+     */
+    private function logHardeningRemovals(array $extracted): void
+    {
+        foreach ($extracted['hardening_removed'] ?? [] as $what) {
+            $this->dind->shell()->logger()?->warn(ComposeHarden::REMOVED_SOURCE . ": {$what}");
+        }
     }
 
     /**
@@ -407,6 +456,26 @@ class RuntimeSidecars
         $repoUrl = (string) $this->dind->userModel()->getGitRepo();
 
         return $repoUrl === '' ? null : GitUrl::ownerAndRepo($repoUrl);
+    }
+
+    /**
+     * What the repository's compose files call the app they build from its
+     * root, so a template naming it is not started beside our build without
+     * a repository URL to match (an archive or upload deploy).
+     *
+     * @return list<string>
+     */
+    private function rootBuildNames(string $projectDir): array
+    {
+        $names = [];
+        foreach (array_unique([...Paths::composeFileCandidates(), ...self::exampleComposeFilenames($projectDir)]) as $candidate) {
+            $raw = $this->dind->projectTree()->read($projectDir . '/' . $candidate);
+            if ($raw !== null) {
+                $names = [...$names, ...ComposeSidecars::rootBuildServiceNames($raw)];
+            }
+        }
+
+        return array_values(array_unique($names));
     }
 
     /**

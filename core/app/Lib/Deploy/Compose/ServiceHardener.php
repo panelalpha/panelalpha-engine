@@ -128,9 +128,22 @@ final class ServiceHardener
         '/home',
         '/root',
         '/usr',
+        // usr-merged: symlinks into /usr, and Docker follows a bind source's symlink.
+        '/bin',
+        '/sbin',
+        '/lib',
+        '/lib32',
+        '/lib64',
+        '/libx32',
         '/opt',
         '/var',
     ];
+
+    /**
+     * The account's hard RLIMIT_NOFILE (Docker's default, measured in an
+     * account). runc refuses more: "error setting rlimit type 7".
+     */
+    private const MAX_NOFILE = 524288;
 
     private const NODE_COMMAND_PATTERN = '/\b(node|nodejs|npm|npx|pnpm|yarn|bun)\b/';
 
@@ -141,6 +154,9 @@ final class ServiceHardener
     private const DATABASE_CPUS = '0.50';
 
     private const APPLICATION_CPUS = '0.75';
+
+    /** Grace a CPU-capped service's own healthcheck gets when its author gave none. */
+    private const CAPPED_START_PERIOD = '60s';
 
     // 256 starved multi-daemon images (a supervisor plus several daemons and a
     // forked plugin per check exhausted it silently); 1024 clears them and still
@@ -494,6 +510,7 @@ final class ServiceHardener
         }
         $service = self::withSafeCapabilities($service);
         $service = self::withoutMemlockUlimit($service);
+        $service = self::withNofileWithinAccount($service);
         $service = self::withNamespacedSysctls($service);
         if (($service['network_mode'] ?? null) === 'host') {
             unset($service['network_mode']);
@@ -517,9 +534,29 @@ final class ServiceHardener
     }
 
     /**
+     * The service's mounts {@see withoutEscapes()} removes, as written.
+     *
+     * @param array<string, mixed> $service
+     * @param array<string, list<?string>|string> $env
+     * @return list<string>
+     */
+    public static function forbiddenMounts(array $service, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
+    {
+        $forbidden = [];
+        foreach (is_array($service['volumes'] ?? null) ? $service['volumes'] : [] as $volume) {
+            if (self::isForbiddenMount($volume, $env, $accountUser, $projectDir)) {
+                $forbidden[] = is_string($volume) ? $volume : (string) json_encode($volume, JSON_UNESCAPED_SLASHES);
+            }
+        }
+
+        return $forbidden;
+    }
+
+    /**
      * Top-level secrets and configs whose `file:` is a forbidden source, or
      * interpolates to one, removed: Compose bind-mounts that file into every
-     * service that names the entry.
+     * service that names the entry. The services' references to a removed
+     * entry go too, or Compose refuses the file as "refers to undefined secret".
      *
      * @param array<string, mixed> $compose
      * @param array<string, list<?string>|string> $env
@@ -536,21 +573,64 @@ final class ServiceHardener
             if (!is_array($entries)) {
                 continue;
             }
-            $before = count($removed);
+            $names = [];
             foreach ($entries as $name => $entry) {
                 $entry = $entry instanceof TaggedValue ? $entry->getValue() : $entry;
                 $file = is_array($entry) ? ($entry['file'] ?? null) : null;
                 if (is_string($file) && self::isForbiddenSourceIn(self::asPath($file), $env, $accountUser, $projectDir)) {
                     unset($entries[$name]);
+                    $names[] = (string) $name;
                     $removed[] = rtrim($section, 's') . " {$name}: file {$file}";
                 }
             }
-            if (count($removed) > $before) {
+            if ($names !== []) {
                 $compose[$section] = $tag === null ? $entries : new TaggedValue($tag, $entries);
+                $compose = self::withoutReferencesTo($compose, $section, $names);
             }
         }
 
         return [$compose, $removed];
+    }
+
+    /**
+     * Each service's `secrets:`/`configs:` without the named entries, in both
+     * the short (`- pw`) and the long (`- source: pw`) form.
+     *
+     * @param array<string, mixed> $compose
+     * @param list<string> $names
+     * @return array<string, mixed>
+     */
+    private static function withoutReferencesTo(array $compose, string $section, array $names): array
+    {
+        if (!is_array($compose['services'] ?? null)) {
+            return $compose;
+        }
+        foreach ($compose['services'] as $serviceName => $service) {
+            $serviceTag = $service instanceof TaggedValue ? $service->getTag() : null;
+            $service = $service instanceof TaggedValue ? $service->getValue() : $service;
+            $list = is_array($service) ? ($service[$section] ?? null) : null;
+            $listTag = $list instanceof TaggedValue ? $list->getTag() : null;
+            $list = $list instanceof TaggedValue ? $list->getValue() : $list;
+            if (!is_array($list)) {
+                continue;
+            }
+            $kept = array_values(array_filter($list, static function (mixed $ref) use ($names): bool {
+                $source = is_array($ref) ? ($ref['source'] ?? null) : $ref;
+
+                return !is_string($source) || !in_array($source, $names, true);
+            }));
+            if (count($kept) === count($list)) {
+                continue;
+            }
+            if ($kept === []) {
+                unset($service[$section]);
+            } else {
+                $service[$section] = $listTag === null ? $kept : new TaggedValue($listTag, $kept);
+            }
+            $compose['services'][$serviceName] = $serviceTag === null ? $service : new TaggedValue($serviceTag, $service);
+        }
+
+        return $compose;
     }
 
     /**
@@ -586,6 +666,38 @@ final class ServiceHardener
         }
 
         return $service;
+    }
+
+    /**
+     * `nofile` above the account's own hard limit lowered to it, as the
+     * memlock request is dropped: the service gets what it could have anyway
+     * instead of a raw OCI error. -1 (unlimited) counts as above.
+     *
+     * @param array<string, mixed> $service
+     * @return array<string, mixed>
+     */
+    private static function withNofileWithinAccount(array $service): array
+    {
+        $nofile = is_array($service['ulimits'] ?? null) ? ($service['ulimits']['nofile'] ?? null) : null;
+        if (is_array($nofile)) {
+            foreach (['soft', 'hard'] as $bound) {
+                if (isset($nofile[$bound]) && is_numeric($nofile[$bound])) {
+                    $nofile[$bound] = self::nofileWithinAccount((int) $nofile[$bound]);
+                }
+            }
+        } elseif (is_numeric($nofile)) {
+            $nofile = self::nofileWithinAccount((int) $nofile);
+        } else {
+            return $service;
+        }
+        $service['ulimits']['nofile'] = $nofile;
+
+        return $service;
+    }
+
+    private static function nofileWithinAccount(int $value): int
+    {
+        return $value < 0 || $value > self::MAX_NOFILE ? self::MAX_NOFILE : $value;
     }
 
     /**
@@ -790,11 +902,33 @@ final class ServiceHardener
     private static function withProcessLimits(string $name, array $service): array
     {
         if (!isset($service['cpus']) && !isset($service['cpu_count'])) {
+            if (self::needsStartPeriodUnderCap($service)) {
+                $service['healthcheck']['start_period'] = self::CAPPED_START_PERIOD;
+            }
             $service['cpus'] = self::isDatabase($name, $service) ? self::DATABASE_CPUS : self::APPLICATION_CPUS;
         }
         $service['pids_limit'] ??= self::PIDS_LIMIT;
 
         return $service;
+    }
+
+    /**
+     * A healthcheck tuned for an unthrottled container, on a service the CPU cap
+     * will slow down: Tiledesk's RabbitMQ (`retries: 1`, no start period) was
+     * never healthy under 0.5 CPU. Probes failing in a start period do not count.
+     *
+     * @param array<string, mixed> $service
+     */
+    public static function needsStartPeriodUnderCap(array $service): bool
+    {
+        $check = $service['healthcheck'] ?? null;
+        if (isset($service['cpus']) || isset($service['cpu_count']) || !is_array($check)
+            || !empty($check['disable']) || isset($check['start_period'])) {
+            return false;
+        }
+        $test = $check['test'] ?? null;
+
+        return !empty($test) && strtoupper(is_array($test) ? (string) ($test[0] ?? '') : (string) $test) !== 'NONE';
     }
 
     /**

@@ -9,6 +9,7 @@ use App\Lib\Deploy\DeployLog\DependencyFailure;
 use App\Lib\Deploy\Dind\DindBuildStorage;
 use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\Platform\PlatformManifest;
+use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Platform\Runtime\HostRunProject;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
@@ -52,6 +53,9 @@ final class AppLauncher
         $skipBuild = DeployCompose::skipBuild($strategy, $runtime);
 
         $this->preloadImages($strategy, $runtime, $skipBuild, $model->getDeployImage());
+        if ($strategy === Strategies::COMPOSE || $strategy === Strategies::PAEMD) {
+            (new BindSourceOwners($this->project))->apply();
+        }
 
         $command = $this->project->userAppComposeCommand(['up', '-d', '--remove-orphans']);
         if (DeployCompose::forceRecreate($strategy, $runtime)) {

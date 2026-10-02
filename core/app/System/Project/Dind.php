@@ -361,6 +361,16 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
+     * The files `docker compose` is run with, in layering order.
+     *
+     * @return list<string>
+     */
+    public function userAppComposeFiles(): array
+    {
+        return $this->paths()->composeFiles();
+    }
+
+    /**
      * @param list<string> $rest
      * @return list<string>
      */

@@ -69,6 +69,67 @@ final class ComposeOverride
     }
 
     /**
+     * The override without its entries for services the base file no longer
+     * has: compose would bring each back as a fragment with no image (Appwrite's
+     * `traefik:` with only `command:`). A file naming none is returned as is.
+     *
+     * @param list<string> $names
+     * @return array{yaml: string, dropped: list<string>}
+     */
+    public static function withoutServices(string $raw, array $names): array
+    {
+        $parsed = $names === [] ? null : self::parse($raw);
+        $dropped = [];
+        foreach (is_array($parsed['services'] ?? null) ? $names : [] as $name) {
+            if (array_key_exists($name, $parsed['services'])) {
+                unset($parsed['services'][$name]);
+                $dropped[] = $name;
+            }
+        }
+
+        return ['yaml' => $dropped === [] ? $raw : Yaml::dump($parsed, 6, 2), 'dropped' => $dropped];
+    }
+
+    /**
+     * The override without the services none of the files under it define and
+     * it gives no image or build: compose refuses the whole project for one.
+     * A recipe written for a service the engine no longer keeps is the case.
+     *
+     * @param list<string> $defined services the files layered under it define
+     * @return array{yaml: ?string, dropped: list<string>} yaml is null when the
+     *         file cannot be read; unchanged, byte for byte, when nothing is dropped
+     */
+    public static function withoutUndefinedServices(string $raw, array $defined): array
+    {
+        $parsed = self::parse($raw);
+        if ($parsed === null) {
+            return ['yaml' => null, 'dropped' => []];
+        }
+        $block = $parsed['services'] ?? null;
+        $tag = $block instanceof TaggedValue ? $block->getTag() : null;
+        $services = $block instanceof TaggedValue ? $block->getValue() : $block;
+        if (!is_array($services)) {
+            return ['yaml' => $raw, 'dropped' => []];
+        }
+        $dropped = [];
+        foreach ($services as $name => $service) {
+            $service = $service instanceof TaggedValue ? $service->getValue() : $service;
+            $own = is_array($service) && (isset($service['image']) || isset($service['build']) || isset($service['extends']));
+            if (!$own && !in_array((string) $name, $defined, true)) {
+                unset($services[$name]);
+                $dropped[] = (string) $name;
+            }
+        }
+        if ($dropped === []) {
+            return ['yaml' => $raw, 'dropped' => []];
+        }
+        // An empty array dumps as `{  }`, the empty map compose expects here.
+        $parsed['services'] = $tag === null ? $services : new TaggedValue($tag, $services);
+
+        return ['yaml' => Yaml::dump($parsed, 6, 2), 'dropped' => $dropped];
+    }
+
+    /**
      * Compose's `!reset` and `!override` tags are read, not rejected: a recipe
      * uses `ports: !reset []`, and a tag must not be a way around the check.
      *

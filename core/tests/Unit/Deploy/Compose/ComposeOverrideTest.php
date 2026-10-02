@@ -194,5 +194,33 @@ class ComposeOverrideTest extends TestCase
             'secret key: file ${KEY_FILE}',
         ], $result['removed']);
     }
-}
 
+    public function test_a_service_only_the_override_names_and_cannot_run_is_dropped(): void
+    {
+        // BookStack's recipe silences a `node` service the run file no longer has.
+        $raw = "services:\n  node:\n    entrypoint: [\"/bin/sh\", \"-c\", \"exit 0\"]\n    restart: \"no\"\n"
+            . "  app:\n    environment: { A: b }\n  cache:\n    image: redis:7\n";
+
+        $result = ComposeOverride::withoutUndefinedServices($raw, ['app', 'db']);
+
+        $this->assertSame(['node'], $result['dropped']);
+        $parsed = Yaml::parse((string) $result['yaml']);
+        $this->assertSame(['app', 'cache'], array_keys($parsed['services']));
+    }
+
+    public function test_an_override_whose_services_all_exist_is_returned_as_written(): void
+    {
+        $raw = "# keep me\nservices:\n  node:\n    restart: \"no\"\n";
+
+        $this->assertSame(['yaml' => $raw, 'dropped' => []], ComposeOverride::withoutUndefinedServices($raw, ['node', 'app']));
+    }
+
+    public function test_an_override_left_with_no_services_still_parses_as_a_map(): void
+    {
+        $result = ComposeOverride::withoutUndefinedServices("services:\n  node:\n    restart: \"no\"\n", ['app']);
+
+        $this->assertSame(['node'], $result['dropped']);
+        $this->assertSame(['services' => []], Yaml::parse((string) $result['yaml']));
+        $this->assertStringContainsString('{', (string) $result['yaml']);
+    }
+}

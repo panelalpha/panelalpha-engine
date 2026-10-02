@@ -128,4 +128,24 @@ class NamedVolumesTest extends TestCase
         $this->assertSame([], NamedVolumes::usedBy(['app' => ['image' => 'acme/app']], ['dbdata' => null]));
         $this->assertSame([], NamedVolumes::usedBy(['app' => ['volumes' => 'dbdata:/data']], ['dbdata' => null]));
     }
+
+    /** deemix mounts `${DEEMIX_CONFIG_PATH}:/config` and says to set it in the shell. */
+    public function test_an_unset_variable_mount_source_becomes_a_named_volume(): void
+    {
+        $compose = ['services' => ['deemix' => ['image' => 'ghcr.io/bambanah/deemix', 'volumes' => [
+            '${DEEMIX_CONFIG_PATH}:/config',
+            '${DEEMIX_MUSIC_PATH}:/downloads:rw',
+            '${SET_PATH}:/set',
+            '${WITH_DEFAULT:-./data}:/data',
+        ]]]];
+
+        $result = NamedVolumes::forUnsetSources($compose, ['SET_PATH' => ['./set']]);
+
+        $this->assertSame(
+            ['deemix-config-path:/config', 'deemix-music-path:/downloads:rw', '${SET_PATH}:/set', '${WITH_DEFAULT:-./data}:/data'],
+            $result['compose']['services']['deemix']['volumes']
+        );
+        $this->assertSame(['deemix-config-path' => null, 'deemix-music-path' => null], $result['compose']['volumes']);
+        $this->assertCount(2, $result['replaced']);
+    }
 }

@@ -109,11 +109,16 @@ class ProjectEnvironment
         }
 
         [$baseContents, $required] = $this->withComposeRequiredSecrets($baseContents, $overrides);
-        if ($required !== []) {
+        $requiredUrls = array_values(array_filter($required, ComposePlaceholders::isRequiredOwnUrlKey(...)));
+        $requiredSecrets = array_values(array_diff($required, $requiredUrls));
+        if ($requiredSecrets !== []) {
             $logger?->info(
                 'This project\'s compose file needs values nobody set. '
-                . 'Generated them for this account: ' . implode(', ', $required)
+                . 'Generated them for this account: ' . implode(', ', $requiredSecrets)
             );
+        }
+        if ($requiredUrls !== []) {
+            $logger?->info('Pointed the application address at its public URL: ' . implode(', ', $requiredUrls));
         }
 
         // 0600: a copy of .env after the prepare hook ran, so it can hold
@@ -249,12 +254,20 @@ class ProjectEnvironment
         $missing = ComposeRequiredEnv::missing(
             $files,
             $overrides + $env,
-            $this->dind->strategy()->secrets()->for('compose-placeholders')
+            $this->dind->strategy()->secrets()->for('compose-placeholders'),
+            fn (): ?string => self::httpUrl($this->dind->publicAppUrl())
         );
 
         return $missing === []
             ? [$contents, []]
             : [EnvFile::merge($contents ?? '', $missing), array_keys($missing)];
+    }
+
+    private static function httpUrl(?string $url): ?string
+    {
+        $url = rtrim(trim((string) $url), '/');
+
+        return preg_match('#^https?://#i', $url) === 1 ? $url : null;
     }
 
     /**

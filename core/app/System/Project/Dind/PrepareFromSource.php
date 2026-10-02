@@ -182,6 +182,7 @@ class PrepareFromSource
 
         $sourceLabel = $gitRepo !== null ? GitUrl::sanitize($gitRepo) : 'uploaded archive';
         $this->dind->strategy()->apply($decision, $appConfig, $projectDir, $chown, $sourceLabel);
+        $this->dind->strategy()->dropUndefinedOverrideServices($chown);
         $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
 
         if ($gitRepo !== null || is_dir($projectDir . '/.git')) {

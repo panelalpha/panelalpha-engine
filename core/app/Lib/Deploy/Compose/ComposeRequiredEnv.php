@@ -30,14 +30,24 @@ final class ComposeRequiredEnv
      * @param list<array{dir: string, yaml: string}> $files the compose file and
      *        everything it includes, each with its directory relative to the project
      * @param array<string, string> $env what `.env` (and the account) already set
+     * @param string|(\Closure(): ?string)|null $publicUrl the account's address, for a
+     *        required variable naming the app's own URL; a closure is asked only when one does
      * @return array<string, string> NAME => value, for the keys `.env` must gain
      */
-    public static function missing(array $files, array $env, string $seed): array
+    public static function missing(array $files, array $env, string $seed, string|\Closure|null $publicUrl = null): array
     {
         $needed = [];
+        $base64 = [];
+        $urls = [];
         foreach ($files as $file) {
-            foreach (self::requiredSecretNames($file['yaml']) as $name => $length) {
+            foreach (self::requiredOwnUrlNames($file['yaml']) as $name => $_) {
+                if (trim((string) ($env[$name] ?? '')) === '') {
+                    $urls[$name] = true;
+                }
+            }
+            foreach (self::requiredSecretNames($file['yaml']) as $name => [$length, $bytes]) {
                 $needed[$name] = max((int) ($needed[$name] ?? 0), $length);
+                $base64[$name] = max($base64[$name] ?? 0, $bytes);
             }
             foreach (self::datastorePasswordNames($file['yaml'], $file['dir'], $env) as $name) {
                 $needed[$name] ??= 0;
@@ -48,6 +58,12 @@ final class ComposeRequiredEnv
         }
 
         $out = [];
+        $publicUrl = $urls !== [] && $publicUrl instanceof \Closure ? $publicUrl() : $publicUrl;
+        if (is_string($publicUrl) && $publicUrl !== '') {
+            foreach (array_keys($urls) as $name) {
+                $out[(string) $name] = $publicUrl;
+            }
+        }
         foreach ($needed as $name => $length) {
             if (trim((string) ($env[$name] ?? '')) !== '') {
                 continue;
@@ -55,7 +71,7 @@ final class ComposeRequiredEnv
             // A user or database name gets the engine's usual `app`, as a kept
             // sidecar does ({@see SidecarCredentials::pinSidecarCredentials()}).
             $out[(string) $name] = $length !== false || ComposePlaceholders::isSecretKey((string) $name)
-                ? ComposePlaceholders::requiredSecretValue((string) $name, $seed, (int) $length)
+                ? ComposePlaceholders::requiredSecretValue((string) $name, $seed, (int) $length, $base64[$name] ?? 0)
                 : 'app';
         }
 
@@ -129,7 +145,7 @@ final class ComposeRequiredEnv
      * Required variables anywhere in the file that name a credential. A
      * required hostname or port is not something to invent.
      *
-     * @return array<string, int> name => the length its message asks for, or 0
+     * @return array<string, array{0: int, 1: int}> name => the hex length and base64 bytes its message asks for, or 0
      */
     private static function requiredSecretNames(string $yaml): array
     {
@@ -137,9 +153,30 @@ final class ComposeRequiredEnv
         $names = [];
         foreach ($m as $ref) {
             if (ComposePlaceholders::isSecretKey($ref[1])) {
-                // A message ComposePlaceholders cannot read whole gives no length, as there.
-                $hint = ($ref[3] ?? '') === '}' ? ComposePlaceholders::hintedLength($ref[2]) : 0;
-                $names[$ref[1]] = max($names[$ref[1]] ?? 0, $hint);
+                // A message ComposePlaceholders cannot read whole gives no hint, as there.
+                $message = ($ref[3] ?? '') === '}' ? $ref[2] : '';
+                $names[$ref[1]] = [
+                    max($names[$ref[1]][0] ?? 0, ComposePlaceholders::hintedLength($message)),
+                    max($names[$ref[1]][1] ?? 0, ComposePlaceholders::hintedBase64Bytes($message)),
+                ];
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * Required variables naming the app's own address (`${EGMA_BASE_URL:?}`).
+     *
+     * @return array<string, true>
+     */
+    private static function requiredOwnUrlNames(string $yaml): array
+    {
+        preg_match_all(self::REQUIRED_REFERENCE, $yaml, $m, PREG_SET_ORDER);
+        $names = [];
+        foreach ($m as $ref) {
+            if (ComposePlaceholders::isRequiredOwnUrlKey($ref[1])) {
+                $names[$ref[1]] = true;
             }
         }
 

@@ -88,6 +88,43 @@ YAML;
         $this->assertStringStartsWith(ComposePlaceholders::generatedSecret('SESSION_SECRET_KEY', self::SEED), $missing['SESSION_SECRET_KEY']);
     }
 
+    public function test_a_base64_byte_hint_writes_base64_of_that_many_bytes(): void
+    {
+        $yaml = <<<'YAML'
+services:
+  api:
+    build: .
+    environment:
+      ECOMGEN_MASTER_KEY: ${ECOMGEN_MASTER_KEY:?Set a base64-encoded 32-byte key in .env}
+YAML;
+
+        $missing = ComposeRequiredEnv::missing([['dir' => '', 'yaml' => $yaml]], [], self::SEED);
+
+        $this->assertSame(32, strlen((string) base64_decode($missing['ECOMGEN_MASTER_KEY'], true)));
+        $this->assertSame(
+            ComposePlaceholders::requiredSecret('ECOMGEN_MASTER_KEY', '${ECOMGEN_MASTER_KEY:?Set a base64-encoded 32-byte key in .env}', self::SEED),
+            $missing['ECOMGEN_MASTER_KEY']
+        );
+    }
+
+    public function test_a_required_own_url_is_written_as_the_public_url(): void
+    {
+        $yaml = <<<'YAML'
+services:
+  api:
+    environment:
+      EGMA_BASE_URL: ${EGMA_BASE_URL:?no default — the whole address a browser reaches egma at}
+      REDIS_URL: ${REDIS_URL:?set it}
+YAML;
+        $files = [['dir' => '', 'yaml' => $yaml]];
+
+        $missing = ComposeRequiredEnv::missing($files, [], self::SEED, static fn (): string => 'https://egma.example.test');
+
+        $this->assertSame(['EGMA_BASE_URL' => 'https://egma.example.test'], $missing);
+        $this->assertSame([], ComposeRequiredEnv::missing($files, ['EGMA_BASE_URL' => 'https://mine.test'], self::SEED, 'https://egma.example.test'));
+        $this->assertSame([], ComposeRequiredEnv::missing($files, [], self::SEED));
+    }
+
     public function test_a_value_already_set_is_left_alone(): void
     {
         $files = [['dir' => 'docker/compose', 'yaml' => self::OTS_SIMPLE]];

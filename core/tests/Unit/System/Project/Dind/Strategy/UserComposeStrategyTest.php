@@ -192,6 +192,20 @@ class UserComposeStrategyTest extends TestCase
         );
     }
 
+    /** deemix: `${DEEMIX_CONFIG_PATH}:/config` with nothing setting it, and compose rejected `:/config`. */
+    public function test_a_mount_from_an_unset_variable_becomes_a_named_volume_in_the_run_file(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $system = $this->stubbedSystem([$clientPath => "services:\n  deemix:\n    image: ghcr.io/bambanah/deemix:latest\n"
+            . "    ports:\n      - 6595:6595\n    volumes:\n      - \"\${DEEMIX_CONFIG_PATH}:/config\"\n"]);
+
+        (new UserComposeStrategy($this->stubbedDind($system, $clientPath)))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertSame(['deemix-config-path:/config'], $run['services']['deemix']['volumes']);
+        $this->assertArrayHasKey('deemix-config-path', $run['volumes']);
+    }
+
     public function test_the_clients_override_is_layered_as_a_hardened_copy_and_left_untouched(): void
     {
         $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
@@ -231,6 +245,49 @@ class UserComposeStrategyTest extends TestCase
         $this->assertSame(['${DATA_DIR:-./data}:/data'], $run['services']['app']['volumes']);
         $override = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_CLIENT_OVERRIDE]);
         $this->assertSame(['./x:/x'], $override['services']['app']['volumes']);
+    }
+
+    /** Appwrite's override sets only `command:` on the Traefik the run file just dropped. */
+    public function test_the_override_loses_a_service_the_run_file_dropped(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $overridePath = self::PROJECT_DIR . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
+        $system = $this->stubbedSystem([
+            $clientPath => "services:\n  traefik:\n    image: traefik:3.6\n    ports:\n      - 80:80\n"
+                . "  appwrite:\n    image: appwrite/appwrite:1.6\n    labels:\n      - traefik.enable=true\n",
+            $overridePath => "services:\n  traefik:\n    command:\n      - --providers.docker=true\n"
+                . "  appwrite:\n    environment:\n      - _APP_ENV=development\n",
+        ]);
+        $dind = $this->stubbedDind($system, $clientPath);
+
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $run = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE]);
+        $this->assertArrayNotHasKey('traefik', $run['services']);
+        $override = Yaml::parse($this->copiedTo[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_CLIENT_OVERRIDE]);
+        $this->assertSame(['appwrite'], array_keys($override['services']));
+    }
+
+    /** reiverr's override builds a `development` stage over the checkout; the base file runs a published image. */
+    public function test_a_workstation_override_is_not_layered(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $overridePath = self::PROJECT_DIR . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
+        $system = $this->stubbedSystem([
+            $clientPath => "services:\n  reiverr-frontend:\n    image: ghcr.io/aleksilassila/reiverr:latest\n    ports:\n      - 9494:9494\n",
+            $overridePath => "services:\n  reiverr-frontend:\n    volumes:\n      - ./:/usr/src/app/\n"
+                . "    build:\n      context: .\n      target: development\n",
+        ]);
+        $dind = $this->stubbedDind($system, $clientPath);
+
+        (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $this->assertArrayHasKey(self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE, $this->copiedTo);
+        // A copy that layers nothing: with no copy at all Paths::composeFiles()
+        // falls back to the raw override, and the development build is back.
+        $copy = self::PROJECT_DIR . '/' . EngineArtifacts::RUN_CLIENT_OVERRIDE;
+        $this->assertArrayHasKey($copy, $this->copiedTo);
+        $this->assertSame(['services' => []], Yaml::parse($this->copiedTo[$copy]));
     }
 
     public function test_services_the_clients_override_includes_are_hardened_in_the_copy(): void
@@ -284,6 +341,92 @@ class UserComposeStrategyTest extends TestCase
         $strategy($this->stubbedDind($this->stubbedSystem($files), $recipePath), $repoOverride)
             ->refreshRunFile(self::PROJECT_DIR, '1001:1001');
         $this->assertArrayHasKey($copyPath, $this->copiedTo, 'an override the recipe wrote is still layered');
+    }
+
+    /**
+     * The same Damselfly shape deployed as an archive: there is no git
+     * history, so what the repository shipped is the override as it stood
+     * before the app config ran.
+     */
+    public function test_without_git_the_override_from_before_the_app_config_decides(): void
+    {
+        $recipePath = self::PROJECT_DIR . '/' . EngineArtifacts::APP_CONFIG_COMPOSE;
+        $overridePath = self::PROJECT_DIR . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
+        $copyPath = self::PROJECT_DIR . '/' . EngineArtifacts::RUN_CLIENT_OVERRIDE;
+        $repoOverride = "version: \"3.4\"\nservices:\n  devonly.sidecar:\n    environment:\n      - X=1\n";
+        $recipe = "services:\n  app:\n    image: nginx:alpine\n";
+        $archive = fn (Dind $dind): UserComposeStrategy => new class ($dind) extends UserComposeStrategy {
+            protected function committedVersion(string $projectDir, string $relative): ?string
+            {
+                return null;
+            }
+        };
+
+        // The repository shipped it: noted before the app config, unchanged since.
+        $strategy = $archive($this->stubbedDind($this->stubbedSystem([$recipePath => $recipe, $overridePath => $repoOverride]), $recipePath));
+        $strategy->noteRepositoryOverride(self::PROJECT_DIR);
+        $strategy->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+        $this->assertArrayNotHasKey($copyPath, $this->copiedTo, "the repository's override is not layered over the recipe's file");
+
+        // The repository shipped none, so the one there now is the recipe's own.
+        $this->copiedTo = [];
+        $live = new \ArrayObject([$recipePath => $recipe]);
+        $strategy = $archive($this->stubbedDind($this->liveSystem($live), $recipePath));
+        $strategy->noteRepositoryOverride(self::PROJECT_DIR);
+        $live[$overridePath] = "services:\n  app:\n    environment:\n      - PUID=1001\n";
+        $strategy->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+        $this->assertArrayHasKey($copyPath, $this->copiedTo, 'an override the recipe wrote is still layered');
+    }
+
+    /** A system whose files can change between two calls, as a prepare hook changes them. */
+    private function liveSystem(\ArrayObject $files): System
+    {
+        $copiedTo = &$this->copiedTo;
+
+        return new class ($files, $copiedTo) extends System {
+            /** @param array<string, string> $copiedTo */
+            public function __construct(private \ArrayObject $files, private array &$copiedTo)
+            {
+            }
+
+            public function filesystem(): SystemFilesystem
+            {
+                return new class ($this, $this->files) extends SystemFilesystem {
+                    public function __construct(System $engine, private \ArrayObject $files)
+                    {
+                        parent::__construct($engine);
+                    }
+
+                    public function fileExists(string $path): bool
+                    {
+                        return isset($this->files[$path]);
+                    }
+
+                    public function fileGetContents(string $path): string
+                    {
+                        return $this->files[$path] ?? '';
+                    }
+                };
+            }
+
+            public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
+            {
+                $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
+                    $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
+                }
+
+                return '';
+            }
+
+            public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
+            {
+                $process = new Process(['php', '-r', 'exit(0);']);
+                $process->run();
+
+                return $process;
+            }
+        };
     }
 
     /**

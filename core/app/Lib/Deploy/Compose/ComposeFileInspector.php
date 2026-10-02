@@ -36,6 +36,14 @@ class ComposeFileInspector
     private const PROJECT_ROOT_SOURCES = ['.', './', '${PWD}', '$PWD'];
 
     /**
+     * Datastores and storage emulators with no sidecar dialect: never the
+     * application, which is all the sidecars-only test needs to know.
+     */
+    private const DIALECTLESS_DATASTORE_IMAGES = '#^(?:mcr\.microsoft\.com/(?:mssql/|azure-storage/azurite$|azure-sql-edge$)'
+        . '|(?:[^/]+/)*cockroachdb/cockroach$|(?:[^/]+/)*gvenzl/oracle-|container-registry\.oracle\.com/database/'
+        . '|(?:[^/]+/)*[^/]*oracle[^/]*-xe)#';
+
+    /**
      * Docker Compose V2 filename priority.
      *
      * @var list<string>
@@ -428,12 +436,25 @@ class ComposeFileInspector
             $identity = isset($service['ports']) ? array_diff_key($service, ['ports' => true, 'expose' => true]) : $service;
             if (!SidecarEngine::isKnownDatastore((string) $name, $identity)
                 && !DevServices::isDevSidecar((string) $name, $service)
+                && !self::isDialectlessDatastore($service)
             ) {
                 return false;
             }
         }
 
         return $seen > 0;
+    }
+
+    /** @param array<string, mixed> $service */
+    private static function isDialectlessDatastore(array $service): bool
+    {
+        $image = $service['image'] ?? null;
+        if (!is_string($image) || trim($image) === '') {
+            return false;
+        }
+        $repository = preg_replace('#:[^/]*$#', '', explode('@', strtolower(trim($image)), 2)[0]);
+
+        return preg_match(self::DIALECTLESS_DATASTORE_IMAGES, (string) $repository) === 1;
     }
 
     /**

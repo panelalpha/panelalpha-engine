@@ -35,6 +35,57 @@ class ComposeHardenTest extends TestCase
         $this->assertArrayNotHasKey('LEFTHOOK', $result['services']['app']['environment']);
     }
 
+    /**
+     * Every source the hardener drops is reported, so the deploy log can name
+     * it: Snagtime lost all 20 secrets with no line, then failed on
+     * "undefined secret app_database_url".
+     */
+    public function test_apply_reporting_names_every_source_it_removes(): void
+    {
+        $compose = [
+            'services' => [
+                'app' => [
+                    'image' => 'acme/app',
+                    'secrets' => ['app_database_url', 'ok'],
+                    'volumes' => ['/etc:/host-etc:ro', './data:/data', '/var/run/docker.sock:/var/run/docker.sock'],
+                ],
+                'db' => [
+                    'image' => 'postgres:16',
+                    'volumes' => [['type' => 'bind', 'source' => '/root', 'target' => '/r'], 'pgdata:/var/lib/postgresql/data'],
+                ],
+            ],
+            'secrets' => [
+                'app_database_url' => ['file' => '/etc/shadow'],
+                'ok' => ['file' => './secrets/ok'],
+            ],
+            'configs' => ['cfg' => ['file' => '/etc/app.conf']],
+            'volumes' => [
+                'pgdata' => ['driver_opts' => ['type' => 'none', 'o' => 'bind', 'device' => '/srv']],
+            ],
+        ];
+
+        $result = ComposeHarden::applyReporting($compose);
+
+        $this->assertSame([
+            'secret app_database_url: file /etc/shadow',
+            'config cfg: file /etc/app.conf',
+            'app: volume /etc:/host-etc:ro',
+            'app: volume /var/run/docker.sock:/var/run/docker.sock',
+            'db: volume {"type":"bind","source":"/root","target":"/r"}',
+            'volume pgdata: driver_opts',
+        ], $result['removed']);
+        $this->assertSame(['./data:/data'], $result['compose']['services']['app']['volumes']);
+        $this->assertSame(['ok'], array_keys($result['compose']['secrets']));
+        $this->assertSame($result['compose'], ComposeHarden::apply($compose));
+    }
+
+    public function test_apply_reporting_reports_nothing_for_a_clean_file(): void
+    {
+        $result = ComposeHarden::applyReporting(['services' => ['app' => ['image' => 'acme/app', 'volumes' => ['./data:/data']]]]);
+
+        $this->assertSame([], $result['removed']);
+    }
+
     /** The issue's compose: the service names `sock`, the volume binds the account's /var/run. */
     public function test_a_named_volume_that_binds_a_path_becomes_a_plain_volume(): void
     {
@@ -589,6 +640,25 @@ YAML
 
         $this->assertSame('no', $services['migrate']['restart']);
         $this->assertSame('unless-stopped', $services['app']['restart']);
+    }
+
+    /** Baserow's permissions fixer chowns a volume and exits 0; restarted, it looked like a crash loop. */
+    public function test_a_file_setup_command_nobody_waits_on_is_one_shot(): void
+    {
+        $compose = ['services' => [
+            'volume-permissions-fixer' => ['image' => 'bash:4.4', 'command' => 'chown 9999:9999 -R /baserow/media'],
+            'perms' => ['image' => 'alpine', 'command' => ['sh', '-c', 'mkdir -p /data/a && chown -R 1000 /data; chmod 755 /data']],
+            'watcher' => ['image' => 'alpine', 'command' => 'sh -c "chown -R 1000 /data && sleep infinity"'],
+            'tailer' => ['image' => 'alpine', 'command' => 'echo start | nc -lk 9000'],
+            'checked' => ['image' => 'bash:4.4', 'command' => 'chown 1 /x', 'healthcheck' => ['test' => ['CMD', 'true']]],
+            'backend' => ['image' => 'baserow/backend:1.30', 'ports' => ['8000:8000']],
+        ]];
+
+        $this->assertSame(['volume-permissions-fixer', 'perms'], ComposeHarden::oneShotServices($compose));
+        $services = ComposeHarden::apply($compose)['services'];
+        $this->assertSame('no', $services['volume-permissions-fixer']['restart']);
+        $this->assertSame('unless-stopped', $services['watcher']['restart']);
+        $this->assertSame('unless-stopped', $services['backend']['restart']);
     }
 
     public function test_a_single_web_service_keeps_its_restart_policy(): void

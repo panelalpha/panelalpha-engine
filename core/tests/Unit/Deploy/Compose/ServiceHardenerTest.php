@@ -260,6 +260,30 @@ class ServiceHardenerTest extends TestCase
         $this->assertArrayNotHasKey('ulimits', $service);
     }
 
+    public function test_a_nofile_ulimit_above_the_accounts_own_is_lowered_to_it(): void
+    {
+        // runc: "error setting rlimit type 7: operation not permitted" above 524288.
+        $service = ServiceHardener::harden('db', [
+            'image' => 'acme/db',
+            'ulimits' => ['nofile' => ['soft' => 65536, 'hard' => 1048576], 'nproc' => 65535],
+        ]);
+        $this->assertSame(['nofile' => ['soft' => 65536, 'hard' => 524288], 'nproc' => 65535], $service['ulimits']);
+
+        $this->assertSame(['nofile' => 524288], ServiceHardener::harden('a', ['image' => 'x', 'ulimits' => ['nofile' => -1]])['ulimits']);
+        $this->assertSame(['nofile' => 65536], ServiceHardener::harden('a', ['image' => 'x', 'ulimits' => ['nofile' => 65536]])['ulimits']);
+    }
+
+    /** /bin is a symlink to usr/bin in the account; Docker follows it, so /usr alone was walked around. */
+    public function test_usr_merged_symlinks_are_refused_like_usr(): void
+    {
+        $service = ServiceHardener::withoutEscapes([
+            'image' => 'acme/app',
+            'volumes' => ['/bin:/hb', '/sbin/:/s', '/lib:/l', '/lib64:/l64', ['type' => 'bind', 'source' => '/lib32', 'target' => '/l32'], '/binaries:/ok'],
+        ]);
+
+        $this->assertSame(['/binaries:/ok'], $service['volumes']);
+    }
+
     public function test_every_service_may_ping_as_a_non_root_user(): void
     {
         // The account's daemon runs in a user namespace and skips Docker's
@@ -499,6 +523,34 @@ class ServiceHardenerTest extends TestCase
         $this->assertSame($kept, $service['volumes']);
     }
 
+    public function test_a_removed_secret_or_config_is_no_longer_referenced_by_a_service(): void
+    {
+        [$compose, $removed] = ServiceHardener::withoutUnsafeFileSources([
+            'services' => [
+                'app' => [
+                    'image' => 'nginx:alpine',
+                    'secrets' => ['pw', ['source' => 'pw', 'target' => 'pw2'], 'token'],
+                    'configs' => [['source' => 'passwd', 'target' => '/etc/x']],
+                ],
+                'side' => ['image' => 'alpine', 'secrets' => ['pw']],
+            ],
+            'secrets' => [
+                'pw' => ['file' => '${PW_FILE:-/etc/shadow}'],
+                'token' => ['file' => './token'],
+            ],
+            'configs' => ['passwd' => ['file' => '/etc/passwd']],
+        ]);
+
+        $this->assertSame(['token'], $compose['services']['app']['secrets']);
+        $this->assertArrayNotHasKey('configs', $compose['services']['app']);
+        $this->assertArrayNotHasKey('secrets', $compose['services']['side']);
+        $this->assertSame(['token'], array_keys($compose['secrets']));
+        $this->assertSame([
+            'secret pw: file ${PW_FILE:-/etc/shadow}',
+            'config passwd: file /etc/passwd',
+        ], $removed);
+    }
+
     public function test_a_file_backed_secret_or_config_is_checked_as_compose_interpolates_it(): void
     {
         [$compose, $removed] = ServiceHardener::withoutUnsafeFileSources([
@@ -521,6 +573,26 @@ class ServiceHardenerTest extends TestCase
             'secret shadow: file ${X}/shadow',
             'config passwd: file /etc/passwd',
         ], $removed);
+    }
+
+    /** Tiledesk's RabbitMQ: `retries: 1` and no start period was never healthy under the 0.5 CPU cap. */
+    public function test_a_capped_service_s_strict_healthcheck_gets_a_start_period(): void
+    {
+        $check = ['test' => ['CMD', 'nc', '-z', 'localhost', '5672'], 'interval' => '5s', 'timeout' => '15s', 'retries' => 1];
+        $rabbit = ServiceHardener::harden('rabbitmq', ['image' => 'chat21/chat21-rabbitmq', 'ports' => ['5672:5672'], 'healthcheck' => $check]);
+        $this->assertSame('0.50', $rabbit['cpus']);
+        $this->assertSame('60s', $rabbit['healthcheck']['start_period']);
+        $this->assertSame(1, $rabbit['healthcheck']['retries']);
+
+        // The author's own start period, CPU setting or disabled check is left alone.
+        $own = ServiceHardener::harden('mongo', ['image' => 'mongo:7', 'healthcheck' => $check + ['start_period' => '20s']]);
+        $this->assertSame('20s', $own['healthcheck']['start_period']);
+        $sized = ServiceHardener::harden('rabbitmq', ['image' => 'rabbitmq:3', 'cpus' => '2', 'healthcheck' => $check]);
+        $this->assertArrayNotHasKey('start_period', $sized['healthcheck']);
+        $off = ServiceHardener::harden('app', ['image' => 'acme/app', 'healthcheck' => ['disable' => true]]);
+        $this->assertSame(['disable' => true], $off['healthcheck']);
+        $none = ServiceHardener::harden('app', ['image' => 'acme/app', 'healthcheck' => ['test' => ['NONE']]]);
+        $this->assertArrayNotHasKey('start_period', $none['healthcheck']);
     }
 
     public function test_a_service_that_would_never_restart_is_given_a_policy(): void

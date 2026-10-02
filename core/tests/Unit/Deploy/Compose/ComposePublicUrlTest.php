@@ -115,6 +115,22 @@ class ComposePublicUrlTest extends TestCase
         $this->assertContains('DATABASE_URL=', $environment);
     }
 
+    /** Titra: `ROOT_URL=${ROOT_URL}` and nothing sets it; Meteor refuses to start without one. */
+    public function test_a_whole_url_key_left_to_an_unset_variable_is_filled(): void
+    {
+        $services = [
+            'titra' => ['image' => 'titraio/titra', 'environment' => ['ROOT_URL=${ROOT_URL}', 'APP_URL=${APP_URL:-http://x}', 'WEBHOOK_URL=${HOOK}']],
+        ];
+        $environment = $this->fill($services)['compose']['services']['titra']['environment'];
+        $this->assertContains('ROOT_URL=' . self::URL, $environment);
+        $this->assertContains('APP_URL=${APP_URL:-http://x}', $environment);
+        $this->assertContains('WEBHOOK_URL=${HOOK}', $environment);
+
+        // The account setting the variable keeps it.
+        $own = ComposePlaceholders::fill(['services' => $services], 'seed', self::URL, ['ROOT_URL' => 'https://mine.example']);
+        $this->assertContains('ROOT_URL=${ROOT_URL}', $own['compose']['services']['titra']['environment']);
+    }
+
     public function test_without_a_domain_nothing_changes(): void
     {
         $services = ['app' => ['image' => 'x', 'environment' => ['ORIGIN' => '']]];

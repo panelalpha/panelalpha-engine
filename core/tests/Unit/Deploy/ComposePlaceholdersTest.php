@@ -377,6 +377,61 @@ YAML);
         );
     }
 
+    /** EcomGen decodes its key as base64 and refuses anything but 32 bytes. */
+    public function test_a_required_secret_asked_for_as_base64_bytes_decodes_to_that_many(): void
+    {
+        $expr = '${ECOMGEN_MASTER_KEY:?Set a base64-encoded 32-byte key in .env}';
+        $compose = ['services' => [
+            'api' => ['environment' => ['ECOMGEN_MASTER_KEY' => $expr]],
+            'worker' => ['environment' => ['ECOMGEN_MASTER_KEY' => $expr]],
+        ]];
+
+        $filled = ComposePlaceholders::fill($compose, 'seed')['compose']['services'];
+        $key = $filled['api']['environment']['ECOMGEN_MASTER_KEY'];
+
+        $this->assertSame(32, strlen((string) base64_decode($key, true)));
+        $this->assertSame($key, $filled['worker']['environment']['ECOMGEN_MASTER_KEY']);
+        $this->assertSame($key, ComposePlaceholders::requiredSecret('ECOMGEN_MASTER_KEY', $expr, 'seed'));
+        $this->assertNotSame($key, ComposePlaceholders::fill($compose, 'other-seed')['compose']['services']['api']['environment']['ECOMGEN_MASTER_KEY']);
+    }
+
+    public function test_base64_hints(): void
+    {
+        $this->assertSame(32, ComposePlaceholders::hintedBase64Bytes('Set a base64-encoded 32-byte key'));
+        $this->assertSame(64, ComposePlaceholders::hintedBase64Bytes('generate with openssl rand -base64 64'));
+        $this->assertSame(16, ComposePlaceholders::hintedBase64Bytes('16 bytes, base64'));
+        $this->assertSame(32, ComposePlaceholders::hintedBase64Bytes('must be base64'));
+        $this->assertSame(0, ComposePlaceholders::hintedBase64Bytes('generate one with openssl rand -hex 32'));
+        $this->assertSame(0, ComposePlaceholders::hintedBase64Bytes('a 32-byte key'));
+    }
+
+    /** egma requires its own address and stops interpolation without it. */
+    public function test_a_required_own_url_gets_the_public_url(): void
+    {
+        $compose = ['services' => ['api' => ['environment' => [
+            'EGMA_BASE_URL' => '${EGMA_BASE_URL:?no default — the whole address a browser reaches egma at}',
+            'DATABASE_URL' => '${DATABASE_URL:?set it}',
+            'CALLBACK' => '${EGMA_BASE_URL:?x}/auth/callback',
+        ]]]];
+
+        $result = ComposePlaceholders::fill($compose, 'seed', 'https://egma.example.test/');
+        $env = $result['compose']['services']['api']['environment'];
+
+        $this->assertSame('https://egma.example.test', $env['EGMA_BASE_URL']);
+        $this->assertSame('https://egma.example.test/auth/callback', $env['CALLBACK']);
+        $this->assertSame('${DATABASE_URL:?set it}', $env['DATABASE_URL']);
+        $this->assertContains('EGMA_BASE_URL', $result['urls']);
+        $this->assertNotContains('EGMA_BASE_URL', $result['secrets']);
+
+        // The account's own value wins; without a public URL nothing is invented.
+        $own = ComposePlaceholders::fill($compose, 'seed', 'https://egma.example.test', ['EGMA_BASE_URL' => 'https://mine.test']);
+        $this->assertSame('https://mine.test', $own['compose']['services']['api']['environment']['EGMA_BASE_URL']);
+        $this->assertSame(
+            $compose['services']['api']['environment']['EGMA_BASE_URL'],
+            ComposePlaceholders::fill($compose, 'seed')['compose']['services']['api']['environment']['EGMA_BASE_URL']
+        );
+    }
+
     /**
      * Etherpad reads one postgres password from both the app and the database.
      * Deriving from the variable rather than the key is what keeps them equal.

@@ -17,6 +17,9 @@ use App\Lib\Deploy\Sidecar\SidecarPasswords;
  */
 class ComposeHarden
 {
+    /** Why {@see applyReporting()} removes a source, for the deploy log. */
+    public const REMOVED_SOURCE = 'Removed from the run file (a host path, outside the project, or a directory the engine cannot check)';
+
     /**
      * For the Dockerfile and Ruby strategies, which run an image the repository
      * wrote: the URL aliases, without the generic HTTPS/SSL flags, without
@@ -45,9 +48,23 @@ class ComposeHarden
      */
     public static function apply(array $compose, ?int $accountMemoryMb = null, ?array $asWritten = null, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
     {
-        [$compose] = ServiceHardener::withoutUnsafeFileSources($compose, $env, $accountUser, $projectDir);
+        return self::applyReporting($compose, $accountMemoryMb, $asWritten, $env, $accountUser, $projectDir)['compose'];
+    }
+
+    /**
+     * As {@see apply()}, with one line per mount source, secret, config or
+     * volume option it removed, so a deploy log can say what went missing.
+     *
+     * @param array<string, mixed> $compose
+     * @param array<array-key, mixed>|null $asWritten
+     * @param array<string, list<?string>|string> $env
+     * @return array{compose: array<string, mixed>, removed: list<string>}
+     */
+    public static function applyReporting(array $compose, ?int $accountMemoryMb = null, ?array $asWritten = null, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
+    {
+        [$compose, $removed] = ServiceHardener::withoutUnsafeFileSources($compose, $env, $accountUser, $projectDir);
         if (!is_array($compose['services'] ?? null)) {
-            return $compose;
+            return ['compose' => $compose, 'removed' => $removed];
         }
 
         // Classified against the file the repository wrote, not against what is
@@ -72,12 +89,15 @@ class ComposeHarden
                 }
                 // A loopback binding stays loopback when another service is the front door.
                 $keepLoopback = array_diff($publishers, [$name]) !== [];
+                foreach (ServiceHardener::forbiddenMounts($service, $env, $accountUser, $projectDir) as $mount) {
+                    $removed[] = "{$name}: volume {$mount}";
+                }
                 $compose['services'][$name] = ServiceHardener::harden((string) $name, $service, $accountMemoryMb, $keepLoopback, $env, $accountUser, $projectDir);
             }
         }
-        [$compose] = ServiceHardener::withoutHostPathEntries($compose);
+        [$compose, $entries] = ServiceHardener::withoutHostPathEntries($compose);
 
-        return $compose;
+        return ['compose' => $compose, 'removed' => [...$removed, ...$entries]];
     }
 
     /**
@@ -161,6 +181,7 @@ class ComposeHarden
      *
      * @param callable(string): list<int>|null $imagePorts
      * @param array<string, list<?string>|string> $env what compose may interpolate the file with
+     * @param list<string> $rootBuildNames names the repository's own compose files give its root build
      * @return array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>}
      */
     public static function extractRuntimeSidecarsFromYaml(
@@ -173,7 +194,8 @@ class ComposeHarden
         ?SidecarPasswords $passwords = null,
         array $env = [],
         ?string $accountUser = null,
-        ?string $projectDir = null
+        ?string $projectDir = null,
+        array $rootBuildNames = []
     ): array {
         return RuntimeSidecars::fromYaml(
             $raw,
@@ -185,7 +207,8 @@ class ComposeHarden
             $passwords,
             $env,
             $accountUser,
-            $projectDir
+            $projectDir,
+            $rootBuildNames
         );
     }
 

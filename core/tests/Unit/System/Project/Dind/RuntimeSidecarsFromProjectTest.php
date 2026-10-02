@@ -281,6 +281,35 @@ class RuntimeSidecarsFromProjectTest extends TestCase
         $this->assertSame(['postgres'], array_keys($result['services']));
     }
 
+    /**
+     * Playerr from an archive: no repository URL to match, but its own
+     * docker-compose.yml builds `playerr` from the root, so the casaos and
+     * github variants of that service are the app, not backing services.
+     */
+    public function test_a_variant_of_the_root_build_is_not_a_backing_service_without_a_repository(): void
+    {
+        $result = $this->sidecarsFromFiles([
+            'docker-compose.yml' => "services:\n  playerr:\n    build: .\n    container_name: playerr\n"
+                . "    ports:\n      - \"2727:2727\"\n    volumes:\n      - ./config:/app/config\n",
+            'docker-compose.casaos.yml' => "services:\n  playerr:\n    image: playerr:latest\n    container_name: playerr\n"
+                . "    network_mode: bridge\n    ports:\n      - \"2727:2727\"\n",
+            'docker-compose.github.yml' => "services:\n  playerr:\n    image: maikboarder/playerr:latest\n    container_name: playerr\n"
+                . "    ports:\n      - \"2727:2727\"\n",
+        ]);
+
+        $this->assertSame([], $result['services']);
+    }
+
+    public function test_a_template_datastore_beside_the_root_build_is_still_kept(): void
+    {
+        $result = $this->sidecarsFromFiles([
+            'docker-compose.yml' => "services:\n  web:\n    build:\n      context: ./\n    volumes:\n      - .:/app\n",
+            'docker-compose.example.yml' => "services:\n  web:\n    image: acme/shop:1\n  cache:\n    image: redis:7\n",
+        ]);
+
+        $this->assertSame(['cache'], array_keys($result['services']));
+    }
+
     public function test_a_development_template_still_speaks_when_it_is_the_only_one(): void
     {
         $result = $this->sidecarsFromFiles([

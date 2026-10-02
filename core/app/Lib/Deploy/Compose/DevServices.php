@@ -62,6 +62,7 @@ final class DevServices
     private const IMAGES = [
         'mailhog', 'mailpit', 'mailcatcher', 'maildev', 'smtp4dev',
         'buggregator', 'selenium', 'playwright', 'cypress', 'ngrok',
+        'swagger-ui',
     ];
 
     private const DEV_COMMAND_PATTERN = '/\b(vite|webpack-dev-server|storybook)\s+(dev|serve)\b/';

@@ -334,6 +334,38 @@ YAML;
         $this->assertFalse(ComposeFileInspector::isSidecarsOnlyComposeYaml($withApp));
     }
 
+    public function test_datastores_without_a_dialect_still_make_a_file_sidecars_only(): void
+    {
+        // Directus' (d9) test matrix: every vendor it supports, and no Directus.
+        $matrix = <<<'YAML'
+services:
+  postgres:
+    image: postgis/postgis:13-3.1-alpine
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    ports: ["5105:1433"]
+  oracle:
+    image: quillbuilduser/oracle-18-xe-micro-sq
+  azure:
+    image: mcr.microsoft.com/azure-storage/azurite
+  keycloak:
+    image: jboss/keycloak:latest
+    ports: ["5110:8080"]
+  cockroachdb:
+    image: cockroachdb/cockroach:latest-v21.1
+  oraclefree:
+    image: gvenzl/oracle-free:23-slim
+YAML;
+        $this->assertTrue(ComposeFileInspector::isSidecarsOnlyComposeYaml($matrix));
+
+        $withApp = $matrix . "\n  directus:\n    image: directus/directus:11\n";
+        $this->assertFalse(ComposeFileInspector::isSidecarsOnlyComposeYaml($withApp));
+
+        // An image that merely mentions a vendor is not one.
+        $app = "services:\n  web:\n    image: acme/oracle-reports:1\n  db:\n    image: postgres:16\n";
+        $this->assertFalse(ComposeFileInspector::isSidecarsOnlyComposeYaml($app));
+    }
+
     public function test_an_application_published_on_a_datastore_port_number_is_not_a_sidecar(): void
     {
         // OpenCloud serves on 9200, which is Elasticsearch's port by number only.

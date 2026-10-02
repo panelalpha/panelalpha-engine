@@ -14,6 +14,7 @@ use App\Lib\Deploy\Compose\ServiceHardener;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Compose\ComposeYaml;
+use App\Lib\Deploy\Compose\NamedVolumes;
 use App\Lib\Deploy\Compose\NestedCompose;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\System\Project\Dind\Paths;
@@ -30,11 +31,32 @@ use App\System\Project\Dind\Source\GitRepository;
  */
 class UserComposeStrategy
 {
+    /** The client-override copy for an override the deploy refused: it layers nothing. */
+    private const NOT_LAYERED_OVERRIDE = "# The repository's docker-compose.override.yml is a development setup and is not layered.\nservices: {}\n";
+
     private DindProject $dind;
+
+    /** The repository's override as it was before the app config ran; null for none. */
+    private ?string $repositoryOverride = null;
+
+    private bool $repositoryOverrideNoted = false;
 
     public function __construct(DindProject $dind)
     {
         $this->dind = $dind;
+    }
+
+    /**
+     * Called before the app config writes files or runs its prepare hook, so
+     * a deploy with no git history (an archive) can still tell the
+     * repository's override from one the recipe wrote.
+     */
+    public function noteRepositoryOverride(string $projectDir): void
+    {
+        $fs = $this->dind->system()->filesystem();
+        $source = rtrim($projectDir, '/') . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
+        $this->repositoryOverride = $fs->fileExists($source) ? $fs->fileGetContents($source) : null;
+        $this->repositoryOverrideNoted = true;
     }
 
     /**
@@ -99,13 +121,7 @@ class UserComposeStrategy
         $runPath = $this->dind->userAppComposeFilePath();
         // Mount sources may be written as `${VAR}`; the hardener checks what they interpolate to.
         $env = $this->dind->environment()->forInterpolation();
-        $this->writeClientOverride(
-            $projectDir,
-            $chown,
-            $logger,
-            basename($composePath) === EngineArtifacts::APP_CONFIG_COMPOSE,
-            $env
-        );
+        $replaced = basename($composePath) === EngineArtifacts::APP_CONFIG_COMPOSE;
         $missing = ComposeFileInspector::missingComposeDockerfileRefs($composePath, $projectDir);
         $raw = $system->filesystem()->fileGetContents($composePath);
         // Through ComposeYaml, not Yaml::parse: this was the one unguarded
@@ -154,6 +170,7 @@ class UserComposeStrategy
                 );
             }
 
+            $this->writeClientOverride($projectDir, $chown, $logger, $replaced, $env, []);
             // Nothing to harden, but the run file still has to exist for
             // whatever runs `compose up` against it — copy the source through
             // verbatim rather than leaving composeFileToRun() pointing at
@@ -199,11 +216,22 @@ class UserComposeStrategy
 
         // Before port detection reads the file, so a bundled Traefik's :80 is
         // never taken for the app's port.
+        $services = $parsed['services'];
         $ingress = ComposeHarden::withoutHostIngress($parsed);
         $parsed = $ingress['compose'];
         foreach ($ingress['dropped'] as $line) {
             $logger?->info($line);
         }
+        // After the drops: an override naming a dropped service would bring it
+        // back as a fragment with no image.
+        $this->writeClientOverride(
+            $projectDir,
+            $chown,
+            $logger,
+            $replaced,
+            $env,
+            array_values(array_diff(array_map('strval', array_keys($services ?? [])), array_map('strval', array_keys($parsed['services']))))
+        );
 
         // The DinD proxy routes the domain to the account container on the
         // detected primary port; a service that only expose:s it binds nothing
@@ -222,12 +250,24 @@ class UserComposeStrategy
             if (is_array($service) && ServiceHardener::requestsMemlockUlimit($service)) {
                 $logger?->info("Removed ulimits.memlock from service {$name}: an account cannot raise its locked-memory limit");
             }
+            if (is_array($service) && ServiceHardener::needsStartPeriodUnderCap($service)) {
+                $logger?->info("Gave {$name}'s healthcheck a 60s start period: its CPU is capped and the check allows no slow start");
+            }
+        }
+
+        ['compose' => $parsed, 'replaced' => $unset] = NamedVolumes::forUnsetSources($parsed, $env);
+        foreach ($unset as $what) {
+            $logger?->info("A mount source variable is not set, so it is a named volume: {$what}");
         }
 
         // The account's own ceiling, so a project the operator has given more
         // memory actually gets it. Null when none is set, which keeps the
         // built-in defaults.
-        $parsed = ComposeHarden::apply($parsed, $this->dind->userModel()->effectiveMemoryLimit(), null, $env, $this->dind->userModel()->username, $this->dind->userAppDirPath());
+        $hardened = ComposeHarden::applyReporting($parsed, $this->dind->userModel()->effectiveMemoryLimit(), null, $env, $this->dind->userModel()->username, $this->dind->userAppDirPath());
+        $parsed = $hardened['compose'];
+        foreach ($hardened['removed'] as $what) {
+            $logger?->warn(ComposeHarden::REMOVED_SOURCE . ": {$what}");
+        }
         $parsed = $this->fillPlaceholders($parsed, $logger);
         // A tracked .env's overrides (ADR-0001 D3). ProjectEnvironment decides
         // on every deploy whether the file should exist; this only keeps it
@@ -285,8 +325,9 @@ class UserComposeStrategy
      * file had just been cleared of (engine#48, item 9).
      *
      * @param array<string, list<?string>> $env
+     * @param list<string> $droppedServices services the run file no longer has
      */
-    private function writeClientOverride(string $projectDir, ?string $chown, ?DeployLogger $logger, bool $replaced, array $env): void
+    private function writeClientOverride(string $projectDir, ?string $chown, ?DeployLogger $logger, bool $replaced, array $env, array $droppedServices): void
     {
         $fs = $this->dind->system()->filesystem();
         $source = rtrim($projectDir, '/') . '/' . Paths::CLIENT_OVERRIDE_FILENAME;
@@ -296,8 +337,19 @@ class UserComposeStrategy
         // replaced; one a recipe wrote (prepare hook, files/) is still layered.
         $committed = $contents !== null && $replaced
             ? $this->committedVersion($projectDir, Paths::CLIENT_OVERRIDE_FILENAME)
+                ?? ($this->repositoryOverrideNoted ? $this->repositoryOverride : null)
             : null;
         $stale = $committed !== null && rtrim($committed) === rtrim((string) $contents);
+        // A workstation override (a development build binding the checkout) is
+        // refused for the same reason a workstation run file is.
+        $workstation = $contents === null || $stale ? null : ComposeFileInspector::localDevComposeReasonYaml($contents);
+        if ($workstation !== null) {
+            $logger?->info('Not layering ' . Paths::CLIENT_OVERRIDE_FILENAME . ": {$workstation}, which is a development setup");
+            // An empty copy, not none: without one Paths::composeFiles() layers the raw file.
+            $fs->filePutContents($copy, self::NOT_LAYERED_OVERRIDE, $chown, '644');
+
+            return;
+        }
         if ($contents === null || $stale) {
             if ($fs->fileExists($copy)) {
                 $this->dind->system()->exec(['sudo', 'rm', '-f', $copy]);
@@ -313,6 +365,7 @@ class UserComposeStrategy
         }
 
         $read = fn (string $relative): ?string => $this->dind->projectTree()->read(rtrim($projectDir, '/') . '/' . $relative);
+        ['yaml' => $contents, 'dropped' => $gone] = ComposeOverride::withoutServices($contents, $droppedServices);
         $hardened = ComposeOverride::harden($contents, $read, $env, $this->dind->userModel()->username, $this->dind->userAppDirPath());
         if ($hardened['yaml'] === null) {
             throw new \InvalidArgumentException(
@@ -321,6 +374,9 @@ class UserComposeStrategy
         }
         foreach ($hardened['removed'] as $what) {
             $logger?->warn('Removed from ' . Paths::CLIENT_OVERRIDE_FILENAME . ", not allowed in hosting: {$what}");
+        }
+        foreach ($gone as $name) {
+            $logger?->info('Dropped service ' . $name . ' from ' . Paths::CLIENT_OVERRIDE_FILENAME . ': the run file no longer has it');
         }
         $fs->filePutContents($copy, $hardened['yaml'], $chown, '644');
     }

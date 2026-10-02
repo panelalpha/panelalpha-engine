@@ -88,13 +88,25 @@ final class HostIngress
     {
         $proxies = [];
         foreach ($services as $name => $service) {
-            $image = is_array($service) && is_string($service['image'] ?? null) ? $service['image'] : '';
-            if ($image !== '' && self::isProxyImage($image) && !self::isStackRouter($image, $service)) {
-                $proxies[(string) $name] = $image;
+            if (is_array($service) && self::isIngressProxy($service)) {
+                $proxies[(string) $name] = (string) $service['image'];
             }
         }
 
         return count($proxies) < count($services) ? $proxies : [];
+    }
+
+    /**
+     * A reverse proxy the engine's own routing replaces, unless it only
+     * routes the stack's own paths.
+     *
+     * @param array<mixed> $service
+     */
+    public static function isIngressProxy(array $service): bool
+    {
+        $image = is_string($service['image'] ?? null) ? $service['image'] : '';
+
+        return $image !== '' && self::isProxyImage($image) && !self::isStackRouter($image, $service);
     }
 
     /**

@@ -76,6 +76,13 @@ class ComposePlaceholders
      */
     private const PUBLIC_URL_KEY_PATTERN = '/(^|_)(URL|ORIGIN|ENDPOINT|DOMAIN)$/i';
 
+    /**
+     * A required variable that is the app's own address (egma's
+     * `${EGMA_BASE_URL:?}`), filled with the account's URL. Narrower than
+     * PUBLIC_URL_KEY_PATTERN: a required DATABASE_URL is not ours to invent.
+     */
+    private const REQUIRED_OWN_URL_PATTERN = '/(^|_)(BASE_URL|PUBLIC_URL|APP_URL|SITE_URL|EXTERNAL_URL|ORIGIN)$/i';
+
     private const LOCAL_URL_PATTERN = '#^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|host\.docker\.internal)(:\d+)?/?$#i';
 
     /**
@@ -111,6 +118,18 @@ class ComposePlaceholders
     private const MAX_HINTED_LENGTH = 256;
 
     /**
+     * A message asking for base64 wants decoded bytes, not characters: EcomGen's
+     * "base64-encoded 32-byte key" refuses 48 hex (36 bytes once decoded).
+     */
+    private const BASE64_HINT_PATTERN = '/base[\s-]?64/i';
+
+    private const BYTES_HINT_PATTERN = '/rand\s+-base64\s+(\d+)|(\d+)[\s-]*bytes?\b/i';
+
+    private const DEFAULT_BASE64_BYTES = 32;
+
+    private const MAX_BASE64_BYTES = 128;
+
+    /**
      * Any `${VAR}` / `${VAR<op>word}` reference, or Compose's `$$` escape so a
      * literal `$${VAR}` is skipped. A nested `${A:-${B}}` is not matched.
      */
@@ -132,7 +151,7 @@ class ComposePlaceholders
      * third party's address, not ours. BASE_URL is left out: blank there
      * usually means "serve from /" ({@see PublicUrlEnvironment::blankFillKeys()}).
      */
-    private const BLANK_URL_KEYS = ['URL', 'PUBLIC_URL', 'APP_URL', 'ASSET_URL', 'SITE_URL', 'ORIGIN'];
+    private const BLANK_URL_KEYS = ['URL', 'PUBLIC_URL', 'APP_URL', 'ASSET_URL', 'SITE_URL', 'ORIGIN', 'ROOT_URL'];
 
     /**
      * @param array<string, mixed> $compose
@@ -154,7 +173,8 @@ class ComposePlaceholders
 
         // Settled across the whole file first: Compose interpolates every
         // string in it, `x-` fragments and DSNs included, so one miss aborts.
-        [$required, $generated] = self::requiredVariables($compose, $seed, $accountEnv);
+        $publicUrl = self::normalisedPublicUrl($publicUrl);
+        [$required, $generated, $requiredUrls] = self::requiredVariables($compose, $seed, $accountEnv, $publicUrl);
         if ($required !== []) {
             $compose = self::withRequiredVariables($compose, $required);
             $services = $compose['services'];
@@ -167,9 +187,8 @@ class ComposePlaceholders
         }
 
         $touchedSecrets = array_fill_keys($generated, true);
-        $touchedUrls = [];
+        $touchedUrls = array_fill_keys($requiredUrls, true);
         $touchedPublished = [];
-        $publicUrl = self::normalisedPublicUrl($publicUrl);
         $publishedPorts = self::publishedPorts($services);
 
         foreach ($services as $name => $service) {
@@ -208,7 +227,7 @@ class ComposePlaceholders
                         return $publicUrl;
                     }
                     if ($publicUrl !== null) {
-                        $withUrl = self::withPublicUrl($key, $value, $publicUrl);
+                        $withUrl = self::withPublicUrl($key, $value, $publicUrl, $accountEnv);
                         if ($withUrl !== $value) {
                             $touchedUrls[$key] = true;
 
@@ -256,7 +275,9 @@ class ComposePlaceholders
         }
 
         // fill() reads no message past a `$`, so neither does this.
-        return self::requiredSecretValue($m[1], $seed, str_contains($m[2], '$') ? 0 : self::hintedLength($m[2]));
+        $message = str_contains($m[2], '$') ? '' : $m[2];
+
+        return self::requiredSecretValue($m[1], $seed, self::hintedLength($message), self::hintedBase64Bytes($message));
     }
 
     /**
@@ -265,8 +286,12 @@ class ComposePlaceholders
      * `openssl rand -hex 32` key refuses 48 characters ("at least 64 are
      * required"). Never shortened, so a value that already works stays put.
      */
-    public static function requiredSecretValue(string $name, string $seed, int $length = 0): string
+    public static function requiredSecretValue(string $name, string $seed, int $length = 0, int $base64Bytes = 0): string
     {
+        if ($base64Bytes > 0) {
+            return base64_encode(self::generatedBytes($name, $seed, $base64Bytes));
+        }
+
         return $length > 48
             ? self::generatedSecretOfLength($name, $seed, $length)
             : self::generatedSecret($name, $seed);
@@ -283,6 +308,27 @@ class ComposePlaceholders
         }
 
         return $length;
+    }
+
+    /** Decoded bytes a `:?` message asks base64 for, or 0 when it does not say base64. */
+    public static function hintedBase64Bytes(string $message): int
+    {
+        if (preg_match(self::BASE64_HINT_PATTERN, $message) !== 1) {
+            return 0;
+        }
+        $bytes = 0;
+        preg_match_all(self::BYTES_HINT_PATTERN, $message, $matches, PREG_SET_ORDER);
+        foreach ($matches as $m) {
+            $bytes = max($bytes, min((int) (($m[1] ?? '') !== '' ? $m[1] : ($m[2] ?? 0)), self::MAX_BASE64_BYTES));
+        }
+
+        return $bytes > 0 ? $bytes : self::DEFAULT_BASE64_BYTES;
+    }
+
+    /** A required variable naming the app's own public address. */
+    public static function isRequiredOwnUrlKey(string $key): bool
+    {
+        return !self::isSecretKey($key) && preg_match(self::REQUIRED_OWN_URL_PATTERN, $key) === 1;
     }
 
     public static function isSecretKey(string $key): bool
@@ -438,6 +484,17 @@ class ComposePlaceholders
         return substr($hex, 0, $length);
     }
 
+    /** $length raw bytes derived from the seed, stable across redeploys. */
+    private static function generatedBytes(string $token, string $seed, int $length): string
+    {
+        $bytes = '';
+        for ($block = 0; strlen($bytes) < $length; $block++) {
+            $bytes .= hash_hmac('sha256', 'compose-placeholder-bytes:' . $token . ':' . $block, $seed, true);
+        }
+
+        return substr($bytes, 0, $length);
+    }
+
     /**
      * Every required (`:?` / `?`) variable naming a credential, with the one
      * value it gets everywhere: the account's own, else one from the seed.
@@ -445,21 +502,29 @@ class ComposePlaceholders
      *
      * @param array<string, mixed> $compose
      * @param array<string, string> $accountEnv
-     * @return array{0: array<string, string>, 1: list<string>} name => value, and the names generated
+     * @return array{0: array<string, string>, 1: list<string>, 2: list<string>} name => value, the names generated, the names given the public URL
      */
-    private static function requiredVariables(array $compose, string $seed, array $accountEnv): array
+    private static function requiredVariables(array $compose, string $seed, array $accountEnv, ?string $publicUrl = null): array
     {
         $names = [];
-        self::walkStrings($compose, static function (string $key, string $value) use (&$names): string {
+        $urls = [];
+        self::walkStrings($compose, static function (string $key, string $value) use (&$names, &$urls, $publicUrl): string {
             preg_match_all(self::REFERENCE_PATTERN, $value, $refs, PREG_SET_ORDER);
             foreach ($refs as $ref) {
                 $name = $ref[1] ?? '';
                 if ($name === '' || preg_match('/^:?\?/', $ref[2] ?? '') !== 1) {
                     continue;
                 }
+                if ($publicUrl !== null && self::isRequiredOwnUrlKey($name)) {
+                    $urls[$name] = true;
+                    continue;
+                }
                 if (self::isSecretKey($name) || (self::isSecretKey($key) && trim($value) === $ref[0])) {
                     // The longest any reference asks for, so every reference agrees.
-                    $names[$name] = max($names[$name] ?? 0, self::hintedLength($ref[2]));
+                    $names[$name] = [
+                        max($names[$name][0] ?? 0, self::hintedLength($ref[2])),
+                        max($names[$name][1] ?? 0, self::hintedBase64Bytes($ref[2])),
+                    ];
                 }
             }
 
@@ -468,18 +533,27 @@ class ComposePlaceholders
 
         $values = [];
         $generated = [];
-        foreach ($names as $name => $length) {
+        foreach ($names as $name => [$length, $base64Bytes]) {
             $name = (string) $name;
             $own = (string) ($accountEnv[$name] ?? '');
             if ($own !== '') {
                 $values[$name] = self::composeLiteral($own);
                 continue;
             }
-            $values[$name] = self::requiredSecretValue($name, $seed, $length);
+            $values[$name] = self::requiredSecretValue($name, $seed, $length, $base64Bytes);
             $generated[] = $name;
         }
+        $filledUrls = [];
+        foreach (array_keys($urls) as $name) {
+            $name = (string) $name;
+            $own = (string) ($accountEnv[$name] ?? '');
+            $values[$name] = $own !== '' ? self::composeLiteral($own) : (string) $publicUrl;
+            if ($own === '') {
+                $filledUrls[] = $name;
+            }
+        }
 
-        return [$values, $generated];
+        return [$values, $generated, $filledUrls];
     }
 
     /**
@@ -693,11 +767,18 @@ class ComposePlaceholders
     /**
      * `${PA_PUBLIC_URL}` / `${PA_PUBLIC_HOST}` (with or without a default)
      * resolved, and an empty whole-URL key filled.
+     *
+     * @param array<string, string> $accountEnv
      */
-    private static function withPublicUrl(string $key, string $value, string $publicUrl): string
+    private static function withPublicUrl(string $key, string $value, string $publicUrl, array $accountEnv = []): string
     {
-        if (trim($value) === '' && in_array(strtoupper($key), self::BLANK_URL_KEYS, true)) {
-            return $publicUrl;
+        if (in_array(strtoupper($key), self::BLANK_URL_KEYS, true)) {
+            // `ROOT_URL=${ROOT_URL}` with nothing setting it is as empty as a blank (Titra).
+            $bare = preg_match('/^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/', trim($value), $m) === 1
+                && trim((string) ($accountEnv[$m[1]] ?? '')) === '';
+            if (trim($value) === '' || $bare) {
+                return $publicUrl;
+            }
         }
 
         return self::withPublicAddress($value, $publicUrl);
