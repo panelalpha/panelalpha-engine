@@ -4,6 +4,7 @@ namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
 use App\System\Project\Dind;
+use App\System\Project\Dind\AppHealth;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -44,7 +45,8 @@ class AppHealthController extends Controller
             . 'answered is the application - a project the engine could not recognise is served the engine\'s own '
             . 'placeholder page with a 200, and a static site that has lost its front page answers 404 on `/` while '
             . 'every other page works. Each check names a stable id, the group it came from, and where it can be said, '
-            . 'what to do about it. `serving` is the one-word summary: `ok`, or what is being served instead.',
+            . 'what to do about it. `serving` is the one-word summary: `ok`, or what is being served instead. '
+            . 'A `secrets-readable` warning names stored secrets that cannot be decoded.',
         x: ['mcp-description' => 'Probes the app on its published ports from inside its container, bypassing domain, '
             . 'DNS, TLS and proxy. `healthy`: something answered (null: no port published). `serving`: whether it '
             . 'is the app - `ok`, or what answered instead; `checks` say why and what to do.'],
@@ -107,10 +109,15 @@ class AppHealthController extends Controller
             'attempts' => 'nullable|integer|min:1|max:10',
         ]);
 
-        $report = $this->getDind($username)->appHealth()->check(
+        $dind = $this->getDind($username);
+        $report = $dind->appHealth()->check(
             (int) ($params['timeout'] ?? 5),
             (int) ($params['attempts'] ?? 3),
         );
+        $secrets = AppHealth::unreadableSecretsCheck($dind->userModel());
+        if ($secrets !== null) {
+            $report['checks'] = [...($report['checks'] ?? []), $secrets];
+        }
 
         return new JsonResponse(['data' => $report]);
     }

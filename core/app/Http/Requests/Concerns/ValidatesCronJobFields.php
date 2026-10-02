@@ -2,6 +2,9 @@
 
 namespace App\Http\Requests\Concerns;
 
+use App\Lib\Helpers\CronSchedule;
+use Closure;
+
 /**
  * The six fields of a cron job, shared by create and update.
  */
@@ -31,14 +34,23 @@ trait ValidatesCronJobFields
         // A crontab entry is one line: a line break would split it in two.
         $oneLine = 'not_regex:/[\r\n\x00]/';
 
-        return [
-            'command' => ['string', 'required', $oneLine],
-            'minute' => ['string', 'required', $oneLine],
-            'hour' => ['string', 'required', $oneLine],
-            'day_of_month' => ['string', 'required', $oneLine],
-            'month' => ['string', 'required', $oneLine],
-            'day_of_week' => ['string', 'required', $oneLine],
-        ];
+        $rules = ['command' => ['string', 'required', $oneLine]];
+        foreach (CronSchedule::fieldNames() as $field) {
+            $rules[$field] = ['bail', 'string', 'required', $oneLine, $this->cronField(...)];
+        }
+
+        return $rules;
+    }
+
+    /**
+     * Each schedule problem under its own field, so errors.hour says what
+     * crond would refuse in the hour.
+     */
+    private function cronField(string $attribute, mixed $value, Closure $fail): void
+    {
+        foreach (CronSchedule::fieldErrors($attribute, (string) $value) as $error) {
+            $fail($error);
+        }
     }
 
     /**

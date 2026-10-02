@@ -17,6 +17,22 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'php_version', type: 'string', example: '8.1', nullable: true),
         new OA\Property(property: 'os', type: 'string', example: 'Ubuntu 22.04', nullable: true),
         new OA\Property(property: 'uptime', type: 'string', nullable: true),
+        new OA\Property(
+            property: 'unreadable_secrets',
+            description: 'Projects holding stored secrets the current APP_KEY cannot decrypt; each project\'s own '
+                . '`unreadable_secrets` names them.',
+            properties: [
+                new OA\Property(property: 'count', type: 'integer', example: 0),
+                new OA\Property(property: 'projects', type: 'array', items: new OA\Items(type: 'string')),
+                new OA\Property(
+                    property: 'warning',
+                    type: 'string',
+                    nullable: true,
+                    description: 'Says the APP_KEY may be invalid and what to do; null when every project decodes.'
+                ),
+            ],
+            type: 'object'
+        ),
     ],
     type: 'object',
 )]

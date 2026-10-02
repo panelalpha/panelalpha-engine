@@ -60,30 +60,30 @@ class CronScheduleTest extends TestCase
     }
 
     /**
-     * @return array<string, array{0: array<string, string>, 1: string}>
+     * @return array<string, array{0: array<string, string>, 1: string, 2: string}>
      */
     public static function invalidSchedules(): array
     {
         return [
-            'minute above range' => [['minute' => '60'], 'minute: value 60 out of bounds (0-59)'],
-            'hour above range' => [['hour' => '24'], 'hour: value 24 out of bounds (0-23)'],
-            'day zero' => [['day_of_month' => '0'], 'day_of_month: value 0 out of bounds (1-31)'],
-            'weekday above seven' => [['day_of_week' => '8'], 'day_of_week: value 8 out of bounds (0-7)'],
-            'backwards range' => [['hour' => '17-9'], 'hour: range start greater than end'],
-            'range out of bounds' => [['minute' => '10-70'], 'minute: range values out of bounds'],
-            'open range' => [['minute' => '5-'], "minute: invalid range '5-'"],
-            'zero step' => [['minute' => '*/0'], 'minute: invalid step value'],
-            'non numeric step' => [['minute' => '1-5/x'], 'minute: invalid step value'],
-            'unknown name' => [['month' => 'smarch'], "month: invalid token 'smarch'"],
-            'name in the wrong field' => [['minute' => 'mon'], "minute: invalid token 'mon'"],
-            'empty field' => [['hour' => ''], 'hour: empty value'],
-            'empty list element' => [['hour' => '1,,2'], 'hour: empty list element'],
-            'unsupported nickname' => [['minute' => '@daily'], "minute: invalid token '@daily'"],
+            'minute above range' => [['minute' => '60'], 'minute', 'Value 60 out of bounds (0-59)'],
+            'hour above range' => [['hour' => '24'], 'hour', 'Value 24 out of bounds (0-23)'],
+            'day zero' => [['day_of_month' => '0'], 'day_of_month', 'Value 0 out of bounds (1-31)'],
+            'weekday above seven' => [['day_of_week' => '8'], 'day_of_week', 'Value 8 out of bounds (0-7)'],
+            'backwards range' => [['hour' => '17-9'], 'hour', 'Range start greater than end'],
+            'range out of bounds' => [['minute' => '10-70'], 'minute', 'Range values out of bounds'],
+            'open range' => [['minute' => '5-'], 'minute', "Invalid range '5-'"],
+            'zero step' => [['minute' => '*/0'], 'minute', 'Invalid step value'],
+            'non numeric step' => [['minute' => '1-5/x'], 'minute', 'Invalid step value'],
+            'unknown name' => [['month' => 'smarch'], 'month', "Invalid token 'smarch'"],
+            'name in the wrong field' => [['minute' => 'mon'], 'minute', "Invalid token 'mon'"],
+            'empty field' => [['hour' => ''], 'hour', 'Empty value'],
+            'empty list element' => [['hour' => '1,,2'], 'hour', 'Empty list element'],
+            'unsupported nickname' => [['minute' => '@daily'], 'minute', "Invalid token '@daily'"],
             // Whitespace ends a crontab field, so `9 , 17` would be three fields.
-            'space around a comma' => [['hour' => '9 , 17'], 'hour: whitespace is not allowed'],
-            'surrounding space' => [['hour' => ' 9 '], 'hour: whitespace is not allowed'],
-            'space inside a range' => [['minute' => '1 - 5'], 'minute: whitespace is not allowed'],
-            'tab in a list' => [['day_of_week' => "1,\t2"], 'day_of_week: whitespace is not allowed'],
+            'space around a comma' => [['hour' => '9 , 17'], 'hour', 'Whitespace is not allowed'],
+            'surrounding space' => [['hour' => ' 9 '], 'hour', 'Whitespace is not allowed'],
+            'space inside a range' => [['minute' => '1 - 5'], 'minute', 'Whitespace is not allowed'],
+            'tab in a list' => [['day_of_week' => "1,\t2"], 'day_of_week', 'Whitespace is not allowed'],
         ];
     }
 
@@ -91,12 +91,13 @@ class CronScheduleTest extends TestCase
      * @param array<string, string> $overrides
      */
     #[DataProvider('invalidSchedules')]
-    public function test_it_rejects_what_crond_would_refuse(array $overrides, string $expected): void
+    public function test_it_rejects_what_crond_would_refuse(array $overrides, string $field, string $expected): void
     {
         $errors = CronSchedule::errors($this->schedule($overrides));
 
-        $this->assertNotEmpty($errors, 'expected a rejection');
-        $this->assertStringContainsString($expected, implode(' | ', $errors));
+        // Keyed by the field, so a caller can report errors.<field>.
+        $this->assertSame([$field], array_keys($errors));
+        $this->assertStringContainsString($expected, implode(' | ', $errors[$field]));
     }
 
     public function test_it_reports_every_bad_field_at_once(): void
@@ -111,14 +112,14 @@ class CronScheduleTest extends TestCase
             'day_of_week' => '1,,2',
         ]);
 
-        $this->assertCount(5, $errors);
+        $this->assertSame(['minute', 'hour', 'day_of_month', 'month', 'day_of_week'], array_keys($errors));
     }
 
     public function test_a_missing_field_is_an_empty_one(): void
     {
         // The API can be called without a field at all; that is the same
         // problem as sending it blank, and gets the same message.
-        $this->assertSame(['minute: empty value'], CronSchedule::errors([
+        $this->assertSame(['minute' => ['Empty value']], CronSchedule::errors([
             'hour' => '0', 'day_of_month' => '*', 'month' => '*', 'day_of_week' => '*',
         ]));
     }
@@ -129,6 +130,14 @@ class CronScheduleTest extends TestCase
         // out-of-bounds base is still caught.
         $this->assertSame([], CronSchedule::errors($this->schedule(['minute' => '0-59/15'])));
         $this->assertNotEmpty(CronSchedule::errors($this->schedule(['minute' => '0-70/15'])));
+    }
+
+    public function test_each_problem_in_a_field_is_reported(): void
+    {
+        $this->assertSame(
+            ['hour' => ['Value 24 out of bounds (0-23)', "Invalid token 'x'"]],
+            CronSchedule::errors($this->schedule(['hour' => '1,24,x']))
+        );
     }
 
     public function test_the_field_order_is_crons_own(): void

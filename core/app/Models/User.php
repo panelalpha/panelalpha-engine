@@ -63,6 +63,21 @@ class User extends Authenticatable
     /** Details stored as one encrypted JSON document each. */
     private const ENCRYPTED_JSON_DETAILS = ['env_vars', 'app_credentials'];
 
+    /** Top-level details encrypted at rest; site_git tokens are per entry. */
+    private const SECRET_DETAILS = [
+        'git_token',
+        'cloudflare_api_token',
+        'cloudflare_tunnel_token',
+        'site_password_hash',
+        AppDatabase::PASSWORD_DETAIL,
+        'env_vars',
+        'app_credentials',
+    ];
+
+    /** What a project can do about its own unreadable secrets; the APP_KEY is a server matter. */
+    public const UNREADABLE_SECRETS_REMEDY = 'Set each one again: env_vars, git_update_credentials for a Git '
+        . 'token, the cloudflare-api-token setting, or the site password.';
+
     protected $fillable = [
         'username',
         'domain',
@@ -384,21 +399,64 @@ class User extends Authenticatable
 
     /**
      * True when the detail is stored encrypted but cannot be decrypted, as
-     * opposed to never having been stored at all.
+     * opposed to never having been stored at all. A nested detail takes its
+     * path: ('site_git', 'project', 'token').
      */
-    public function hasUnreadableSecret(string $key): bool
+    public function hasUnreadableSecret(string ...$path): bool
     {
-        $stored = $this->storedEncryptedDetail($key);
+        $stored = $this->storedEncryptedDetail(...$path);
 
         return $stored !== null && $this->decryptSecretString($stored) === null;
     }
 
-    /** The raw, still-encrypted value of a top-level detail, if it is one. */
-    private function storedEncryptedDetail(string $key): ?string
+    /**
+     * Stored secrets that cannot be decrypted, by name; a site_git token as
+     * `site_git.<path>.token`.
+     *
+     * @return list<string>
+     */
+    public function unreadableSecrets(): array
+    {
+        $names = array_values(array_filter(self::SECRET_DETAILS, fn (string $key): bool => $this->hasUnreadableSecret($key)));
+        $raw = $this->attributes['details'] ?? null;
+        $siteGit = (is_string($raw) ? json_decode($raw, true) : null)['site_git'] ?? null;
+        foreach (is_array($siteGit) ? array_keys($siteGit) : [] as $path) {
+            if ($this->hasUnreadableSecret('site_git', (string) $path, 'token')) {
+                $names[] = "site_git.{$path}.token";
+            }
+        }
+
+        return $names;
+    }
+
+    /** Names what cannot be decoded and what saving does to it, or null. Says nothing of the APP_KEY. */
+    public function unreadableSecretsWarning(): ?string
+    {
+        $names = $this->unreadableSecrets();
+        if ($names === []) {
+            return null;
+        }
+
+        $warning = 'Stored secrets cannot be decoded: ' . implode(', ', $names) . '. They read as empty, and '
+            . 'the next save of this project, a redeploy included, stores them empty. '
+            . self::UNREADABLE_SECRETS_REMEDY;
+        if (in_array(AppDatabase::PASSWORD_DETAIL, $names, true)) {
+            // AppDatabase keeps that one and refuses to deploy without it.
+            $warning .= ' The app database password is kept, and a deploy refuses while it cannot be decoded: '
+                . 'a new one would lock the app out of its database.';
+        }
+
+        return $warning;
+    }
+
+    /** The raw, still-encrypted value of a detail, if it is one. */
+    private function storedEncryptedDetail(string ...$path): ?string
     {
         $raw = $this->attributes['details'] ?? null;
-        $stored = is_string($raw) ? json_decode($raw, true) : null;
-        $value = is_array($stored) ? ($stored[$key] ?? null) : null;
+        $value = is_string($raw) ? json_decode($raw, true) : null;
+        foreach ($path as $segment) {
+            $value = is_array($value) ? ($value[$segment] ?? null) : null;
+        }
 
         return is_string($value) && str_starts_with($value, self::ENCRYPTED_SECRET_PREFIX) ? $value : null;
     }

@@ -38,6 +38,9 @@ class UserResource extends JsonResource
                 : null,
             'details' => $this->publicDetails($user),
             'app_credentials' => $this->appCredentials($user),
+            // Secrets stored for this project that cannot be decoded; [] when all decode.
+            'unreadable_secrets' => $user->unreadableSecrets(),
+            'warning' => $user->unreadableSecretsWarning(),
             'config' => $user->getConfig(),
             'email_verified_at' => $user->email_verified_at,
             'created_at' => $user->created_at,

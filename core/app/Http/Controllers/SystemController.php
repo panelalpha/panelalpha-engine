@@ -12,6 +12,7 @@ use App\Lib\Ssl\Issuers;
 use App\Lib\Ssl\SharedZones;
 use App\Models\Ipv4NatMap;
 use App\Models\Setting;
+use App\Models\User;
 use App\System;
 use App\System\Network;
 use App\System\Services\Webserver\Litespeed;
@@ -76,11 +77,38 @@ class SystemController extends Controller
             'panelalpha_online' => [
                 'last_error' => DomainAllocator::lastOnlineError(),
             ],
+            // Projects holding secrets this APP_KEY cannot decrypt.
+            'unreadable_secrets' => self::unreadableSecrets(User::query()->cursor()),
         ];
 
         return new JsonResponse([
             'data' => $data,
         ]);
+    }
+
+    /**
+     * The one place that names the APP_KEY: a project only knows it cannot
+     * decode its secrets, the server knows that many projects at once point
+     * at the key.
+     *
+     * @param iterable<User> $users
+     * @return array{count: int, projects: list<string>, warning: ?string}
+     */
+    public static function unreadableSecrets(iterable $users): array
+    {
+        $projects = [];
+        foreach ($users as $user) {
+            if ($user->unreadableSecrets() !== []) {
+                $projects[] = (string) $user->username;
+            }
+        }
+
+        $warning = $projects === [] ? null : count($projects) . ' project(s) hold secrets the engine cannot '
+            . 'decode: ' . implode(', ', $projects) . '. The APP_KEY may be invalid, or changed since they were '
+            . 'stored. Restore the previous APP_KEY before those projects are saved again, or their secrets are '
+            . 'stored empty.';
+
+        return ['count' => count($projects), 'projects' => $projects, 'warning' => $warning];
     }
 
     /**

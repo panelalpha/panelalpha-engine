@@ -62,6 +62,9 @@ class AppHealth
     public const CHECK_BLANK_PAGE = 'app-blank-page';
     public const SERVING_BLANK_PAGE = 'blank_page';
 
+    /** The check {@see unreadableSecretsCheck()} adds. */
+    public const CHECK_SECRETS_READABLE = 'secrets-readable';
+
     /** Short: the deploy is already over and one `compose ps` is all this is. */
     private const RESTART_PROBE_TIMEOUT_SECONDS = 20;
 
@@ -252,6 +255,32 @@ class AppHealth
         }
 
         return self::restartLoopFrom($raw);
+    }
+
+    /**
+     * Stored secrets that cannot be decoded. The app may be serving fine;
+     * the next save stores them empty. Only the health endpoint asks, so it
+     * never makes a deploy partial.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function unreadableSecretsCheck(\App\Models\User $user): ?array
+    {
+        $names = $user->unreadableSecrets();
+        if ($names === []) {
+            return null;
+        }
+
+        return [
+            'id' => self::CHECK_SECRETS_READABLE,
+            'group' => '_baseline',
+            'status' => CheckResult::STATUS_FAIL,
+            'severity' => HealthCheck::SEVERITY_WARNING,
+            'title' => 'Stored secrets cannot be decoded.',
+            'detail' => (string) $user->unreadableSecretsWarning(),
+            'fix' => \App\Models\User::UNREADABLE_SECRETS_REMEDY,
+            'evidence' => ['secrets' => $names],
+        ];
     }
 
     /**

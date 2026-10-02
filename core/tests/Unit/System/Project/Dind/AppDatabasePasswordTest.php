@@ -62,7 +62,8 @@ class AppDatabasePasswordTest extends TestCase
             $this->password($user);
             $this->fail('An unreadable password must not be replaced');
         } catch (\RuntimeException $e) {
-            $this->assertStringContainsString('cannot be decrypted', $e->getMessage());
+            $this->assertStringContainsString('cannot be decoded', $e->getMessage());
+            $this->assertStringNotContainsString('APP_KEY', $e->getMessage());
         }
 
         $this->assertSame(0, $user->saves);

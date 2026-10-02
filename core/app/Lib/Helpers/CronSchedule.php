@@ -40,21 +40,22 @@ final class CronSchedule
     ];
 
     /**
-     * Every problem with this schedule, empty when there is none.
+     * Every problem with this schedule, keyed by field, empty when there is none.
      *
      * All fields are checked rather than stopping at the first: someone
      * fixing a cron expression should see everything wrong with it in one
      * round trip.
      *
      * @param array<string, mixed> $schedule keyed by field name
-     * @return list<string>
+     * @return array<string, list<string>>
      */
     public static function errors(array $schedule): array
     {
         $errors = [];
         foreach (array_keys(self::FIELDS) as $field) {
-            foreach (self::fieldErrors($field, (string) ($schedule[$field] ?? '')) as $error) {
-                $errors[] = $error;
+            $fieldErrors = self::fieldErrors($field, (string) ($schedule[$field] ?? ''));
+            if ($fieldErrors !== []) {
+                $errors[$field] = $fieldErrors;
             }
         }
 
@@ -68,27 +69,32 @@ final class CronSchedule
     }
 
     /**
-     * One field, which is a comma-separated list of tokens.
+     * One field, which is a comma-separated list of tokens. Messages do not
+     * repeat the field name: callers key them by it.
      *
      * @return list<string>
      */
-    private static function fieldErrors(string $field, string $value): array
+    public static function fieldErrors(string $field, string $value): array
     {
+        if (!isset(self::FIELDS[$field])) {
+            throw new \InvalidArgumentException("Unknown cron field '{$field}'");
+        }
+
         if ($value === '') {
-            return ["{$field}: empty value"];
+            return ['Empty value'];
         }
 
         // Written into the crontab as is, where whitespace ends the field:
         // `9 , 17` would be read as three fields, not a list.
         if (preg_match('/\s/', $value) === 1) {
-            return ["{$field}: whitespace is not allowed inside a field"];
+            return ['Whitespace is not allowed inside a field'];
         }
 
         $errors = [];
         foreach (explode(',', $value) as $part) {
             if ($part === '') {
                 // `1,,5` is a typo, not an empty schedule — say which.
-                $errors[] = "{$field}: empty list element";
+                $errors[] = 'Empty list element';
                 continue;
             }
             $error = self::tokenError(strtolower($part), $field);
@@ -115,7 +121,7 @@ final class CronSchedule
         if (str_contains($token, '/')) {
             [$base, $step] = array_pad(explode('/', $token, 2), 2, '');
             if (!ctype_digit($step) || (int) $step <= 0) {
-                return "{$field}: invalid step value in '{$token}'";
+                return "Invalid step value in '{$token}'";
             }
             $token = $base;
         }
@@ -134,11 +140,11 @@ final class CronSchedule
             $value = (int) $token;
 
             return $value < $rules['min'] || $value > $rules['max']
-                ? "{$field}: value {$value} out of bounds ({$rules['min']}-{$rules['max']})"
+                ? "Value {$value} out of bounds ({$rules['min']}-{$rules['max']})"
                 : null;
         }
 
-        return isset($rules['names'][$token]) ? null : "{$field}: invalid token '{$token}'";
+        return isset($rules['names'][$token]) ? null : "Invalid token '{$token}'";
     }
 
     /**
@@ -150,28 +156,28 @@ final class CronSchedule
         [$from, $to] = array_pad(explode('-', $token, 2), 2, '');
 
         if ($from === '' || $to === '') {
-            return "{$field}: invalid range '{$token}'";
+            return "Invalid range '{$token}'";
         }
 
         $fromValue = self::numeric($from, $rules['names']);
         if ($fromValue === null) {
-            return "{$field}: invalid token '{$from}' in range '{$token}'";
+            return "Invalid token '{$from}' in range '{$token}'";
         }
         $toValue = self::numeric($to, $rules['names']);
         if ($toValue === null) {
-            return "{$field}: invalid token '{$to}' in range '{$token}'";
+            return "Invalid token '{$to}' in range '{$token}'";
         }
 
         if ($fromValue < $rules['min'] || $fromValue > $rules['max']
             || $toValue < $rules['min'] || $toValue > $rules['max']
         ) {
-            return "{$field}: range values out of bounds in '{$token}' "
+            return "Range values out of bounds in '{$token}' "
                 . "(allowed {$rules['min']}-{$rules['max']})";
         }
 
         // `fri-mon` is not a weekend: crond reads a range forwards only.
         return $fromValue > $toValue
-            ? "{$field}: range start greater than end in '{$token}'"
+            ? "Range start greater than end in '{$token}'"
             : null;
     }
 

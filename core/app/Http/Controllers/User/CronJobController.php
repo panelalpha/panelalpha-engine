@@ -7,7 +7,6 @@ use App\Http\Requests\CronJobStoreRequest;
 use App\Http\Requests\CronJobUpdateRequest;
 use App\Http\Resources\CronJobCollection;
 use App\Http\Resources\CronJobResource;
-use App\Lib\Helpers\CronSchedule;
 use App\Models\User;
 use App\System\Project\Dind;
 use Illuminate\Http\JsonResponse;
@@ -38,17 +37,6 @@ class CronJobController extends Controller
         $user = $this->projectOr404($username);
 
         return new CronJobCollection($user->project()->cron()->list());
-    }
-
-    /**
-     * @param array<string, mixed> $req
-     * @return bool|list<string> true when valid, the problems otherwise
-     */
-    private function validateCronSchedule(array $req): bool|array
-    {
-        $errors = CronSchedule::errors($req);
-
-        return $errors === [] ? true : $errors;
     }
 
     #[OA\Post(
@@ -95,11 +83,6 @@ class CronJobController extends Controller
          * }
          */
         $params = $request->validated();
-        $errors = $this->validateCronSchedule($params);
-        if (is_array($errors) && !empty($errors)) {
-            throw ValidationException::withMessages($errors);
-        }
-
         $cron = $user->project()->cron();
         $job = $cron->create($params);
         $user->project()->reloadCron();
@@ -155,11 +138,6 @@ class CronJobController extends Controller
          * }
          */
         $params = $request->validated();
-        $errors = $this->validateCronSchedule($params);
-        if (is_array($errors) && !empty($errors)) {
-            throw ValidationException::withMessages($errors);
-        }
-
         $cron = $user->project()->cron();
         if (!$cron->exists($hash)) {
             abort(new JsonResponse([

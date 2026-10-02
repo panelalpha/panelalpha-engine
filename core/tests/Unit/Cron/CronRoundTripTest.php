@@ -10,6 +10,7 @@ use App\System;
 use App\System\Filesystem;
 use App\System\Project\Cron;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -121,10 +122,13 @@ class CronRoundTripTest extends TestCase
 
     public function test_whitespace_inside_a_field_is_refused_rather_than_written(): void
     {
-        $params = $this->validated(CronJobStoreRequest::class, ['hour' => ' 9 , 17 '] + $this->schedule('echo a'));
-
-        $this->assertSame('9 , 17', $params['hour']);
-        $this->assertSame(['hour: whitespace is not allowed inside a field'], CronSchedule::errors($params));
+        // Trimming takes the ends; the spaces inside are refused under the field.
+        try {
+            $this->validated(CronJobStoreRequest::class, ['hour' => ' 9 , 17 '] + $this->schedule('echo a'));
+            $this->fail('expected the request to refuse the schedule');
+        } catch (ValidationException $e) {
+            $this->assertSame(['hour' => ['Whitespace is not allowed inside a field']], $e->errors());
+        }
     }
 
     public function test_hand_written_lines_still_parse(): void
