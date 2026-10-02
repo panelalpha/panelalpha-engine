@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\System;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
@@ -30,6 +32,8 @@ use Symfony\Component\Yaml\Yaml;
  */
 final class ComposeYaml
 {
+    private static ?\Closure $privilegedRead = null;
+
     /**
      * An anchor alone on its line, e.g. `&base-lychee-setup` -- a trailing
      * comment included, because Baserow writes one there and an anchor with
@@ -73,9 +77,29 @@ final class ComposeYaml
      */
     public static function parseFile(string $path): ?array
     {
-        $raw = @file_get_contents($path);
+        $raw = self::read($path);
 
         return is_string($raw) ? self::parse($raw) : null;
+    }
+
+    /**
+     * The file's contents, through sudo when the core cannot open it: the run
+     * file is the account's, 0600 ({@see EngineArtifacts::RUN_COMPOSE_MODE}).
+     */
+    public static function read(string $path): ?string
+    {
+        $raw = @file_get_contents($path);
+        if (is_string($raw) || !is_file($path)) {
+            return is_string($raw) ? $raw : null;
+        }
+
+        return (self::$privilegedRead ?? static fn (string $p): ?string => (new System())->filesystem()->cat($p))($path);
+    }
+
+    /** For tests: what reads a file the core cannot open; null restores sudo. */
+    public static function readPrivilegedWith(?\Closure $read): void
+    {
+        self::$privilegedRead = $read;
     }
 
     /**

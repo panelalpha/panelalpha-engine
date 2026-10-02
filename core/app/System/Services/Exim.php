@@ -2,12 +2,39 @@
 
 namespace App\System\Services;
 
+use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Models\Setting;
 use App\System as EngineSystem;
 use Illuminate\Support\Facades\Blade;
 
 class Exim
 {
+    /** Docker's stock docker0 address; used only when the bridge cannot be inspected. */
+    public const FALLBACK_BRIDGE_GATEWAY = '172.17.0.1';
+
+    /**
+     * `service exim4 restart`, plus stopping every `exim4 -bd` the init script
+     * missed: a daemon still retrying a bind has written no pid file, kept
+     * 127.0.0.1:25, and left the new one waiting minutes for the port.
+     */
+    public const RESTART_SCRIPT = <<<'SH'
+        service exim4 stop || true
+        daemons() {
+            for p in /proc/[0-9]*; do
+                [ "$(cat "$p/comm" 2>/dev/null)" = exim4 ] || continue
+                case " $(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)" in
+                    *" -bd"*) echo "${p#/proc/}" ;;
+                esac
+            done
+        }
+        left=$(daemons)
+        [ -n "$left" ] && kill $left 2>/dev/null
+        for _ in $(seq 20); do [ -z "$(daemons)" ] && break; sleep 0.5; done
+        left=$(daemons)
+        [ -n "$left" ] && kill -9 $left 2>/dev/null
+        service exim4 start
+        SH;
+
     public function __construct(
         private EngineSystem $system,
     ) {
@@ -47,6 +74,7 @@ class Exim
             'dc_readhost' => $config['sender_domain'],
             'dc_eximconfig_configtype' => $type,
             'dc_smarthost' => $smarthost,
+            ...$this->networkSettings(),
         ];
         $updateConf = Blade::render($updateConfTemplate, $templateVars);
         $this->system->filesystem()->filePutContents($updateConfPath, $updateConf);
@@ -105,6 +133,95 @@ class Exim
         $transport = Blade::render($transportTemplate, $templateVars);
         $this->system->filesystem()->filePutContents($transportPath, $transport);
 
+        $this->applyConfig();
+    }
+
+    /**
+     * Rewrites only the listen and relay lines of the existing
+     * update-exim4.conf.conf, leaving the rest as installed or saved.
+     */
+    public function rebuildNetworks(): void
+    {
+        $path = $this->system->engineDirPath() . '/config/exim/update-exim4.conf.conf';
+        $current = $this->system->filesystem()->fileGetContents($path);
+
+        $lines = array_filter(
+            explode("\n", rtrim($current, "\n")),
+            fn (string $line) => !preg_match('/^(dc_local_interfaces|dc_relay_nets)=/', $line)
+        );
+        foreach ($this->networkSettings() as $key => $value) {
+            $lines[] = "{$key}='{$value}'";
+        }
+        $this->system->filesystem()->filePutContents($path, implode("\n", $lines) . "\n");
+
+        $this->applyConfig();
+    }
+
+    /**
+     * Accounts send mail to host.docker.internal:25, which Docker resolves to
+     * docker0's gateway; on pash-tenants they arrive from that network's subnet.
+     *
+     * @return array{dc_local_interfaces: string, dc_relay_nets: string}
+     */
+    public function networkSettings(): array
+    {
+        $gateway = $this->networkAddresses('bridge')['gateway'] ?? self::FALLBACK_BRIDGE_GATEWAY;
+
+        $relay = ['127.0.0.0/8', '172.16.0.0/12'];
+        $tenants = $this->networkAddresses(TenantNetwork::NAME)['subnet'] ?? null;
+        if ($tenants !== null) {
+            $relay[] = $tenants;
+        }
+
+        return [
+            'dc_local_interfaces' => '127.0.0.1 ; ' . $gateway,
+            'dc_relay_nets' => implode(' ; ', $relay),
+        ];
+    }
+
+    /**
+     * The first IPv4 subnet and gateway of a Docker network; empty when it
+     * does not exist or cannot be inspected.
+     *
+     * @return array{subnet?: string, gateway?: string}
+     */
+    protected function networkAddresses(string $network): array
+    {
+        $process = $this->system->runProcess([
+            'sudo', 'docker', 'network', 'inspect', $network,
+            '--format', '{{range .IPAM.Config}}{{.Subnet}} {{.Gateway}}{{"\n"}}{{end}}',
+        ], [], 30);
+        if ($process->getExitCode() !== 0) {
+            return [];
+        }
+
+        return self::parseNetworkAddresses($process->getOutput());
+    }
+
+    /**
+     * @return array{subnet?: string, gateway?: string}
+     */
+    public static function parseNetworkAddresses(string $output): array
+    {
+        foreach (preg_split('/\R/', trim($output)) ?: [] as $line) {
+            if (!preg_match('#^(\d+\.\d+\.\d+\.\d+)/(\d+)(?:\s+(\S+))?$#', trim($line), $m)
+                || filter_var($m[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false
+                || (int) $m[2] > 32) {
+                continue;
+            }
+            $found = ['subnet' => $m[1] . '/' . $m[2]];
+            if (filter_var($m[3] ?? '', FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+                $found['gateway'] = $m[3];
+            }
+
+            return $found;
+        }
+
+        return [];
+    }
+
+    private function applyConfig(): void
+    {
         $this->system->exec([
             'sudo',
             'docker',
@@ -124,9 +241,11 @@ class Exim
             $this->system->composeFilePath(),
             'exec',
             'mail',
-            'service',
-            'exim4',
-            'reload',
+            // A reload only signals a running daemon; one that abandoned a
+            // bind it could not make stays down, so start it afresh.
+            'sh',
+            '-c',
+            self::RESTART_SCRIPT,
         ]);
     }
 

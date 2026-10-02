@@ -61,7 +61,7 @@ class EximRebuildTest extends TestCase
         $this->assertStringNotContainsString('REMOTE_SMTP_SMARTHOST_PROTOCOL', $transport);
 
         $this->assertContains('update-exim4.conf', $system->journal);
-        $this->assertContains('exim4-reload', $system->journal);
+        $this->assertContains('exim4-restart', $system->journal);
 
         $updateCmd = null;
         $reloadCmd = null;
@@ -69,7 +69,7 @@ class EximRebuildTest extends TestCase
             if (str_contains($cmd, 'update-exim4.conf')) {
                 $updateCmd = $cmd;
             }
-            if (str_contains($cmd, 'service exim4 reload')) {
+            if (str_contains($cmd, 'service exim4 start')) {
                 $reloadCmd = $cmd;
             }
         }
@@ -79,7 +79,7 @@ class EximRebuildTest extends TestCase
         $this->assertStringNotContainsString('exec -T mail', $updateCmd);
 
         $this->assertNotNull($reloadCmd);
-        $this->assertStringContainsString('exec mail service exim4 reload', $reloadCmd);
+        $this->assertStringContainsString('exec mail sh -c', $reloadCmd);
         $this->assertStringNotContainsString('exec -T mail', $reloadCmd);
     }
 
@@ -131,6 +131,92 @@ class EximRebuildTest extends TestCase
         $this->assertStringContainsString('${address:$header_from:}', $rewrite);
     }
 
+    public function test_rebuild_listens_on_this_hosts_docker0_and_relays_for_the_tenant_network(): void
+    {
+        $system = $this->recordingSystem();
+        $exim = $this->eximWithConfig($system, [], [
+            'bridge' => ['subnet' => '172.20.0.0/16', 'gateway' => '172.20.0.1'],
+            'pash-tenants' => ['subnet' => '10.200.0.0/16', 'gateway' => '10.200.0.1'],
+        ]);
+
+        $exim->rebuildEximConfig();
+
+        $updateConf = file_get_contents($this->tmpRoot . '/config/exim/update-exim4.conf.conf');
+        $this->assertStringContainsString("dc_local_interfaces='127.0.0.1 ; 172.20.0.1'", $updateConf);
+        $this->assertStringNotContainsString('172.17.0.1', $updateConf);
+        $this->assertStringContainsString("dc_relay_nets='127.0.0.0/8 ; 172.16.0.0/12 ; 10.200.0.0/16'", $updateConf);
+    }
+
+    public function test_rebuild_falls_back_to_dockers_default_when_nothing_can_be_inspected(): void
+    {
+        $system = $this->recordingSystem();
+        $exim = $this->eximWithConfig($system, []);
+
+        $exim->rebuildEximConfig();
+
+        $updateConf = file_get_contents($this->tmpRoot . '/config/exim/update-exim4.conf.conf');
+        $this->assertStringContainsString("dc_local_interfaces='127.0.0.1 ; 172.17.0.1'", $updateConf);
+        $this->assertStringContainsString("dc_relay_nets='127.0.0.0/8 ; 172.16.0.0/12'", $updateConf);
+    }
+
+    public function test_rebuild_networks_rewrites_only_the_listen_and_relay_lines(): void
+    {
+        $path = $this->tmpRoot . '/config/exim/update-exim4.conf.conf';
+        file_put_contents($path, "dc_readhost='panelalpha.engine'\n"
+            . "dc_relay_nets=''\n"
+            . "dc_hide_mailname='true'\n"
+            . "dc_local_interfaces='127.0.0.1 ; 172.17.0.1'\n"
+            . "dc_relay_nets='127.0.0.0/8 ; 172.16.0.0/12'\n");
+        $system = $this->recordingSystem();
+        $exim = $this->eximWithConfig($system, [], [
+            'bridge' => ['subnet' => '172.20.0.0/16', 'gateway' => '172.20.0.1'],
+            'pash-tenants' => ['subnet' => '10.201.0.0/16', 'gateway' => '10.201.0.1'],
+        ]);
+
+        $exim->rebuildNetworks();
+
+        $this->assertSame("dc_readhost='panelalpha.engine'\n"
+            . "dc_hide_mailname='true'\n"
+            . "dc_local_interfaces='127.0.0.1 ; 172.20.0.1'\n"
+            . "dc_relay_nets='127.0.0.0/8 ; 172.16.0.0/12 ; 10.201.0.0/16'\n", file_get_contents($path));
+        $this->assertSame(['update-exim4.conf', 'exim4-restart'], $system->journal);
+    }
+
+    /**
+     * The daemon a container start left retrying its bind has no pid file, so
+     * `service exim4 stop` misses it; the restart also stops every `exim4 -bd`
+     * before starting the new one.
+     */
+    public function test_the_restart_stops_a_daemon_the_init_script_missed(): void
+    {
+        $script = Exim::RESTART_SCRIPT;
+
+        $stop = strpos($script, 'service exim4 stop');
+        $kill = strpos($script, 'kill $left');
+        $start = strpos($script, 'service exim4 start');
+        $this->assertNotFalse($stop);
+        $this->assertNotFalse($kill);
+        $this->assertNotFalse($start);
+        $this->assertTrue($stop < $kill && $kill < $start);
+        $this->assertStringContainsString('-bd', $script);
+        $this->assertStringContainsString('kill -9', $script);
+    }
+
+    public function test_parse_network_addresses(): void
+    {
+        $this->assertSame(
+            ['subnet' => '172.20.0.0/16', 'gateway' => '172.20.0.1'],
+            Exim::parseNetworkAddresses("172.20.0.0/16 172.20.0.1\n")
+        );
+        $this->assertSame(
+            ['subnet' => '10.200.0.0/16', 'gateway' => '10.200.0.1'],
+            Exim::parseNetworkAddresses("fd00::/64 fd00::1\n10.200.0.0/16 10.200.0.1\n")
+        );
+        $this->assertSame(['subnet' => '172.17.0.0/16'], Exim::parseNetworkAddresses('172.17.0.0/16 '));
+        $this->assertSame([], Exim::parseNetworkAddresses(''));
+        $this->assertSame([], Exim::parseNetworkAddresses('ok-stdout'));
+    }
+
     public function test_send_test_email_uses_run_process_and_returns_process_result(): void
     {
         $system = $this->recordingSystem();
@@ -156,17 +242,24 @@ class EximRebuildTest extends TestCase
     /**
      * @param array<string, string> $config
      */
-    private function eximWithConfig(System $system, array $config): Exim
+    private function eximWithConfig(System $system, array $config, array $networks = []): Exim
     {
-        return new class ($system, $config) extends Exim {
+        return new class ($system, $config, $networks) extends Exim {
             /**
              * @param array<string, string> $config
+             * @param array<string, array{subnet?: string, gateway?: string}> $networks
              */
             public function __construct(
                 System $system,
                 private array $config,
+                private array $networks,
             ) {
                 parent::__construct($system);
+            }
+
+            protected function networkAddresses(string $network): array
+            {
+                return $this->networks[$network] ?? [];
             }
 
             protected function eximConfig(): array
@@ -199,6 +292,8 @@ class EximRebuildTest extends TestCase
             "dc_readhost='{{ \$dc_readhost }}'\n"
             . "dc_eximconfig_configtype='{{ \$dc_eximconfig_configtype }}'\n"
             . "dc_smarthost='{{ \$dc_smarthost }}'\n"
+            . "dc_local_interfaces='{{ \$dc_local_interfaces }}'\n"
+            . "dc_relay_nets='{{ \$dc_relay_nets }}'\n"
         );
         file_put_contents(
             $dir . '/exim-passwd.blade.php',
@@ -254,8 +349,8 @@ class EximRebuildTest extends TestCase
                 if (str_contains($line, 'update-exim4.conf')) {
                     $this->journal[] = 'update-exim4.conf';
                 }
-                if (str_contains($line, 'service exim4 reload')) {
-                    $this->journal[] = 'exim4-reload';
+                if (str_contains($line, 'service exim4 stop') && str_contains($line, 'service exim4 start')) {
+                    $this->journal[] = 'exim4-restart';
                 }
 
                 return '';

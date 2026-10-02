@@ -51,5 +51,5 @@ services:
 @endif
 networks: 
   default: 
-    name: pash-default-network
+    name: pash-tenants
     external: true

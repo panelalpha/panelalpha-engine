@@ -33,6 +33,13 @@ A repository that ships its own `.panelalpha/` directory wins over anything
 here — an upstream that describes its own hosting knows more than a page
 written about it from outside.
 
+The account's `~/.panelalpha` (where hooks keep what must survive a redeploy)
+is 0700 and also holds the engine's own files (`app-credentials.env`, tunnel
+tokens). Bind only the subdirectory or file a service needs
+(`../.panelalpha/<app>:/pa-data/<app>`), never the whole directory, and create
+that subdirectory in `hooks/prepare.sh` so it is the account's: a bind source
+that does not exist yet is created by Docker as root.
+
 ---
 
 ## Integration guide

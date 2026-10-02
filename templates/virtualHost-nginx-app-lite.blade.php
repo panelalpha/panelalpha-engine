@@ -42,7 +42,7 @@ server {
     location / {
         resolver 127.0.0.54 valid=30s;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header Upgrade $http_upgrade;
         proxy_ssl_server_name on;
         proxy_ssl_name $host;
@@ -95,7 +95,7 @@ server {
     location / {
         resolver 127.0.0.54 valid=30s;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header Upgrade $http_upgrade;
         proxy_ssl_server_name on;
         proxy_ssl_name $host;

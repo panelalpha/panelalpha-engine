@@ -10,6 +10,13 @@ server {
     listen [{{ $ip }}]:80;
 @endforeach
     server_name  {{ $domain }}@if (!empty($aliases)) {{ implode(' ', $aliases) }}@endif;
+{{-- The *.panelalpha.online front: the visitor is the last X-Forwarded-For entry it sent. --}}
+@foreach ($trusted_fronts ?? [] as $front)
+    set_real_ip_from {{ $front }};
+@endforeach
+@if (!empty($trusted_fronts))
+    real_ip_header X-Forwarded-For;
+@endif
     access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/access.log combined;
     access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/bytes.log bytes;
     error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/error.log error;
@@ -44,7 +51,7 @@ server {
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-For $remote_addr;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header X-Forwarded-Host $host;
             proxy_set_header X-Forwarded-Port $server_port;
@@ -98,7 +105,7 @@ server {
         set $enginehost core.shared-hosting.palocal;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
-        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-For   $remote_addr;
         proxy_set_header   X-Forwarded-Proto $scheme;
         set $ssopass 0;
         if ($arg_token) {
@@ -121,6 +128,12 @@ server {
 @endforeach
         http2 on;
         server_name  {{ $domain }}@if (!empty($aliases)) {{ implode(' ', $aliases) }}@endif;
+@foreach ($trusted_fronts ?? [] as $front)
+        set_real_ip_from {{ $front }};
+@endforeach
+@if (!empty($trusted_fronts))
+        real_ip_header X-Forwarded-For;
+@endif
         ssl_certificate {{ $ssl_cert_pem_file }};
         ssl_certificate_key {{ $ssl_cert_key_file }};
         proxy_hide_header Strict-Transport-Security;
@@ -150,7 +163,7 @@ server {
                 proxy_http_version 1.1;
                 proxy_set_header Host $host;
                 proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-For $remote_addr;
                 proxy_set_header X-Forwarded-Proto $scheme;
                 proxy_set_header X-Forwarded-Host $host;
                 proxy_set_header X-Forwarded-Port $server_port;
@@ -167,7 +180,7 @@ server {
                 grpc_send_timeout 3600s;
                 grpc_set_header Host $host;
                 grpc_set_header X-Real-IP $remote_addr;
-                grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                grpc_set_header X-Forwarded-For $remote_addr;
                 grpc_set_header X-Forwarded-Proto $scheme;
                 grpc_set_header X-Forwarded-Host $host;
                 grpc_set_header X-Forwarded-Port $server_port;
@@ -226,7 +239,7 @@ server {
             set $enginehost core.shared-hosting.palocal;
             proxy_set_header   Host              $host;
             proxy_set_header   X-Real-IP         $remote_addr;
-            proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header   X-Forwarded-For   $remote_addr;
             proxy_set_header   X-Forwarded-Proto $scheme;
             set $ssopass 0;
             if ($arg_token) {
@@ -249,6 +262,12 @@ server {
     listen [{{ $ip }}]:{{ $extra['listen_port'] }};
 @endforeach
     server_name  {{ $domain }}@if (!empty($aliases)) {{ implode(' ', $aliases) }}@endif;
+@foreach ($trusted_fronts ?? [] as $front)
+    set_real_ip_from {{ $front }};
+@endforeach
+@if (!empty($trusted_fronts))
+    real_ip_header X-Forwarded-For;
+@endif
     access_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/access.log combined;
     error_log /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy/{{ $domain }}/error.log error;
     # Connection: upgrade only when the client asked to upgrade. Set per server,
@@ -268,7 +287,7 @@ server {
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-For $remote_addr;
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $pa_connection_upgrade;

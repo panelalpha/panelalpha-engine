@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Detect\DockerfileFinder;
 use App\Lib\Deploy\DetectAppPort;
@@ -88,7 +89,7 @@ final class AppPortAlignment
                 $composePath,
                 ComposeYaml::dump($parsed, $raw, 6, 2),
                 $this->project->userModel()->getChownString(),
-                '644'
+                EngineArtifacts::RUN_COMPOSE_MODE
             );
             $this->project->shell()->exec(
                 $this->project->userAppComposeCommand(['up', '-d', '--no-build']),

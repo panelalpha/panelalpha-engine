@@ -2,6 +2,7 @@
 
 namespace App\System\Project;
 
+use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
 use App\System;
@@ -11,6 +12,7 @@ use App\System\Project\PhpHosting\FpmApacheStack;
 use App\System\Project\PhpHosting\PhpRuntime;
 use App\System\Project\PhpHosting\PhpStack;
 use App\System\Project\PhpHosting\PhpStackResolver;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -95,7 +97,24 @@ class PhpHosting implements Runtime
 
     public function start(): void
     {
+        $this->prepareTenantNetwork();
         $this->system()->exec("sudo docker compose -f {$this->composeFilePath()} up -d --remove-orphans");
+        // The account's bridge port carries nothing until it is bound (engine#529).
+        $this->prepareTenantNetwork();
+    }
+
+    /**
+     * The account runs on pash-tenants (engine#217), which compose cannot start
+     * without and whose firewall a reboot drops. A failure is a warning: with no
+     * rules, enable_icc still keeps the network's members apart.
+     */
+    private function prepareTenantNetwork(): void
+    {
+        try {
+            $this->system()->exec(TenantNetwork::firewallArgv(), [], 60);
+        } catch (\Exception $e) {
+            Log::warning("Tenant network firewall not applied for {$this->username()}: " . trim($e->getMessage()));
+        }
     }
 
     public function stop(): void

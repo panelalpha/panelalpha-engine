@@ -121,6 +121,74 @@ class ServiceHardenerTest extends TestCase
         );
     }
 
+    /**
+     * A relative `../.panelalpha/...` source is kept even when the engine's own
+     * process cannot read into ~/.panelalpha to rule out a symlink (private,
+     * 0700, same as a real account since engine#494): it is trusted exactly
+     * like the absolute form above, not run past LinkedSource at all.
+     */
+    public function test_a_relative_panelalpha_bind_is_kept_even_when_panelalpha_is_unreadable(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('root searches every directory');
+        }
+        $root = sys_get_temp_dir() . '/service-hardener-' . bin2hex(random_bytes(4));
+        $home = $root . '/acct';
+        mkdir($home . '/project', 0755, true);
+        // 0000, not the real 0700: this single process owns whatever it creates,
+        // so 0700 would still let it search the directory. 0000 is how
+        // LinkedSourceTest reproduces "the caller cannot search this" too.
+        mkdir($home . '/.panelalpha', 0000, true);
+        try {
+            $service = ServiceHardener::withoutEscapes([
+                'image' => 'acme/app',
+                'volumes' => [
+                    '../.panelalpha/app/config.json:/config.json',
+                    '../.panelalpha:/state',
+                ],
+            ], accountUser: 'acct', projectDir: $home . '/project');
+
+            $this->assertSame([
+                '../.panelalpha/app/config.json:/config.json',
+                '../.panelalpha:/state',
+            ], $service['volumes']);
+        } finally {
+            exec('rm -rf ' . escapeshellarg($root));
+        }
+    }
+
+    /**
+     * The absolute form too, as recipe hooks write it into .env and an
+     * override interpolates it (`${CRAFTY_DATA}/config:/...`).
+     */
+    public function test_an_absolute_panelalpha_bind_is_kept_even_when_panelalpha_is_unreadable(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('root searches every directory');
+        }
+        $root = sys_get_temp_dir() . '/service-hardener-' . bin2hex(random_bytes(4));
+        $home = $root . '/acct';
+        mkdir($home . '/project', 0755, true);
+        mkdir($home . '/.panelalpha', 0000, true);
+        try {
+            $service = ServiceHardener::withoutEscapes([
+                'image' => 'acme/app',
+                'volumes' => [
+                    '/home/acct/.panelalpha/trac:/data',
+                    '${CRAFTY_DATA}/config:/crafty/app/config',
+                    '/home/acct/.panelalpha/../docker:/d',
+                ],
+            ], ['CRAFTY_DATA' => '/home/acct/.panelalpha/crafty'], accountUser: 'acct', projectDir: $home . '/project');
+
+            $this->assertSame([
+                '/home/acct/.panelalpha/trac:/data',
+                '${CRAFTY_DATA}/config:/crafty/app/config',
+            ], $service['volumes']);
+        } finally {
+            exec('rm -rf ' . escapeshellarg($root));
+        }
+    }
+
     public function test_a_capability_beyond_the_default_set_is_stripped(): void
     {
         foreach ([['ALL'], ['SYS_ADMIN', 'SYS_PTRACE', 'SYS_MODULE'], 'ALL', []] as $caps) {

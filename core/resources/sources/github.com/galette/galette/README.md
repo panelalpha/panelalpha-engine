@@ -45,8 +45,8 @@ whole deploy. None of the three fixes is a change to upstream source:
 2. **config/ and data/ live in the checkout, wiped every redeploy** (engine#173,
    ~/project is emptied). Galette keeps its DB connection (`config/config.inc.php`,
    which holds the DB password) in `config/` and all uploads/logs/exports/photos
-   in `data/`. `overrides/docker-compose.override.yml` bind-mounts `~/.panelalpha`
-   into the `app` container as `/pa-data`; `files/galette/panelalpha/galette-setup.sh`
+   in `data/`. `overrides/docker-compose.override.yml` bind-mounts `~/.panelalpha/galette`
+   (created by `hooks/prepare.sh`) into the `app` container as `/pa-data/galette`; `files/galette/panelalpha/galette-setup.sh`
    seeds `~/.panelalpha/galette/{config,data}` once from the fresh checkout, then
    symlinks `/app/config` and `/app/data` onto it. Relational content is in the
    account MySQL (`database: mysql`), which survives on its own. Verified: a

@@ -9,36 +9,48 @@ namespace App\Lib\Deploy\Source;
  * that subdirectory is the project root — the usual "zip of a folder" case.
  * Otherwise the extract directory itself is the root (flat archive).
  *
- * No Laravel dependencies — unit-testable with a temp directory.
+ * The directory is listed with {@see topLevelArgv()} rather than read here:
+ * archives are extracted under the account's private ~/.panelalpha, which
+ * core's PHP process cannot read. No Laravel dependencies.
  */
 class ProjectArchive
 {
-    public static function findSingleDir(string $tmpExtractDir): ?string
+    /**
+     * The top level of $dir as `<type> <name>` records, NUL-terminated, where
+     * type is find's `%y` letter (`d` directory, `f` file, `l` link, ...).
+     *
+     * @return list<string>
+     */
+    public static function topLevelArgv(string $dir): array
     {
-        if (!is_dir($tmpExtractDir)) {
-            return null;
-        }
-
-        $dir = null;
-        foreach (scandir($tmpExtractDir) ?: [] as $entry) {
-            if ($entry === '.' || $entry === '..' || $entry === '.DS_Store') {
-                continue;
-            }
-            $path = $tmpExtractDir . '/' . $entry;
-            if (!is_dir($path)) {
-                return null;
-            }
-            if ($dir !== null) {
-                return null;
-            }
-            $dir = $path;
-        }
-
-        return $dir;
+        return ['sudo', 'find', $dir, '-mindepth', '1', '-maxdepth', '1', '-printf', '%y %f\0'];
     }
 
-    public static function resolveProjectRoot(string $tmpExtractDir): string
+    /**
+     * @param string $listing the output of {@see topLevelArgv()} for $dir
+     */
+    public static function findSingleDir(string $dir, string $listing): ?string
     {
-        return self::findSingleDir($tmpExtractDir) ?? $tmpExtractDir;
+        $found = null;
+        foreach (explode("\0", $listing) as $record) {
+            if ($record === '') {
+                continue;
+            }
+            [$type, $name] = array_pad(explode(' ', $record, 2), 2, '');
+            if ($name === '' || $name === '.DS_Store') {
+                continue;
+            }
+            if ($type !== 'd' || $found !== null) {
+                return null;
+            }
+            $found = rtrim($dir, '/') . '/' . $name;
+        }
+
+        return $found;
+    }
+
+    public static function resolveProjectRoot(string $dir, string $listing): string
+    {
+        return self::findSingleDir($dir, $listing) ?? $dir;
     }
 }

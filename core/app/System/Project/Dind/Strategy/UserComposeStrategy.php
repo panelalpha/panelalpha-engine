@@ -162,7 +162,7 @@ class UserComposeStrategy
                 $runPath,
                 $included === [] ? $raw : ComposeYaml::dump($parsed, $raw, 6, 2, ...$included),
                 $chown,
-                '644'
+                EngineArtifacts::RUN_COMPOSE_MODE
             );
 
             return;
@@ -235,7 +235,7 @@ class UserComposeStrategy
         if ($system->filesystem()->fileExists($projectDir . '/' . EngineArtifacts::ENV_OVERRIDES)) {
             [$parsed, ] = ComposeEnvFiles::attach($parsed, EngineArtifacts::ENV_OVERRIDES);
         }
-        $system->filesystem()->filePutContents($runPath, ComposeYaml::dump($parsed, $raw, 6, 2, ...$included), $chown, '644');
+        $system->filesystem()->filePutContents($runPath, ComposeYaml::dump($parsed, $raw, 6, 2, ...$included), $chown, EngineArtifacts::RUN_COMPOSE_MODE);
         $this->dind->strategy()->installRailsHostInitializer($projectDir, $chown);
         $logger?->info('Hardened compose for hosting (resource limits, restart policy, isolation)');
     }

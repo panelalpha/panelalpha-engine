@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
 use App\Lib\Deploy\Detect\PlaceholderPage;
@@ -26,7 +27,7 @@ class ComposeWriter
             $this->project->userAppComposeFilePath(),
             $yaml,
             $chown,
-            '644'
+            EngineArtifacts::RUN_COMPOSE_MODE
         );
         $this->freezeRuntimeImage($yaml);
     }

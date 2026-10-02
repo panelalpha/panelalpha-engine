@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project\PhpHosting;
 
+use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project as ProjectAggregate;
@@ -97,6 +98,20 @@ class PhpHostingRuntimeTest extends TestCase
         $this->assertContains('compose-down', $system->journal);
     }
 
+    /** engine#217: the account joins pash-tenants, and its port is bound once it exists. */
+    public function test_start_applies_the_tenant_network_firewall_around_compose_up(): void
+    {
+        $model = $this->userModel('erin');
+        $system = $this->recordingSystem($this->tmpRoot);
+        $project = $this->phpHosting($system, $model);
+        mkdir($system->projectDirPath('erin'), 0777, true);
+        file_put_contents($project->composeFilePath(), "services:\n  php:\n    image: test\n");
+
+        $project->start();
+
+        $this->assertSame(['tenant-firewall', 'compose-up', 'tenant-firewall'], $system->journal);
+    }
+
     private function phpHosting(System $system, ModelsUser $model): PhpHosting
     {
         $runtime = (new ProjectAggregate($system, $model))->runtime();
@@ -145,6 +160,9 @@ class PhpHostingRuntimeTest extends TestCase
             public function exec(string|array $cmd, array $env = [], int $timeout = 600): string
             {
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
+                if ($cmd === TenantNetwork::firewallArgv()) {
+                    $this->journal[] = 'tenant-firewall';
+                }
                 if (str_contains($line, 'docker compose') && str_contains($line, ' up ')) {
                     $this->journal[] = 'compose-up';
                     if ($this->failOnComposeUp) {

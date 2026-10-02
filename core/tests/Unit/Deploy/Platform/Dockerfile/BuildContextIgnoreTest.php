@@ -120,6 +120,7 @@ class BuildContextIgnoreTest extends TestCase
             'docker-compose.panelalpha.override.yml',
             'docker-compose.panelalpha.app-config.yml',
             '.env.panelalpha',
+            '.env.default',
             'panelalpha.Dockerfile',
             'panelalpha.Dockerfile.dockerignore',
             'Dockerfile.dockerignore',
@@ -133,6 +134,13 @@ class BuildContextIgnoreTest extends TestCase
     {
         $this->assertContains(EngineArtifacts::ENV_OVERRIDES, $this->lines(BuildContextIgnore::render(null, 'Dockerfile', false, false)));
         $this->assertContains(EngineArtifacts::ENV_OVERRIDES, $this->lines(BuildContextIgnore::render(null, 'panelalpha.Dockerfile', true, true)));
+    }
+
+    /** A COPY . of the context put it in the image, generated passwords and all. */
+    public function test_the_engines_env_default_is_always_left_out(): void
+    {
+        $this->assertContains(EngineArtifacts::ENV_DEFAULT, $this->lines(BuildContextIgnore::render(null, 'Dockerfile', false, false)));
+        $this->assertContains(EngineArtifacts::ENV_DEFAULT, $this->lines(BuildContextIgnore::render("node_modules\n", 'Dockerfile', true, true)));
     }
 
     public function test_env_is_listed_only_when_asked(): void

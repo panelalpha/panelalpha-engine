@@ -37,8 +37,9 @@ failure — no repair, only configuration.
   generates (`credentials:` in `panelalpha.yaml`) into
   `~/.panelalpha/pmwiki/admin.hash` (0600) whenever it does not match; drops a PHP-disabling `.htaccess` in uploads;
   removes the clone's `.git`.
-- **`overrides/docker-compose.override.yml`** — bind-mounts `~/.panelalpha` to
-  `/pa-data`. No `database:` — PmWiki needs none, so no sidecar; it fits the
+- **`overrides/docker-compose.override.yml`** — bind-mounts `~/.panelalpha/pmwiki`
+  (created by `hooks/prepare.sh`) to `/pa-data/pmwiki`, and `app-credentials.env`
+  read-only to `/pa-data/app-credentials.env`; never the whole `~/.panelalpha`. No `database:` — PmWiki needs none, so no sidecar; it fits the
   smallest host.
 - **`.htaccess` files** — root denies `wiki.d/`, `.git/`, the setup dir and the
   ini dir over HTTP; `local/.htaccess` (shipped by PmWiki) denies `config.php`;

@@ -19,6 +19,7 @@ final class Files
 
     public function __construct(
         private DindProject $project,
+        private string $stageRoot = self::ARCHIVE_STAGE_DIR,
     ) {
     }
 
@@ -39,7 +40,7 @@ final class Files
             );
         }
 
-        $stageDir = self::ARCHIVE_STAGE_DIR . '/' . bin2hex(random_bytes(8));
+        $stageDir = $this->stageRoot . '/' . bin2hex(random_bytes(8));
         $staged = $stageDir . '/' . $archive->stagedName();
         $tmp = $home . '/.panelalpha/archive-extract-' . bin2hex(random_bytes(8));
 
@@ -65,7 +66,9 @@ final class Files
             }
             $system->exec($archive->extractArgv($uid, $gid, $staged, $tmp), [], 600);
 
-            $source = ProjectArchive::resolveProjectRoot($tmp);
+            // Listed as root: ~/.panelalpha is the account's alone (0700), so
+            // core's PHP would see an empty directory and never unwrap it.
+            $source = ProjectArchive::resolveProjectRoot($tmp, $system->exec(ProjectArchive::topLevelArgv($tmp), [], 60));
             $system->exec(['sudo', 'mkdir', '-p', $projectDir]);
             $system->exec([
                 'sudo',

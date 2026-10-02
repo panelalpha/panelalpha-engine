@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project\Dind;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Models\User;
 use App\System;
@@ -32,6 +33,12 @@ class TenantNetworkMoveTest extends TestCase
 
     /** @var array<string, string> */
     public array $files = [];
+
+    /** @var array<string, ?string> the mode each write asked for */
+    public array $modes = [];
+
+    /** @var list<string> */
+    public array $composeFiles = [self::RUN_FILE];
 
     /** @var list<string> networks the account container is on, in docker's view */
     public array $networks = [];
@@ -84,6 +91,23 @@ class TenantNetworkMoveTest extends TestCase
             str_replace('name: pash-default-network', 'name: pash-tenants', self::ACCOUNT_COMPOSE),
             $this->files[self::ACCOUNT_FILE]
         );
+    }
+
+    /**
+     * The run file inlines env_vars and passwords, so it stays 0600 (engine#173)
+     * when the repin rewrites it; an override keeps the 0644 its writers use.
+     */
+    public function test_the_repinned_run_file_stays_owner_only(): void
+    {
+        $this->networks = [TenantNetwork::LEGACY_NAME];
+        $override = '/home/alice/project/' . EngineArtifacts::RUN_COMPOSE_OVERRIDE;
+        $this->files[$override] = "      - 'database-users.shared-hosting.palocal:172.25.0.3'\n";
+        $this->composeFiles = [self::RUN_FILE, $override];
+
+        (new TenantNetworkMove($this->dind(true)))->run();
+
+        $this->assertSame(EngineArtifacts::RUN_COMPOSE_MODE, $this->modes[self::RUN_FILE]);
+        $this->assertSame('644', $this->modes[$override]);
     }
 
     public function test_an_app_that_does_not_come_back_keeps_the_old_network(): void
@@ -189,6 +213,7 @@ class TenantNetworkMoveTest extends TestCase
                     {
                         $this->test->events[] = 'write ' . $path;
                         $this->test->files[$path] = $contents;
+                        $this->test->modes[$path] = $chmod;
                     }
                 };
             }
@@ -204,7 +229,7 @@ class TenantNetworkMoveTest extends TestCase
         $dind->method('system')->willReturn($system);
         $dind->method('userModel')->willReturn($user);
         $dind->method('userAppComposeEnv')->willReturn([
-            'COMPOSE_FILE' => self::RUN_FILE,
+            'COMPOSE_FILE' => implode(':', $test->composeFiles),
             'COMPOSE_PATH_SEPARATOR' => ':',
         ]);
         $dind->method('projectAction')->willReturnCallback(function (string $action) use ($test): array {

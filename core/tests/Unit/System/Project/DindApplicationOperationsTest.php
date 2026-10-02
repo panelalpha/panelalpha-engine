@@ -238,6 +238,10 @@ class DindApplicationOperationsTest extends TestCase
                 if (is_array($cmd) && ($cmd[0] ?? null) === 'test' && ($cmd[1] ?? null) === '-e') {
                     return file_exists((string) ($cmd[2] ?? '')) ? FakeProcess::ok() : FakeProcess::failed();
                 }
+                // The account's own container is on the host, under its Compose label.
+                if (is_array($cmd) && str_starts_with(implode(' ', $cmd), 'sudo docker ps -a --filter name=^/alice$')) {
+                    return FakeProcess::ok("alice\n");
+                }
 
                 return FakeProcess::forCommand($cmd);
             }

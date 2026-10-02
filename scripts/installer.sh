@@ -1063,6 +1063,13 @@ configure_quota() {
         echo_warning "Could not turn on filesystem quota; project disk limits will not be enforced"
 }
 
+# lxcfs gives each account its own /proc/meminfo, loadavg and CPUs. Never
+# fatal: without it accounts start as before and see the host's.
+configure_lxcfs() {
+    bash /opt/panelalpha/shared-hosting/scripts/configure-lxcfs.sh ||
+        echo_warning "lxcfs is not running; accounts will see the host's memory, CPUs and load in /proc"
+}
+
 remove_renamed_containers() {
     for old in nginx cron database-core webserver database-users phpmyadmin-users dns-proxy exim pure-ftpd redis core-redis queue-worker core-queue core-cron core-http; do
         ids=$(docker ps -aq \
@@ -1228,6 +1235,9 @@ EOF
     # live. Already-moved and stopped ones are left alone, and one that cannot
     # move keeps working where it is, so it never fails the update.
     docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan project:network:move --all || true
+    # Exim listens on docker0's gateway, which differs per host (bip, or a
+    # 172.17 clash), and relays for pash-tenants; both are read from Docker.
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:exim:rebuild --networks || true
     if [ "$ENABLE_NAT" = 1 ]; then
         docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml exec -T core php artisan system:nat:build --replace-default-ipv4 || true
     fi
@@ -1362,6 +1372,7 @@ post_install_config() {
     # Hardening ran before the stack came up, in harden_host.
     set_default_ip
     configure_quota
+    configure_lxcfs
     # Before request_certificates: an ACME HTTP-01 challenge is answered through
     # this webserver, so take its restart before any challenge is in flight.
     render_webserver_config

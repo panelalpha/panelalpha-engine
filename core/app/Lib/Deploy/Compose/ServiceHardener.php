@@ -98,6 +98,9 @@ final class ServiceHardener
      */
     private const DOCKER_SOCKET_PATTERN = '#(^|:)\s*/(?:var/)?run(?:/docker\.sock)?(?:/)?(?::|$)#';
 
+    /** The account's own writable tree, trusted like `leavesProject()` documents. */
+    private const PANELALPHA_DIR = '.panelalpha';
+
     /**
      * Host paths an application service is never given. `/` covers the whole
      * filesystem; the rest are the parts of it that carry the daemon's state
@@ -918,7 +921,17 @@ final class ServiceHardener
     {
         $source = trim($source);
         // Docker follows symlinks in a bind source, and a checkout keeps them.
+        // Skipped for a path that resolves into ~/.panelalpha, relative or
+        // absolute: the account already owns that tree outright, and it being
+        // account-private (0700) means the engine's own process often cannot
+        // even stat into it to tell a symlink from a missing file --
+        // LinkedSource::escapes() then has to assume the worst and refuses a
+        // bind this function means to allow (leavesProject()'s own docblock).
+        $inPanelalpha = str_starts_with($source, '/')
+            ? self::isOwnPanelalpha(self::normalisedAbsolute($source), $accountUser)
+            : self::relativeFirstSegment($source) === self::PANELALPHA_DIR;
         if ($projectDir !== null && str_starts_with($projectDir, '/') && preg_match('#^[./]#', $source) === 1
+            && !$inPanelalpha
             && LinkedSource::escapes($source, $projectDir)
         ) {
             return true;
@@ -941,11 +954,8 @@ final class ServiceHardener
         }
         // The account's own ~/.panelalpha: the one writable tree a rebuild keeps,
         // which recipe hooks record in .env by its absolute path.
-        if ($accountUser !== null && preg_match('/^[a-z_][a-z0-9_.-]*$/i', $accountUser) === 1) {
-            $keep = "/home/{$accountUser}/.panelalpha";
-            if ($source === $keep || str_starts_with($source, $keep . '/')) {
-                return false;
-            }
+        if (self::isOwnPanelalpha($source, $accountUser)) {
+            return false;
         }
 
         foreach (self::FORBIDDEN_SOURCE_PREFIXES as $prefix) {
@@ -955,6 +965,17 @@ final class ServiceHardener
         }
 
         return false;
+    }
+
+    /** Whether normalised absolute $source is the account's ~/.panelalpha or under it. */
+    private static function isOwnPanelalpha(string $source, ?string $accountUser): bool
+    {
+        if ($accountUser === null || preg_match('/^[a-z_][a-z0-9_.-]*$/i', $accountUser) !== 1) {
+            return false;
+        }
+        $keep = "/home/{$accountUser}/.panelalpha";
+
+        return $source === $keep || str_starts_with($source, $keep . '/');
     }
 
     private static function normalisedAbsolute(string $source): string
@@ -982,6 +1003,19 @@ final class ServiceHardener
      */
     private static function leavesProject(string $source): bool
     {
+        $first = self::relativeFirstSegment($source);
+
+        // false means more `..` than there were segments to pop: past ~ itself.
+        return $first === false || $first === 'docker';
+    }
+
+    /**
+     * The first path component once `.`/`..` are resolved against `~/project`:
+     * a name, null for `~` itself (e.g. `../`), or false for more `..` than
+     * there were parts to pop (past `~`).
+     */
+    private static function relativeFirstSegment(string $source): string|false|null
+    {
         $segments = ['project'];
         foreach (explode('/', $source) as $segment) {
             if ($segment === '' || $segment === '.') {
@@ -989,7 +1023,7 @@ final class ServiceHardener
             }
             if ($segment === '..') {
                 if ($segments === []) {
-                    return true;
+                    return false;
                 }
                 array_pop($segments);
                 continue;
@@ -997,6 +1031,6 @@ final class ServiceHardener
             $segments[] = $segment;
         }
 
-        return ($segments[0] ?? null) === 'docker';
+        return $segments[0] ?? null;
     }
 }

@@ -46,7 +46,9 @@ The recipe fixes it, none of it a change to upstream source:
    `spip.logger.log_path`), the setup script copies `config/spip/` there too.
    `IMG/` has no env override and is symlinked onto `/pa-data`. Relational
    content lives in the account MySQL (`database: mysql`) and survives on its
-   own. `overrides/docker-compose.override.yml` provides the `/pa-data` mount.
+   own. `overrides/docker-compose.override.yml` mounts `~/.panelalpha/spip`
+   (created by `hooks/prepare.sh`) at `/pa-data/spip` and `app-credentials.env`
+   read-only; never the whole `~/.panelalpha`.
 
 3. **The installer is a first-visitor-wins web wizard, and it is closed
    headless.** SPIP 5 ships **no CLI installer**; `ecrire/?exec=install` is a
@@ -106,7 +108,7 @@ source recipe's build command into the decision — would let this recipe drop t
 in-container composer re-run (fix 1). The in-container re-run is the workaround
 until then.
 
-## Verified (mariusz2, PHP 8.4, 2026-09-21)
+## Verified (a dev host, PHP 8.4, 2026-09-21)
 
 Fresh deploy, no manual steps. Deploy ~18s engine + container-boot layout +
 headless install (well within the 300s start-hook budget); app container

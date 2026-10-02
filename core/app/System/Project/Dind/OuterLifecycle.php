@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Dind\TenantNetwork;
+use App\System\AccountContainers;
 use App\System\Project\Dind as DindProject;
 
 /**
@@ -76,7 +77,7 @@ final class OuterLifecycle
     }
 
     /**
-     * Outer compose down (when present) and force-remove the named DinD container.
+     * Outer compose down (when present) and force-remove the account's DinD container.
      * Safe when compose was never written or was already removed.
      */
     public function deleteOuterStack(): void
@@ -95,12 +96,10 @@ final class OuterLifecycle
             ]);
         }
 
-        $this->project->system()->runProcess([
-            'sudo',
-            'docker',
-            'rm',
-            '-f',
-            $this->project->username(),
-        ]);
+        // Only the account's own container: a foreign one may share the name.
+        $username = $this->project->username();
+        if ((new AccountContainers($this->project->system()))->ownsContainerNamed($username)) {
+            $this->project->system()->runProcess(['sudo', 'docker', 'rm', '-f', $username]);
+        }
     }
 }

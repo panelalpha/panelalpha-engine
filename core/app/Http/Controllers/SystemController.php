@@ -14,6 +14,7 @@ use App\Models\Ipv4NatMap;
 use App\Models\Setting;
 use App\Models\User;
 use App\System;
+use App\System\AccountContainers;
 use App\System\Network;
 use App\System\Services\Webserver\Litespeed;
 use Illuminate\Http\JsonResponse;
@@ -79,6 +80,9 @@ class SystemController extends Controller
             ],
             // Projects holding secrets this APP_KEY cannot decrypt.
             'unreadable_secrets' => self::unreadableSecrets(User::query()->cursor()),
+            // Reported only: the operator removes them, the engine never does.
+            'orphan_account_containers' => (new AccountContainers($system))
+                ->orphanReport(User::query()->pluck('username')),
         ];
 
         return new JsonResponse([

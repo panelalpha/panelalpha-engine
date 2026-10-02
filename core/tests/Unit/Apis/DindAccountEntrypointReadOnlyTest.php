@@ -17,7 +17,7 @@ class DindAccountEntrypointReadOnlyTest extends TestCase
     private const TEMPLATE = __DIR__ . '/../../../../templates/user/dind/project/docker-compose.yml.blade.php';
 
     /**
-     * @return list<string>
+     * @return list<string|array<string, mixed>> short-syntax strings, or long-syntax maps
      */
     private function volumes(): array
     {
@@ -53,6 +53,14 @@ class DindAccountEntrypointReadOnlyTest extends TestCase
     public function test_every_account_template_mount_is_read_only(): void
     {
         foreach ($this->volumes() as $volume) {
+            // Long syntax (lxcfs's /proc binds): read_only instead of a `:ro` suffix.
+            if (is_array($volume)) {
+                $source = (string) ($volume['source'] ?? '');
+                if (str_starts_with($source, './')) {
+                    $this->assertTrue(($volume['read_only'] ?? false) === true, "{$source} is writable from inside the account");
+                }
+                continue;
+            }
             $volume = (string) $volume;
             if (!str_starts_with($volume, './')) {
                 continue; // not a template file -- the account's own /home.

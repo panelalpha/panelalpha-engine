@@ -13,6 +13,11 @@ if [ "${DB_CONNECTION:-sqlite}" = "sqlite" ]; then
     touch /var/www/html/storage/database/core.sqlite
 fi
 chown -R www-data:www-data /var/www/html/storage
+# Statistics config and data are written by php-fpm and the workers, which run
+# as www-data; the install leaves both directories owned by root.
+for d in /opt/panelalpha/shared-hosting/awstats-config /opt/panelalpha/shared-hosting/awstats-data; do
+    if [ -d "$d" ]; then chown -R www-data:www-data "$d"; fi
+done
 mkdir -p /var/tmp/panelalpha-backup
 chown www-data:www-data /var/tmp/panelalpha-backup
 chmod 1777 /var/tmp/panelalpha-backup

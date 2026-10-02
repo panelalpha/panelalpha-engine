@@ -177,4 +177,16 @@ class TenantNetworkTest extends TestCase
         $this->assertStringContainsString('name: ' . TenantNetwork::NAME, $template);
         $this->assertStringNotContainsString('name: ' . TenantNetwork::LEGACY_NAME, $template);
     }
+
+    /** engine#217: PHP-hosting accounts sat on core's network after DinD ones left it. */
+    public function test_php_hosting_accounts_are_created_on_the_tenant_network(): void
+    {
+        $templates = glob(dirname(__DIR__, 5) . '/templates/user/default/project/docker-compose.yml*.blade.php') ?: [];
+        $this->assertCount(4, $templates);
+        foreach ($templates as $path) {
+            $template = (string) file_get_contents($path);
+            $this->assertStringContainsString('name: ' . TenantNetwork::NAME, $template, basename($path));
+            $this->assertStringNotContainsString('name: ' . TenantNetwork::LEGACY_NAME, $template, basename($path));
+        }
+    }
 }

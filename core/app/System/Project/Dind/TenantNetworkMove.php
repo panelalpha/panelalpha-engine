@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Dind\TenantNetwork;
 use App\System\Project\Dind as DindProject;
 use RuntimeException;
@@ -130,7 +131,9 @@ final class TenantNetworkMove
             $yaml = $filesystem->fileGetContents($file);
             $repinned = AppDatabase::repinned($yaml, $address);
             if ($repinned !== $yaml) {
-                $filesystem->filePutContents($file, $repinned, $chown, '644');
+                // The run file inlines env_vars and passwords; the overrides are 0644 wherever written.
+                $mode = basename($file) === EngineArtifacts::RUN_COMPOSE ? EngineArtifacts::RUN_COMPOSE_MODE : '644';
+                $filesystem->filePutContents($file, $repinned, $chown, $mode);
                 $changed = true;
             }
         }

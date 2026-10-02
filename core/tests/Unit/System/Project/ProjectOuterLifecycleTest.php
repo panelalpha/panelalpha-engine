@@ -352,9 +352,11 @@ class ProjectOuterLifecycleTest extends TestCase
                 if (str_contains($line, 'rm -rf')) {
                     $this->simulateRmRf($line);
                 }
+                // The account's own container is on the host, under its Compose label.
+                $output = str_starts_with($line, 'sudo docker ps -a --filter name=^/alice$') ? "alice\n" : '';
 
-                return new class extends Process {
-                    public function __construct()
+                return new class ($output) extends Process {
+                    public function __construct(private string $output)
                     {
                         parent::__construct(['true']);
                     }
@@ -376,7 +378,7 @@ class ProjectOuterLifecycleTest extends TestCase
 
                     public function getOutput(): string
                     {
-                        return '';
+                        return $this->output;
                     }
                 };
             }

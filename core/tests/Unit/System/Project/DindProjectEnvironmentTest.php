@@ -479,8 +479,8 @@ class DindProjectEnvironmentTest extends TestCase
 
         $this->assertSame('0600', $this->mode(EngineArtifacts::ENV_OVERRIDES));
         $this->assertSame('0600', $this->mode('.env.default'));
-        // Still 0644: port detection reads it as www-data, not through sudo.
-        $this->assertSame('0644', $this->mode(EngineArtifacts::RUN_COMPOSE));
+        // The run file now carries .env.panelalpha too; port detection reads it through sudo.
+        $this->assertSame('0600', $this->mode(EngineArtifacts::RUN_COMPOSE));
     }
 
     private function mode(string $name): string

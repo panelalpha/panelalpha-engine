@@ -365,7 +365,7 @@ class ProjectEnvironment
                 $runPath,
                 ComposeYaml::dump($updated, $raw, 6, 2),
                 $this->dind->userModel()->getChownString(),
-                '644'
+                EngineArtifacts::RUN_COMPOSE_MODE
             );
         }
 

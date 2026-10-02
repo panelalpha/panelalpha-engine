@@ -35,10 +35,14 @@ class UserComposeStrategyTest extends TestCase
     /** @var array<string, string> target path => contents, from every `sudo cp` the write issued */
     private array $copiedTo = [];
 
+    /** @var array<string, string> target path => mode, from every `sudo chmod` */
+    private array $modes = [];
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->copiedTo = [];
+        $this->modes = [];
     }
 
     /**
@@ -47,11 +51,13 @@ class UserComposeStrategyTest extends TestCase
     private function stubbedSystem(array $files): System
     {
         $copiedTo = &$this->copiedTo;
+        $modes = &$this->modes;
 
-        return new class ($files, $copiedTo) extends System {
+        return new class ($files, $copiedTo, $modes) extends System {
             /** @param array<string, string> $files
-             *  @param array<string, string> $copiedTo */
-            public function __construct(private array $files, private array &$copiedTo)
+             *  @param array<string, string> $copiedTo
+             *  @param array<string, string> $modes */
+            public function __construct(private array $files, private array &$copiedTo, private array &$modes)
             {
             }
 
@@ -84,6 +90,9 @@ class UserComposeStrategyTest extends TestCase
                 $line = is_array($cmd) ? implode(' ', $cmd) : $cmd;
                 if (preg_match('/^sudo cp (\S+) (\S+)$/', $line, $m) === 1 && is_file($m[1])) {
                     $this->copiedTo[$m[2]] = (string) file_get_contents($m[1]);
+                }
+                if (preg_match('/^sudo chmod (\S+) (\S+)$/', $line, $m) === 1) {
+                    $this->modes[$m[2]] = $m[1];
                 }
 
                 return '';
@@ -464,5 +473,26 @@ class UserComposeStrategyTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('includes missing.yml');
         (new UserComposeStrategy($dind))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+    }
+
+    /** engine#173: the run file inlines env_vars and generated passwords. */
+    public function test_the_run_file_is_written_owner_only(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $system = $this->stubbedSystem([$clientPath => "services:\n  app:\n    image: acme/app\n"]);
+
+        (new UserComposeStrategy($this->stubbedDind($system, $clientPath)))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $this->assertSame('600', $this->modes[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE] ?? null);
+    }
+
+    public function test_a_run_file_copied_through_verbatim_is_owner_only_too(): void
+    {
+        $clientPath = self::PROJECT_DIR . '/docker-compose.yml';
+        $system = $this->stubbedSystem([$clientPath => "version: '3'\n"]);
+
+        (new UserComposeStrategy($this->stubbedDind($system, $clientPath)))->refreshRunFile(self::PROJECT_DIR, '1001:1001');
+
+        $this->assertSame('600', $this->modes[self::PROJECT_DIR . '/' . EngineArtifacts::RUN_COMPOSE] ?? null);
     }
 }

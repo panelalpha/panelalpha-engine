@@ -31,6 +31,11 @@ services:
       - ./entrypoint.d/:/entrypoint.d/:ro
       - ./daemon.json:/etc/docker/daemon.json:ro
       - ./services/:/etc/s6/account/:ro
+      # lxcfs: the account's own memory, CPUs and load in /proc. Long syntax,
+      # so compose never creates a missing source as a directory.
+@foreach ($proc_mounts ?? [] as $procFile)
+      - {type: bind, source: /var/lib/lxcfs/proc/{{ $procFile }}, target: /proc/{{ $procFile }}, read_only: true}
+@endforeach
     tty: true
     {{ !empty($cpu_limit) ? ("cpus: " . $cpu_limit) : "" }}
     {{ !empty($memory_limit) ? ("mem_limit: " . $memory_limit . "M") : "" }}

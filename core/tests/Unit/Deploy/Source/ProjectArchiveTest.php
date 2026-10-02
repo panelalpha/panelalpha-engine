@@ -7,69 +7,50 @@ use PHPUnit\Framework\TestCase;
 
 class ProjectArchiveTest extends TestCase
 {
-    private string $tmpDir = '';
+    private const DIR = '/home/acct/.panelalpha/archive-extract-0123';
 
-    protected function setUp(): void
+    public function test_lists_the_top_level_as_root(): void
     {
-        parent::setUp();
-        $this->tmpDir = sys_get_temp_dir() . '/project-archive-' . bin2hex(random_bytes(8));
-        mkdir($this->tmpDir, 0777, true);
-    }
-
-    protected function tearDown(): void
-    {
-        $this->removeDir($this->tmpDir);
-        parent::tearDown();
+        $this->assertSame(
+            ['sudo', 'find', self::DIR, '-mindepth', '1', '-maxdepth', '1', '-printf', '%y %f\0'],
+            ProjectArchive::topLevelArgv(self::DIR)
+        );
     }
 
     public function test_unwraps_single_subdirectory(): void
     {
-        mkdir($this->tmpDir . '/my-app');
-        file_put_contents($this->tmpDir . '/my-app/index.html', 'hi');
-
-        $this->assertSame(
-            $this->tmpDir . '/my-app',
-            ProjectArchive::resolveProjectRoot($this->tmpDir)
-        );
+        $this->assertSame(self::DIR . '/my-app', ProjectArchive::resolveProjectRoot(self::DIR, "d my-app\0"));
     }
 
     public function test_keeps_flat_root_when_files_present(): void
     {
-        file_put_contents($this->tmpDir . '/index.html', 'hi');
-        mkdir($this->tmpDir . '/assets');
-
-        $this->assertSame($this->tmpDir, ProjectArchive::resolveProjectRoot($this->tmpDir));
+        $this->assertSame(self::DIR, ProjectArchive::resolveProjectRoot(self::DIR, "f index.html\0d assets\0"));
+        $this->assertSame(self::DIR, ProjectArchive::resolveProjectRoot(self::DIR, "d assets\0f index.html\0"));
     }
 
     public function test_keeps_root_when_multiple_directories(): void
     {
-        mkdir($this->tmpDir . '/a');
-        mkdir($this->tmpDir . '/b');
+        $this->assertNull(ProjectArchive::findSingleDir(self::DIR, "d a\0d b\0"));
+        $this->assertSame(self::DIR, ProjectArchive::resolveProjectRoot(self::DIR, "d a\0d b\0"));
+    }
 
-        $this->assertNull(ProjectArchive::findSingleDir($this->tmpDir));
-        $this->assertSame($this->tmpDir, ProjectArchive::resolveProjectRoot($this->tmpDir));
+    public function test_keeps_root_when_empty(): void
+    {
+        $this->assertSame(self::DIR, ProjectArchive::resolveProjectRoot(self::DIR, ''));
     }
 
     public function test_ignores_ds_store_when_finding_single_dir(): void
     {
-        mkdir($this->tmpDir . '/app');
-        file_put_contents($this->tmpDir . '/.DS_Store', '');
-
-        $this->assertSame($this->tmpDir . '/app', ProjectArchive::findSingleDir($this->tmpDir));
+        $this->assertSame(self::DIR . '/app', ProjectArchive::findSingleDir(self::DIR, "f .DS_Store\0d app\0"));
     }
 
-    private function removeDir(string $dir): void
+    public function test_a_link_to_a_directory_is_not_unwrapped(): void
     {
-        if ($dir === '' || !is_dir($dir)) {
-            return;
-        }
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
-        );
-        foreach ($iterator as $file) {
-            $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
-        }
-        rmdir($dir);
+        $this->assertNull(ProjectArchive::findSingleDir(self::DIR, "l app\0"));
+    }
+
+    public function test_keeps_a_name_with_spaces_whole(): void
+    {
+        $this->assertSame(self::DIR . '/my app ', ProjectArchive::findSingleDir(self::DIR, "d my app \0"));
     }
 }

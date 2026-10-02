@@ -41,6 +41,12 @@ class AppCredentialDelivery
         $path = $home . '/' . AppCredentials::ENV_FILE;
         $logger = $this->dind->shell()->logger();
 
+        // Every deploy, so an account made before ~/.panelalpha was private becomes so.
+        // Recipes bind only the subdirectories they need, never the whole directory.
+        if ($fs->isDir(dirname($path))) {
+            $this->dind->system()->exec(['sudo', 'chmod', '700', dirname($path)]);
+        }
+
         $result = AppCredentials::reconcile(
             $spec,
             $user->getAppCredentials(),
@@ -91,8 +97,6 @@ class AppCredentialDelivery
         $chown = $user->getChownString();
         $dir = dirname($path);
         if (!$fs->isDir($dir)) {
-            // Only a directory the engine creates is made private here: an existing
-            // ~/.panelalpha may be mounted into a container that runs as another uid.
             $fs->makeDirWithParents($dir, $chown);
             $this->dind->system()->exec(['sudo', 'chmod', '700', $dir]);
         }

@@ -4,6 +4,7 @@ namespace App\System\Project\Dind;
 
 use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind as DindProject;
+use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Deploy\DetectAppPort;
 use App\Models\ProxyRule;
 use App\Models\User;
@@ -82,6 +83,10 @@ class Networking
                 Log::warning("Failed to sync tunnel ingress after port detect for {$user->username}", [
                     'error' => $e->getMessage(),
                 ]);
+                // In the deploy log too, in full for our own refusals: an
+                // unreadable tunnel token is refused here and needs the operator.
+                $this->project->shell()->logger()?->warn('Tunnel ingress was not synced: '
+                    . ($e instanceof CloudflareException ? $e->getMessage() : AppHealth::trimReason($e->getMessage())));
             }
         }
 

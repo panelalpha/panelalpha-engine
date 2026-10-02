@@ -457,6 +457,10 @@ else
     warn "Skipping filesystem quota (--no-quota): project disk limits will not be enforced"
 fi
 
+# Same as installer.sh: lxcfs gives each account its own /proc/meminfo, loadavg and CPUs.
+step "Setting up lxcfs"
+bash scripts/configure-lxcfs.sh || warn "lxcfs is not running; accounts will see the host's memory, CPUs and load in /proc"
+
 step "Starting the stack"
 # As in installer.sh: sites-db and the registries join pash-tenants (engine#519).
 docker network inspect pash-tenants >/dev/null 2>&1 || {
@@ -480,6 +484,9 @@ docker compose exec -T core php artisan migrate --force
 step "Moving accounts onto the tenant network"
 # engine#519, as in installer.sh: live, and never fails the bootstrap.
 docker compose exec -T core php artisan project:network:move --all || warn "Some accounts could not be moved onto the tenant network"
+
+step "Pointing Exim at this host's Docker addresses"
+docker compose exec -T core php artisan system:exim:rebuild --networks || warn "Exim's listen addresses could not be updated"
 
 IP_WAS_SET=0
 if ! docker compose exec -T core php artisan settings:exists default_ipv4 >/dev/null 2>&1; then

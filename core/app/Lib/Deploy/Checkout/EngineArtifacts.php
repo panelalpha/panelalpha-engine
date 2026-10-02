@@ -23,6 +23,12 @@ final class EngineArtifacts
     /** The compose file the engine runs. */
     public const RUN_COMPOSE = 'docker-compose.panelalpha.yml';
 
+    /**
+     * The run file inlines env_vars, database passwords and PA_INSTANCE_SECRET,
+     * and ~/project is traversable by every uid on the host (engine#173).
+     */
+    public const RUN_COMPOSE_MODE = '600';
+
     /** An app config's compose file in `override` mode, layered over the run file. */
     public const RUN_COMPOSE_OVERRIDE = 'docker-compose.panelalpha.override.yml';
 

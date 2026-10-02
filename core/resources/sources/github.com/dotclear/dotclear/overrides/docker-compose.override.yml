@@ -1,8 +1,11 @@
 # Persist Dotclear's config, master key and uploaded media across the redeploy
 # that empties ~/project (engine#173). The account home survives, so mount
-# ~/.panelalpha (../.panelalpha relative to this compose file, which sits in
-# ~/project) into the app container; dotclear-setup.sh writes under /pa-data.
+# ~/.panelalpha/dotclear (../.panelalpha relative to this compose file, which
+# sits in ~/project; hooks/prepare.sh creates it) into the app container, where
+# dotclear-setup.sh writes, and the engine's login file read-only. Never the
+# whole ~/.panelalpha: it is private to the account.
 services:
   app:
     volumes:
-      - '../.panelalpha:/pa-data'
+      - '../.panelalpha/dotclear:/pa-data/dotclear'
+      - '../.panelalpha/app-credentials.env:/pa-data/app-credentials.env:ro'

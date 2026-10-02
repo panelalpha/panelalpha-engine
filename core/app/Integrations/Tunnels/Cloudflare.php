@@ -78,6 +78,12 @@ class Cloudflare
     public static function ensureTunnel(User $user): array
     {
         $client = self::clientFor($user);
+        // Before any details write: on a stored token that cannot be decoded,
+        // a lookup or a new tunnel would overwrite it without the operator asking.
+        if ($user->getCloudflareTunnelToken() === null && $user->hasUnreadableSecret('cloudflare_tunnel_token')) {
+            Log::warning("Cloudflare tunnel token for {$user->username} cannot be decoded; tunnel sync refused");
+            throw new CloudflareException(self::unreadableTunnelTokenMessage($user->username));
+        }
         $accountId = $user->getCloudflareAccountId();
         if ($accountId === null) {
             $account = $client->resolveAccount();
@@ -115,6 +121,13 @@ class Cloudflare
             'tunnel_token' => $tunnelToken,
             'account_id' => $accountId,
         ];
+    }
+
+    public static function unreadableTunnelTokenMessage(string $username): string
+    {
+        return "The Cloudflare tunnel token stored for '{$username}' cannot be decoded, so its tunnel is left as it is. "
+            . "Reconnect it: `pae project:settings:unset --project={$username} cloudflare-api-token --force`, "
+            . 'set the cloudflare-api-token setting again and re-create the tunnel hostnames.';
     }
 
     /**

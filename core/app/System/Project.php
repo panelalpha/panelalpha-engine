@@ -871,6 +871,9 @@ class Project
         if ($this->model->getTemplate() === 'dind' && $this->system->filesystem()->directoryExists($dockerDir)) {
             $this->system->runProcess("sudo chown root:root {$dockerDir}");
         }
+        if ($this->system->filesystem()->directoryExists("{$home}/.panelalpha")) {
+            $this->system->runProcess(['sudo', 'chmod', '700', "{$home}/.panelalpha"]);
+        }
 
         foreach ($this->model->getDomains() as $domain) {
             $lscacheDir = $home . '/' . $domain->domain . '/.lscache';
@@ -914,6 +917,8 @@ class Project
         $this->system->exec("sudo mkdir -p {$home}");
         $this->system->exec("sudo chown root:root {$home}");
         $this->system->exec("sudo mkdir -p {$home}/.panelalpha");
+        // Generated secrets and tunnel tokens: the account only.
+        $this->system->exec("sudo chmod 700 {$home}/.panelalpha");
         $this->system->exec("sudo mkdir -p {$home}/.wp-cli");
     }
 

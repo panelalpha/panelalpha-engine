@@ -20,7 +20,7 @@ The recipe fixes three things, none of them a code change to upstream:
    empty `public/` that the base image's `-d /app/public` probe serves as a 403
    (PhpDocroot.php documents this by name). This HEAD ships no `public/`, so
    detection already resolves the root; `docroot: "."` pins it against the media
-   symlink creating a `public/` at runtime. Measured on stock mariusz2
+   symlink creating a `public/` at runtime. Measured on a stock dev host
    (`LATE_CANDIDATES=['src']`; `src/` has no `index.php`, so it never wins).
 
 2. **The installer is first-visitor-wins.** `files/panelalpha/dotclear-setup.sh`
@@ -42,8 +42,9 @@ The recipe fixes three things, none of them a code change to upstream:
    `GitRepository::cloneConfiguredRepository()` calls `clearContents()` before
    the clone). Dotclear keeps `config.php`, the master key and uploaded media
    inside the tree, so `overrides/docker-compose.override.yml` bind-mounts the
-   account home's `~/.panelalpha` (which survives) into the app container at
-   `/pa-data`, and the setup script keeps `config.php`, `public/` (media),
+   account home's `~/.panelalpha/dotclear` (which survives; `hooks/prepare.sh`
+   creates it) into the app container at `/pa-data/dotclear`, plus
+   `app-credentials.env` read-only, and the setup script keeps `config.php`, `public/` (media),
    `cache/` and `var/` there, symlinking them back in on every boot. The posts
    live in the account's own MySQL (`database: mysql`) and survive on their own.
 
@@ -61,7 +62,7 @@ The recipe fixes three things, none of them a code change to upstream:
   No recipe can grant host-level access; if the engine's network cannot reach
   git.dotclear.org, this row depends on that mirror.
 
-## Verified (mariusz2, Dotclear HEAD b8df5e6, 2026-09-21)
+## Verified (a dev host, Dotclear HEAD b8df5e6, 2026-09-21)
 
 Deploy 52 s, `serving: ok`, HTTP 200. Installed over the public HTTPS domain;
 web installer closed; logged into the admin, created and published a post, saw

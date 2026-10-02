@@ -339,6 +339,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
             'relative_document_root' => $domain->getDocumentRoot(),
             'app_port' => $user->getAppPort() ?? 80,
             'app_ssl_port' => $user->getAppPort() ?? 443,
+            'trusted_fronts' => \App\Integrations\Tunnels\PanelAlphaConnect::trustedFrontsFor($domain),
         ];
         $templateVars = array_merge($templateVars, \App\System\Project\SitePasswordProtection::nginxTemplateVars($user));
         $templateVars = array_merge($templateVars, $this->httpAcmeChallengeTemplateVars($domain));
@@ -627,7 +628,7 @@ server {
         proxy_pass {$scheme}://upstream-{$vars['id']}-{$vars['upstream_host']}-{$vars['upstream_port']};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For \$remote_addr;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header X-Forwarded-Host \$server_name;
         proxy_http_version 1.1;

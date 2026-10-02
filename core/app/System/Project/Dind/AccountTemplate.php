@@ -177,6 +177,7 @@ BASH;
             'device_write_bps' => $deviceWriteBps,
             'block_device' => $blockDevice,
             'php_versions' => $system->php()->listAvailablePhpVersions(),
+            'proc_mounts' => LxcfsProc::mounts(LxcfsProc::present($system), AccountRuntime::isSysbox()),
         ];
     }
 

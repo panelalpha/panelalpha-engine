@@ -252,7 +252,21 @@ class System implements ProcessRunner
         return UsernamePolicy::isAcceptable($username)
             && !$this->isUidExists($username)
             && !is_dir($this->projectHomeDirPath($username))
-            && !is_dir($this->projectDirPath($username));
+            && !is_dir($this->projectDirPath($username))
+            && !$this->isContainerNameTaken($username);
+    }
+
+    /**
+     * A host container of that name, in any state. The account's DinD container
+     * is named after the account, so `compose up` would fail on the conflict.
+     */
+    public function isContainerNameTaken(string $name): bool
+    {
+        $result = $this->runProcess([
+            'sudo', 'docker', 'ps', '-a', '--filter', 'name=^/' . preg_quote($name, null) . '$', '--format', '{{.Names}}',
+        ]);
+
+        return $result->isSuccessful() && trim($result->getOutput()) !== '';
     }
 
     public function isUidExists(string $username): bool
