@@ -42,6 +42,15 @@ return [
     'step_idle_timeout' => (int) env('DEPLOY_STEP_IDLE_TIMEOUT', 900),
 
     /*
+     * Catalogue ids the host prewarms (`php:8.3`, `php:8.3+mongodb`, `composer`);
+     * empty warms nothing. Budget and reserve override images.yaml's `host`
+     * block. Set with `pae configure prewarm`.
+     */
+    'prewarm_images' => env('DEPLOY_PREWARM_IMAGES', ''),
+    'prewarm_budget' => env('DEPLOY_PREWARM_BUDGET', ''),
+    'prewarm_reserve' => env('DEPLOY_PREWARM_RESERVE', ''),
+
+    /*
      * Free disk the engine host must have for a deploy to start, checked on
      * the Docker root and /home. Below it the deploy is refused with that
      * reason instead of failing later on ENOSPC. A size (3G, 512M); 0 or `off`

@@ -13,10 +13,11 @@ namespace App\Lib\Deploy\CacheManager;
  * extension set from the PHP source tree — minutes per minor, paid by whoever
  * deploys that minor first.
  *
- * The list, the order and the disk limits all come from
- * `config/core/images.yaml` ({@see ImageCatalog}). This class is the
- * arithmetic on top: what fits, what is already there, and what to give back
- * when the host is under pressure.
+ * The candidates and their order come from `config/core/images.yaml`
+ * ({@see ImageCatalog}); which of them this host warms, and the disk limits,
+ * from `.env` via `pae configure prewarm`. This class is the arithmetic on
+ * top: what fits, what is already there, and what to give back when the host
+ * is under pressure.
  *
  * Nothing here estimates a size. The caller measures each absent image and
  * passes the sizes in; an image it could not measure is still warmed, and the
@@ -34,12 +35,31 @@ class HostPrewarmPlan
     public const FALLBACK_BUDGET_BYTES = 6442450944;  // 6 GiB
 
     /**
-     * The configured plan, highest priority first.
+     * The entries this host warms, highest priority first: only those selected
+     * with `pae configure prewarm`, so none by default.
      *
      * @param list<string> $runtimes limit to these runtimes; empty = all
-     * @return list<array{ref: string, kind: string, runtime: string, prewarm: ?int, load: list<string>, why: string}>
+     * @param list<string>|null $selected entry ids; null = {@see selected()}
+     * @return list<array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}>
      */
-    public static function catalog(array $runtimes = []): array
+    public static function catalog(array $runtimes = [], ?array $selected = null): array
+    {
+        $wanted = array_flip($selected ?? self::selected());
+
+        return array_values(array_filter(
+            self::available($runtimes),
+            static fn (array $i): bool => isset($wanted[$i['id']])
+        ));
+    }
+
+    /**
+     * Everything images.yaml gives a `prewarm` priority: what an operator may
+     * select from, in the order it would be warmed.
+     *
+     * @param list<string> $runtimes limit to these runtimes; empty = all
+     * @return list<array{id: string, ref: string, kind: string, runtime: string, prewarm: ?int, why: string}>
+     */
+    public static function available(array $runtimes = []): array
     {
         $items = ImageCatalog::prewarmed();
         if ($runtimes === []) {
@@ -54,21 +74,53 @@ class HostPrewarmPlan
         ));
     }
 
-    /** The host's free-space floor, per config. */
-    public static function reserveBytes(): int
+    /**
+     * Entry ids from `DEPLOY_PREWARM_IMAGES`; images.yaml is read-only.
+     *
+     * @return list<string>
+     */
+    public static function selected(): array
     {
-        return self::parseBytes(ImageCatalog::reserve()) ?? self::FALLBACK_RESERVE_BYTES;
+        return self::parseList(self::setting('prewarm_images'));
     }
 
-    /** What one run may spend, or null for "up to the reserve". */
+    /** @return list<string> */
+    public static function parseList(string $raw): array
+    {
+        return array_values(array_unique(array_filter(array_map('trim', explode(',', $raw)))));
+    }
+
+    /** The host's free-space floor: `.env`, then images.yaml. */
+    public static function reserveBytes(): int
+    {
+        return self::parseBytes(self::setting('prewarm_reserve'))
+            ?? self::parseBytes(ImageCatalog::reserve())
+            ?? self::FALLBACK_RESERVE_BYTES;
+    }
+
+    /** What one run may spend, or null for "up to the reserve": `.env`, then images.yaml. */
     public static function budgetBytes(): ?int
     {
-        $declared = ImageCatalog::budget();
-        if ($declared === null) {
+        $declared = self::setting('prewarm_budget');
+        if ($declared === '') {
+            $declared = ImageCatalog::budget();
+        }
+        if ($declared === null || $declared === '') {
             return self::FALLBACK_BUDGET_BYTES;
         }
 
         return strtolower($declared) === 'none' ? null : self::parseBytes($declared);
+    }
+
+    /** A `deploy.*` value, or '' without a Laravel config (plain unit tests). */
+    private static function setting(string $key): string
+    {
+        if (!\Illuminate\Container\Container::getInstance()->bound('config')) {
+            return '';
+        }
+        $value = config('deploy.' . $key, '');
+
+        return is_scalar($value) ? trim((string) $value) : '';
     }
 
     /**

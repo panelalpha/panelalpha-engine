@@ -207,7 +207,7 @@ class SharedBaseImages
             $this->inner->host()->logInfo(
                 "Shared Python base image {$tag} has not been built on this host yet; building it now. "
                 . 'Later deploys on this Python version and dependency set load it in seconds. '
-                . '`php artisan system:image:prewarm` builds it ahead of time.'
+                . '`pae configure prewarm` can keep it built ahead of time.'
             );
         }
 
@@ -319,7 +319,7 @@ class SharedBaseImages
                 . ($packages === [] ? '' : ' with ' . implode(', ', $packages))
                 . ($required === [] ? '' : ', since this project requires ' . implode(', ', $required)) . '. '
                 . 'Later deploys on this PHP version load it in seconds. '
-                . '`php artisan system:image:prewarm` builds it ahead of time.'
+                . '`pae configure prewarm` can keep it built ahead of time.'
             );
         }
 

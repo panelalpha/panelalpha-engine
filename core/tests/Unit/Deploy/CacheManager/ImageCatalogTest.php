@@ -32,6 +32,40 @@ class ImageCatalogTest extends TestCase
         }
     }
 
+    /**
+     * The id is what `DEPLOY_PREWARM_IMAGES` names, so it must not move when a
+     * recipe date or an upstream tag does, or a selection silently lapses.
+     */
+    public function test_ids_in_the_shipped_file_are_unique_and_carry_no_tag(): void
+    {
+        $ids = array_column(ImageCatalog::entries(), 'id');
+
+        $this->assertSame(count($ids), count(array_unique($ids)));
+        $this->assertContains('php:8.3', $ids);
+        $this->assertContains('php:8.3+mongodb', $ids);
+        $this->assertContains('composer', $ids);
+        foreach ($ids as $id) {
+            $this->assertDoesNotMatchRegularExpression('/-pa\d|-x[0-9a-f]/', $id, "{$id} carries a recipe tag");
+        }
+    }
+
+    public function test_an_extra_is_known_by_its_repository(): void
+    {
+        $this->withConfig(<<<'YAML'
+        extras:
+            - image: "localhost:5000/team/tool:1.2"
+              runtime: static
+              prewarm: 10
+              why: "registry with a port"
+            - image: "busybox"
+              runtime: static
+              prewarm: 20
+              why: "no tag at all"
+        YAML);
+
+        $this->assertSame(['localhost:5000/team/tool', 'busybox'], array_column(ImageCatalog::entries(), 'id'));
+    }
+
     public function test_prewarm_priorities_in_the_shipped_file_are_unique(): void
     {
         // Not a correctness requirement — ties break on ref — but two lines

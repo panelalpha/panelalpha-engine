@@ -6,6 +6,7 @@ use App\Console\Wizard\Sections\ApiTokensSection;
 use App\Console\Wizard\Sections\DockerHubSection;
 use App\Console\Wizard\Sections\EngineAddressSection;
 use App\Console\Wizard\Sections\McpTokensSection;
+use App\Console\Wizard\Sections\PrewarmSection;
 use App\Console\Wizard\Sections\QueueSection;
 use App\Console\Wizard\Sections\SitesDbSection;
 use App\Console\Wizard\Sections\TelemetrySection;
@@ -25,6 +26,7 @@ class Wizard
         ApiTokensSection::class,
         QueueSection::class,
         DockerHubSection::class,
+        PrewarmSection::class,
         SitesDbSection::class,
         TelemetrySection::class,
     ];

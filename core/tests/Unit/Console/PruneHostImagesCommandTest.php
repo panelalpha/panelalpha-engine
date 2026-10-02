@@ -24,6 +24,8 @@ class PruneHostImagesCommandTest extends TestCase
 
     private string $plain;
 
+    private string $plainId;
+
     /** @var object{calls: list<list<string>>, images: array<string, int>, containers: list<string>} */
     private object $host;
 
@@ -36,6 +38,8 @@ class PruneHostImagesCommandTest extends TestCase
         $this->app->useStoragePath($this->storage);
 
         $this->plain = $this->plainPhpBase();
+        // Prewarming is opt-in; select the plain base so it is the protected one.
+        config(['deploy.prewarm_images' => $this->plainId]);
         $now = time();
         // tag => seconds since it was pulled or built on the host
         $this->host = $this->hostDouble([
@@ -79,6 +83,16 @@ class PruneHostImagesCommandTest extends TestCase
             ['sudo', 'docker', 'buildx', 'prune', '-af', '--filter', 'until=86400s'],
             $this->host->calls
         );
+    }
+
+    /** Not selected for prewarming, it is just another deploy image. */
+    public function test_an_unselected_base_is_removed_once_unused(): void
+    {
+        config(['deploy.prewarm_images' => '']);
+
+        Artisan::call('system:image:prune');
+
+        $this->assertContains($this->plain, $this->removed());
     }
 
     public function test_a_recent_deploy_log_keeps_an_image_it_names(): void
@@ -238,9 +252,11 @@ class PruneHostImagesCommandTest extends TestCase
 
     private function plainPhpBase(): string
     {
-        foreach (HostPrewarmPlan::catalog() as $item) {
+        foreach (HostPrewarmPlan::available() as $item) {
             $ref = (string) $item['ref'];
             if (BuiltImage::runtimeFor($ref) === 'php' && !BuiltImage::isVariant($ref)) {
+                $this->plainId = $item['id'];
+
                 return $ref;
             }
         }

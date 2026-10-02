@@ -11,8 +11,10 @@
 #     project needs -- `requires: {php: runtime}` -- and a Runtime class reads
 #     the project for a version. This file turns `php` at `8.3` into an image.
 #
-#   which of those does this host hold before any deploy asks?
-#     `prewarm` on a version, read by `system:image:prewarm`.
+#   which of those may this host hold before any deploy asks?
+#     `prewarm` on a version, read by `system:image:prewarm`. That makes an
+#     image selectable, not warmed: a host warms only what `pae configure
+#     prewarm` selected (DEPLOY_PREWARM_IMAGES), which is nothing by default.
 #
 # It was three files. dind-image-cache.yaml and prewarm.yaml described
 # overlapping halves of the second question and were merged; runtime-images.yaml
@@ -43,7 +45,8 @@
 #       versions:                   # oldest first -- resolution walks them in
 #         - version: "8.3"          # this order and takes the first that fits
 #           prewarm: 870            # host warm priority, higher first;
-#                                   # omit and this version is never warmed
+#                                   # omit and this version cannot be
+#                                   # selected for warming at all
 #           why: "..."              # shown in the prewarm plan
 #
 #   extras:                         # images no runtime describes
@@ -429,6 +432,7 @@ extras:
     prewarm: 750
     why: "host build path for bun.lock projects"
 
+# DEPLOY_PREWARM_BUDGET and DEPLOY_PREWARM_RESERVE in .env override both.
 host:
   # Accounts live on the same filesystem, so warming never takes the host below
   # this much free space, whatever the budget says.

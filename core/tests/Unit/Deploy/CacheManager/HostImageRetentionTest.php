@@ -182,7 +182,7 @@ class HostImageRetentionTest extends TestCase
      */
     private function prewarmed(): array
     {
-        return array_map(static fn (array $i): string => (string) $i['ref'], HostPrewarmPlan::catalog());
+        return array_map(static fn (array $i): string => (string) $i['ref'], HostPrewarmPlan::available());
     }
 
     private function plainPhpBase(): string

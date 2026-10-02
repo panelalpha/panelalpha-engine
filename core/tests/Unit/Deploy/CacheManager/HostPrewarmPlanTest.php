@@ -25,7 +25,7 @@ class HostPrewarmPlanTest extends TestCase
     {
         $priorities = array_map(
             static fn (array $i): int => $i['prewarm'],
-            HostPrewarmPlan::catalog()
+            HostPrewarmPlan::available()
         );
 
         $sorted = $priorities;
@@ -50,7 +50,7 @@ class HostPrewarmPlanTest extends TestCase
                 why: "stock image"
         YAML);
 
-        $catalog = HostPrewarmPlan::catalog();
+        $catalog = HostPrewarmPlan::available();
 
         // PHP declares an image.build, so warming it means building our tag.
         $this->assertSame(PhpBaseImage::tag('php:8.3-apache-bookworm'), $catalog[0]['ref']);
@@ -76,7 +76,7 @@ class HostPrewarmPlanTest extends TestCase
                 why: "the only minor this host serves"
         YAML);
 
-        $refs = array_map(static fn (array $i): string => $i['ref'], HostPrewarmPlan::catalog());
+        $refs = array_map(static fn (array $i): string => $i['ref'], HostPrewarmPlan::available());
 
         $this->assertSame([PhpBaseImage::tag('php:8.5-apache-bookworm')], $refs);
         $this->assertStringNotContainsString('8.1', $refs[0]);
@@ -107,7 +107,7 @@ class HostPrewarmPlanTest extends TestCase
             why: "the one good line"
         YAML);
 
-        $refs = array_map(static fn (array $i): string => $i['ref'], HostPrewarmPlan::catalog());
+        $refs = array_map(static fn (array $i): string => $i['ref'], HostPrewarmPlan::available());
 
         $this->assertSame(['nginx:alpine'], $refs);
     }
@@ -116,7 +116,7 @@ class HostPrewarmPlanTest extends TestCase
     {
         $runtimes = array_unique(array_map(
             static fn (array $i): string => $i['runtime'],
-            HostPrewarmPlan::catalog(['python', 'go'])
+            HostPrewarmPlan::available(['python', 'go'])
         ));
         sort($runtimes);
 
@@ -126,7 +126,7 @@ class HostPrewarmPlanTest extends TestCase
     public function test_reserve_is_never_spent(): void
     {
         // 12G free with a 10G reserve leaves 2G, whatever the budget says.
-        $catalog = HostPrewarmPlan::catalog();
+        $catalog = HostPrewarmPlan::available();
         $sizes = array_fill_keys(
             array_map(static fn (array $i): string => $i['ref'], $catalog),
             1073741824
@@ -149,7 +149,7 @@ class HostPrewarmPlanTest extends TestCase
     public function test_a_full_disk_warms_nothing_rather_than_filling_it(): void
     {
         $plan = HostPrewarmPlan::select(
-            HostPrewarmPlan::catalog(),
+            HostPrewarmPlan::available(),
             [],
             availableBytes: 5 * 1073741824,
             reserveBytes: 10 * 1073741824,
@@ -183,7 +183,7 @@ class HostPrewarmPlanTest extends TestCase
             why: "measurable"
         YAML);
 
-        $catalog = HostPrewarmPlan::catalog();
+        $catalog = HostPrewarmPlan::available();
         $plan = HostPrewarmPlan::select(
             $catalog,
             ['nginx:alpine' => 100 * 1048576],
@@ -208,7 +208,7 @@ class HostPrewarmPlanTest extends TestCase
         YAML);
 
         $plan = HostPrewarmPlan::select(
-            HostPrewarmPlan::catalog(),
+            HostPrewarmPlan::available(),
             ['nginx:alpine' => 100 * 1048576],
             100 * 1073741824,
             0,
@@ -247,7 +247,7 @@ class HostPrewarmPlanTest extends TestCase
     {
         ImageCatalog::useConfig('/nonexistent/images.yaml');
 
-        $this->assertSame([], HostPrewarmPlan::catalog());
+        $this->assertSame([], HostPrewarmPlan::available());
         $this->assertSame(HostPrewarmPlan::FALLBACK_RESERVE_BYTES, HostPrewarmPlan::reserveBytes());
         $this->assertSame(HostPrewarmPlan::FALLBACK_BUDGET_BYTES, HostPrewarmPlan::budgetBytes());
     }
@@ -270,6 +270,27 @@ class HostPrewarmPlanTest extends TestCase
             ['panelalpha/php:8.4-cli-bookworm-padeadbeef', 'panelalpha/php:8.2-cli-bookworm-pa20200101'],
             $stale
         );
+    }
+
+    public function test_only_selected_ids_are_warmed(): void
+    {
+        $plan = HostPrewarmPlan::catalog([], ['php:8.3', 'composer', 'not-in-the-catalogue']);
+
+        $this->assertSame(['php:8.3', 'composer'], array_column($plan, 'id'));
+    }
+
+    /** No Laravel config here, so nothing selected: a host warms nothing by default. */
+    public function test_nothing_is_warmed_unless_selected(): void
+    {
+        $this->assertSame([], HostPrewarmPlan::selected());
+        $this->assertSame([], HostPrewarmPlan::catalog());
+        $this->assertNotSame([], HostPrewarmPlan::available());
+    }
+
+    public function test_parses_a_selection(): void
+    {
+        $this->assertSame(['php:8.1', 'composer'], HostPrewarmPlan::parseList(' php:8.1, ,composer,php:8.1 '));
+        $this->assertSame([], HostPrewarmPlan::parseList(''));
     }
 
     #[DataProvider('byteProvider')]
