@@ -83,6 +83,9 @@ class Kernel extends ConsoleKernel
         // flight, so it runs hourly and does real work once per 20h window:
         // on a busy host a single daily slot almost always found a deploy.
         $schedule->command('system:image:prune --due-after=20h')->hourly()->withoutOverlapping();
+        // Caps host build cache and frees disk once free space runs low,
+        // instead of waiting for the next prune or refusing a deploy.
+        $schedule->command('system:disk:guard')->everyFiveMinutes()->withoutOverlapping();
         // Deploy telemetry is written to a spool during a deploy and sent from
         // here: QUEUE_CONNECTION is `sync`, so a dispatched job would put a
         // network round trip inside the customer's deploy request.

@@ -62,4 +62,17 @@ return [
      * it for the weekly `system:image:prewarm` to clear.
      */
     'host_build_cache_retention' => env('DEPLOY_HOST_BUILD_CACHE_RETENTION', '24h'),
+
+    /*
+     * `system:disk:guard` (every five minutes) keeps host build cache under
+     * this size, oldest first. A size (10G); `off` leaves it uncapped.
+     */
+    'host_build_cache_max' => env('DEPLOY_HOST_BUILD_CACHE_MAX', '10G'),
+
+    /*
+     * Free space the same guard keeps on the Docker root and /home: a share
+     * of the filesystem (15%) or a size (20G). Below it the guard prunes build
+     * cache and then base images unused for 6h. `off` stops that half.
+     */
+    'disk_pressure_free' => env('DEPLOY_DISK_PRESSURE_FREE', '15%'),
 ];
