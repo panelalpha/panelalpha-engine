@@ -67,15 +67,19 @@ SECRETS="$HOME/.panelalpha/phorge"
 mkdir -p "$SECRETS"
 chmod 700 "$SECRETS"
 
-# PHORGE_DB_PASSWORD, not MYSQL_ROOT_PASSWORD: the container's own
-# MYSQL_ROOT_PASSWORD is set by the engine (to the literal `app`) and is a
-# different value with a different meaning. panelalpha/phorge-db-secure.php
-# uses the engine's to log in once and this one to replace it.
+# The database's root password. db-root.env below hands it to the db service as
+# MYSQL_ROOT_PASSWORD; panelalpha/phorge-db-secure.php reads it from here.
 if [ ! -f "$SECRETS/db.env" ]; then
     ( umask 077; printf 'PHORGE_DB_PASSWORD=%s\n' \
         "$(openssl rand -base64 30 | tr -d '/+=' | cut -c1-28)" > "$SECRETS/db.env" )
     chmod 600 "$SECRETS/db.env"
 fi
+
+# The same password as MYSQL_ROOT_PASSWORD for the db service (env_file in the
+# override): MySQL refuses to initialise without one, and the engine sets none.
+# Rewritten from db.env every time, so the two never drift.
+( umask 077; sed -n 's/^PHORGE_DB_PASSWORD=/MYSQL_ROOT_PASSWORD=/p' "$SECRETS/db.env" > "$SECRETS/db-root.env" )
+chmod 600 "$SECRETS/db-root.env"
 
 # Alphanumeric. It is passed to PhabricatorAuthPassword::setPassword() which
 # takes anything, but it is also a value an operator copies out of a file and

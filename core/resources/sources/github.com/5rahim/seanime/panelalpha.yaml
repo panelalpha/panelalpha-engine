@@ -17,9 +17,10 @@ description: >-
   Without a server password Seanime serves only loopback and private-network
   hosts: from the public domain every API call answers 403 "this action
   requires either a server password or a trusted local origin" and the UI
-  never gets past "Connecting...". The project env var SEANIME_PASSWORD is
-  therefore required and passed as `--password`; a one-shot env-check
-  service fails the deploy naming it while it is unset. server.trustedProxies
+  never gets past "Connecting...". The engine therefore generates the server
+  password (`credentials:`) and it is passed as `--password`;
+  `GET /projects/{name}/app-credentials` returns it, and a project env var
+  SEANIME_PASSWORD set before the first deploy is kept instead. server.trustedProxies
   is left empty on purpose: Seanime would take the first X-Forwarded-For
   entry, which a visitor can spoof through the account vhost.
 
@@ -27,3 +28,6 @@ description: >-
   visitor goes through the setup screen (library path, AniList login).
   Adding media: copy files into the anime volume, e.g.
   `docker compose -p project cp <dir> app:/anime/`.
+credentials:
+  fields:
+    SEANIME_PASSWORD: {kind: password}

@@ -1,24 +1,6 @@
 # The repo builds with Gradle/Jib; this runs the published image of the current
 # release the way upstream's docker-examples/docker-compose.yml does.
 services:
-  # One-shot: Kuvasz refuses to start without the admin login. Values are read
-  # from .env (the project's env vars), not interpolated (engine#336).
-  check:
-    image: docker.io/library/postgres:18-alpine
-    restart: "no"
-    env_file: .env
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        missing=""
-        [ -n "$$ADMIN_USER" ] || missing="$$missing ADMIN_USER"
-        [ -n "$$ADMIN_PASSWORD" ] || missing="$$missing ADMIN_PASSWORD (min. 12 characters)"
-        if [ -n "$$missing" ]; then
-          echo "Error: set in the project's environment variables:$$missing"
-          exit 1
-        fi
-    mem_limit: 32m
-
   kuvasz-db:
     image: docker.io/library/postgres:18-alpine
     restart: unless-stopped
@@ -43,14 +25,14 @@ services:
     env_file:
       - .env
       - ../.panelalpha/kuvasz/app.env
+      # ADMIN_USER / ADMIN_PASSWORD, the login the engine generates.
+      - ../.panelalpha/app-credentials.env
     environment:
       DATABASE_HOST: kuvasz-db
       DATABASE_USER: kuvasz
     volumes:
       - ./kuvasz.yml:/config/kuvasz.yml:ro
     depends_on:
-      check:
-        condition: service_completed_successfully
       kuvasz-db:
         condition: service_healthy
     healthcheck:

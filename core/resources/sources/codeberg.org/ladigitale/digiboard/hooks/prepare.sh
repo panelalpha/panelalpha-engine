@@ -15,3 +15,16 @@ cd ~/project
 if [ -f docker-compose.override.yml ] && [ ! -f docker-compose.override.yml.panelalpha-local ]; then
     mv docker-compose.override.yml docker-compose.override.yml.panelalpha-local
 fi
+
+# The server refuses to start in production without SESSION_KEY, and the redis
+# sidecar's password is DB_PWD. Both are generated once into ~/.panelalpha and
+# added to .env (which compose reads for the app and interpolates for redis).
+SECRETS="$HOME/.panelalpha/digiboard"
+mkdir -p "$SECRETS"
+if [ ! -s "$SECRETS/secrets.env" ]; then
+    ( umask 077; printf 'DB_PWD=%s\nSESSION_KEY=%s\n' "$(openssl rand -hex 16)" "$(openssl rand -hex 32)" > "$SECRETS/secrets.env" )
+fi
+touch .env
+while IFS= read -r line; do
+    grep -q "^${line%%=*}=" .env || printf '%s\n' "$line" >> .env
+done < "$SECRETS/secrets.env"

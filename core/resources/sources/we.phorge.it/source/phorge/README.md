@@ -82,7 +82,7 @@ Apache's subprocess environment rather than the container's — it would satisfy
 | `install` / `upgrade` | `panelalpha/phorge-setup.sh`: replace the database's engine-default credentials, write `conf/local/local.json`, `bin/storage upgrade --force` (54 schemas, ~900 patches), create the first administrator and the auth provider, purge caches |
 | healthcheck | `/` redirects **and** `/auth/start/` renders a password field; the `ready` service gates `docker compose up -d` on it |
 
-Measured on `mariusz.panelalpha.tools` (15 GB, shared with other work), with the
+Measured on a dev host (15 GB, shared with other work), with the
 shared PHP 8.3 base image and `mysql:8.0` already in the host cache:
 **about 135 seconds** from API call to a healthy site, of which the storage
 upgrade is roughly 35.
@@ -133,20 +133,14 @@ login page.
 | `/config/`, `/storage/`, `/people/` | login page (Phorge's own applications, authenticated) |
 | `/auth/register/` | "There are no configured default registration providers." |
 
-**What this recipe cannot fix: the sidecar's credentials, briefly.** The engine
-harvests this recipe's own `overrides/docker-compose.override.yml` for backing
-services and replaces the `environment` of anything it recognises as a datastore
-with credentials of its own. For an application that is not Laravel those
-credentials are all defaults, and the generated `docker-compose.yml` comes out
-with `MYSQL_USER: app`, `MYSQL_PASSWORD: app`, `MYSQL_ROOT_PASSWORD: app` and
-`MYSQL_ROOT_HOST: '%'`. Compose gives `environment:` precedence over
-`env_file:`, and the only other channel — `.env` — is copied to a
-world-readable `.env.default`. So `panelalpha/phorge-db-secure.php` fixes it
-from the inside instead: on every deploy it connects as root with whichever of
-the two passwords works, sets root's password to the one generated for this
-account, and drops the `app`/`app` user. Between `docker compose up` and that
-script running — a few seconds, once, on the first deploy — the database is
-reachable on the account's private compose network with a published password.
+**The sidecar's credentials.** `hooks/prepare.sh` generates the database root
+password into `~/.panelalpha/phorge/db.env` (0600, in a 0700 directory) and
+writes it as `MYSQL_ROOT_PASSWORD` to `db-root.env` beside it, which the
+override passes to the `db` service with `env_file:`. MySQL will not initialise
+without a root password, and the engine adds none to a recipe's own override.
+`panelalpha/phorge-db-secure.php` runs on every deploy and is a no-op on such a
+database; on one an older engine initialised with `root`/`app` and an
+`app`/`app` user, it rotates root to the account's password and drops `app`.
 
 ## What is not running: the daemons
 

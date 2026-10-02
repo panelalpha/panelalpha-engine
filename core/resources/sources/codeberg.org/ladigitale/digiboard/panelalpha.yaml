@@ -11,3 +11,9 @@ description: >-
   pins DOMAIN to localhost and re-gates traefik, and ProjectPaths merges any
   surviving override over the compose file the engine generates.
 extends: dockerfile
+# The server listens on 3000 (the Dockerfile's EXPOSE); a recipe that extends
+# dockerfile otherwise takes the platform's port 80.
+port: 3000
+env:
+  # The server refuses to start in production without its public origin.
+  DOMAIN: '${PA_PUBLIC_URL}'

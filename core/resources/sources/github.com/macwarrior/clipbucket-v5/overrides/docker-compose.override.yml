@@ -28,15 +28,9 @@ services:
     volumes:
       # ~/.panelalpha/clipbucket. Everything this account accumulates lives
       # here, because a redeploy clears and re-clones ~/project (engine#173):
-      #
-      #   /data/bin/              static ffmpeg, ffprobe and mediainfo. The
-      #                           shared PHP base image has none of them and no
-      #                           manifest key can add an apt package to it, so
-      #                           hooks/prepare.sh fetches them once per account
-      #                           and the install writes their paths into
-      #                           ClipBucket's own config rows.
-      #   /data/files/            mounted again below, over the application's
-      #                           own upload/files.
+      # /data/files is mounted again below, over the application's own
+      # upload/files. (A bin/ left there by an older version of this recipe is
+      # unused: the tools come from `system_packages`.)
       - ../.panelalpha/clipbucket:/data
 
       # Every byte a user uploads. DirPath::get() (includes/constants.php:33-47)

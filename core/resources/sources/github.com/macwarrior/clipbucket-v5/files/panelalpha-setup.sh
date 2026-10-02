@@ -31,21 +31,16 @@ fi
 
 # The tools, checked here rather than discovered later. ClipBucket resolves them
 # through config rows that the seed writes, and a missing binary would not show
-# up until the first upload failed silently in a background process. /data is
-# ~/.panelalpha/clipbucket, mounted by the compose override; hooks/prepare.sh
-# fills it.
-for tool in ffmpeg ffprobe; do
-    if [ ! -x "/data/bin/${tool}" ]; then
-        log "/data/bin/${tool} is missing. ClipBucket cannot convert an uploaded video" >&2
+# up until the first upload failed silently in a background process. They come
+# from `system_packages` in panelalpha.yaml.
+for tool in ffmpeg ffprobe mediainfo; do
+    if [ ! -x "/usr/bin/${tool}" ]; then
+        log "/usr/bin/${tool} is missing. ClipBucket cannot convert an uploaded video" >&2
         log "without it, and upstream's own installer refuses to run without it." >&2
-        log "hooks/prepare.sh fetches it into ~/.panelalpha/clipbucket/bin." >&2
+        log "panelalpha.yaml's system_packages should have put it in the image." >&2
         exit 1
     fi
 done
-if [ ! -x /data/bin/mediainfo ]; then
-    log "note: /data/bin/mediainfo is missing. ffprobe covers everything except the"
-    log "duration fallback and anamorphic Original width/height; see README.md."
-fi
 
 # The uploaded media has to be on the mount, not in the checkout. If this is the
 # checkout's own directory the bind mount did not happen, and every video this

@@ -31,8 +31,8 @@ services:
       start_period: 10s
     mem_limit: 256m
 
-  # One-shot: fails the deploy when ROOT_USER is missing, then creates the
-  # schema on a fresh database (docs/container.md) or migrates an existing one.
+  # One-shot: creates the schema on a fresh database (docs/container.md) and
+  # the admin from the engine's login, or migrates an existing one.
   init:
     image: liberaforms-local:latest
     restart: "no"
@@ -45,21 +45,20 @@ services:
       - ./panelalpha/liberaforms/defaults.env
       - ../.panelalpha/liberaforms/app.env
       - .env
+      # ROOT_USER / LIBERAFORMS_ADMIN_USER / LIBERAFORMS_ADMIN_PASSWORD (credentials:).
+      - ../.panelalpha/app-credentials.env
     environment:
       BASE_URL: ${PA_PUBLIC_URL}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        if [ -z "$$ROOT_USER" ]; then
-          echo "Error: set ROOT_USER in the project's environment variables (the email address that becomes the LiberaForms admin when it signs up)"
-          exit 1
-        fi
         set -e
         if python -c "import os,sys,psycopg2; c=psycopg2.connect(host=os.environ['DB_HOST'],dbname=os.environ['DB_NAME'],user=os.environ['DB_USER'],password=os.environ['DB_PASSWORD']); k=c.cursor(); k.execute(\"select to_regclass('public.alembic_version')\"); sys.exit(0 if k.fetchone()[0] else 1)"; then
           flask db upgrade
         else
           flask database create-tables
           flask db stamp
+          flask user create -role admin "$$LIBERAFORMS_ADMIN_USER" "$$ROOT_USER" "$$LIBERAFORMS_ADMIN_PASSWORD"
         fi
     mem_limit: 512m
 
@@ -73,6 +72,8 @@ services:
       - ./panelalpha/liberaforms/defaults.env
       - ../.panelalpha/liberaforms/app.env
       - .env
+      # ROOT_USER, the admin's email (credentials:).
+      - ../.panelalpha/app-credentials.env
     environment:
       BASE_URL: ${PA_PUBLIC_URL}
     ports:

@@ -34,3 +34,19 @@ for dir in ban metrics twilio; do
     grep -qE "^[[:space:]]*ADD[[:space:]]+\./${dir}([[:space:]]|$)" Dockerfile-build \
         || { echo "Dockerfile-build still does not copy ${dir}/" >&2; exit 1; }
 done
+
+# The builder's Go can also fall behind go.mod: upstream moved to `go 1.26.0`
+# while Dockerfile-build still says golang:1.25-bookworm, and the official image
+# sets GOTOOLCHAIN=local, so the Go layer stops with
+#
+#     go: go.mod requires go >= 1.26.0 (running go 1.25.14; GOTOOLCHAIN=local)
+#
+# Raise the builder to go.mod's minor when it is behind; never lower it.
+want=$(sed -nE 's/^go ([0-9]+\.[0-9]+)(\.[0-9]+)?[[:space:]]*$/\1/p' go.mod | head -n 1)
+have=$(sed -nE 's/^FROM golang:([0-9]+\.[0-9]+)[^[:space:]]*[[:space:]]+AS[[:space:]]+builder.*/\1/p' Dockerfile-build | head -n 1)
+if [ -n "$want" ] && [ -n "$have" ] \
+    && [ "$(printf '%s\n%s\n' "$have" "$want" | sort -V | tail -n 1)" != "$have" ]; then
+    sed -i -E "s/^FROM golang:${have//./\\.}([^[:space:]]*)([[:space:]]+AS[[:space:]]+builder)/FROM golang:${want}\1\2/" Dockerfile-build
+    grep -qE "^FROM golang:${want//./\\.}[^[:space:]]*[[:space:]]+AS[[:space:]]+builder" Dockerfile-build \
+        || { echo "Dockerfile-build: could not move the builder to Go ${want}" >&2; exit 1; }
+fi

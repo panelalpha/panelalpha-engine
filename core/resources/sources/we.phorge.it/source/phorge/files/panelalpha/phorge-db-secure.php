@@ -2,43 +2,19 @@
 <?php
 
 /**
- * Replaces the sidecar database's engine-default credentials with ones
- * generated for this account, and hands Phorge a user that can create its 54
- * schemas.
+ * Makes sure the sidecar database's root account uses this account's own
+ * password, and hands Phorge a user that can create its 54 schemas.
  *
- * Why this file exists, measured on this engine:
+ * A new database is initialised with that password already: hooks/prepare.sh
+ * writes it to ~/.panelalpha/phorge/db-root.env, which the override gives the
+ * db service as MYSQL_ROOT_PASSWORD. Databases created by older engines were
+ * initialised with the engine's default `app` (it used to rewrite this
+ * recipe's db environment), so that password, and whatever the app container
+ * has as MYSQL_ROOT_PASSWORD, are still tried and replaced.
  *
- * A compose file in the project root is harvested for backing services
- * (RuntimeSidecars::runtimeSidecarsFromProject) and this recipe's own
- * overrides/docker-compose.override.yml is one -- `exampleComposeFilenames()`
- * globs `docker-compose.*.yml`. The harvest keeps the service's image, command
- * and volumes and then REPLACES its `environment` with credentials the engine
- * derives from the application's database settings. For an application that is
- * not Laravel, those settings are the empty array (PhpStrategy::deploy, line
- * 76: `$artisan ? EnvFile::databaseSettings($projectDir) : []`), so every value
- * falls back to a default and the generated docker-compose.yml comes out as:
- *
- *     MYSQL_DATABASE: app
- *     MYSQL_USER: app
- *     MYSQL_PASSWORD: app
- *     MYSQL_ROOT_PASSWORD: app
- *     MYSQL_ROOT_HOST: '%'
- *
- * `app` is MysqlSidecar::FALLBACK_PASSWORD, line 18. `environment:` outranks
- * `env_file:` in Compose, so a password this recipe generates and passes
- * through env_file loses to it; and the only channel Compose interpolation
- * would read instead is `.env`, which ProjectEnvironment::apply() copies to
- * `.env.default` with mode 644 (engine defect #173) -- a world-readable
- * password is worse than this.
- *
- * So the credentials are fixed from inside, after the database is up, by the
- * one process that can read both of them: the app container has
- * MYSQL_ROOT_PASSWORD in its own environment (the engine puts it there) and
- * ~/.panelalpha/phorge/db.env bind-mounted at /panelalpha (0600, in a 0700
- * directory, owned by the account uid the container runs as).
- *
- * Idempotent, and that is the whole difficulty: on the second deploy the
- * engine still says `app` and the server no longer accepts it. Both are tried.
+ * The target is read from ~/.panelalpha/phorge/db.env, bind-mounted at
+ * /panelalpha (0600, owned by the account uid the container runs as).
+ * Idempotent: on a redeploy the first candidate already works.
  *
  * mysqli rather than the `mysql` client, which the shared PHP base image does
  * not contain.
@@ -76,9 +52,8 @@ if (!is_string($target) || $target === '') {
   db_fail('PHORGE_DB_PASSWORD is not set in '.$secret_file);
 }
 
-// In order: the password we want (a redeploy, already rotated), then the one
-// the engine wrote into the container's environment (the first deploy), then
-// the literal fallback in case the engine ever stops exporting it to the app.
+// In order: the password we want (new databases, and every redeploy), then
+// the ones a database initialised by an older engine may still have.
 $candidates = array($target);
 $engine_password = getenv('MYSQL_ROOT_PASSWORD');
 if (is_string($engine_password) && $engine_password !== '') {
@@ -119,7 +94,7 @@ if ($used === $target) {
 
 $quoted = "'".$conn->real_escape_string($target)."'";
 
-// root@'%' is the account the engine creates (MYSQL_ROOT_HOST: '%') and the one
+// root@'%' is the account the mysql image creates (MYSQL_ROOT_HOST defaults to '%') and the one
 // Phorge will use: it is the only account that may CREATE DATABASE, which
 // Phorge does 54 times. root@'localhost' exists inside the container and is
 // rotated with it so the two do not drift.
@@ -131,8 +106,8 @@ foreach (array("'root'@'%'", "'root'@'localhost'") as $account) {
   }
 }
 
-// The engine also creates `app`@'%' with the password `app` and ALL PRIVILEGES
-// on the `app` schema. Nothing uses it -- Phorge's data is in its own 54
+// Older engines also created `app`@'%' with the password `app` and ALL
+// PRIVILEGES on the `app` schema. Nothing uses it -- Phorge's data is in its own 54
 // schemas -- and a published username and password on a live server is worth
 // one DROP.
 if (!$conn->query("DROP USER IF EXISTS 'app'@'%'")) {

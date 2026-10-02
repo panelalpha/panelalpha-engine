@@ -6,7 +6,12 @@ description: >-
   check unless whitelisting, basic auth or user accounts protect it. This recipe
   runs the official image of the current release
   (ghcr.io/sillytavern/sillytavern:1.19.0) on port 8000 in SillyTavern's own
-  basic-auth mode with the credentials the customer sets as
-  SILLYTAVERN_BASICAUTHUSER_USERNAME / SILLYTAVERN_BASICAUTHUSER_PASSWORD; a
-  one-shot check service fails the deploy while either is unset. Config, data,
+  basic-auth mode with a login the engine generates (`credentials:`, returned
+  by `GET /projects/{name}/app-credentials`; project env vars
+  SILLYTAVERN_BASICAUTHUSER_USERNAME / _PASSWORD set before the first deploy
+  are kept instead). Config, data,
   plugins and third-party extensions live on named volumes.
+credentials:
+  fields:
+    SILLYTAVERN_BASICAUTHUSER_USERNAME: {kind: username}
+    SILLYTAVERN_BASICAUTHUSER_PASSWORD: {kind: password}

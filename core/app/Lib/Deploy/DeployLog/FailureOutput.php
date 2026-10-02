@@ -74,6 +74,8 @@ final class FailureOutput
         '/^\s+imports [\w.\/-]+\S*: (?:build constraints|no required module|cannot find)/',
         // A repo with no buildable package at all -- lura is a framework.
         '/^no Go files in \//',
+        // The toolchain refusing go.mod's version (GOTOOLCHAIN=local in the official image).
+        '/^go: go\.mod requires go >= /',
         '/^error: cannot find module providing package /',
         '/^FAILURE: Build failed/',              // Gradle's own banner
         '/^\* What went wrong:/',                // ...and the section naming the task
@@ -150,6 +152,9 @@ final class FailureOutput
         // The same for `apt-get update`, best effort in the Rust host compile
         // (`|| true`): the account cannot write the apt lists (#86).
         '/^E: List directory \/var\/lib\/apt\/lists\/partial is missing\. - Acquire \(13: Permission denied\)$/',
+        // A Makefile's `git describe` in a build context with no .git (ntfy). Real
+        // git failures (`fatal: repository ... not found`) still lead.
+        '/^(?:#\d+ \d+(?:\.\d+)? )?fatal: not a git repository\b/',
         '/^\s*$/',
     ];
 

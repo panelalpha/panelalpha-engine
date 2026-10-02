@@ -6,7 +6,7 @@ MySQL underneath and no Composer at the repository root.
 
 Upstream: <https://github.com/MacWarrior/clipbucket-v5> (5.5.3, revision 188,
 `86d81659`). Tracker:
-[supported-apps#1137](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/1137).
+supported-apps#1137.
 
 The batch verdict was `serving-missing_entry`: a deploy that finished and a
 site where every request answered 403.
@@ -52,21 +52,14 @@ rest of this recipe and have sections of their own below.
 
 ## The ffmpeg answer
 
-**The shared PHP base image has no ffmpeg, no ffprobe and no mediainfo, and no
-recipe can add one.** Measured:
+**The shared PHP base image has no ffmpeg, no ffprobe and no mediainfo.**
+Measured:
 
 ```
 $ docker run --rm panelalpha/php:8.3-apache-bookworm-pa20260910 \
       sh -c 'command -v ffmpeg ffprobe mediainfo'
 (nothing)
 ```
-
-`requires:` in a manifest names toolchains the engine knows about;
-`PhpBaseImage`'s `extras` are php extension names handed to
-`install-php-extensions` (`core/app/Lib/Deploy/CacheManager/PhpBaseImage.php:254-270`);
-and `core/resources/deploy/templates/dockerfile/php-base.stub` installs a fixed
-`git unzip` and nothing a manifest can reach. There is no per-project
-Dockerfile any more — the stub says so itself.
 
 **For ClipBucket that is not a degraded feature, it is the product.** Two
 separate facts:
@@ -84,35 +77,22 @@ separate facts:
   nobody can play** — not an error, not a rejection, just a video that never
   appears. That is the worst of the three possible answers.
 
-So `hooks/prepare.sh` fetches static builds once per account into
-`~/.panelalpha/clipbucket/bin`, which the compose override mounts at
-`/data/bin`:
+So `panelalpha.yaml` asks for them with `system_packages: [ffmpeg, mediainfo]`:
+the engine builds a variant of the shared PHP base image with Debian's
+packages, once per host, and only accounts deploying an app that asks for the
+set load it. The first deploy of a new set waits for that build and fails
+rather than deploying without the packages. The install then writes
+`/usr/bin/ffmpeg`, `/usr/bin/ffprobe` and `/usr/bin/mediainfo` into the
+`ffmpegpath`, `ffprobe_path` and `media_info` config rows, which
+`System::get_binaries()` reads *before* it ever falls back to `which`
+(`includes/classes/system.class.php:547-620`), and the setup stage refuses to
+continue if any of the three is missing.
 
-| Tool | Source | Size |
-| --- | --- | --- |
-| ffmpeg, ffprobe 7.0.2 | `johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz` | 42 MB down, 160 MB on disk |
-| mediainfo 26.05 | MediaArea's `MediaInfo_CLI_26.05_Lambda_x86_64.zip` | 6.6 MB down, 17 MB on disk |
-
-Both verified to run inside the bookworm base image before being wired in.
-MediaArea's Lambda build is the only self-contained MediaInfo CLI they publish
-— their Debian packages need `libmediainfo0v5` and `libzen0v5` unpacked beside
-them. The install then writes those paths into the `ffmpegpath`,
-`ffprobe_path` and `media_info` config rows, which `System::get_binaries()`
-reads *before* it ever falls back to `which`
-(`includes/classes/system.class.php:547-620`).
-
-Once per account, not once per deploy: `~/.panelalpha` outlives the re-clone
-(#173). A failed **ffmpeg** download fails the deploy — a video site that
-cannot accept a video should not be reported as a success. A failed
-**mediainfo** download does not: it is a hard requirement of upstream's
-precheck but only a fallback at runtime, used for the duration when ffprobe
-could not give one and for the "Original width/height" of anamorphic material
-(`ffmpeg.class.php:126,134`), and ffprobe covers everything else.
-
-**This is a workaround and the right fix is in the base image.** Every
-video-, audio- or image-processing application on this platform will want
-ffmpeg, and the alternative to putting it there is every recipe downloading
-160 MB per account from a third party. See "Engine findings" below.
+Earlier versions of this recipe downloaded static builds (johnvansickle's
+ffmpeg, MediaArea's MediaInfo CLI, ~180 MB on disk) into
+`~/.panelalpha/clipbucket/bin` on every account. The config rows are written on
+every deploy, so an account installed that way is re-pointed at `/usr/bin` by
+its next redeploy; the old `bin/` directory is left alone and can be deleted.
 
 ### Nothing needs a cron, and that is not obvious
 
@@ -402,7 +382,7 @@ nothing newer to move to.
 
 ## What was verified
 
-On `mariusz.panelalpha.tools`, 2026-09-20, ClipBucket 5.5.3 rev 188
+On a dev host, 2026-09-20, ClipBucket 5.5.3 rev 188
 (`86d81659`), PHP 8.3, `--memory-limit=2000`, **host load average 6.7–8.1
 throughout** (a long batch job was running, so these numbers are slow):
 
@@ -437,6 +417,18 @@ throughout** (a long batch job was running, so these numbers are slow):
   both the checkout and the mount, and a second video uploaded, transcoded to
   240p/360p and served over the public domain.
 
+**`system_packages`, 2026-10-02**, on the same host, ClipBucket `master`
+(`f15cef1`), this directory shipped as the checkout's own `.panelalpha/`: the
+first deploy built `panelalpha/php:8.3-apache-bookworm-pa20260924-x357d1a10`
+with ffmpeg and mediainfo and waited for it (deploy 236 s, success), the app
+container has ffmpeg 5.1.9 and MediaInfoLib 23.04 from Debian, the three config
+rows read `/usr/bin/ffmpeg`, `/usr/bin/ffprobe` and `/usr/bin/mediainfo`, and
+`~/.panelalpha/clipbucket` holds `files/` only. A 6-second 640×360 H.264/AAC
+MP4 uploaded through `actions/file_uploader.php` (chunk fields, signed in with
+the generated credential) went to `Successful`, 100 %, duration 6, with 240p
+and 360p renditions and WebP thumbnails; the 360p file serves 130,318 bytes of
+`video/mp4` over the public domain.
+
 ### The multipart-POST stall is real (#170)
 
 The upload had to be retried against the account's own address.
@@ -454,15 +446,15 @@ application fault.
 - Photo upload, collections, playlists, comments and the mail paths.
 - HLS conversion (`conversion_type` is `mp4` by default; the HLS branch of
   `video_convert.php` was read but not run).
-- Behaviour when the ffmpeg download fails — the failure path is written and
-  reviewed but was not forced.
+- A deploy whose `system_packages` base variant fails to build (the engine
+  fails the deploy; not forced here).
 
 ## Files
 
 | Path | Why |
 | --- | --- |
-| `panelalpha.yaml` | `docroot: upload`, `database: mysql`, the setup command |
-| `hooks/prepare.sh` | deletes the shipped `install.me`; fetches ffmpeg/ffprobe/mediainfo; seeds and protects the media mount; denies developer files |
+| `panelalpha.yaml` | `docroot: upload`, `database: mysql`, `system_packages` (ffmpeg, mediainfo), the setup command |
+| `hooks/prepare.sh` | deletes the shipped `install.me`; seeds and protects the media mount; denies developer files |
 | `files/panelalpha-setup.sh` | install/upgrade stage driver (repository root, outside the docroot) |
 | `files/panelalpha-install.php` | CLI install through upstream's own SQL, `pass_code()` and `Migration::updateConfig()` |
 | `files/panelalpha-migrate.php` | runs ClipBucket's own migration tool on the upgrade stage |
@@ -475,14 +467,9 @@ application fault.
 
 Nothing new filed. Two things worth someone's attention:
 
-**ffmpeg belongs in the shared PHP base image.** This recipe downloads 160 MB
-of static binaries per account from a third party because there is no other
-lever — `extras` are php extensions, `php-base.stub`'s apt line is fixed, and
-there is no per-project Dockerfile. Every video, audio or image application
-this platform meets will want the same thing, and `castopod`'s recipe already
-records losing its video-clip feature to the same gap. An `extras`-shaped key
-for apt packages, or simply `ffmpeg` in the stub, would remove the workaround
-from this recipe and the next five.
+**ffmpeg comes from `system_packages`.** The recipe used to download 160 MB of
+static binaries per account from a third party because there was no other
+lever; the manifest key (engine#193) replaced that.
 
 **Known defects met, and how.** #172 does not bite (`upload` is a real relative
 path). #181 does not apply (the docroot is a child of the repository root).

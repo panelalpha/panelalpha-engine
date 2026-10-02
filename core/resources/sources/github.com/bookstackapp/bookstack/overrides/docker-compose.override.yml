@@ -1,8 +1,0 @@
-# The repo's dev compose contributes a `node` asset watcher (entrypoint.node.sh)
-# that restart-loops on EACCES; the assets are built on the host, so it only
-# needs to exit cleanly. `app` depends on it being started, so it is kept.
-services:
-  node:
-    entrypoint: ["/bin/sh", "-c", "exit 0"]
-    restart: "no"
-    mem_limit: 32m

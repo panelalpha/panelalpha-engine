@@ -1,7 +1,7 @@
 # Castopod
 
 <https://code.castopod.org/adaures/castopod> — tracker issue
-[#1374](https://git.modulesgarden.tech/panelalpha/playground/supported-apps/-/work_items/1374).
+#1374.
 
 A podcast hosting platform: CodeIgniter 4.7 over MySQL, a Vite/Tailwind
 frontend, an admin area at `/cp-admin`, ActivityPub federation, and an RSS feed
@@ -62,8 +62,11 @@ the keys it owns.
   application for the analytics rollups and the fediverse outbox. There is no
   cron on a hosting account, so those do not run. The site, the admin area,
   publishing and the feed are unaffected.
-* **Video clips.** `Modules\MediaClipper` shells out to ffmpeg, which is not in
-  the shared PHP base image. Audio, artwork and the feed do not need it.
+* **Video clips, automatically.** `Modules\MediaClipper` renders a clip queued
+  in the admin area when the scheduled `video-clips:generate` task runs, and
+  there is no scheduler here. ffmpeg is in the image (`system_packages:
+  [ffmpeg]` in `panelalpha.yaml`), so running
+  `php spark video-clips:generate` in the app container renders the queue.
 
 ## Measured
 

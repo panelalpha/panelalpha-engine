@@ -306,19 +306,18 @@ if ($mode === 'schema') {
 /**
  * Where the tools are. ClipBucket resolves every external binary through
  * System::get_binaries() (includes/classes/system.class.php:547-620), which
- * reads a config row first and only falls back to `which`. The shared PHP base
- * image has none of ffmpeg, ffprobe or mediainfo, so `which` would find
- * nothing; hooks/prepare.sh puts static builds on the account's own data
- * directory and the compose override mounts it at /data.
+ * reads a config row first and only falls back to `which`. Debian's packages,
+ * from `system_packages` in panelalpha.yaml; written on every deploy, so an
+ * account installed with the old static builds under /data/bin is re-pointed.
  *
  * @return array<string,string> config row name => absolute path
  */
 function cb_binaries()
 {
     $paths = array(
-        'ffmpegpath'   => '/data/bin/ffmpeg',
-        'ffprobe_path' => '/data/bin/ffprobe',
-        'media_info'   => '/data/bin/mediainfo',
+        'ffmpegpath'   => '/usr/bin/ffmpeg',
+        'ffprobe_path' => '/usr/bin/ffprobe',
+        'media_info'   => '/usr/bin/mediainfo',
         // PHP_BINARY is the CLI binary this process is running as, which is the
         // one every backgrounded conversion will be started with.
         'php_path'     => PHP_BINARY,

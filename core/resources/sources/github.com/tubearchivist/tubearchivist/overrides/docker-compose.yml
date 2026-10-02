@@ -1,7 +1,7 @@
 # Upstream's docker-compose.yml with three changes: images pinned to the current
 # release, no `ulimits: memlock` on Elasticsearch (an account cannot raise
 # RLIMIT_MEMLOCK: "error setting rlimit type 8: operation not permitted"), and
-# the initial login from the project's env vars instead of a literal default.
+# the initial login the engine generates instead of a literal default.
 services:
   app:
     image: bbilly1/tubearchivist:v0.5.12
@@ -11,6 +11,8 @@ services:
     env_file:
       # ELASTIC_PASSWORD, generated once by hooks/prepare.sh.
       - ../.panelalpha/tubearchivist/secrets.env
+      # TA_USERNAME / TA_PASSWORD, the initial login the engine generates.
+      - ../.panelalpha/app-credentials.env
     environment:
       ES_URL: http://archivist-es:9200
       REDIS_CON: redis://archivist-redis:6379
@@ -18,16 +20,11 @@ services:
       HOST_GID: "1000"
       # Allowed host / CSRF origin.
       TA_HOST: ${PA_PUBLIC_URL}
-      # Initial login, from the project's env vars (checked below).
-      TA_USERNAME: ${TA_USERNAME:-}
-      TA_PASSWORD: ${TA_PASSWORD:-}
       TZ: Etc/UTC
     volumes:
       - media:/youtube
       - cache:/cache
     depends_on:
-      env-check:
-        condition: service_completed_successfully
       archivist-es:
         condition: service_healthy
       archivist-redis:
@@ -40,18 +37,6 @@ services:
       retries: 60
       start_period: 30s
     mem_limit: 1024m
-
-  # Fails `compose up` (and so the deploy) while a required variable is unset.
-  env-check:
-    image: bbilly1/tubearchivist:v0.5.12
-    restart: "no"
-    entrypoint: ["/bin/sh", "/ta-env-check.sh"]
-    environment:
-      TA_USERNAME: ${TA_USERNAME:-}
-      TA_PASSWORD: ${TA_PASSWORD:-}
-    volumes:
-      - ./ta-env-check.sh:/ta-env-check.sh:ro
-    mem_limit: 64m
 
   archivist-redis:
     image: redis:8-alpine

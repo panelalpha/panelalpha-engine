@@ -37,12 +37,12 @@ if [ ! -f /arcanist/src/init/init-library.php ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 1b. The database's credentials, which are the engine's until this runs.
+# 1b. The database's credentials.
 #
-#     The harvested sidecar is handed `root`/`app` and an `app`/`app` user by
-#     the engine, with MYSQL_ROOT_HOST '%'. This replaces both with a password
-#     generated for this account. It has to happen before the configuration
-#     below, because that is where the password is written.
+#     A new database already has this account's root password (db-root.env);
+#     one initialised by an older engine may still have `root`/`app` and an
+#     `app`/`app` user, which this replaces. It has to happen before the
+#     configuration below, because that is where the password is written.
 php panelalpha/phorge-db-secure.php
 
 # ---------------------------------------------------------------------------

@@ -41,6 +41,48 @@ class FailureOutputTest extends TestCase
         $this->assertStringContainsString('_resolveFilename', $selected);
     }
 
+    /**
+     * ntfy's Makefile asks git for a version in a build context with no .git,
+     * and those `fatal:` lines led the headline twelve lines above the reason.
+     */
+    public function test_a_go_toolchain_refusal_leads_not_gits_missing_repository(): void
+    {
+        $output = <<<'OUT'
+        #40 [builder 34/34] RUN --mount=type=cache,target=/go/pkg/mod make VERSION=dev COMMIT=unknown cli-linux-server
+        #40 0.688 fatal: not a git repository (or any of the parent directories): .git
+        #40 0.690 fatal: not a git repository (or any of the parent directories): .git
+        #40 0.695 mkdir -p server/docs server/site
+        #40 0.697 touch server/docs/index.html server/site/app.html
+        #40 0.707 # This is a target to build the CLI (including the server) manually.
+        #40 0.709 # Use this for development, if you really don't want to install GoReleaser ...
+        #40 0.709 mkdir -p dist/ntfy_linux_server server/docs
+        #40 0.712 CGO_ENABLED=1 go build \
+        #40 0.712 	-o dist/ntfy_linux_server/ntfy \
+        #40 0.712 	-tags sqlite_omit_load_extension,osusergo,netgo \
+        #40 0.712 	-ldflags \
+        #40 0.712 	"-linkmode=external -extldflags=-static -s -w -X main.version=dev -X main.commit=unknown -X main.date=1790933091"
+        #40 0.724 go: go.mod requires go >= 1.26.0 (running go 1.25.14; GOTOOLCHAIN=local)
+        #40 0.725 make: *** [Makefile:201: cli-linux-server] Error 1
+        #40 ERROR: process "/bin/sh -c make VERSION=$VERSION COMMIT=$COMMIT cli-linux-server" did not complete successfully: exit code: 2
+        OUT;
+
+        $selected = FailureOutput::select($output);
+
+        $this->assertStringStartsWith('#40 0.724 go: go.mod requires go >= 1.26.0', $selected);
+        $this->assertSame(
+            'This project needs Go 1.26.0, but it was built with Go 1.25.14.',
+            DeployFailureExplainer::explain($selected)
+        );
+    }
+
+    public function test_a_real_git_failure_still_leads(): void
+    {
+        $this->assertStringStartsWith(
+            'fatal: repository',
+            FailureOutput::select("Cloning into 'x'...\nfatal: repository 'https://github.com/a/b/' not found")
+        );
+    }
+
     /** mydia's Flutter precache: the tar lines, not BuildKit's summary below them, name the cause. */
     public function test_an_owner_id_out_of_range_leads_the_region(): void
     {

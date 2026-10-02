@@ -228,7 +228,7 @@ The account's web server reaches the application over plain HTTP. An application
 port_scheme: https
 ```
 
-The project's generated :80 and :443 proxy rules then use an `https` upstream, without verifying the application's certificate, and no re-encrypting nginx sidecar is needed. `http` (or no key) is the default. It works for a compose recipe too, where it is the only manifest key the file has. The value is stored on the project at every deploy, so a redeploy, a domain rename or a later rule sync keeps it.
+The project's generated :80 and :443 proxy rules then use an `https` upstream, without verifying the application's certificate, and no re-encrypting nginx sidecar is needed. `http` (or no key) is the default. It works for a compose recipe too, next to its `port:` (see above), without making the recipe a manifest. The value is stored on the project at every deploy, so a redeploy, a domain rename or a later rule sync keeps it.
 
 ---
 
