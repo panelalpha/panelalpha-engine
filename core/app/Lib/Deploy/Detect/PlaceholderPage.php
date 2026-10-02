@@ -83,6 +83,8 @@ final class PlaceholderPage
             || $name === strtolower(EngineArtifacts::RUN_COMPOSE_OVERRIDE)
             || $name === strtolower(EngineArtifacts::RUN_CLIENT_OVERRIDE)
             || $name === strtolower(EngineArtifacts::APP_CONFIG_COMPOSE)
+            || $name === strtolower(EngineArtifacts::RUN_PASSWD)
+            || $name === strtolower(EngineArtifacts::RUN_GROUP)
         ) {
             return true;
         }

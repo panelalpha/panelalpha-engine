@@ -625,6 +625,36 @@ class JsPackageManagerTest extends TestCase
         $this->assertFalse(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'npm run build']], 'npm run build'));
     }
 
+    public function test_a_task_runner_config_or_a_workspace_hook_calling_php_is_found(): void
+    {
+        $files = [
+            // opensourcepos/opensourcepos gulpfile.js, trimmed.
+            'gulpfile.js' => "gulp.task('update-licenses', function () {\n"
+                . "    return run_completion(run('composer licenses --format=json --no-dev > public/license/composer.LICENSES').exec());\n});\n",
+            'Gruntfile.js' => "grunt.initConfig({ shell: { lint: { command: 'php vendor/bin/phpcs' } } });\n",
+            'packages/php/blueprint/package.json' => '{"scripts":{"postinstall":"XDEBUG_MODE=off composer install --quiet"}}',
+        ];
+        $read = static fn (string $file): ?string => $files[$file] ?? null;
+
+        $this->assertTrue(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'gulp default']], 'npm run build', $read));
+        $this->assertTrue(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'npx grunt dist']], 'npm run build', $read));
+        $this->assertTrue(JsPackageManager::scriptsCallPhp(
+            ['workspaces' => ['packages/php/blueprint'], 'scripts' => ['build' => 'vite build']],
+            'npm run build',
+            $read
+        ));
+
+        // The build never runs gulp, so the gulpfile is not the build's.
+        $this->assertFalse(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'vite build']], 'npm run build', $read));
+        $this->assertFalse(JsPackageManager::scriptsCallPhp(
+            ['scripts' => ['build' => 'gulp default']],
+            'npm run build',
+            static fn (string $file): ?string => $file === 'gulpfile.js' ? "const php = require('gulp-php-minify');\ngulp.task('default', () => gulp.src('src/*.js'));\n" : null
+        ));
+        // Without a reader only package.json is read, as before.
+        $this->assertFalse(JsPackageManager::scriptsCallPhp(['scripts' => ['build' => 'gulp default']], 'npm run build'));
+    }
+
     public function test_yarn_berry_defaults_to_plug_n_play(): void
     {
         $berryLock = "__metadata:\n  version: 8\n";

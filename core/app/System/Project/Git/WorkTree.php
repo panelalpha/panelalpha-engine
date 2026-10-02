@@ -203,6 +203,18 @@ abstract class WorkTree
     }
 
     /**
+     * Deepen the depth-1 clone to the whole history and every tag, for a build
+     * that derives its version from them (`git describe --tags`).
+     */
+    public function fetchFullHistory(?string $token): void
+    {
+        $this->requireRepository();
+
+        $shallow = trim($this->git(['rev-parse', '--is-shallow-repository'])) === 'true';
+        $this->git($shallow ? ['fetch', '--unshallow', '--tags', 'origin'] : ['fetch', '--tags', 'origin'], $token);
+    }
+
+    /**
      * Fetch the submodules a freshly cloned checkout declares, if any.
      *
      * `clone` stays without `--recurse-submodules` on purpose: that flag makes

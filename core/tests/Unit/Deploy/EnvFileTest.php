@@ -50,6 +50,17 @@ class EnvFileTest extends TestCase
         $this->assertSame(['.env', 'api/.env'], $relative);
     }
 
+    public function test_nested_env_sample_is_copied_when_there_is_no_env_example(): void
+    {
+        mkdir($this->tmpDir . '/api', 0777, true);
+        file_put_contents($this->tmpDir . '/api/.env.sample', "API=1\n");
+
+        $copies = EnvFile::nestedEnvExampleCopies($this->tmpDir);
+
+        $this->assertSame([$this->tmpDir . '/api/.env.sample'], array_column($copies, 'example'));
+        $this->assertSame(['api/.env'], array_column($copies, 'relative'));
+    }
+
     public function test_env_local_from_example_and_from_env_when_mentioned(): void
     {
         file_put_contents($this->tmpDir . '/.env.local.example', "LOCAL=1\n");

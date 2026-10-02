@@ -64,6 +64,24 @@ class ComposeUsableNestedProbeTest extends ProbeTestCase
         $this->assertFalse($this->evaluate());
     }
 
+    /** autobase keeps its deployable stack in console/, beside automation/ and images/. */
+    public function test_the_only_other_directory_with_a_usable_stack_is_found(): void
+    {
+        $this->write('console/docker-compose.yml', self::ZORAXY);
+        $this->write('ws-tests/docker-compose.yml', self::ZORAXY);
+        $this->write('automation/README.md', '# ansible');
+
+        $this->assertSame(['compose_path' => $this->dir . '/console/docker-compose.yml'], $this->evaluate());
+    }
+
+    public function test_two_other_directories_with_a_stack_are_a_guess(): void
+    {
+        $this->write('server/docker-compose.yml', self::ZORAXY);
+        $this->write('agent/docker-compose.yml', self::ZORAXY);
+
+        $this->assertFalse($this->evaluate());
+    }
+
     public function test_a_project_railpack_recognises_is_left_to_railpack(): void
     {
         $this->write('docker/docker-compose.yml', self::ZORAXY);

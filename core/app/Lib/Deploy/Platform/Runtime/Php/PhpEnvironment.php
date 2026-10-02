@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Platform\Runtime\Php;
 
+use App\Lib\Deploy\Compose\ComposeValues;
+
 /**
  * The environment the generated PHP service runs with: production, logs to
  * stderr where Docker can read them, and pointed at whichever database the
@@ -30,6 +32,18 @@ final class PhpEnvironment
             self::url($appUrl),
             self::database(DatabaseSettings::fromArray($db), $artisan, $databaseConfig)
         );
+    }
+
+    /**
+     * The engine's environment over the matched manifest's `env:`. The manifest
+     * fills keys the engine does not set; the engine's own values still win.
+     *
+     * @param array<string, string> $engine
+     * @return array<string, string>
+     */
+    public static function withManifest(array $engine, mixed $declared): array
+    {
+        return array_merge(ComposeValues::stringMap($declared), $engine);
     }
 
     /**

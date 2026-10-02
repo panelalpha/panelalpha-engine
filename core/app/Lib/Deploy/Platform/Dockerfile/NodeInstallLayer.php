@@ -11,7 +11,7 @@ use App\Lib\Deploy\Template\Template;
  * Manifests are copied ahead of the source so BuildKit can reuse the install
  * when only application code changed. Workspaces are the exception: npm and bun
  * need every workspace `package.json` before they can link, so those copy the
- * tree first and give the cache up.
+ * tree first and give the cache up. So does a root install script.
  */
 final class NodeInstallLayer
 {
@@ -32,7 +32,32 @@ final class NodeInstallLayer
 
     public function render(): string
     {
-        return $this->recipe->isWorkspace() ? $this->wholeTree() : $this->manifestsFirst();
+        return $this->recipe->isWorkspace() || $this->runsRootLifecycleScript()
+            ? $this->wholeTree()
+            : $this->manifestsFirst();
+    }
+
+    /**
+     * A root install script the strip keeps runs during the install and may
+     * read the repository (teikei's `lerna exec` needs lerna.json, jitsi-meet's
+     * patch-package needs patches/), so it needs the tree as workspaces do.
+     */
+    private function runsRootLifecycleScript(): bool
+    {
+        $scripts = $this->recipe->package()['scripts'] ?? null;
+        if (!is_array($scripts)) {
+            return false;
+        }
+        foreach (JsPackageManager::INSTALL_LIFECYCLE_SCRIPTS as $name) {
+            $script = $scripts[$name] ?? null;
+            if (is_string($script) && trim($script) !== ''
+                && !JsPackageManager::isGitHookInstallerScript($script, sourcePresent: true)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function wholeTree(): string

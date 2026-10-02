@@ -13,6 +13,7 @@ use App\System\Project\Dind\ShellOperations;
 use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Engine\ContainerEngine;
 use App\Lib\Deploy\Engine\EngineAccount;
+use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 
@@ -148,6 +149,32 @@ class HostCompileFrontendBuildTest extends TestCase
         $this->assertSame([], $commands);
     }
 
+    /**
+     * Firefly III: the root package.json only declares `workspaces` (and a
+     * patch-package postinstall); `vite build` is resources/assets/v3's own
+     * script. No frontend build ran, and every page 500'd on
+     * ViteManifestNotFoundException.
+     */
+    public function test_a_workspace_root_without_a_build_script_builds_its_workspaces(): void
+    {
+        [$ran, $commands] = $this->runForPhp([
+            '/home/acme/project/package.json' => '{"scripts":{"postinstall":"patch-package --error-on-fail"},'
+                . '"workspaces":["resources/assets/v3"]}',
+            '/home/acme/project/package-lock.json' => '{}',
+        ], null);
+
+        $this->assertTrue($ran);
+        $this->assertCount(1, $commands);
+        $this->assertStringEndsWith(' && npm run build --workspaces --if-present', (string) end($commands[0]));
+    }
+
+    public function test_each_manager_builds_its_workspaces_its_own_way(): void
+    {
+        $this->assertSame('pnpm -r --if-present run build', JsPackageManager::workspacesScriptCommand('pnpm', 'build'));
+        $this->assertSame("bun run --filter '*' build", JsPackageManager::workspacesScriptCommand('bun', 'build'));
+        $this->assertSame('npm run build --workspaces --if-present', JsPackageManager::workspacesScriptCommand('yarn', 'build'));
+    }
+
     /** Crater: public/build is committed and both lockfiles are stale. */
     public function test_false_skips_the_pass_even_with_a_build_script(): void
     {
@@ -219,6 +246,27 @@ class HostCompileFrontendBuildTest extends TestCase
         $this->assertContains('panelalpha/build-node:php-pa12345678', $commands[0]);
     }
 
+    /** OSPOS: `build` is `gulp default`, and a gulp task runs `composer licenses`. */
+    public function test_a_gulp_task_calling_composer_builds_in_the_php_image_with_node(): void
+    {
+        $bases = $this->createMock(SharedBaseImages::class);
+        $bases->expects($this->once())->method('ensureNodeBuild')
+            ->willReturn('panelalpha/build-node:php-pa12345678');
+
+        [, $commands] = $this->runForPhp(
+            [
+                '/home/acme/project/package.json' => '{"scripts":{"build":"gulp default","gulp":"gulp"}}',
+                '/home/acme/project/gulpfile.js' => "gulp.task('update-licenses', function () {\n"
+                    . "    return Promise.all([run_completion(run('composer licenses --format=json --no-dev > public/license/composer.LICENSES').exec())]);\n});\n",
+            ],
+            null,
+            'panelalpha/php:8.3-apache-bookworm-paXXXX',
+            $bases
+        );
+
+        $this->assertContains('panelalpha/build-node:php-pa12345678', $commands[0]);
+    }
+
     public function test_a_frontend_that_never_calls_php_keeps_the_node_image(): void
     {
         $bases = $this->createMock(SharedBaseImages::class);
@@ -247,6 +295,35 @@ class HostCompileFrontendBuildTest extends TestCase
 
         $this->assertContains('YARN_NODE_LINKER=node-modules', $commands[0]);
         $this->assertContains('/var/cache/panelalpha/projects/acme/node_modules:/app/node_modules', $commands[0]);
+    }
+
+    /**
+     * A host-run Express app on Yarn 4 with no .yarnrc.yml: PnP wrote .pnp.cjs
+     * and no node_modules, and the deploy failed "Install finished but
+     * node_modules is missing". That compile keeps node_modules in the project.
+     */
+    public function test_yarn_pnp_installs_into_node_modules_for_a_host_run_app_too(): void
+    {
+        $system = $this->system([
+            '/home/acme/project/package.json' => '{"packageManager":"yarn@4.5.1","dependencies":{"express":"^4.21.0"}}',
+            '/home/acme/project/yarn.lock' => "__metadata:\n  version: 8\n",
+        ]);
+        $compile = new HostCompile($this->project($system));
+
+        (new \ReflectionMethod(HostCompile::class, 'runContainer'))->invoke(
+            $compile,
+            '/home/acme/project',
+            'node:22-bookworm',
+            'yarn install --immutable',
+            '',
+            [],
+            false,
+            true,
+            ''
+        );
+
+        $this->assertContains('YARN_NODE_LINKER=node-modules', $system->commands[0]);
+        $this->assertNotContains('/var/cache/panelalpha/projects/acme/node_modules:/app/node_modules', $system->commands[0]);
     }
 
     public function test_a_project_linker_other_than_pnp_is_left_alone(): void

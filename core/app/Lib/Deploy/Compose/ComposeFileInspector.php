@@ -383,6 +383,56 @@ class ComposeFileInspector
     }
 
     /**
+     * Why `docker compose up` starts nothing from this file as written: every
+     * service sits behind a profile nobody activates (NextChat), or one has
+     * neither image nor build (poke) and Compose rejects the project. Null when
+     * it can start something.
+     *
+     * @param list<string> $activeProfiles COMPOSE_PROFILES the repository sets
+     */
+    public static function startsNothingReasonYaml(string $raw, array $activeProfiles = []): ?string
+    {
+        try {
+            $parsed = ComposeYaml::parse($raw);
+        } catch (\Throwable) {
+            return null;
+        }
+        if (!is_array($parsed) || !is_array($parsed['services'] ?? null) || isset($parsed['include'])) {
+            return null;
+        }
+
+        $startable = false;
+        foreach ($parsed['services'] as $name => $service) {
+            if (!is_array($service)) {
+                continue;
+            }
+            if (!isset($service['image']) && !isset($service['build']) && !isset($service['extends'])) {
+                return "service `{$name}` has neither an image nor a build";
+            }
+            $profiles = is_array($service['profiles'] ?? null) ? $service['profiles'] : [];
+            if ($profiles === [] || array_intersect($profiles, $activeProfiles) !== []) {
+                $startable = true;
+            }
+        }
+
+        return $startable || $parsed['services'] === [] ? null : 'every service is behind a profile';
+    }
+
+    /**
+     * COMPOSE_PROFILES as the repository's committed `.env` sets it.
+     *
+     * @return list<string>
+     */
+    public static function profilesFromEnvFile(?string $env): array
+    {
+        if ($env === null || preg_match('/^\s*COMPOSE_PROFILES\s*=\s*["\']?([^"\'\n#]*)/m', $env, $m) !== 1) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map('trim', explode(',', $m[1]))));
+    }
+
+    /**
      * Compose file whose every service is a known datastore (postgres, redis, …).
      * Treat as sidecar inventory for framework/railpack deploys — not STRATEGY_COMPOSE.
      */

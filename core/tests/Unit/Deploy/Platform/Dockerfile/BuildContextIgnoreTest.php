@@ -121,6 +121,8 @@ class BuildContextIgnoreTest extends TestCase
             'docker-compose.panelalpha.app-config.yml',
             '.env.panelalpha',
             '.env.default',
+            'panelalpha.passwd',
+            'panelalpha.group',
             'panelalpha.Dockerfile',
             'panelalpha.Dockerfile.dockerignore',
             'Dockerfile.dockerignore',

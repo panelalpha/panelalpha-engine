@@ -131,8 +131,8 @@ final class DotnetRuntime implements Runtime
     }
 
     /**
-     * The one project to publish: a web SDK project, else one declaring
-     * `OutputType Exe`. Publishing a solution instead fails with `NETSDK1194`
+     * The one project to publish: a web SDK project, else an `OutputType Exe`
+     * that serves HTTP ({@see servesHttp()}). Publishing a solution instead fails with `NETSDK1194`
      * (test projects error and MSBuild's exit code is the build's). Tests are
      * excluded by path and name, and so is a web SDK project that says it is a
      * `Library` (Sonarr.SignalR) or targets only Windows. Null when nothing
@@ -140,8 +140,29 @@ final class DotnetRuntime implements Runtime
      */
     public static function entryProject(string $projectDir): ?string
     {
+        return self::candidates($projectDir)['entry'];
+    }
+
+    /**
+     * Executables, but none that serves HTTP: a console worker (the voting
+     * app's Redis-to-Postgres mover), a desktop app, a build tool. Publishing
+     * one deploys something that can never answer on a port.
+     */
+    public static function onlyConsoleExecutables(string $projectDir): bool
+    {
+        $found = self::candidates($projectDir);
+
+        // A .NET Framework one stays claimed, so the deploy is refused with that reason.
+        return $found['entry'] === null && $found['console'] !== null
+            && self::legacyFrameworkOf($projectDir, $found['console']) === null;
+    }
+
+    /** @return array{entry: ?string, console: ?string} */
+    private static function candidates(string $projectDir): array
+    {
         $webSdk = null;
         $executable = null;
+        $console = null;
 
         foreach (self::findProjectFiles($projectDir) as $relative) {
             if (!preg_match('/\.(cs|fs|vb)proj$/', $relative) || self::looksLikeTests($relative)) {
@@ -162,11 +183,101 @@ final class DotnetRuntime implements Runtime
                 continue;
             }
             if (preg_match('/<OutputType>\s*Exe\s*<\/OutputType>/i', $contents) === 1) {
-                $executable ??= $relative;
+                if (self::servesHttp(rtrim($projectDir, '/'), $relative)) {
+                    $executable ??= $relative;
+                } else {
+                    $console ??= $relative;
+                }
             }
         }
 
-        return $webSdk ?? $executable;
+        return ['entry' => $webSdk ?? $executable, 'console' => $console];
+    }
+
+    /**
+     * Whether a project, or one it references, hosts a web server: the web
+     * SDK, ASP.NET Core (Prowlarr.Console reaches it through Prowlarr.Host),
+     * another HTTP server package, or `HttpListener` in its own sources.
+     *
+     * @param array<string, true> $seen
+     */
+    private static function servesHttp(string $root, string $relative, array &$seen = []): bool
+    {
+        if (isset($seen[$relative]) || count($seen) >= 50) {
+            return false;
+        }
+        $seen[$relative] = true;
+        $contents = @file_get_contents($root . '/' . $relative);
+        if (!is_string($contents)) {
+            return false;
+        }
+        if (stripos($contents, 'Microsoft.NET.Sdk.Web') !== false
+            || preg_match('/<FrameworkReference\s+Include\s*=\s*"Microsoft\.AspNetCore\.App"/i', $contents) === 1
+            || preg_match(self::HTTP_SERVER_PACKAGES, $contents) === 1
+        ) {
+            return true;
+        }
+
+        $dir = dirname($relative);
+        preg_match_all('/<ProjectReference\s+Include\s*=\s*"([^"]+)"/i', $contents, $refs);
+        foreach ($refs[1] as $ref) {
+            $path = self::normalizePath(($dir === '.' ? '' : $dir . '/') . str_replace('\\', '/', $ref));
+            if ($path !== null && self::servesHttp($root, $path, $seen)) {
+                return true;
+            }
+        }
+
+        return self::sourcesUseHttpListener($root . ($dir === '.' ? '' : '/' . $dir));
+    }
+
+    private const HTTP_SERVER_PACKAGES = '/<PackageReference\s+Include\s*=\s*"[^"]*'
+        . '(?:AspNetCore|Kestrel|EmbedIO|Nancy|ServiceStack|Suave|Giraffe|Saturn|WatsonWebserver|Owin)[^"]*"/i';
+
+    /** `a/b/../c/x.csproj` -> `a/c/x.csproj`; null when it climbs out of the project. */
+    private static function normalizePath(string $path): ?string
+    {
+        $parts = [];
+        foreach (explode('/', $path) as $part) {
+            if ($part === '' || $part === '.') {
+                continue;
+            }
+            if ($part === '..') {
+                if ($parts === []) {
+                    return null;
+                }
+                array_pop($parts);
+                continue;
+            }
+            $parts[] = $part;
+        }
+
+        return $parts === [] ? null : implode('/', $parts);
+    }
+
+    /** A bounded look at a console project's own sources for a hand-rolled server. */
+    private static function sourcesUseHttpListener(string $dir): bool
+    {
+        if (!is_dir($dir)) {
+            return false;
+        }
+        $checked = 0;
+        $files = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($files as $file) {
+            if (!$file->isFile() || !preg_match('/\.(cs|fs|vb)$/', $file->getFilename())) {
+                continue;
+            }
+            if (++$checked > 200) {
+                break;
+            }
+            $source = @file_get_contents($file->getPathname());
+            if (is_string($source) && preg_match('/\bHttpListener\b/', $source) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -225,10 +336,14 @@ final class DotnetRuntime implements Runtime
      */
     public static function legacyFrameworkEntry(string $projectDir): ?string
     {
-        $entry = self::entryProject($projectDir);
-        if ($entry === null) {
-            return null;
-        }
+        $found = self::candidates($projectDir);
+        $entry = $found['entry'] ?? $found['console'];
+
+        return $entry === null ? null : self::legacyFrameworkOf($projectDir, $entry);
+    }
+
+    private static function legacyFrameworkOf(string $projectDir, string $entry): ?string
+    {
         $contents = @file_get_contents(rtrim($projectDir, '/') . '/' . $entry);
         if (!is_string($contents)
             || preg_match('/<TargetFrameworks?>/i', $contents) === 1
@@ -311,11 +426,26 @@ final class DotnetRuntime implements Runtime
         $framework = $target === null ? null : self::publishFramework($projectDir, $target);
         $solutionDir = $target === null ? null : self::solutionDir($projectDir, $target);
 
-        return 'dotnet publish' . ($target === null ? '' : ' ' . escapeshellarg($target))
+        return 'echo ' . escapeshellarg(self::AUDIT_TARGETS) . ' > ' . self::AUDIT_TARGETS_FILE . ' && '
+            . 'dotnet publish' . ($target === null ? '' : ' ' . escapeshellarg($target))
             . ($framework === null ? '' : ' -f ' . $framework)
             . ($solutionDir === null ? '' : ' -p:SolutionDir="$PWD/' . ($solutionDir === '.' ? '' : $solutionDir . '/') . '"')
-            . ' -c Release -o ' . self::PUBLISH_DIR . ' --nologo';
+            . ' -c Release -o ' . self::PUBLISH_DIR . ' --nologo'
+            . ' -p:CustomAfterMicrosoftCommonTargets=' . self::AUDIT_TARGETS_FILE;
     }
+
+    /**
+     * NuGet audit (NU1900-NU1904) stays a warning under the project's
+     * TreatWarningsAsErrors: Flink stopped at restore on `error NU1903: Warning
+     * As Error` for a transitive package. Appended to the project's own
+     * WarningsNotAsErrors from a targets file, because `-p:WarningsNotAsErrors=`
+     * would replace that list and turn its codes back into errors.
+     */
+    private const AUDIT_TARGETS = '<Project><PropertyGroup><WarningsNotAsErrors>'
+        . '$(WarningsNotAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904'
+        . '</WarningsNotAsErrors></PropertyGroup></Project>';
+
+    private const AUDIT_TARGETS_FILE = '/tmp/panelalpha-nuget-audit.targets';
 
     /**
      * The directory of the nearest solution above a project, relative to the

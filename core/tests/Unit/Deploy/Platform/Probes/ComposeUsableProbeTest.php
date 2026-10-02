@@ -72,6 +72,43 @@ class ComposeUsableProbeTest extends ProbeTestCase
         $this->assertFalse($this->probe()->evaluate($this->context()));
     }
 
+    /** NextChat gates both its services behind profiles: `compose up` reports "no service selected". */
+    public function test_a_file_whose_every_service_is_profiled_starts_nothing(): void
+    {
+        $profiled = <<<'YAML'
+        services:
+          chatgpt-next-web:
+            profiles: [ "no-proxy" ]
+            image: yidadaa/chatgpt-next-web
+            ports: ["3000:3000"]
+          chatgpt-next-web-proxy:
+            profiles: [ "proxy" ]
+            image: yidadaa/chatgpt-next-web
+            ports: ["3000:3000"]
+        YAML;
+        $this->write('docker-compose.yml', $profiled);
+        $this->assertFalse($this->probe()->evaluate($this->context()));
+
+        // The repository's own .env activating one makes it a stack again.
+        $this->write('.env', "COMPOSE_PROFILES=proxy\n");
+        $this->assertSame(
+            ['compose_path' => $this->dir . '/docker-compose.yml'],
+            $this->probe()->evaluate($this->context())
+        );
+    }
+
+    /** poke's only service has its `image:` commented out and no `build:`. */
+    public function test_a_service_with_neither_image_nor_build_starts_nothing(): void
+    {
+        $this->write('docker-compose.yml', "services:\n  poke:\n    restart: unless-stopped\n    ports:\n      - \"6003:6003\"\n");
+        $this->write('Dockerfile', "FROM node:20\n");
+        $this->assertFalse($this->probe()->evaluate($this->context()));
+
+        // A service that inherits its image through `extends` is fine.
+        $this->write('docker-compose.yml', "services:\n  base:\n    image: node:20\n  web:\n    extends: base\n    ports: [\"3000:3000\"]\n");
+        $this->assertIsArray($this->probe()->evaluate($this->context()));
+    }
+
     public function test_the_modern_filename_is_preferred(): void
     {
         // Repos mid-rename carry both. compose.yaml is the current spelling

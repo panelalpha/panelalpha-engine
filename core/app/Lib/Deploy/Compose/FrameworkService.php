@@ -9,6 +9,7 @@ use App\Lib\Deploy\Platform\PlatformManifest;
 use App\Lib\Deploy\Platform\Runtime\HostRunProject;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
+use App\Lib\Deploy\Platform\Runtime\Php\AccountUserFiles;
 use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
 use App\Lib\Deploy\Platform\Runtime\StandaloneNodeServe;
 
@@ -291,6 +292,10 @@ final class FrameworkService
         if ($cache !== '') {
             $service['volumes'][] = $cache . ':' . PhpBaseImage::COMPOSER_CACHE_DIR;
         }
+        // Gives that uid a name: {@see AccountUserFiles}.
+        if (($this->decision['account_user_files'] ?? false) === true) {
+            array_push($service['volumes'], ...AccountUserFiles::volumes());
+        }
 
         return $service;
     }
@@ -339,7 +344,8 @@ final class FrameworkService
      *
      * `env_file` carries the secrets the repository already wrote
      * (BETTER_AUTH_SECRET, …); the generated values below it override the
-     * localhost placeholders a template ships with.
+     * localhost placeholders a template ships with. A `path_prefix_keys` entry
+     * is left to that file: the project reads it as a sub-path, not a URL.
      *
      * @return array<string, mixed>
      */
@@ -353,7 +359,10 @@ final class FrameworkService
                     'HOSTNAME' => '0.0.0.0',
                     'PORT' => (string) $this->port,
                 ],
-                PublicUrlEnvironment::for($this->publicUrl),
+                array_diff_key(
+                    PublicUrlEnvironment::for($this->publicUrl),
+                    array_flip(ComposeValues::stringList($this->decision['path_prefix_keys'] ?? null))
+                ),
                 ComposeValues::stringMap($this->decision['env'] ?? null)
             ),
         ];

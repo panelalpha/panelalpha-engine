@@ -120,6 +120,8 @@ final class BuildContextIgnore
             EngineArtifacts::ENV_OVERRIDES,
             // The engine's 0600 copy of the base .env, generated secrets included.
             EngineArtifacts::ENV_DEFAULT,
+            EngineArtifacts::RUN_PASSWD,
+            EngineArtifacts::RUN_GROUP,
             DockerfileBuilder::FILENAME,
             self::pathFor(DockerfileBuilder::FILENAME),
             self::pathFor($dockerfile),

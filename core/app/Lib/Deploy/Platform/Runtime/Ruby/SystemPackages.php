@@ -36,8 +36,8 @@ final class SystemPackages
     ];
 
     /**
-     * Gems whose C extension links a system library they do not vendor, by
-     * gem => apt package. Looked up in Gemfile.lock too, since these arrive
+     * Gems whose C extension or FFI binding needs a system library they do
+     * not vendor, by gem => apt package. Looked up in Gemfile.lock too, since these arrive
      * transitively: idn-ruby through twitter-text, and extconf fails without
      * the headers.
      *
@@ -45,6 +45,15 @@ final class SystemPackages
      */
     private const NATIVE_GEM_PACKAGES = [
         'idn-ruby' => 'libidn-dev',
+        // FFI gems compile nothing; they dlopen the library when required,
+        // so a Rails app dies at boot without it (Manyfold:
+        // "Could not open library 'libarchive.so.13'"). The package must
+        // ship the exact name the gem's ffi_lib asks for.
+        'ffi-libarchive' => 'libarchive13',
+        // ffi_lib 'assimp' wants the unversioned libassimp.so, which only -dev has.
+        'assimp-ffi' => 'libassimp-dev',
+        'ruby-vips' => 'libvips42',
+        'rbnacl' => 'libsodium23',
     ];
 
     /**

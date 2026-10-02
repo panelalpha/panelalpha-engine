@@ -13,6 +13,7 @@ use App\Lib\Deploy\Compose\NestedCompose;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Compose\PublicUrlEnvironment;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
+use App\Lib\Deploy\Env\EnvTemplates;
 use App\Lib\Deploy\EnvFile;
 use App\Lib\Deploy\Platform\Strategies;
 
@@ -31,6 +32,9 @@ use App\Lib\Deploy\Platform\Strategies;
  */
 class ProjectEnvironment
 {
+    /** Project detail: the env_vars keys the last deploy merged into .env. */
+    private const MERGED_OVERRIDES = 'env_override_keys';
+
     private DindProject $dind;
 
     public function __construct(DindProject $dind)
@@ -52,7 +56,8 @@ class ProjectEnvironment
         $fs = $system->filesystem();
         $projectDir = $this->dind->userAppDirPath();
         $envPath = "{$projectDir}/.env";
-        $examplePath = "{$projectDir}/.env.example";
+        $exampleName = EnvTemplates::first(static fn (string $name): bool => $fs->fileExists("{$projectDir}/{$name}")) ?? '.env.example';
+        $examplePath = "{$projectDir}/{$exampleName}";
         $defaultPath = "{$projectDir}/.env.default";
         $chown = $user->getChownString();
         $logger = $this->dind->shell()->logger();
@@ -71,18 +76,31 @@ class ProjectEnvironment
         if (!$fs->fileExists($envPath) && $fs->fileExists($examplePath)) {
             $example = EnvFile::asUtf8((string) $fs->fileGetContents($examplePath));
             if ($example === null) {
-                $logger?->warn('Ignored .env.example: it is not a text file Docker Compose can read (NUL bytes in an unrecognised encoding)');
+                $logger?->warn("Ignored {$exampleName}: it is not a text file Docker Compose can read (NUL bytes in an unrecognised encoding)");
             }
         }
+        $removed = [];
         if ($fs->fileExists($envPath)) {
             $baseContents = $fs->fileGetContents($envPath);
             $source = 'after-clone';
+            // A .env that survives redeploys (archive, upload) still holds the
+            // overrides merged into it last time: back to the base before merging again,
+            // so one removed since is gone and .env.default stays the base.
+            [$baseContents, $restored] = self::withoutMergedOverrides(
+                (string) $baseContents,
+                $fs->fileExists($defaultPath) ? (string) $fs->fileGetContents($defaultPath) : '',
+                self::mergedOverrideKeys($user)
+            );
+            $removed = array_values(array_diff($restored, array_keys($overrides)));
+            if ($removed !== []) {
+                $logger?->info('No longer set as environment variables, so put back to the base .env: ' . implode(', ', $removed));
+            }
         } elseif ($example !== null) {
             $seed = $this->dind->strategy()->secrets()->for('compose-placeholders');
             $baseContents = self::withGeneratedSecrets($example, $seed);
             [$baseContents, $replaced] = self::withoutPublishedSecrets($baseContents, $seed, $overrides);
             foreach ($replaced as $key) {
-                $logger?->info("Replaced the published placeholder in {$key} from .env.example with a generated secret");
+                $logger?->info("Replaced the published placeholder in {$key} from {$exampleName} with a generated secret");
             }
             $baseContents = $this->withoutComposeDefaultedKeys($baseContents);
             // Asked only when there is a blank to fill: the address is a lookup.
@@ -95,17 +113,33 @@ class ProjectEnvironment
                 );
             }
             if ($urls !== []) {
-                $logger?->info('Filled the blank public-URL keys in .env.example with this account\'s address: ' . implode(', ', $urls));
+                $logger?->info("Filled the blank public-URL keys in {$exampleName} with this account's address: " . implode(', ', $urls));
             }
             [$baseContents, $blanks] = self::withoutTemplatePlaceholders($baseContents, $overrides);
             if ($blanks !== []) {
                 $logger?->info(
-                    'Left to the image, which sets them: .env.example had blanks to fill in for '
+                    "Left to the image, which sets them: {$exampleName} had blanks to fill in for "
                     . implode(', ', $blanks)
                 );
             }
-            $baseContents = self::withoutComposeRejectedLines($baseContents, '.env.example', $logger);
-            $source = '.env.example';
+            $baseContents = self::withoutComposeRejectedLines($baseContents, $exampleName, $logger);
+            $source = $exampleName;
+        }
+
+        // key:generate only rewrites an existing APP_KEY line, so a Laravel .env
+        // without one (LinkAce ships no template) got no key at all.
+        $keyAdded = false;
+        if ($user->getDeployStrategy() === Strategies::LARAVEL
+            && !isset($overrides['APP_KEY'])
+            && ($source !== 'after-clone' || !$this->envIsTracked())
+        ) {
+            [$baseContents, $keyAdded] = self::withAppKeyLine(
+                $baseContents,
+                $this->dind->strategy()->secrets()->for('compose-placeholders')
+            );
+            if ($keyAdded) {
+                $logger?->info('Added a generated APP_KEY to .env: it had none, and artisan key:generate only fills an existing line');
+            }
         }
 
         [$baseContents, $required] = $this->withComposeRequiredSecrets($baseContents, $overrides);
@@ -145,7 +179,7 @@ class ProjectEnvironment
                 . 'such as Vite or Next.js. Only the container environment carries them.'
             );
             $this->materializeNestedEnvExamples($projectDir, $chown);
-            $user->setDetails(['used_custom_env_vars' => true]);
+            $user->setDetails(['used_custom_env_vars' => true, self::MERGED_OVERRIDES => []]);
             $user->save();
 
             return;
@@ -170,21 +204,22 @@ class ProjectEnvironment
             );
             $this->materializeNestedEnvExamples($projectDir, $chown);
             $this->withNestedComposeEnv($projectDir, $composePath, $chown);
-            $user->setDetails(['used_custom_env_vars' => true]);
+            $user->setDetails(['used_custom_env_vars' => true, self::MERGED_OVERRIDES => array_keys($overrides)]);
             $user->save();
 
             return;
         }
 
         if ($baseContents !== null
-            && (!$fs->fileExists($envPath) || ($required !== [] && !$this->envIsTracked()))
+            && (!$fs->fileExists($envPath) || $removed !== [] || $keyAdded
+                || ($required !== [] && !$this->envIsTracked()))
         ) {
             $fs->filePutContents($envPath, $baseContents, $chown, '644');
         }
         $this->materializeNestedEnvExamples($projectDir, $chown);
         $this->withNestedComposeEnv($projectDir, $composePath, $chown);
         $logger?->info("Using default environment variables (source: {$source})");
-        $user->setDetails(['used_custom_env_vars' => false]);
+        $user->setDetails(['used_custom_env_vars' => false, self::MERGED_OVERRIDES => []]);
         $user->save();
     }
 
@@ -217,10 +252,16 @@ class ProjectEnvironment
     {
         $tree = $this->dind->projectTree();
         $projectDir = $this->dind->userAppDirPath();
+        $example = null;
+        EnvTemplates::first(static function (string $name) use ($tree, $projectDir, &$example): bool {
+            $example = $tree->readIn($projectDir, $name);
+
+            return $example !== null;
+        });
 
         return ComposeInterpolation::environment(
             $tree->readIn($projectDir, '.env'),
-            $tree->readIn($projectDir, '.env.example'),
+            $example,
             $this->dind->userModel()->getEnvVars()
         );
     }
@@ -553,6 +594,25 @@ class ProjectEnvironment
     }
 
     /**
+     * An APP_KEY line for a Laravel .env that has none, or only a blank one.
+     * Same seeded value as {@see withGeneratedSecrets()}, so stable across redeploys.
+     *
+     * @return array{0: string, 1: bool} contents, whether the key was set
+     */
+    public static function withAppKeyLine(?string $contents, string $seed): array
+    {
+        foreach (EnvFile::parse($contents ?? '') as $row) {
+            if (($row['type'] ?? '') === 'variable' && ($row['key'] ?? '') === 'APP_KEY'
+                && trim(trim((string) ($row['value'] ?? '')), '"\'') !== ''
+            ) {
+                return [(string) $contents, false];
+            }
+        }
+
+        return [EnvFile::merge($contents ?? '', ['APP_KEY' => ComposePlaceholders::publishedSecret('APP_KEY', $seed)]), true];
+    }
+
+    /**
      * Signing keys a `.env.example` sets to a well-known placeholder (Saleor's
      * SECRET_KEY=changeme), with the same seed and rule as the compose path.
      * APP_KEY is left to withGeneratedSecrets; keys the account set are left to its env_vars.
@@ -716,7 +776,7 @@ class ProjectEnvironment
             // Plainpad's server/.env.example (its app_root) ships APP_KEY={KEY}.
             // A real .env used as a source is left as it is.
             $replaced = [];
-            if ($contents !== '' && str_ends_with($copy['example'], '.example')) {
+            if ($contents !== '' && (str_ends_with($copy['example'], '.example') || EnvTemplates::isTemplate($copy['example']))) {
                 $seed = $this->dind->strategy()->secrets()->for('compose-placeholders');
                 $contents = self::withGeneratedSecrets($contents, $seed);
                 [$contents, $replaced] = self::withoutPublishedSecrets($contents, $seed);
@@ -732,7 +792,7 @@ class ProjectEnvironment
             $logger?->info(
                 $copy['example'] === ''
                     ? 'Created empty ' . $copy['relative'] . ' (required by compose env_file)'
-                    : 'Created ' . $copy['relative'] . ' from .env.example'
+                    : 'Created ' . $copy['relative'] . ' from ' . basename($copy['example'])
             );
             foreach ($replaced as $key) {
                 $logger?->info("Replaced the published placeholder in {$key} of {$copy['relative']} with a generated secret");
@@ -772,5 +832,50 @@ class ProjectEnvironment
                 $logger?->info("Created empty {$relative} (required by compose env_file)");
             }
         }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function mergedOverrideKeys(\App\Models\User $user): array
+    {
+        $keys = $user->getDetails()[self::MERGED_OVERRIDES] ?? [];
+
+        return is_array($keys) ? array_values(array_filter($keys, 'is_string')) : [];
+    }
+
+    /**
+     * $keys back to their value in the base .env (.env.default, written
+     * before the overrides were merged), or out of .env when the base has none.
+     *
+     * @param list<string> $keys
+     * @return array{0: string, 1: list<string>} contents, the keys changed
+     */
+    public static function withoutMergedOverrides(string $contents, string $base, array $keys): array
+    {
+        if ($keys === []) {
+            return [$contents, []];
+        }
+        $baseRows = [];
+        foreach (EnvFile::parse($base) as $row) {
+            if (($row['type'] ?? '') === 'variable') {
+                $baseRows[(string) $row['key']] = $row;
+            }
+        }
+        $rows = [];
+        $changed = [];
+        foreach (EnvFile::parse($contents) as $row) {
+            $key = ($row['type'] ?? '') === 'variable' ? (string) $row['key'] : null;
+            if ($key === null || !in_array($key, $keys, true)) {
+                $rows[] = $row;
+                continue;
+            }
+            $changed[$key] = true;
+            if (isset($baseRows[$key])) {
+                $rows[] = $baseRows[$key];
+            }
+        }
+
+        return $changed === [] ? [$contents, []] : [EnvFile::serialise($rows), array_keys($changed)];
     }
 }

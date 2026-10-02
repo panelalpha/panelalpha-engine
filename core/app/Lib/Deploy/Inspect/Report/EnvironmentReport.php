@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Inspect\Report;
 
+use App\Lib\Deploy\Env\EnvTemplates;
 use App\Lib\Deploy\EnvFile;
 
 /**
@@ -32,14 +33,7 @@ final class EnvironmentReport
      *
      * @var list<string>
      */
-    private const CANDIDATE_FILES = [
-        '.env.example',
-        '.env.sample',
-        '.env.template',
-        '.example.env',
-        'example.env',
-        '.env',
-    ];
+    private const CANDIDATE_FILES = [...EnvTemplates::NAMES, '.env'];
 
     private readonly string $projectDir;
 

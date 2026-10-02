@@ -239,6 +239,41 @@ final class PhpRuntime implements Runtime
     }
 
     /**
+     * The locked package that rejects $minor, as `name version (php X)`, when
+     * the lock states no exact minor of its own and composer.json's
+     * `require.php` allows $minor. `platform.php` is then the root constraint
+     * (`^8.3.0`), so {@see lockedPhpContradicted()} has nothing to compare:
+     * personal-management-system locks random_compat v9.99.99 (`^7`) under
+     * `^8.3.0` and the install failed on its platform check.
+     *
+     * Null when the root says nothing about PHP, or rules $minor out itself:
+     * that project really needs another PHP.
+     */
+    public static function lockedPackageRejecting(?string $composerJson, ?string $composerLock, string $minor): ?string
+    {
+        if (self::lockedPhpMinors($composerLock) !== null) {
+            return null;
+        }
+        $root = self::decodeObject($composerJson)['require']['php'] ?? null;
+        if (!is_string($root) || trim($root) === ''
+            || self::constraintAllowsVersion(trim($root), $minor . '.999999') !== true
+        ) {
+            return null;
+        }
+
+        foreach (self::decodedPackages($composerLock) as $package) {
+            $requires = $package['require']['php'] ?? null;
+            if (is_string($requires) && trim($requires) !== ''
+                && self::constraintAllowsVersion(trim($requires), $minor . '.999999') === false
+            ) {
+                return trim(($package['name'] ?? '?') . ' ' . ($package['version'] ?? '')) . ' (php ' . trim($requires) . ')';
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * The locked *runtime* packages. `packages-dev` is left out: `composer
      * install --no-dev` loads only the non-dev repository, so a dev package's
      * `require.php` is never checked, and counting it would let a package that

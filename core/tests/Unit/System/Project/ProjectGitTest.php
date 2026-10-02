@@ -255,6 +255,42 @@ class ProjectGitTest extends TestCase
         $this->assertStringNotContainsString('pat-secret', $flat);
     }
 
+    public function test_full_history_unshallows_with_tags(): void
+    {
+        $dir = sys_get_temp_dir() . '/pa-project-git-full-' . bin2hex(random_bytes(4));
+        mkdir($dir, 0755, true);
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'rev-parse --is-shallow-repository' => "true\n",
+        ];
+        $git = $this->testable($this->dindModel(), 'project', $runner, $dir);
+
+        $git->fetchFullHistory('pat-secret');
+
+        $last = end($runner->commands);
+        $this->assertSame(['fetch', '--unshallow', '--tags', 'origin'], array_slice($last, -4));
+        @rmdir($dir);
+    }
+
+    /** A history with nothing cut off is not shallow; only the tags are fetched. */
+    public function test_full_history_of_a_complete_clone_fetches_tags_only(): void
+    {
+        $dir = sys_get_temp_dir() . '/pa-project-git-full-' . bin2hex(random_bytes(4));
+        mkdir($dir, 0755, true);
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'rev-parse --is-shallow-repository' => "false\n",
+        ];
+        $git = $this->testable($this->dindModel(), 'project', $runner, $dir);
+
+        $git->fetchFullHistory(null);
+
+        $this->assertSame(['fetch', '--tags', 'origin'], array_slice(end($runner->commands), -3));
+        @rmdir($dir);
+    }
+
     public function test_init_submodules_fetches_when_gitmodules_present(): void
     {
         $dir = sys_get_temp_dir() . '/pa-project-git-sub-' . bin2hex(random_bytes(4));

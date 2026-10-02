@@ -35,6 +35,11 @@ final class AppConfig
     /** …or layers on top of one the engine generated. */
     public const COMPOSE_OVERRIDE = 'override';
 
+    /** `git: {history: full}`: the clone gets the whole history and every tag. */
+    public const GIT_HISTORY_FULL = 'full';
+
+    public const GIT_HISTORY_SHALLOW = 'shallow';
+
     /**
      * Keys this class reads itself; everything else it may hold is a manifest key,
      * spelled as in `resources/apps/<id>/panelalpha.yaml`.
@@ -43,7 +48,7 @@ final class AppConfig
      */
     private const OWN_KEYS = [
         '$schema', 'description', 'extends', 'env',
-        'precheck', 'prepare', 'entrypoint', 'commands', 'files', 'app', 'compose',
+        'precheck', 'prepare', 'entrypoint', 'commands', 'files', 'app', 'compose', 'git',
     ];
 
     /** Names the shipped recipe this application is an instance of. */
@@ -68,6 +73,7 @@ final class AppConfig
         private readonly array $env,
         private readonly ?array $manifest,
         private readonly ?CredentialSpec $credentials,
+        private readonly bool $fullGitHistory = false,
         private readonly ?string $portScheme = null,
     ) {
     }
@@ -127,6 +133,7 @@ final class AppConfig
             $config?->env() ?? [],
             $config?->manifest(),
             $config?->credentials(),
+            $config?->fullGitHistory() ?? false,
             $config?->portScheme(),
         );
     }
@@ -175,6 +182,7 @@ final class AppConfig
                 $raw['credentials'] ?? null,
                 static fn (string $m): ManifestException => new ManifestException(self::YAML_FILENAME . ": {$m}")
             ),
+            self::readGitHistory($raw) === self::GIT_HISTORY_FULL,
             self::readPortScheme($raw),
         );
     }
@@ -211,6 +219,7 @@ final class AppConfig
             $config?->env() ?? [],
             $config?->manifest(),
             $config?->credentials(),
+            $config?->fullGitHistory() ?? false,
             $config?->portScheme(),
         );
 
@@ -251,6 +260,7 @@ final class AppConfig
             && $this->env === []
             && $this->manifest === null
             && $this->credentials === null
+            && !$this->fullGitHistory
             && $this->portScheme === null;
     }
 
@@ -392,6 +402,16 @@ final class AppConfig
     }
 
     /**
+     * Whether the deploy clone needs the whole history and every tag: a build
+     * that stamps its version with `git describe` fails on the default
+     * depth-1 clone.
+     */
+    public function fullGitHistory(): bool
+    {
+        return $this->fullGitHistory;
+    }
+
+    /**
      * `port_scheme`: what the app's port speaks. Read here as well as in the
      * manifest, since a compose recipe declares it without being a manifest.
      */
@@ -479,6 +499,26 @@ final class AppConfig
         }
 
         return $content;
+    }
+
+    /** @param array<string, mixed> $raw */
+    private static function readGitHistory(array $raw): string
+    {
+        $git = $raw['git'] ?? null;
+        if ($git === null) {
+            return self::GIT_HISTORY_SHALLOW;
+        }
+        $history = is_array($git) ? ($git['history'] ?? null) : null;
+        if (!is_array($git) || array_diff(array_keys($git), ['history']) !== []
+            || !in_array($history, [self::GIT_HISTORY_FULL, self::GIT_HISTORY_SHALLOW], true)
+        ) {
+            throw new ManifestException(
+                self::YAML_FILENAME . ": 'git' must be {history: " . self::GIT_HISTORY_FULL
+                . '} or {history: ' . self::GIT_HISTORY_SHALLOW . '}'
+            );
+        }
+
+        return $history;
     }
 
     /** @param array<string, mixed> $raw */

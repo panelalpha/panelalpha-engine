@@ -40,6 +40,7 @@ final class ComposeUsableProbe implements PlatformProbe
                 || ($guess && ComposeFileInspector::isLocalDevCompose($path))
                 || ($guess && ComposeFileInspector::isSidecarsOnlyCompose($path))
                 || ComposeFileInspector::isLegacyV1Compose($path)
+                || ($guess && $this->startsNothing($candidate, $context))
             ) {
                 continue;
             }
@@ -51,5 +52,13 @@ final class ComposeUsableProbe implements PlatformProbe
         }
 
         return false;
+    }
+
+    private function startsNothing(string $candidate, ProjectContext $context): bool
+    {
+        $raw = $context->contents($candidate);
+        $profiles = ComposeFileInspector::profilesFromEnvFile($context->contents('.env'));
+
+        return is_string($raw) && ComposeFileInspector::startsNothingReasonYaml($raw, $profiles) !== null;
     }
 }

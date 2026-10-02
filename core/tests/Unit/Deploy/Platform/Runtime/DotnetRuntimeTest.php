@@ -3,6 +3,7 @@
 namespace Tests\Unit\Deploy\Platform\Runtime;
 
 use App\Lib\Deploy\Detect\DeployabilityCheck;
+use App\Lib\Deploy\Platform\Probes\DotnetProjectProbe;
 use App\Lib\Deploy\Platform\ProjectContext;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Platform\Runtime\DotnetRuntime;
@@ -219,6 +220,28 @@ XML);
     }
 
     /**
+     * Flink sets TreatWarningsAsErrors and restore died on `error NU1903: Warning
+     * As Error` for a transitive package. The audit codes are appended to the
+     * project's own WarningsNotAsErrors from a targets file; `-p:WarningsNotAsErrors`
+     * would replace that list (measured: the project's CS0618 became an error again).
+     */
+    public function test_nuget_audit_warnings_are_not_errors_and_the_projects_own_list_is_kept(): void
+    {
+        $this->write('Flink/Flink.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web"><PropertyGroup>'
+            . '<TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup></Project>');
+
+        $build = DotnetRuntime::buildCommand($this->dir);
+
+        $this->assertStringStartsWith(
+            "echo '<Project><PropertyGroup><WarningsNotAsErrors>\$(WarningsNotAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904"
+                . "</WarningsNotAsErrors></PropertyGroup></Project>' > /tmp/panelalpha-nuget-audit.targets && dotnet publish 'Flink/Flink.csproj'",
+            $build
+        );
+        $this->assertStringEndsWith(' -p:CustomAfterMicrosoftCommonTargets=/tmp/panelalpha-nuget-audit.targets', $build);
+        $this->assertStringNotContainsString('-p:WarningsNotAsErrors', $build);
+    }
+
+    /**
      * Jellyfin's layout, and the failure that found this: publishing the
      * directory publishes Jellyfin.sln, whose 17 xUnit v3 test projects
      * hard-error on the global -p:UseAppHost=false the build used to pass.
@@ -265,12 +288,60 @@ XML);
         $this->assertNull(DotnetRuntime::entryProject($this->dir));
     }
 
-    /** A console app with no web SDK is still an application. */
+    /** A console app hosting ASP.NET Core without the web SDK is still the application. */
     public function test_an_executable_project_is_the_entry_point(): void
     {
-        $this->write('src/Worker/Worker.csproj', '<Project Sdk="Microsoft.NET.Sdk"><OutputType>Exe</OutputType></Project>');
+        $this->write('src/Worker/Worker.csproj', '<Project Sdk="Microsoft.NET.Sdk"><OutputType>Exe</OutputType>'
+            . '<ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup></Project>');
 
         $this->assertSame('src/Worker/Worker.csproj', DotnetRuntime::entryProject($this->dir));
+    }
+
+    /**
+     * dockersamples/example-voting-app: worker/Worker.csproj, verbatim. It moves
+     * votes from Redis to Postgres and listens on nothing, so publishing it as the
+     * app deployed something that could never answer.
+     */
+    public function test_a_console_worker_is_not_the_entry_point_and_the_repo_is_not_claimed(): void
+    {
+        $this->write('worker/Worker.csproj', '<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net7.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="StackExchange.Redis" Version="2.2.4" />
+    <PackageReference Include="Npgsql" Version="4.1.9" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+  </ItemGroup>
+</Project>');
+
+        $this->assertNull(DotnetRuntime::entryProject($this->dir));
+        $this->assertTrue(DotnetRuntime::onlyConsoleExecutables($this->dir));
+        $this->assertFalse((new DotnetProjectProbe())->evaluate($this->context()));
+    }
+
+    /** Prowlarr.Console is a plain Exe; ASP.NET Core comes in through Prowlarr.Host. */
+    public function test_an_executable_reaching_aspnet_through_a_project_reference_is_the_entry_point(): void
+    {
+        $this->write('src/NzbDrone.Console/Prowlarr.Console.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+            . '<OutputType>Exe</OutputType></PropertyGroup><ItemGroup>'
+            . '<ProjectReference Include="..\\NzbDrone.Host\\Prowlarr.Host.csproj" /></ItemGroup></Project>');
+        $this->write('src/NzbDrone.Host/Prowlarr.Host.csproj', '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>'
+            . '<ProjectReference Include="..\\Prowlarr.Http\\Prowlarr.Http.csproj" /></ItemGroup></Project>');
+        $this->write('src/Prowlarr.Http/Prowlarr.Http.csproj', '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>'
+            . '<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.0" /></ItemGroup></Project>');
+
+        $this->assertSame('src/NzbDrone.Console/Prowlarr.Console.csproj', DotnetRuntime::entryProject($this->dir));
+        $this->assertTrue((new DotnetProjectProbe())->evaluate($this->context()));
+    }
+
+    public function test_a_console_app_with_its_own_http_listener_is_the_entry_point(): void
+    {
+        $this->write('Server/Server.csproj', '<Project Sdk="Microsoft.NET.Sdk"><OutputType>Exe</OutputType></Project>');
+        $this->write('Server/Program.cs', "var listener = new System.Net.HttpListener();\nlistener.Start();\n");
+
+        $this->assertSame('Server/Server.csproj', DotnetRuntime::entryProject($this->dir));
     }
 
     public function test_a_project_whose_targets_run_npm_needs_node_in_its_build(): void
@@ -310,7 +381,7 @@ XML);
         $this->write(
             'src/NzbDrone.Console/Prowlarr.Console.csproj',
             '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType>'
-            . '<TargetFrameworks>net8.0</TargetFrameworks></PropertyGroup></Project>'
+            . '<TargetFrameworks>net8.0</TargetFrameworks></PropertyGroup><ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup></Project>'
         );
 
         $this->assertStringContainsString(
@@ -326,7 +397,8 @@ XML);
     public function test_a_project_inside_a_solution_is_published_with_its_solution_dir(): void
     {
         $this->write('src/Prowlarr.sln', $this->solution('NzbDrone.Console\\Prowlarr.Console.csproj'));
-        $this->write('src/NzbDrone.Console/Prowlarr.Console.csproj', '<Project Sdk="Microsoft.NET.Sdk"><OutputType>Exe</OutputType></Project>');
+        $this->write('src/NzbDrone.Console/Prowlarr.Console.csproj', '<Project Sdk="Microsoft.NET.Sdk"><OutputType>Exe</OutputType>'
+            . '<ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup></Project>');
 
         $this->assertSame('src', DotnetRuntime::solutionDir($this->dir, 'src/NzbDrone.Console/Prowlarr.Console.csproj'));
         $this->assertStringContainsString('-p:SolutionDir="$PWD/src/"', DotnetRuntime::buildCommand($this->dir));
@@ -382,7 +454,8 @@ XML);
         $this->write('src/NzbDrone.SignalR/Sonarr.SignalR.csproj', '<Project Sdk="Microsoft.NET.Sdk.Web">'
             . '<PropertyGroup><TargetFrameworks>net10.0</TargetFrameworks><OutputType>Library</OutputType></PropertyGroup></Project>');
         $this->write('src/NzbDrone.Console/Sonarr.Console.csproj', '<Project Sdk="Microsoft.NET.Sdk">'
-            . '<PropertyGroup><OutputType>Exe</OutputType><TargetFrameworks>net10.0</TargetFrameworks></PropertyGroup></Project>');
+            . '<PropertyGroup><OutputType>Exe</OutputType><TargetFrameworks>net10.0</TargetFrameworks></PropertyGroup>'
+            . '<ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup></Project>');
 
         $this->assertSame('src/NzbDrone.Console/Sonarr.Console.csproj', DotnetRuntime::entryProject($this->dir));
     }
@@ -414,7 +487,8 @@ XML);
         $this->write('Kavita.Benchmark/Kavita.Benchmark.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
             . '<OutputType>Exe</OutputType></PropertyGroup></Project>');
         $this->write('Kavita.Server/Kavita.Server.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
-            . '<OutputType>Exe</OutputType></PropertyGroup></Project>');
+            . '<OutputType>Exe</OutputType></PropertyGroup>'
+            . '<ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup></Project>');
 
         $this->assertSame('Kavita.Server/Kavita.Server.csproj', DotnetRuntime::entryProject($this->dir));
 
@@ -424,7 +498,8 @@ XML);
         file_put_contents($this->dir . '/Perf/Perf.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType>'
             . '</PropertyGroup><ItemGroup><PackageReference Include="BenchmarkDotNet" Version="0.15.8" /></ItemGroup></Project>');
         $this->write('Kavita.Server/Kavita.Server.csproj', '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
-            . '<OutputType>Exe</OutputType></PropertyGroup></Project>');
+            . '<OutputType>Exe</OutputType></PropertyGroup>'
+            . '<ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup></Project>');
 
         $this->assertSame('Kavita.Server/Kavita.Server.csproj', DotnetRuntime::entryProject($this->dir));
     }

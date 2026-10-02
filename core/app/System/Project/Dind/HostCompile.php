@@ -7,10 +7,12 @@ use App\System\Project\Dind\Strategy\PythonBase;
 use App\Lib\Deploy\Dind\BuildNetwork;
 use App\Lib\Deploy\Dind\DindHostBuilder;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Lib\Deploy\Platform\Runtime\GoEmbeddedFrontends;
 use App\Lib\Deploy\Platform\Runtime\HostRunProject;
 use App\Lib\Deploy\Platform\Strategies;
 use App\Lib\Deploy\Platform\Runtime\Ruby\SystemPackages;
 use App\Lib\Deploy\Platform\Runtime\RubyRuntime;
+use App\Lib\Deploy\Platform\Runtime\RustBuildTools;
 use App\Lib\Deploy\Platform\Runtime\RustRuntime;
 use App\Lib\Deploy\Platform\Runtime\RustRuntimeLibraries;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RubyApp;
@@ -153,6 +155,12 @@ class HostCompile
         // shapes, so it stays in the project rather than being isolated into
         // the cache the way a throwaway static compile's is.
         $isolateNodeModules = !$isNitro && !$isMounted;
+        if (($decision['strategy'] ?? null) === Strategies::GO) {
+            $this->buildGoEmbeddedFrontends($projectDir, $cached);
+        }
+        if ($isNitro) {
+            $this->clearRelocatedNitroOutput($appDir);
+        }
         try {
             $this->runContainer($projectDir, $image, $installCmd, $buildCmd, $recipeEnv, $isolateNodeModules && $cached, $isNode, $appRoot);
         } catch (\Exception $e) {
@@ -274,6 +282,22 @@ class HostCompile
                 break;
             }
         }
+        // Firefly III: the root only declares `workspaces`, and the Vite build
+        // is a workspace's own `build` script.
+        $workspaceBuild = false;
+        if ($package === null && $declared === null) {
+            foreach (array_unique([$appRoot, '']) as $candidate) {
+                $root = $this->packageJson($projectDir, $candidate);
+                $pnpmWorkspace = $this->project->projectTree()
+                    ->readIn($projectDir, ($candidate === '' ? '' : $candidate . '/') . 'pnpm-workspace.yaml') !== null;
+                if ($root !== null && JsPackageManager::isJsWorkspace($root, $pnpmWorkspace ? ['pnpm-workspace.yaml' => true] : [])) {
+                    $package = $root;
+                    $buildRoot = $candidate;
+                    $workspaceBuild = true;
+                    break;
+                }
+            }
+        }
         if ($package === null) {
             if ($declared !== null) {
                 throw new \Exception('The recipe sets frontend_build, but the project has no package.json to run it against');
@@ -322,14 +346,20 @@ class HostCompile
         $install = JsPackageManager::installCommand($pm, $files, $package, $buildDir);
         // The install stays the engine's (cache, lockfile, git image); only
         // the build step is the recipe's. It runs on a cache hit too.
-        $build = $declared ?? JsPackageManager::scriptCommand($pm, 'build');
+        $build = $declared ?? ($workspaceBuild
+            ? JsPackageManager::workspacesScriptCommand($pm, 'build')
+            : JsPackageManager::scriptCommand($pm, 'build'));
         $nodeImage = Images::nodeImage($buildDir, $package);
         $image = HostNodeBuild::compilerImage($install, $nodeImage, $pm);
         // A script that calls composer or php (selfoss's postinstall) exits
         // 127 in a Node image, so the build runs in the PHP runtime with Node
         // copied in.
         if ($image === $nodeImage && $phpImage !== null && $phpImage !== ''
-            && JsPackageManager::scriptsCallPhp($package, $build)
+            && JsPackageManager::scriptsCallPhp(
+                $package,
+                $build,
+                fn (string $file): ?string => $this->project->projectTree()->readIn($buildDir, $file)
+            )
         ) {
             $image = $this->project->innerDocker()->bases()->ensureNodeBuild($phpImage, $nodeImage) ?? $image;
         }
@@ -409,10 +439,11 @@ class HostCompile
             return;
         }
         if ($isNitro) {
-            $entry = StandaloneNodeServe::firstEntry($projectDir, static function (string $path) use ($system): bool {
-                return $system->filesystem()->fileExists($path);
-            });
-            if ($entry === null) {
+            $exists = static fn (string $path): bool => $system->filesystem()->fileExists($path);
+            if (StandaloneNodeServe::firstEntry($projectDir, $exists) === null) {
+                $this->relocateNestedNitroOutput($projectDir);
+            }
+            if (StandaloneNodeServe::firstEntry($projectDir, $exists) === null) {
                 throw new \Exception(StandaloneNodeServe::missingEntryMessage());
             }
 
@@ -422,6 +453,70 @@ class HostCompile
         $index = $projectDir . '/' . $output . '/index.html';
         if (!$system->filesystem()->fileExists($index)) {
             throw new \Exception('Static build finished but ' . $output . '/index.html is missing');
+        }
+    }
+
+    /**
+     * Build the frontends a Go program embeds before compiling it
+     * ({@see GoEmbeddedFrontends}). Not fatal: a frontend the binary does not
+     * embed may fail to build, and one it does leaves the Go build to fail on
+     * the same embed error, with this build's output above it.
+     */
+    private function buildGoEmbeddedFrontends(string $projectDir, bool $cached): void
+    {
+        $logger = $this->project->shell()->logger();
+        foreach (GoEmbeddedFrontends::plan($projectDir) as $frontend) {
+            $dir = $frontend['dir'];
+            $logger?->info('Building the frontend in ' . ($dir === '' ? 'the project root' : $dir . '/')
+                . " first: {$frontend['embed']} is embedded by the Go build and is not in the checkout");
+            try {
+                $this->runContainer($projectDir, $frontend['image'], $frontend['install'], $frontend['build'], [], $cached, true, $dir);
+            } catch (DeployCancelledException $e) {
+                throw $e;
+            } catch (\Exception $e) {
+                $logger?->info("The frontend build in {$dir}/ failed; compiling Go without it: " . $e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * A workspace's Nitro build writes `.output` beside its Vite root (wemux:
+     * apps/web/.output), while it is served from the project's `.output`.
+     * Exactly one such directory is moved up; several are left for the
+     * missing-entry error, which names them.
+     */
+    private function relocateNestedNitroOutput(string $projectDir): void
+    {
+        $system = $this->project->system();
+        $root = rtrim($projectDir, '/');
+        try {
+            $listing = $system->exec(StandaloneNodeServe::nestedEntriesArgv($root), [], 60);
+        } catch (\Exception) {
+            return;
+        }
+        $dirs = StandaloneNodeServe::nestedOutputDirs($root, $listing);
+        if (count($dirs) !== 1) {
+            if ($dirs !== []) {
+                throw new \Exception(StandaloneNodeServe::missingEntryMessage()
+                    . '; several workspace apps built one: ' . implode(', ', $dirs));
+            }
+
+            return;
+        }
+        $system->exec(['sudo', 'rm', '-rf', '--', $root . '/.output'], [], 60);
+        $system->exec(['sudo', 'mv', '-T', '--', $root . '/' . $dirs[0], $root . '/.output'], [], 60);
+        $system->exec(['sudo', 'touch', $root . '/.output/' . StandaloneNodeServe::RELOCATED_MARKER], [], 60);
+        $this->project->shell()->logger()?->info(
+            "The build wrote its server to {$dirs[0]}; moved it to .output, where it is served from"
+        );
+    }
+
+    /** A `.output` moved up by the last deploy would outlive a build that writes the nested one again. */
+    private function clearRelocatedNitroOutput(string $appDir): void
+    {
+        $output = rtrim($appDir, '/') . '/.output';
+        if ($this->project->system()->filesystem()->fileExists($output . '/' . StandaloneNodeServe::RELOCATED_MARKER)) {
+            $this->project->system()->exec(['sudo', 'rm', '-rf', '--', $output], [], 60);
         }
     }
 
@@ -446,7 +541,12 @@ class HostCompile
         $declared = trim((string) ($decision['image'] ?? ''));
 
         if (($decision['strategy'] ?? null) === Strategies::RUST) {
-            return RustRuntime::compileImage($declared);
+            $image = RustRuntime::compileImage($declared);
+            // protoc, cmake, libclang or mold, when the project's build scripts call them.
+            $tools = RustBuildTools::packages($projectDir);
+
+            return $tools === [] ? $image
+                : ($this->project->innerDocker()->bases()->ensureRustBuild($image, $tools) ?? $image);
         }
 
         if (($decision['strategy'] ?? null) === Strategies::RUBY) {
@@ -580,7 +680,8 @@ class HostCompile
     }
 
     /**
-     * Whether the project's lock pins a PHP its own packages reject.
+     * Whether the project's lock pins a PHP its own packages reject, or holds a
+     * package rejecting the PHP composer.json allows and the deploy runs.
      *
      * Without a composer.json there is no install to relax: a project with a
      * lock and no manifest is not one Composer can install from at all.
@@ -593,7 +694,21 @@ class HostCompile
             return false;
         }
 
-        return PhpRuntime::lockedPhpContradicted($this->projectComposerLock($appRoot));
+        $lock = $this->projectComposerLock($appRoot);
+        if (PhpRuntime::lockedPhpContradicted($lock)) {
+            return true;
+        }
+        $minor = $this->targetPhpMinor($appRoot);
+        $package = $minor === null ? null
+            : PhpRuntime::lockedPackageRejecting($this->projectComposerJson($appRoot), $lock, $minor);
+        if ($package !== null) {
+            $this->project->shell()->logger()?->info(
+                "composer.lock holds {$package}, which rejects PHP {$minor} that composer.json allows; "
+                . 'installing the locked set without the php platform check'
+            );
+        }
+
+        return $package !== null;
     }
 
     /**
@@ -922,11 +1037,21 @@ class HostCompile
         }
         // The isolated node_modules is a bind mount, and Yarn PnP's link step
         // deletes any node_modules it finds: rmdir gets EBUSY and the install
-        // aborts. A compiled frontend does not depend on the linker.
-        if ($isolateNodeModules && $isNode && !array_key_exists('YARN_NODE_LINKER', $env)
+        // aborts. A host-run app is started from the project's node_modules,
+        // which PnP never writes. Neither depends on the linker otherwise.
+        if ($isNode && !array_key_exists('YARN_NODE_LINKER', $env)
             && $this->isYarnPnp($projectDir, $appRoot)
         ) {
             $env['YARN_NODE_LINKER'] = 'node-modules';
+        }
+        // Webpack 4 hashes with MD4, which Node 17+ refuses without the legacy provider.
+        if ($isNode) {
+            $buildDir = rtrim($projectDir, '/') . (trim($appRoot, '/') === '' ? '' : '/' . trim($appRoot, '/'));
+            $legacy = NodeRuntime::withLegacyOpenssl($build, $buildDir);
+            if ($legacy !== $build) {
+                $this->project->shell()->logger()?->info('Webpack 4 build: enabling the OpenSSL legacy provider');
+                $build = $legacy;
+            }
         }
         $process = $this->runHostBuild(
             static fn (HostBuilder $builder): array => $builder->nodeBuildArgv(

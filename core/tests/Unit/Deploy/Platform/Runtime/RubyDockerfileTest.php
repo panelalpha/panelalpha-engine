@@ -85,10 +85,57 @@ class RubyDockerfileTest extends TestCase
 
         $dockerfile = RubyDockerfile::generate($dir, ['gemfile' => true], 3000);
 
-        $this->assertStringContainsString('RUN SECRET_KEY_BASE_DUMMY=1 bundle exec rails assets:precompile', $dockerfile);
+        $this->assertStringContainsString('RUN SECRET_KEY_BASE_DUMMY=1 SECRET_KEY_BASE=panelalpha-assets-precompile bundle exec rails assets:precompile', $dockerfile);
+        // Rails before 7.1 ignores the DUMMY switch and refuses to boot without a key.
         // After the source is in place, and not fatal for an app that cannot boot without its database.
         $this->assertGreaterThan(strpos($dockerfile, 'COPY . .'), strpos($dockerfile, 'assets:precompile'));
         $this->assertStringContainsString('|| echo "PANELALPHA: rails assets:precompile failed', $dockerfile);
+    }
+
+    /**
+     * railsdevs.com: jsbundling-rails + cssbundling-rails write app/assets/builds
+     * from `build` and `build:css`, and their precompile hooks call yarn, which
+     * the Ruby app stage does not have.
+     */
+    public function test_a_jsbundling_app_builds_js_and_css_in_node_and_precompiles_without_it(): void
+    {
+        $dir = $this->projectDir([
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'rails', '~> 7.0'\ngem 'cssbundling-rails'\ngem 'jsbundling-rails'\ngem 'sprockets-rails'\n",
+            'package.json' => (string) json_encode(['scripts' => [
+                'build' => 'esbuild app/javascript/*.* --bundle --outdir=app/assets/builds',
+                'build:css' => 'tailwindcss -i ./app/assets/stylesheets/application.tailwind.css -o ./app/assets/builds/application.css',
+            ]]),
+            'yarn.lock' => "# yarn lockfile v1\n",
+            'config/application.rb' => "module App; end\n",
+        ]);
+
+        $docker = RubyDockerfile::generate($dir, ['gemfile' => true, 'package.json' => true, 'yarn.lock' => true], 3000);
+
+        $this->assertStringContainsString('RUN yarn build && yarn build:css && mkdir -p app/assets/builds', $docker);
+        $this->assertStringContainsString('COPY --from=assets /app/app/assets/builds ./app/assets/builds', $docker);
+        $this->assertStringContainsString('SKIP_JS_BUILD=1 SKIP_CSS_BUILD=1 SECRET_KEY_BASE_DUMMY=1 SECRET_KEY_BASE=panelalpha-assets-precompile bundle exec rails assets:precompile', $docker);
+        $this->assertStringContainsString('PATH=/tmp/pa-js-built:$PATH', $docker);
+        $this->assertSame(1, substr_count($docker, 'bundle exec rails assets:precompile'));
+        $this->assertGreaterThan(
+            strpos($docker, 'COPY --from=assets /app/app/assets/builds'),
+            strpos($docker, 'bundle exec rails assets:precompile')
+        );
+    }
+
+    /** A cssbundling app on importmap has `build:css` and no `build`. */
+    public function test_a_css_only_bundling_app_still_gets_its_node_stage(): void
+    {
+        $dir = $this->projectDir([
+            'Gemfile' => "source 'https://rubygems.org'\ngem 'rails', '~> 7.1'\ngem 'cssbundling-rails'\ngem 'propshaft'\n",
+            'package.json' => (string) json_encode(['scripts' => ['build:css' => 'sass ./app/assets/stylesheets/application.scss:./app/assets/builds/application.css']]),
+            'package-lock.json' => '{}',
+            'config/application.rb' => "module App; end\n",
+        ]);
+
+        $docker = RubyDockerfile::generate($dir, ['gemfile' => true, 'package.json' => true, 'package-lock.json' => true], 3000);
+
+        $this->assertStringContainsString('RUN npm run build:css && mkdir -p app/assets/builds', $docker);
+        $this->assertStringContainsString('COPY --from=assets /app/app/assets/builds ./app/assets/builds', $docker);
     }
 
     /** Rails 6/7.0 pull sprockets-rails in through the rails gem, so only the lockfile names it. */

@@ -40,16 +40,45 @@ final class FrontendStage
         return (new self($app))->build();
     }
 
+    /**
+     * jsbundling-rails / cssbundling-rails: the bundles go to app/assets/builds,
+     * which the asset pipeline then serves.
+     */
+    public static function bundlesIntoAssets(RubyApp $app): bool
+    {
+        $gemfile = $app->gemfile();
+        foreach (['jsbundling-rails', 'cssbundling-rails'] as $gem) {
+            if ($gemfile->requires($gem) || $gemfile->locks($gem)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function build(): string
     {
-        if ($this->app->project->script('build') === '') {
+        // cssbundling's own script is `build:css`, beside jsbundling's `build`.
+        $scripts = array_values(array_filter(
+            ['build', 'build:css'],
+            fn (string $script): bool => $this->app->project->script($script) !== ''
+        ));
+        if ($scripts === []) {
             return '';
+        }
+        $build = implode(' && ', array_map(
+            fn (string $script): string => JsPackageManager::scriptCommand($this->packageManager, $script),
+            $scripts
+        ));
+        if (self::bundlesIntoAssets($this->app)) {
+            // The app stage copies it back whether or not a bundle was written.
+            $build .= ' && mkdir -p app/assets/builds';
         }
 
         return Template::named('dockerfile/ruby-assets')->render([
             'node_image' => NodeRuntime::defaultImage(),
             'install_command' => $this->installCommand(),
-            'build_command' => JsPackageManager::scriptCommand($this->packageManager, 'build'),
+            'build_command' => $build,
         ]);
     }
 

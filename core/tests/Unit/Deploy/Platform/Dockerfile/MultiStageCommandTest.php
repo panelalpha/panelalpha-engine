@@ -38,6 +38,14 @@ class MultiStageCommandTest extends TestCase
         $this->assertStringContainsString('FROM mcr.microsoft.com/dotnet/aspnet:10.0', $dockerfile);
     }
 
+    /** The audit targets file is written by the same RUN, with its MSBuild property reference intact. */
+    public function test_the_engines_publish_command_reaches_the_run_line_verbatim(): void
+    {
+        $command = \App\Lib\Deploy\Platform\Runtime\DotnetRuntime::buildCommand('');
+
+        $this->assertStringContainsString('RUN ' . $command . "\n", $this->dotnet(['install_command' => $command]));
+    }
+
     /** The whole point: the source tree does not reach the final image. */
     public function test_only_the_published_output_is_carried_over(): void
     {

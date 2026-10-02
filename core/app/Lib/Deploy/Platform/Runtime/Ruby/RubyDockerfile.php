@@ -55,7 +55,8 @@ final class RubyDockerfile
             'system_packages' => implode(' ', SystemPackages::for($this->app->gemfile())),
             'bundle_deployment' => $this->app->hasLockfile(),
             'environment' => EnvironmentLines::of(RubyEnvironment::for($this->app)),
-            'frontend_stage' => FrontendStage::render($this->app),
+            'frontend_stage' => $frontend = FrontendStage::render($this->app),
+            'js_bundling' => $frontend !== '' && FrontendStage::bundlesIntoAssets($this->app),
             'assets_precompile' => $this->precompilesAssets(),
             'port' => $this->port,
             'start_command' => RubyServer::command($this->app, $this->port),
@@ -65,8 +66,14 @@ final class RubyDockerfile
     /**
      * Production Rails serves only precompiled Sprockets/Propshaft assets, so
      * without this every asset tag raises AssetNotFound. SECRET_KEY_BASE_DUMMY
-     * boots the app without the real key; a failure does not fail the build,
+     * (Rails 7.1+) or a throwaway SECRET_KEY_BASE (older) boots the app
+     * without the real key; a failure does not fail the build,
      * since some apps cannot boot without their database.
+     *
+     * jsbundling/cssbundling hook `javascript:build`/`css:build` into the
+     * precompile, and the app stage has no Node: their output comes from the
+     * Node stage, so the precompile skips them (SKIP_*_BUILD, and no-op
+     * package manager shims for gem versions older than that switch).
      */
     private function precompilesAssets(): bool
     {
@@ -77,7 +84,8 @@ final class RubyDockerfile
 
         return $gemfile->requiresAny(['sprockets-rails', 'sprockets', 'propshaft', 'sass-rails'])
             || $gemfile->locks('sprockets-rails')
-            || $gemfile->locks('propshaft');
+            || $gemfile->locks('propshaft')
+            || FrontendStage::bundlesIntoAssets($this->app);
     }
 
     /**

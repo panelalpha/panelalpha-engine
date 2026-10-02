@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform\Dockerfile;
 
+use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 use App\Lib\Deploy\Template\Template;
 
 /**
@@ -33,7 +34,7 @@ final class NodeDockerfile implements DockerfileWriter
             'git_install' => GitInstall::command($this->image),
             'install_layer' => $this->installLayer(),
             'env' => EnvironmentLines::of($this->environment()),
-            'build_command' => $this->recipe->buildCommand,
+            'build_command' => NodeRuntime::withLegacyOpenssl($this->recipe->buildCommand, $this->recipe->projectDir),
             'port' => $this->port,
             'entrypoint' => EntrypointInstall::lines(),
         ]);

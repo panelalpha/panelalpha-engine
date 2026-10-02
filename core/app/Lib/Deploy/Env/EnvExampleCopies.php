@@ -10,7 +10,7 @@ use App\Lib\Deploy\Platform\ProjectContext;
  *
  * Three sources, in this order of confidence:
  *
- *  1. A `.env.example` beside a directory that has no `.env` — including a
+ *  1. A `.env.example` ({@see EnvTemplates}) beside a directory that has no `.env` — including a
  *     few levels down, because a monorepo's api and web each ship their own.
  *  2. A path the compose file names in `env_file:`. Compose V2 refuses to
  *     start when one is missing, so a destination with no source still gets
@@ -159,7 +159,8 @@ final class EnvExampleCopies
             return null;
         }
 
-        foreach ([$projectDir . '/' . self::ENV, $projectDir . '/' . self::EXAMPLE] as $source) {
+        $example = EnvTemplates::first(static fn (string $name): bool => is_file($projectDir . '/' . $name)) ?? self::EXAMPLE;
+        foreach ([$projectDir . '/' . self::ENV, $projectDir . '/' . $example] as $source) {
             if (is_file($source)) {
                 return $source;
             }
@@ -174,7 +175,8 @@ final class EnvExampleCopies
     private static function collectExamples(string $projectDir, string $rel, int $depth, array &$copies, bool $includeMade): void
     {
         $dir = $rel === '' ? $projectDir : $projectDir . '/' . $rel;
-        foreach ([self::EXAMPLE => self::ENV, self::LOCAL_EXAMPLE => self::LOCAL] as $example => $target) {
+        $template = EnvTemplates::first(static fn (string $name): bool => is_file($dir . '/' . $name)) ?? self::EXAMPLE;
+        foreach ([$template => self::ENV, self::LOCAL_EXAMPLE => self::LOCAL] as $example => $target) {
             $source = $dir . '/' . $example;
             $dest = $dir . '/' . $target;
             if (is_file($source) && ($includeMade || !is_file($dest))) {

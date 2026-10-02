@@ -24,6 +24,12 @@ use Symfony\Component\Yaml\Yaml;
  */
 final class ComposeUsableNestedProbe implements PlatformProbe
 {
+    /** Words in a directory name that mean its compose file is not the deployment. */
+    private const NOT_A_DEPLOYMENT = [
+        'test', 'tests', 'e2e', 'ci', 'dev', 'devcontainer', 'local', 'doc', 'docs',
+        'example', 'examples', 'sample', 'samples', 'demo', 'fixtures', 'benchmark', 'benchmarks',
+    ];
+
     public function id(): string
     {
         return 'compose-usable-nested';
@@ -39,18 +45,60 @@ final class ComposeUsableNestedProbe implements PlatformProbe
             if (!$context->hasFile($directory) || !is_dir($context->path($directory))) {
                 continue;
             }
-            foreach (ComposeFileInspector::COMPOSE_FILE_CANDIDATES as $candidate) {
-                $relative = $directory . '/' . $candidate;
-                if (!$context->isFile($relative)) {
-                    continue;
-                }
-                if ($this->usable($relative, $context)) {
-                    return ['compose_path' => $context->path($relative)];
-                }
+            $found = $this->usableIn($directory, $context);
+            if ($found !== null) {
+                return ['compose_path' => $context->path($found)];
             }
         }
 
-        return false;
+        // Any other top-level directory, when it is the only one holding a usable
+        // file (autobase keeps its stack in console/). Two make it a guess.
+        $found = [];
+        foreach ($this->otherDirectories($context) as $directory) {
+            $relative = $this->usableIn($directory, $context);
+            if ($relative !== null) {
+                $found[] = $relative;
+            }
+        }
+
+        return count($found) === 1 ? ['compose_path' => $context->path($found[0])] : false;
+    }
+
+    private function usableIn(string $directory, ProjectContext $context): ?string
+    {
+        foreach (ComposeFileInspector::COMPOSE_FILE_CANDIDATES as $candidate) {
+            $relative = $directory . '/' . $candidate;
+            if ($context->isFile($relative) && $this->usable($relative, $context)) {
+                return $relative;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Top-level directories outside the list, less the ones whose name says
+     * they hold tests, examples, docs or a dev setup (huly's `ws-tests/`).
+     *
+     * @return list<string>
+     */
+    private function otherDirectories(ProjectContext $context): array
+    {
+        $entries = @scandir($context->projectDir);
+        $directories = [];
+        foreach (is_array($entries) ? $entries : [] as $entry) {
+            if (str_starts_with($entry, '.') || in_array($entry, NestedCompose::DIRECTORIES, true)
+                || !is_dir($context->path($entry))
+            ) {
+                continue;
+            }
+            $words = preg_split('/[^a-z0-9]+/', strtolower($entry)) ?: [];
+            if (array_intersect($words, self::NOT_A_DEPLOYMENT) === []) {
+                $directories[] = $entry;
+            }
+        }
+
+        return $directories;
     }
 
     private function usable(string $relative, ProjectContext $context): bool
@@ -66,6 +114,7 @@ final class ComposeUsableNestedProbe implements PlatformProbe
         if (ComposeFileInspector::isGeneratedBootstrapCompose($path)
             || ComposeFileInspector::isLocalDevComposeYaml($fromRoot)
             || ComposeFileInspector::isSidecarsOnlyComposeYaml($fromRoot)
+            || ComposeFileInspector::startsNothingReasonYaml($fromRoot) !== null
         ) {
             return false;
         }

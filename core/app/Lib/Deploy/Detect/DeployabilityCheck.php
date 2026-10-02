@@ -5,6 +5,7 @@ namespace App\Lib\Deploy\Detect;
 use App\Lib\Deploy\Compose\AppRoot;
 use App\Lib\Deploy\Compose\ComposeFileInspector;
 use App\Lib\Deploy\Platform\ProjectContext;
+use App\Lib\Deploy\Platform\Probes\SvelteKitAdapter;
 use App\Lib\Deploy\Platform\Runtime\DotnetRuntime;
 use App\Lib\Deploy\Platform\Strategies;
 use InvalidArgumentException;
@@ -68,7 +69,26 @@ final class DeployabilityCheck
             default => null,
         };
 
+        if ($this->strategy === Strategies::SVELTEKIT) {
+            $this->assertSvelteKitAdapter();
+        }
         $this->assertPhpExtensionsAvailable();
+    }
+
+    /**
+     * adapter-auto and the platform adapters write nothing nginx or Node can
+     * serve here: an empty build/ answered 403, a missing build/index.js
+     * restart-looped.
+     *
+     * @throws InvalidArgumentException
+     */
+    private function assertSvelteKitAdapter(): void
+    {
+        $adapter = SvelteKitAdapter::configured(ProjectContext::at(AppRoot::path($this->projectDir, $this->decision)));
+        $refusal = $adapter === null ? null : SvelteKitAdapter::refusal($adapter);
+        if ($refusal !== null) {
+            throw new InvalidArgumentException($refusal);
+        }
     }
 
     /**

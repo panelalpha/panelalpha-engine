@@ -207,6 +207,19 @@ Seed only when the application has no user yet, so a password changed in the app
 
 ---
 
+### The clone's depth (`git`)
+
+A deploy clones the repository at depth 1: one branch, no history, no tags. A build that stamps its version from tags (`git describe --tags`, goreleaser, setuptools-scm, a Makefile's `$(shell git describe)`) then fails with `fatal: No names found, cannot describe anything`. For such a repository:
+
+```yaml
+git:
+  history: full     # default: shallow
+```
+
+After the clone the engine fetches the whole history of the branch and every tag (`git fetch --unshallow --tags`), on every deploy. It works from the engine's per-repository directory and from a repository's own `.panelalpha/`. Leave it out for every other repository: the full history of a large project is tens of megabytes and many seconds.
+
+---
+
 ### An HTTPS-only application port (`port_scheme`)
 
 The account's web server reaches the application over plain HTTP. An application that serves only TLS on its port (UniFi Network Application on 8443, with a self-signed certificate) declares it next to `port:`:

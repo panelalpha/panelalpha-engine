@@ -19,6 +19,8 @@ use App\Lib\Deploy\Compose\ComposeEnvironment;
 use App\Lib\Deploy\Compose\ComposeOverride;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\DeployCompose;
+use App\Lib\Deploy\Compose\FrameworkService;
+use App\Lib\Deploy\Compose\PublicUrlEnvironment;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Strategies;
 
@@ -129,6 +131,34 @@ class DeployStrategy
         );
 
         return ComposeEnvironment::withPublicAddress($decision, $this->dind->publicAppUrl());
+    }
+
+    /**
+     * The project's own `.env` and `.env.example`, null when absent: what
+     * {@see PublicUrlEnvironment::pathPrefixKeysIn()} reads.
+     *
+     * @return list<?string>
+     */
+    public function projectEnvFiles(string $projectDir): array
+    {
+        return [
+            $this->dind->projectTree()->readIn($projectDir, '.env'),
+            $this->dind->projectTree()->readIn($projectDir, '.env.example'),
+        ];
+    }
+
+    /**
+     * The decision for a service the engine generates, told which URL keys
+     * the project uses as a sub-path ({@see FrameworkService}).
+     *
+     * @param array<string, mixed> $decision
+     * @return array<string, mixed>
+     */
+    public function withPathPrefixKeys(array $decision, string $projectDir): array
+    {
+        $keys = PublicUrlEnvironment::pathPrefixKeysIn($this->projectEnvFiles($projectDir));
+
+        return $keys === [] ? $decision : ['path_prefix_keys' => $keys] + $decision;
     }
 
     // -------------------------------------------------------------------------

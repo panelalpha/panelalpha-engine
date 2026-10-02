@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Platform;
 
+use App\Lib\Deploy\Compose\AppRoot;
 use App\Lib\Deploy\Platform\AppConfig\AppConfig;
 use App\Lib\Deploy\Platform\Runtime\ImageResolver;
 use App\Lib\Deploy\Platform\Runtime\Requirement;
@@ -46,6 +47,30 @@ final class PlatformValues
     }
 
     /**
+     * The Next workspace the probe found, when the repository root has no
+     * package.json to install it from; null otherwise.
+     *
+     * @param array<string, mixed> $decision
+     */
+    private static function standaloneNextWorkspace(
+        PlatformManifest $manifest,
+        ProjectContext $context,
+        array $decision
+    ): ?string {
+        if ($manifest->appRoot !== '' || $manifest->outputFrom !== 'next-workspace'
+            || $context->hasFile('package.json')
+        ) {
+            return null;
+        }
+        $relative = AppRoot::relative(['app_root' => (string) ($decision['workspace_relative'] ?? '')]);
+        if ($relative === '' || !is_file($context->projectDir . '/' . $relative . '/package.json')) {
+            return null;
+        }
+
+        return $relative;
+    }
+
+    /**
      * Resolve every project-dependent field of a decision, in place.
      *
      * @param array<string, mixed> $decision
@@ -60,6 +85,15 @@ final class PlatformValues
         // phpBB's `require.php` lives in phpBB/composer.json, and resolving at
         // the repository root finds no composer.json at all.
         $runtimeContext = self::appRootContext($manifest, $context);
+        // Next in web/ with no package.json at the repository root (storyden):
+        // that workspace is the whole JS project, so it becomes the app_root.
+        $standalone = self::standaloneNextWorkspace($manifest, $context, $decision);
+        if ($standalone !== null) {
+            $decision['app_root'] = $standalone;
+            $decision['workspace_relative'] = '';
+            unset($decision['workspace_package'], $decision['workspace_slug']);
+            $runtimeContext = ProjectContext::at($context->projectDir . '/' . $standalone);
+        }
 
         // A manifest naming its own `image` has answered the question, so an
         // unreadable project manifest is not fatal (osTicket ships no

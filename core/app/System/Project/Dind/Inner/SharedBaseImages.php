@@ -9,6 +9,7 @@ use App\Lib\Deploy\CacheManager\NodeBuildImage;
 use App\Lib\Deploy\CacheManager\PhpBaseImage;
 use App\Lib\Deploy\CacheManager\PythonBaseImage;
 use App\Lib\Deploy\CacheManager\RubyBaseImage;
+use App\Lib\Deploy\CacheManager\RustBuildToolsImage;
 use App\Lib\Deploy\Platform\Runtime\RuntimeImageCatalog;
 use App\Lib\Deploy\Telemetry\Telemetry;
 
@@ -75,6 +76,16 @@ class SharedBaseImages
         $tag = PhpBaseImage::tag($phpImage);
         if ($tag !== null && $this->providePhp($tag, $phpImage)) {
             return ['tag' => $tag, 'baked' => []];
+        }
+        // The base is the runtime: the stock image has no Composer, Apache
+        // configuration or entrypoint, so falling back to it fails later as `composer: not found`.
+        if ($tag !== null && RuntimeImageCatalog::runnable('php')) {
+            throw new \RuntimeException(
+                "The shared PHP base image {$tag} could not be built or loaded on this server; see the lines above. "
+                . "A PHP app runs on that image (Composer, the Apache configuration and the entrypoint are baked "
+                . "into it), and the stock {$phpImage} has none of them. Deploy again once the cause above is "
+                . 'fixed; `php artisan system:image:prewarm` builds the base ahead of a deploy.'
+            );
         }
 
         // All the way down to the stock image: this account is about to compile
@@ -260,6 +271,41 @@ class SharedBaseImages
         } catch (\Exception $e) {
             $host->failDeployIfDiskFull($e->getMessage());
             $host->logInfo("Could not build {$tag}, building without Node: " . $e->getMessage());
+
+            return null;
+        }
+
+        return $tag;
+    }
+
+    /**
+     * $image with the apt packages a Rust build script needs ({@see RustBuildToolsImage}).
+     * Host only, built now: without them cargo fails every time. Null means
+     * compile in $image as before.
+     *
+     * @param list<string> $packages
+     */
+    public function ensureRustBuild(string $image, array $packages): ?string
+    {
+        $tag = RustBuildToolsImage::tag($image, $packages);
+        $dockerfile = RustBuildToolsImage::dockerfile($image, $packages);
+        if ($tag === null || $dockerfile === null) {
+            return null;
+        }
+        $host = $this->inner->host();
+        $host->logInfo('The Rust build needs ' . implode(', ', $packages) . "; building in {$tag}");
+        if ($this->hostHasImage($tag)) {
+            return $tag;
+        }
+
+        try {
+            $host->cancellable(
+                $this->inner->imageStore()->hostBuildCommand($tag, $dockerfile, false, !$this->hostHasImage($image)),
+                self::BUILD_TIMEOUT_SECONDS
+            );
+        } catch (\Exception $e) {
+            $host->failDeployIfDiskFull($e->getMessage());
+            $host->logInfo("Could not build {$tag}, compiling in {$image}: " . $e->getMessage());
 
             return null;
         }

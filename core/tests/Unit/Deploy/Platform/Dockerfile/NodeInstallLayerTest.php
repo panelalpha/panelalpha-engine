@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\Platform\Dockerfile;
 
 use App\Lib\Deploy\Platform\Dockerfile\BuildRecipe;
 use App\Lib\Deploy\Platform\Dockerfile\NodeInstallLayer;
+use App\Lib\Deploy\Platform\Runtime\JsPackageManager;
 use Tests\TestCase;
 
 /**
@@ -150,5 +151,63 @@ class NodeInstallLayerTest extends TestCase
 
         $this->assertStringContainsString('pnpm install --frozen-lockfile', $layer);
         $this->assertStringContainsString('target=/root/.local/share/pnpm/store', $layer);
+    }
+
+    /**
+     * @param array<string, string> $scripts
+     */
+    private function renderWithScripts(array $scripts): string
+    {
+        $dir = sys_get_temp_dir() . '/pa-install-layer-' . bin2hex(random_bytes(6));
+        mkdir($dir, 0777, true);
+        file_put_contents($dir . '/package.json', json_encode(['scripts' => $scripts]));
+        try {
+            return (new NodeInstallLayer(
+                new BuildRecipe([], ['package.json' => true, 'package-lock.json' => true], $dir),
+                'npm ci'
+            ))->render();
+        } finally {
+            @unlink($dir . '/package.json');
+            @rmdir($dir);
+        }
+    }
+
+    /**
+     * teikei's root `install` runs `lerna exec`, which needs lerna.json;
+     * jitsi-meet's `postinstall` runs patch-package, which needs patches/.
+     * Before the tree is copied the first fails and the second silently
+     * applies nothing.
+     */
+    public function test_a_root_install_script_gets_the_tree_first(): void
+    {
+        foreach ([
+            'install' => 'lerna exec -- npm ci --legacy-peer-deps',
+            'postinstall' => 'patch-package --error-on-fail && jetify',
+            'preinstall' => 'npx only-allow npm',
+            'prepare' => 'npm run build',
+        ] as $name => $script) {
+            $layer = $this->renderWithScripts([$name => $script, 'build' => 'tsc']);
+
+            $this->assertStringStartsWith('COPY . .', $layer, $name);
+            $this->assertStringNotContainsString('COPY package.json ./', $layer, $name);
+        }
+    }
+
+    /** A git-hook installer is stripped anyway, so it keeps the cached layer. */
+    public function test_git_hook_lifecycle_scripts_keep_the_manifests_first_layer(): void
+    {
+        $layer = $this->renderWithScripts(['prepare' => 'husky', 'postinstall' => 'lefthook install', 'build' => 'tsc']);
+
+        $this->assertStringStartsWith('COPY package.json ./', $layer);
+        $this->assertLessThan(strpos($layer, 'COPY . .'), strpos($layer, 'RUN npm ci'));
+    }
+
+    public function test_the_strip_also_reads_the_root_install_script(): void
+    {
+        $this->assertStringContainsString('"install"', JsPackageManager::dockerfileStripGitHookScriptsCommand('npm'));
+        $stripped = JsPackageManager::stripGitHookInstallerScripts([
+            'scripts' => ['install' => 'husky install', 'build' => 'tsc'],
+        ]);
+        $this->assertSame(['build' => 'tsc'], $stripped['scripts']);
     }
 }

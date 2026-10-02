@@ -552,6 +552,29 @@
           "type": "null"
         }
       ]
+    },
+    "git": {
+      "description": "How the deploy clones the repository. The default is a depth-1 clone of one branch, with no history and no tags. `history: full` fetches the whole history and every tag after the clone, for a build that derives its version from them (`git describe --tags`, goreleaser, setuptools-scm); it costs the size of the history on every deploy, so set it only for a repository that needs it.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "history": {
+              "enum": [
+                "full",
+                "shallow"
+              ]
+            }
+          },
+          "required": [
+            "history"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "definitions": {

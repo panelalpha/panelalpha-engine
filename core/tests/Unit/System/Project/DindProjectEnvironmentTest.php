@@ -53,6 +53,61 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertFalse($model->usedCustomEnvVars());
     }
 
+    /** LinkAce ships no .env.example: key:generate found no APP_KEY line to fill. */
+    public function test_a_laravel_project_without_a_template_gets_an_app_key_line(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'laravel']);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $first = $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY'] ?? '';
+
+        $this->assertStringStartsWith('base64:', $first);
+        $this->assertSame(32, strlen(base64_decode(substr($first, 7))));
+
+        // A reclone lands here again: the same key, not a new one.
+        unlink($this->projectDir . '/.env');
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $this->assertSame($first, $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY']);
+    }
+
+    public function test_a_laravel_template_without_the_line_and_a_blank_untracked_env_get_one(): void
+    {
+        file_put_contents($this->projectDir . '/.env.example', "APP_NAME=Demo\n");
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'laravel']), tracked: false)->apply();
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('Demo', $env['APP_NAME']);
+        $this->assertStringStartsWith('base64:', $env['APP_KEY']);
+
+        // An archive's .env left from a deploy before this fix: empty, untracked.
+        file_put_contents($this->projectDir . '/.env', "APP_KEY=\n");
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'laravel']), tracked: false)->apply();
+        $this->assertSame($env['APP_KEY'], $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY']);
+    }
+
+    public function test_an_app_key_line_is_left_alone_where_it_is_not_ours(): void
+    {
+        // A key the project's .env already has.
+        file_put_contents($this->projectDir . '/.env', "APP_KEY=base64:mine\n");
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'laravel']), tracked: false)->apply();
+        $this->assertSame("APP_KEY=base64:mine\n", file_get_contents($this->projectDir . '/.env'));
+
+        // A .env the repository tracks.
+        file_put_contents($this->projectDir . '/.env', "APP_NAME=Tracked\n");
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'laravel']), tracked: true)->apply();
+        $this->assertSame("APP_NAME=Tracked\n", file_get_contents($this->projectDir . '/.env'));
+
+        // Not Laravel.
+        unlink($this->projectDir . '/.env');
+        file_put_contents($this->projectDir . '/.env.example', "APP_NAME=Demo\n");
+        $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'php']), tracked: false)->apply();
+        $this->assertArrayNotHasKey('APP_KEY', $this->vars((string) file_get_contents($this->projectDir . '/.env')));
+
+        // The account's own key wins.
+        unlink($this->projectDir . '/.env');
+        $model = $this->dindModel(['deploy_strategy' => 'laravel', 'env_vars' => ['APP_KEY' => 'base64:account']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $this->assertSame('base64:account', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['APP_KEY']);
+    }
+
     public function test_a_utf16_example_is_read_as_text(): void
     {
         // DumbPad ships .env.example as UTF-16LE with a BOM and CRLF; copied
@@ -102,6 +157,39 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertSame('Custom', $env['APP_NAME']);
         $this->assertArrayNotHasKey('EMPTY', $env);
         $this->assertTrue($model->usedCustomEnvVars());
+    }
+
+    /**
+     * An archive project keeps ~/project, and its .env, across redeploys: an
+     * env var removed since the last deploy must leave .env too, back to the
+     * base value or out entirely, while the ones still set and the file's own
+     * lines stay.
+     */
+    public function test_a_removed_env_var_leaves_an_env_that_survives_redeploys(): void
+    {
+        file_put_contents($this->projectDir . '/.env.example', "APP_NAME=Demo\nMODE=base\n");
+        $model = $this->dindModel(['env_vars' => ['MODE' => 'custom', 'TOREMOVE' => 'keepme-1', 'KEEPME' => 'stay']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame(['custom', 'keepme-1', 'stay'], [$env['MODE'], $env['TOREMOVE'], $env['KEEPME']]);
+
+        // No reclone: the archive's directory, with an edit the operator made in place.
+        file_put_contents($this->projectDir . '/.env', "EDITED=1\n", FILE_APPEND);
+        $model->setDetails(['env_vars' => ['KEEPME' => 'stay']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        // Re-merged after the base, so KEEPME moves to the end: order is not the point.
+        $this->assertEquals(['APP_NAME' => 'Demo', 'MODE' => 'base', 'KEEPME' => 'stay', 'EDITED' => '1'], $env);
+        $default = $this->vars((string) file_get_contents($this->projectDir . '/.env.default'));
+        $this->assertSame(['APP_NAME' => 'Demo', 'MODE' => 'base', 'EDITED' => '1'], $default);
+
+        $model->setDetails(['env_vars' => []]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $this->assertSame(
+            ['APP_NAME' => 'Demo', 'MODE' => 'base', 'EDITED' => '1'],
+            $this->vars((string) file_get_contents($this->projectDir . '/.env'))
+        );
     }
 
     /**
@@ -371,6 +459,27 @@ class DindProjectEnvironmentTest extends TestCase
         // A redeploy over the .env it wrote keeps the same value.
         $this->forcedEnvironment($model, tracked: false)->apply();
         $this->assertSame($env, $this->vars((string) file_get_contents($this->projectDir . '/.env')));
+    }
+
+    /** borgwarehouse ships `.env.sample`, and its compose file requires every key in it. */
+    public function test_a_env_sample_template_seeds_env_like_env_example(): void
+    {
+        file_put_contents($this->projectDir . '/docker-compose.yml', <<<'YAML'
+        services:
+          borgwarehouse:
+            image: borgwarehouse/borgwarehouse
+            ports:
+              - '${WEB_SERVER_PORT:?WEB_SERVER_PORT variable missing}:${WEB_SERVER_PORT}'
+            volumes:
+              - ${CONFIG_PATH:?CONFIG_PATH variable missing}:/home/borgwarehouse/app/config
+        YAML);
+        file_put_contents($this->projectDir . '/.env.sample', "WEB_SERVER_PORT=3000\nCONFIG_PATH=./config\n");
+
+        $this->dind($this->dindModel(['deploy_strategy' => 'compose']))->applyProjectEnvVars();
+
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('3000', $env['WEB_SERVER_PORT']);
+        $this->assertSame('./config', $env['CONFIG_PATH']);
     }
 
     /** onetimesecret (#140): `${VAR:?}` in an included file's `command:`. */

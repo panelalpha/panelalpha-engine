@@ -23,9 +23,20 @@ COPY . .
 {{# frontend_stage }}
 COPY --from=assets /app/public ./public
 {{/ frontend_stage }}
+{{# js_bundling }}
+COPY --from=assets /app/app/assets/builds ./app/assets/builds
+{{/ js_bundling }}
 {{# assets_precompile }}
-RUN SECRET_KEY_BASE_DUMMY=1 bundle exec rails assets:precompile \
+{{# js_bundling }}
+RUN mkdir -p /tmp/pa-js-built \
+ && for tool in yarn npm pnpm bun; do printf '#!/bin/sh\nexit 0\n' > /tmp/pa-js-built/$tool && chmod +x /tmp/pa-js-built/$tool; done \
+ && PATH=/tmp/pa-js-built:$PATH SKIP_JS_BUILD=1 SKIP_CSS_BUILD=1 SECRET_KEY_BASE_DUMMY=1 SECRET_KEY_BASE=panelalpha-assets-precompile bundle exec rails assets:precompile \
+ || echo "PANELALPHA: rails assets:precompile failed; the app starts without precompiled assets"; rm -rf /tmp/pa-js-built
+{{/ js_bundling }}
+{{^ js_bundling }}
+RUN SECRET_KEY_BASE_DUMMY=1 SECRET_KEY_BASE=panelalpha-assets-precompile bundle exec rails assets:precompile \
  || echo "PANELALPHA: rails assets:precompile failed; the app starts without precompiled assets"
+{{/ js_bundling }}
 {{/ assets_precompile }}
 EXPOSE {{ port }}
 CMD {{ start_command }}

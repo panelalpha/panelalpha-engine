@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind\Source;
 
+use App\Lib\Deploy\Platform\ManifestException;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Models\User as ModelsUser;
 use App\System as EngineSystem;
@@ -87,6 +88,14 @@ class GitRepository extends WorkTree
         }
 
         $logger?->ok('Repository cloned');
+        if ($this->wantsFullHistory($gitRepo)) {
+            $logger?->info('Fetching the full history and tags (the recipe sets git: {history: full})');
+            try {
+                $this->fetchFullHistory($gitToken);
+            } catch (GitException $e) {
+                throw new \RuntimeException($e->getMessage(), 0, $e);
+            }
+        }
         $this->fetchSubmodules($gitToken);
         $this->allowUntrustedGitDirectory();
     }
@@ -125,6 +134,17 @@ class GitRepository extends WorkTree
         }
         if ($clear) {
             $this->tree()->clearContents($dir);
+        }
+    }
+
+    /** Read after the clone, so a repository's own `.panelalpha/` can ask too. */
+    private function wantsFullHistory(string $gitRepo): bool
+    {
+        try {
+            return $this->project->appConfig($gitRepo)?->fullGitHistory() ?? false;
+        } catch (ManifestException) {
+            // A malformed app config is reported by the preparation that follows.
+            return false;
         }
     }
 

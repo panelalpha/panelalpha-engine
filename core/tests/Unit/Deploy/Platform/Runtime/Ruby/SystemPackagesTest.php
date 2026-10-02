@@ -49,7 +49,7 @@ class SystemPackagesTest extends TestCase
      * so bundler resolves and compiles it. Everything that pulls in rdoc does,
      * which is railties, which is every Rails app.
      *
-     * Measured on 10.10.10.25 with digitalocean/sample-rails: without
+     * Measured on a dev host with digitalocean/sample-rails: without
      * libyaml-dev the deploy stops at `An error occurred while installing
      * psych (5.2.6), and Bundler cannot continue`, four dependency levels away
      * from anything the Gemfile names.
@@ -107,6 +107,29 @@ class SystemPackagesTest extends TestCase
         $packages = SystemPackages::for($this->gemfile("source 'x'\ngem 'twitter-text', '3.1.0'\n"));
 
         $this->assertContains('libidn-dev', $packages);
+    }
+
+    /**
+     * Manyfold: ffi-libarchive and assimp-ffi load their libraries when
+     * required, and the app died at boot on "Could not open library
+     * 'libarchive.so.13'". assimp-ffi comes from a git source.
+     */
+    public function test_ffi_gems_get_the_library_they_load(): void
+    {
+        $lock = "GIT\n  remote: https://github.com/Kerilk/assimp-ruby.git\n  specs:\n    assimp-ffi (0.1.8)\n      ffi (~> 1.9, >= 1.9.19)\n\n"
+            . "GEM\n  remote: https://rubygems.org/\n  specs:\n    ffi-libarchive (1.1.14)\n      ffi (~> 1.0)\n"
+            . "    image_processing (1.14.0)\n      ruby-vips (>= 2.0.17, < 3)\n    ruby-vips (2.2.3)\n      ffi (~> 1.12)\n";
+        file_put_contents($this->dir . '/' . Gemfile::LOCKFILE, $lock);
+
+        $packages = SystemPackages::for($this->gemfile(
+            "source 'x'\ngem 'ffi-libarchive', '~> 1.1'\ngem 'image_processing'\ngem 'assimp-ffi', git: 'https://github.com/Kerilk/assimp-ruby.git'\n"
+        ));
+
+        $this->assertContains('libarchive13', $packages);
+        $this->assertContains('libassimp-dev', $packages);
+        $this->assertContains('libvips42', $packages);
+        $this->assertNotContains('libsodium23', $packages);
+        $this->assertContains('libsodium23', SystemPackages::for(Gemfile::fromContents("gem 'rbnacl'\n")));
     }
 
     /** A dependency line (six spaces) is not a resolved spec, and no lock means no guess. */

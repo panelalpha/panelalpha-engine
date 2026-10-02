@@ -236,10 +236,30 @@ class DeployFailureExplainer
                         . 'The full output is in the deploy log.',
             ],
 
+            // A Rust build script or link step asked for a tool the build image lacks.
+            // Named, because "does not compile: `quote`" sends the user to their own code.
+            'rust-build-tool-missing' => [
+                '/Could not find `protoc`|Missing dependency: cmake|is `cmake` not installed'
+                    . "|Unable to find libclang|collect2: fatal error: cannot find 'ld'/",
+                static function (array $m, string $output = ''): string {
+                    $tool = match (true) {
+                        str_contains($m[0], 'protoc') => '`protoc` (the Protocol Buffers compiler)',
+                        str_contains($m[0], 'cmake') => '`cmake`',
+                        str_contains($m[0], 'libclang') => '`libclang` (for bindgen)',
+                        preg_match('/-fuse-ld=([a-z]+)/', $output, $l) === 1
+                            => "the `{$l[1]}` linker, which the project selects with `-fuse-ld={$l[1]}` in .cargo/config.toml,",
+                        default => 'the linker the project selects in .cargo/config.toml',
+                    };
+
+                    return "The Rust build needs {$tool} and the build image does not have it. "
+                        . 'The full output is in the deploy log.';
+                },
+            ],
+
             // A crate's build script needs pkg-config or the headers it queries: `The
-            // pkg-config command could not be found`, `Unable to find libclang`.
+            // pkg-config command could not be found`.
             'native-library-headers-missing' => [
-                '/(The pkg-config command could not be found|Unable to find libclang'
+                '/(The pkg-config command could not be found'
                     . '|Package \\S+ was not found in the pkg-config search path'
                     . '|Could not find \\S+ using pkg-config'
                     // lxml's own sdist build (engine#120).
@@ -250,10 +270,13 @@ class DeployFailureExplainer
                         . 'output is in the deploy log, naming the dependency.',
             ],
 
+            // Composer names the package (`- vendor/pkg v1.2 requires php ^7 -> your php
+            // version ...`) or `Root composer.json`; a locked package is not the project.
             'php-version-mismatch' => [
-                '/requires php ([^\s,]+).*?your php version \(([^)]+)\)/is',
-                static fn (array $m): string =>
-                    "This project needs PHP {$m[1]}, but it was built with PHP {$m[2]}.",
+                '/(?:-\s+(\S+)\s+(\S+)\s+)?requires php ([^\s,]+).*?your php version \(([^)]+)\)/is',
+                static fn (array $m): string => ($m[1] ?? '') !== '' && $m[1] !== 'Root'
+                    ? "The locked package {$m[1]} {$m[2]} needs PHP {$m[3]}, but the project was built with PHP {$m[4]}."
+                    : "This project needs PHP {$m[3]}, but it was built with PHP {$m[4]}.",
             ],
 
             // Composer resolves against the runtime image, so the extension really is absent
@@ -411,7 +434,7 @@ class DeployFailureExplainer
 
             // A Rust `-sys` crate with no C++ compiler in the image says so about itself
             // (`CXX_... = None`), which reads as a crate fault when it is the image's.
-            // `native-library-headers-missing` above covers the pkg-config and libclang cases.
+            // `native-library-headers-missing` above covers the pkg-config case.
             'native-build-interrupted' => [
                 '/^(?:CXX?_[A-Za-z0-9_-]+ = None|CC_FORCE_DISABLE = None)$/m',
                 static fn (): string =>
@@ -571,6 +594,14 @@ class DeployFailureExplainer
             // not carry. pnpm 10+ runs install scripts by default, so the first dependency
             // with a native addon ends the build with gyp output and no diagnosis.
             // Not a bare `node-gyp rebuild`: pnpm echoes that script line for installs that succeed.
+            // Webpack 4 hashes with MD4; OpenSSL 3 (Node 17+) refuses it.
+            'webpack4-openssl-unsupported' => [
+                '/ERR_OSSL_EVP_UNSUPPORTED|error:0308010C:digital envelope routines::unsupported/',
+                static fn (): string =>
+                    'The build uses webpack 4 (react-scripts 4 or older, Vue CLI 4, laravel-mix 5), which Node 17 '
+                        . 'and newer refuse to run without the OpenSSL legacy provider. Upgrade the build toolchain '
+                        . 'to webpack 5, or set NODE_OPTIONS=--openssl-legacy-provider for the build.',
+            ],
             'native-build-toolchain-missing' => [
                 '/(gyp ERR!|Could not find any Python installation to use|node-gyp: (?:command )?not found)/i',
                 static fn (): string =>

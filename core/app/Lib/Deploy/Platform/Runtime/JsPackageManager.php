@@ -65,6 +65,19 @@ class JsPackageManager
     }
 
     /**
+     * $script in every workspace that defines it, from the workspace root.
+     * npm and Yarn 1 share the `workspaces` field npm reads.
+     */
+    public static function workspacesScriptCommand(string $packageManager, string $script): string
+    {
+        return match ($packageManager) {
+            'pnpm' => 'pnpm -r --if-present run ' . $script,
+            'bun' => "bun run --filter '*' " . $script,
+            default => 'npm run ' . $script . ' --workspaces --if-present',
+        };
+    }
+
+    /**
      * The lockfile this manager reads, or null when the project ships none.
      * `bun.lock` outranks `bun.lockb`; `package-lock.json` outranks
      * `npm-shrinkwrap.json`.
@@ -225,6 +238,9 @@ class JsPackageManager
         return false;
     }
 
+    /** Root scripts npm, pnpm, Yarn and bun run during a plain install. */
+    public const INSTALL_LIFECYCLE_SCRIPTS = ['preinstall', 'install', 'postinstall', 'prepare'];
+
     /**
      * @param array<string, mixed> $package
      * @return array<string, mixed>
@@ -234,7 +250,7 @@ class JsPackageManager
         if (!isset($package['scripts']) || !is_array($package['scripts'])) {
             return $package;
         }
-        foreach (['prepare', 'postinstall', 'preinstall'] as $name) {
+        foreach (self::INSTALL_LIFECYCLE_SCRIPTS as $name) {
             $script = $package['scripts'][$name] ?? null;
             if (is_string($script) && self::isGitHookInstallerScript($script, $sourcePresent)) {
                 unset($package['scripts'][$name]);
@@ -268,7 +284,7 @@ class JsPackageManager
             . 'if(!p.scripts)process.exit(0);'
             . 'const re=/\\b(husky|lefthook|simple-git-hooks|yorkie|pre-commit)\\b/i;'
             . $localRule
-            . 'for(const k of["prepare","postinstall","preinstall"]){'
+            . 'for(const k of["preinstall","install","postinstall","prepare"]){'
             . 'const s=p.scripts[k];'
             . 'if(typeof s!=="string")continue;'
             . 'if(re.test(s)' . $localTest . ')delete p.scripts[k];'
@@ -472,9 +488,15 @@ class JsPackageManager
      * selfoss's postinstall runs `composer install`, which a Node-only build
      * image cannot.
      *
+     * With $read (a file relative to the package.json's directory) it also
+     * reads the gulpfile or Gruntfile a visited script runs -- OSPOS's
+     * `gulp default` runs `composer licenses` from a gulp task -- and the
+     * install hooks of workspace members named by a literal path.
+     *
      * @param array<string, mixed> $package
+     * @param (callable(string): ?string)|null $read
      */
-    public static function scriptsCallPhp(array $package, string $build): bool
+    public static function scriptsCallPhp(array $package, string $build, ?callable $read = null): bool
     {
         $scripts = is_array($package['scripts'] ?? null) ? $package['scripts'] : [];
         $pending = [$build];
@@ -482,8 +504,10 @@ class JsPackageManager
             $pending[] = is_string($scripts[$hook] ?? null) ? $scripts[$hook] : '';
         }
         $seen = [];
+        $visited = '';
         while ($pending !== []) {
             $body = (string) array_shift($pending);
+            $visited .= $body . "\n";
             if (preg_match('/(?:^|[\s;&|(])(?:php|composer)(?:\s|$)/', $body) === 1) {
                 return true;
             }
@@ -497,9 +521,41 @@ class JsPackageManager
                 }
             }
         }
+        if ($read === null) {
+            return false;
+        }
+
+        foreach (self::TASK_RUNNER_FILES as $runner => $files) {
+            if (preg_match('/\b' . $runner . '\b/i', $visited) !== 1) {
+                continue;
+            }
+            foreach ($files as $file) {
+                $contents = $read($file);
+                // A shell command in a string: run('composer licenses ...'), exec("php ...").
+                if ($contents !== null && preg_match('/[\'"`]\s*(?:php|composer)\s/', $contents) === 1) {
+                    return true;
+                }
+            }
+        }
+
+        foreach (self::workspaces($package) as $workspace) {
+            if (str_contains($workspace, '*')) {
+                continue;
+            }
+            $member = json_decode((string) $read($workspace . '/package.json'), true);
+            if (is_array($member) && self::scriptsCallPhp($member, '')) {
+                return true;
+            }
+        }
 
         return false;
     }
+
+    /** Task runner => the config files it reads from the working directory. */
+    private const TASK_RUNNER_FILES = [
+        'gulp' => ['gulpfile.js', 'gulpfile.mjs', 'gulpfile.cjs', 'gulpfile.ts', 'gulpfile.babel.js'],
+        'grunt' => ['Gruntfile.js', 'Gruntfile.cjs', 'Gruntfile.coffee', 'gruntfile.js'],
+    ];
 
     /**
      * Yarn 2+ on Plug'n'Play, its default linker: the install writes no

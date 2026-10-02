@@ -166,6 +166,21 @@ class YamlAppConfigTest extends TestCase
         AppConfig::fromYaml("image: [unclosed\n");
     }
 
+    /** A build that runs `git describe --tags` needs the history the default clone leaves out. */
+    public function test_git_history_full_asks_for_the_whole_history(): void
+    {
+        $this->assertTrue(AppConfig::fromYaml("git:\n  history: full\n")->fullGitHistory());
+        $this->assertFalse(AppConfig::fromYaml("git:\n  history: shallow\n")?->fullGitHistory() ?? false);
+        $this->assertFalse(AppConfig::fromYaml("description: Demo\nprepare: 'true'\n")->fullGitHistory());
+    }
+
+    public function test_an_unknown_git_history_is_refused(): void
+    {
+        $this->expectException(ManifestException::class);
+        $this->expectExceptionMessageMatches("/'git' must be/");
+        AppConfig::fromYaml("git:\n  history: deep\n");
+    }
+
     public function test_an_unknown_compose_mode_is_refused(): void
     {
         $this->expectException(ManifestException::class);

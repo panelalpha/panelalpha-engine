@@ -118,6 +118,15 @@ OUT;
                 'requires php ^8.4 but your php version (8.1.2) does not satisfy',
                 'needs PHP ^8.4',
             ],
+            'php too old for the root' => [
+                '  - Root composer.json requires php ^8.4 but your php version (8.1.2) does not satisfy that requirement.',
+                'This project needs PHP ^8.4, but it was built with PHP 8.1.2.',
+            ],
+            'php too new for a locked package' => [
+                "  - paragonie/random_compat v9.99.99 requires php ^7 -> your php version (8.3.35) does not satisfy that requirement.\n"
+                . '    - ramsey/uuid 3.9.3 requires paragonie/random_compat ^1 | ^2 | 9.99.99',
+                'The locked package paragonie/random_compat v9.99.99 needs PHP ^7, but the project was built with PHP 8.3.35.',
+            ],
             'generic' => [
                 'failed to solve: process "/bin/sh -c make" did not complete successfully: exit code: 2',
                 'exit code 2',
@@ -174,7 +183,25 @@ OUT;
             ],
             'rust crate needs libclang' => [
                 'Unable to find libclang: "couldn\'t find any valid shared libraries matching: [\'libclang.so\']"',
-                'development headers',
+                '`libclang` (for bindgen)',
+            ],
+            'rust crate needs protoc' => [
+                "error: failed to run custom build command for `chirpstack_api v4.20.0-test.2 (/app/api/rust)`\n"
+                . 'Error: Custom { kind: NotFound, error: "Could not find `protoc`. If `protoc` is installed, try setting the `PROTOC` environment variable',
+                '`protoc` (the Protocol Buffers compiler)',
+            ],
+            'rust crate needs cmake' => [
+                "error: failed to run custom build command for `aws-lc-sys v0.41.0`\n"
+                . "Missing dependency: cmake\n"
+                . 'called `Result::unwrap()` on an `Err` value: "Required build dependency is missing. Halting build."',
+                'needs `cmake`',
+            ],
+            'rust link step wants mold' => [
+                "error: linking with `cc` failed: exit status: 1\n"
+                . '  = note: LC_ALL="C" PATH="/usr/local/cargo/bin" "cc" "-m64" "-fuse-ld=mold" "-nodefaultlibs"' . "\n"
+                . "  = note: collect2: fatal error: cannot find 'ld'\n"
+                . "error: could not compile `quote` (build script) due to 1 previous error",
+                'the `mold` linker, which the project selects with `-fuse-ld=mold`',
             ],
             'rust crate names itself' => [
                 'error: failed to run custom build command for `openssl-sys v0.9.117`',
@@ -596,6 +623,20 @@ OUT;
 
         $this->assertSame('native-build-toolchain-missing', $match['rule']);
         $this->assertStringContainsString('compiled during install', $match['message']);
+    }
+
+    /** React-Messenger-Clone (react-scripts 3.4.3) on Node 22. */
+    public function test_webpack4_on_openssl3_is_named(): void
+    {
+        $output = "Error: error:0308010C:digital envelope routines::unsupported\n"
+            . "    at module.exports (/app/node_modules/webpack/lib/util/createHash.js:135:53)\n"
+            . "  code: 'ERR_OSSL_EVP_UNSUPPORTED'\n"
+            . "Node.js v22.23.3\nerror Command failed with exit code 1.";
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('webpack4-openssl-unsupported', $match['rule']);
+        $this->assertStringContainsString('webpack 4', $match['message']);
     }
 
     /** It outranks the generic build failure, being the more specific answer. */

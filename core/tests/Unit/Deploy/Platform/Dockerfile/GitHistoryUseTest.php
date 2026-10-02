@@ -94,4 +94,81 @@ class GitHistoryUseTest extends TestCase
             'magefile.go' => "func Build() error {\n\treturn sh.Run(\"go\", \"build\", \"./...\")\n}\n",
         ]));
     }
+
+    public function test_a_bundler_config_that_runs_git_keeps_it(): void
+    {
+        // Stremio/stremio-web's webpack.config.js:15.
+        $files = ['webpack.config.js' => "const { execSync } = require('child_process');\n"
+            . "const COMMIT_HASH = execSync('git rev-parse HEAD').toString().trim();\n"];
+
+        $this->assertSame(
+            'webpack.config.js reads the version from git',
+            GitHistoryUse::reason("FROM node:20\nCOPY . .\nRUN pnpm build\n", null, ['package.json' => '{"scripts":{"build":"webpack"}}'], $this->reader($files))
+        );
+    }
+
+    public function test_a_script_file_a_lifecycle_hook_runs_is_followed_into_its_imports(): void
+    {
+        // bitfocus/companion: postinstall -> run build:writefile -> tools/build_writefile.mts -> ./lib.mts.
+        $package = json_encode(['scripts' => [
+            'postinstall' => 'husky && run build:writefile && run build:whatsnew',
+            'build:writefile' => 'tsx ./tools/build_writefile.mts',
+            'build:whatsnew' => 'tsx ./tools/build_whatsnew.mts',
+        ]]);
+        $files = [
+            'tools/build_writefile.mts' => "import { fs, path } from 'zx'\nimport { generateVersionString } from './lib.mts'\n",
+            'tools/build_whatsnew.mts' => "import fs from 'fs'\n",
+            'tools/lib.mts' => "const headHashRaw = await \$`git rev-parse --short=10 HEAD`\n",
+        ];
+
+        $this->assertSame(
+            'tools/lib.mts, run by a package.json script, reads the version from git',
+            GitHistoryUse::reason("FROM node:26\nCOPY . /app/\nRUN yarn\n", null, ['package.json' => $package], $this->reader($files))
+        );
+    }
+
+    public function test_a_script_the_dockerfile_names_and_inline_git_are_seen(): void
+    {
+        $package = json_encode(['scripts' => [
+            'dist' => 'node scripts/dist.js',
+            'version:stamp' => 'echo $(git describe --tags) > VERSION',
+        ]]);
+        $read = $this->reader(['scripts/dist.js' => "require('child_process').spawnSync('git', ['describe', '--tags'])\n"]);
+
+        $this->assertSame(
+            'scripts/dist.js, run by a package.json script, reads the version from git',
+            GitHistoryUse::reason("FROM node:22\nRUN npm run dist\n", null, ['package.json' => $package], $read)
+        );
+        $this->assertSame(
+            'package.json script "version:stamp" reads the version from git',
+            GitHistoryUse::reason("FROM node:22\nRUN yarn version:stamp\n", null, ['package.json' => $package], $read)
+        );
+    }
+
+    public function test_js_projects_that_do_not_read_git_let_it_go(): void
+    {
+        $package = json_encode(['scripts' => [
+            'postinstall' => 'node ./scripts/patch.js',
+            'build' => 'vite build',
+            'release' => 'node scripts/release.js',
+        ]]);
+        $files = [
+            'vite.config.ts' => "export default { build: { outDir: 'dist' } }\n",
+            'scripts/patch.js' => "require('../../outside.js')\n",
+            // Not run by the build.
+            'scripts/release.js' => "execSync('git tag v1')\n",
+            'webpack.config.js' => "// see https://github.com/x/y.git\nmodule.exports = {}\n",
+        ];
+
+        $this->assertNull(GitHistoryUse::reason("FROM node:22\nRUN npm ci && npm run build\n", null, ['package.json' => $package], $this->reader($files)));
+    }
+
+    /**
+     * @param array<string, string> $files
+     * @return callable(string): ?string
+     */
+    private function reader(array $files): callable
+    {
+        return static fn (string $path): ?string => $files[$path] ?? null;
+    }
 }

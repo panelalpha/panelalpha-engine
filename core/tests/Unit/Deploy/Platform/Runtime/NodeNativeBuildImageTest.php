@@ -448,6 +448,69 @@ TS);
     }
 
     /**
+     * wemux's shape: node-pty 1.x has no linux-x64 prebuild, so a project
+     * declaring it compiles on every install.
+     */
+    public function test_node_pty_is_a_native_dependency(): void
+    {
+        $this->write('package.json', json_encode([
+            'engines' => ['node' => '>=22'],
+            'dependencies' => ['node-pty' => '^1.1.0'],
+            'pnpm' => ['onlyBuiltDependencies' => ['esbuild', 'node-pty']],
+        ]));
+        $this->write('pnpm-lock.yaml', "lockfileVersion: '9.0'\n");
+
+        $this->assertSame('node:22-bookworm', Images::nodeImage($this->tmpDir));
+    }
+
+    /**
+     * A pnpm lock records no install script, so a native package arriving
+     * transitively is only visible in the project's own build allowlist.
+     */
+    public function test_a_pnpm_build_allowlist_naming_a_native_package_is_a_native_project(): void
+    {
+        $cases = [
+            'pkg-only' => [['pnpm' => ['onlyBuiltDependencies' => ['better-sqlite3']]], null],
+            'pkg-allow' => [['pnpm' => ['allowBuilds' => ['bcrypt' => true]]], null],
+            'ws-only' => [[], "packages:\n  - apps/*\nonlyBuiltDependencies:\n  - esbuild\n  - node-pty\n"],
+            'ws-allow' => [[], "allowBuilds:\n  argon2: true\n"],
+        ];
+        foreach ($cases as $name => [$extra, $workspace]) {
+            $dir = $this->tmpDir . '/' . $name;
+            mkdir($dir, 0777, true);
+            file_put_contents($dir . '/package.json', json_encode(['dependencies' => ['express' => '4.21.0']] + $extra));
+            if ($workspace !== null) {
+                file_put_contents($dir . '/pnpm-workspace.yaml', $workspace);
+            }
+
+            $this->assertTrue(NodeRuntime::hasNativeDependency(ProjectContext::at($dir)), $name);
+        }
+    }
+
+    /**
+     * Allowing only prebuilt packages, or refusing a native one, is no
+     * evidence of a compile.
+     */
+    public function test_a_pnpm_allowlist_without_a_native_package_stays_slim(): void
+    {
+        $cases = [
+            'prebuilt' => [['pnpm' => ['onlyBuiltDependencies' => ['esbuild', '@swc/core', 'sharp']]], null],
+            'refused' => [['pnpm' => ['allowBuilds' => ['better-sqlite3' => false]]], null],
+            'broken-yaml' => [[], "onlyBuiltDependencies: [node-pty\n  : :"],
+        ];
+        foreach ($cases as $name => [$extra, $workspace]) {
+            $dir = $this->tmpDir . '/' . $name;
+            mkdir($dir, 0777, true);
+            file_put_contents($dir . '/package.json', json_encode(['dependencies' => ['express' => '4.21.0']] + $extra));
+            if ($workspace !== null) {
+                file_put_contents($dir . '/pnpm-workspace.yaml', $workspace);
+            }
+
+            $this->assertFalse(NodeRuntime::hasNativeDependency(ProjectContext::at($dir)), $name);
+        }
+    }
+
+    /**
      * A package the list does not know, with an install script, does not
      * count. The list is the limit of what can be recognised, and guessing
      * beyond it is how every project ends up on the big image.

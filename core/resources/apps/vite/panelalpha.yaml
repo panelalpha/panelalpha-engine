@@ -44,6 +44,12 @@ detect:
     - dep: '@remix-run/serve'
     - dep: socket.io
     - dep: '@sveltejs/adapter-node'
+    # A workspace root whose own build is not Vite (fluxer runs cargo); see
+    # ViteNotTheBuildProbe.
+    - probe: vite-not-the-build
+    # A PHP front controller at the root (Tiki, with no root composer.json):
+    # Vite builds its assets, as for Laravel, and is not the application.
+    - file: index.php
 commands:
   - id: npm-install
     stage: build
