@@ -2,6 +2,7 @@
 
 namespace App\Console;
 
+use App\Support\RootConsoleOwnership;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Facades\App;
@@ -20,6 +21,10 @@ class Kernel extends ConsoleKernel
         if (App::runningInConsole() && function_exists('posix_geteuid') && posix_geteuid() === 0) {
             $compiledPath = (string)Config::get('view.compiled');
             Config::set('view.compiled', $compiledPath . '/console');
+        }
+
+        if (RootConsoleOwnership::applies(App::runningInConsole(), function_exists('posix_geteuid') ? posix_geteuid() : -1, App::runningUnitTests())) {
+            RootConsoleOwnership::register();
         }
     }
 
