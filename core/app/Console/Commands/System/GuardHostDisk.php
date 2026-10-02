@@ -27,10 +27,12 @@ class GuardHostDisk extends Command
 
     protected $description = 'Cap host build cache and free host disk when it runs low';
 
+    private bool $dryRun = false;
+
     public function handle(): int
     {
         $system = app(System::class);
-        $dryRun = (bool) $this->option('dry-run');
+        $dryRun = $this->dryRun = (bool) $this->option('dry-run');
 
         $cap = self::bytes(config('deploy.host_build_cache_max'));
         if ($cap !== null) {
@@ -151,7 +153,7 @@ class GuardHostDisk extends Command
         return sprintf('%s free of %s on %s', HostPrewarmPlan::formatBytes($usage['free']), HostPrewarmPlan::formatBytes($usage['size']), $usage['path']);
     }
 
-    /** Console and the Laravel log: scheduled output goes nowhere. */
+    /** Console and the Laravel log: scheduled output goes nowhere. A dry run only prints. */
     private function report(string $level, string $message): void
     {
         match ($level) {
@@ -159,6 +161,8 @@ class GuardHostDisk extends Command
             'warning' => $this->warn($message),
             default => $this->info($message),
         };
-        Log::log($level, 'system:disk:guard: ' . $message);
+        if (!$this->dryRun) {
+            Log::log($level, 'system:disk:guard: ' . $message);
+        }
     }
 }

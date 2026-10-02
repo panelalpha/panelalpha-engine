@@ -64,8 +64,9 @@ return [
     'host_build_cache_retention' => env('DEPLOY_HOST_BUILD_CACHE_RETENTION', '24h'),
 
     /*
-     * `system:disk:guard` (every five minutes) keeps host build cache under
-     * this size, oldest first. A size (10G); `off` leaves it uncapped.
+     * `system:disk:guard` (every five minutes) trims host build cache over
+     * this size, oldest first, as BuildKit measures it (shared layers once, so
+     * `buildx du` can read higher). A size (10G); `off` leaves it uncapped.
      */
     'host_build_cache_max' => env('DEPLOY_HOST_BUILD_CACHE_MAX', '10G'),
 

@@ -72,13 +72,16 @@ class GuardHostDiskCommandTest extends TestCase
         );
     }
 
-    public function test_dry_run_prunes_nothing(): void
+    public function test_dry_run_prunes_and_logs_nothing(): void
     {
+        Log::spy();
         $host = $this->host(free: 5 * self::G, frees: []);
 
         Artisan::call('system:disk:guard', ['--dry-run' => true]);
 
         $this->assertSame([], $host->calls);
+        $this->assertStringContainsString('Would prune host build cache down to', Artisan::output());
+        Log::shouldNotHaveReceived('log');
     }
 
     public function test_off_skips_both_halves(): void
