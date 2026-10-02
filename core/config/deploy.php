@@ -50,7 +50,7 @@ return [
     'host_min_free' => env('DEPLOY_HOST_MIN_FREE', '3G'),
 
     /*
-     * `system:image:prune` (daily) removes deploy base images from the host
+     * `system:image:prune` (once a day, retried hourly past a deploy) removes deploy base images from the host
      * that were not pulled, built or named by a deploy for this long. The
      * prewarm catalogue and images a container uses are always kept. A
      * duration (3d, 72h); `off` stops the image half of the prune.
