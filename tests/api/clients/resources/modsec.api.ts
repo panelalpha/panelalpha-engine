@@ -8,9 +8,9 @@ import {
   type ModSecurityConfig,
   type ModSecurityRuleset,
 } from '@/types';
-import { CsfApi } from './csf.api';
+import { WpCliApi } from './wpcli.api';
 
-export class ModSecurityApi extends CsfApi {
+export class ModSecurityApi extends WpCliApi {
   async getModSecurityConfig(): Promise<ApiResponse<ModSecurityConfig>> {
     const response = await this.api.get('modsec/mode');
     await this.assertStatus(response, 200);

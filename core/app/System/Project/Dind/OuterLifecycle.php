@@ -36,7 +36,7 @@ final class OuterLifecycle
 
     /**
      * The account joins pash-tenants, which compose cannot start without, and
-     * whose firewall a reboot or a CSF restart drops (engine#519). One that
+     * whose firewall a reboot drops (engine#519). One that
      * cannot be applied is a warning, not an account left down: with no rules
      * enable_icc still drops traffic between the network's members.
      */

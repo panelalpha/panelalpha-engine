@@ -13,7 +13,7 @@ final class HostCollaboratorsCutoverTest extends TestCase
     {
         $root = dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'app';
         $paths = [
-            'Http/Controllers/CsfController.php',
+            'Http/Controllers/FirewallController.php',
             'Http/Controllers/ModsecController.php',
             'Http/Controllers/IpController.php',
             'Http/Controllers/SystemController.php',

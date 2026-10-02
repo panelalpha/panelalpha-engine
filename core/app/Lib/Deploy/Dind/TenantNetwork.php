@@ -29,7 +29,7 @@ final class TenantNetwork
     /**
      * Creates the network when it is missing and applies its firewall, from
      * the host namespace. Idempotent; run before every account start, because
-     * a reboot or a CSF restart drops the rules.
+     * a reboot drops the rules.
      *
      * @return list<string>
      */

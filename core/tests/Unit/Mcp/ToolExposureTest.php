@@ -107,7 +107,7 @@ class ToolExposureTest extends TestCase
             array_sum(array_column($counts, 'total')),
             'every tool belongs to exactly one group'
         );
-        $this->assertSame(0, $counts['csf']['exposed'], 'a group left off is off');
+        $this->assertSame(0, $counts['firewall']['exposed'], 'a group left off is off');
     }
 
     /**

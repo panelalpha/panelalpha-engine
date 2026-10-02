@@ -60,7 +60,7 @@ These settings live in `/opt/panelalpha/shared-hosting/.env-core`. If you edit t
 
 | Value | What the assistant can do |
 |---|---|
-| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`csf_ui_credentials`, `system_exim_config_get`, `app_sso_login`, `app_credentials_get`) are not offered. |
+| `readonly` | Look at what is switched on, change nothing. Inspecting a repository still works. The tools that hand out a password or a login (`system_exim_config_get`, `app_sso_login`, `app_credentials_get`) are not offered. |
 | `modify` | Create and change things, but not delete them. |
 | `full` | Everything, including deletion. **This is the default.** |
 
@@ -106,7 +106,7 @@ A tool has to be in an enabled group (or named in `MCP_TOOLS`), allowed by the p
 
 ### How many tools the assistant loads
 
-The full list is 197 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
+The full list is 200 tools, and an assistant loads every listed tool's description when it connects. That is about 95 KB of text it carries around before you have asked for anything. So by default the engine lists only what deploying, checking and running a project takes, plus two more:
 
 - `search_tools` finds any other tool by what it does, for example `mysql user` or `cron`.
 - `execute_tools` runs the tool it found.
@@ -322,7 +322,7 @@ Your assistant is using a list it loaded earlier. Restart your assistant, then r
 
 ## Every tool
 
-This is every MCP tool the engine ships: **197** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
+This is every MCP tool the engine ships: **200** tools, grouped by area. You do not type these names. You describe the work in chat, and the assistant picks the tool.
 
 A **project** is one hosting account. Every tool takes it as `name`; what the tools return still calls that value `username`, the REST API's name for it.
 
@@ -360,7 +360,7 @@ pae mcp:tool:list
 | [Proxy rules](#proxy-rules) | `proxyrules` | On | 5 |
 | [System](#system) | `system` | On | 11 |
 | [Server metrics](#server-metrics) | `servermetrics` | On | 5 |
-| [CSF firewall](#csf-firewall) | `csf` | On | 9 |
+| [Firewall](#firewall) | `firewall` | On | 12 |
 | [IP management](#ip-management) | `ipmanagement` | On | 6 |
 | [ModSecurity](#modsecurity) | `modsecurity` | On | 9 |
 | [Lighthouse](#lighthouse) | `lighthouse` | On | 1 |
@@ -624,19 +624,22 @@ pae mcp:tool:list
 | `metrics_last_hour` | Get metrics for the last hour |
 | `metrics_last_hour_averages` | Get last hour metric averages |
 
-## CSF firewall
+## Firewall
 
 | Tool | What it does |
 |---|---|
-| `csf_disable` | Disable CSF firewall |
-| `csf_enable` | Enable CSF firewall |
-| `csf_restart` | Restart CSF firewall |
-| `csf_rule_create` | Add a CSF firewall rule |
-| `csf_rule_delete` | Delete a CSF firewall rule |
-| `csf_rule_list` | List CSF firewall rules |
-| `csf_rule_update` | Edit a CSF firewall rule |
-| `csf_status` | Get CSF firewall status |
-| `csf_ui_credentials` | Get CSF UI credentials |
+| `firewall_disable` | Disable the firewall |
+| `firewall_enable` | Enable the firewall |
+| `firewall_log_list` | Read what the firewall blocked and banned |
+| `firewall_reload` | Reload the firewall |
+| `firewall_rule_create` | Add a firewall rule |
+| `firewall_rule_delete` | Delete a firewall rule |
+| `firewall_rule_list` | List firewall rules |
+| `firewall_rule_update` | Edit a firewall rule |
+| `firewall_status` | Get the firewall status |
+| `firewall_trusted_add` | Trust an address |
+| `firewall_trusted_delete` | Stop trusting an address |
+| `firewall_trusted_list` | List trusted addresses |
 
 ## IP management
 

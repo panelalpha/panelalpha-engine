@@ -3,8 +3,9 @@
 #
 #   bash scripts/ensure-docker-network.sh [MTU]
 #
-# A firewall reload -- CSF's `csf -r`, or a boot that starts CSF after Docker --
-# flushes the iptables chains dockerd installs at start. Networks that exist
+# A firewall that flushes the whole ruleset -- CSF did on every reload, and its
+# uninstaller does once when a host moves to ufw -- removes the iptables chains
+# dockerd installs at start. Networks that exist
 # keep working, but every new `docker network create` then fails with
 # `iptables: No chain/target/match by that name` until the daemon restarts and
 # puts its chains back. A reinstall is the first thing that needs a new network

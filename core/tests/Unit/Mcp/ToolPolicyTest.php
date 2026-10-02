@@ -4,7 +4,6 @@ namespace Tests\Unit\Mcp;
 
 use App\Mcp\ToolPolicy;
 use App\Mcp\Tools\Api\AppUsers\AppSsoLoginTool;
-use App\Mcp\Tools\Api\CSF\CsfUiCredentialsTool;
 use App\Mcp\Tools\Api\System\SystemEximConfigGetTool;
 use App\Mcp\Tools\Api\Deploy\SourceInspectTool;
 use App\Mcp\Tools\Api\Domains\DomainListTool;
@@ -280,13 +279,12 @@ class ToolPolicyTest extends TestCase
             $this->assertContains($needed, $names, "the default must keep {$needed}");
         }
 
-        foreach (['csf_rule_create', 'modsec_mode_set', 'ip_assign', 'tunnel_create'] as $on) {
+        foreach (['firewall_rule_create', 'modsec_mode_set', 'ip_assign', 'tunnel_create'] as $on) {
             $this->assertContains($on, $names, "the default must expose {$on}");
         }
     }
 
     private const CREDENTIAL_READS = [
-        CsfUiCredentialsTool::class,
         SystemEximConfigGetTool::class,
         AppSsoLoginTool::class,
     ];
@@ -315,7 +313,7 @@ class ToolPolicyTest extends TestCase
     {
         $policy = new ToolPolicy([
             'toolsets' => 'engine',
-            'tools' => 'csf_ui_credentials,system_exim_config_get',
+            'tools' => 'system_exim_config_get,app_sso_login',
             'permission_mode' => 'readonly',
         ]);
 

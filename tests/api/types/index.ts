@@ -5,7 +5,7 @@ export * from './ftp.types';
 export * from './php.types';
 export * from './wordpress.types';
 export * from './cron.types';
-export * from './csf.types';
+export * from './firewall.types';
 export * from './exim.types';
 export * from './modsecurity.types';
 export * from './system.types';

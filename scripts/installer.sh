@@ -187,7 +187,7 @@ Installing into a container (CI, dev):
                            --no-sysbox --no-hardening --dind-runtime privileged
                            --mtu 1400. Individual flags still win.
       --no-sysbox          do not install the Sysbox runtime
-      --no-hardening       skip sysctl, monit and CSF
+      --no-hardening       skip sysctl, monit and the firewall (ufw, fail2ban)
       --no-upgrade         skip 'apt-get upgrade' and 'apt-get autoremove'
       --no-quota           leave filesystem quota off; project disk and inode
                            limits are then recorded but not enforced
@@ -775,7 +775,7 @@ before_install() {
     ensure_packages jq unzip lsb-release apt-transport-https ca-certificates curl ipcalc quota at
     # nft binds each port of the accounts' network to its container (engine#529).
     # The package's own nftables.service ships disabled and must stay so: its
-    # default config flushes every rule on the host, Docker's and CSF's too.
+    # default config flushes every rule on the host, Docker's and ufw's too.
     ensure_packages nftables
 
     detect_distro
@@ -1023,28 +1023,30 @@ EOF
     fi
 }
 
-# Host hardening, and the reason it runs before the stack does: csf.sh rebuilds
-# the whole iptables ruleset, which drops the chains the Docker daemon installs
-# at start, so the daemon has to be restarted afterwards. Doing that with the
-# stack up takes every container down with it — which is how the install used to
-# fail, on the first artisan call after the restart. It needs .env, the compose
+# Host hardening, and the reason it runs before the stack does: on a host
+# still running CSF, firewall.sh moves its rules to ufw and uninstalls it, and
+# CSF's uninstaller flushes the whole iptables ruleset, Docker's chains with it,
+# so the daemon has to be restarted afterwards. Doing that with the stack up
+# takes every container down with it — which is how the install used to fail,
+# on the first artisan call after the restart. It needs .env, the compose
 # bridge and docker0 in place, so the earliest safe point is right before 'up'.
 harden_host() {
     if [ "$HARDEN" != 1 ]; then
-        echo_warning "Skipping sysctl, monit and CSF (--no-hardening)"
+        echo_warning "Skipping sysctl, monit and the firewall (--no-hardening)"
         return
     fi
 
     bash /opt/panelalpha/shared-hosting/scripts/configure-sysctl.sh
     bash /opt/panelalpha/shared-hosting/scripts/configure-monit.sh
-    bash /opt/panelalpha/shared-hosting/scripts/csf.sh --install
+    bash /opt/panelalpha/shared-hosting/scripts/firewall.sh --install ||
+        echo_warning "Could not set up the firewall; this host has none until the next update"
     # This is the fourth Docker restart in a minute or so (install, sysbox,
-    # daemon DNS, CSF); docker.service allows three, and on a fast host the
+    # daemon DNS, firewall); docker.service allows three, and on a fast host the
     # fourth fails with start-limit-hit although the daemon stopped cleanly.
     systemctl reset-failed docker.service 2>/dev/null || true
     service docker restart
     # engine#246: host builds run on panelalpha-build. Made here, while
-    # Docker's chains are fresh: after a CSF flush the engine cannot create it.
+    # Docker's chains are fresh: after a firewall flush the engine cannot create it.
     bash /opt/panelalpha/shared-hosting/scripts/build-network-firewall.sh --create panelalpha-build || true
     # engine#519: the accounts' network, likewise; the stack names it.
     bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker || true
@@ -1191,6 +1193,9 @@ EOF
     bash /opt/panelalpha/shared-hosting/scripts/ensure-docker-network.sh "${DOCKER_NETWORK_MTU}"
     # The accounts' network (engine#519); sites-db and the registries join it.
     DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --create --restart-docker || true
+    # Closed from boot until core binds it, not only from when core starts.
+    bash /opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh --install-units ||
+        echo_warning "Could not install the tenant network's boot units; after a reboot accounts run unfiltered until core starts"
 
     # make sure systemd-resolved is disabled / no conflicts with sites-dns
     disable_systemd_resolved || true

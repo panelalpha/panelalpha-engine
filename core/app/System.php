@@ -14,7 +14,6 @@ use App\System\Project as SystemProject;
 use App\System\ProcessRunner;
 use App\System\Projects;
 use App\System\UsernamePolicy;
-use App\System\Services\Csf;
 use App\System\Services\Exim;
 use App\System\Services\Modsec;
 use App\System\Services\Mysql;
@@ -136,11 +135,6 @@ class System implements ProcessRunner
     public function webserver(): Webserver
     {
         return new Webserver($this);
-    }
-
-    public function csf(): Csf
-    {
-        return new Csf($this);
     }
 
     public function modsec(): Modsec

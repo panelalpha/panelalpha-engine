@@ -14,10 +14,10 @@
 # DNS is unaffected: Docker's embedded resolver forwards from the daemon.
 #
 # Usage: build-network-firewall.sh [--create] [network]   (default panelalpha-build)
-# Idempotent. Run by the engine before every host build -- a reboot or CSF
-# restart drops these rules -- and from csfpost.sh. --create makes the network
-# first; the installers run that right after restarting Docker, because on a
-# CSF host `docker network create` fails once CSF has flushed Docker's chains
+# Idempotent. Run by the engine before every host build -- a reboot drops these
+# rules. --create makes the network first; the installers run that right after
+# restarting Docker, because once a firewall flush (moving a host off CSF) has
+# removed Docker's chains `docker network create` fails
 # ("iptables ... -A DOCKER-FORWARD ...: No chain/target/match by that name").
 
 CREATE=0
@@ -53,7 +53,7 @@ iptables -A "$CHAIN" -o "$bridge" -j REJECT --reject-with icmp-net-prohibited
 iptables -A "$CHAIN" -j ACCEPT
 
 # DOCKER-USER is where Docker promises to look first, and it survives a daemon
-# restart. FORWARD too, for a host where CSF removed Docker's chains.
+# restart. FORWARD too, for a host where a flush removed Docker's chains.
 for parent in DOCKER-USER FORWARD; do
     iptables -n -L "$parent" >/dev/null 2>&1 || continue
     iptables -C "$parent" -i "$bridge" -j "$CHAIN" 2>/dev/null ||

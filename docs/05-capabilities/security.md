@@ -45,15 +45,41 @@ pae mcp:token:revoke <id>
 
 Revoking stops it working immediately while keeping it in the list, so you keep a record of what existed.
 
-## The firewall (CSF)
+## The firewall
 
-CSF is the firewall installed alongside the engine.
+The installer sets up ufw as the server's firewall. Incoming connections are refused, except on the ports the engine serves: SSH, 80 and 443 for the sites, 2011 for the engine itself, 21 and 30000-30009 for FTP, and 2222 for SFTP. Those rules are marked as the engine's, and your assistant cannot change or remove them. Outgoing connections are allowed.
 
 ```text
-Show the CSF firewall status.
+Show the firewall status and its rules.
 ```
 
-You can list rules, add and remove them, and enable, disable or restart the firewall through your assistant. If it cannot, those tools have been turned off: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+You can list rules, add and remove them, and enable, disable or reload the firewall through your assistant. A rule allows or denies a port, an address, or both. A deny rule goes above every allow rule, so blocking an address works even on a port that is open to everyone. If the assistant cannot do this, those tools have been turned off: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+
+```text
+Block 203.0.113.7 from this server, both ways.
+```
+
+A rule applies to one direction, incoming or outgoing, unless you ask for both. A rule in both directions blocks (or allows) traffic from the address and to it, as one rule.
+
+The rules also cover the ports Docker publishes for the engine (2011, FTP and SFTP). On its own, ufw does not see those ports at all. The engine sends their traffic through the same rules, so a blocked address is blocked there too.
+
+fail2ban watches the logins the server takes: SSH, SFTP, FTP, and the engine's own API on 2011, where a request with a wrong or expired token counts as a failed login. After 5 failed attempts in 10 minutes (10 for the API, since a client with a stale token retries), an address is banned for an hour, and for longer each time it comes back. A ban closes every port to that address. It is a deny rule in the list; delete it to lift the ban early.
+
+Trust the addresses that must never be locked out: your office, your monitoring, the panel that drives this engine. A trusted address is never banned, and trusting it lifts a ban it has now. It is not an allow rule: the firewall rules still apply to it.
+
+```text
+Trust 203.0.113.7, that's our office. Show me the trusted addresses.
+```
+
+The firewall keeps a log of what it refused and whom it banned, newest first:
+
+```text
+What did the firewall block in the last hour? Was 203.0.113.7 banned?
+```
+
+A blocked entry is a connection refused because no rule allowed it, on any port, the ones Docker publishes included. The firewall writes at most a few of these a minute, so a flood shows as a sample. A connection dropped by a deny rule you added is not logged.
+
+A server that ran CSF before is moved to ufw on its next engine update. Its allow and deny lists become ufw rules, and its configuration is saved in `/var/backups/panelalpha-csf-<date>.tgz`. The addresses it trusted are never banned by fail2ban. If CSF had been switched off, ufw stays off too. CSF's own automatic login blocks are not carried over.
 
 > **Do not open a public port for an application.** It is a natural instinct and it is the wrong move here. Applications deliberately do not publish public ports - traffic is supposed to arrive at the engine's webserver, which routes it into the right sandbox. Opening a port bypasses that, and with it the routing, the HTTPS termination, and the isolation. If a site is unreachable, the cause is almost never the firewall: [What the engine checks](monitoring-and-logs.md#what-the-engine-checks). Extra HTTP routing belongs as a proxy rule, not a firewall hole: [Extra routes](domains-and-ssl.md#extra-routes).
 

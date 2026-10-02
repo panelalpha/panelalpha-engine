@@ -1,7 +1,7 @@
 # The "host" the engine is installed into, for CI and local development.
 #
 # On a real deployment the engine owns a machine: it drives that machine's
-# Docker daemon, writes its sysctls, installs CSF, and starts one sysbox
+# Docker daemon, writes its sysctls, sets up the firewall, and starts one sysbox
 # container per hosting account. This image is that machine, packaged — a
 # systemd container that runs its own Docker daemon and is started with
 # `--runtime=sysbox-runc`, so everything above it happens inside.

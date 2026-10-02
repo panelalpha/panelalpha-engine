@@ -42,7 +42,7 @@ ASSUME_YES=0
 KEEP_PROJECTS=0
 REMOVE_DOCKER=0
 REMOVE_SYSBOX=0
-REMOVE_CSF=0
+REMOVE_FIREWALL=0
 RESTORE_SYSTEMD_RESOLVED=0
 PURGE_IMAGES=0
 
@@ -65,7 +65,8 @@ Optional flags (off by default):
   --keep-projects              Leave hosting accounts and /home data
   --remove-docker              Purge Docker Engine packages
   --remove-sysbox              Uninstall Sysbox runtime (stops all containers)
-  --remove-csf                 Uninstall CSF firewall (if installed by PanelAlpha)
+  --remove-firewall            Turn ufw off and drop the engine's fail2ban jail
+                               (without it ufw stays on, minus the engine's hooks)
   --restore-systemd-resolved   Restore /etc/resolv.conf and systemd-resolved
   --purge-images               Remove ghcr.io/panelalpha/* Docker images
   -y, --yes                    Skip confirmation prompt
@@ -101,8 +102,8 @@ while [[ $# -gt 0 ]]; do
         REMOVE_SYSBOX=1
         shift
         ;;
-    --remove-csf)
-        REMOVE_CSF=1
+    --remove-firewall)
+        REMOVE_FIREWALL=1
         shift
         ;;
     --restore-systemd-resolved)
@@ -165,8 +166,8 @@ confirm_uninstall() {
     if [ "$REMOVE_SYSBOX" = 1 ]; then
         echo "  - Sysbox runtime"
     fi
-    if [ "$REMOVE_CSF" = 1 ]; then
-        echo "  - CSF firewall"
+    if [ "$REMOVE_FIREWALL" = 1 ]; then
+        echo "  - the firewall (ufw off, fail2ban jail removed)"
     fi
     if [ "$REMOVE_DOCKER" = 1 ]; then
         echo "  - Docker Engine packages"
@@ -201,22 +202,16 @@ compose_down() {
     docker compose -f "$compose_file" down -v --remove-orphans || true
 }
 
-uninstall_csf_if_requested() {
-    if [ "$REMOVE_CSF" != 1 ]; then
-        return 0
-    fi
-    if [ ! -f /etc/csf/version.txt ]; then
-        echo_warning "CSF is not installed, skipping."
-        return 0
-    fi
-    if [ -f "$ENGINE_DIR/scripts/csf.sh" ]; then
-        echo_info "Uninstalling CSF..."
-        bash "$ENGINE_DIR/scripts/csf.sh" --uninstall || true
-    elif [ -f /usr/src/csf/uninstall.sh ]; then
-        echo_info "Uninstalling CSF..."
-        /bin/bash /usr/src/csf/uninstall.sh || true
+# The firewall's hooks call scripts under $ENGINE_DIR, and while its Docker hook
+# is in place ufw cannot reload, so they go whatever the flags. ufw itself and
+# its rules stay on unless --remove-firewall.
+uninstall_firewall() {
+    [ -f "$ENGINE_DIR/scripts/firewall.sh" ] || return 0
+    if [ "$REMOVE_FIREWALL" = 1 ]; then
+        echo_info "Turning the firewall off..."
+        bash "$ENGINE_DIR/scripts/firewall.sh" --uninstall || true
     else
-        echo_warning "CSF uninstall script not found, skipping."
+        bash "$ENGINE_DIR/scripts/firewall.sh" --unhook || true
     fi
 }
 
@@ -357,8 +352,8 @@ uninstall_engine_stack() {
         return 0
     fi
 
-    # CSF/Sysbox scripts live under shared-hosting — run before rm -rf.
-    uninstall_csf_if_requested
+    # Firewall/Sysbox scripts live under shared-hosting — run before rm -rf.
+    uninstall_firewall
     uninstall_sysbox_if_requested
     uninstall_engine_users
     deconfigure_engine
@@ -410,8 +405,12 @@ remove_docker_network() {
         docker network rm "$name" >/dev/null 2>&1 ||
             echo_warning "Could not remove Docker network $name (it may still be in use)."
     done
-    # The accounts' port bindings (tenant-network-firewall.sh).
+    # The accounts' port bindings and the units that hold them at boot
+    # (tenant-network-firewall.sh).
     command -v nft >/dev/null 2>&1 && nft delete table bridge pa_tenants 2>/dev/null || true
+    systemctl disable panelalpha-tenant-guard.service panelalpha-tenant-bind.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/panelalpha-tenant-guard.service /etc/systemd/system/panelalpha-tenant-bind.service
+    systemctl daemon-reload >/dev/null 2>&1 || true
 }
 
 restore_systemd_resolved_if_requested() {

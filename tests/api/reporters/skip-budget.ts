@@ -3,7 +3,7 @@ import type { FullResult, Reporter, TestCase, TestResult } from '@playwright/tes
 /**
  * Makes skipped tests visible, and optionally budgeted.
  *
- * This suite skips a lot on purpose: CSF may not be installed, `pae-artisan`
+ * This suite skips a lot on purpose: the firewall (ufw) may not be installed, `pae-artisan`
  * may be unreachable, IP management is an optional module. That is the right
  * behaviour, but it means a green run says nothing about how much of the suite
  * actually executed — an engine that has quietly lost a component reports the

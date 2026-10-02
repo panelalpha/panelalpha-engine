@@ -72,7 +72,7 @@ npm run check             # typecheck + lint + format — run before pushing
 Three things an agent gets wrong here:
 
 **A green run is not full coverage.** A lot of the suite skips for legitimate
-environmental reasons (CSF not installed, IP management absent, `pae-artisan`
+environmental reasons (no firewall on the host, IP management absent, `pae-artisan`
 unreachable). Every run now prints what it skipped and why; read that summary
 before reporting a result, and quote the skip count alongside the pass count.
 `MAX_SKIPPED=<n>` turns the budget into a gate.
@@ -991,7 +991,7 @@ iptables -I FORWARD -o docker0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACC
 iptables -t nat -A POSTROUTING -s 172.20.0.0/16 ! -o docker0 -j MASQUERADE
 ```
 
-These are not persisted across a reboot, and CSF (`scripts/csf.sh`) is the likely
+These are not persisted across a reboot, and CSF (since replaced by ufw) is the likely
 reason Docker's own rules went missing.
 
 ---

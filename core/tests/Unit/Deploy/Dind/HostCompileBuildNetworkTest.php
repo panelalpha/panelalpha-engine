@@ -109,7 +109,7 @@ class HostCompileBuildNetworkTest extends TestCase
 
     public function test_a_network_that_cannot_be_created_falls_back_to_the_default_bridge(): void
     {
-        // What a CSF host answers once CSF has flushed Docker's chains.
+        // What a host answers once a firewall flush has removed Docker's chains.
         $system = $this->system([$this->inspect(), $this->create(), $this->inspect()]);
         $compile = $this->prepare($system, 'panelalpha-build');
 

@@ -404,7 +404,7 @@ with the user's explicit go-ahead.
   unless the user asked for it. Surface that a `seed` script exists and let
   them choose.
 - Destructive tools (`project_delete`, `mysql_database_delete`,
-  `project_suspend`, `csf_*`) need the user's explicit confirmation on a
+  `project_suspend`, `firewall_*`) need the user's explicit confirmation on a
   server that hosts anything real.
 - Do not choose a domain. Omit `domain` and report what
   `details.domain` says the project got; pass one only when the user has one.

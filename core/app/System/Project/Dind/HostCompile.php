@@ -689,8 +689,8 @@ class HostCompile
      * Make sure the build network exists and its firewall is applied (engine#246).
      *
      * Both fail open, to what a build had before this network existed: a
-     * network that cannot be made -- on a CSF host `docker network create`
-     * fails once CSF has flushed Docker's chains, which is why the installers
+     * network that cannot be made -- `docker network create` fails once a
+     * firewall flush has removed Docker's chains, which is why the installers
      * make it right after restarting Docker -- sends this build to the default
      * bridge, and a firewall that cannot be applied leaves the network
      * unfiltered. Either is a warning in the deploy log, never a failed deploy.

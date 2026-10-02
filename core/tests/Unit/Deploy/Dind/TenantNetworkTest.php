@@ -140,13 +140,11 @@ class TenantNetworkTest extends TestCase
         $this->assertStringContainsString('nft delete table bridge pa_tenants', $this->repo('scripts/uninstall.sh'));
     }
 
-    public function test_csf_restores_the_rules_and_does_not_trust_the_subnet(): void
+    /** ufw reloads leave the chains in place; the old CSF hooks are gone with CSF. */
+    public function test_the_host_firewall_does_not_flush_the_account_rules(): void
     {
-        $csf = $this->repo('scripts/csf.sh');
-
-        $this->assertStringContainsString('panelalpha-tenant-network', $csf);
-        $this->assertStringContainsString('install_tenant_network_rules', $csf);
-        $this->assertStringNotContainsString('pash-tenants" # docker internal network', $csf);
+        $this->assertStringContainsString('MANAGE_BUILTINS=no', $this->repo('scripts/firewall/ufw.sh'));
+        $this->assertStringNotContainsString('csfpost', $this->repo('scripts/tenant-network-firewall.sh'));
     }
 
     public function test_installers_and_core_start_apply_it(): void
@@ -154,6 +152,10 @@ class TenantNetworkTest extends TestCase
         $this->assertStringContainsString('tenant-network-firewall.sh --create', $this->repo('scripts/installer.sh'));
         $this->assertStringContainsString('tenant-network-firewall.sh --create', $this->repo('scripts/bootstrap-from-source.sh'));
         $this->assertStringContainsString('tenant-network-firewall.sh', $this->repo('dockerfiles/entrypoint-core.sh'));
+        // engine#541: closed from boot, not only from when core starts.
+        $this->assertStringContainsString('tenant-network-firewall.sh --install-units', $this->repo('scripts/installer.sh'));
+        $this->assertStringContainsString('tenant-network-firewall.sh --install-units', $this->repo('scripts/bootstrap-from-source.sh'));
+        $this->assertStringContainsString('panelalpha-tenant-guard.service', $this->repo('scripts/uninstall.sh'));
     }
 
     public function test_an_update_moves_existing_accounts_without_failing_on_one(): void

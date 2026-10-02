@@ -31,7 +31,13 @@ bash /etc/sftp/sync-logins.sh
 
 if $startSshd; then
     log "Executing sshd"
-    exec /usr/sbin/sshd -D -e
+    # 2222 as published: the host firewall matches a published port after the DNAT.
+    # Logs go to the host's journal as local5, so fail2ban can tell SFTP
+    # logins from the host's own SSH; without the socket, to the container log.
+    if [ -S /dev/log ]; then
+        exec /usr/sbin/sshd -D -p 2222 -o SyslogFacility=LOCAL5
+    fi
+    exec /usr/sbin/sshd -D -e -p 2222
 else
     log "Executing $*"
     exec "$@"

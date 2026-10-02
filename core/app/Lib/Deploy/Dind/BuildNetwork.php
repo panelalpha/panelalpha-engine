@@ -68,7 +68,7 @@ final class BuildNetwork
     /**
      * The firewall lives in the host's netfilter, so it is applied from the
      * host namespace. Idempotent; run before every build because a reboot
-     * or a CSF restart drops it.
+     * drops it.
      *
      * @return list<string>
      */

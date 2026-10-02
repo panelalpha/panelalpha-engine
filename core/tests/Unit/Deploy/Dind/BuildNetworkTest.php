@@ -108,7 +108,7 @@ class BuildNetworkTest extends TestCase
         $this->assertStringContainsString('iptables -I INPUT -i "$bridge" -j REJECT', $script);
         // The chain Docker evaluates first and keeps across a daemon restart.
         $this->assertStringContainsString('for parent in DOCKER-USER FORWARD', $script);
-        // Egress still works after CSF has removed Docker's own NAT.
+        // Egress still works after a flush has removed Docker's own NAT.
         $this->assertStringContainsString('-j MASQUERADE', $script);
         // The installer makes the network while Docker's chains are fresh. int-updater.sh is now only a
         // redirect to updater.sh; HostCompile creates the network on demand before a host build.
@@ -117,9 +117,5 @@ class BuildNetworkTest extends TestCase
             'build-network-firewall.sh --create panelalpha-build',
             (string) file_get_contents(dirname($path) . '/installer.sh')
         );
-
-        $csf = (string) file_get_contents(dirname($path) . '/csf.sh');
-        $this->assertStringContainsString('panelalpha-build-network', $csf);
-        $this->assertStringContainsString('build-network-firewall.sh panelalpha-build', $csf);
     }
 }

@@ -2,7 +2,7 @@
 # Bring the engine up from an already-uploaded source tree, without the full
 # installer. Does what install_panelalpha_engine() does — env files, config
 # seeding, TLS, network, vendor, compose, migrations — and nothing else: no
-# apt upgrade, no CSF, no monit, no sysctl, no Let's Encrypt, no telemetry.
+# apt upgrade, no firewall, no monit, no sysctl, no Let's Encrypt, no telemetry.
 #
 # Idempotent: every step is guarded, so re-running it after another upload is
 # the redeploy path.
@@ -276,6 +276,9 @@ docker network inspect pash-default-network >/dev/null 2>&1 || {
 # engine#519: the accounts' network; sites-db and the registries join it.
 DOCKER_NETWORK_MTU="${DOCKER_NETWORK_MTU}" bash scripts/tenant-network-firewall.sh --create --restart-docker \
     || warn "Could not create the tenant network"
+# Closed from boot until core binds it, not only from when core starts.
+bash scripts/tenant-network-firewall.sh --install-units \
+    || warn "Could not install the tenant network's boot units"
 
 # ----------------------------------------------------------------------- vendor
 if [ "$FORCE_COMPOSER" = 1 ] || [ ! -d core/vendor ]; then
@@ -419,18 +422,19 @@ fi
 
 # ------------------------------------------------------------------- hardening
 # installer.sh's harden_host. On by default so a source install reaches the same end
-# state as a packaged one — the API test suite exercises CSF, so an engine without it
-# is not a complete engine. --no-hardening skips the lot.
+# state as a packaged one — the API test suite exercises the firewall, so an engine
+# without it is not a complete engine. --no-hardening skips the lot.
 #
-# Before the stack, not after: csf.sh rebuilds the whole iptables ruleset, dropping
-# the chains the Docker daemon installs at start, so the daemon has to be restarted
-# — and with the stack up that takes every container down with it. It needs .env,
-# the compose bridge and docker0, so this is the earliest point it can run.
+# Before the stack, not after: on a host still running CSF, firewall.sh moves it to
+# ufw and CSF's uninstaller flushes the whole iptables ruleset, dropping the chains
+# the Docker daemon installs at start, so the daemon has to be restarted — and with
+# the stack up that takes every container down with it. It needs .env, the compose
+# bridge and docker0, so this is the earliest point it can run.
 if [ "$HARDEN" = 1 ]; then
-    step "Applying host configuration (sysctl, monit, CSF)"
+    step "Applying host configuration (sysctl, monit, firewall)"
     bash scripts/configure-sysctl.sh || warn "sysctl configuration failed"
     bash scripts/configure-monit.sh || warn "monit configuration failed"
-    bash scripts/csf.sh --install || warn "CSF install failed"
+    bash scripts/firewall.sh --install || warn "Firewall setup failed"
     service docker restart || warn "Could not restart Docker"
     # engine#246, as in installer.sh: the build network, while Docker's chains are fresh.
     bash scripts/build-network-firewall.sh --create panelalpha-build || warn "Could not create the build network"
@@ -524,7 +528,7 @@ if [ "$HARDEN" = 1 ]; then
     # per PHP minor is paid by whichever customer deploys that minor first.
     bash scripts/prewarm-images.sh || warn "Could not start image prewarm"
 else
-    warn "Skipped sysctl/monit/CSF/prewarm (--no-hardening) — CSF-dependent API tests will fail"
+    warn "Skipped sysctl/monit/firewall/prewarm (--no-hardening) — firewall API tests will fail"
 fi
 
 echo

@@ -263,16 +263,19 @@ return [
     'GET /metrics/last-12-hours' => 'metrics_last_12_hours',
     'GET /metrics/last-hour-averages' => 'metrics_last_hour_averages',
 
-    // CSF firewall
-    'GET /csf/rules' => 'csf_rule_list',
-    'POST /csf/rules/{type}' => 'csf_rule_create',
-    'PUT /csf/rules/{type}/{lineMd5}' => 'csf_rule_update',
-    'DELETE /csf/rules/{type}/{lineMd5}' => 'csf_rule_delete',
-    'GET /csf/status' => 'csf_status',
-    'GET /csf/ui-credentials' => 'csf_ui_credentials',
-    'PUT /csf/restart' => 'csf_restart',
-    'PUT /csf/enable' => 'csf_enable',
-    'PUT /csf/disable' => 'csf_disable',
+    // Host firewall
+    'GET /firewall/status' => 'firewall_status',
+    'PUT /firewall/enable' => 'firewall_enable',
+    'PUT /firewall/disable' => 'firewall_disable',
+    'PUT /firewall/reload' => 'firewall_reload',
+    'GET /firewall/logs' => 'firewall_log_list',
+    'GET /firewall/trusted' => 'firewall_trusted_list',
+    'POST /firewall/trusted' => 'firewall_trusted_add',
+    'DELETE /firewall/trusted/{id}' => 'firewall_trusted_delete',
+    'GET /firewall/rules' => 'firewall_rule_list',
+    'POST /firewall/rules' => 'firewall_rule_create',
+    'PUT /firewall/rules/{id}' => 'firewall_rule_update',
+    'DELETE /firewall/rules/{id}' => 'firewall_rule_delete',
 
     // IP management
     'GET /ip/subnets' => 'ip_subnet_list',

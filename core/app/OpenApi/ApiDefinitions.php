@@ -53,7 +53,7 @@ use OpenApi\Attributes as OA;
 #[OA\Tag(name: 'WP-CLI', description: 'WP-CLI command execution')]
 #[OA\Tag(name: 'Proxy Rules', description: 'Reverse proxy rule management')]
 #[OA\Tag(name: 'System', description: 'System information and configuration')]
-#[OA\Tag(name: 'CSF', description: 'ConfigServer Security Firewall management')]
+#[OA\Tag(name: 'Firewall', description: 'The host firewall (ufw)')]
 #[OA\Tag(name: 'ModSecurity', description: 'ModSecurity WAF management')]
 #[OA\Tag(name: 'Server Metrics', description: 'Real-time and historical server metrics')]
 #[OA\Tag(name: 'IP Management', description: 'IP subnet and assignment management')]

@@ -43,7 +43,6 @@ services:
       - /var/lib/docker:/var/lib/docker
       - /etc/letsencrypt:/etc/letsencrypt
       - /var/lib/letsencrypt:/var/lib/letsencrypt
-      - /etc/csf:/etc/csf
       - /opt/panelalpha:/opt/panelalpha
       - /home:/home
       - /var/tmp/panelalpha-backup:/var/tmp/panelalpha-backup
@@ -65,6 +64,7 @@ services:
       - "METRICS_LIMIT_DAYS=${METRICS_LIMIT_DAYS:-90}"
       - "METRICS_LIMIT_ENTRIES=${METRICS_LIMIT_ENTRIES:-1000000}"
       - "QUEUE_CONNECTION=database"
+      - "FIREWALL_PROVIDER=${FIREWALL_PROVIDER:-ufw}"
     mem_limit: ${MEM_LIMIT_CORE:-6G}
     memswap_limit: ${MEMSWAP_LIMIT_CORE:-0}
   mail:
@@ -173,6 +173,9 @@ services:
       - /home:/home/ftpuser
       - ./pureftpd:/etc/pureftpd
       - ./config/pure-ftpd/entrypoint.sh:/usr/bin/entrypoint.sh
+      # pure-ftpd logs only to syslog: the host's journal, where fail2ban
+      # watches for failed logins (scripts/firewall/ufw.sh).
+      - /dev/log:/dev/log
     mem_limit: ${MEM_LIMIT_FTP:-${MEM_LIMIT_PURE_FTPD:-3G}}
     memswap_limit: ${MEMSWAP_LIMIT_FTP:-${MEMSWAP_LIMIT_PURE_FTPD:-0}}
   sftp:
@@ -185,7 +188,9 @@ services:
     restart: always
     hostname: sftp.shared-hosting.palocal
     ports:
-      - "2222:22"
+      # The same port inside: ufw judges a published port after Docker's DNAT,
+      # so its rule for 2222 has to match there (scripts/firewall/ufw.sh).
+      - "2222:2222"
     volumes:
       - ./config/sftp/ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key
       - ./config/sftp/ssh_host_rsa_key:/etc/ssh/ssh_host_rsa_key
@@ -197,6 +202,9 @@ services:
       # image ships nothing under /etc/sftp, so nothing is shadowed.
       - ./config/sftp:/etc/sftp
       - ./config/sftp/entrypoint.sh:/entrypoint.sh
+      # sshd logs to the host's journal (facility local5), where fail2ban
+      # watches for failed logins (scripts/firewall/ufw.sh).
+      - /dev/log:/dev/log
       - /home:/home
     entrypoint: ["/bin/bash", "/entrypoint.sh"]
     mem_limit: ${MEM_LIMIT_SFTP:-3G}

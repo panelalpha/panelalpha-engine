@@ -14,7 +14,7 @@ import { ProjectSettingsApi } from './resources/project-settings.api';
 import { TasksApi } from './resources/tasks.api';
 import { BugReportsApi } from './resources/bug-reports.api';
 import { CronApi } from './resources/cron.api';
-import { CsfApi } from './resources/csf.api';
+import { FirewallApi } from './resources/firewall.api';
 import { DomainsApi } from './resources/domains.api';
 import { EximApi } from './resources/exim.api';
 import { FilesApi } from './resources/files.api';
@@ -44,7 +44,7 @@ export interface EngineApi
     SftpApi,
     CronApi,
     WpCliApi,
-    CsfApi,
+    FirewallApi,
     ModSecurityApi,
     SystemApi,
     FilesApi,
@@ -84,7 +84,7 @@ export class EngineApi extends EngineApiBase {
     sftp: SftpApi;
     cron: CronApi;
     wpcli: WpCliApi;
-    csf: CsfApi;
+    firewall: FirewallApi;
     modsec: ModSecurityApi;
     system: SystemApi;
     files: FilesApi;
@@ -119,7 +119,7 @@ export class EngineApi extends EngineApiBase {
       sftp: new SftpApi(transport),
       cron: new CronApi(transport),
       wpcli: new WpCliApi(transport),
-      csf: new CsfApi(transport),
+      firewall: new FirewallApi(transport),
       modsec: new ModSecurityApi(transport),
       system: new SystemApi(transport),
       files: new FilesApi(transport),

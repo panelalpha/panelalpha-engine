@@ -13,8 +13,8 @@ import { reportListenUrl, resolvePublicReportHost } from './lib/report-host';
  *
  * `webserver-change`, `update`, `cli`, `engine-cert`, `network-mutation` and
  * `slow` are left out of the default run: they either reconfigure the engine,
- * need host SSH for `pae-artisan`, or take minutes of host-wide CSF / full
- * PHP-version matrix. The Supported-board catalogue runs here.
+ * need host SSH for `pae-artisan`, or turn the host firewall off and on, or walk
+ * the full PHP-version matrix. The Supported-board catalogue runs here.
  */
 
 const DEFAULT_PROJECTS = ['unit', 'api', 'supported-apps'];

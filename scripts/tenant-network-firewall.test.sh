@@ -60,13 +60,14 @@ cat >"$W/bin/service" <<FAKE
 echo "service \$*" >>"$W/calls"
 rm -f "$W/flushed"
 FAKE
-cat >"$W/bin/iptables" <<'FAKE'
+cat >"$W/bin/iptables" <<FAKE
 #!/bin/bash
-case "$*" in *" -C "* | "-C "* | *"-t nat -C"*) exit 1 ;; esac
+echo "iptables \$*" >>"$W/calls"
+case "\$*" in *" -C "* | "-C "* | *"-t nat -C"*) exit 1 ;; esac
 exit 0
 FAKE
-printf '#!/bin/bash\ncat >/dev/null\n' >"$W/bin/iptables-restore"
-printf '#!/bin/bash\nexit 0\n' >"$W/bin/systemctl"
+printf '#!/bin/bash\ncat >"%s/restore.in"\n' "$W" >"$W/bin/iptables-restore"
+printf '#!/bin/bash\necho "systemctl $*" >>"%s/calls"\n' "$W" >"$W/bin/systemctl"
 printf '#!/bin/bash\nexit 0\n' >"$W/bin/flock"
 chmod +x "$W/bin/"*
 
@@ -81,13 +82,13 @@ expect() { # expect <label> <expected> <actual>
 }
 reset() {
     rm -f "$W/routes" "$W/addrs" "$W/nets" "$W/tenants" "$W/flushed" "$W/calls" \
-        "$W/members" "$W/pids" "$W/hostlinks" "$W"/ns-* "$W/nft.in"
+        "$W/members" "$W/pids" "$W/hostlinks" "$W"/ns-* "$W/nft.in" "$W/restore.in" "$W/units"
     printf 'default via 192.0.2.1 dev eth0\n10.10.0.0/20 dev eth0 proto kernel scope link src 10.10.0.25\n' >"$W/routes"
     printf '1: lo    inet 127.0.0.1/8 scope host lo\n2: eth0    inet 10.10.0.25/20 brd 10.10.15.255 scope global eth0\n' >"$W/addrs"
     printf 'COMPOSE_PROFILES=full\n' >"$W/env"
 }
 run() { # run [args...] -> exit code
-    PATH="$W/bin:$PATH" PA_ENV_FILE="$W/env" PA_TENANT_LOCK="$W/lock" \
+    PATH="$W/bin:$PATH" PA_ENV_FILE="$W/env" PA_TENANT_LOCK="$W/lock" PA_SYSTEMD_DIR="$W/units" \
         sh "$SCRIPT_DIR/tenant-network-firewall.sh" "$@" >"$W/out" 2>&1
     echo $?
 }
@@ -174,6 +175,39 @@ expect "reported" "1" "$(grep -c '2 port(s) bound' "$W/out")"
 reset; echo "10.200.0.0/16" >"$W/tenants"
 expect "no members: an empty binding, so every port is cut off" "0" "$(run)"
 expect "the sets have no elements" "0" "$(grep -c 'elements' "$W/nft.in")"
+
+# engine#541: before Docker, from .env alone, everything closed until bound.
+reset; echo "TENANT_NETWORK_PREFIX=10.250" >>"$W/env"
+expect "boot: applied without Docker" "0" "$(run --boot)"
+expect "Docker is never asked" "0" "$(grep -c '^docker' "$W/calls")"
+expect "the chains from the prefix in .env" "1" "$(grep -c -- '-d 10.250.0.2/32 -p tcp --dport 3306 -j ACCEPT' "$W/restore.in")"
+expect "DOCKER-USER made for Docker to keep" "1" "$(grep -c '^iptables -N DOCKER-USER' "$W/calls")"
+expect "and jumped to before Docker's own rules" "1" "$(grep -c '^iptables -I DOCKER-USER -i br-pa-tenants -j PA-TENANT-NET' "$W/calls")"
+expect "no port bound" "0" "$(grep -c 'elements' "$W/nft.in")"
+expect "so every port of the bridge is dropped" "1" "$(grep -c 'counter drop' "$W/nft.in")"
+expect "and says so" "1" "$(grep -c 'closed until its ports are bound' "$W/out")"
+
+reset
+expect "boot without a prefix in .env" "0" "$(run --boot)"
+expect "uses docker-compose.yml's default" "1" "$(grep -c -- '-d 10.200.0.2/32' "$W/restore.in")"
+
+reset; echo "TENANT_NETWORK_PREFIX=10.x" >>"$W/env"
+expect "boot with a prefix that is not two octets: refused" "1" "$(run --boot)"
+expect "nothing applied" "no" "$([ -f "$W/restore.in" ] && echo yes || echo no)"
+
+reset; mkdir -p "$W/units"
+expect "units installed" "0" "$(run --install-units)"
+guard="$W/units/panelalpha-tenant-guard.service"
+bind="$W/units/panelalpha-tenant-bind.service"
+expect "the guard runs before Docker" "1" "$(grep -c '^Before=docker.service$' "$guard")"
+expect "once per boot" "1" "$(grep -c '^RemainAfterExit=yes$' "$guard")"
+expect "with --boot" "1" "$(grep -c "^ExecStart=/bin/sh $SCRIPT_DIR/tenant-network-firewall.sh --boot$" "$guard")"
+expect "pulled in by Docker itself" "1" "$(grep -c '^WantedBy=docker.service multi-user.target$' "$guard")"
+expect "the binder runs after Docker" "1" "$(grep -c '^After=docker.service$' "$bind")"
+expect "on every Docker start" "0" "$(grep -c 'RemainAfterExit=yes' "$bind")"
+expect "with a full apply" "1" "$(grep -c "^ExecStart=/bin/sh $SCRIPT_DIR/tenant-network-firewall.sh$" "$bind")"
+expect "both enabled" "1" "$(grep -c '^systemctl enable panelalpha-tenant-guard.service panelalpha-tenant-bind.service' "$W/calls")"
+expect "Docker untouched" "0" "$(grep -c '^docker' "$W/calls")"
 
 echo
 [ "$failures" = 0 ] && echo "All passed." || echo "$failures failed."

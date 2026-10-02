@@ -19,23 +19,38 @@
 # between two ports of one bridge never reaches iptables at all.
 #
 # Usage: tenant-network-firewall.sh [--create [--restart-docker]]
-# Idempotent. Run from csfpost.sh (CSF flushes these with Docker's own chains),
-# at core start, and by the engine before an account starts.
+# Idempotent. Run at core start (a reboot empties iptables) and by the engine
+# before an account starts. ufw reloads only its own chains, so it leaves these.
 #
 # --create makes the network when it is missing, on the first /16 of
 # 10.200-10.219 that nothing on the host uses (routes, addresses, Docker
 # networks), and records it as TENANT_NETWORK_PREFIX in .env, which
 # docker-compose.yml reads. A prefix already in .env is used as it is, and
 # refused if it overlaps. --restart-docker is for the installers only: it
-# restarts Docker once when a CSF flush left it unable to create networks.
+# restarts Docker once when a firewall flush (moving a host off CSF) left it
+# unable to create networks.
 # Core runs this script too, and restarting Docker there would stop core.
+#
+# A reboot starts the kernel with none of this, and Docker starts the accounts
+# at the same moment as core, which applied it about 6 s later: accounts ran
+# unfiltered and unbound until then. Two systemd units close that, installed by
+# --install-units (the installers run it):
+#   panelalpha-tenant-guard  before Docker: --boot puts the chains in place from
+#                            TENANT_NETWORK_PREFIX and an empty binding, so every
+#                            port of the bridge carries nothing until it is bound;
+#   panelalpha-tenant-bind   after every Docker start: binds the ports at once.
+# Core's entrypoint and tenant-network service still apply it as before.
 
 CREATE=0
 RESTART=0
+BOOT=0
+UNITS=0
 for arg in "$@"; do
     case "$arg" in
     --create) CREATE=1 ;;
     --restart-docker) RESTART=1 ;;
+    --boot) BOOT=1 ;;
+    --install-units) UNITS=1 ;;
     esac
 done
 
@@ -114,7 +129,60 @@ create_network() {
         --label com.panelalpha.role=tenants "$NET" 2>&1 >/dev/null
 }
 
-if [ "$CREATE" = 1 ] && ! docker network inspect "$NET" >/dev/null 2>&1; then
+install_units() {
+    local dir="${PA_SYSTEMD_DIR:-/etc/systemd/system}" self
+    self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    cat >"$dir/panelalpha-tenant-guard.service" <<EOF
+# Written by the PanelAlpha engine (scripts/tenant-network-firewall.sh).
+[Unit]
+Description=PanelAlpha: hosting accounts' network closed until its ports are bound
+After=local-fs.target ufw.service
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh $self --boot
+
+[Install]
+WantedBy=docker.service multi-user.target
+EOF
+    cat >"$dir/panelalpha-tenant-bind.service" <<EOF
+# Written by the PanelAlpha engine (scripts/tenant-network-firewall.sh).
+[Unit]
+Description=PanelAlpha: bind the hosting accounts' network ports once Docker is up
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh $self
+
+[Install]
+WantedBy=docker.service
+EOF
+    systemctl daemon-reload &&
+        systemctl enable panelalpha-tenant-guard.service panelalpha-tenant-bind.service >/dev/null 2>&1 ||
+        { echo "tenant-network-firewall: could not enable the boot units" >&2; return 1; }
+    echo "tenant-network-firewall: boot units installed"
+}
+if [ "$UNITS" = 1 ]; then
+    install_units || exit 1
+    exit 0
+fi
+
+if [ "$BOOT" = 1 ]; then
+    # Before Docker: no network to read, so the prefix .env records (written
+    # whenever the network exists) or docker-compose.yml's default.
+    prefix=${configured:-10.200}
+    if ! echo "$prefix" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}$'; then
+        echo "tenant-network-firewall: TENANT_NETWORK_PREFIX=$prefix is not two octets" >&2
+        exit 1
+    fi
+    SUBNET="$prefix.0.0/16"
+    # Docker keeps a DOCKER-USER it finds, and looks there before its own rules.
+    iptables -N DOCKER-USER 2>/dev/null || true
+elif [ "$CREATE" = 1 ] && ! docker network inspect "$NET" >/dev/null 2>&1; then
     prefix=$(choose_prefix) || exit 1
     record_prefix "$prefix" || exit 1
     if ! out=$(create_network "$prefix"); then
@@ -133,29 +201,31 @@ if [ "$CREATE" = 1 ] && ! docker network inspect "$NET" >/dev/null 2>&1; then
     fi
     echo "tenant-network-firewall: created $NET on $prefix.0.0/16"
 fi
-docker network inspect "$NET" >/dev/null 2>&1 || {
-    echo "tenant-network-firewall: no docker network $NET" >&2
-    exit 1
-}
+if [ "$BOOT" != 1 ]; then
+    docker network inspect "$NET" >/dev/null 2>&1 || {
+        echo "tenant-network-firewall: no docker network $NET" >&2
+        exit 1
+    }
 
-# The addresses come from the network that exists, not from .env: a prefix
-# edited after the network was made would otherwise allow addresses sites-db
-# does not have, and every account would lose its database without a word.
-SUBNET=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$NET" | awk '{print $1}')
-actual=$(echo "$SUBNET" | cut -d. -f1-2)
-case "$SUBNET" in
-*.0.0/16) ;;
-*)
-    echo "tenant-network-firewall: $NET has subnet '$SUBNET', expected <prefix>.0.0/16" >&2
-    exit 1
-    ;;
-esac
-if [ -z "$configured" ]; then
-    record_prefix "$actual" || true
-elif [ "$configured" != "$actual" ]; then
-    echo "tenant-network-firewall: TENANT_NETWORK_PREFIX is $configured but $NET is $SUBNET; using $actual (docker-compose.yml will refuse $configured)" >&2
+    # The addresses come from the network that exists, not from .env: a prefix
+    # edited after the network was made would otherwise allow addresses sites-db
+    # does not have, and every account would lose its database without a word.
+    SUBNET=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$NET" | awk '{print $1}')
+    actual=$(echo "$SUBNET" | cut -d. -f1-2)
+    case "$SUBNET" in
+    *.0.0/16) ;;
+    *)
+        echo "tenant-network-firewall: $NET has subnet '$SUBNET', expected <prefix>.0.0/16" >&2
+        exit 1
+        ;;
+    esac
+    if [ -z "$configured" ]; then
+        record_prefix "$actual" || true
+    elif [ "$configured" != "$actual" ]; then
+        echo "tenant-network-firewall: TENANT_NETWORK_PREFIX is $configured but $NET is $SUBNET; using $actual (docker-compose.yml will refuse $configured)" >&2
+    fi
+    prefix=$actual
 fi
-prefix=$actual
 SITES_DB="$prefix.0.2"
 CACHE_REGISTRY="$prefix.0.3"
 REGISTRY_PROXY="$prefix.0.4"
@@ -186,7 +256,7 @@ flock 9
 } | iptables-restore --noflush || exit 1
 
 # DOCKER-USER is where Docker looks first and it survives a daemon restart.
-# FORWARD and INPUT as well, for a host where CSF removed Docker's chains.
+# FORWARD and INPUT as well, for a host where a flush removed Docker's chains.
 for parent in DOCKER-USER FORWARD; do
     iptables -n -L "$parent" >/dev/null 2>&1 || continue
     for dir in -i -o; do
@@ -197,8 +267,8 @@ done
 iptables -C INPUT -i "$BRIDGE" -j PA-TENANT-INPUT 2>/dev/null ||
     iptables -I INPUT -i "$BRIDGE" -j PA-TENANT-INPUT
 # The proxy runs on the host and reaches an app on whatever port it listens on.
-# CSF holds the host to TCP_OUT and trusts only the subnet in csf.allow, which
-# must not name this one: csf.allow is trusted inbound as well.
+# Allowed past the host firewall's outgoing policy, should an operator make ufw
+# deny outgoing by default.
 iptables -C OUTPUT -o "$BRIDGE" -j ACCEPT 2>/dev/null ||
     iptables -I OUTPUT -o "$BRIDGE" -j ACCEPT
 iptables -t nat -C POSTROUTING -s "$SUBNET" ! -o "$BRIDGE" -j MASQUERADE 2>/dev/null ||
@@ -233,7 +303,9 @@ port_bindings() { # "veth mac ip" per running member of the network
 }
 
 if command -v nft >/dev/null 2>&1; then
-    bindings=$(port_bindings)
+    # At boot nothing is bound yet: an empty binding cuts every port off.
+    bindings=
+    [ "$BOOT" = 1 ] || bindings=$(port_bindings)
     arp=$(echo "$bindings" | awk 'NF == 3 { printf "%s\"%s\" . %s . %s . %s", s, $1, $2, $2, $3; s = ", " }')
     ipv4=$(echo "$bindings" | awk 'NF == 3 { printf "%s\"%s\" . %s . %s", s, $1, $2, $3; s = ", " }')
     # Created and replaced in one transaction: never absent, never half-filled.
@@ -264,4 +336,8 @@ else
     bound=none
 fi
 
+if [ "$BOOT" = 1 ]; then
+    echo "tenant-network-firewall: $BRIDGE ($SUBNET) closed until its ports are bound"
+    exit 0
+fi
 echo "tenant-network-firewall: $NET ($BRIDGE, $SUBNET) applied, $bound port(s) bound"

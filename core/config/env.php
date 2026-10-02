@@ -14,6 +14,10 @@ return [
     // 'privileged', the latter only for an engine that itself runs inside a
     // sysbox container. See App\System\Project\Dind\AccountRuntime.
     'DIND_RUNTIME' => env('DIND_RUNTIME'),
+    // The host firewall the API manages: 'ufw' unless another provider is
+    // registered with App\System\Firewall\FirewallFactory::register().
+    // scripts/firewall.sh reads the same key from the engine's .env.
+    'FIREWALL_PROVIDER' => env('FIREWALL_PROVIDER'),
     // Filter what a DinD account's own code may reach (engine#217): on the
     // shared network only the users' MySQL and the image registries, on the
     // host only mail and the sites, never the metadata address. Applied inside

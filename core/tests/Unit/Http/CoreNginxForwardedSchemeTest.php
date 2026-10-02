@@ -52,7 +52,6 @@ class CoreNginxForwardedSchemeTest extends TestCase
     {
         $conf = $this->config();
         $api = substr($conf, (int) strpos($conf, 'listen 2011 ssl;'));
-        $api = substr($api, 0, (int) strpos($api, 'location /csf-web-ui'));
 
         $this->assertStringContainsString('proxy_set_header Host $host:$server_port;', $api);
         $this->assertStringContainsString('proxy_set_header X-Forwarded-Proto $scheme;', $api);

@@ -38,13 +38,12 @@ write_trusted_proxy_conf() {
 }
 write_trusted_proxy_conf
 
-# On a CSF host every `csf -r` drops Docker's DNAT, and :2011 then reaches core
-# through docker-proxy, from the gateway, for every client. The host script
-# puts the DNAT back for this container's address: csfpost.sh runs it after
-# CSF, this after a (re)start that may have moved the address. No-op without CSF.
-publish_script=/opt/panelalpha/shared-hosting/scripts/csf-publish-core.sh
-if [ -f "$publish_script" ]; then
-    timeout 30 nsenter --target 1 --all sh "$publish_script" "$(hostname -i | awk '{print $1}')" || true
+# ufw does not filter ports Docker publishes on its own; the host firewall's
+# hook in DOCKER-USER does. ufw puts it in place whenever it starts; this is
+# the backstop for a host where Docker came up after it.
+firewall_script=/opt/panelalpha/shared-hosting/scripts/firewall.sh
+if [ -f "$firewall_script" ]; then
+    timeout 30 nsenter --target 1 --all bash "$firewall_script" --apply || true
 fi
 
 # engine#519: the accounts' firewall lives in the host's iptables, which a

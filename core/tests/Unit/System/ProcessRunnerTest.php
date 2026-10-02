@@ -8,7 +8,7 @@ use App\System\Network;
 use App\System\ProcessRunner;
 use App\System\Project\PhpHosting\FpmStack;
 use App\System\Project\PhpHosting\LiteSpeedStack;
-use App\System\Services\Csf;
+use App\System\Firewall\Ufw\UfwFirewall;
 use ReflectionClass;
 use ReflectionNamedType;
 use Symfony\Component\Process\Process;
@@ -24,7 +24,7 @@ class ProcessRunnerTest extends TestCase
     private const NARROWED = [
         Filesystem::class,
         Network::class,
-        Csf::class,
+        UfwFirewall::class,
         FpmStack::class,
         LiteSpeedStack::class,
         \App\Lib\Task\ProcessTreeKiller::class,
@@ -106,7 +106,7 @@ class ProcessRunnerTest extends TestCase
 
         $this->assertInstanceOf(Filesystem::class, new Filesystem($system));
         $this->assertInstanceOf(Network::class, new Network($system));
-        $this->assertInstanceOf(Csf::class, new Csf($system));
+        $this->assertInstanceOf(UfwFirewall::class, new UfwFirewall($system));
         $this->assertInstanceOf(\App\Lib\Task\ProcessTreeKiller::class, new \App\Lib\Task\ProcessTreeKiller($system));
     }
 

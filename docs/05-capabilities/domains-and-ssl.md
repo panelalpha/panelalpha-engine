@@ -72,7 +72,7 @@ The engine already sends HTTP and HTTPS for your project hostnames to the right 
 List the proxy rules on this engine.
 ```
 
-Do not add a rule that opens a public port for an application that already has a hostname. Traffic is supposed to arrive at the engine's webserver, which routes it into the right project: [Security](security.md#the-firewall-csf).
+Do not add a rule that opens a public port for an application that already has a hostname. Traffic is supposed to arrive at the engine's webserver, which routes it into the right project: [Security](security.md#the-firewall).
 
 ## Troubleshooting
 
