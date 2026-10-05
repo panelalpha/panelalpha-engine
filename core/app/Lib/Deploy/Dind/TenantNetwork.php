@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\Dind;
 
+use Symfony\Component\HttpFoundation\IpUtils;
+
 /**
  * The Docker network DinD accounts run on (engine#519).
  *
@@ -23,6 +25,12 @@ final class TenantNetwork
 
     public const FIREWALL_SCRIPT = '/opt/panelalpha/shared-hosting/scripts/tenant-network-firewall.sh';
 
+    /** What the firewall refuses an account: the script's REFUSED, which a test keeps this equal to. */
+    public const REFUSED_RANGES = [
+        '0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12',
+        '192.0.0.0/24', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/4', '240.0.0.0/4',
+    ];
+
     /** sites-db's host number in the subnet; docker-compose.yml pins `<prefix>.0.2`. */
     private const SITES_DB_HOST = 2;
 
@@ -36,6 +44,13 @@ final class TenantNetwork
     public static function firewallArgv(): array
     {
         return ['sudo', 'nsenter', '--target', '1', '--all', 'sh', self::FIREWALL_SCRIPT, '--create'];
+    }
+
+    /** Whether an account's connection to this IPv4 address is refused by the firewall. */
+    public static function refuses(string $ipv4): bool
+    {
+        return filter_var($ipv4, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false
+            && IpUtils::checkIp($ipv4, self::REFUSED_RANGES);
     }
 
     /** @return list<string> */

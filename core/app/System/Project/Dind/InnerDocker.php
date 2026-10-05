@@ -112,6 +112,14 @@ class InnerDocker
     }
 
     /**
+     * @return list<string>
+     */
+    public function imageEnvironment(string $image): array
+    {
+        return $this->seeding()->imageEnvironment($image);
+    }
+
+    /**
      * @param list<string> $extras
      * @param list<string> $packages
      * @param list<string> $required
@@ -155,6 +163,11 @@ class InnerDocker
     public function reclaimStorage(bool $emergency): void
     {
         $this->storage()->reclaim($emergency);
+    }
+
+    public function reclaimStorageAfterDiskLimit(): void
+    {
+        $this->storage()->reclaimAfterDiskLimit();
     }
 
     public function wipeDataRoot(): void

@@ -19,6 +19,8 @@ class BandwidthApiTest extends TestCase
 {
     private FakeStatistics $statistics;
 
+    private System $system;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -87,13 +89,25 @@ class BandwidthApiTest extends TestCase
             ],
         ];
         $this->app->instance(Statistics::class, $this->statistics);
-        // /usage measures the home with `du` through sudo; answer it here instead of on this machine.
-        $this->app->instance(System::class, new class extends System {
+        // /usage measures the home with `du` and the container logs with `find`, both
+        // through sudo; answer them here instead of on this machine.
+        $this->system = new class extends System {
+            /** @var list<list<string>> */
+            public array $ran = [];
+
+            public string $logSizes = '';
+
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                return in_array('du', (array) $cmd, true) ? FakeProcess::ok("12\t/home/alice\n") : FakeProcess::forCommand($cmd);
+                $this->ran[] = (array) $cmd;
+                if (in_array('du', (array) $cmd, true)) {
+                    return FakeProcess::ok("12\t/home/alice\n");
+                }
+
+                return in_array('find', (array) $cmd, true) ? FakeProcess::ok($this->logSizes) : FakeProcess::forCommand($cmd);
             }
-        });
+        };
+        $this->app->instance(System::class, $this->system);
 
         $this->withoutMiddleware(Authenticate::class);
     }
@@ -170,6 +184,38 @@ class BandwidthApiTest extends TestCase
         $response->assertOk();
         $response->assertJsonStructure(['bandwidth' => ['usage', 'maximum']]);
         $response->assertJsonPath('bandwidth.maximum', null);
+    }
+
+    public function test_usage_sums_a_dind_projects_container_logs_in_bytes(): void
+    {
+        $user = $this->makeProject(['template' => 'dind']);
+        $this->system->logSizes = "10485760\n10485760\n524288\n";
+
+        $response = $this->getJson("/api/projects/{$user->username}/usage");
+
+        $response->assertOk();
+        $response->assertJsonPath('logs.usage', 10485760 * 2 + 524288);
+        $response->assertJsonPath('logs.maximum', null);
+        $response->assertJsonPath('storage.usage', 12);
+        $find = array_values(array_filter($this->system->ran, static fn (array $cmd): bool => in_array('find', $cmd, true)));
+        $this->assertSame([[
+            'sudo', 'find', $this->system->projectHomeDirPath('alice') . '/docker/containers',
+            '-mindepth', '2', '-maxdepth', '2', '-type', 'f', '-name', '*-json.log*', '-printf', '%s\n',
+        ]], $find);
+    }
+
+    public function test_usage_logs_are_zero_without_a_containers_directory_or_a_dind_runtime(): void
+    {
+        $user = $this->makeProject(['template' => 'dind']);
+        $this->system->logSizes = '';
+        $this->getJson("/api/projects/{$user->username}/usage")->assertOk()->assertJsonPath('logs.usage', 0);
+
+        $user->setDetails(['template' => null]);
+        $user->save();
+        $this->system->ran = [];
+        $this->system->logSizes = "999\n";
+        $this->getJson("/api/projects/{$user->username}/usage")->assertOk()->assertJsonPath('logs.usage', 0);
+        $this->assertSame([], array_filter($this->system->ran, static fn (array $cmd): bool => in_array('find', $cmd, true)));
     }
 
     public function test_empty_statistics_are_zeros_not_errors(): void

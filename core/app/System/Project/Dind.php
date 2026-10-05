@@ -35,6 +35,7 @@ use App\System\Project\Dind\Paths;
 use App\System\Project\Dind\PrepareFromSource;
 use App\System\Project\Dind\ProjectEnvironment;
 use App\System\Project\Dind\ProjectFiles;
+use App\System\Project\Dind\RegistryLogin;
 use App\System\Project\Dind\ShellOperations;
 use App\System\Project\Dind\Services\S6ServiceManager;
 use App\System\Project\Dind\Services\ServiceManager;
@@ -70,6 +71,7 @@ class Dind implements DeployableDindProject, Runtime
     private ?PrepareFromSource $prepareFromSource = null;
     private ?ProjectEnvironment $projectEnvironment = null;
     private ?AppCredentialDelivery $appCredentials = null;
+    private ?RegistryLogin $registryLogin = null;
 
     public function __construct(
         private readonly ProjectAggregate $project,
@@ -253,9 +255,18 @@ class Dind implements DeployableDindProject, Runtime
         return $this->containerOperations()->serviceAction($service, $action);
     }
 
-    public function getServiceLogs(string $service, int $lines = 200): string
+    public function getServiceLogs(string $service, int $lines = 200, ?string $since = null, ?string $until = null): string
     {
-        return $this->containerOperations()->getServiceLogs($service, $lines);
+        return $this->containerOperations()->getServiceLogs($service, $lines, $since, $until);
+    }
+
+    /**
+     * @param callable(string, ?string): void $onLine
+     * @param ?callable(): void $onIdle
+     */
+    public function followServiceLogs(string $service, int $lines, ?string $since, callable $onLine, ?callable $onIdle = null): void
+    {
+        $this->containerOperations()->followServiceLogs($service, $lines, $since, $onLine, $onIdle);
     }
 
     public function appCertificate(): AppCertificate
@@ -263,9 +274,9 @@ class Dind implements DeployableDindProject, Runtime
         return $this->appCertificate ??= new AppCertificate($this);
     }
 
-    public function abortRunningDeploy(bool $stopInnerDocker = true): void
+    public function abortRunningDeploy(bool $stopInnerDocker = true, bool $removeVolumes = false): void
     {
-        $this->accountTeardown()->abortRunningDeploy($stopInnerDocker);
+        $this->accountTeardown()->abortRunningDeploy($stopInnerDocker, $removeVolumes);
     }
 
     public function preCheckFromSources(): void
@@ -277,7 +288,7 @@ class Dind implements DeployableDindProject, Runtime
     public function prepareFromSources(): void
     {
         $this->assertHostHasRoomToDeploy();
-        $this->prepareFromSource()->prepare();
+        $this->registryLogin()->during(fn () => $this->prepareFromSource()->prepare());
     }
 
     /**
@@ -307,6 +318,12 @@ class Dind implements DeployableDindProject, Runtime
     public function applyProjectEnvVars(?string $composePath = null): void
     {
         $this->projectEnvironment()->apply($composePath);
+    }
+
+    /** The project's private registry logins, held only while a deploy pulls and builds. */
+    public function registryLogin(): RegistryLogin
+    {
+        return $this->registryLogin ??= new RegistryLogin($this);
     }
 
     /** The login a manifest's `credentials:` declares, written into the account. */
@@ -380,7 +397,7 @@ class Dind implements DeployableDindProject, Runtime
     }
 
     /**
-     * @return array{COMPOSE_FILE: string, COMPOSE_PATH_SEPARATOR: string}
+     * @return array<string, string>
      */
     public function userAppComposeEnv(): array
     {

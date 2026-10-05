@@ -6,6 +6,7 @@ use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Models\Domain;
 use App\Models\Tunnel;
 use App\Models\User;
+use App\System;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -97,7 +98,10 @@ class TunnelManager
         }
 
         if ($provider === Tunnel::PROVIDER_PANELALPHA) {
-            return PanelAlphaConnect::createTunnel($user, $domain, $hostname);
+            $tunnel = PanelAlphaConnect::createTunnel($user, $domain, $hostname);
+            self::rebuildForSibling($domain, $tunnel);
+
+            return $tunnel;
         }
 
         throw new CloudflareException("Unsupported tunnel provider '{$provider}'.");
@@ -109,6 +113,15 @@ class TunnelManager
      * PanelAlpha Online: remote DELETE on license proxy (best-effort) + local DB row.
      */
     public static function deleteTunnel(User $user, Tunnel $tunnel): void
+    {
+        $domain = $tunnel->domain;
+        self::removeTunnel($user, $tunnel);
+        if ($domain instanceof Domain) {
+            self::rebuildForSibling($domain, $tunnel);
+        }
+    }
+
+    private static function removeTunnel(User $user, Tunnel $tunnel): void
     {
         if ((int) $tunnel->user_id !== (int) $user->id) {
             throw new CloudflareException('Tunnel does not belong to this project.');
@@ -129,11 +142,27 @@ class TunnelManager
         }
     }
 
+    /**
+     * A panelalpha.online name beside the domain (`api-<name>`) is forwarded
+     * with its own Host, so the domain's site starts or stops answering to it.
+     */
+    private static function rebuildForSibling(Domain $domain, Tunnel $tunnel): void
+    {
+        if (!$tunnel->isPanelAlpha()
+            || PanelAlphaConnect::servesItsOwnPublicName((string) $domain->domain, (string) $tunnel->hostname, Tunnel::PROVIDER_PANELALPHA)
+        ) {
+            return;
+        }
+        $domain->projectDomain()->rebuild();
+        (new System())->reloadWebserver();
+    }
+
     public static function teardownDomain(User $user, Domain $domain): void
     {
         foreach (Tunnel::forDomain($domain) as $tunnel) {
             try {
-                self::deleteTunnel($user, $tunnel);
+                // The domain is going away: nothing to rebuild.
+                self::removeTunnel($user, $tunnel);
             } catch (\Throwable $e) {
                 Log::warning(
                     "Tunnel teardown failed for {$tunnel->hostname}: " . $e->getMessage()

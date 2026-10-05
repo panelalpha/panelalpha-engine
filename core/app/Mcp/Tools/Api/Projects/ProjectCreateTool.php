@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Create a new hosting project (async)
 
-    Creates the account now and deploys it in the background: answers 202 with a task `id`. Poll task_get until it is completed, failed or cancelled. Leave `domain` out: the engine picks the best public name it can, a free panelalpha.online one when available, and project_get says which (details.domain). Resource limits are set afterwards with project_update.
+    Creates the account now and deploys it in the background: answers 202 with a task `id`. Poll task_get until it is completed, failed or cancelled. Leave `domain` out: the engine picks the best public name it can, a free panelalpha.online one when available, and project_get says which (details.domain). Resource limits are set afterwards with project_update. For a public github.com repository `data.inspection` in the answer is what its file list says before the clone: a `reason` there means it may not deploy, and the project is created anyway.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectCreateTool extends ApiTool
@@ -84,7 +84,7 @@ class ProjectCreateTool extends ApiTool
             'memory_limit' => $schema->integer()->description('MB. Default: the server\'s RAM less the engine\'s share, which is also the most allowed.'),
             'template' => $schema->string()->description('dind runs the app in containers of its own; the other templates are classic shared hosting. This tool sends dind when it is omitted.'),
             'tunnel' => $schema->string()->description('panelalpha (default): a free panelalpha.online name with a trusted certificate, tunnel attached in this call. none: `domain` already points at this host. One of: panelalpha, none.'),
-            'git_repo' => $schema->string()->description('HTTPS clone URL; SSH remotes are refused. github.com/owner/repo also works. Example: https://github.com/owner/repo.git.'),
+            'git_repo' => $schema->string()->description('HTTPS clone URL; github.com/owner/repo also works. For an SSH remote, create the project without it, then git_deploy_key_create and git_connect. Example: https://github.com/owner/repo.git.'),
             'git_branch' => $schema->string(),
             'git_token' => $schema->string()->description('Token for a private repository. Prefer a `vault:<id>` from vault_secret_create over the token itself.'),
             'env_vars' => $schema->object()->description('KEY=value applied to the app\'s .env and container on every deploy.'),

@@ -575,6 +575,28 @@
           "type": "null"
         }
       ]
+    },
+    "health": {
+      "description": "How the deploy waits for the application. `start_period` is how many seconds an application whose container is running but listens on no port yet may take to bind it, after the deploy's own probe (about 105 s) gave up. The default is 300; set it for an application that installs itself on first start (Magento's setup:install and di:compile). 0 turns the wait off.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "start_period": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1800
+            }
+          },
+          "required": [
+            "start_period"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "definitions": {

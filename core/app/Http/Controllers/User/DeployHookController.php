@@ -33,8 +33,8 @@ class DeployHookController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/deploy-hook',
         description: 'Create the Deploy Hook for a git-connected checkout, so a push to its tracked branch '
-            . 'redeploys the project. Optional `path` defaults to `project` on DinD and `public_html` on '
-            . 'FPM/LiteSpeed (`project` is the Deploy-managed checkout). Returns the `url` to register in the git host and the `secret` to sign with. '
+            . 'redeploys the project. Optional `path` defaults to `project` on DinD and the document root of the '
+            . 'main domain on FPM/LiteSpeed (`project` is the Deploy-managed checkout). Returns the `url` to register in the git host and the `secret` to sign with. '
             . 'The secret is shown ONCE, in this response, and can never be read again: store it now, or '
             . 'rotate later. Asking again returns the same hook (200) without the secret and never rotates it. '
             . 'On the Deploy-managed checkout every push to the tracked branch force-updates it to match the '
@@ -54,7 +54,7 @@ class DeployHookController extends Controller
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
             properties: [
-                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', type: 'string'),
+                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string'),
                 new OA\Property(property: 'provider', description: 'Optional. Narrows `tls.instructions` to this git host: github, gitlab, bitbucket-cloud, bitbucket-data-center.', type: 'string'),
             ],
         )),
@@ -113,14 +113,14 @@ class DeployHookController extends Controller
             . 'null while still queued or for a delivery that queued nothing. `detail` carries the reason for a '
             . 'refused pull or a failure; `deploy_id` points at the full build log '
             . '(`php artisan project:deploy:log <project> --id=<deploy_id>`) for a delivery that started one. '
-            . 'Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. '
+            . 'Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. '
             . '404 when the checkout has no hook.',
         summary: 'Show a push-to-deploy hook',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'The hook (no secret)', content: new OA\JsonContent(
@@ -167,7 +167,7 @@ class DeployHookController extends Controller
         description: 'Replace the Deploy Hook\'s URL and secret with new ones, for when either leaked. '
             . 'The old URL answers 404 from this moment, so the new `url` and `secret` must be registered '
             . 'in the git host again. The secret is shown ONCE, in this response, and can never be read again. '
-            . 'Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. '
+            . 'Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. '
             . '404 when the checkout has no hook; rotating '
             . 'never creates one. On the Deploy-managed checkout every push to the tracked branch force-updates '
             . 'it to match the repository (local changes to tracked files and untracked files that are not '
@@ -175,7 +175,7 @@ class DeployHookController extends Controller
         summary: 'Rotate a push-to-deploy hook',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
-            properties: [new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', type: 'string')],
+            properties: [new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string')],
         )),
         tags: ['Git'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -206,13 +206,13 @@ class DeployHookController extends Controller
         path: '/projects/{username}/git/deploy-hook',
         description: 'Delete the Deploy Hook of a checkout and its delivery history. Its URL answers 404 '
             . 'from then on; remove the webhook in the git host too. Optional `path` defaults to `project` '
-            . 'on DinD and `public_html` on FPM/LiteSpeed. 404 when the checkout has no hook.',
+            . 'on DinD and the document root of the main domain on FPM/LiteSpeed. 404 when the checkout has no hook.',
         summary: 'Delete a push-to-deploy hook',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],
         responses: [
             new OA\Response(response: 204, description: 'Deleted'),

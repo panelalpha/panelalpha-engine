@@ -523,7 +523,7 @@ class ComposeFileInspector
     }
 
     /**
-     * Dockerfile that maps a host UID/GID with no numeric ARG default.
+     * Dockerfile that maps a host UID/GID with no numeric ARG or ENV default.
      * Nested copies of local-dev runtimes (docker/8.x, docker/Dockerfile)
      * must not win over PHP/JS/Railpack recipes.
      */
@@ -544,9 +544,11 @@ class ComposeFileInspector
         if (preg_match('/\$(?:\{)?(' . self::HOST_UID_VARS . ')\b/i', $raw, $match) !== 1) {
             return false;
         }
-        $var = $match[1];
+        $var = preg_quote($match[1], '/');
 
-        return preg_match('/^\s*ARG\s+' . preg_quote($var, '/') . '\s*=\s*\d+/mi', $raw) !== 1;
+        // Koillection's `ENV PUID=1001` sets it as surely as an ARG default.
+        return preg_match('/^\s*ARG\s+' . $var . '\s*=\s*\d+/mi', $raw) !== 1
+            && preg_match('/^\s*ENV\s+(?:(?:\S+=\S+\s+)*' . $var . '\s*=\s*["\']?\d+|' . $var . '\s+["\']?\d+)/mi', $raw) !== 1;
     }
 
     /**
@@ -614,9 +616,9 @@ class ComposeFileInspector
      * it is read-only, or a single generated file: that is a recipe injecting
      * one artifact (an entrypoint/config/answer file, as Centreon, Saleor and
      * Socioboard do), and demoting the whole compose over it wrote the wrong
-     * container topology. A datastore's `./data:/var/lib/mysql` is not reached
-     * here: that service carries an `image:`, and the caller only asks about
-     * services that `build:`.
+     * container topology. Nor when it is a log directory. A datastore's
+     * `./data:/var/lib/mysql` is not reached here: that service carries an
+     * `image:`, and the caller only asks about services that `build:`.
      *
      * @param array<string, mixed> $service
      */
@@ -637,7 +639,7 @@ class ComposeFileInspector
             if (!str_starts_with($source, './')) {
                 continue;
             }
-            if ($readOnly || self::mountsSingleFile($source, $target)) {
+            if ($readOnly || self::mountsSingleFile($source, $target) || self::mountsLogDirectory($source, $target)) {
                 continue;
             }
 
@@ -645,6 +647,26 @@ class ComposeFileInspector
         }
 
         return null;
+    }
+
+    /**
+     * `./nginx/log:/var/log/nginx`, `./logs:/app/logs`: a directory the
+     * service only writes its logs to. It holds no source and the stack runs
+     * with it empty, so it says nothing about a workstation.
+     */
+    private static function mountsLogDirectory(string $source, string $target): bool
+    {
+        $target = rtrim($target, '/');
+        if ($target === '/var/log' || str_starts_with($target, '/var/log/')) {
+            return true;
+        }
+        foreach ([$source, $target] as $path) {
+            if (preg_match('/^logs?$/i', basename(rtrim($path, '/'))) === 1) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

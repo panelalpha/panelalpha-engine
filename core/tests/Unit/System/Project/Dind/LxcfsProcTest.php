@@ -3,7 +3,9 @@
 namespace Tests\Unit\System\Project\Dind;
 
 use App\System;
+use App\System\Project\Dind;
 use App\System\Project\Dind\LxcfsProc;
+use App\System\Project\Dind\ShellOperations;
 use Illuminate\Support\Facades\Blade;
 use Symfony\Component\Yaml\Yaml;
 use Tests\TestCase;
@@ -45,7 +47,10 @@ class LxcfsProcTest extends TestCase
     {
         $volumes = $this->renderedVolumes(LxcfsProc::mounts(LxcfsProc::FILES, true));
 
-        $binds = array_values(array_filter($volumes, 'is_array'));
+        $binds = array_values(array_filter(
+            $volumes,
+            static fn ($v): bool => is_array($v) && str_starts_with((string) $v['target'], '/proc/')
+        ));
         $this->assertSame(
             ['/proc/meminfo', '/proc/cpuinfo', '/proc/stat', '/proc/loadavg', '/proc/diskstats'],
             array_column($binds, 'target')
@@ -57,6 +62,45 @@ class LxcfsProcTest extends TestCase
         }
         // The account's own mounts are still there.
         $this->assertContains('./services/:/etc/s6/account/:ro', $volumes);
+    }
+
+    /** The account's own dockerd binds the same files into the app containers. */
+    public function test_the_account_gets_the_lxcfs_directory_for_its_own_containers(): void
+    {
+        $volumes = $this->renderedVolumes(['meminfo']);
+
+        $this->assertContains(
+            ['type' => 'bind', 'source' => LxcfsProc::PROC_DIR, 'target' => LxcfsProc::PROC_DIR, 'read_only' => true],
+            $volumes
+        );
+    }
+
+    public function test_the_account_reports_the_files_its_containers_can_bind(): void
+    {
+        $this->assertSame(['meminfo', 'loadavg'], LxcfsProc::inAccount($this->accountAnswering("loadavg\nmeminfo\n")));
+    }
+
+    /** An account created before the directory was mounted: binding a missing source would fail the deploy. */
+    public function test_an_account_without_the_directory_binds_nothing(): void
+    {
+        $this->assertSame([], LxcfsProc::inAccount($this->accountAnswering('')));
+        $this->assertSame([], LxcfsProc::inAccount($this->accountAnswering(new \RuntimeException('container not running'))));
+    }
+
+    private function accountAnswering(string|\Throwable $output): Dind
+    {
+        $system = $this->createStub(System::class);
+        if ($output instanceof \Throwable) {
+            $system->method('exec')->willThrowException($output);
+        } else {
+            $system->method('exec')->willReturn($output);
+        }
+        $dind = $this->createStub(Dind::class);
+        $dind->method('system')->willReturn($system);
+        $dind->method('composeFilePath')->willReturn('/home/alice/docker-compose.yml');
+        $dind->method('shell')->willReturnCallback(static fn () => new ShellOperations($dind));
+
+        return $dind;
     }
 
     /** sysbox-fs already serves these two in the account; lxcfs would stack a second FUSE layer. */

@@ -52,6 +52,18 @@ The assistant passes the token's reference, such as `vault:7`, in place of the t
 
 A project stores the token it was given. Deleting a vault entry does not take it away from projects that already used it; to change a project's token, give it the new one. Pasting again on the old link does not change a stored secret.
 
+## A deploy key instead of a token
+
+A deploy key gives the engine read access to one repository and nothing else. Ask for one:
+
+```text
+Create a deploy key for the project shop and connect git@github.com:acme/shop.git, branch main.
+```
+
+The assistant creates the project's key and shows you its public half, a line that starts with `ssh-ed25519`. Add that line to the repository as a read-only deploy key (on GitHub: **Settings > Deploy keys**), then tell the assistant you are done. The engine connects the repository over SSH and deploys it. Later pulls and rebuilds use the same key. The private half is stored encrypted and never leaves the engine.
+
+The engine checks the server's identity on every connection. It knows github.com, gitlab.com and bitbucket.org already. For your own git server, name it when the key is created, for example `git.example.com` or `git.example.com:2222`. The engine reads that server's keys once and trusts only those afterwards. If the server's key changes later, the connection is refused; delete the deploy key and create it again to trust the new one.
+
 ## A zip of files, not a repository
 
 ```text

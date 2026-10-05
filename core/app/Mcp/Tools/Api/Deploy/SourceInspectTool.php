@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Inspect an application source and report its stack, ports and services
 
-    Detects what an application is without deploying it. The source may be a Git repository URL, an absolute path on this server, or the username of an existing project (its files under the account home directory). Git sources are cloned shallow into a temporary directory and removed again. Values from .env files are never returned - only the variable names. A project username returns the same report as GET /projects/{username}/inspect, including the `deployment` snapshot its last deploy froze and the `drift` between that and the files on disk - so a caller that already has a username does not need the other endpoint.
+    Detects what an application is without deploying it. The source may be a Git repository URL, an absolute path on this server, or the username of an existing project (its files under the account home directory). A public github.com repository is read from its file list and only the files detection reads are fetched; any other Git source, or one that cannot be read that way, is cloned shallow into a temporary directory and removed again. `source.method` says which (`tree` or `clone`). Values from .env files are never returned - only the variable names. A project username returns the same report as GET /projects/{username}/inspect, including the `deployment` snapshot its last deploy froze and the `drift` between that and the files on disk - so a caller that already has a username does not need the other endpoint.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]

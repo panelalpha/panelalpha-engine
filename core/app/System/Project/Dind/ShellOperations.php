@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\Exceptions\BuildStalledException;
+use App\Exceptions\DiskLimitException;
 use App\Exceptions\DeployCancelledException;
 use App\Exceptions\DockerErrorException;
 use App\Lib\Deploy\DeployLog\DeployLogger;
@@ -140,6 +141,59 @@ final class ShellOperations
     }
 
     /**
+     * Run as the account user and hand each chunk of output to $onOutput as it arrives.
+     * $onIdle is called after every $idleSeconds without output; throwing from it stops the run.
+     *
+     * @param list<string> $cmd
+     * @param callable(string, string): void $onOutput
+     * @param ?callable(): void $onIdle
+     */
+    public function followAsUser(array $cmd, int $timeout, callable $onOutput, ?callable $onIdle = null, int $idleSeconds = 2): void
+    {
+        $username = $this->project->username();
+        $cmdStr = implode(' ', array_map('escapeshellarg', $cmd));
+
+        $lastOutput = microtime(true);
+        $output = function (string $type, string $data) use ($onOutput, &$lastOutput): void {
+            $lastOutput = microtime(true);
+            $onOutput($type, $data);
+        };
+        // Process::wait() returns to us only when output arrives, and a quiet
+        // service may print nothing for minutes; poll here instead. The process
+        // is started without a callback, so its output is read here too.
+        $poll = $onIdle === null ? null : function (Process $process) use ($output, $onIdle, $idleSeconds, &$lastOutput): void {
+            do {
+                $running = $process->isRunning();
+                $process->checkTimeout();
+                $out = $process->getIncrementalOutput();
+                $err = $process->getIncrementalErrorOutput();
+                $process->clearOutput()->clearErrorOutput();
+                if ($out !== '') {
+                    $output(Process::OUT, $out);
+                }
+                if ($err !== '') {
+                    $output(Process::ERR, $err);
+                }
+                if ($running && microtime(true) - $lastOutput >= $idleSeconds) {
+                    $lastOutput = microtime(true);
+                    $onIdle();
+                }
+                if ($running) {
+                    usleep(100_000);
+                }
+            } while ($running);
+        };
+
+        $this->project->system()->runProcessWithCallbacks(
+            $this->wrap(['su', '-s', '/bin/bash', $username, '-c', $cmdStr]),
+            [],
+            $timeout,
+            $poll,
+            $output,
+        );
+    }
+
+    /**
      * execAsUser() with the project's env vars exported, so a recipe hook can
      * check them (a precheck refusing a deploy for a missing token). The values
      * go through a 0600 file in the home, never argv or the deploy log.
@@ -223,13 +277,14 @@ final class ShellOperations
     public function streamProcess(array $cmd, array $env, int $timeout, DeployLogger $logger): Process
     {
         $idle = (int) config('deploy.step_idle_timeout', 900);
-        $tag = $idle > 0 ? bin2hex(random_bytes(6)) : null;
+        $diskFull = $this->diskLimitProbe();
+        $tag = $idle > 0 || $diskFull !== null ? bin2hex(random_bytes(6)) : null;
         $watchdog = null;
         if ($tag !== null) {
             $label = self::stepLabel($cmd);
             $cmd = $this->tagStep($cmd, $tag);
             $tagged = $cmd;
-            $watchdog = new StepWatchdog($idle, $label, fn (): bool => $this->stepIsBusy($tagged, $tag));
+            $watchdog = new StepWatchdog(max(0, $idle), $label, fn (): bool => $this->stepIsBusy($tagged, $tag), $diskFull);
         }
 
         try {
@@ -250,12 +305,35 @@ final class ShellOperations
             $logger->error($e->getMessage());
             $this->stopTaggedStep($cmd, (string) $tag);
             throw $e;
+        } catch (DiskLimitException $e) {
+            $logger->flushBuffers();
+            $logger->error($e->getMessage());
+            $this->stopTaggedStep($cmd, (string) $tag);
+            // Give back what the step took, a half-done pull included.
+            try {
+                $this->project->innerDocker()->reclaimStorageAfterDiskLimit();
+            } catch (\Throwable $reclaim) {
+                $logger->warn('Could not reclaim the account\'s Docker storage: ' . $reclaim->getMessage());
+            }
+            throw $e;
         } finally {
             $logger->setPid(null);
             $logger->flushBuffers();
         }
 
         return $process;
+    }
+
+    /** @return ?\Closure(): ?string */
+    private function diskLimitProbe(): ?\Closure
+    {
+        try {
+            $limit = StepDiskLimit::for($this->project);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $limit === null ? null : static fn (): ?string => $limit->reason();
     }
 
     /**

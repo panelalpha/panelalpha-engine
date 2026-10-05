@@ -6,6 +6,7 @@ use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DockerErrorException;
 use App\Exceptions\NotFoundException;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Validation\ValidationException;
@@ -98,6 +99,58 @@ class ConsoleFailureRenderingTest extends TestCase
         $this->assertSame(1, $exit);
         $this->assertStringContainsString('boom', $stdout . $stderr);
         $this->assertStringContainsString('In ConsoleFailureRenderingTest.php line', $stdout . $stderr);
+    }
+
+    /** Collision wraps the handler like this outside tests and dumps every exception. */
+    private function wrapHandlerLikeCollision(): void
+    {
+        $inner = $this->app->make(ExceptionHandler::class);
+        $this->app->instance(ExceptionHandler::class, new class ($inner) implements ExceptionHandler {
+            public function __construct(private ExceptionHandler $inner)
+            {
+            }
+
+            public function report(\Throwable $e)
+            {
+                $this->inner->report($e);
+            }
+
+            public function shouldReport(\Throwable $e)
+            {
+                return $this->inner->shouldReport($e);
+            }
+
+            public function render($request, \Throwable $e)
+            {
+                return $this->inner->render($request, $e);
+            }
+
+            public function renderForConsole($output, \Throwable $e)
+            {
+                $output->writeln('DUMP ' . get_class($e));
+            }
+        });
+    }
+
+    public function test_a_wrapping_handler_does_not_turn_a_not_found_into_a_dump(): void
+    {
+        $this->wrapHandlerLikeCollision();
+
+        [$exit, $stdout, $stderr] = $this->runThrowing(new NotFoundException("Project 'x' not found."));
+
+        $this->assertSame(1, $exit);
+        $this->assertSame('', $stdout);
+        $this->assertSame("Project 'x' not found.\n", $stderr);
+    }
+
+    public function test_a_wrapping_handler_still_renders_anything_else(): void
+    {
+        $this->wrapHandlerLikeCollision();
+
+        [$exit, $stdout] = $this->runThrowing(new \RuntimeException('boom'));
+
+        $this->assertSame(1, $exit);
+        $this->assertSame("DUMP RuntimeException\n", $stdout);
     }
 
     public function test_http_still_answers_a_plain_not_found(): void

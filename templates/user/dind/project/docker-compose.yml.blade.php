@@ -36,6 +36,10 @@ services:
 @foreach ($proc_mounts ?? [] as $procFile)
       - {type: bind, source: /var/lib/lxcfs/proc/{{ $procFile }}, target: /proc/{{ $procFile }}, read_only: true}
 @endforeach
+@if (!empty($proc_mounts))
+      # The same files for the containers the account's own dockerd starts.
+      - {type: bind, source: /var/lib/lxcfs/proc, target: /var/lib/lxcfs/proc, read_only: true}
+@endif
     tty: true
     {{ !empty($cpu_limit) ? ("cpus: " . $cpu_limit) : "" }}
     {{ !empty($memory_limit) ? ("mem_limit: " . $memory_limit . "M") : "" }}

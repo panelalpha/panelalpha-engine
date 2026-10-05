@@ -136,6 +136,15 @@ class DindEntrypointInitScriptsTest extends TestCase
     }
 
     /** Without it, a dockerd OOM kill left every container Exited after s6 restarted it. */
+    /** Docker's default json-file log has no cap and lives inside the account's quota. */
+    public function test_container_logs_are_rotated_by_default(): void
+    {
+        $json = $this->daemonJson();
+
+        $this->assertSame('json-file', $json['log-driver'] ?? null);
+        $this->assertSame(['max-size' => '10m', 'max-file' => '3'], $json['log-opts'] ?? null);
+    }
+
     public function test_containers_outlive_a_daemon_restart(): void
     {
         $this->assertTrue($this->daemonJson()['live-restore'] ?? null);

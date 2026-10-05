@@ -246,7 +246,7 @@ final class FrameworkService
      * before the shell ever sees it. Undoubled, that same script's `"$jar"`
      * arrived empty and compose warned about a variable nobody wrote.
      */
-    private static function shellCommand(string $command): string
+    public static function shellCommand(string $command): string
     {
         $compound = preg_match('/(;|&&|\|\||\n)/', $command) === 1
             || str_starts_with(trim($command), 'exec ');

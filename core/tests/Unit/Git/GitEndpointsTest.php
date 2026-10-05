@@ -2,7 +2,9 @@
 
 namespace Tests\Unit\Git;
 
+use App\Jobs\DeployProject;
 use App\Models\DeployHook;
+use App\Models\Task;
 use App\Models\User;
 use App\System\Project\Git\CheckoutRedeploy;
 use Tests\Unit\DeployHook\DeployHookTestCase;
@@ -54,6 +56,8 @@ class GitEndpointsTest extends DeployHookTestCase
             'tracking' => null,
             'commits_ahead' => null,
             'commits_behind' => null,
+            'connecting' => false,
+            'connecting_since' => null,
         ];
     }
 
@@ -101,7 +105,7 @@ class GitEndpointsTest extends DeployHookTestCase
 
         $response->assertStatus(422);
         $this->assertSame(
-            '{"message":"Invalid git ref name.","errors":{"branch":["Invalid git ref name."]}}',
+            '{"message":"Invalid git ref name.","errors":{"branch":["Invalid git ref name."]},"problems":[{"field":"branch","code":"branch_invalid","message":"Invalid git ref name."}]}',
             $response->getContent(),
         );
     }
@@ -114,7 +118,7 @@ class GitEndpointsTest extends DeployHookTestCase
 
         $response->assertStatus(422);
         $this->assertSame(
-            '{"message":"Git is not connected.","errors":{"git":["Git is not connected."]}}',
+            '{"message":"Git is not connected.","errors":{"git":["Git is not connected."]},"problems":[{"field":"git","code":"git_invalid","message":"Git is not connected."}]}',
             $response->getContent(),
         );
         $this->assertSame(0, $this->redeploy->requests);
@@ -133,6 +137,23 @@ class GitEndpointsTest extends DeployHookTestCase
             json_encode(['message' => 'fatal: could not read from https://user:pw@github.com/x.git']),
             $response->getContent(),
         );
+    }
+
+    public function test_changing_to_a_branch_the_remote_lacks_is_a_422_with_the_closest_one(): void
+    {
+        $this->user('main');
+        $this->withRepository();
+        $this->respond("'fetch' 'origin'", 128, "fatal: couldn't find remote ref mian\n");
+        $sha = str_repeat('a', 40);
+        $this->respond("'ls-remote' '--heads' 'origin'", 0, "{$sha}\trefs/heads/main\n{$sha}\trefs/heads/develop\n");
+
+        $this->putJson(self::URL . '/change-branch', ['branch' => 'mian'])
+            ->assertStatus(422)
+            ->assertJsonPath('problems.0.field', 'git')
+            ->assertJsonPath('problems.0.code', 'git_branch_not_found')
+            ->assertJsonPath('problems.0.message', "The remote has no branch named 'mian'. Did you mean 'main'?");
+        $this->assertFalse($this->called("'checkout'"));
+        $this->assertSame(0, $this->redeploy->requests);
     }
 
     public function test_branches_and_commits(): void
@@ -162,6 +183,37 @@ class GitEndpointsTest extends DeployHookTestCase
         $response->assertStatus(200);
         $this->assertSame('deploy', $response->json('data.managed_by'));
         $this->assertSame('ghp_x', $user->fresh()->getDetails()['git_token']);
+    }
+
+    public function test_a_change_while_the_project_is_being_created_is_a_409(): void
+    {
+        $this->siteGitUser();
+        $task = Task::start(DeployProject::class, 'default', 'alice');
+        $this->withoutRepository();
+        $body = ['path' => 'public_html', 'repo_url' => self::REPO, 'branch' => 'main'];
+
+        $changes = [
+            '/connect' => 'postJson', '/disconnect' => 'postJson', '/change-branch' => 'putJson',
+            '/update-credentials' => 'putJson', '/pull' => 'postJson', '/push' => 'postJson', '/revert' => 'postJson',
+        ];
+        foreach ($changes as $endpoint => $method) {
+            $response = $this->{$method}(self::URL . $endpoint, $body);
+            $response->assertStatus(409);
+            $this->assertSame(
+                "Project 'alice' is still being created; try again when its deploy has finished.",
+                $response->json('message'),
+                $endpoint,
+            );
+        }
+        $this->assertSame([], $this->calls(), 'nothing may reach the account while it is being created');
+        $this->getJson(self::URL . '/status?path=public_html')->assertStatus(200);
+
+        $task->markRunning();
+        $this->postJson(self::URL . '/connect', $body)->assertStatus(409);
+
+        $task->markCompleted();
+        $this->postJson(self::URL . '/connect', $body)->assertStatus(200);
+        $this->assertTrue($this->called("'ls-remote' '--heads'"));
     }
 
     public function test_disconnect_forgets_the_checkout_and_its_hook(): void

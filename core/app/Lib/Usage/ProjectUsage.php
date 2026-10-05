@@ -7,6 +7,7 @@ use App\Integrations\Statistics\Statistics;
 use App\Models\Domain;
 use App\Models\User;
 use App\System;
+use App\System\Project\Dind;
 use Illuminate\Support\Facades\DB;
 
 /** Resource usage and transfer for a project, shared by the API and the CLI. */
@@ -21,7 +22,10 @@ class ProjectUsage
      */
     public function summary(User $user, ?System $system = null): array
     {
-        $diskUsage = $user->project($system)->fileManager()->diskUsage();
+        $project = $user->project($system);
+        $diskUsage = $project->fileManager()->diskUsage();
+        // Only a DinD account keeps its containers' logs inside its own home.
+        $logBytes = $project->runtime() instanceof Dind ? $project->fileManager()->containerLogBytes() : 0;
 
         $query = "SELECT ";
         $query .= "(SELECT COUNT(*) FROM domains WHERE user_id = ? AND type = 'addon') AS addon_domains, ";
@@ -40,6 +44,10 @@ class ProjectUsage
             'storage' => [
                 'usage' => $diskUsage,
                 'maximum' => $user->getDiskSpaceLimit(),
+            ],
+            'logs' => [
+                'usage' => $logBytes,
+                'maximum' => null,
             ],
             'bandwidth' => [
                 'usage' => $this->statistics->projectCalendarMonthBytes($this->domainNames($user)),

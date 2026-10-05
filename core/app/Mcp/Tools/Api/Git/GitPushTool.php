@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Push local git changes
 
-    Push local git changes. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. If the working tree is dirty this tool will commit all changes itself, then push. Returns 422 `Pull first.` when behind the remote, or when managed_by is `deploy`.
+    Push local git changes. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. If the working tree is dirty this tool will commit all changes itself, then push. Returns 422 `Pull first.` when behind the remote, or when managed_by is `deploy`.
     MARKDOWN)]
 #[IsDestructive]
 class GitPushTool extends ApiTool
@@ -68,7 +68,7 @@ class GitPushTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
+            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).'),
         ];
     }
 }

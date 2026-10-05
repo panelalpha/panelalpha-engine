@@ -32,6 +32,16 @@ If you create a project without naming a domain, the engine picks the best publi
 
 A `panelalpha.online` name is yours for as long as the project exists, and is released again when you remove it.
 
+## Extra names for an app that needs them
+
+Some applications answer on a few fixed names next to their main one, for example an API on its own hostname. On a `panelalpha.online` name, a project can add a few sibling names beside its own, such as `api-shop.panelalpha.online` next to `shop.panelalpha.online`. Each one has a trusted certificate, reaches the same site, and arrives with the name the visitor typed, so the application can tell them apart:
+
+```text
+Add api-shop.panelalpha.online as an extra name for shop.panelalpha.online.
+```
+
+This works for applications that let you choose those names (an `API_DOMAIN` setting or similar). An application that insists on a name *under* its own, such as `api.shop.panelalpha.online`, cannot get one on `panelalpha.online`. Give it a domain of your own, point its DNS at this server, and add the extra names (`api.shop.example.com`, ...) to the project as well, as addon domains, each with its own certificate.
+
 ## Reach a site through Cloudflare
 
 Instead of pointing a DNS record at this VPS, you can have visitors reach a repository-deployed site through Cloudflare, with Cloudflare providing HTTPS. You save a Cloudflare API token on the project, then ask the assistant to attach the hostname:

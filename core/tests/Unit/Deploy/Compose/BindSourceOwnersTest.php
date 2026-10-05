@@ -7,6 +7,7 @@ use App\Models\User;
 use App\System;
 use App\System\Project\Dind;
 use App\System\Project\Dind\BindSourceOwners;
+use App\System\Project\Dind\InnerDocker;
 use App\System\Project\Dind\ShellOperations;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
@@ -78,6 +79,34 @@ class BindSourceOwnersTest extends TestCase
         $this->assertSame('0644', $this->mode('/../outside/secret'));
     }
 
+    /**
+     * kassambara/wordpress-docker-compose: `wpcli` is a tag the file builds, so
+     * asking a registry for it only logged `docker.io/library/wpcli:latest: not
+     * found`; its user comes from its Dockerfile. `wordpress:${WORDPRESS_VERSION:-latest}`
+     * is fetched under the name compose runs, not the raw string.
+     */
+    public function test_a_tag_the_file_builds_is_never_fetched_and_its_user_comes_from_its_dockerfile(): void
+    {
+        mkdir($this->project . '/wordpress', 0755);
+        mkdir($this->project . '/wpcli', 0755);
+        file_put_contents($this->project . '/wpcli/Dockerfile', "FROM wordpress:cli\nUSER root\nRUN apk add make\nUSER 33:33\nCMD [\"wp\", \"shell\"]\n");
+
+        $lines = $this->apply(
+            "services:\n  wordpress:\n    image: wordpress:\${WORDPRESS_VERSION:-latest}\n    volumes:\n      - \${WORDPRESS_DATA_DIR:-./wordpress}:/var/www/html\n"
+            . "  wpcli:\n    build: ./wpcli/\n    image: wpcli\n    volumes:\n      - \${WORDPRESS_DATA_DIR:-./wordpress}:/var/www/html\n"
+        );
+
+        $this->assertSame(['wordpress:latest'], $this->fetched);
+        $this->assertContains(
+            'Service wpcli runs as uid 33 and writes to wordpress through a bind mount; handed them to that uid (the account keeps group write)',
+            $lines,
+            implode("\n", $lines)
+        );
+    }
+
+    /** @var list<string> images ensureImage() was asked for */
+    private array $fetched = [];
+
     /** @return list<string> the deploy log after apply() */
     private function apply(string $compose): array
     {
@@ -129,6 +158,11 @@ class BindSourceOwnersTest extends TestCase
         $dind->method('userAppComposeFileToRun')->willReturn($composeFile);
         $dind->method('userAppDirPath')->willReturn($this->project);
         $dind->method('shell')->willReturnCallback(fn (): ShellOperations => new ShellOperations($dind));
+        $inner = $this->createStub(InnerDocker::class);
+        $inner->method('ensureImage')->willReturnCallback(function (string $image): void {
+            $this->fetched[] = $image;
+        });
+        $dind->method('innerDocker')->willReturn($inner);
 
         (new BindSourceOwners($dind))->apply();
 

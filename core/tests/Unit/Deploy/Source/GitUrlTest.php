@@ -47,6 +47,22 @@ class GitUrlTest extends TestCase
         );
     }
 
+    public function test_sanitize_keeps_an_ssh_user_and_drops_only_its_password(): void
+    {
+        $this->assertSame(
+            'ssh://git@10.10.0.44:22277/home/git/r7.git',
+            GitUrl::sanitize('ssh://git@10.10.0.44:22277/home/git/r7.git')
+        );
+        $this->assertSame(
+            'ssh://deploy@git.example.com/org/repo.git',
+            GitUrl::sanitize('ssh://deploy:s3cret@git.example.com/org/repo.git')
+        );
+        $this->assertSame(
+            'https://github.com/org/repo.git',
+            GitUrl::sanitize('https://ghp_token@github.com/org/repo.git')
+        );
+    }
+
     public function test_sanitize_leaves_clean_url(): void
     {
         $this->assertSame(
@@ -134,5 +150,22 @@ class GitUrlTest extends TestCase
             static fn (string $arg): bool => str_starts_with($arg, 'GIT_ASKPASS=')
         ));
         $this->assertSame(['GIT_ASKPASS=/home/u/.pa-askpass'], $askPass, 'only the real helper');
+    }
+
+    /** One helper for the create-time probe and the account's clone and fetches. */
+    public function test_the_http11_retry_goes_right_after_git_bare_or_wrapped(): void
+    {
+        $this->assertTrue(GitUrl::refusedOverHttp2("error: RPC failed\nfatal: Expected flush after ref listing"));
+        $this->assertFalse(GitUrl::refusedOverHttp2('fatal: repository not found'));
+
+        $this->assertSame(
+            ['git', '-c', 'http.version=HTTP/1.1', '-C', '/p', 'fetch', 'origin'],
+            GitUrl::overHttp11(['git', '-C', '/p', 'fetch', 'origin'])
+        );
+        $wrapped = GitUrl::withAskPass(['git', 'ls-remote', '--', 'https://x.test/r.git'], '/tmp/ap');
+        $retried = GitUrl::overHttp11($wrapped);
+        $git = array_search('git', $retried, true);
+        $this->assertSame(['git', '-c', 'http.version=HTTP/1.1', 'ls-remote'], array_slice($retried, (int) $git, 4));
+        $this->assertSame(array_slice($wrapped, 0, (int) $git), array_slice($retried, 0, (int) $git), 'the env wrapper is kept');
     }
 }

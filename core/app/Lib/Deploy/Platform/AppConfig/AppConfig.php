@@ -48,8 +48,11 @@ final class AppConfig
      */
     private const OWN_KEYS = [
         '$schema', 'description', 'extends', 'env',
-        'precheck', 'prepare', 'entrypoint', 'commands', 'files', 'app', 'compose', 'git',
+        'precheck', 'prepare', 'entrypoint', 'commands', 'files', 'app', 'compose', 'git', 'health',
     ];
+
+    /** Ceiling for `health: {start_period}`, in seconds. */
+    public const MAX_START_PERIOD = 1800;
 
     /** Names the shipped recipe this application is an instance of. */
     public const EXTENDS_KEY = 'extends';
@@ -75,6 +78,7 @@ final class AppConfig
         private readonly ?CredentialSpec $credentials,
         private readonly bool $fullGitHistory = false,
         private readonly ?string $portScheme = null,
+        private readonly ?int $startPeriod = null,
     ) {
     }
 
@@ -135,6 +139,7 @@ final class AppConfig
             $config?->credentials(),
             $config?->fullGitHistory() ?? false,
             $config?->portScheme(),
+            $config?->startPeriod(),
         );
     }
 
@@ -184,6 +189,7 @@ final class AppConfig
             ),
             self::readGitHistory($raw) === self::GIT_HISTORY_FULL,
             self::readPortScheme($raw),
+            self::readStartPeriod($raw),
         );
     }
 
@@ -221,6 +227,7 @@ final class AppConfig
             $config?->credentials(),
             $config?->fullGitHistory() ?? false,
             $config?->portScheme(),
+            $config?->startPeriod(),
         );
 
         return $appConfig->isEmpty() ? null : $appConfig;
@@ -261,7 +268,8 @@ final class AppConfig
             && $this->manifest === null
             && $this->credentials === null
             && !$this->fullGitHistory
-            && $this->portScheme === null;
+            && $this->portScheme === null
+            && $this->startPeriod === null;
     }
 
     /**
@@ -420,6 +428,15 @@ final class AppConfig
         return $this->portScheme;
     }
 
+    /**
+     * `health: {start_period}`: how long the app may take to bind its port
+     * after the deploy's own probe gave up. Null means the engine's default.
+     */
+    public function startPeriod(): ?int
+    {
+        return $this->startPeriod;
+    }
+
     // -- YAML reading ------------------------------------------------------
 
     /**
@@ -478,6 +495,25 @@ final class AppConfig
         }
 
         return $scheme;
+    }
+
+    /** @param array<string, mixed> $raw */
+    private static function readStartPeriod(array $raw): ?int
+    {
+        $health = $raw['health'] ?? null;
+        if ($health === null) {
+            return null;
+        }
+        $period = is_array($health) ? ($health['start_period'] ?? null) : null;
+        if (!is_array($health) || array_diff(array_keys($health), ['start_period']) !== []
+            || !is_int($period) || $period < 0 || $period > self::MAX_START_PERIOD
+        ) {
+            throw new ManifestException(
+                self::YAML_FILENAME . ": 'health' must be {start_period: <seconds, 0-" . self::MAX_START_PERIOD . '>}'
+            );
+        }
+
+        return $period;
     }
 
     /** @param array<string, mixed> $raw */

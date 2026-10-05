@@ -46,6 +46,15 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class UserController extends Controller
 {
+    /** How a create answers with what it found in the repository before cloning it. */
+    private const INSPECTION_DOC = "A public github.com repository with no git_token is inspected from its "
+        . "file list before anything is created, as POST /source/inspect does, in seconds. It never "
+        . "refuses the create: `data.inspection` carries `verdict` and `strategy`, and when the "
+        . "repository may not deploy as it stands (`verdict` not_deployable, placeholder or "
+        . "no_start_command) also `reason` and `suggestion`, which open the deploy log as warnings. "
+        . "It is null when nothing was inspected: no git_repo, another host, a token, or a file "
+        . "list that could not be read within 20 seconds.";
+
     #[OA\Get(
         path: '/projects',
         summary: 'List projects (paginated)',
@@ -128,12 +137,14 @@ class UserController extends Controller
             . "<name>.<cert_domain> from GET /system/info, which resolves to this host but is served "
             . "a self-signed certificate. "
             . "X-Deploy-Stream is not supported here — use POST /users for a synchronous create "
-            . "with optional NDJSON streaming.",
+            . "with optional NDJSON streaming. " . self::INSPECTION_DOC,
         summary: 'Create a new hosting project (async)',
         x: ['mcp-description' => 'Creates the account now and deploys it in the background: answers 202 with a task `id`. '
             . 'Poll task_get until it is completed, failed or cancelled. Leave `domain` out: the engine picks '
             . 'the best public name it can, a free panelalpha.online one when available, and project_get '
-            . 'says which (details.domain). Resource limits are set afterwards with project_update.'],
+            . 'says which (details.domain). Resource limits are set afterwards with project_update. '
+            . 'For a public github.com repository `data.inspection` in the answer is what its file list says '
+            . 'before the clone: a `reason` there means it may not deploy, and the project is created anyway.'],
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             // Nothing is required: validation has never demanded an email, and
@@ -203,11 +214,13 @@ class UserController extends Controller
                     type: 'string',
                     nullable: true,
                     example: 'https://github.com/owner/repo.git',
-                    description: 'HTTPS clone URL. SSH remotes (git@host:owner/repo.git, ssh://...) are '
-                        . 'not supported: the engine clones anonymously or with `git_token` and holds no '
-                        . 'SSH keys -- a 422 names the HTTPS spelling to use instead. A schemeless '
-                        . 'github.com/owner/repo is accepted and has the scheme filled in.',
-                    x: ['mcp-description' => 'HTTPS clone URL; SSH remotes are refused. github.com/owner/repo also works.']
+                    description: 'HTTPS clone URL. An SSH remote (git@host:owner/repo.git, ssh://...) is '
+                        . 'refused here, because it clones only with the project\'s deploy key and a project '
+                        . 'has none until it exists: create the project without git_repo, POST '
+                        . '/projects/{username}/git/deploy-key, add the returned public key to the repository, '
+                        . 'then POST /projects/{username}/git/connect. A schemeless github.com/owner/repo is '
+                        . 'accepted and has the scheme filled in.',
+                    x: ['mcp-description' => 'HTTPS clone URL; github.com/owner/repo also works. For an SSH remote, create the project without it, then git_deploy_key_create and git_connect.']
                 ),
                 new OA\Property(property: 'git_branch', type: 'string', nullable: true),
                 new OA\Property(
@@ -258,7 +271,7 @@ class UserController extends Controller
         )),
         tags: ['Projects'],
         responses: [
-            new OA\Response(response: 202, description: 'Account created; deploy queued', content: new OA\JsonContent(
+            new OA\Response(response: 202, description: 'Account created; deploy queued. `data.inspection` as described above.', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
             new OA\Response(response: 400, description: 'X-Deploy-Stream is not supported on the async path'),
@@ -275,7 +288,7 @@ class UserController extends Controller
 
         $task = $creator->queue(self::newProjectInput($request));
 
-        return TaskResource::make($task)->response()->setStatusCode(202);
+        return self::withInspection(TaskResource::make($task)->response(), $creator)->setStatusCode(202);
     }
 
     #[OA\Post(
@@ -293,7 +306,7 @@ class UserController extends Controller
             . "released when a tunnel is deleted -- add a short random suffix, and on 422 pick "
             . "another. Where there is no license key or no public IPv4, fall back to "
             . "<name>.<cert_domain> from GET /system/info, which resolves to this host but is served "
-            . "a self-signed certificate.",
+            . "a self-signed certificate. " . self::INSPECTION_DOC,
         summary: 'Create a new hosting project (synchronous)',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -364,11 +377,13 @@ class UserController extends Controller
                     type: 'string',
                     nullable: true,
                     example: 'https://github.com/owner/repo.git',
-                    description: 'HTTPS clone URL. SSH remotes (git@host:owner/repo.git, ssh://...) are '
-                        . 'not supported: the engine clones anonymously or with `git_token` and holds no '
-                        . 'SSH keys -- a 422 names the HTTPS spelling to use instead. A schemeless '
-                        . 'github.com/owner/repo is accepted and has the scheme filled in.',
-                    x: ['mcp-description' => 'HTTPS clone URL; SSH remotes are refused. github.com/owner/repo also works.']
+                    description: 'HTTPS clone URL. An SSH remote (git@host:owner/repo.git, ssh://...) is '
+                        . 'refused here, because it clones only with the project\'s deploy key and a project '
+                        . 'has none until it exists: create the project without git_repo, POST '
+                        . '/projects/{username}/git/deploy-key, add the returned public key to the repository, '
+                        . 'then POST /projects/{username}/git/connect. A schemeless github.com/owner/repo is '
+                        . 'accepted and has the scheme filled in.',
+                    x: ['mcp-description' => 'HTTPS clone URL; github.com/owner/repo also works. For an SSH remote, create the project without it, then git_deploy_key_create and git_connect.']
                 ),
                 new OA\Property(property: 'git_branch', type: 'string', nullable: true),
                 new OA\Property(
@@ -419,11 +434,11 @@ class UserController extends Controller
         )),
         tags: ['Projects'],
         responses: [
-            new OA\Response(response: 201, description: 'Project created', content: new OA\JsonContent(ref: '#/components/schemas/User')),
+            new OA\Response(response: 201, description: 'Project created; the User resource plus `inspection`, as described above.', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
-    public function store(UserStoreRequest $request, ProjectCreator $creator): UserResource|StreamedResponse
+    public function store(UserStoreRequest $request, ProjectCreator $creator): JsonResponse|StreamedResponse
     {
         // Validate the streaming opt-in up front so an unknown value never
         // leaves a half-created account behind.
@@ -442,7 +457,22 @@ class UserController extends Controller
 
         $creator->deploy($user, $deployLogger);
 
-        return new UserResource($user);
+        return self::withInspection((new UserResource($user))->response(), $creator);
+    }
+
+    /**
+     * `data.inspection`: what the inspection before the clone found, or null
+     * when it did not run. Only a create carries it.
+     */
+    private static function withInspection(JsonResponse $response, ProjectCreator $creator): JsonResponse
+    {
+        $payload = $response->getData(true);
+        if (is_array($payload) && is_array($payload['data'] ?? null)) {
+            $payload['data']['inspection'] = $creator->inspection()?->toResponse();
+            $response->setData($payload);
+        }
+
+        return $response;
     }
 
     /** The create as ProjectCreator takes it: validated fields, plus the raw ones it reads itself. */

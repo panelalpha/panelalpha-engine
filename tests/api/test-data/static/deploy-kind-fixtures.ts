@@ -205,6 +205,17 @@ export const DEPLOY_KIND_FIXTURES: readonly DeployKindFixture[] = [
     },
   },
   {
+    // A root `<name>.dockerfile`. The page sits under web/: a root index.html would be Static.
+    id: 'dockerfile-named',
+    strategy: 'dockerfile',
+    pageMarker: 'pae-frontend:dockerfile-named',
+    files: {
+      'app.dockerfile':
+        'FROM nginx:alpine\nCOPY web/index.html /usr/share/nginx/html/index.html\nEXPOSE 80\n',
+      'web/index.html': HTML_PAGE('pae-frontend:dockerfile-named'),
+    },
+  },
+  {
     id: 'dotnet',
     strategy: 'dotnet',
     pageMarker: frontend('dotnet'),

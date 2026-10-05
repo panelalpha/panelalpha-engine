@@ -1,0 +1,221 @@
+services:
+    shlink_nginx:
+        container_name: shlink_nginx
+        image: nginx:1.25-alpine
+        ports:
+            - "8000:80"
+        volumes:
+            - ./:/home/shlink/www
+            - ./docs:/home/shlink/www/public/docs
+            - ./data/infra/vhost.conf:/etc/nginx/conf.d/default.conf
+        links:
+            - shlink_php
+
+    shlink_php:
+        container_name: shlink_php
+        user: 1000:1000
+        build:
+            context: .
+            dockerfile: ./data/infra/php.Dockerfile
+        ports:
+            - '8888:8888'
+        volumes:
+            - ./:/home/shlink/www
+            - ./data/infra/php.ini:/usr/local/etc/php/php.ini
+        links:
+            - shlink_db_mysql
+            - shlink_db_postgres
+            - shlink_db_maria
+            - shlink_db_ms
+            - shlink_redis
+            - shlink_redis_acl
+            - shlink_mercure
+            - shlink_mercure_proxy
+            - shlink_rabbitmq
+            - shlink_matomo
+        environment:
+            LC_ALL: C
+            DEFAULT_DOMAIN: localhost:8000
+        extra_hosts:
+            - 'host.docker.internal:host-gateway'
+
+    shlink_roadrunner:
+        container_name: shlink_roadrunner
+        user: 1000:1000
+        build:
+            context: .
+            dockerfile: ./data/infra/roadrunner.Dockerfile
+        ports:
+            - "8800:8080"
+        volumes:
+            - ./:/home/shlink
+            - ./data/infra/php.ini:/usr/local/etc/php/php.ini
+        links:
+            - shlink_db_mysql
+            - shlink_db_postgres
+            - shlink_db_maria
+            - shlink_db_ms
+            - shlink_redis
+            - shlink_redis_acl
+            - shlink_mercure
+            - shlink_mercure_proxy
+            - shlink_rabbitmq
+            - shlink_matomo
+        environment:
+            LC_ALL: C
+        extra_hosts:
+            - 'host.docker.internal:host-gateway'
+
+    shlink_frankenphp:
+      container_name: shlink_frankenphp
+      user: 1000:1000
+      build:
+        context: .
+        dockerfile: ./data/infra/frankenphp.Dockerfile
+      ports:
+        - "8008:8008"
+      volumes:
+        - ./:/home/shlink
+        - ./data/infra/php.ini:/usr/local/etc/php/php.ini
+        - ./data/infra/frankenphp_caddy_data:/data
+        - ./data/infra/frankenphp_caddy_config:/config
+      links:
+        - shlink_db_mysql
+        - shlink_db_postgres
+        - shlink_db_maria
+        - shlink_db_ms
+        - shlink_redis
+        - shlink_redis_acl
+        - shlink_mercure
+        - shlink_mercure_proxy
+        - shlink_rabbitmq
+        - shlink_matomo
+      environment:
+        FRANKENPHP_CONFIG: 'worker /home/shlink/bin/frankenphp-worker.php'
+        SERVER_NAME: ':8008 https:8009'
+      extra_hosts:
+        - 'host.docker.internal:host-gateway'
+      tty: true
+
+    shlink_db_mysql:
+        container_name: shlink_db_mysql
+        user: 1000:1000
+        image: mysql:8.0
+        ports:
+            - "3307:3306"
+        volumes:
+            - ./:/home/shlink/www
+            - ./data/infra/database:/var/lib/mysql
+        environment:
+            MYSQL_ROOT_PASSWORD: root
+            MYSQL_DATABASE: shlink
+
+    shlink_db_postgres:
+        container_name: shlink_db_postgres
+        user: 1000:1000
+        image: postgres:16.3-alpine
+        ports:
+            - "5434:5432"
+        volumes:
+            - ./:/home/shlink/www
+            - ./data/infra/database_pg:/var/lib/postgresql/data
+        environment:
+            POSTGRES_PASSWORD: root
+            POSTGRES_DB: shlink
+            PGDATA: /var/lib/postgresql/data/pgdata
+
+    shlink_db_maria:
+        container_name: shlink_db_maria
+        user: 1000:1000
+        image: mariadb:12.3
+        ports:
+            - "3308:3306"
+        volumes:
+            - ./:/home/shlink/www
+            - ./data/infra/database_maria:/var/lib/mysql
+        environment:
+            MYSQL_ROOT_PASSWORD: root
+            MYSQL_DATABASE: shlink
+            MYSQL_INITDB_SKIP_TZINFO: 1
+
+    shlink_db_ms:
+        container_name: shlink_db_ms
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        ports:
+            - "1433:1433"
+        environment:
+            ACCEPT_EULA: Y
+            SA_PASSWORD: "Passw0rd!"
+
+    shlink_redis:
+        container_name: shlink_redis
+        image: redis:7.4-alpine
+        ports:
+            - "6380:6379"
+
+    shlink_redis_acl:
+        container_name: shlink_redis_acl
+        image: redis:7.4-alpine
+        command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+        ports:
+            - "6382:6379"
+        volumes:
+            - ./data/infra/redis/redis-acl.conf:/usr/local/etc/redis/redis.conf
+
+    shlink_mercure_proxy:
+        container_name: shlink_mercure_proxy
+        image: nginx:1.25-alpine
+        ports:
+            - "8002:80"
+        volumes:
+            - ./:/home/shlink/www
+            - ./data/infra/mercure_proxy_vhost.conf:/etc/nginx/conf.d/default.conf
+        links:
+            - shlink_mercure
+
+    shlink_mercure:
+        container_name: shlink_mercure
+        image: dunglas/mercure:v0.18
+        ports:
+            - "3080:80"
+        environment:
+            SERVER_NAME: ":80"
+            MERCURE_PUBLISHER_JWT_KEY: mercure_jwt_key_long_enough_to_avoid_error
+            MERCURE_SUBSCRIBER_JWT_KEY: mercure_jwt_key_long_enough_to_avoid_error
+            MERCURE_EXTRA_DIRECTIVES: "cors_origins https://app.shlink.io http://localhost:3000 http://127.0.0.1:3000 http://localhost:3002 http://127.0.0.1:3002 http://localhost:3005 http://127.0.0.1:3005"
+
+    shlink_rabbitmq:
+        container_name: shlink_rabbitmq
+        image: rabbitmq:3.11-management-alpine
+        ports:
+            - "15673:15672"
+            - "5673:5672"
+        environment:
+            RABBITMQ_DEFAULT_USER: "rabbit"
+            RABBITMQ_DEFAULT_PASS: "rabbit"
+
+    shlink_swagger_ui:
+        container_name: shlink_swagger_ui
+        image: swaggerapi/swagger-ui:v5.11.3
+        ports:
+            - "8005:8080"
+        volumes:
+            - ./docs/swagger:/app
+
+    shlink_matomo:
+        container_name: shlink_matomo
+        image: matomo:5.0-apache
+        ports:
+            - "8003:80"
+        volumes:
+            # Matomo does not persist port in trusted hosts. This volume is needed to edit config afterward
+            # https://github.com/matomo-org/matomo/issues/9549
+            - ./data/infra/matomo:/var/www/html
+        links:
+            - shlink_db_mysql
+        environment:
+            MATOMO_DATABASE_HOST: "shlink_db_mysql"
+            MATOMO_DATABASE_ADAPTER: "mysql"
+            MATOMO_DATABASE_DBNAME: "matomo"
+            MATOMO_DATABASE_USERNAME: "root"
+            MATOMO_DATABASE_PASSWORD: "root"

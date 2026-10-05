@@ -2,8 +2,11 @@
 
 namespace App\Lib\Git;
 
+use App\Exceptions\ProblemException;
+use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\DeployHook\DeployHooks;
+use App\Lib\Project\ProjectCreator;
 use App\Models\User;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Git;
@@ -56,6 +59,10 @@ class GitActions
      */
     public function connectRemote(User $user, array $params): array
     {
+        $this->refuseWhileCreating($user);
+
+        $this->assertSshRemoteUsable($user, (string) ($params['repo_url'] ?? ''));
+
         return $this->run($user, $params['path'] ?? null, fn (Git $git) => $git->connect(
             $params['repo_url'] ?? '',
             $params['branch'] ?? '',
@@ -69,6 +76,8 @@ class GitActions
      */
     public function disconnect(User $user, array $params): array
     {
+        $this->refuseWhileCreating($user);
+
         return $this->run($user, $params['path'] ?? null, fn (Git $git) => $this->hooks->disconnectAndForget($user, $git));
     }
 
@@ -77,6 +86,8 @@ class GitActions
      */
     public function changeBranch(User $user, array $params): array
     {
+        $this->refuseWhileCreating($user);
+
         return $this->run($user, $params['path'] ?? null, fn (Git $git) => $git->changeBranch($params['branch']), true);
     }
 
@@ -87,6 +98,8 @@ class GitActions
      */
     public function updateCredentials(User $user, array $params): array
     {
+        $this->refuseWhileCreating($user);
+
         $provided = array_key_exists('token', $params);
 
         return $this->run(
@@ -101,6 +114,8 @@ class GitActions
      */
     public function pull(User $user, array $params): array
     {
+        $this->refuseWhileCreating($user);
+
         return $this->run($user, $params['path'] ?? null, fn (Git $git) => $git->pull($params['strategy'] ?? null), true);
     }
 
@@ -109,6 +124,8 @@ class GitActions
      */
     public function push(User $user, array $params): array
     {
+        $this->refuseWhileCreating($user);
+
         return $this->run($user, $params['path'] ?? null, fn (Git $git) => $git->push());
     }
 
@@ -117,7 +134,46 @@ class GitActions
      */
     public function revert(User $user, array $params): array
     {
+        $this->refuseWhileCreating($user);
+
         return $this->run($user, $params['path'] ?? null, fn (Git $git) => $git->revert($params['ref'] ?? null), true);
+    }
+
+    /**
+     * Create the project's SSH deploy key, or return the one it has, pinning
+     * `host` when given.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    public function deployKey(User $user, array $params): array
+    {
+        return app(DeployKey::class)->ensure($user, isset($params['host']) ? (string) $params['host'] : null);
+    }
+
+    /**
+     * An SSH remote clones only with the project's deploy key, and only from a
+     * host whose key is pinned. Refused here, before anything is connected.
+     */
+    private function assertSshRemoteUsable(User $user, string $repoUrl): void
+    {
+        if (!GitRepoInput::isSsh($repoUrl)) {
+            return;
+        }
+
+        if (DeployKey::stored($user) === null) {
+            $https = GitRepoInput::httpsEquivalent($repoUrl);
+            throw ProblemException::one('repo_url', 'repo_url_ssh_needs_deploy_key',
+                'This project has no deploy key, so an SSH remote cannot authenticate. Create one with '
+                . 'POST /projects/{name}/git/deploy-key, add its public key to the repository as a deploy key, '
+                . 'and connect again' . ($https !== null ? ", or connect {$https} with a token." : '.'),
+                array_filter(['suggestion' => $https]));
+        }
+
+        $problem = GitRepoInput::sshProblemWithKey('repo_url', $repoUrl, fn (string $host): bool => DeployKey::pins($user, $host));
+        if ($problem !== null) {
+            throw ProblemException::of([$problem]);
+        }
     }
 
     /**
@@ -139,10 +195,28 @@ class GitActions
             return $work($project->git($path), $project);
         } catch (GitException $e) {
             if ($e->httpStatus === 422) {
-                throw ValidationException::withMessages(['git' => $e->getMessage()]);
+                throw $e->problemCode !== null
+                    ? ProblemException::one('git', $e->problemCode, $e->getMessage())
+                    : ValidationException::withMessages(['git' => $e->getMessage()]);
             }
 
             throw new GitException(GitUrl::sanitize($e->getMessage()), $e->httpStatus);
+        }
+    }
+
+    /**
+     * A change to the checkout while the project's create is still running
+     * would reach an account that may not exist yet (`sudo: unknown user`).
+     *
+     * @throws GitException
+     */
+    private function refuseWhileCreating(User $user): void
+    {
+        if (ProjectCreator::isCreating($user)) {
+            throw new GitException(
+                "Project '{$user->username}' is still being created; try again when its deploy has finished.",
+                409,
+            );
         }
     }
 
@@ -153,12 +227,17 @@ class GitActions
     private function run(User $user, ?string $path, callable $action, bool $redeployIfManaged = false): array
     {
         return $this->onCheckout($user, $path, function (Git $git, ProjectAggregate $project) use ($action, $redeployIfManaged): array {
-            $data = $action($git);
-            if ($redeployIfManaged) {
-                app(CheckoutRedeploy::class)->afterMutation($git, $project);
+            if (!$redeployIfManaged) {
+                return $action($git);
             }
+            $redeploy = app(CheckoutRedeploy::class);
 
-            return $data;
+            return $redeploy->keepingTheServedTree($git, $project, function () use ($action, $git, $project, $redeploy): array {
+                $data = $action($git);
+                $redeploy->afterMutation($git, $project);
+
+                return $data;
+            });
         });
     }
 }

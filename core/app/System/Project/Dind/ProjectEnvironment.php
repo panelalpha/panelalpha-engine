@@ -29,6 +29,10 @@ use App\Lib\Deploy\Platform\Strategies;
  * A `.env` the repository tracks is the client's, not the engine's (ADR-0001
  * D3): it is left as committed and the env_vars go to `.env.panelalpha`
  * instead, loaded after `.env` by the services that load `.env`.
+ *
+ * Secrets the engine generates for a compose file's `${VAR:?}` go to
+ * `.env.panelalpha` too, never `.env`: a non-empty `.env` is part of a build
+ * context, and an image that copies its context into a docroot serves it.
  */
 class ProjectEnvironment
 {
@@ -142,17 +146,24 @@ class ProjectEnvironment
             }
         }
 
-        [$baseContents, $required] = $this->withComposeRequiredSecrets($baseContents, $overrides);
-        $requiredUrls = array_values(array_filter($required, ComposePlaceholders::isRequiredOwnUrlKey(...)));
-        $requiredSecrets = array_values(array_diff($required, $requiredUrls));
-        if ($requiredSecrets !== []) {
+        // Generated secrets go to .env.panelalpha, not .env: a non-empty .env
+        // stays in the build context, and an image that copies its context
+        // into a docroot served them. The public URL is no secret and stays.
+        $required = $this->composeRequiredValues($baseContents, $overrides);
+        $requiredUrls = array_filter($required, ComposePlaceholders::isRequiredOwnUrlKey(...), ARRAY_FILTER_USE_KEY);
+        $generated = array_diff_key($required, $requiredUrls);
+        if ($requiredUrls !== []) {
+            $baseContents = EnvFile::merge($baseContents ?? '', $requiredUrls);
+        }
+        $announce = $this->dind->strategy()->secrets()->notYetAnnounced(array_map('strval', array_keys($generated)));
+        if ($announce !== []) {
             $logger?->info(
                 'This project\'s compose file needs values nobody set. '
-                . 'Generated them for this account: ' . implode(', ', $requiredSecrets)
+                . 'Generated them for this account, in ' . EngineArtifacts::ENV_OVERRIDES . ': ' . implode(', ', $announce)
             );
         }
         if ($requiredUrls !== []) {
-            $logger?->info('Pointed the application address at its public URL: ' . implode(', ', $requiredUrls));
+            $logger?->info('Pointed the application address at its public URL: ' . implode(', ', array_keys($requiredUrls)));
         }
 
         // 0600: a copy of .env after the prepare hook ran, so it can hold
@@ -162,10 +173,24 @@ class ProjectEnvironment
         }
 
         $envOverridesPath = $projectDir . '/' . EngineArtifacts::ENV_OVERRIDES;
-        if ($overrides !== [] && $this->envIsTracked()) {
-            // The account's env_vars; only compose inside the account reads it.
-            $fs->filePutContents($envOverridesPath, EnvFile::merge('', $overrides), $chown, '600');
+        $tracked = $overrides !== [] && $this->envIsTracked();
+        // The account's env_vars win over a generated value (missing() never generates a key they set).
+        $engineValues = $tracked ? $overrides + $generated : $generated;
+        if ($engineValues !== []) {
+            // Only compose inside the account reads it.
+            $fs->filePutContents($envOverridesPath, EnvFile::merge('', $engineValues), $chown, '600');
             $services = $this->syncRunFileEnvOverrides(true);
+        } else {
+            // A .env.panelalpha from an earlier deploy would otherwise keep
+            // reapplying values removed since.
+            if ($fs->fileExists($envOverridesPath)) {
+                $system->exec(['sudo', 'rm', '-f', $envOverridesPath]);
+            }
+            $this->syncRunFileEnvOverrides(false);
+            $services = [];
+        }
+
+        if ($tracked) {
             $keys = array_keys($overrides);
             $logger?->info(
                 'The repository tracks .env, so it is left as committed. Using user-provided environment variables ('
@@ -184,13 +209,6 @@ class ProjectEnvironment
 
             return;
         }
-
-        // No overrides, or a .env the engine owns: a .env.panelalpha from an
-        // earlier deploy would otherwise keep reapplying values removed since.
-        if ($fs->fileExists($envOverridesPath)) {
-            $system->exec(['sudo', 'rm', '-f', $envOverridesPath]);
-        }
-        $this->syncRunFileEnvOverrides(false);
 
         if ($overrides !== []) {
             $merged = EnvFile::merge($baseContents ?? '', $overrides);
@@ -212,7 +230,7 @@ class ProjectEnvironment
 
         if ($baseContents !== null
             && (!$fs->fileExists($envPath) || $removed !== [] || $keyAdded
-                || ($required !== [] && !$this->envIsTracked()))
+                || ($requiredUrls !== [] && !$this->envIsTracked()))
         ) {
             $fs->filePutContents($envPath, $baseContents, $chown, '644');
         }
@@ -274,13 +292,13 @@ class ProjectEnvironment
      * on "superuser password is not specified".
      *
      * @param array<string, string> $overrides
-     * @return array{0: ?string, 1: list<string>} contents, the keys generated
+     * @return array<string, string> NAME => value for the keys nothing set
      */
-    private function withComposeRequiredSecrets(?string $contents, array $overrides): array
+    private function composeRequiredValues(?string $contents, array $overrides): array
     {
         $strategy = $this->dind->userModel()->getDeployStrategy();
         if ($strategy !== Strategies::COMPOSE && $strategy !== Strategies::PAEMD) {
-            return [$contents, []];
+            return [];
         }
 
         $fs = $this->dind->system()->filesystem();
@@ -301,7 +319,7 @@ class ProjectEnvironment
             }
         }
         if ($files === []) {
-            return [$contents, []];
+            return [];
         }
 
         $env = [];
@@ -310,16 +328,12 @@ class ProjectEnvironment
                 $env[(string) $row['key']] = (string) ($row['value'] ?? '');
             }
         }
-        $missing = ComposeRequiredEnv::missing(
+        return ComposeRequiredEnv::missing(
             $files,
             $overrides + $env,
             $this->dind->strategy()->secrets()->for('compose-placeholders'),
             fn (): ?string => self::httpUrl($this->dind->publicAppUrl())
         );
-
-        return $missing === []
-            ? [$contents, []]
-            : [EnvFile::merge($contents ?? '', $missing), array_keys($missing)];
     }
 
     private static function httpUrl(?string $url): ?string
@@ -776,7 +790,7 @@ class ProjectEnvironment
             // Plainpad's server/.env.example (its app_root) ships APP_KEY={KEY}.
             // A real .env used as a source is left as it is.
             $replaced = [];
-            if ($contents !== '' && (str_ends_with($copy['example'], '.example') || EnvTemplates::isTemplate($copy['example']))) {
+            if ($contents !== '' && (preg_match('/\.(?:example|sample|template|dist)$/', $copy['example']) === 1 || EnvTemplates::isTemplate($copy['example']))) {
                 $seed = $this->dind->strategy()->secrets()->for('compose-placeholders');
                 $contents = self::withGeneratedSecrets($contents, $seed);
                 [$contents, $replaced] = self::withoutPublishedSecrets($contents, $seed);

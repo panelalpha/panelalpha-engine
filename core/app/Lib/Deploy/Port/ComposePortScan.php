@@ -14,6 +14,7 @@ use App\Lib\Deploy\Sidecar\SidecarEngine;
  * that offers nothing from one that offers only a database.
  *
  * @psalm-type Refusal = array{port: int, reason: string, service: string}
+ * @psalm-type Choice = array{reason: string, alternatives: list<int>}
  * @psalm-type Scan = array{all: list<int>, primary?: int, refused: list<Refusal>}
  */
 final class ComposePortScan
@@ -22,6 +23,12 @@ final class ComposePortScan
     private const PREFERRED = [80, 443, 8000, 8001, 8080, 8090, 8443, 3000, 5000, 9000];
 
     private const DEFAULT_PRIMARY = 8080;
+
+    /** Why the primary port was chosen ({@see choice()}). */
+    public const CHOSEN_PREFERRED = 'preferred';
+    public const CHOSEN_HEALTHCHECK = 'healthcheck';
+    public const CHOSEN_LOWEST = 'lowest';
+    public const CHOSEN_SINGLE = 'single';
 
     /**
      * @param array<string, string> $env the project's `.env`, which compose
@@ -48,10 +55,21 @@ final class ComposePortScan
     }
 
     /**
-     * @param array<array-key, array<string, mixed>> $services
-     * @return Scan
+     * Why {@see of()} chose its primary port, null when it offers none.
+     *
+     * @param array<string, string> $env
+     * @return Choice|null
      */
-    private static function fromServices(array $services): array
+    public static function choiceOf(string $composePath, array $env = []): ?array
+    {
+        return self::fromServices(self::withEnv(self::services($composePath), $env), true)['choice'] ?? null;
+    }
+
+    /**
+     * @param array<array-key, array<string, mixed>> $services
+     * @return Scan|array{all: list<int>, primary: int, choice: Choice, refused: list<Refusal>}
+     */
+    private static function fromServices(array $services, bool $withChoice = false): array
     {
         $scan = self::scan($services);
         $ports = self::sorted($scan['public'], $scan['ranks'], $scan['demoted']);
@@ -77,9 +95,50 @@ final class ComposePortScan
             ));
         }
 
-        return $ports === []
-            ? ['all' => [], 'refused' => $refused]
+        if ($ports === []) {
+            return ['all' => [], 'refused' => $refused];
+        }
+
+        return $withChoice
+            ? ['all' => $ports, 'primary' => $ports[0], 'choice' => self::choice($ports, $scan), 'refused' => $refused]
             : ['all' => $ports, 'primary' => $ports[0], 'refused' => $refused];
+    }
+
+    /**
+     * Why $ports[0] leads: a preferred port, the port its service's own
+     * healthcheck probes, or only the lowest number among ports its service
+     * publishes on equal terms (Cabernet's 5004 stream over its 6077 web UI).
+     * `alternatives` are those equal ports, which only a probe can tell apart.
+     *
+     * @param list<int> $ports
+     * @param array{ranks: array<int, int>, demoted: list<int>, checked: list<int>, owners: array<int, list<string>>, published: array<string, list<int>>} $scan
+     * @return Choice
+     */
+    private static function choice(array $ports, array $scan): array
+    {
+        $primary = $ports[0];
+        $rank = static fn (int $port): int => $scan['ranks'][$port] ?? self::rankOf($port);
+        if ($rank($primary) < PHP_INT_MAX - 1) {
+            return ['reason' => self::CHOSEN_PREFERRED, 'alternatives' => []];
+        }
+        if (in_array($primary, $scan['checked'], true)) {
+            return ['reason' => self::CHOSEN_HEALTHCHECK, 'alternatives' => []];
+        }
+
+        $tier = static fn (int $port): array => [InternalPorts::nonWebOn($port) !== null, in_array($port, $scan['demoted'], true)];
+        $alternatives = [];
+        foreach ($scan['owners'][$primary] ?? [] as $service) {
+            foreach ($scan['published'][$service] ?? [] as $port) {
+                if ($port !== $primary && $rank($port) === $rank($primary) && $tier($port) === $tier($primary)) {
+                    $alternatives[] = $port;
+                }
+            }
+        }
+        $alternatives = array_values(array_unique($alternatives));
+
+        return $alternatives === []
+            ? ['reason' => self::CHOSEN_SINGLE, 'alternatives' => []]
+            : ['reason' => self::CHOSEN_LOWEST, 'alternatives' => $alternatives];
     }
 
     public static function primaryOf(string $composePath): int
@@ -162,7 +221,7 @@ final class ComposePortScan
      * 20128 and depends on headroom's 8787).
      *
      * @param array<array-key, array<string, mixed>> $services
-     * @return array{public: list<int>, refused: list<Refusal>, guessed: list<int>, ranks: array<int, int>, demoted: list<int>}
+     * @return array{public: list<int>, refused: list<Refusal>, guessed: list<int>, ranks: array<int, int>, demoted: list<int>, checked: list<int>, owners: array<int, list<string>>, published: array<string, list<int>>}
      */
     private static function scan(array $services): array
     {
@@ -171,15 +230,23 @@ final class ComposePortScan
         $refused = [];
         $guessed = [];
         $ranks = [];
+        $checked = [];
+        $owners = [];
+        $published = [];
         foreach ($services as $name => $service) {
             if (self::isOptIn($service)) {
                 continue;
             }
             $found = self::serviceScan($service);
             $isBehind = in_array(strtolower((string) $name), $fronted, true);
+            $published[(string) $name] = $found['public'];
+            foreach ($found['checked'] as $port) {
+                $checked[$port] = true;
+            }
             foreach ($found['public'] as $port) {
                 $ports[$port] = ($ports[$port] ?? true) && ($isBehind || in_array($port, $found['demoted'], true));
                 $ranks[$port] = min($ranks[$port] ?? PHP_INT_MAX, $found['ranks'][$port]);
+                $owners[$port][] = (string) $name;
             }
             foreach ($found['refused'] as $entry) {
                 $refused[$entry['port']] ??= $entry;
@@ -195,6 +262,9 @@ final class ComposePortScan
             'guessed' => array_keys($guessed),
             'ranks' => $ranks,
             'demoted' => array_keys(array_filter($ports)),
+            'checked' => array_keys($checked),
+            'owners' => $owners,
+            'published' => $published,
         ];
     }
 
@@ -246,7 +316,7 @@ final class ComposePortScan
      * its other ports (Stepifi's Bull Board 3001, which nothing serves).
      *
      * @param array<string, mixed> $service
-     * @return array{public: list<int>, refused: list<Refusal>, guessed: list<int>, ranks: array<int, int>, demoted: list<int>}
+     * @return array{public: list<int>, refused: list<Refusal>, guessed: list<int>, ranks: array<int, int>, demoted: list<int>, checked: list<int>}
      */
     private static function serviceScan(array $service): array
     {
@@ -295,6 +365,7 @@ final class ComposePortScan
                 $exposed,
                 $healthy === [] ? [] : array_diff(array_keys($ports), array_keys($healthy))
             ))),
+            'checked' => array_keys($healthy),
         ];
     }
 

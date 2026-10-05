@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
- * The hook tables, and the users they hang off, on an in-memory sqlite
+ * The hook tables, the users they hang off and the tasks a create queues, on an in-memory sqlite
  * database: the real migrations, run by hand against the test's connection
  * (production is a MySQL this suite must not touch).
  */
@@ -40,10 +40,15 @@ abstract class DeployHookTestCase extends TestCase
         ] as $migration) {
             (require base_path('database/migrations/' . $migration))->up();
         }
+
+        require_once base_path('database/migrations/2026_09_04_000000_create_tasks_tables.php');
+        (new \CreateTasksTables())->up();
     }
 
     protected function tearDown(): void
     {
+        Schema::dropIfExists('task_logs');
+        Schema::dropIfExists('tasks');
         Schema::dropIfExists('hook_deliveries');
         Schema::dropIfExists('deploy_hooks');
         Schema::dropIfExists('users');

@@ -10,6 +10,8 @@ use App\System\Project\Deployment\DeployableDindProject;
 use App\System\Project\Deployment\DeployMechanics;
 use App\System\Project\Deployment\DeploymentWorkflow;
 use App\System\Project\Deployment\FailureRetention;
+use App\System\Project\Dind\AppLauncher;
+use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
 use Tests\TestCase;
 
 class DeploymentWorkflowTest extends TestCase
@@ -168,6 +170,29 @@ class DeploymentWorkflowTest extends TestCase
         }
     }
 
+    /** A failed redeploy keeps the project's volumes; only a failed first deploy may drop them. */
+    public function test_a_failed_start_removes_volumes_only_on_the_first_deploy(): void
+    {
+        foreach (['run' => true, 'rebuildFromCheckout' => false] as $path => $removesVolumes) {
+            $model = $this->dindModel(['deploy_strategy' => 'compose']);
+            $domain = new DomainModel();
+            $domain->domain = 'alice.example.test';
+            $mechanics = new RecordingDeployMechanics($model, $domain);
+            $mechanics->hasGit = true;
+            $mechanics->applicationRunning = true;
+            $mechanics->startResult = ['exit_code' => 1, 'stdout' => '', 'stderr' => 'manifest unknown'];
+
+            $workflow = new DeploymentWorkflow(new StubDindProject($model), $mechanics);
+            try {
+                $path === 'run' ? $workflow->run() : $workflow->rebuildFromCheckout($this->silentDeployLogger());
+                $this->fail("Expected ProblemException from {$path}");
+            } catch (ProblemException) {
+            }
+
+            $this->assertSame($removesVolumes, $mechanics->abortRemovedVolumes, $path);
+        }
+    }
+
     /** An app that is not serving may have been broken by them, and is still told so. */
     public function test_an_app_that_is_not_serving_still_gets_the_env_vars_hint(): void
     {
@@ -219,6 +244,117 @@ class DeploymentWorkflowTest extends TestCase
         );
 
         $this->assertSame("Deploy started (source: push, commit: {$commit})", $started);
+    }
+
+    /** A failed release started nothing, so a git or push redeploy leaves the running app up. */
+    public function test_a_failed_release_on_a_checkout_redeploy_does_not_tear_the_running_app_down(): void
+    {
+        $failures = [
+            'release' => [
+                'exit_code' => 3,
+                'stdout' => 'migrate failed',
+                'stderr' => "The Procfile release process exited with code 3; the new version was not started.\n",
+                AppLauncher::RELEASE_FAILED => true,
+                AppLauncher::RAN_BEFORE_RELEASE => true,
+            ],
+            'up' => ['exit_code' => 1, 'stdout' => '', 'stderr' => 'build failed'],
+        ];
+        foreach ($failures as $case => $result) {
+            $mechanics = new RecordingMechanics($this->dindModel(['deploy_strategy' => 'express']), $this->mainDomain());
+            $mechanics->hasGit = true;
+            $mechanics->startResult = $result;
+            $messages = [];
+            $logger = $this->silentDeployLogger();
+            $logger->method('info')->willReturnCallback(function (string $message) use (&$messages): void {
+                $messages[] = $message;
+            });
+
+            $problem = [];
+            try {
+                DeploymentWorkflow::forMechanics($mechanics, new RecordingDisposition())->rebuildFromCheckout($logger);
+                $this->fail("Expected ProblemException ({$case})");
+            } catch (ProblemException $e) {
+                $problem = $e->problems[0] ?? [];
+            }
+            $this->assertSame('app_did_not_start', $problem['code'] ?? null, $case);
+
+            if ($case === 'release') {
+                $this->assertSame(['syncCheckoutRebuild', 'reprepare', 'start', 'settle'], $mechanics->calls);
+                $this->assertStringContainsString('The Procfile release process exited with code 3', (string) ($problem['message'] ?? ''));
+                $this->assertContains('The release failed before the new version started; the running app was left as it was', $messages);
+            } else {
+                $this->assertSame(['syncCheckoutRebuild', 'reprepare', 'start', 'abort', 'settle'], $mechanics->calls);
+            }
+        }
+    }
+
+    /**
+     * POST /rebuild and an archive deploy say what a failed release left behind, as
+     * a pull does; "left as it was" only when a version was running before it.
+     */
+    public function test_a_failed_release_on_a_source_or_archive_deploy_says_what_is_still_running(): void
+    {
+        $left = 'The release failed before the new version started; the running app was left as it was';
+        $none = 'The release failed before the new version started; no version of the app is running';
+        $cases = [
+            'rebuild, previous version running' => ['rebuild', true, $left],
+            'rebuild, app stopped before the wipe' => ['rebuild', false, $none],
+            'first archive deploy' => ['archive', false, $none],
+            'archive, could not ask' => ['archive', null, 'The release failed before the new version started'],
+        ];
+        foreach ($cases as $case => [$path, $ranBefore, $expected]) {
+            $mechanics = new RecordingMechanics($this->dindModel(['deploy_strategy' => 'express']), $this->mainDomain());
+            $mechanics->startResult = [
+                'exit_code' => 3,
+                'stdout' => 'migrate failed',
+                'stderr' => "The Procfile release process exited with code 3; the new version was not started.\n",
+                AppLauncher::RELEASE_FAILED => true,
+                AppLauncher::RAN_BEFORE_RELEASE => $ranBefore,
+            ];
+            $messages = [];
+            $logger = $this->silentDeployLogger();
+            $logger->method('info')->willReturnCallback(function (string $message) use (&$messages): void {
+                $messages[] = $message;
+            });
+
+            $workflow = DeploymentWorkflow::forMechanics($mechanics, new RecordingDisposition());
+            try {
+                $path === 'rebuild'
+                    ? $workflow->rebuildFromSource($logger, null)
+                    : $workflow->deployFromArchive($logger, '/project/app.zip');
+                $this->fail("Expected ProblemException ({$case})");
+            } catch (ProblemException $e) {
+                $this->assertStringContainsString('Failed to start app', $e->getMessage(), $case);
+            }
+
+            $said = array_values(array_filter($messages, static fn (string $m): bool => str_starts_with($m, 'The release failed')));
+            $this->assertSame([$expected], $said, $case);
+            $this->assertNotContains('The previous version is still serving; nothing was torn down', $messages, $case);
+            $this->assertNotContains('abort', $mechanics->calls, $case);
+        }
+
+        // Nothing marked as a failed release says nothing about one.
+        $mechanics = new RecordingMechanics($this->dindModel(['deploy_strategy' => 'express']), $this->mainDomain());
+        $mechanics->startResult = ['exit_code' => 1, 'stdout' => '', 'stderr' => 'build failed'];
+        $messages = [];
+        $logger = $this->silentDeployLogger();
+        $logger->method('info')->willReturnCallback(function (string $message) use (&$messages): void {
+            $messages[] = $message;
+        });
+        try {
+            DeploymentWorkflow::forMechanics($mechanics, new RecordingDisposition())->deployFromArchive($logger, '/project/app.zip');
+            $this->fail('Expected ProblemException');
+        } catch (ProblemException) {
+        }
+        $this->assertSame([], array_filter($messages, static fn (string $m): bool => str_starts_with($m, 'The release failed')));
+    }
+
+    private function mainDomain(): DomainModel
+    {
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+
+        return $domain;
     }
 
     public function test_a_working_fallback_domain_is_said_in_the_deploy_log_without_a_partial(): void
@@ -440,6 +576,115 @@ class DeploymentWorkflowTest extends TestCase
         }
     }
 
+    /**
+     * engine#33: a new version that never became healthy did not replace the
+     * old one, so tearing the app down would stop the version still serving.
+     */
+    public function test_a_redeploy_that_kept_the_previous_version_does_not_tear_it_down(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'express']);
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+        $mechanics = new RecordingDeployMechanics($model, $domain);
+        $mechanics->hasGit = true;
+        $mechanics->startResult = [
+            'exit_code' => 1,
+            'stdout' => '',
+            'stderr' => 'The new version did not become healthy: it exited with code 1. The previous version is still serving.',
+            ZeroDowntimeRedeploy::PREVIOUS_KEPT => true,
+        ];
+
+        try {
+            (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->rebuildFromCheckout($this->silentDeployLogger());
+            $this->fail('Expected ProblemException');
+        } catch (ProblemException $e) {
+            $this->assertStringContainsString('previous version is still serving', $e->getMessage());
+        }
+
+        $this->assertFalse($mechanics->aborted);
+        $this->assertSame(1, $mechanics->settled);
+    }
+
+    /** A rebuild or an archive deploy says the old version kept serving, as a pull does. */
+    public function test_a_source_redeploy_that_kept_the_previous_version_says_so(): void
+    {
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+        $paths = [
+            'source' => fn (DeploymentWorkflow $w, DeployLogger $l) => $w->rebuildFromSource($l, null),
+            'archive' => fn (DeploymentWorkflow $w, DeployLogger $l) => $w->deployFromArchive($l, '/project/app.zip'),
+        ];
+        foreach ($paths as $name => $run) {
+            foreach ([true, false] as $kept) {
+                $mechanics = new RecordingDeployMechanics($this->dindModel(['deploy_strategy' => 'dockerfile']), $domain);
+                $mechanics->startResult = ['exit_code' => 1, 'stdout' => '', 'stderr' => 'failed to solve: no FROM'];
+                if ($kept) {
+                    $mechanics->startResult[ZeroDowntimeRedeploy::PREVIOUS_KEPT] = true;
+                }
+                $messages = [];
+                $logger = $this->silentDeployLogger();
+                $logger->method('info')->willReturnCallback(function (string $message) use (&$messages): void {
+                    $messages[] = $message;
+                });
+
+                try {
+                    $run(new DeploymentWorkflow(new StubDindProject($mechanics->user()), $mechanics), $logger);
+                    $this->fail("{$name}: expected the deploy to fail");
+                } catch (ProblemException) {
+                }
+
+                $this->assertSame(
+                    $kept,
+                    in_array('The previous version is still serving; nothing was torn down', $messages, true),
+                    "{$name}, kept " . var_export($kept, true)
+                );
+                $this->assertFalse($mechanics->aborted, $name);
+            }
+        }
+    }
+
+    public function test_a_failed_checkout_redeploy_without_a_kept_version_still_tears_down(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'express']);
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+        $mechanics = new RecordingDeployMechanics($model, $domain);
+        $mechanics->startResult = ['exit_code' => 1, 'stdout' => '', 'stderr' => 'build failed'];
+
+        try {
+            (new DeploymentWorkflow(new StubDindProject($model), $mechanics))->rebuildFromCheckout($this->silentDeployLogger());
+            $this->fail('Expected ProblemException');
+        } catch (ProblemException) {
+        }
+
+        $this->assertTrue($mechanics->aborted);
+    }
+
+    /** Every redeploy path settles what it put aside, whatever it ended in. */
+    public function test_every_redeploy_settles_what_it_kept_aside(): void
+    {
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+        $paths = [
+            'checkout' => fn (DeploymentWorkflow $w) => $w->rebuildFromCheckout($this->silentDeployLogger()),
+            'source' => fn (DeploymentWorkflow $w) => $w->rebuildFromSource($this->silentDeployLogger(), null),
+            'archive' => fn (DeploymentWorkflow $w) => $w->deployFromArchive($this->silentDeployLogger(), '/project/app.zip'),
+        ];
+        foreach ($paths as $name => $run) {
+            foreach ([0, 1] as $exit) {
+                $mechanics = new RecordingDeployMechanics($this->dindModel(['deploy_strategy' => 'express']), $domain);
+                $mechanics->startResult = ['exit_code' => $exit, 'stdout' => '', 'stderr' => $exit === 0 ? '' : 'build failed'];
+                try {
+                    $run(new DeploymentWorkflow(new StubDindProject($mechanics->user()), $mechanics));
+                } catch (\Exception) {
+                }
+                $this->assertSame(1, $mechanics->settled, "{$name}, exit {$exit}");
+                // A failed redeploy may put the project back as it was; a successful one never.
+                $this->assertSame([$exit === 0], $mechanics->settledAsSucceeded, "{$name}, exit {$exit}");
+            }
+        }
+    }
+
     public function test_workflow_exposes_rebuild_from_source(): void
     {
         $source = file_get_contents($this->coreAppRoot . '/System/Project/Deployment/DeploymentWorkflow.php');
@@ -520,6 +765,7 @@ final class RecordingDeployMechanics implements DeployMechanics
     public bool $deletedProject = false;
     public bool $applicationRunning = false;
     public bool $syncedSourceRebuild = false;
+    public ?bool $abortRemovedVolumes = null;
     public bool $ingestedWipeRebuild = false;
     public ?string $sourceRebuildZipPath = null;
     public ?string $wipeRebuildZipPath = null;
@@ -529,6 +775,10 @@ final class RecordingDeployMechanics implements DeployMechanics
     /** @var list<string> */
     public array $publicUrl = [];
     public ?string $envHint = null;
+    public int $settled = 0;
+    /** @var list<bool> */
+    public array $settledAsSucceeded = [];
+    public bool $aborted = false;
 
     public function __construct(
         private ModelsUser $userModel,
@@ -617,8 +867,16 @@ final class RecordingDeployMechanics implements DeployMechanics
         return $this->startResult;
     }
 
-    public function abortPartialDeploy(): void
+    public function abortPartialDeploy(bool $removeVolumes = false): void
     {
+        $this->abortRemovedVolumes = $removeVolumes;
+        $this->aborted = true;
+    }
+
+    public function settleRedeploy(bool $succeeded): void
+    {
+        $this->settled++;
+        $this->settledAsSucceeded[] = $succeeded;
     }
 
     public function servingWarnings(): array

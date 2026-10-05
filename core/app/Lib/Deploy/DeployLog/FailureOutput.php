@@ -25,8 +25,12 @@ final class FailureOutput
     /** How much to keep when nothing announced itself. */
     private const FALLBACK = 6;
 
-    /** How much of a failed build step's own output to keep. */
-    private const STEP_LINES = 40;
+    /**
+     * How much of a failed build step's own output to keep. publify's
+     * `Unable to find libclang` sat 46 lines above `#11 ERROR:`, under
+     * Bundler's backtrace.
+     */
+    private const STEP_LINES = 60;
 
     /**
      * A build step its memory limit stopped. The compile errors printed above
@@ -184,7 +188,8 @@ final class FailureOutput
                 if (preg_match($pattern, $line) === 1 || preg_match($pattern, $bare) === 1) {
                     $start = self::npmBlockStart($lines, $offset + $i);
 
-                    return trim(implode("\n", array_slice($lines, $start, self::CONTEXT)));
+                    return self::stepCause($lines, $offset + $i)
+                        ?? trim(implode("\n", array_slice($lines, $start, self::CONTEXT)));
                 }
             }
         }
@@ -259,6 +264,45 @@ final class FailureOutput
         }
 
         return $stderr !== '' ? $stderr : $stdout;
+    }
+
+    /**
+     * When BuildKit's `#N ERROR:` is the first line that announced itself, the
+     * cause is in what step N printed above it, which no CAUSE pattern knows:
+     * yum's `Could not resolve host: mirrorlist.centos.org` (flexisip), a
+     * bindgen panic under a Bundler backtrace (publify). The region starting
+     * at `#N ERROR:` only reaches the generic exit code, so it is centred on
+     * the step's own line an explainer rule recognises instead. Null when
+     * none does: the old region stands.
+     *
+     * @param list<string> $lines
+     */
+    private static function stepCause(array $lines, int $at): ?string
+    {
+        if (preg_match('/^#(\d+) ERROR:/', $lines[$at], $m) !== 1) {
+            return null;
+        }
+        $own = array_values(array_filter(
+            array_slice($lines, 0, $at),
+            static fn (string $l): bool => str_starts_with($l, '#' . $m[1] . ' ')
+        ));
+        $rule = DeployFailureExplainer::match(implode("\n", $own))['rule'] ?? null;
+        if ($rule === null) {
+            return null;
+        }
+
+        // The shortest tail of the step that still reads as that rule starts at its line.
+        for ($k = count($own) - 1; $k >= 0; $k--) {
+            $tail = array_slice($own, $k);
+            if ((DeployFailureExplainer::match(implode("\n", $tail))['rule'] ?? null) !== $rule) {
+                continue;
+            }
+            $region = implode("\n", array_slice($tail, 0, self::CONTEXT));
+
+            return trim((DeployFailureExplainer::match($region)['rule'] ?? null) === $rule ? $region : implode("\n", $tail));
+        }
+
+        return null;
     }
 
     /**

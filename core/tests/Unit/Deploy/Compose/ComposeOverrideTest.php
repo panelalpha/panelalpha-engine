@@ -164,9 +164,11 @@ class ComposeOverrideTest extends TestCase
         }
         $this->assertGreaterThan(50, count($files));
 
+        // What a recipe's prepare hook writes to .env before the override is hardened.
+        $env = ['CRAFTY_DATA' => ['/home/acct/.panelalpha/crafty']];
         foreach ($files as $path) {
             $raw = (string) file_get_contents($path);
-            $this->assertSame(['yaml' => $raw, 'removed' => []], ComposeOverride::harden($raw), $path);
+            $this->assertSame(['yaml' => $raw, 'removed' => []], ComposeOverride::harden($raw, null, $env, 'acct', '/nonexistent-core-view/acct/project'), $path);
         }
     }
     public function test_an_interpolated_mount_source_is_checked_against_the_projects_env(): void

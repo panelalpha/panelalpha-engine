@@ -1070,6 +1070,14 @@ configure_lxcfs() {
         echo_warning "lxcfs is not running; accounts will see the host's memory, CPUs and load in /proc"
 }
 
+# Host AppArmor profiles that attach by path also confine tenant binaries at
+# that path (engine#366). Run on every install and update, so profiles a new
+# release ships are caught. Never fatal.
+configure_apparmor() {
+    bash /opt/panelalpha/shared-hosting/scripts/configure-apparmor.sh ||
+        echo_warning "Could not disable the host's path-attached AppArmor profiles; tenant binaries at those paths stay confined"
+}
+
 remove_renamed_containers() {
     for old in nginx cron database-core webserver database-users phpmyadmin-users dns-proxy exim pure-ftpd redis core-redis queue-worker core-queue core-cron core-http; do
         ids=$(docker ps -aq \
@@ -1373,6 +1381,7 @@ post_install_config() {
     set_default_ip
     configure_quota
     configure_lxcfs
+    configure_apparmor
     # Before request_certificates: an ACME HTTP-01 challenge is answered through
     # this webserver, so take its restart before any challenge is in flight.
     render_webserver_config

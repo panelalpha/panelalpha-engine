@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\System\Project\Dind\AppHealth;
+use App\System\Project\Dind\Generation\RoutingSnapshot;
 use App\System\Project\Dind as DindProject;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Deploy\DetectAppPort;
@@ -59,10 +60,38 @@ class Networking
             "Detected application port: {$primaryPort}" . ($recipePort !== null ? " (the recipe's port:)" : '')
         );
 
+        $this->routeTo($user, $primaryPort);
+    }
+
+    /**
+     * Points the site at $port: the stored app port, the domain's :80/:443
+     * rules, its tunnel ingress and the vhost.
+     */
+    public function routeTo(User $user, int $primaryPort): void
+    {
         // Store primary port in user details (fallback for legacy vhost / bridge)
         $user->setAppPort($primaryPort);
         $user->save();
 
+        // A redeploy of a running app: the site stays where the running
+        // version answers until the new version takes traffic.
+        $served = RoutingSnapshot::servedPort($user->username);
+        if (RoutingSnapshot::defers($user->username)) {
+            if ($served !== null && $served !== $primaryPort) {
+                $this->project->shell()->logger()?->info(
+                    "The site stays on port {$served}, where the running version answers, until the new version takes traffic"
+                );
+            }
+
+            return;
+        }
+
+        $this->applyRoutes($user, $primaryPort);
+    }
+
+    /** The domain's generated rules on $primaryPort, then the vhost rebuilt and the webserver reloaded. */
+    public function applyRoutes(User $user, int $primaryPort): void
+    {
         $domain = $user->getMainDomain();
         $fqdn = $domain !== null ? trim((string) $domain->domain) : '';
         if ($fqdn === '') {

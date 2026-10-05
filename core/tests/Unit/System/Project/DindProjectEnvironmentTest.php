@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\System\Project;
 
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Checkout\EngineArtifacts;
 use App\Lib\Deploy\Compose\ComposePlaceholders;
 use App\Lib\Deploy\EnvFile;
@@ -427,11 +428,13 @@ class DindProjectEnvironmentTest extends TestCase
     /**
      * kaneo (#144): postgres reads its password from `.env` through
      * `env_file:`, the repo ships no `.env.example`, and an empty `.env`
-     * left the database refusing its first start.
+     * left the database refusing its first start. The generated value goes
+     * to `.env.panelalpha`, attached after `.env` wherever `.env` is loaded,
+     * never into `.env`, which a build context carries into the image.
      */
-    public function test_compose_database_password_read_through_env_file_is_generated_into_env(): void
+    public function test_compose_database_password_read_through_env_file_is_generated_into_env_panelalpha(): void
     {
-        file_put_contents($this->projectDir . '/compose.yml', <<<'YAML'
+        file_put_contents($this->projectDir . '/compose.yml', $compose = <<<'YAML'
         services:
           postgres:
             image: postgres:16-alpine
@@ -442,23 +445,64 @@ class DindProjectEnvironmentTest extends TestCase
             env_file:
               - .env
         YAML);
+        file_put_contents($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE, $compose);
 
         $model = $this->dindModel(['deploy_strategy' => 'compose']);
         $dind = $this->dind($model);
         $dind->applyProjectEnvVars();
 
-        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertArrayNotHasKey('POSTGRES_PASSWORD', $this->vars((string) @file_get_contents($this->projectDir . '/.env')));
+        $engine = $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES));
         $this->assertSame(
             ComposePlaceholders::generatedSecret(
                 'POSTGRES_PASSWORD',
                 $dind->strategy()->secrets()->for('compose-placeholders')
             ),
-            $env['POSTGRES_PASSWORD']
+            $engine['POSTGRES_PASSWORD']
         );
+        $this->assertSame('0600', $this->mode(EngineArtifacts::ENV_OVERRIDES));
+        $run = Yaml::parseFile($this->projectDir . '/' . EngineArtifacts::RUN_COMPOSE);
+        $this->assertSame(['.env', EngineArtifacts::ENV_OVERRIDES], $run['services']['postgres']['env_file']);
+        $this->assertSame(['.env', EngineArtifacts::ENV_OVERRIDES], $run['services']['kaneo']['env_file']);
 
-        // A redeploy over the .env it wrote keeps the same value.
+        // A redeploy keeps the same value, and still keeps it out of .env.
         $this->forcedEnvironment($model, tracked: false)->apply();
-        $this->assertSame($env, $this->vars((string) file_get_contents($this->projectDir . '/.env')));
+        $this->assertSame($engine, $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES)));
+        $this->assertArrayNotHasKey('POSTGRES_PASSWORD', $this->vars((string) @file_get_contents($this->projectDir . '/.env')));
+    }
+
+    /**
+     * The vd420 case: `DB_PASSWORD: ${DB_PASSWORD:?}` in `environment:`, a
+     * build that copies its context into a docroot. The account's own
+     * env_vars still go to `.env`; only what the engine generated is kept out.
+     */
+    public function test_a_generated_required_secret_stays_out_of_env_and_the_customers_values_stay_in(): void
+    {
+        file_put_contents($this->projectDir . '/docker-compose.yml', <<<'YAML'
+        services:
+          web:
+            build: .
+            environment:
+              DB_PASSWORD: ${DB_PASSWORD:?}
+              SITE_NAME: ${SITE_NAME:-demo}
+        YAML);
+
+        $model = $this->dindModel(['deploy_strategy' => 'compose', 'env_vars' => ['SITE_NAME' => 'Mine']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+
+        $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
+        $this->assertSame('Mine', $env['SITE_NAME']);
+        $this->assertArrayNotHasKey('DB_PASSWORD', $env);
+        $this->assertStringNotContainsString('DB_PASSWORD', (string) @file_get_contents($this->projectDir . '/.env.default'));
+        $engine = $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES));
+        $this->assertSame(['DB_PASSWORD'], array_keys($engine));
+        $this->assertSame(48, strlen($engine['DB_PASSWORD']));
+
+        // A password set in the panel is the account's own: it goes to .env, nothing is generated.
+        $model = $this->dindModel(['deploy_strategy' => 'compose', 'env_vars' => ['DB_PASSWORD' => 'hunter2']]);
+        $this->forcedEnvironment($model, tracked: false)->apply();
+        $this->assertSame('hunter2', $this->vars((string) file_get_contents($this->projectDir . '/.env'))['DB_PASSWORD']);
+        $this->assertFileDoesNotExist($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES);
     }
 
     /** borgwarehouse ships `.env.sample`, and its compose file requires every key in it. */
@@ -483,7 +527,7 @@ class DindProjectEnvironmentTest extends TestCase
     }
 
     /** onetimesecret (#140): `${VAR:?}` in an included file's `command:`. */
-    public function test_compose_required_variables_in_an_included_file_are_generated_into_an_existing_env(): void
+    public function test_compose_required_variables_in_an_included_file_are_generated_beside_an_existing_env(): void
     {
         mkdir($this->projectDir . '/docker/compose', 0777, true);
         file_put_contents($this->projectDir . '/docker-compose.yml', "include:\n  - path: docker/compose/simple.yml\n");
@@ -499,7 +543,52 @@ class DindProjectEnvironmentTest extends TestCase
 
         $env = $this->vars((string) file_get_contents($this->projectDir . '/.env'));
         $this->assertSame('', $env['SMTP_HOST']);
-        $this->assertSame(48, strlen($env['VALKEY_PASSWORD']));
+        $this->assertArrayNotHasKey('VALKEY_PASSWORD', $env);
+        $engine = $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES));
+        $this->assertSame(48, strlen($engine['VALKEY_PASSWORD']));
+    }
+
+    /**
+     * The run file inlines the same generated value first and says so; one
+     * value is one log line, not one per file it lands in.
+     */
+    public function test_a_generated_compose_secret_already_logged_is_not_logged_again(): void
+    {
+        file_put_contents($this->projectDir . '/docker-compose.yml', <<<'YAML'
+        services:
+          maindb:
+            image: valkey/valkey:8.1
+            command: valkey-server --requirepass ${VALKEY_PASSWORD:?VALKEY_PASSWORD must be set}
+        YAML);
+
+        $generatedLines = function (bool $runFileLoggedIt): array {
+            @unlink($this->projectDir . '/.env');
+            @unlink($this->projectDir . '/.env.default');
+            $dind = $this->dind($this->dindModel(['deploy_strategy' => 'compose']));
+            if ($runFileLoggedIt) {
+                $dind->strategy()->secrets()->notYetAnnounced(['VALKEY_PASSWORD']);
+            }
+            $logger = DeployLogger::start('alice');
+            try {
+                (new class ($dind) extends Dind\ProjectEnvironment {
+                    protected function envIsTracked(): bool
+                    {
+                        return false;
+                    }
+                })->apply();
+                $lines = array_column($logger->read()['lines'], 'msg');
+            } finally {
+                $logger->finish(DeployLogger::STATUS_SUCCESS);
+                DeployLogger::deleteUserLogs('alice');
+            }
+
+            return array_values(array_filter($lines, static fn (string $l): bool => str_contains($l, 'Generated them')));
+        };
+
+        $notLoggedYet = $generatedLines(false);
+        $this->assertCount(1, $notLoggedYet);
+        $this->assertStringContainsString('VALKEY_PASSWORD', $notLoggedYet[0]);
+        $this->assertSame([], $generatedLines(true));
     }
 
     /**
@@ -551,6 +640,11 @@ class DindProjectEnvironmentTest extends TestCase
         $this->forcedEnvironment($this->dindModel(['deploy_strategy' => 'compose']), tracked: true)->apply();
 
         $this->assertSame("APP_NAME=Demo\n", file_get_contents($this->projectDir . '/.env'));
+        // The value the database needs still reaches compose, from the engine's own file.
+        $this->assertArrayHasKey(
+            'POSTGRES_PASSWORD',
+            $this->vars((string) file_get_contents($this->projectDir . '/' . EngineArtifacts::ENV_OVERRIDES))
+        );
     }
 
     /**

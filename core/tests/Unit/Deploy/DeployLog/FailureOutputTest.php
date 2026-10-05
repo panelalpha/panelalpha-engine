@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\DeployLog;
 
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\FailureOutput;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -807,5 +808,46 @@ NPMUSAGE;
         $this->assertSame('Deploy failed on purpose', FailureOutput::withoutNoise("  Deploy failed on purpose\n"));
         // All noise: the output itself, not nothing.
         $this->assertSame('npm warn deprecated x', FailureOutput::withoutNoise('npm warn deprecated x'));
+    }
+
+    /**
+     * flexisip (CentOS 7 base) and publify (selma's bindgen): the cause is in
+     * the failed step's own output above `#N ERROR:`, which is where the
+     * region used to start, so both read "A build step failed".
+     *
+     * @return array<string, array{string, string, string}>
+     */
+    public static function stepCauses(): array
+    {
+        return [
+            'yum mirrorlist gone' => ['flexisip', 'package-archive-gone', 'Could not resolve host: mirrorlist.centos.org'],
+            'bindgen without libclang' => ['publify', 'rust-build-tool-missing', 'Unable to find libclang'],
+        ];
+    }
+
+    #[DataProvider('stepCauses')]
+    public function test_the_failed_steps_own_cause_leads_over_its_exit_code(string $app, string $rule, string $line): void
+    {
+        $dir = dirname(__DIR__, 3) . '/fixtures/failure-output/';
+        // As AppLauncher::failureOutput() hands it over: the step, then stderr.
+        $raw = FailureOutput::failedBuildStep((string) file_get_contents($dir . $app . '.stdout'))
+            . "\n" . file_get_contents($dir . $app . '.stderr');
+
+        $region = FailureOutput::select($raw);
+
+        $this->assertStringContainsString($line, $region);
+        $this->assertSame($rule, DeployFailureExplainer::match($region)['rule'] ?? null);
+    }
+
+    public function test_a_step_whose_output_names_nothing_keeps_the_error_line_region(): void
+    {
+        $output = "#7 1.2 doing things\n#7 1.3 still doing things\n"
+            . "#7 ERROR: process \"/bin/sh -c make\" did not complete successfully: exit code: 2\n"
+            . "failed to solve: process \"/bin/sh -c make\" did not complete successfully: exit code: 2";
+
+        $region = FailureOutput::select($output);
+
+        $this->assertStringStartsWith('#7 ERROR:', $region);
+        $this->assertSame('build-step-failed', DeployFailureExplainer::match($region)['rule'] ?? null);
     }
 }

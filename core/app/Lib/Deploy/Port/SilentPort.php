@@ -56,13 +56,7 @@ final class SilentPort
      */
     public static function diagnose(string $service, int $published, int $target, array $sockets): string
     {
-        // A loopback listener on another port is the app's own internals or
-        // Docker's embedded DNS (127.0.0.11, a random port), never the answer.
-        $sockets = array_values(array_filter(
-            $sockets,
-            static fn (array $s): bool => (int) $s['port'] === $target
-                || !ListeningSockets::isLoopback((string) $s['addr'])
-        ));
+        $sockets = self::relevant($sockets, $target);
         if ($sockets === []) {
             return "{$service} is running but listens on no TCP port yet: it is still starting, "
                 . 'or waiting for something it needs.';
@@ -86,6 +80,33 @@ final class SilentPort
         $where = $target === $published ? "{$target}" : "{$target} (published as {$published})";
 
         return "{$service} listens on " . implode(', ', $ports) . ", not on {$where}.";
+    }
+
+    /**
+     * Nothing bound yet that could be the answer: the process is still
+     * starting, or waiting for something it needs.
+     *
+     * @param list<array{addr: string, port: int}> $sockets
+     */
+    public static function listensOnNothing(array $sockets, int $target): bool
+    {
+        return self::relevant($sockets, $target) === [];
+    }
+
+    /**
+     * A loopback listener on another port is the app's own internals or
+     * Docker's embedded DNS (127.0.0.11, a random port), never the answer.
+     *
+     * @param list<array{addr: string, port: int}> $sockets
+     * @return list<array{addr: string, port: int}>
+     */
+    private static function relevant(array $sockets, int $target): array
+    {
+        return array_values(array_filter(
+            $sockets,
+            static fn (array $s): bool => (int) $s['port'] === $target
+                || !ListeningSockets::isLoopback((string) $s['addr'])
+        ));
     }
 
     /**

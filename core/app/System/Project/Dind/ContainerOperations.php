@@ -49,6 +49,15 @@ final class ContainerOperations
 
     private const COMPOSE_TIMEOUT = 7200;
 
+    /** The most lines one logs read returns; rotation keeps a container's log to ~30 MB. */
+    public const MAX_LOG_LINES = 5000;
+
+    /** How long one log follow runs before it ends itself. */
+    public const FOLLOW_SECONDS = 600;
+
+    /** Silence after which a follow asks whether its reader is still there. */
+    public const FOLLOW_IDLE_SECONDS = 2;
+
     /**
      * Inner compose stop for backup downtime (throws on failure).
      */
@@ -113,6 +122,7 @@ final class ContainerOperations
                 : $this->project->userAppComposeCommand([$action]);
 
             $stdout = $this->shell->execAsUser($cmd, [], 600);
+            $this->clearStoppedByRequest($action);
             $cleanup = self::cleanupArgvAfter($action);
             if ($cleanup !== null) {
                 try {
@@ -209,6 +219,7 @@ final class ContainerOperations
                 [],
                 120
             );
+            $this->clearStoppedByRequest($action);
 
             return ['stdout' => $output, 'stderr' => '', 'exit_code' => 0];
         } catch (\Exception $e) {
@@ -216,24 +227,114 @@ final class ContainerOperations
         }
     }
 
-    public function getServiceLogs(string $service, int $lines = 200): string
+    /** Whatever starts the app again ends a stop that was asked for. */
+    private function clearStoppedByRequest(string $action): void
+    {
+        if (!in_array($action, ['up', 'start', 'restart', 'pull'], true)) {
+            return;
+        }
+        try {
+            $this->project->userModel()->markAppStoppedByRequest(false);
+        } catch (\Throwable) {
+            // Bookkeeping for the health sweep; the action itself worked.
+        }
+    }
+
+    public function getServiceLogs(string $service, int $lines = 200, ?string $since = null, ?string $until = null): string
     {
         self::assertServiceName($service);
 
         try {
             return $this->shell->execAsUser(
-                $this->project->userAppComposeCommand([
-                    'logs',
-                    "--tail={$lines}",
-                    '--no-color',
-                    $service,
-                ]),
+                $this->project->userAppComposeCommand(self::logsArgs($service, $lines, $since, $until, false)),
                 [],
                 60
             );
         } catch (\Exception $e) {
             return $e->getMessage();
         }
+    }
+
+    /**
+     * Follow a service's log, handing each line and its timestamp to $onLine,
+     * until the stream has run FOLLOW_SECONDS. Stopping the outer exec does not
+     * stop the follow inside the account, so `timeout` bounds it there, and when
+     * $onLine or $onIdle throws (the client went away) it is killed by its tag at once.
+     * $onIdle runs after every FOLLOW_IDLE_SECONDS without a line.
+     *
+     * @param callable(string, ?string): void $onLine
+     * @param ?callable(): void $onIdle
+     */
+    public function followServiceLogs(string $service, int $lines, ?string $since, callable $onLine, ?callable $onIdle = null): void
+    {
+        self::assertServiceName($service);
+
+        $tag = 'PANELALPHA_LOG_FOLLOW=' . bin2hex(random_bytes(6));
+        $compose = $this->project->userAppComposeCommand(self::logsArgs($service, $lines, $since, null, true));
+        // composeCommand() starts with `env`; the tag rides along as one more variable.
+        $command = ['timeout', (string) self::FOLLOW_SECONDS, 'env', $tag, ...array_slice($compose, 1)];
+
+        $buffer = '';
+        try {
+            $this->shell->followAsUser(
+                $command,
+                self::FOLLOW_SECONDS + 10,
+                function (string $type, string $data) use (&$buffer, $onLine): void {
+                    $buffer .= $data;
+                    while (($end = strpos($buffer, "\n")) !== false) {
+                        $raw = rtrim(substr($buffer, 0, $end), "\r");
+                        $buffer = (string) substr($buffer, $end + 1);
+                        $onLine(...self::splitTimestamp($raw));
+                    }
+                },
+                $onIdle,
+                self::FOLLOW_IDLE_SECONDS,
+            );
+        } catch (\Throwable $e) {
+            try {
+                $this->shell->execAsUser(['pkill', '-TERM', '-f', $tag], [], 30);
+            } catch (\Throwable) {
+                // Nothing left to stop; `timeout` ends it otherwise.
+            }
+            throw $e;
+        }
+        if ($buffer !== '') {
+            $onLine(...self::splitTimestamp(rtrim($buffer, "\r")));
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function logsArgs(string $service, int $lines, ?string $since, ?string $until, bool $follow): array
+    {
+        $args = ['logs', "--tail={$lines}", '--no-color'];
+        if ($follow) {
+            array_push($args, '--follow', '--timestamps', '--no-log-prefix');
+        }
+        if ($since !== null && $since !== '') {
+            $args[] = '--since=' . $since;
+        }
+        if ($until !== null && $until !== '') {
+            $args[] = '--until=' . $until;
+        }
+        $args[] = $service;
+
+        return $args;
+    }
+
+    /**
+     * `--timestamps` puts docker's RFC 3339 time first on every line.
+     *
+     * @return array{0: string, 1: ?string}
+     */
+    public static function splitTimestamp(string $raw): array
+    {
+        if (preg_match('/^(\d{4}-\d{2}-\d{2}T\S+) (.*)$/s', $raw, $m) === 1) {
+            return [$m[2], $m[1]];
+        }
+
+        return [$raw, null];
     }
 
     private static function assertServiceName(string $service): void

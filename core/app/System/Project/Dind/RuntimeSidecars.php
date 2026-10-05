@@ -72,9 +72,15 @@ class RuntimeSidecars
                 $this->dind->userAppDirPath()
             );
             $this->logDroppedProxies($extracted);
-            if ($extracted['services'] !== []) {
-                $names = implode(', ', array_keys($extracted['services']));
-                $this->dind->shell()->logger()?->info("Keeping runtime services from compose: {$names}");
+            $this->logDroppedTestServices($extracted, $candidate);
+            // Every service it kept was a test suite: still the app's own
+            // settings, as when the suite was kept (Zerobyte's APP_SECRET).
+            $suiteOnly = $extracted['services'] === [] && self::droppedATestSuite($extracted);
+            if ($extracted['services'] !== [] || $suiteOnly) {
+                if ($extracted['services'] !== []) {
+                    $names = implode(', ', array_keys($extracted['services']));
+                    $this->dind->shell()->logger()?->info("Keeping runtime services from compose: {$names}");
+                }
                 foreach ($extracted['dropped_mounts'] ?? [] as $mount) {
                     $this->dind->shell()->logger()?->info("Dropped the bind {$mount}: installed dependencies are not in a deployment's checkout");
                 }
@@ -140,6 +146,7 @@ class RuntimeSidecars
                 $rootBuildNames
             );
             $this->logDroppedProxies($extracted);
+            $this->logDroppedTestServices($extracted, $candidate);
             if ($extracted['services'] !== []) {
                 $names = implode(', ', array_keys($extracted['services']));
                 $this->dind->shell()->logger()?->info(
@@ -180,6 +187,43 @@ class RuntimeSidecars
         foreach ($extracted['dropped_proxies'] ?? [] as $proxy) {
             $this->dind->shell()->logger()?->info("Dropped service {$proxy}: the engine's proxy routes traffic to this app");
         }
+    }
+
+    /**
+     * @param array{dropped_test_services?: list<string>, dropped_test_matrix?: array{engines: int, databases?: list<string>, services: list<string>}|null} $extracted
+     */
+    private static function droppedATestSuite(array $extracted): bool
+    {
+        return ($extracted['dropped_test_services'] ?? []) !== [] || ($extracted['dropped_test_matrix'] ?? null) !== null;
+    }
+
+    /**
+     * @param array{dropped_test_services?: list<string>, dropped_test_matrix?: array{engines: int, databases?: list<string>, services: list<string>}|null} $extracted
+     */
+    private function logDroppedTestServices(array $extracted, string $file): void
+    {
+        $names = $extracted['dropped_test_services'] ?? [];
+        if ($names !== []) {
+            $this->dind->shell()->logger()?->info('Dropped test-suite services: ' . implode(', ', $names));
+        }
+        $matrix = $extracted['dropped_test_matrix'] ?? null;
+        if ($matrix !== null) {
+            $this->dind->shell()->logger()?->info(self::droppedTestMatrixLine($matrix, $file));
+        }
+    }
+
+    /**
+     * The count is of the databases listed; what went with them is listed apart.
+     *
+     * @param array{engines: int, databases?: list<string>, services: list<string>} $matrix
+     */
+    public static function droppedTestMatrixLine(array $matrix, string $file): string
+    {
+        $databases = $matrix['databases'] ?? $matrix['services'];
+        $others = array_values(array_diff($matrix['services'], $databases));
+        $line = "Dropped a test matrix from {$file} (" . count($databases) . ' SQL engines, none configured): ' . implode(', ', $databases);
+
+        return $others === [] ? $line : $line . '; with them: ' . implode(', ', $others);
     }
 
     /**
@@ -310,6 +354,12 @@ class RuntimeSidecars
             $decision['app_aliases'] = $sidecars['app_aliases'];
         }
         if ($sidecars['services'] === []) {
+            // Only a file whose kept services were all a test suite gets here
+            // with app env; it ranks below what the strategy generates, as below.
+            if (($sidecars['app_env'] ?? []) !== []) {
+                $decision['env'] = array_merge($sidecars['app_env'], $decision['env'] ?? []);
+            }
+
             return $decision;
         }
         $decision['sidecars'] = array_merge($sidecars['services'], $decision['sidecars'] ?? []);

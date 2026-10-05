@@ -49,3 +49,5 @@ Rebuild this project.
 ```
 
 If the project is connected to git, ask the assistant to pull the latest commit. That pull rebuilds the site: [Connecting with Git](../05-capabilities/connecting-with-git.md).
+
+The version already online keeps serving while a rebuild runs. The new version starts beside it, and the site moves over only once the new version answers. If it never answers, the deploy fails with what it printed and the old version stays online. Some projects cannot run two copies side by side: one that publishes a TCP or UDP port on the server, one behind a Cloudflare tunnel, or a repository compose file with several services. Those are replaced in place, with a short gap, and the deploy log says why.

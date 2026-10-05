@@ -406,21 +406,16 @@ extras:
 
   # Railpack's own build infrastructure. Only reached when every recipe has
   # declined -- now that every runtime has one, that is a library with no entry
-  # point or a language we have no recipe for. These tags follow Railpack's own
-  # release calendar; an account is given whatever its plan names, so a stale
-  # one here costs a host pull rather than the wrong image.
-  - image: "ghcr.io/railwayapp/railpack-runtime:mise-2026.8.16"
-    runtime: railpack
-    prewarm: 830
-    why: "Railpack runtime base (mise runtime shims)"
+  # point or a language we have no recipe for. Only the frontend is named here:
+  # it is the one tag the engine passes itself. The builder and runtime tags
+  # come from the plan the account's railpack writes and change with every
+  # Railpack release, so a deploy fetches them onto the host the first time a
+  # plan names them, and every account after that gets them from the cache
+  # registry.
   - image: "ghcr.io/railwayapp/railpack-frontend:latest"
     runtime: railpack
     prewarm: 820
     why: "Railpack buildkit frontend"
-  - image: "ghcr.io/railwayapp/railpack-builder:mise-2026.8.16"
-    runtime: railpack
-    prewarm: 800
-    why: "Railpack builder base (mise + build deps)"
 
   - image: "composer:2"
     runtime: php

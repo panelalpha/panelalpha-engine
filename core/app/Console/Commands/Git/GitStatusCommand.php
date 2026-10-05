@@ -13,7 +13,7 @@ class GitStatusCommand extends Command
 
     protected $signature = 'git:status
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}
                             {--fetch : Fetch from remote before reporting status}';
 
     protected $description = 'Git repository status';

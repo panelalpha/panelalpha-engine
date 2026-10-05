@@ -81,13 +81,13 @@ class GitCheckoutSyncTest extends TestCase
         (new TestableGitCheckoutSync($redeploy, $git))->pullAndRebuild($this->user(), 'project', 'pushed-sha');
 
         $commands = $this->subcommands($runner);
-        $this->assertContains('fetch origin main', $commands);
+        $this->assertContains('fetch origin +refs/heads/main:refs/remotes/origin/main', $commands);
         $this->assertContains('reset --hard origin/main', $commands, 'a push makes the checkout match the repository');
         $this->assertContains('clean -fd', $commands);
         $this->assertNotContains('merge --ff-only origin/main', $commands);
         $this->assertLessThan(
             array_search('reset --hard origin/main', $commands, true),
-            array_search('fetch origin main', $commands, true),
+            array_search('fetch origin +refs/heads/main:refs/remotes/origin/main', $commands, true),
         );
 
         $this->assertCount(1, $redeploy->calls);

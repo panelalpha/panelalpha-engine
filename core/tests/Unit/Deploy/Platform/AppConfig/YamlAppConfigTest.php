@@ -181,6 +181,26 @@ class YamlAppConfigTest extends TestCase
         AppConfig::fromYaml("git:\n  history: deep\n");
     }
 
+    /** engine#569: an app that installs itself at first start needs longer than the deploy probe. */
+    public function test_health_start_period_is_read(): void
+    {
+        $this->assertSame(900, AppConfig::fromYaml("health:\n  start_period: 900\n")?->startPeriod());
+        $this->assertSame(0, AppConfig::fromYaml("health:\n  start_period: 0\n")?->startPeriod());
+        $this->assertNull(AppConfig::fromYaml("description: Demo\nprepare: 'true'\n")?->startPeriod());
+    }
+
+    public function test_a_start_period_out_of_range_is_refused(): void
+    {
+        foreach (["health:\n  start_period: 1801\n", "health:\n  start_period: '60'\n", "health:\n  start: 60\n", "health: 60\n"] as $yaml) {
+            try {
+                AppConfig::fromYaml($yaml);
+                $this->fail("accepted: {$yaml}");
+            } catch (ManifestException $e) {
+                $this->assertStringContainsString("'health' must be", $e->getMessage());
+            }
+        }
+    }
+
     public function test_an_unknown_compose_mode_is_refused(): void
     {
         $this->expectException(ManifestException::class);

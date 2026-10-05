@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\Platform\Runtime\Images;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -56,6 +57,17 @@ final class GeneratedCompose
      */
     public const LABEL = 'panelalpha.generated';
 
+    /** The Procfile process run once before the app starts, and the profile that keeps `up` from starting it. */
+    public const RELEASE_PROCESS = 'release';
+
+    public const RELEASE_PROFILE = 'panelalpha-release';
+
+    /** {@see LABEL}'s value on a service a Procfile line added: this, then the process name. */
+    public const PROCESS_LABEL_PREFIX = 'procfile-';
+
+    /** Where a recipe's dependencies put their commands, which a Procfile line names bare. */
+    private const PROCESS_PATH = '/app/.venv/bin:/app/node_modules/.bin:/app/vendor/bin';
+
     private const INLINE_DEPTH = 4;
 
     private const INDENT = 2;
@@ -70,8 +82,10 @@ final class GeneratedCompose
         // fails silently: Docker's own default is `no`, so the app comes up
         // on the deploy that created it and never again. staticNginx() was
         // the one caller that forgot, and its sites stayed down after a host
-        // reboot while every other platform's came back.
-        $appService['restart'] ??= 'unless-stopped';
+        // reboot while every other platform's came back. Same rule as the
+        // hardener: only a service that publishes a port gets the default.
+        $appService = ServiceHardener::withRestartPolicy($appService);
+        $appService = ServiceHardener::withLogRotation($appService);
         // The names the project's own kept services reach the application by.
         // The file's app service was dropped and this one replaced it under
         // the name `app`, so a proxy in front — which names the old service in
@@ -96,6 +110,135 @@ final class GeneratedCompose
         }
 
         return Yaml::dump($compose, self::INLINE_DEPTH, self::INDENT);
+    }
+
+    /**
+     * The project's `persist-paths` as named volumes on the app service, so
+     * what the app writes there outlives a rebuild, which replaces the
+     * checkout a recipe bind-mounts. Mounted over that bind; a path something
+     * already mounts is left alone. Unchanged when there is nothing to add.
+     *
+     * @param list<string> $paths
+     */
+    public static function withPersistedPaths(string $yaml, array $paths): string
+    {
+        if ($paths === []) {
+            return $yaml;
+        }
+        $compose = ComposeYaml::parse($yaml);
+        $service = $compose['services'][self::APP_SERVICE] ?? null;
+        if (!is_array($service)) {
+            return $yaml;
+        }
+
+        $mounts = is_array($service['volumes'] ?? null) ? array_values($service['volumes']) : [];
+        $taken = [];
+        foreach ($mounts as $mount) {
+            $target = is_string($mount) ? (explode(':', $mount)[1] ?? null) : ($mount['target'] ?? null);
+            if (is_string($target)) {
+                $taken[rtrim($target, '/') ?: '/'] = true;
+            }
+        }
+
+        $volumes = is_array($compose['volumes'] ?? null) ? $compose['volumes'] : [];
+        $added = false;
+        foreach ($paths as $path) {
+            if (isset($taken[$path])) {
+                continue;
+            }
+            $name = self::volumeNameFor($path);
+            $mounts[] = $name . ':' . $path;
+            $volumes[$name] ??= null;
+            $taken[$path] = true;
+            $added = true;
+        }
+        if (!$added) {
+            return $yaml;
+        }
+
+        $compose['services'][self::APP_SERVICE]['volumes'] = $mounts;
+        $compose['volumes'] = $volumes;
+
+        return Yaml::dump($compose, self::INLINE_DEPTH, self::INDENT);
+    }
+
+    /**
+     * One more service per Procfile process besides `web`, each the app
+     * service running the process's command in a shell: the same image or
+     * build, env, volumes and dependencies, no ports. `release` is a one-shot behind a
+     * profile, so `up` leaves it to the run before it. A name the file
+     * already uses is skipped, and an app served by stock nginx gets none:
+     * there is no runtime in it to run them. Unchanged when there are none.
+     *
+     * @param array<string, string> $processes name => command
+     */
+    public static function withProcesses(string $yaml, array $processes): string
+    {
+        if ($processes === []) {
+            return $yaml;
+        }
+        $compose = ComposeYaml::parse($yaml);
+        $app = $compose['services'][self::APP_SERVICE] ?? null;
+        if (!is_array($app) || ($app['image'] ?? null) === Images::NGINX_IMAGE) {
+            return $yaml;
+        }
+
+        $base = $app;
+        unset($base['ports'], $base['healthcheck'], $base['networks'], $base['container_name'], $base['hostname']);
+        // Its own build of the same Dockerfile, cached: a tag the app builds is
+        // not there yet when `run` asks for the release.
+        if (isset($base['build'])) {
+            unset($base['image']);
+        }
+
+        $added = false;
+        foreach ($processes as $name => $command) {
+            if (isset($compose['services'][$name])) {
+                continue;
+            }
+            $service = $base;
+            $service['labels'] = [self::LABEL => self::PROCESS_LABEL_PREFIX . $name];
+            // In a shell of its own, as Heroku runs a Procfile line: an image
+            // entrypoint like Railpack's `bash -c` would otherwise take `sh` for
+            // the whole script.
+            $service['entrypoint'] = ['sh', '-c'];
+            $service['command'] = ['export PATH=' . self::PROCESS_PATH . ':$$PATH && ' . FrameworkService::shellCommand($command)];
+            if ($name === self::RELEASE_PROCESS) {
+                $service['restart'] = 'no';
+                $service['profiles'] = [self::RELEASE_PROFILE];
+            } else {
+                $service['restart'] = 'unless-stopped';
+            }
+            $compose['services'][$name] = $service;
+            $added = true;
+        }
+
+        return $added ? Yaml::dump($compose, self::INLINE_DEPTH, self::INDENT) : $yaml;
+    }
+
+    /**
+     * The service a Procfile `release:` line became, if this compose file has one.
+     *
+     * @param array<mixed> $compose
+     */
+    public static function releaseService(array $compose): ?string
+    {
+        $label = self::PROCESS_LABEL_PREFIX . self::RELEASE_PROCESS;
+        foreach (is_array($compose['services'] ?? null) ? $compose['services'] : [] as $name => $service) {
+            if (is_array($service) && ($service['labels'][self::LABEL] ?? null) === $label) {
+                return (string) $name;
+            }
+        }
+
+        return null;
+    }
+
+    /** `/var/lib/grafana` -> `data-var-lib-grafana`, stable across deploys. */
+    public static function volumeNameFor(string $path): string
+    {
+        $slug = strtolower(trim((string) preg_replace('/[^A-Za-z0-9]+/', '-', $path), '-'));
+
+        return 'data-' . ($slug === '' ? 'root' : $slug);
     }
 
     /**
@@ -143,6 +286,11 @@ final class GeneratedCompose
         $sidecars = [];
         foreach ((array) ($decision['sidecars'] ?? []) as $name => $sidecar) {
             if (is_string($name) && $name !== '' && is_array($sidecar)) {
+                // The app needs what the engine put beside it, port or not; a
+                // one-shot the hardener marked `no` keeps that.
+                if (in_array($sidecar['restart'] ?? null, [null, '', false], true)) {
+                    $sidecar['restart'] = 'unless-stopped';
+                }
                 $sidecars[$name] = $sidecar;
             }
         }

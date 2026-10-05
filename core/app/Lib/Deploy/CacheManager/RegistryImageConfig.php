@@ -48,6 +48,26 @@ final class RegistryImageConfig
     }
 
     /**
+     * The `KEY=value` lines $image sets for itself (its Dockerfile `ENV`), from
+     * the first registry that has it.
+     *
+     * @return list<string>
+     */
+    public function environment(string $image): array
+    {
+        foreach (self::sources($image) as [$base, $repository, $reference]) {
+            $config = $this->config($base, $repository, $reference);
+            if ($config !== null) {
+                $env = $config['config']['Env'] ?? null;
+
+                return is_array($env) ? array_values(array_filter($env, 'is_string')) : [];
+            }
+        }
+
+        return [];
+    }
+
+    /**
      * What pulling $image moves: the compressed layers of this platform's
      * manifest, as `docker manifest inspect --verbose` would have summed them,
      * but asked of our registries, so the question goes out under
@@ -103,6 +123,8 @@ final class RegistryImageConfig
      */
     private static function split(string $image): array
     {
+        // A tag beside a digest would end up in the repository path.
+        $image = ImageTransfer::preferDigest($image);
         $at = strpos($image, '@');
         if ($at !== false) {
             return [substr($image, 0, $at), substr($image, $at + 1)];

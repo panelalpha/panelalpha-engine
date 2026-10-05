@@ -179,6 +179,36 @@ class PathsTest extends TestCase
     }
 
     /**
+     * Generated `${X:?}` secrets live in `.env.panelalpha`, out of `.env` and
+     * so out of a build context: compose has to interpolate from both files,
+     * and naming one replaces its default `.env`.
+     */
+    public function test_compose_interpolates_from_env_panelalpha_beside_env_when_it_exists(): void
+    {
+        $dind = $this->dindProject('lena', Strategies::COMPOSE);
+        $this->writeRunFile('lena');
+        $app = $this->appDir('lena');
+
+        $this->assertNotContains('--env-file', $dind->userAppComposeCommand(['up']));
+        $this->assertArrayNotHasKey('COMPOSE_ENV_FILES', $dind->userAppComposeEnv());
+
+        file_put_contents($app.'/'.EngineArtifacts::ENV_OVERRIDES, "DB_PASSWORD=x\n");
+        $this->assertSame([$app.'/'.EngineArtifacts::ENV_OVERRIDES], (new Paths($dind))->envFiles(), 'an absent .env is not named');
+
+        file_put_contents($app.'/.env', "SITE=demo\n");
+        $command = $dind->userAppComposeCommand(['up']);
+        $this->assertSame(['env', 'PWD='.$app, 'docker', 'compose'], array_slice($command, 0, 4));
+        $this->assertSame(
+            ['--env-file', $app.'/.env', '--env-file', $app.'/'.EngineArtifacts::ENV_OVERRIDES],
+            array_slice($command, 6, 4)
+        );
+        $this->assertSame(
+            $app.'/.env,'.$app.'/'.EngineArtifacts::ENV_OVERRIDES,
+            $dind->userAppComposeEnv()['COMPOSE_ENV_FILES']
+        );
+    }
+
+    /**
      * composeCommandForDirectory() (used by CopyVolumes for a staging clone,
      * a directory that is not the account's own appDir()) layers the same
      * way as composeFiles() (D8) — the run file (or the project's own, before

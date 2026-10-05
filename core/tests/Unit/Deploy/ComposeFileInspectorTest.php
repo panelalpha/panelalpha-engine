@@ -244,6 +244,43 @@ YAML;
         );
     }
 
+    /**
+     * masoudei/docker-wordpress-nginx (`./nginx/log:/var/log/nginx`) and
+     * PrivyDrop (`./logs:/app/logs`): a log directory holds no source, so the
+     * stack was demoted to the placeholder for nothing.
+     */
+    public function test_a_build_service_writing_logs_to_the_checkout_is_not_a_dev_compose(): void
+    {
+        $nginx = <<<'YAML'
+services:
+  nginx:
+    build: ./nginx/
+    volumes:
+      - ${WORDPRESS_DIR:-./www}:/var/www/html
+      - ./nginx/log:/var/log/nginx
+  wordpress:
+    image: wordpress:6.7-php8.3-fpm-alpine
+YAML;
+        $this->assertNull(ComposeFileInspector::localDevComposeReasonYaml($nginx));
+
+        $backend = <<<'YAML'
+services:
+  backend:
+    build: { context: ./backend }
+    volumes:
+      - ./logs:/app/logs
+  frontend:
+    build: { context: ./frontend }
+    volumes:
+      - ./docker/ssl:/opt/privydrop/ssl:ro
+YAML;
+        $this->assertNull(ComposeFileInspector::localDevComposeReasonYaml($backend));
+
+        // A source tree beside the log directory still demotes.
+        $both = "services:\n  web:\n    build: .\n    volumes:\n      - ./logs:/app/logs\n      - ./src:/app/src\n";
+        $this->assertSame('service `web` mounts `./src`', ComposeFileInspector::localDevComposeReasonYaml($both));
+    }
+
     public function test_is_sidecars_only_compose_yaml_requires_every_service_to_be_a_known_datastore(): void
     {
         $sidecarsOnly = <<<'YAML'
@@ -418,6 +455,32 @@ DOCKER
         $this->assertFalse(ComposeFileInspector::isHostUidMappedDockerfile($plain));
 
         $this->assertFalse(ComposeFileInspector::isHostUidMappedDockerfile($this->tmpDir . '/missing'));
+    }
+
+    /**
+     * Koillection's production Dockerfile sets the uid with `ENV`, not `ARG`,
+     * and was taken for a workstation file, so detection fell to PHP.
+     */
+    public function test_an_env_default_is_as_good_as_an_arg_default(): void
+    {
+        $koillection = $this->writeFile('Dockerfile.koillection', <<<'DOCKER'
+FROM debian:trixie-slim
+ENV APP_ENV=prod
+ENV PUID=1001
+ENV PGID=1001
+ENV USER=koillection
+RUN addgroup --gid "$PGID" "$USER" ; \
+    adduser --gecos '' --no-create-home --disabled-password --uid "$PUID" --gid "$PGID" "$USER"
+DOCKER
+        );
+        $this->assertFalse(ComposeFileInspector::isHostUidMappedDockerfile($koillection));
+
+        $legacy = $this->writeFile('Dockerfile.legacy', "FROM alpine\nENV LANG=C PUID=1000\nENV PGID 1000\nRUN addgroup -g \$PGID app && adduser -u \$PUID app\n");
+        $this->assertFalse(ComposeFileInspector::isHostUidMappedDockerfile($legacy));
+
+        // An ENV that only passes the build arg on is no default.
+        $passOn = $this->writeFile('Dockerfile.passon', "FROM alpine\nARG PUID\nENV PUID=\${PUID}\nRUN adduser -u \$PUID app\n");
+        $this->assertTrue(ComposeFileInspector::isHostUidMappedDockerfile($passOn));
     }
 
     /**

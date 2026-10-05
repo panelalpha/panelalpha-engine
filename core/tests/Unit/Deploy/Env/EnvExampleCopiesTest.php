@@ -138,6 +138,29 @@ class EnvExampleCopiesTest extends TestCase
         $this->assertSame($this->dir . '/.env.example', $copies[0]['example']);
     }
 
+    /** openstatus: `env_file: .env.docker` beside `.env.docker.example`; the root `.env` lacks its keys. */
+    public function test_a_compose_declared_file_takes_its_own_template_first(): void
+    {
+        $this->write('.env', "WEB_PORT=8080\n");
+        $this->write('.env.example', "WEB_PORT=8080\n");
+        $this->write('.env.docker.example', "RESEND_API_KEY=re_your_resend_api_key_here\n");
+        $this->write('apps/worker/.env.worker.sample', "QUEUE=default\n");
+        $this->write('docker-compose.yml', <<<'YAML'
+        services:
+          app:
+            image: acme/app
+            env_file: .env.docker
+          worker:
+            image: acme/worker
+            env_file: apps/worker/.env.worker
+        YAML);
+
+        $sources = array_column(EnvExampleCopies::for($this->dir), 'example', 'relative');
+
+        $this->assertSame($this->dir . '/.env.docker.example', $sources['.env.docker']);
+        $this->assertSame($this->dir . '/apps/worker/.env.worker.sample', $sources['apps/worker/.env.worker']);
+    }
+
     public function test_a_compose_declared_file_in_a_directory_that_is_not_there_is_skipped(): void
     {
         // Copying into it would mean creating directories a customer's file

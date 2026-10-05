@@ -85,7 +85,7 @@ class GateServiceFailsTheDeployTest extends TestCase
 
     /**
      * The services worth waiting for: `restart: "no"` in the hardened run
-     * file and nothing published. Everything else got a restart policy.
+     * file and nothing published.
      */
     public function test_one_shots_are_the_unpublished_no_restart_services(): void
     {
@@ -98,6 +98,24 @@ class GateServiceFailsTheDeployTest extends TestCase
         ]];
 
         $this->assertSame(['ready', 'init'], AppLauncher::oneShotServices($compose));
+    }
+
+    /**
+     * kassambara/wordpress-docker-compose's `wpcli` publishes no port and names
+     * no policy, so the run file gives it none: its exit is not a gate's.
+     */
+    public function test_services_with_no_restart_policy_are_not_gates(): void
+    {
+        $compose = ['services' => [
+            'wordpress' => ['image' => 'wordpress', 'restart' => 'always', 'ports' => ['80:80']],
+            'wpcli' => ['image' => 'wpcli'],
+            'healthcheck' => ['image' => 'wpcli', 'restart' => ''],
+            'ready' => ['image' => 'alpine:3', 'restart' => 'no'],
+            'init' => ['image' => 'x', 'restart' => false],
+        ]];
+
+        $this->assertSame(['wpcli', 'healthcheck'], AppLauncher::withoutRestartPolicy($compose));
+        $this->assertSame([], AppLauncher::withoutRestartPolicy([]));
     }
 
     /**

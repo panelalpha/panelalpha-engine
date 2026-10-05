@@ -46,6 +46,22 @@ public function test_status_reports_dirty_tree_and_sanitized_remote_url(): void
         $this->assertSame(1, $status['commits_behind']);
     }
 
+    public function test_status_keeps_the_user_of_an_ssh_remote(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'status --porcelain' => '',
+            'config --get remote.origin.url' => "ssh://git@10.10.0.44:22277/home/git/r7.git\n",
+            'branch --show-current' => "main\n",
+        ];
+        $git = $this->testable($model, 'public_html', $runner);
+
+        $this->assertSame('ssh://git@10.10.0.44:22277/home/git/r7.git', $git->status()['remote_url']);
+    }
+
     public function test_status_fetch_false_does_not_call_fetch(): void
     {
         $model = new ModelsUser();
@@ -189,6 +205,66 @@ public function test_status_reports_dirty_tree_and_sanitized_remote_url(): void
         $this->assertFalse($this->commandsContain($joined, '%x1f'));
     }
 
+    public function test_branches_lists_every_branch_the_remote_has_not_only_the_fetched_one(): void
+    {
+        $model = $this->connectedUser();
+        $sep = "\x1f";
+        $tokens = [];
+        $git = $this->testable($model, 'public_html', function (array $cmd, ?string $token) use (&$tokens, $sep): string {
+            $joined = implode(' ', $cmd);
+            if (str_contains($joined, 'ls-remote')) {
+                $tokens[] = $token;
+                $this->assertStringEndsWith('ls-remote --heads origin', $joined);
+
+                return "abc\trefs/heads/main\ndef\trefs/heads/staging\n0a1\trefs/heads/feature/x\n";
+            }
+
+            return match (true) {
+                str_contains($joined, 'rev-parse --is-inside-work-tree') => "true\n",
+                str_contains($joined, 'for-each-ref') => "refs/heads/main{$sep}main{$sep}origin/main{$sep}*\n"
+                    . "refs/remotes/origin/main{$sep}origin/main{$sep}{$sep}\n",
+                default => '',
+            };
+        });
+
+        $branches = $git->branches();
+
+        $this->assertSame(['main', 'staging', 'feature/x'], array_column($branches, 'name'));
+        $this->assertTrue($branches[0]['current']);
+        $this->assertSame('origin/main', $branches[0]['tracking']);
+        $this->assertSame(['name' => 'staging', 'current' => false, 'tracking' => 'origin/staging'], $branches[1]);
+        $this->assertSame(['pat-secret'], $tokens);
+    }
+
+    public function test_branches_of_an_unconnected_checkout_do_not_ask_a_remote(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'for-each-ref' => "refs/heads/main\x1fmain\x1f\x1f*\n",
+        ];
+        $git = $this->testable($model, 'public_html', $runner);
+
+        $this->assertSame(['main'], array_column($git->branches(), 'name'));
+        $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
+        $this->assertFalse($this->commandsContain($joined, 'ls-remote'));
+    }
+
+    public function test_branches_fall_back_to_local_refs_when_the_remote_cannot_be_asked(): void
+    {
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'for-each-ref' => "refs/heads/main\x1fmain\x1forigin/main\x1f*\n",
+        ];
+        $runner->failIfContains = ['ls-remote'];
+        $git = $this->testable($this->connectedUser(), 'public_html', $runner);
+
+        $this->assertSame(['main'], array_column($git->branches(), 'name'));
+    }
+
     public function test_configure_safe_directory_adds_once(): void
     {
         $model = new ModelsUser();
@@ -279,6 +355,95 @@ public function test_connect_when_origin_mismatches_throws_422(): void
             $this->assertSame(422, $e->httpStatus);
             $this->assertSame('Remote URL does not match the existing origin.', $e->getMessage());
         }
+    }
+
+    public function test_a_refused_connect_over_an_unborn_head_leaves_head_alone(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'branch --show-current' => "master\n",
+            'config --get remote.origin.url' => "https://github.com/other/repo.git\n",
+        ];
+        $runner->failIfContains = ['rev-parse --verify HEAD'];
+        $git = $this->testable($model, 'public_html', $runner);
+
+        try {
+            $git->connect('https://github.com/octocat/Hello-World', 'no-such-branch', null);
+            $this->fail('Expected GitException');
+        } catch (GitException $e) {
+            $this->assertSame('Remote URL does not match the existing origin.', $e->getMessage());
+        }
+
+        $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
+        $this->assertFalse($this->commandsContain($joined, 'symbolic-ref'));
+        $this->assertNull($model->getSiteGit('public_html'));
+    }
+
+    public function test_connect_over_an_existing_repository_refuses_a_branch_it_is_not_on(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'branch --show-current' => "master\n",
+            'rev-parse --verify HEAD' => "abc123\n",
+        ];
+        $git = $this->testable($model, 'public_html', $runner);
+
+        try {
+            $git->connect('https://github.com/octocat/Hello-World', 'no-such-branch', null);
+            $this->fail('Expected GitException');
+        } catch (GitException $e) {
+            $this->assertSame(422, $e->httpStatus);
+            $this->assertStringContainsString('on branch master', $e->getMessage());
+        }
+
+        $this->assertNull($model->getSiteGit('public_html'));
+        $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
+        $this->assertFalse($this->commandsContain($joined, 'remote add'));
+        $this->assertFalse($this->commandsContain($joined, 'checkout'));
+        $this->assertFalse($this->commandsContain($joined, 'reset'));
+    }
+
+    public function test_connect_over_an_existing_repository_on_the_same_branch_is_accepted(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'branch --show-current' => "master\n",
+            'rev-parse --verify HEAD' => "abc123\n",
+        ];
+        $git = $this->testable($model, 'public_html', $runner);
+
+        $status = $git->connect('https://github.com/octocat/Hello-World', 'master', null);
+
+        $this->assertTrue($status['connected']);
+        $this->assertSame('master', $model->getSiteGit('public_html')['branch']);
+    }
+
+    public function test_connect_over_an_unborn_head_points_it_at_the_requested_branch(): void
+    {
+        $model = new ModelsUser();
+        $model->username = 'alice';
+        $runner = new FakeGitRunner();
+        $runner->stdout = [
+            'rev-parse --is-inside-work-tree' => "true\n",
+            'branch --show-current' => "master\n",
+        ];
+        $runner->failIfContains = ['rev-parse --verify HEAD'];
+        $git = $this->testable($model, 'public_html', $runner);
+
+        $git->connect('https://github.com/octocat/Hello-World', 'main', null);
+
+        $joined = array_map(fn (array $cmd) => implode(' ', $cmd), $runner->commands);
+        $this->assertTrue($this->commandsContain($joined, 'symbolic-ref HEAD refs/heads/main'));
+        $this->assertSame('main', $model->getSiteGit('public_html')['branch']);
     }
 
     public function test_disconnect_removes_site_git_and_remote(): void

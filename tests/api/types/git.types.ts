@@ -5,6 +5,8 @@ export interface GitStatus {
   path_key: string;
   managed_by: GitManagedBy;
   connected: boolean;
+  connecting: boolean;
+  connecting_since: string | null;
   repository_exists: boolean;
   [key: string]: unknown;
 }

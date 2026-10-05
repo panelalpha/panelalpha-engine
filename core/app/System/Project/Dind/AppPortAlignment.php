@@ -152,13 +152,22 @@ final class AppPortAlignment
         return $code !== '000';
     }
 
+    /** `COMPOSE_ENV_FILES=… ` for a script's bare compose call, or '' when compose's default `.env` is all there is. */
+    private function envFilesAssignment(): string
+    {
+        $files = $this->project->userAppComposeEnv()['COMPOSE_ENV_FILES'] ?? null;
+
+        return $files === null ? '' : 'COMPOSE_ENV_FILES=' . escapeshellarg($files) . ' ';
+    }
+
     /** The status the app container answers on $port, over http then https; '' when it cannot be asked. */
     private function httpStatusOf(int $port): string
     {
         $composeFile = escapeshellarg($this->project->userAppComposeFileToRun());
         $projectDir = escapeshellarg($this->project->userAppDirPath());
+        $envFiles = $this->envFilesAssignment();
         $script = <<<SH
-cid=\$(docker compose --project-directory {$projectDir} -f {$composeFile} ps -q app 2>/dev/null | head -1)
+cid=\$({$envFiles}docker compose --project-directory {$projectDir} -f {$composeFile} ps -q app 2>/dev/null | head -1)
 [ -n "\$cid" ] || exit 0
 ip=\$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "\$cid" 2>/dev/null | awk '{print \$1}')
 [ -n "\$ip" ] || exit 0
@@ -248,8 +257,9 @@ SH;
     {
         $composeFile = escapeshellarg($this->project->userAppComposeFileToRun());
         $projectDir = escapeshellarg($this->project->userAppDirPath());
+        $envFiles = $this->envFilesAssignment();
         $script = <<<SH
-cid=\$(docker compose --project-directory {$projectDir} -f {$composeFile} ps -q app 2>/dev/null | head -1)
+cid=\$({$envFiles}docker compose --project-directory {$projectDir} -f {$composeFile} ps -q app 2>/dev/null | head -1)
 [ -n "\$cid" ] || exit 0
 state=\$(docker inspect -f '{{.State.Status}}' "\$cid" 2>/dev/null)
 [ "\$state" = "running" ] || exit 0

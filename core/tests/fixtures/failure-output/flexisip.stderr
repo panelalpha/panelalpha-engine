@@ -1,0 +1,23 @@
+------
+> [ 3/17] RUN yum -y install epel-release  yum-downloadonly gdb:
+1.183
+1.183      5. Configure the failing repository to be skipped, if it is unavailable.
+1.183         Note that yum will try to contact the repo. when it runs most commands,
+1.183         so will have to try and fail each time (and thus. yum will be be much
+1.183         slower). If it is a very temporary problem though, this is often a nice
+1.183         compromise:
+1.183
+1.183             yum-config-manager --save --setopt=<repoid>.skip_if_unavailable=true
+1.183
+1.183 Cannot find a valid baseurl for repo: base/7/x86_64
+------
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+Dockerfile:6
+--------------------
+4 |     # Prepare the Belledonne's repository
+5 |     COPY docker/Belledonne.repo /etc/yum.repos.d/Belledonne.repo
+6 | >>> RUN yum -y install epel-release  yum-downloadonly gdb
+7 |     RUN yum update -y
+8 |
+--------------------
+failed to solve: process "/bin/sh -c yum -y install epel-release  yum-downloadonly gdb" did not complete successfully: exit code: 1

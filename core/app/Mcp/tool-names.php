@@ -175,6 +175,8 @@ return [
     'POST /projects/{username}/git/pull' => 'git_pull',
     'POST /projects/{username}/git/push' => 'git_push',
     'POST /projects/{username}/git/revert' => 'git_revert',
+    'POST /projects/{username}/git/deploy-key' => 'git_deploy_key_create',
+    'DELETE /projects/{username}/git/deploy-key' => 'git_deploy_key_delete',
     'POST /projects/{username}/git/deploy-hook' => 'git_deploy_hook_create',
     'GET /projects/{username}/git/deploy-hook' => 'git_deploy_hook_show',
     'POST /projects/{username}/git/deploy-hook/rotate' => 'git_deploy_hook_rotate',

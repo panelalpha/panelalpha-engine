@@ -1236,6 +1236,61 @@ OUT;
         $this->assertStringContainsString('refused access', $message);
     }
 
+    /** CoreShop (engine#27): compose pulled a private ghcr.io image anonymously. */
+    public function test_a_registry_401_names_the_image_and_the_setting(): void
+    {
+        $output = 'time="2026-09-19T17:02:31Z" level=info msg="fetch failed" error="failed to authorize: failed to fetch '
+            . 'anonymous token: unexpected status from GET request to https://ghcr.io/token?scope=repository%3Acors-gmbh'
+            . '%2Fdev-compose%3Apull&service=ghcr.io: 401 Unauthorized" host=ghcr.io method=HEAD '
+            . 'url="https://ghcr.io/v2/cors-gmbh/dev-compose/manifests/pimcore2026.1"' . "\n"
+            . 'failed to pull OCI resource "ghcr.io/cors-gmbh/dev-compose:pimcore2026.1": failed to authorize: '
+            . 'failed to fetch anonymous token: unexpected status: 401 Unauthorized';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('base-image-unauthorized', $match['rule'] ?? null);
+        $this->assertStringContainsString('ghcr.io/cors-gmbh/dev-compose:pimcore2026.1', $match['message']);
+        $this->assertStringContainsString('registry-auth', $match['message']);
+    }
+
+    public function test_a_registrys_unauthorized_answer_is_read_from_its_manifest_url(): void
+    {
+        $output = 'Error response from daemon: Head "https://registry.example.com/v2/acme/app/manifests/1.2": unauthorized';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('base-image-unauthorized', $match['rule'] ?? null);
+        $this->assertStringContainsString('registry.example.com/acme/app:1.2', $match['message']);
+    }
+
+    /** A registry with basic auth, as the account's daemon reports an anonymous pull from it. */
+    public function test_a_registry_asking_for_basic_auth_names_the_image(): void
+    {
+        $output = 'Image 127.0.0.1:5000/test/whoami:1 Error failed to resolve reference "127.0.0.1:5000/test/whoami:1": '
+            . 'pull access denied, repository does not exist or may require authorization: authorization failed: '
+            . 'no basic auth credentials';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('base-image-unauthorized', $match['rule'] ?? null);
+        $this->assertStringContainsString('The image 127.0.0.1:5000/test/whoami:1 could not be downloaded', $match['message']);
+    }
+
+    public function test_docker_hubs_pull_access_denied_stays_ambiguous(): void
+    {
+        $output = 'Error response from daemon: pull access denied for acme/private-base, repository does not exist '
+            . 'or may require \'docker login\': denied: requested access to the resource is denied';
+
+        $this->assertSame('base-image-unavailable', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
+    public function test_a_401_from_something_other_than_a_registry_is_not_taken_for_one(): void
+    {
+        $output = "npm error code E401\nnpm error 401 Unauthorized - GET https://npm.pkg.github.com/@acme%2fui";
+
+        $this->assertNotSame('base-image-unauthorized', DeployFailureExplainer::match($output)['rule'] ?? null);
+    }
+
     public function test_an_unreachable_registry_says_so_and_names_the_image(): void
     {
         $output = 'failed to solve: localhost:5000/base-php:amd64: failed to do request: '

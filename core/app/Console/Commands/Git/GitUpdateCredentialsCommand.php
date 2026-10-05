@@ -13,7 +13,7 @@ class GitUpdateCredentialsCommand extends Command
 
     protected $signature = 'git:update-credentials
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}
                             {--token= : Personal access token (omit to leave unchanged; pass empty to clear)}';
 
     protected $description = 'Update git credentials for a directory';

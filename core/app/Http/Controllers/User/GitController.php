@@ -6,11 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Git\GitChangeBranchRequest;
 use App\Http\Requests\Git\GitCommitsRequest;
 use App\Http\Requests\Git\GitConnectRequest;
+use App\Http\Requests\Git\GitDeployKeyRequest;
 use App\Http\Requests\Git\GitPathRequest;
 use App\Http\Requests\Git\GitPullRequest;
 use App\Http\Requests\Git\GitRevertRequest;
 use App\Http\Requests\Git\GitStatusRequest;
 use App\Http\Requests\Git\GitUpdateCredentialsRequest;
+use App\Lib\Git\DeployKey;
 use App\Lib\Git\GitActions;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Http\JsonResponse;
@@ -20,16 +22,17 @@ class GitController extends Controller
 {
     #[OA\Get(
         path: '/projects/{username}/git/status',
-        description: 'Call this first. Optional `path` defaults to `project` on DinD and `public_html` '
-            . 'on FPM/LiteSpeed. Query `fetch` updates remote-tracking refs before reporting. The '
+        description: 'Call this first. Optional `path` defaults to `project` on DinD and the document root '
+            . 'of the main domain on FPM/LiteSpeed. Query `fetch` updates remote-tracking refs before reporting. The '
             . 'payload includes `managed_by`: `deploy` (account provisioned with git_repo; mutating '
-            . 'Git must go through `project_rebuild`) or `site_git` (these Git tools).',
+            . 'Git must go through `project_rebuild`) or `site_git` (these Git tools). `connecting: true` '
+            . 'means a connect is still fetching the repository: wait and poll; do not call connect again.',
         summary: 'Git repository status',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'fetch', in: 'query', required: false, schema: new OA\Schema(type: 'boolean')),
         ],
         responses: [
@@ -40,6 +43,8 @@ class GitController extends Controller
                         new OA\Property(property: 'path_key', type: 'string'),
                         new OA\Property(property: 'managed_by', type: 'string', enum: ['deploy', 'site_git']),
                         new OA\Property(property: 'connected', type: 'boolean'),
+                        new OA\Property(property: 'connecting', type: 'boolean'),
+                        new OA\Property(property: 'connecting_since', type: 'string', format: 'date-time', nullable: true),
                         new OA\Property(property: 'repository_exists', type: 'boolean'),
                     ]),
                 ],
@@ -58,14 +63,14 @@ class GitController extends Controller
 
     #[OA\Get(
         path: '/projects/{username}/git/branches',
-        description: 'List git branches. Optional `path` defaults to `project` on DinD and `public_html` '
-            . 'on FPM/LiteSpeed.',
+        description: 'List git branches. Optional `path` defaults to `project` on DinD and the document root '
+            . 'of the main domain on FPM/LiteSpeed.',
         summary: 'List git branches',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Branch list', content: new OA\JsonContent(
@@ -84,14 +89,14 @@ class GitController extends Controller
 
     #[OA\Get(
         path: '/projects/{username}/git/commits',
-        description: 'List git commits. Optional `path` defaults to `project` on DinD and `public_html` '
-            . 'on FPM/LiteSpeed. Query `branch` filters the log; `limit` caps how many commits are returned.',
+        description: 'List git commits. Optional `path` defaults to `project` on DinD and the document root '
+            . 'of the main domain on FPM/LiteSpeed. Query `branch` filters the log; `limit` caps how many commits are returned.',
         summary: 'List git commits',
         security: [['bearerAuth' => []]],
         tags: ['Git'],
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'branch', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'limit', in: 'query', required: false, schema: new OA\Schema(type: 'integer', minimum: 1)),
         ],
@@ -113,17 +118,18 @@ class GitController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/connect',
         description: 'Connect a directory to a git remote. Optional `path` defaults to `project` on DinD '
-            . 'and `public_html` on FPM/LiteSpeed. Body `repo_url` and `branch` are required. Optional '
+            . 'and the document root of the main domain on FPM/LiteSpeed. Body `repo_url` and `branch` are required. Optional '
             . '`token` is a PAT (never logged). Set `repair` to re-adopt a missing .git. On a `deploy` '
             . 'account without repair this only keeps origin in sync and persists metadata — it does '
-            . 'not clone from scratch.',
+            . 'not clone from scratch. An SSH `repo_url` (`git@host:owner/repo.git`) needs the project\'s '
+            . 'deploy key (POST /projects/{username}/git/deploy-key) added to the repository first.',
         summary: 'Connect a directory to a git remote',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['repo_url', 'branch'],
             properties: [
-                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', type: 'string'),
-                new OA\Property(property: 'repo_url', type: 'string', format: 'uri'),
+                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string'),
+                new OA\Property(property: 'repo_url', description: 'HTTPS URL, or an SSH remote when the project has a deploy key.', type: 'string'),
                 new OA\Property(property: 'branch', type: 'string'),
                 new OA\Property(property: 'token', type: 'string', nullable: true),
                 new OA\Property(property: 'auth_type', type: 'string', enum: ['pat']),
@@ -150,13 +156,13 @@ class GitController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/disconnect',
         description: 'Disconnect git from a directory. Optional `path` defaults to `project` on DinD and '
-            . '`public_html` on FPM/LiteSpeed. Removes `origin` and site-git metadata; does not delete '
+            . 'the document root of the main domain on FPM/LiteSpeed. Removes `origin` and site-git metadata; does not delete '
             . 'working-tree files. Also removes the checkout\'s Deploy Hook, if it has one -- a '
             . 'disconnected checkout has nothing for a push to deploy. Returns 422 when managed_by is `deploy`.',
         summary: 'Disconnect git from a directory',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
-            properties: [new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', type: 'string')],
+            properties: [new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string')],
         )),
         tags: ['Git'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -178,7 +184,7 @@ class GitController extends Controller
     #[OA\Put(
         path: '/projects/{username}/git/change-branch',
         description: 'Change the tracked git branch. Optional `path` defaults to `project` on DinD and '
-            . '`public_html` on FPM/LiteSpeed. Body `branch` is required. Returns 422 if the working '
+            . 'the document root of the main domain on FPM/LiteSpeed. Body `branch` is required. Returns 422 if the working '
             . 'tree is dirty, the remote branch does not exist, or managed_by is `deploy` — then use '
             . '`project_rebuild`.',
         summary: 'Change the tracked git branch',
@@ -186,7 +192,7 @@ class GitController extends Controller
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             required: ['branch'],
             properties: [
-                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', type: 'string'),
+                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string'),
                 new OA\Property(property: 'branch', type: 'string'),
             ],
         )),
@@ -210,13 +216,13 @@ class GitController extends Controller
     #[OA\Put(
         path: '/projects/{username}/git/update-credentials',
         description: 'Update git credentials for a directory. Optional `path` defaults to `project` on '
-            . 'DinD and `public_html` on FPM/LiteSpeed. Sending `token` (including empty) updates stored '
+            . 'DinD and the document root of the main domain on FPM/LiteSpeed. Sending `token` (including empty) updates stored '
             . 'credentials. Omitting `token` is a no-op that returns status.',
         summary: 'Update git credentials for a directory',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
             properties: [
-                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', type: 'string'),
+                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string'),
                 new OA\Property(property: 'token', type: 'string', nullable: true),
             ],
         )),
@@ -240,7 +246,7 @@ class GitController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/pull',
         description: 'Pull from the git remote. Optional `path` defaults to `project` on DinD and '
-            . '`public_html` on FPM/LiteSpeed. Body `strategy` is `ff` (default), `force` '
+            . 'the document root of the main domain on FPM/LiteSpeed. Body `strategy` is `ff` (default), `force` '
             . '(`reset --hard` origin/<branch> plus clean -fd), or `push_first`. `ff` fetches and fast-forwards, '
             . 'and git alone decides whether the checkout allows it: untracked files (uploads, caches) and edits to '
             . 'files the incoming commits leave alone do not block it. It returns 422 naming the paths when a local '
@@ -252,7 +258,7 @@ class GitController extends Controller
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
             properties: [
-                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', type: 'string'),
+                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string'),
                 new OA\Property(property: 'strategy', type: 'string', enum: ['ff', 'force', 'push_first']),
             ],
         )),
@@ -276,13 +282,13 @@ class GitController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/push',
         description: 'Push local git changes. Optional `path` defaults to `project` on DinD and '
-            . '`public_html` on FPM/LiteSpeed. If the working tree is dirty this tool will commit all '
+            . 'the document root of the main domain on FPM/LiteSpeed. If the working tree is dirty this tool will commit all '
             . 'changes itself, then push. Returns 422 `Pull first.` when behind the remote, or when '
             . 'managed_by is `deploy`.',
         summary: 'Push local git changes',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
-            properties: [new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', type: 'string')],
+            properties: [new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string')],
         )),
         tags: ['Git'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -304,13 +310,13 @@ class GitController extends Controller
     #[OA\Post(
         path: '/projects/{username}/git/revert',
         description: 'Revert local git changes. Optional `path` defaults to `project` on DinD and '
-            . '`public_html` on FPM/LiteSpeed. Runs `reset --hard` and `clean -fd` to `ref` (default '
+            . 'the document root of the main domain on FPM/LiteSpeed. Runs `reset --hard` and `clean -fd` to `ref` (default '
             . 'HEAD). Discards local changes. Confirm with the operator.',
         summary: 'Revert local git changes',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
             properties: [
-                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).', type: 'string'),
+                new OA\Property(property: 'path', description: 'Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).', type: 'string'),
                 new OA\Property(property: 'ref', type: 'string'),
             ],
         )),
@@ -332,6 +338,73 @@ class GitController extends Controller
     }
 
     /** The action's data, or the git layer's refusal with the status it carries. */
+    #[OA\Post(
+        path: '/projects/{username}/git/deploy-key',
+        description: 'Create the project\'s SSH deploy key, or return the one it has: `public_key` is the line '
+            . 'to add to the repository as a read-only deploy key, then connect an SSH remote with git_connect. '
+            . 'The private key is stored encrypted and never returned. Host keys are pinned: github.com, '
+            . 'gitlab.com and bitbucket.org from their published keys; for another host pass `host` '
+            . '(`git.example.com` or `git.example.com:2222`) and its keys are read once and pinned, with their '
+            . '`fingerprints` returned to check. 201 when the key was created, 200 when it existed; never '
+            . 'rotates (delete and create again for a new key).',
+        summary: 'Create a git deploy key',
+        security: [['bearerAuth' => []]],
+        requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
+            properties: [
+                new OA\Property(property: 'host', description: 'Optional. A git host other than github.com, gitlab.com or bitbucket.org to pin, with an optional :port.', type: 'string'),
+            ],
+        )),
+        tags: ['Git'],
+        parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
+        responses: [
+            new OA\Response(response: 201, description: 'Created', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object', properties: [
+                    new OA\Property(property: 'created', type: 'boolean'),
+                    new OA\Property(property: 'public_key', type: 'string'),
+                    new OA\Property(property: 'fingerprint', type: 'string'),
+                    new OA\Property(property: 'hosts', type: 'array', items: new OA\Items(type: 'object', properties: [
+                        new OA\Property(property: 'host', type: 'string'),
+                        new OA\Property(property: 'pinned', type: 'string', enum: ['published', 'scanned']),
+                        new OA\Property(property: 'fingerprints', type: 'array', items: new OA\Items(type: 'string')),
+                    ])),
+                ])],
+            )),
+            new OA\Response(response: 200, description: 'The key already existed'),
+            new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+    )]
+    public function deployKey(string $username, GitDeployKeyRequest $request, GitActions $git): JsonResponse
+    {
+        $user = $this->projectOr404($username);
+        $data = $git->deployKey($user, $request->validated());
+
+        return new JsonResponse(['data' => $data], $data['created'] ? 201 : 200);
+    }
+
+    #[OA\Delete(
+        path: '/projects/{username}/git/deploy-key',
+        description: 'Delete the project\'s SSH deploy key and the host keys pinned with it. SSH remotes stop '
+            . 'authenticating; remove the key from the repository too. 404 when the project has no deploy key.',
+        summary: 'Delete a git deploy key',
+        security: [['bearerAuth' => []]],
+        tags: ['Git'],
+        parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
+        responses: [
+            new OA\Response(response: 204, description: 'Deleted'),
+            new OA\Response(response: 404, description: 'Project or deploy key not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+        ],
+    )]
+    public function deleteDeployKey(string $username): JsonResponse
+    {
+        $user = $this->projectOr404($username);
+        if (!DeployKey::delete($user)) {
+            return new JsonResponse(['message' => "Project '{$username}' has no deploy key."], 404);
+        }
+
+        return new JsonResponse(null, 204);
+    }
+
     private function respond(callable $action): JsonResponse
     {
         try {

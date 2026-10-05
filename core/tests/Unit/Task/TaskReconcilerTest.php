@@ -150,6 +150,38 @@ class TaskReconcilerTest extends SqliteTaskTestCase
         );
     }
 
+    /**
+     * warpgate: core restarted under the worker, so the database queue still
+     * holds the job as reserved (until retry_after, a day) and the queue says
+     * "pending" -- while nothing holds the account's deploy lock. Once the
+     * dead deploy's log is closed, the task adopts its verdict.
+     */
+    public function test_a_reserved_deploy_whose_worker_died_fails_once_its_log_is_closed(): void
+    {
+        $username = 'reserved-' . bin2hex(random_bytes(4));
+        $task = Task::start(jobType: 'App\\Jobs\\DeployProject', queue: 'default', username: $username);
+        $task->markRunning('h-' . ++self::$jobSeq);
+        $task->started_at = now()->subMinutes(10);
+        $task->save();
+        $logger = DeployLogger::start($username);
+        $logger->stage(DeployLogger::STAGE_RUNNING);
+        unset($logger);
+        gc_collect_cycles();
+
+        try {
+            $this->assertSame([], TaskReconciler::reconcile(isPending: $this->queued()), 'running log, reserved job: left alone');
+
+            $this->assertContains($username, DeployLogger::settleOrphanedDeploys());
+            $this->assertSame([(int) $task->id], TaskReconciler::reconcile(isPending: $this->queued()));
+
+            $task->refresh();
+            $this->assertSame(Task::STATUS_FAILED, $task->status);
+            $this->assertSame(DeployLogger::INTERRUPTED_MESSAGE, $task->details['error'] ?? null);
+        } finally {
+            DeployLogger::deleteUserLogs($username);
+        }
+    }
+
     // ---- the sweep -------------------------------------------------------
 
     public function test_reconcile_retires_only_the_orphan_and_is_dry_run_safe(): void

@@ -145,6 +145,9 @@ final class DindImageStore implements ImageStore
             . ' && ' . self::sharedLock("{ {$attempt}; } || { sleep 2; {$attempt}; }");
     }
 
+    /** What {@see seedCommand()} says when neither the cache registry nor the host has $ours. */
+    public const NOT_BUILT_HERE = 'not built on this host yet';
+
     /**
      * Everything that gets one image into an account, as a single command that
      * prints one line saying where it came from:
@@ -157,27 +160,96 @@ final class DindImageStore implements ImageStore
      *      host's copy, which is the one that can be incomplete.
      *
      * Fails with the last step's error when none of them worked.
+     *
+     * $private skips 2 and 3: an image the project logs in for is pulled
+     * straight into the account, so it never lands in a registry every other
+     * account reads. $dockerConfig is the client config holding that login.
      */
-    public function seedCommand(EngineAccount $account, string $image, bool $ours): string
+    public function seedCommand(
+        EngineAccount $account,
+        string $image,
+        bool $ours,
+        bool $private = false,
+        ?string $dockerConfig = null,
+    ): string {
+        $image = ImageTransfer::preferDigest($image);
+        $img = escapeshellarg($image);
+        $exec = $this->accountExec($account);
+        if ($private) {
+            $config = $dockerConfig === null ? '' : ' --config ' . escapeshellarg($dockerConfig);
+
+            return "if {$exec} docker image history -q -- {$img} >/dev/null 2>&1; then :;"
+                . " elif {$exec} docker{$config} pull -q {$img} >/dev/null; then printf 'Pulled base image %s\\n' {$img};"
+                . " else printf 'Could not get %s into the account\\n' {$img} >&2; false; fi";
+        }
+        $fromCache = $this->fromCacheRegistry($account, $image);
+
+        $script = "if {$exec} docker image history -q -- {$img} >/dev/null 2>&1; then :;"
+            . " elif {$fromCache}; then printf 'Pulled base image %s from the cache registry\\n' {$img};";
+        // A shared image nobody has built yet is not a failure: the caller
+        // builds it. Every real failure says why on stderr.
+        $script .= $ours
+            ? " elif ! sudo docker image inspect -- {$img} >/dev/null 2>&1; then"
+                . " printf '%s\\n' '" . self::NOT_BUILT_HERE . "' >&2; false;"
+                . " elif { {$this->loadFromHostCommand($account, $image)}; }; then printf 'Loaded base image %s from the host through the cache registry\\n' {$img};"
+            : " elif {$exec} docker pull -q {$img} >/dev/null; then printf 'Pulled base image %s\\n' {$img};";
+
+        return $script . " else printf 'Could not get %s into the account\\n' {$img} >&2; false; fi";
+    }
+
+    /**
+     * {@see seedCommand()} for a public image the host fetches once for every
+     * account: on a cache-registry miss the host pulls it, if it does not hold
+     * it already, and hands it over through the registry, so the next account
+     * pulls it from there. The account pulling it itself is the last rung.
+     *
+     * A mutable tag (`latest`) is re-pulled on the host before it is pushed,
+     * so a registry miss never republishes a host copy older than the tag.
+     */
+    public function seedThroughHostCommand(EngineAccount $account, string $image): string
+    {
+        $image = ImageTransfer::preferDigest($image);
+        $img = escapeshellarg($image);
+        $exec = $this->accountExec($account);
+        $fromCache = $this->fromCacheRegistry($account, $image);
+        $hostHas = "sudo docker image inspect -- {$img} >/dev/null 2>&1";
+        $hostPull = "sudo docker pull -q {$img} >/dev/null 2>&1";
+        $onHost = self::isMutableTag($image) ? "{ {$hostPull} || {$hostHas}; }" : "{ {$hostHas} || {$hostPull}; }";
+        $fromHost = "{$onHost} && { {$this->loadFromHostCommand($account, $image)}; }";
+
+        return "if {$exec} docker image history -q -- {$img} >/dev/null 2>&1; then :;"
+            . " elif {$fromCache}; then printf 'Pulled base image %s from the cache registry\\n' {$img};"
+            . " elif {$fromHost}; then printf 'Loaded base image %s from the host through the cache registry\\n' {$img};"
+            . " elif {$exec} docker pull -q {$img} >/dev/null; then printf 'Pulled base image %s\\n' {$img};"
+            . " else printf 'Could not get %s into the account\\n' {$img} >&2; false; fi";
+    }
+
+    /** The account pulls $image from the cache registry and restores its plain name. */
+    private function fromCacheRegistry(EngineAccount $account, string $image): string
     {
         $img = escapeshellarg($image);
         $exec = $this->accountExec($account);
         $cacheRef = escapeshellarg(self::CACHE_REGISTRY . '/' . $image);
 
-        $fromCache = "{$this->registryRunning()}"
+        return "{$this->registryRunning()}"
             . " && {$exec} docker pull -q {$cacheRef} >/dev/null 2>&1"
             . " && {$exec} docker tag {$cacheRef} {$img}"
             . " && { {$exec} docker image rm {$cacheRef} >/dev/null 2>&1 || true; }";
-        $fromHost = "sudo docker image inspect -- {$img} >/dev/null 2>&1"
-            . " && { {$this->loadFromHostCommand($account, $image)}; }";
+    }
 
-        $script = "if {$exec} docker image history -q -- {$img} >/dev/null 2>&1; then :;"
-            . " elif {$fromCache}; then printf 'Pulled base image %s from the cache registry\\n' {$img};";
-        $script .= $ours
-            ? " elif {$fromHost}; then printf 'Loaded base image %s from the host through the cache registry\\n' {$img};"
-            : " elif {$exec} docker pull -q {$img} >/dev/null; then printf 'Pulled base image %s\\n' {$img};";
+    /** No tag or `latest`: what it names moves, unlike a dated tag or a digest. */
+    private static function isMutableTag(string $image): bool
+    {
+        if (str_contains($image, '@')) {
+            return false;
+        }
+        $slash = strrpos($image, '/');
+        $colon = strrpos($image, ':');
+        if ($colon === false || ($slash !== false && $colon < $slash)) {
+            return true;
+        }
 
-        return $script . " else printf 'Could not get %s into the account\\n' {$img} >&2; false; fi";
+        return substr($image, $colon + 1) === 'latest';
     }
 
     /**

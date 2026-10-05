@@ -3,6 +3,7 @@
 namespace App\Exceptions;
 
 use App\Models\User;
+use App\Rules\RuleExpectation;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
@@ -11,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\Console\Formatter\OutputFormatter;
 use Symfony\Component\Console\Output\ConsoleOutputInterface;
+use Symfony\Component\Console\Output\OutputInterface;
 use Throwable;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -95,6 +97,17 @@ class Handler extends ExceptionHandler
      */
     public function renderForConsole($output, Throwable $e)
     {
+        if (!self::renderPlainForConsole($output, $e)) {
+            parent::renderForConsole($output, $e);
+        }
+    }
+
+    /**
+     * Print a failure the user can act on as plain lines on stderr. Returns
+     * false, printing nothing, for any other exception.
+     */
+    public static function renderPlainForConsole(OutputInterface $output, Throwable $e): bool
+    {
         $lines = match (true) {
             $e instanceof ValidationException => collect($e->errors())->flatten()->all(),
             $e instanceof NotFoundException,
@@ -105,15 +118,15 @@ class Handler extends ExceptionHandler
         };
 
         if ($lines === null) {
-            parent::renderForConsole($output, $e);
-
-            return;
+            return false;
         }
 
         $stderr = $output instanceof ConsoleOutputInterface ? $output->getErrorOutput() : $output;
         foreach ($lines as $line) {
             $stderr->writeln('<error>' . OutputFormatter::escape(trim((string) $line)) . '</error>');
         }
+
+        return true;
     }
 
     /**
@@ -131,13 +144,18 @@ class Handler extends ExceptionHandler
         /** @var JsonResponse $response */
         $response = parent::invalidJson($request, $exception);
 
-        if (!$exception instanceof ProblemException || $exception->problems === []) {
+        // Every 422 carries problems[]: a ProblemException brings its own, any
+        // other validation failure gets one per message with what was expected.
+        $problems = $exception instanceof ProblemException && $exception->problems !== []
+            ? $exception->problems
+            : RuleExpectation::problems($exception->validator);
+        if ($problems === []) {
             return $response;
         }
 
         /** @var array<string, mixed> $data */
         $data = (array) $response->getData(true);
-        $data['problems'] = $exception->problems;
+        $data['problems'] = $problems;
 
         return $response->setData($data);
     }

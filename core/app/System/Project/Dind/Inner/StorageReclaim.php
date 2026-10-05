@@ -76,6 +76,46 @@ class StorageReclaim
         }
     }
 
+    /**
+     * After a step was stopped for disk. With the app still up (a rebuild
+     * keeps it serving) only what no container uses goes: the build cache and
+     * unused images.
+     */
+    public function reclaimAfterDiskLimit(): void
+    {
+        if ($this->canAggressivelyReclaim()) {
+            // The killed build's half-written layer stays leased, and unprunable,
+            // until the daemon restarts (1.2 GB measured); nothing runs to lose.
+            $this->restartEngine();
+            $this->reclaim(true);
+
+            return;
+        }
+
+        $this->inner->host()->logInfo('Clearing inner Docker build cache and unused images after the disk limit');
+        foreach ($this->whileRunningArgvs() as $argv) {
+            $this->inner->dind()->shell()->exec($argv, [], 300);
+        }
+    }
+
+    /**
+     * What goes while the app still runs: nothing a container uses.
+     *
+     * @return list<list<string>>
+     */
+    public function whileRunningArgvs(): array
+    {
+        return [...$this->storage()->pruneBuildCacheArgv(), ['docker', 'image', 'prune', '-af']];
+    }
+
+    protected function restartEngine(): void
+    {
+        $dind = $this->inner->dind();
+        $dind->shell()->runProcess($dind->services()->stopArgv('docker'), [], 120);
+        $dind->shell()->runProcess($dind->services()->startArgv('docker'), [], 60);
+        $dind->awaitReady(10, 2);
+    }
+
     public function wipeDataRoot(): void
     {
         $dind = $this->inner->dind();

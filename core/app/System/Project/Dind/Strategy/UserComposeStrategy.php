@@ -19,6 +19,8 @@ use App\Lib\Deploy\Compose\NestedCompose;
 use App\Lib\Deploy\Env\ComposeEnvFiles;
 use App\Lib\Deploy\Port\ComposePortScan;
 use App\Lib\Deploy\Port\UnpublishedAppPort;
+use App\System\Project\Dind\LxcfsProc;
+use App\System\Project\Dind\Networking;
 use App\System\Project\Dind\Paths;
 use App\System\Project\Dind\Source\GitRepository;
 
@@ -266,7 +268,19 @@ class UserComposeStrategy
         // The account's own ceiling, so a project the operator has given more
         // memory actually gets it. Null when none is set, which keeps the
         // built-in defaults.
-        $hardened = ComposeHarden::applyReporting($parsed, $this->dind->userModel()->effectiveMemoryLimit(), null, $env, $this->dind->userModel()->username, $this->dind->userAppDirPath());
+        $imageEnv = [];
+        $hardened = ComposeHarden::applyReporting(
+            $parsed,
+            $this->dind->userModel()->effectiveMemoryLimit(),
+            null,
+            $env,
+            $this->dind->userModel()->username,
+            $this->dind->userAppDirPath(),
+            LxcfsProc::inAccount($this->dind),
+            function (string $image) use (&$imageEnv): array {
+                return $imageEnv[$image] ??= $this->dind->innerDocker()->imageEnvironment($image);
+            }
+        );
         $parsed = $hardened['compose'];
         foreach ($hardened['removed'] as $what) {
             $logger?->warn(ComposeHarden::REMOVED_SOURCE . ": {$what}");
@@ -322,7 +336,10 @@ class UserComposeStrategy
             $others
         );
         if ($found === null) {
-            $logger?->warn('No service publishes a port and none names one, so the domain is routed to 8080, which is a guess. Publish the port the application listens on in the compose file.');
+            // The recipe's `port:` routes the domain then, so nothing is guessed.
+            if (Networking::recipeComposePort($this->dind->userModel()) === null) {
+                $logger?->warn('No service publishes a port and none names one, so the domain is routed to 8080, which is a guess. Publish the port the application listens on in the compose file.');
+            }
 
             return $parsed;
         }
@@ -471,10 +488,11 @@ class UserComposeStrategy
         foreach ($result['published'] as $key) {
             $logger?->info("Replaced the published placeholder in {$key} with a generated secret");
         }
-        if ($result['secrets'] !== []) {
+        $generated = $secrets->notYetAnnounced($result['secrets']);
+        if ($generated !== []) {
             $logger?->info(
                 'This project ships its compose file with the passwords left blank. '
-                . 'Generated them for this account: ' . implode(', ', $result['secrets'])
+                . 'Generated them for this account: ' . implode(', ', $generated)
             );
         }
         if ($result['urls'] !== []) {

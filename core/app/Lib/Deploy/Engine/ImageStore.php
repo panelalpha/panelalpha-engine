@@ -41,9 +41,24 @@ interface ImageStore
     /**
      * Get one image into the account by whatever route works, printing one
      * line that says which. $ours: built on the host, so it comes from there;
-     * otherwise from its own registry.
+     * otherwise from its own registry. $private: the project has a login for
+     * its registry, so it never goes through a shared one; $dockerConfig is
+     * the client config holding that login.
      */
-    public function seedCommand(EngineAccount $account, string $image, bool $ours): string;
+    public function seedCommand(
+        EngineAccount $account,
+        string $image,
+        bool $ours,
+        bool $private = false,
+        ?string $dockerConfig = null,
+    ): string;
+
+    /**
+     * {@see seedCommand()} for a public image the host should fetch on the
+     * accounts' behalf, once, rather than each account from its own registry:
+     * one no pull-through cache reaches, such as Railpack's on ghcr.io.
+     */
+    public function seedThroughHostCommand(EngineAccount $account, string $image): string;
 
     /**
      * Seed several images at once, never more than $concurrency in flight.

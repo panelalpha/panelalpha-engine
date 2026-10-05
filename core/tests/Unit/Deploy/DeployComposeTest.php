@@ -297,6 +297,20 @@ class DeployComposeTest extends TestCase
         $this->assertSame(['mysql:8.4', 'redis:latest'], DeployCompose::imageRefs($compose));
     }
 
+    public function test_image_refs_keep_a_recipe_pinned_image_by_its_digest(): void
+    {
+        $digest = 'sha256:' . str_repeat('a', 64);
+        $compose = <<<YAML
+        services:
+          app:
+            image: traefik/whoami:v1.10.3@{$digest}
+          again:
+            image: traefik/whoami@{$digest}
+        YAML;
+
+        $this->assertSame(["traefik/whoami@{$digest}"], DeployCompose::imageRefs($compose));
+    }
+
     public function test_image_refs_are_capped_and_deduplicated(): void
     {
         $services = [];

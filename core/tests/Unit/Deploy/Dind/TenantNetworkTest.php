@@ -17,6 +17,22 @@ class TenantNetworkTest extends TestCase
         return (string) file_get_contents(dirname(__DIR__, 5) . '/' . $path);
     }
 
+    public function test_the_refused_ranges_are_the_firewall_scripts(): void
+    {
+        $this->assertSame(1, preg_match('/^REFUSED="([^"]*)"$/m', $this->repo('scripts/tenant-network-firewall.sh'), $m));
+        $this->assertSame(explode(' ', $m[1]), TenantNetwork::REFUSED_RANGES);
+    }
+
+    public function test_refuses_private_and_reserved_addresses_only(): void
+    {
+        foreach (['10.10.0.25', '127.0.0.1', '169.254.169.254', '172.20.0.1', '192.168.1.10', '100.64.0.1'] as $ip) {
+            $this->assertTrue(TenantNetwork::refuses($ip), $ip);
+        }
+        foreach (['140.82.121.4', '8.8.8.8', '203.0.113.45', 'github.com', '::1'] as $ip) {
+            $this->assertFalse(TenantNetwork::refuses($ip), $ip);
+        }
+    }
+
     public function test_sites_db_address_is_the_pinned_one_on_the_tenant_network(): void
     {
         $json = json_encode([

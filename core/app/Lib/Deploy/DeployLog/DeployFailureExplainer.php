@@ -2,6 +2,8 @@
 
 namespace App\Lib\Deploy\DeployLog;
 
+use App\Lib\Deploy\Dind\RegistryAuth;
+
 /**
  * Turns a failed build's BuildKit output into one sentence naming the cause.
  * Rule slugs are identifiers telemetry reports, so renaming one splits that
@@ -12,6 +14,9 @@ class DeployFailureExplainer
     private const REGISTRY_ERROR = '/(?:manifest unknown|manifest for \S+ not found|pull access denied'
         . '|failed to resolve source metadata|failed to do request'
         . '|failed to resolve reference (?:"([^"\n]+)"|(\S+)))/i';
+
+    private const REGISTRY_REFUSAL = '/unauthorized|authentication required|authorization failed'
+        . '|no basic auth credentials|denied: requested access|\b40[13]\b/i';
 
     public static function explain(string $output): ?string
     {
@@ -107,6 +112,57 @@ class DeployFailureExplainer
     }
 
     /**
+     * The image a registry refused to hand over without a login, from the
+     * first line that is a registry's answer and not some other 401 (an npm
+     * or git one during the build). Null when no such line is in $output.
+     */
+    private static function registryRefusal(string $output): ?string
+    {
+        foreach (preg_split('/\R/', $output) ?: [] as $line) {
+            if (preg_match(self::REGISTRY_REFUSAL, $line) !== 1
+                || preg_match('#error from registry|failed to authorize|failed to resolve (?:source metadata|reference)'
+                    . '|failed to pull OCI resource|pull access denied|Error response from daemon|/v2/\S+/manifests/#i', $line) !== 1) {
+                continue;
+            }
+            $image = self::refusedImage($line);
+            if (preg_match('/pull access denied/i', $line) === 1
+                && ($image === null || RegistryAuth::registryFor($image) === 'docker.io')) {
+                continue;
+            }
+            $named = $image === null ? 'An image this project uses' : "The image {$image}";
+
+            return "{$named} could not be downloaded: its registry refused access, so it is private or needs a "
+                . "login this project does not have. Give the project one with the registry-auth setting, one "
+                . "'host username token' line per registry; if one is set, its token is wrong or cannot read this image.";
+        }
+
+        return null;
+    }
+
+    private static function refusedImage(string $line): ?string
+    {
+        foreach ([
+            '/failed to pull OCI resource "([^"]+)"/i',
+            '/failed to resolve source metadata for (\S+?):\s/i',
+            '/failed to resolve reference "([^"]+)"/i',
+            '/\bImage (\S+) Error\b/',
+        ] as $pattern) {
+            if (preg_match($pattern, $line, $m) === 1) {
+                return (string) preg_replace('#^docker\.io/(?:library/)?#', '', $m[1]);
+            }
+        }
+        if (preg_match('#https?://([^/\s"]+)/v2/(\S+?)/manifests/([^\s"]+)#', $line, $m) === 1) {
+            $host = in_array($m[1], ['registry-1.docker.io', 'index.docker.io'], true) ? '' : $m[1] . '/';
+            $path = $host === '' ? (string) preg_replace('#^library/#', '', $m[2]) : $m[2];
+            $ref = str_starts_with($m[3], 'sha256:') ? '@' . $m[3] : ':' . $m[3];
+
+            return $host . $path . $ref;
+        }
+
+        return null;
+    }
+
+    /**
      * Which of the three a failed base-image pull was, from the daemon's own
      * words, naming the image. Null when every registry error in $output is
      * the benign pull of a tag this same log builds.
@@ -182,6 +238,16 @@ class DeployFailureExplainer
     private static function rules(): array
     {
         return [
+            // StepWatchdog stopped a step for disk. First, like build-stalled below.
+            'disk-limit-reached' => [
+                '/' . preg_quote(StepWatchdog::DISK_MARKER, '/') . ' \((.*)\)/',
+                static fn (array $m): string =>
+                    "The deploy was stopped because {$m[1]}, and the account's unused Docker storage was cleared. "
+                        . (str_starts_with($m[1], 'the engine host')
+                            ? 'Free disk on the host and deploy again; `pae system:image:prune` removes base images no project has used recently.'
+                            : 'Raise the project\'s disk limit, or make what the deploy downloads and builds smaller.'),
+            ],
+
             // StepWatchdog killed a silent step. First: it quotes a last output line in
             // its marker, which another rule could otherwise match.
             'build-stalled' => [
@@ -592,6 +658,15 @@ class DeployFailureExplainer
                         . "builds when the project's own tooling passes --build-arg {$m[1]}=..., and nothing in the "
                         . 'repository supplies it. It needs a PanelAlpha recipe that sets build_args, or a default '
                         . 'in the Dockerfile.',
+            ],
+
+            // A registry that refused an anonymous or wrong login (ghcr.io's 401, a
+            // private registry's `no basic auth credentials`). Docker Hub's own `pull
+            // access denied` is left to base-image-unavailable: it says that for a
+            // missing repository too.
+            'base-image-unauthorized' => [
+                self::REGISTRY_REFUSAL,
+                static fn (array $m, string $output = ''): ?string => self::registryRefusal($output),
             ],
 
             // BuildKit's wording when it cannot reach the registry at all: a pruned patch tag

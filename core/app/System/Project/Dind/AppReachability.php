@@ -63,7 +63,8 @@ final class AppReachability
      */
     private function probe(array $ports, int $timeout): array
     {
-        $domain = $this->dind->userModel()->getMainDomain()?->domain;
+        $main = $this->dind->userModel()->getMainDomain();
+        $domain = $main?->domain;
         if ($domain === null || $domain === '') {
             return self::skipped(null, 'the project has no domain yet');
         }
@@ -88,7 +89,7 @@ final class AppReachability
         return self::awaitRoute(
             $domain,
             fn (): array => self::parseFingerprint($this->dind->system()->execOnHost(
-                ['bash', '-c', self::edgeProbeScript($domain, $ip, $timeout)],
+                ['bash', '-c', self::edgeProbeScript($domain, $ip, $timeout, $main->sslEnabled())],
             )),
             $app
         );
@@ -128,6 +129,18 @@ final class AppReachability
      * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
      */
     public static function compareFingerprints(string $domain, array $edge, array $app): array
+    {
+        $scheme = ($edge['scheme'] ?? '') === 'https' ? 'https' : 'http';
+
+        return self::compare($domain, $edge, $app) + ['scheme' => $scheme];
+    }
+
+    /**
+     * @param array{code: int, hash: string, default404: bool} $edge
+     * @param array{code: int, hash: string, default404: bool} $app
+     * @return array{verdict: string, domain: ?string, http_code: ?int, detail: string}
+     */
+    private static function compare(string $domain, array $edge, array $app): array
     {
         if ($edge['code'] === 0) {
             return [
@@ -250,25 +263,39 @@ final class AppReachability
      * No DNS: the Host header carries the name and the address is the one the
      * vhost binds, so the check works for a domain whose DNS has not been
      * pointed here yet -- which is most of them, most of the time.
+     *
+     * Over https when the domain has TLS, as visitors arrive: over http the
+     * vhost forwards `X-Forwarded-Proto: http`, and an app that insists on a
+     * secure request answers that with a 500 nobody visiting ever gets. Plain
+     * http only when nothing answered on https.
      */
-    public static function edgeProbeScript(string $domain, string $ip, int $timeout = 5): string
+    public static function edgeProbeScript(string $domain, string $ip, int $timeout = 5, bool $https = false): string
     {
         $timeout = max(1, $timeout);
         $domain = escapeshellarg($domain);
         $ip = escapeshellarg($ip);
+        $secure = $https ? 1 : 0;
 
         return <<<SH
 set -u
 host={$domain}
 addr={$ip}
 f=\$(mktemp)
-out=\$(curl -sS -m {$timeout} -o "\$f" -w '%{http_code} %{redirect_url}' -H "Host: \$host" "http://\$addr/" 2>/dev/null) || out=000
+scheme=http
+out=000
+if [ {$secure} = 1 ]; then
+  out=\$(curl -sS -k -m {$timeout} -o "\$f" -w '%{http_code} %{redirect_url}' --resolve "\$host:443:\$addr" "https://\$host/" 2>/dev/null) || out=000
+  [ "\${out%% *}" = 000 ] || scheme=https
+fi
+if [ "\$scheme" = http ]; then
+  out=\$(curl -sS -m {$timeout} -o "\$f" -w '%{http_code} %{redirect_url}' -H "Host: \$host" "http://\$addr/" 2>/dev/null) || out=000
+fi
 code=\${out%% *}
 location=\$(printf '%s' "\${out#* }" | tr -d '\t\r\n')
 [ "\$location" = "\$out" ] && location=
 marker=no
 if [ "\$code" = "404" ] && grep -q 'Page Not Found' "\$f" && grep -q 'error-page' "\$f"; then marker=yes; fi
-printf '%s\t%s\t%s\t\t%s' "\${code:-000}" "\$(head -c 2048 "\$f" | sha256sum | cut -d' ' -f1)" "\$marker" "\$location"
+printf '%s\t%s\t%s\t\t%s\t%s' "\${code:-000}" "\$(head -c 2048 "\$f" | sha256sum | cut -d' ' -f1)" "\$marker" "\$location" "\$scheme"
 rm -f "\$f"
 exit 0
 SH;
@@ -290,8 +317,10 @@ SH;
     {
         $timeout = max(1, $timeout);
         $scheme = $scheme === 'https' ? 'https' : 'http';
+        // The headers the vhost forwards for a visitor on https, as the health
+        // probe sends them: an app that needs them answers 403 or 500 without.
         // Same Host as the edge fetch, so an app that echoes it into the page still matches.
-        $host = $domain !== null && $domain !== '' ? '-H ' . escapeshellarg("Host: {$domain}") . ' ' : '';
+        $host = AppHealth::visitorHeaders($domain !== '' ? $domain : null);
 
         return <<<SH
 set -u
@@ -309,7 +338,7 @@ SH;
     }
 
     /**
-     * @return array{code: int, hash: string, default404: bool, hash2: string, location: string}
+     * @return array{code: int, hash: string, default404: bool, hash2: string, location: string, scheme: string}
      */
     public static function parseFingerprint(string $raw): array
     {
@@ -324,6 +353,8 @@ SH;
             'hash2' => trim($parts[3] ?? ''),
             // Only the edge probe sends this: where a redirect pointed.
             'location' => trim($parts[4] ?? ''),
+            // Only the edge probe sends this: which scheme it answered on.
+            'scheme' => trim($parts[5] ?? ''),
         ];
     }
 
@@ -351,7 +382,7 @@ SH;
      */
     public static function describe(array $result): string
     {
-        $url = 'http://' . ($result['domain'] ?? '?') . '/';
+        $url = ($result['scheme'] ?? 'http') . '://' . ($result['domain'] ?? '?') . '/';
 
         return match ($result['verdict']) {
             self::OK => "Reachable: {$url} answered {$result['detail']} through the webserver",

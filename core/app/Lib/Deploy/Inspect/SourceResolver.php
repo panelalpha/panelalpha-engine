@@ -20,15 +20,25 @@ final class SourceResolver
     /** @var list<string> */
     public const TYPES = [self::TYPE_GIT, self::TYPE_PATH, self::TYPE_PROJECT];
 
+    /** How a git source was read: its GitHub file list, or a clone. */
+    public const METHOD_TREE = 'tree';
+
+    public const METHOD_CLONE = 'clone';
+
     /**
      * How long a workspace may sit in the temp root before it is assumed to belong
      * to a request that died. Every clone deletes its own.
      */
     private const STALE_WORKSPACE_SECONDS = 6 * 3600;
 
+    /**
+     * @param ?GitHubTree $tree reads a public GitHub repository from its file
+     *        list before falling back to a clone; null always clones
+     */
     public function __construct(
         private readonly string $tempRoot,
-        private readonly int $timeout = 180
+        private readonly int $timeout = 180,
+        private readonly ?GitHubTree $tree = null
     ) {
     }
 
@@ -93,16 +103,30 @@ final class SourceResolver
     }
 
     /**
-     * Clone $repoUrl shallow into a temp directory.
+     * Read $repoUrl into a temp directory: from its file list when it is a
+     * public GitHub repository, else (or when that fails) as a shallow clone.
+     * `meta.method` says which.
+     *
+     * $subdirectory only narrows which files the file list fetches; the
+     * caller still descends into it.
      *
      * @throws InspectException
      */
-    public function fromGit(string $repoUrl, ?string $branch = null, ?string $token = null): ResolvedSource
-    {
+    public function fromGit(
+        string $repoUrl,
+        ?string $branch = null,
+        ?string $token = null,
+        ?string $subdirectory = null
+    ): ResolvedSource {
         $repoUrl = self::normaliseGitUrl($repoUrl);
         self::assertCloneable($repoUrl);
         if ($token !== null && $token !== '') {
             GitUrl::assertSafeForToken($repoUrl);
+        } elseif ($this->tree !== null && GitHubTree::repository($repoUrl) !== null) {
+            $resolved = $this->fromTree($this->tree, $repoUrl, $branch, $subdirectory);
+            if ($resolved !== null) {
+                return $resolved;
+            }
         }
 
         $root = $this->makeTempDir();
@@ -156,7 +180,72 @@ final class SourceResolver
                 'repository' => GitUrl::sanitize($repoUrl),
                 'branch' => $branch ?? $this->gitBranch($target),
                 'commit' => $this->gitCommit($target),
+                'method' => self::METHOD_CLONE,
             ],
+            $root
+        );
+    }
+
+    /**
+     * The repository from its file list, or null to clone it instead. A token
+     * never gets here: a repository needing one is not readable this way.
+     *
+     * @throws InspectException
+     */
+    private function fromTree(
+        GitHubTree $tree,
+        string $repoUrl,
+        ?string $branch,
+        ?string $subdirectory
+    ): ?ResolvedSource {
+        try {
+            return $this->readTree($tree, $repoUrl, $branch, $subdirectory);
+        } catch (TreeUnavailable) {
+            return null;
+        }
+    }
+
+    /**
+     * The repository from its file list only, never cloned: for a caller
+     * that would rather know nothing than wait for a clone.
+     *
+     * @throws TreeUnavailable when it cannot be read that way
+     * @throws InspectException
+     */
+    public function fromGitHubTree(string $repoUrl, ?string $branch = null): ResolvedSource
+    {
+        $repoUrl = self::normaliseGitUrl($repoUrl);
+        if ($this->tree === null || GitHubTree::repository($repoUrl) === null) {
+            throw new TreeUnavailable('Not a github.com repository URL.');
+        }
+
+        return $this->readTree($this->tree, $repoUrl, $branch, null);
+    }
+
+    /**
+     * @throws TreeUnavailable
+     * @throws InspectException
+     */
+    private function readTree(
+        GitHubTree $tree,
+        string $repoUrl,
+        ?string $branch,
+        ?string $subdirectory
+    ): ResolvedSource {
+        $root = $this->makeTempDir();
+        try {
+            $meta = $tree->writeTo($root . '/repo', $repoUrl, $branch, $subdirectory);
+        } catch (TreeUnavailable $e) {
+            ResolvedSource::removeTree($root);
+
+            throw $e;
+        }
+
+        return new ResolvedSource(
+            self::TYPE_GIT,
+            $repoUrl,
+            $root . '/repo',
+            $meta + ['method' => self::METHOD_TREE],
             $root
         );
     }

@@ -1,0 +1,38 @@
+#8 [ 3/17] RUN yum -y install epel-release  yum-downloadonly gdb
+#8 0.945 Loaded plugins: fastestmirror, ovl
+#8 1.119 Determining fastest mirrors
+#8 1.181 Could not retrieve mirrorlist http://mirrorlist.centos.org/?release=7&arch=x86_64&repo=os&infra=container error was
+#8 1.181 14: curl#6 - "Could not resolve host: mirrorlist.centos.org; Unknown error"
+#8 1.183
+#8 1.183  One of the configured repositories failed (Unknown),
+#8 1.183  and yum doesn't have enough cached data to continue. At this point the only
+#8 1.183  safe thing yum can do is fail. There are a few ways to work "fix" this:
+#8 1.183
+#8 1.183      1. Contact the upstream for the repository and get them to fix the problem.
+#8 1.183
+#8 1.183      2. Reconfigure the baseurl/etc. for the repository, to point to a working
+#8 1.183         upstream. This is most often useful if you are using a newer
+#8 1.183         distribution release than is supported by the repository (and the
+#8 1.183         packages for the previous distribution release still work).
+#8 1.183
+#8 1.183      3. Run the command with the repository temporarily disabled
+#8 1.183             yum --disablerepo=<repoid> ...
+#8 1.183
+#8 1.183      4. Disable the repository permanently, so yum won't use it by default. Yum
+#8 1.183         will then just ignore the repository until you permanently enable it
+#8 1.183         again or use --enablerepo for temporary usage:
+#8 1.183
+#8 1.183             yum-config-manager --disable <repoid>
+#8 1.183         or
+#8 1.183             subscription-manager repos --disable=<repoid>
+#8 1.183
+#8 1.183      5. Configure the failing repository to be skipped, if it is unavailable.
+#8 1.183         Note that yum will try to contact the repo. when it runs most commands,
+#8 1.183         so will have to try and fail each time (and thus. yum will be be much
+#8 1.183         slower). If it is a very temporary problem though, this is often a nice
+#8 1.183         compromise:
+#8 1.183
+#8 1.183             yum-config-manager --save --setopt=<repoid>.skip_if_unavailable=true
+#8 1.183
+#8 1.183 Cannot find a valid baseurl for repo: base/7/x86_64
+#8 ERROR: process "/bin/sh -c yum -y install epel-release  yum-downloadonly gdb" did not complete successfully: exit code: 1

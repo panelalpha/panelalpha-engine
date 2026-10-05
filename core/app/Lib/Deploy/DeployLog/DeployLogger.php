@@ -53,6 +53,17 @@ class DeployLogger
         self::STATUS_FAILED => 'Deploy failed',
     ];
 
+    /** Why a deploy whose process died before finish() is closed as failed. */
+    public const INTERRUPTED_MESSAGE =
+        'The deploy stopped without finishing — the engine process running it is gone. '
+        . 'This usually means the host restarted or ran out of memory. Deploy again to retry.';
+
+    /** The line a DinD account without git ends its first deploy on, `running`, until files arrive. */
+    public const WAITING_FOR_FILES = 'Environment ready, waiting for project files';
+
+    /** How far back from the end of a log to look for its finish line. */
+    private const FINISH_LINE_LOOKBACK = 60;
+
     /** Lines of a known problem's text written to the log, per section. */
     private const PROBLEM_MAX_LINES = 40;
 
@@ -280,6 +291,127 @@ class DeployLogger
     public static function pruneAll(int $keep = self::KEEP_LOGS, bool $dryRun = false): array
     {
         return DeployLogArchive::pruneAll($keep, $dryRun);
+    }
+
+    /**
+     * Close every deploy left `running` by a process that died before finish().
+     *
+     * @return list<string> the accounts whose deploy was (or, dry, would be) closed
+     */
+    public static function settleOrphanedDeploys(bool $dryRun = false): array
+    {
+        $settled = [];
+        foreach (self::listUsers() as $row) {
+            $username = $row['username'] ?? null;
+            if (($row['status'] ?? null) === self::STATUS_RUNNING && is_string($username)
+                && self::settleOrphaned($username, $dryRun) !== null) {
+                $settled[] = $username;
+            }
+        }
+
+        return $settled;
+    }
+
+    /**
+     * Close this account's deploy if its process is gone: latest.json says
+     * `running` and nothing holds the deploy lock, which the kernel released
+     * with the process (an OOM kill, a core or worker restart). Nothing else
+     * would ever write its status, and a client polling for one waits forever.
+     *
+     * A deploy that got as far as its finish line keeps that verdict; one that
+     * did not is failed with {@see INTERRUPTED_MESSAGE}. A DinD account waiting
+     * for its files is `running` with no lock by design and is left alone.
+     *
+     * @return ?string the status written (or, dry, that would be), null when left alone
+     */
+    public static function settleOrphaned(string $username, bool $dryRun = false): ?string
+    {
+        $logger = self::current($username);
+        if ($logger === null || !$logger->isRunning() || $logger->isWaitingForFiles()) {
+            return null;
+        }
+        if ($dryRun) {
+            return $logger->lock->isHeld() ? null : ($logger->finishLine()[0] ?? self::STATUS_FAILED);
+        }
+
+        // Held while the status is written, so a deploy starting now cannot be overwritten.
+        try {
+            $logger->lock->acquire();
+        } catch (DeployAlreadyRunningException) {
+            return null;
+        }
+        try {
+            $latest = $logger->readLatest() ?? [];
+            if (($latest['id'] ?? null) !== $logger->deployId || ($latest['status'] ?? null) !== self::STATUS_RUNNING) {
+                return null;
+            }
+            $finished = $logger->finishLine();
+            if ($finished === null) {
+                $finished = [self::STATUS_FAILED, self::INTERRUPTED_MESSAGE];
+                $logger->writeLine(self::LEVEL_ERROR, self::finishMessage(...$finished), $latest['stage'] ?? null);
+            }
+            [$stages] = DeployStatus::closeOpenStage($latest['stages'] ?? [], $now = time());
+            $logger->status->write(array_merge($latest, [
+                'status' => $finished[0],
+                'pid' => null,
+                'finished_at' => $now,
+                'error' => $finished[1],
+                'stages' => $stages,
+            ]));
+        } finally {
+            $logger->lock->release();
+        }
+        Log::warning("Deploy {$logger->deployId} for {$username} was left running by a process that is gone; closed as {$finished[0]}.");
+        // What finish() would have done last. Cannot throw.
+        Coalescing::runPendingFor($username);
+
+        return $finished[0];
+    }
+
+    /**
+     * The first deploy of a DinD account without git, stopped on purpose until files arrive.
+     * Git and file commands run on the waiting account stream their output into this log as
+     * dim lines, so it is the last line that is not dim that has to say so.
+     */
+    private function isWaitingForFiles(): bool
+    {
+        if (($this->readLatest()['stage'] ?? null) !== self::STAGE_PREPARING) {
+            return false;
+        }
+        foreach (array_reverse($this->entries()) as $line) {
+            if ($line['level'] !== self::LEVEL_DIM) {
+                return $line['msg'] === self::WAITING_FOR_FILES;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The status and error a finish() line near the end of the log announced:
+     * finish() writes it before the status, so a process killed in between
+     * (telemetry's report is the slow part) leaves the verdict only there.
+     *
+     * @return array{0: string, 1: ?string}|null
+     */
+    private function finishLine(): ?array
+    {
+        foreach (array_reverse($this->tail(self::FINISH_LINE_LOOKBACK)) as $line) {
+            if (!in_array($line['level'] ?? null, [self::LEVEL_OK, self::LEVEL_ERROR], true)) {
+                continue;
+            }
+            $msg = (string) ($line['msg'] ?? '');
+            foreach (self::FINISH_MESSAGE as $status => $message) {
+                if ($msg === $message) {
+                    return [$status, null];
+                }
+                if (str_starts_with($msg, $message . ': ')) {
+                    return [$status, substr($msg, strlen($message) + 2)];
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

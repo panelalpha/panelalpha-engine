@@ -87,18 +87,72 @@ class GitUrl
         ];
     }
 
+    /**
+     * GitHub's edge at times refuses older git's HTTP/2 fingerprint once the
+     * refs are listed; the same request over HTTP/1.1 is let through.
+     */
+    public static function refusedOverHttp2(string $stderr): bool
+    {
+        return preg_match('/expected flush after ref listing/i', $stderr) === 1;
+    }
+
+    /**
+     * $command asking for HTTP/1.1: `-c http.version=HTTP/1.1` right after
+     * `git`, so it also works behind an `env …` wrapper.
+     *
+     * @param list<string> $command
+     * @return list<string>
+     */
+    public static function overHttp11(array $command): array
+    {
+        $git = array_search('git', $command, true);
+        if ($git === false) {
+            return $command;
+        }
+        array_splice($command, $git + 1, 0, ['-c', 'http.version=HTTP/1.1']);
+
+        return $command;
+    }
+
+    /**
+     * Point git's ssh at one key and one known_hosts file, and nothing else:
+     * no agent, no ~/.ssh, no prompt, and an unknown or changed host key fails.
+     *
+     * @param list<string> $command an `env …` argv from withoutPrompts() or withAskPass()
+     * @return list<string>
+     */
+    public static function withSshKey(array $command, string $keyPath, string $knownHostsPath): array
+    {
+        foreach ([$keyPath, $knownHostsPath] as $path) {
+            if ($path === '' || preg_match('#^[A-Za-z0-9_./-]+$#', $path) !== 1) {
+                throw new \InvalidArgumentException('Invalid SSH key path.');
+            }
+        }
+        if (($command[0] ?? null) !== 'env') {
+            throw new \InvalidArgumentException('Expected an env argv.');
+        }
+
+        $ssh = 'ssh -i ' . $keyPath . ' -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes'
+            . ' -o StrictHostKeyChecking=yes -o UserKnownHostsFile=' . $knownHostsPath
+            . ' -o GlobalKnownHostsFile=/dev/null';
+
+        return ['env', 'GIT_SSH_COMMAND=' . $ssh, ...array_slice($command, 1)];
+    }
+
     public static function sanitize(string $repoUrl): string
     {
         $parsed = parse_url($repoUrl);
         if ($parsed === false || empty($parsed['host'])) {
             return $repoUrl;
         }
-        if (empty($parsed['user']) && empty($parsed['pass'])) {
+        // An SSH remote's user (git@) is the login, not a credential: only a password goes.
+        $ssh = in_array(strtolower((string) ($parsed['scheme'] ?? '')), ['ssh', 'git+ssh', 'ssh+git'], true);
+        if (empty($parsed['pass']) && ($ssh || empty($parsed['user']))) {
             return $repoUrl;
         }
 
         $scheme = $parsed['scheme'] ?? 'https';
-        $host = $parsed['host'];
+        $host = ($ssh && !empty($parsed['user']) ? $parsed['user'] . '@' : '') . $parsed['host'];
         $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
         $path = $parsed['path'] ?? '';
         $query = isset($parsed['query']) ? '?' . $parsed['query'] : '';

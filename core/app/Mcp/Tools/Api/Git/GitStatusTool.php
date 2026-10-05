@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Git repository status
 
-    Call this first. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Query `fetch` updates remote-tracking refs before reporting. The payload includes `managed_by`: `deploy` (account provisioned with git_repo; mutating Git must go through `project_rebuild`) or `site_git` (these Git tools).
+    Call this first. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Query `fetch` updates remote-tracking refs before reporting. The payload includes `managed_by`: `deploy` (account provisioned with git_repo; mutating Git must go through `project_rebuild`) or `site_git` (these Git tools). `connecting: true` means a connect is still fetching the repository: wait and poll; do not call connect again.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -71,7 +71,7 @@ class GitStatusTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
+            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).'),
             'fetch' => $schema->boolean(),
         ];
     }

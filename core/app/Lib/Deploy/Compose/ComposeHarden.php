@@ -4,6 +4,7 @@ namespace App\Lib\Deploy\Compose;
 
 use App\Lib\Deploy\Sidecar\SidecarEngine;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
+use App\System\Project\Dind\LxcfsProc;
 
 /**
  * Turning a compose file somebody wrote for their laptop into one an account
@@ -58,9 +59,11 @@ class ComposeHarden
      * @param array<string, mixed> $compose
      * @param array<array-key, mixed>|null $asWritten
      * @param array<string, list<?string>|string> $env
+     * @param list<string> $procFiles lxcfs files the account serves ({@see withProcMounts()})
+     * @param (callable(string): list<string>)|null $imageEnvironment an image's `Config.Env`
      * @return array{compose: array<string, mixed>, removed: list<string>}
      */
-    public static function applyReporting(array $compose, ?int $accountMemoryMb = null, ?array $asWritten = null, array $env = [], ?string $accountUser = null, ?string $projectDir = null): array
+    public static function applyReporting(array $compose, ?int $accountMemoryMb = null, ?array $asWritten = null, array $env = [], ?string $accountUser = null, ?string $projectDir = null, array $procFiles = [], ?callable $imageEnvironment = null): array
     {
         [$compose, $removed] = ServiceHardener::withoutUnsafeFileSources($compose, $env, $accountUser, $projectDir);
         if (!is_array($compose['services'] ?? null)) {
@@ -82,22 +85,71 @@ class ComposeHarden
             $compose['services'],
             static fn ($service): bool => is_array($service) && ServiceHardener::publishesWebPort($service)
         ));
+        $needed = ServiceReferences::needed($compose['services']);
         foreach ($compose['services'] as $name => $service) {
             if (is_array($service)) {
                 if (in_array((string) $name, $oneShot, true)) {
                     $service['restart'] = 'no';
+                } elseif (in_array((string) $name, $needed, true) && in_array($service['restart'] ?? null, [null, '', false], true)) {
+                    // A database another service depends on or reaches by name
+                    // publishes no port, and must still come back after a reboot.
+                    $service['restart'] = 'unless-stopped';
                 }
                 // A loopback binding stays loopback when another service is the front door.
                 $keepLoopback = array_diff($publishers, [$name]) !== [];
                 foreach (ServiceHardener::forbiddenMounts($service, $env, $accountUser, $projectDir) as $mount) {
                     $removed[] = "{$name}: volume {$mount}";
                 }
-                $compose['services'][$name] = ServiceHardener::harden((string) $name, $service, $accountMemoryMb, $keepLoopback, $env, $accountUser, $projectDir);
+                $compose['services'][$name] = ServiceHardener::harden((string) $name, $service, $accountMemoryMb, $keepLoopback, $env, $accountUser, $projectDir, $imageEnvironment);
             }
         }
         [$compose, $entries] = ServiceHardener::withoutHostPathEntries($compose);
 
-        return ['compose' => $compose, 'removed' => [...$removed, ...$entries]];
+        return ['compose' => self::withProcMounts($compose, $procFiles), 'removed' => [...$removed, ...$entries]];
+    }
+
+    /**
+     * lxcfs's /proc files bound read-only into every service, so an app reads
+     * its own memory and load instead of the host's. Added after hardening,
+     * which removes host paths; a service that mounts the target keeps its own.
+     *
+     * @param array<string, mixed> $compose
+     * @param list<string> $procFiles names under {@see LxcfsProc::PROC_DIR} the account has
+     * @return array<string, mixed>
+     */
+    public static function withProcMounts(array $compose, array $procFiles): array
+    {
+        if ($procFiles === [] || !is_array($compose['services'] ?? null)) {
+            return $compose;
+        }
+        foreach ($compose['services'] as $name => $service) {
+            if (!is_array($service)) {
+                continue;
+            }
+            $volumes = is_array($service['volumes'] ?? null) ? $service['volumes'] : [];
+            $taken = array_map(self::mountTarget(...), $volumes);
+            foreach ($procFiles as $file) {
+                if (!in_array("/proc/{$file}", $taken, true)) {
+                    $volumes[] = ['type' => 'bind', 'source' => LxcfsProc::PROC_DIR . "/{$file}", 'target' => "/proc/{$file}", 'read_only' => true];
+                }
+            }
+            $compose['services'][$name]['volumes'] = array_values($volumes);
+        }
+
+        return $compose;
+    }
+
+    private static function mountTarget(mixed $volume): ?string
+    {
+        if (is_array($volume)) {
+            return is_string($volume['target'] ?? null) ? rtrim($volume['target'], '/') : null;
+        }
+        if (!is_string($volume)) {
+            return null;
+        }
+        $parts = explode(':', $volume);
+
+        return rtrim($parts[count($parts) > 1 ? 1 : 0], '/');
     }
 
     /**

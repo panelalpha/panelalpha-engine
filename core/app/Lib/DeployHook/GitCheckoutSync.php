@@ -55,30 +55,32 @@ class GitCheckoutSync implements CheckoutSync
             $onDeployStarted($deployLogger->getDeployId());
         }
 
-        try {
-            $git->pull(ProjectGit::STRATEGY_FORCE);
+        $this->redeploy->keepingTheServedTree($git, $project, function () use ($git, $project, $pushedCommit, $deployLogger): void {
+            try {
+                $git->pull(ProjectGit::STRATEGY_FORCE);
 
-            // What the checkout holds now, rather than what the push said it
-            // would: the two differ when another push landed in between.
-            $commit = $git->readHeadCommit() ?? $pushedCommit;
+                // What the checkout holds now, rather than what the push said it
+                // would: the two differ when another push landed in between.
+                $commit = $git->readHeadCommit() ?? $pushedCommit;
 
-            $this->forgetWorkerState();
-            $this->redeploy->afterMutation($git, $project, 'push', $commit, $deployLogger);
-        } catch (\Throwable $e) {
-            // The rebuild finishes its own deploy, whatever its outcome; a
-            // pull that failed never reached it, and must not leave the
-            // deploy it started `running`.
-            if ($deployLogger?->isRunning()) {
-                $deployLogger->finish(DeployLogger::STATUS_FAILED, 'Could not update the checkout to the pushed branch: ' . $e->getMessage());
+                $this->forgetWorkerState();
+                $this->redeploy->afterMutation($git, $project, 'push', $commit, $deployLogger);
+            } catch (\Throwable $e) {
+                // The rebuild finishes its own deploy, whatever its outcome; a
+                // pull that failed never reached it, and must not leave the
+                // deploy it started `running`.
+                if ($deployLogger?->isRunning()) {
+                    $deployLogger->finish(DeployLogger::STATUS_FAILED, 'Could not update the checkout to the pushed branch: ' . $e->getMessage());
+                }
+
+                throw $e;
             }
 
-            throw $e;
-        }
-
-        if ($deployLogger?->isRunning()) {
-            // A runtime with nothing to rebuild returned without finishing it.
-            $deployLogger->finish(DeployLogger::STATUS_SUCCESS);
-        }
+            if ($deployLogger?->isRunning()) {
+                // A runtime with nothing to rebuild returned without finishing it.
+                $deployLogger->finish(DeployLogger::STATUS_SUCCESS);
+            }
+        });
     }
 
     /**

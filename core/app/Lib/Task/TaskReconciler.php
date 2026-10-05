@@ -18,7 +18,7 @@ use Illuminate\Support\Facades\Log;
  * reads `running` for good and every poller waits on a job that no longer
  * exists.
  *
- * Observed on 2.29.1.58: a reboot at 15:34 left 8 tasks `running` with a null
+ * Observed on a dev host: a reboot at 15:34 left 8 tasks `running` with a null
  * pid, and a batch runner polled them for 25 minutes before anyone noticed
  * the work had died with the previous boot. `task:prune` cannot help -- it
  * skips non-terminal rows by design, since deleting an in-flight task would
@@ -32,7 +32,7 @@ use Illuminate\Support\Facades\Log;
  * The read must go through the *payload*, not the uuid: the uuid is a field
  * inside it. A lookup keyed by the bare uuid silently misses every time --
  * which is what the first version of this class did against Redis, and it
- * retired nothing at all on 2.29.1.58 and 178.104.84.45. {@see queueCheck()}
+ * retired nothing at all on two dev hosts. {@see queueCheck()}
  *
  * The deploy log looks like evidence and is not. It is written *by* the work,
  * so it cannot outlive it -- and it is deleted with the account on rollback,
@@ -52,9 +52,7 @@ use Illuminate\Support\Facades\Log;
  */
 final class TaskReconciler
 {
-    public const ORPHAN_MESSAGE =
-        'The deploy stopped without finishing — the engine process running it is gone. '
-        . 'This usually means the host restarted or ran out of memory. Deploy again to retry.';
+    public const ORPHAN_MESSAGE = DeployLogger::INTERRUPTED_MESSAGE;
 
     /**
      * @param null|callable(Task): ?bool $isPending overrides the queue check

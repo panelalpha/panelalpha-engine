@@ -25,8 +25,9 @@ final class ServiceHardener
      * run through this class and came out still carrying `cap_add: [ALL]`,
      * `security_opt: [seccomp:unconfined]` and `userns_mode: host`: dropping
      * `privileged` means little while the capabilities it implies can be asked
-     * for one at a time. This is still a denylist, so a compose key nobody has
-     * thought about yet passes -- an allowlist is the real answer.
+     * for one at a time. Keys stay a denylist on purpose: an allowlist would
+     * drop every Compose key added since (`post_start`, `gpus`, ...) and break
+     * apps that use them. Bind sources are an allowlist ({@see isForbiddenSource()}).
      * `cap_add` is not here: it is allowlisted by {@see withSafeCapabilities()}.
      *
      * @var list<string>
@@ -102,44 +103,6 @@ final class ServiceHardener
     private const PANELALPHA_DIR = '.panelalpha';
 
     /**
-     * Host paths an application service is never given. `/` covers the whole
-     * filesystem; the rest are the parts of it that carry the daemon's state
-     * or the host's identity. "Host" is the account container: its /home
-     * holds the inner daemon's data-root (~/docker), /run the s6 scan dir,
-     * /var the crontabs and /usr the binaries s6 runs as root.
-     *
-     * @var list<string>
-     */
-    private const FORBIDDEN_SOURCE_PREFIXES = [
-        // The account container's own boot scripts (the egress guard among
-        // them), and /run: the inner daemon's and containerd's sockets, s6's
-        // scan directory /run/service.
-        '/entrypoint.d',
-        '/entrypoint.sh',
-        '/run',
-        '/var/run',
-        '/var/lib/docker',
-        '/var/lib/containerd',
-        '/etc',
-        '/boot',
-        '/sys',
-        '/proc',
-        '/dev',
-        '/home',
-        '/root',
-        '/usr',
-        // usr-merged: symlinks into /usr, and Docker follows a bind source's symlink.
-        '/bin',
-        '/sbin',
-        '/lib',
-        '/lib32',
-        '/lib64',
-        '/libx32',
-        '/opt',
-        '/var',
-    ];
-
-    /**
      * The account's hard RLIMIT_NOFILE (Docker's default, measured in an
      * account). runc refuses more: "error setting rlimit type 7".
      */
@@ -163,6 +126,9 @@ final class ServiceHardener
     // caps a fork bomb. A per-service pids_limit overrides this default.
     private const PIDS_LIMIT = 1024;
 
+    /** At most 30 MB of log per container; the account's daemon defaults to the same. */
+    public const LOG_OPTIONS = ['max-size' => '10m', 'max-file' => '3'];
+
     /**
      * Thread pools sized from the visible core count (OpenMP, MKL, OpenBLAS).
      * A CPU quota does not hide the host's cores, so torch under `cpus: 0.75`
@@ -180,6 +146,7 @@ final class ServiceHardener
     /**
      * @param array<string, mixed> $service
      * @param array<string, list<?string>|string> $env what compose may interpolate with ({@see ComposeInterpolation})
+     * @param (callable(string): list<string>)|null $imageEnvironment an image's `Config.Env` ({@see withNodeHeapCap()})
      * @return array<string, mixed>
      */
     public static function harden(
@@ -189,14 +156,16 @@ final class ServiceHardener
         bool $keepLoopbackPorts = false,
         array $env = [],
         ?string $accountUser = null,
-        ?string $projectDir = null
+        ?string $projectDir = null,
+        ?callable $imageEnvironment = null
     ): array {
         $service = self::withHostNetworkPortPublished($service);
         $service = self::withoutEscapes($service, $env, $accountUser, $projectDir);
         $service = self::withRestartPolicy($service);
+        $service = self::withLogRotation($service);
         $service = self::withoutDeployResources($service);
         $service = self::withMemoryLimit($name, $service, $accountMemoryMb);
-        $service = self::withNodeHeapCap($name, $service, $accountMemoryMb);
+        $service = self::withNodeHeapCap($name, $service, $accountMemoryMb, $imageEnvironment);
         $service = self::withReachablePublishedPorts($service, $keepLoopbackPorts);
         $service = self::withLegacyPostgresDataDir($service);
         $service = self::withPingGroupRange($service);
@@ -804,14 +773,53 @@ final class ServiceHardener
     }
 
     /**
+     * `unless-stopped` for a service that publishes a port and names no policy.
+     * One that publishes none keeps compose's own default, so a helper such as
+     * a `wp shell` container exits once instead of restarting forever. A
+     * service others depend on or reach by name was given the policy before
+     * this, by {@see ComposeHarden::applyReporting()}.
+     *
      * @param array<string, mixed> $service
      * @return array<string, mixed>
      */
-    private static function withRestartPolicy(array $service): array
+    public static function withRestartPolicy(array $service): array
     {
         $restart = $service['restart'] ?? null;
-        if ($restart === null || $restart === '' || $restart === false) {
+        if ($restart !== null && $restart !== '' && $restart !== false) {
+            return $service;
+        }
+        if (empty($service['ports'])) {
+            unset($service['restart']);
+        } else {
             $service['restart'] = 'unless-stopped';
+        }
+
+        return $service;
+    }
+
+    /**
+     * Docker's json-file driver keeps a container's log forever, inside the
+     * account's quota, so a chatty app fills it. A service that names another
+     * driver, or sizes its own, is left as it is.
+     *
+     * @param array<string, mixed> $service
+     * @return array<string, mixed>
+     */
+    public static function withLogRotation(array $service): array
+    {
+        $logging = $service['logging'] ?? null;
+        if ($logging === null) {
+            $service['logging'] = ['driver' => 'json-file', 'options' => self::LOG_OPTIONS];
+
+            return $service;
+        }
+        $driver = is_array($logging) ? ($logging['driver'] ?? 'json-file') : null;
+        if ($driver !== 'json-file') {
+            return $service;
+        }
+        $options = is_array($logging['options'] ?? null) ? $logging['options'] : [];
+        if (!isset($options['max-size'])) {
+            $service['logging']['options'] = $options + self::LOG_OPTIONS;
         }
 
         return $service;
@@ -873,10 +881,15 @@ final class ServiceHardener
      * Applied when the service is recognisably Node or builds from source (no
      * `image:` to match on): a stray NODE_OPTIONS on a non-Node process is inert.
      *
+     * A service's `environment:` replaces the image's own NODE_OPTIONS, so the
+     * cap is appended to it: Overleaf's image loads through Yarn PnP there
+     * (`--require /overleaf/.pnp.cjs`) and died on a missing package without it.
+     *
      * @param array<string, mixed> $service
+     * @param (callable(string): list<string>)|null $imageEnvironment an image's `Config.Env`
      * @return array<string, mixed>
      */
-    private static function withNodeHeapCap(string $name, array $service, ?int $accountMemoryMb = null): array
+    private static function withNodeHeapCap(string $name, array $service, ?int $accountMemoryMb = null, ?callable $imageEnvironment = null): array
     {
         if (ServiceEnvironment::hasKey($service['environment'] ?? null, 'NODE_OPTIONS')) {
             return $service;
@@ -885,14 +898,45 @@ final class ServiceHardener
             return $service;
         }
 
+        $own = $imageEnvironment === null ? null : self::imageNodeOptions($service, $imageEnvironment);
+        if ($own !== null && str_contains($own, '--max-old-space-size')) {
+            return $service;
+        }
+
         $limit = $service['mem_limit'] ?? $service['mem_reservation']
             ?? ServiceLimits::memoryFor($name, $service, $accountMemoryMb);
+        $cap = '--max-old-space-size=' . ServiceLimits::nodeHeapMbFor($limit);
         $service['environment'] = ServiceEnvironment::withDefaults(
             $service['environment'] ?? [],
-            ['NODE_OPTIONS' => '--max-old-space-size=' . ServiceLimits::nodeHeapMbFor($limit)]
+            // `$$`: compose would interpolate the image's value otherwise.
+            ['NODE_OPTIONS' => $own === null || $own === '' ? $cap : str_replace('$', '$$', $own) . ' ' . $cap]
         );
 
         return $service;
+    }
+
+    /**
+     * NODE_OPTIONS the service's image sets for itself; null when it sets none,
+     * the service builds its own, or the image could not be read.
+     *
+     * @param array<string, mixed> $service
+     * @param callable(string): list<string> $imageEnvironment
+     */
+    private static function imageNodeOptions(array $service, callable $imageEnvironment): ?string
+    {
+        $image = $service['image'] ?? null;
+        if (!is_string($image) || $image === '' || isset($service['build'])) {
+            return null;
+        }
+        // `name:tag@digest` (recipes pin that way) is the digest; the tag only fails the reference checks.
+        $image = (string) preg_replace('#:[\w][\w.-]*(?=@sha256:)#', '', $image);
+        foreach ($imageEnvironment($image) as $line) {
+            if (is_string($line) && str_starts_with($line, 'NODE_OPTIONS=')) {
+                return trim(substr($line, strlen('NODE_OPTIONS=')));
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -1046,10 +1090,12 @@ final class ServiceHardener
     }
 
     /**
-     * A host path the account's own services never get: `/` itself, or anything
-     * under one of {@see FORBIDDEN_SOURCE_PREFIXES}. `/hostfs` bound from `/`
-     * was the case that prompted this -- it reads and writes the whole
-     * filesystem the service's daemon is running on.
+     * A host path the account's own services never get. An absolute source is
+     * allowed only in the checkout or the account's ~/.panelalpha: everything
+     * else is the account container's own (its /home holds the inner daemon's
+     * data-root, /run the s6 scan dir, /usr the binaries s6 runs as root), and
+     * a list of what to refuse kept missing a path (/tmp, /srv). `/hostfs`
+     * bound from `/` was the case that prompted the check.
      */
     private static function isForbiddenSource(string $source, ?string $accountUser = null, ?string $projectDir = null): bool
     {
@@ -1092,13 +1138,14 @@ final class ServiceHardener
             return false;
         }
 
-        foreach (self::FORBIDDEN_SOURCE_PREFIXES as $prefix) {
-            if ($source === $prefix || str_starts_with($source, $prefix . '/')) {
-                return true;
-            }
+        if ($projectDir === null || !str_starts_with($projectDir, '/')) {
+            return true;
         }
+        // The checkout as the account container sees it, as LinkedSource maps it.
+        $projectDir = rtrim($projectDir, '/');
+        $checkout = '/home/' . basename(dirname($projectDir)) . '/' . basename($projectDir);
 
-        return false;
+        return $source !== $checkout && !str_starts_with($source, $checkout . '/');
     }
 
     /** Whether normalised absolute $source is the account's ~/.panelalpha or under it. */

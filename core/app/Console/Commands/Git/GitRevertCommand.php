@@ -13,7 +13,7 @@ class GitRevertCommand extends Command
 
     protected $signature = 'git:revert
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}
                             {--ref= : Commit ref to revert to (default HEAD)}';
 
     protected $description = 'Revert local git changes';

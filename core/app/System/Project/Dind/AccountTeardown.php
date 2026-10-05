@@ -29,7 +29,7 @@ final class AccountTeardown
         );
 
         $storage = $this->project->engine()->storage();
-        $this->project->abortRunningDeploy(false);
+        $this->abortRunningDeploy(false, removeVolumes: true);
         $this->tryStep($storage->pruneAllArgv(), 300, true);
 
         // Stops dockerd through the account's init, then removes its store.
@@ -44,10 +44,15 @@ final class AccountTeardown
         $this->purgeHostDockerCache($sidecarRefs);
     }
 
-    public function abortRunningDeploy(bool $stopInnerDocker = true): void
+    /**
+     * Volumes are removed only on request: a failed or cancelled redeploy of a
+     * live project must not take its named volumes (database data) with it.
+     */
+    public function abortRunningDeploy(bool $stopInnerDocker = true, bool $removeVolumes = false): void
     {
         $storage = $this->project->engine()->storage();
-        $this->tryStep($this->project->userAppComposeCommand(['down', '-v', '--remove-orphans']), 120, true);
+        $down = $removeVolumes ? ['down', '-v', '--remove-orphans'] : ['down', '--remove-orphans'];
+        $this->tryStep($this->project->userAppComposeCommand($down), 120, true);
         foreach ($storage->pruneBuildCacheArgv() as $prune) {
             $this->tryStep($prune, 120, true);
         }

@@ -234,6 +234,8 @@ $projectRoutes = function (): void {
     Route::post('/{username}/git/pull', [GitController::class, 'pull']);
     Route::post('/{username}/git/push', [GitController::class, 'push']);
     Route::post('/{username}/git/revert', [GitController::class, 'revert']);
+    Route::post('/{username}/git/deploy-key', [GitController::class, 'deployKey']);
+    Route::delete('/{username}/git/deploy-key', [GitController::class, 'deleteDeployKey']);
     Route::post('/{username}/git/deploy-hook', [DeployHookController::class, 'create']);
     Route::get('/{username}/git/deploy-hook', [DeployHookController::class, 'show']);
     Route::post('/{username}/git/deploy-hook/rotate', [DeployHookController::class, 'rotate']);
@@ -250,6 +252,7 @@ $projectRoutes = function (): void {
     Route::post('/{username}/containers/action', [ContainerController::class, 'projectAction']);
     Route::post('/{username}/containers/{service}/action', [ContainerController::class, 'serviceAction']);
     Route::get('/{username}/containers/{service}/logs', [ContainerController::class, 'logs']);
+    Route::get('/{username}/containers/{service}/logs/stream', [ContainerController::class, 'streamLogs']);
 
     // What the account's own files are, next to what its last deploy decided.
     // The same report POST /source/inspect gives for a repository or a path,

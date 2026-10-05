@@ -32,6 +32,23 @@ class DeployComposeDockerfileTest extends TestCase
         $this->assertArrayNotHasKey('entrypoint', $service);
     }
 
+    /** MintHCM's CMD ends in `exec bash`: its compose runs it with a terminal. */
+    public function test_carries_the_repository_services_terminal_settings(): void
+    {
+        $service = Yaml::parse(DeployCompose::dockerfile('docker/Dockerfile', 80, ['tty' => true, 'stdin_open' => true]))['services']['app'];
+
+        $this->assertTrue($service['tty']);
+        $this->assertTrue($service['stdin_open']);
+    }
+
+    public function test_sets_no_terminal_unless_asked(): void
+    {
+        $service = Yaml::parse(DeployCompose::dockerfile('Dockerfile', 80))['services']['app'];
+
+        $this->assertArrayNotHasKey('tty', $service);
+        $this->assertArrayNotHasKey('stdin_open', $service);
+    }
+
     public function test_port_80_is_published_on_8080(): void
     {
         $service = Yaml::parse(DeployCompose::dockerfile('Dockerfile', 80))['services']['app'];

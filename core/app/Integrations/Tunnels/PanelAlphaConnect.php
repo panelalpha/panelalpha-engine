@@ -286,7 +286,10 @@ class PanelAlphaConnect
             );
         }
 
-        $created = (new self())->createSite($domain->domain, $targetIp, $path);
+        // Forwarded with its own name as Host: on the domain of the same name
+        // that is the domain, and a sibling (`api-<name>`) reaches the app as
+        // the name its visitor typed.
+        $created = (new self())->createSite(self::pathFqdnFromHostname($hostname), $targetIp, $path);
 
         return self::recordPanelAlphaTunnel($user, $domain, $created + ['target_ip' => $targetIp]);
     }

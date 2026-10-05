@@ -85,9 +85,10 @@ class DindAccountRunIsEphemeralTest extends TestCase
     {
         // A guard on the isolation boundary generally, not just /run.
         foreach ((array) ($this->service()['volumes'] ?? []) as $volume) {
-            // lxcfs's virtualised /proc files, read-only, are the one exception.
+            // lxcfs's virtualised /proc files, read-only, are the one exception:
+            // each file over /proc, and the directory for the account's own containers.
             if (is_array($volume)) {
-                $this->assertStringStartsWith('/var/lib/lxcfs/proc/', (string) ($volume['source'] ?? ''));
+                $this->assertStringStartsWith('/var/lib/lxcfs/proc', (string) ($volume['source'] ?? ''));
                 $this->assertTrue($volume['read_only'] ?? false, 'an lxcfs file must be mounted read-only');
                 continue;
             }

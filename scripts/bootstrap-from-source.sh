@@ -461,6 +461,10 @@ fi
 step "Setting up lxcfs"
 bash scripts/configure-lxcfs.sh || warn "lxcfs is not running; accounts will see the host's memory, CPUs and load in /proc"
 
+# Same as installer.sh: host profiles that attach by path also confine tenant binaries.
+step "Disabling the host's path-attached AppArmor profiles"
+bash scripts/configure-apparmor.sh || warn "Could not disable the host's path-attached AppArmor profiles; tenant binaries at those paths stay confined"
+
 step "Starting the stack"
 # As in installer.sh: sites-db and the registries join pash-tenants (engine#519).
 docker network inspect pash-tenants >/dev/null 2>&1 || {

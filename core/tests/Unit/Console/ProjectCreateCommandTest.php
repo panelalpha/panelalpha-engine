@@ -5,11 +5,13 @@ namespace Tests\Unit\Console;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\ProblemException;
 use App\Http\Resources\UserResource;
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DeployLog\DeployLogStream;
 use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Host\ProjectMemory;
+use App\Lib\Project\CreateInspection;
 use App\Lib\Project\NewProjectInput;
 use App\Lib\Project\ProjectCreator;
 use App\Models\Admin;
@@ -99,7 +101,7 @@ class ProjectCreateCommandTest extends TestCase
     {
         [$out, $errors] = $this->refused(['--project' => 'ab']);
 
-        $this->assertSame(self::INTRO . "\n", $out);
+        $this->assertSame('', $out);
         $this->assertSame(["'ab' is not a valid project name. A project name is 3-15 characters: lowercase letters a-z and digits, starting with a letter."], $errors);
         $this->assertNothingCreated();
     }
@@ -110,7 +112,7 @@ class ProjectCreateCommandTest extends TestCase
 
         [$out, $errors] = $this->refused(['--project' => 'taken', '--domain' => 'x.example.test']);
 
-        $this->assertSame(self::INTRO . "\n", $out);
+        $this->assertSame('', $out);
         $this->assertSame(["A project named 'taken' already exists. Choose another name."], $errors);
         $this->assertNothingCreated();
     }
@@ -121,7 +123,7 @@ class ProjectCreateCommandTest extends TestCase
 
         [$out, $errors] = $this->refused(['--project' => 'taken', '--domain' => 'x.example.test', '--template' => 'nope']);
 
-        $this->assertSame(self::INTRO . "\n", $out);
+        $this->assertSame('', $out);
         $this->assertSame([
             "A project named 'taken' already exists. Choose another name.",
             'Template directory does not exist.',
@@ -133,7 +135,7 @@ class ProjectCreateCommandTest extends TestCase
     {
         [$out, $errors] = $this->refused(['--project' => 'fresh', '--domain' => 'bad_domain']);
 
-        $this->assertSame(self::INTRO . "\n", $out);
+        $this->assertSame('', $out);
         $this->assertSame(['The domain format is invalid.'], $errors);
         $this->assertNothingCreated();
     }
@@ -150,7 +152,7 @@ class ProjectCreateCommandTest extends TestCase
     {
         [$out, $errors] = $this->refused(['--project' => 'fresh', '--domain' => 'fresh.example.test', '--template' => 'nope']);
 
-        $this->assertSame(self::INTRO . "\n", $out);
+        $this->assertSame('', $out);
         $this->assertSame(['Template directory does not exist.'], $errors);
         $this->assertNothingCreated();
     }
@@ -159,7 +161,7 @@ class ProjectCreateCommandTest extends TestCase
     {
         [$out, $errors] = $this->refused(['--project' => 'fresh', '--domain' => 'fresh.example.test', '--recipe' => 'Bad']);
 
-        $this->assertSame(self::INTRO . "\n", $out);
+        $this->assertSame('', $out);
         $this->assertSame(["'Bad' is not a recipe id. Inspect the source and pick one of the ids under application.candidates."], $errors);
         $this->assertNothingCreated();
     }
@@ -189,15 +191,34 @@ class ProjectCreateCommandTest extends TestCase
         $this->assertSame('php', app(RecipeChoiceContext::class)->get());
     }
 
-    public function test_a_failed_create_from_a_repository_points_at_the_deploy_log(): void
+    /** Refused before anything was deployed: no progress line, and no deploy log to point at. */
+    public function test_a_refused_create_from_a_repository_prints_only_the_refusal(): void
     {
         [$out, $errors] = $this->refused(['--repo' => 'git@github.com:a/b.git', '--project' => 'fresh']);
 
-        $this->assertSame("Creating a project for git@github.com:a/b.git — this takes a few minutes.\n"
-            . "Deploy log: pae project:deploy:list\n", $out);
-        $this->assertSame(['SSH remotes are not supported: the engine clones anonymously or with an HTTPS token '
-            . '(`git_token`), and holds no SSH keys. Use https://github.com/a/b.git instead.'], $errors);
+        $this->assertSame('', $out);
+        $this->assertSame(['An SSH remote clones only with a project\'s deploy key, and a project has none until it '
+            . 'exists. Create the project without a repository, create its key with POST '
+            . '/projects/{name}/git/deploy-key, add the returned public key to the repository as a deploy key, '
+            . 'then connect the SSH remote with POST /projects/{name}/git/connect. '
+            . 'Or use https://github.com/a/b.git, with a token if it is private.'], $errors);
         $this->assertNothingCreated();
+    }
+
+    /** A refusal from provisioning (the remote probe, the domain) is as silent as a validation one. */
+    public function test_a_create_refused_while_provisioning_prints_only_the_refusal(): void
+    {
+        $this->stubCreate(fn (): never => $this->fail('a refused create must not deploy'));
+        $this->app->make(ProjectCreator::class)->refuseWith = ProblemException::one(
+            'git_repo',
+            'git_repo_unreachable',
+            'The repository could not be reached.'
+        );
+
+        [$out, $errors] = $this->refused(['--repo' => 'https://github.com/acme/app.git', '--project' => 'acme']);
+
+        $this->assertSame('', $out);
+        $this->assertSame(['The repository could not be reached.'], $errors);
     }
 
     /** The user row and its main domain are one transaction: a failed domain insert takes the user with it. */
@@ -301,7 +322,7 @@ class ProjectCreateCommandTest extends TestCase
 
     public function test_success_prints_the_deploy_log_and_where_the_project_lives(): void
     {
-        $this->stubCreate(fn (array $params): User => $this->deployed($params));
+        $this->stubCreate(fn (User $user) => $this->deployed($user));
 
         [$code, $out] = $this->create(['--project' => 'acme', '--domain' => 'acme.example.test']);
 
@@ -314,23 +335,22 @@ class ProjectCreateCommandTest extends TestCase
 
     public function test_success_in_json_mode_prints_the_project_resource(): void
     {
-        $this->stubCreate(fn (array $params): User => $this->deployed($params));
+        $this->stubCreate(fn (User $user) => $this->deployed($user));
 
         [$code, $out] = $this->create(['--project' => 'acme', '--domain' => 'acme.example.test', '--json' => true, '--quiet-deploy' => true]);
 
         $this->assertSame(0, $code, $out);
         $this->assertNotNull($this->created);
-        $this->assertSame((new UserResource($this->created))->response()->getContent() . "\n", $out);
+        $expected = (new UserResource($this->created))->response();
+        $data = $expected->getData(true);
+        // A create without a repository inspected nothing.
+        $data['data']['inspection'] = null;
+        $this->assertSame($expected->setData($data)->getContent() . "\n", $out);
     }
 
     public function test_options_reach_the_create_as_its_fields(): void
     {
-        $seen = null;
-        $this->stubCreate(function (array $params) use (&$seen): User {
-            $seen = $params;
-
-            return $this->deployed($params);
-        });
+        $this->stubCreate(fn (User $user) => $this->deployed($user));
 
         $this->create([
             '--repo' => 'acme/app',
@@ -358,11 +378,12 @@ class ProjectCreateCommandTest extends TestCase
             // Filled in by validation, as the API does.
             'memory_limit' => ProjectMemory::defaultMb(),
         ];
+        $input = app(ProjectCreator::class)->input;
+        $seen = $input->params;
         ksort($expected);
         ksort($seen);
         $this->assertSame($expected, $seen);
 
-        $input = app(ProjectCreator::class)->input;
         $this->assertSame('tok', $input->gitToken);
         $this->assertSame(['A' => '1', 'B' => 'x=y'], $input->envVars);
         $this->assertSame('php', $input->recipe);
@@ -377,11 +398,78 @@ class ProjectCreateCommandTest extends TestCase
 
         $this->refused(['--project' => 'ab']);
 
-        $this->stubCreate(fn (array $params): User => $this->deployed($params));
+        $this->stubCreate(fn (User $user) => $this->deployed($user));
         [$code] = $this->create(['--project' => 'acme', '--domain' => 'acme.example.test', '--quiet-deploy' => true]);
         $this->assertSame(0, $code);
 
         $this->assertSame(0, Admin::query()->count());
+    }
+
+    /** The inspection before the clone never stops the create; what it found is said. */
+    public function test_a_repository_that_may_not_deploy_is_warned_about_and_created(): void
+    {
+        $this->stubInspectedCreate(CreateInspection::fromReport([
+            'application' => ['strategy' => 'fallback', 'label' => 'Unknown', 'deployable' => true, 'issue' => null],
+        ]));
+
+        [$code, $out] = $this->create(['--repo' => 'https://github.com/acme/lib', '--project' => 'acme', '--domain' => 'acme.example.test', '--quiet-deploy' => true]);
+
+        $this->assertSame(0, $code, $out);
+        $this->assertStringContainsString('Project acme created.', $out);
+        $this->assertStringContainsString('The repository may not deploy as it stands: No recipe and no runtime recognises it', $out);
+    }
+
+    public function test_json_mode_carries_the_inspection(): void
+    {
+        $this->stubInspectedCreate(CreateInspection::fromReport([
+            'application' => ['strategy' => 'static', 'label' => 'Static', 'deployable' => true, 'issue' => null],
+        ]));
+
+        [$code, $out] = $this->create(['--repo' => 'https://github.com/acme/site', '--project' => 'acme', '--domain' => 'acme.example.test', '--json' => true, '--quiet-deploy' => true]);
+
+        $this->assertSame(0, $code, $out);
+        $json = json_decode($out, true);
+        $this->assertSame(['verdict' => 'deployable', 'strategy' => 'static'], $json['data']['inspection'] ?? null);
+    }
+
+    /** A create that succeeds with $inspection, however the command drives it. */
+    private function stubInspectedCreate(CreateInspection $inspection): void
+    {
+        $make = function (array $params): User {
+            $user = $this->makeUser((string) $params['username'], ['template' => 'dind'], (string) $params['domain']);
+            $this->makeMainDomain($user, $user->domain);
+
+            return $this->created = $user;
+        };
+        $this->app->instance(ProjectCreator::class, new class ($make, $inspection) extends ProjectCreator {
+            public function __construct(private readonly \Closure $make, private readonly CreateInspection $found)
+            {
+            }
+
+            public function create(NewProjectInput $input): User
+            {
+                return ($this->make)($input->params);
+            }
+
+            public function provisionForDeploy(NewProjectInput $input): User
+            {
+                return ($this->make)($input->params);
+            }
+
+            public function startDeployLog(User $user): ?DeployLogger
+            {
+                return null;
+            }
+
+            public function deploy(User $user, ?DeployLogger $deployLogger): void
+            {
+            }
+
+            public function inspection(): ?CreateInspection
+            {
+                return $this->found;
+            }
+        });
     }
 
     /** Strip the console colour tags the deploy lines carry. */
@@ -390,42 +478,64 @@ class ProjectCreateCommandTest extends TestCase
         return (string) preg_replace('#</?(?:fg|bg|options)=[^>]*>|</>#', '', $out);
     }
 
-    /**
-     * What a successful create leaves behind: the rows, and a deploy log line
-     * on the live stream.
-     *
-     * @param array<string, mixed> $params
-     */
-    private function deployed(array $params): User
+    /** What a successful deploy leaves behind: a deploy log line on the live stream. */
+    private function deployed(User $user): void
     {
-        $user = $this->makeUser((string) $params['username'], ['template' => 'dind'], (string) ($params['domain'] ?? 'acme.example.test'));
-        $this->makeMainDomain($user, $user->domain);
         DeployLogStream::emit(['type' => 'line', 'ts' => time(), 'stage' => null, 'level' => 'info', 'msg' => 'Deploy started (source: dind template)']);
-
-        return $this->created = $user;
+        $this->created = $user;
     }
 
     /**
-     * Stand in for the create itself. `$behaviour` gets the validated fields
-     * and returns the project, or throws what the create would.
+     * Stand in for the create itself: provisioning records the input and
+     * leaves the rows (or throws `refuseWith`), and `$deploy` gets the
+     * provisioned project and returns, or throws what the deploy would.
      *
-     * @param \Closure(array<string, mixed>): User $behaviour
+     * @param \Closure(User): void $deploy
      */
-    private function stubCreate(\Closure $behaviour): void
+    private function stubCreate(\Closure $deploy): void
     {
-        $this->app->instance(ProjectCreator::class, new class ($behaviour) extends ProjectCreator {
+        $test = $this;
+        $this->app->instance(ProjectCreator::class, new class ($deploy, $test) extends ProjectCreator {
             public ?NewProjectInput $input = null;
 
-            public function __construct(private readonly \Closure $behaviour)
+            public ?\Throwable $refuseWith = null;
+
+            public function __construct(private readonly \Closure $deploy, private readonly ProjectCreateCommandTest $test)
             {
             }
 
-            public function create(NewProjectInput $input): User
+            public function provisionForDeploy(NewProjectInput $input): User
             {
                 $this->input = $input;
+                if ($this->refuseWith !== null) {
+                    throw $this->refuseWith;
+                }
 
-                return ($this->behaviour)($input->params);
+                return $this->test->provisioned($input->params);
+            }
+
+            public function startDeployLog(User $user): ?DeployLogger
+            {
+                return null;
+            }
+
+            public function deploy(User $user, ?DeployLogger $deployLogger): void
+            {
+                ($this->deploy)($user);
             }
         });
+    }
+
+    /**
+     * The rows a provisioned create leaves.
+     *
+     * @param array<string, mixed> $params
+     */
+    public function provisioned(array $params): User
+    {
+        $user = $this->makeUser((string) $params['username'], ['template' => 'dind'], (string) ($params['domain'] ?? 'acme.example.test'));
+        $this->makeMainDomain($user, $user->domain);
+
+        return $user;
     }
 }

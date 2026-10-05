@@ -8,11 +8,13 @@ use App\Http\Requests\RecipeChoiceInput;
 use App\Integrations\Tunnels\PanelAlphaConnect;
 use App\Jobs\DeployProject;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\Dind\TenantNetwork;
 use App\Lib\Deploy\EnvVarOverrides;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\ProjectName;
 use App\Lib\Deploy\Source\GitRemoteProbe;
+use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Domains\DomainAllocationException;
 use App\Lib\Domains\DomainAllocator;
@@ -37,6 +39,9 @@ use Illuminate\Validation\ValidationException;
  */
 class ProjectCreator
 {
+    /** What the last provision's inspection found; null without a git_repo. */
+    private ?CreateInspection $inspection = null;
+
     /**
      * Provision and deploy in this process.
      *
@@ -79,9 +84,19 @@ class ProjectCreator
             $deployLogger->info($gitRepo
                 ? "Deploy started (source: git, repo: " . GitUrl::sanitize($gitRepo) . ")"
                 : 'Deploy started (source: dind template)');
+            $this->inspection?->writeTo($deployLogger);
         }
 
         return $deployLogger;
+    }
+
+    /**
+     * The repository inspection the last provision ran, for the create
+     * response; null when it had no git_repo.
+     */
+    public function inspection(): ?CreateInspection
+    {
+        return $this->inspection;
     }
 
     /**
@@ -118,9 +133,22 @@ class ProjectCreator
                 'action' => 'deploy',
             ],
         );
-        DeployProject::dispatch($user->username, $stages, $recipe)->attachTask($task);
+        DeployProject::dispatch($user->username, $stages, $recipe, $this->inspection?->toArray())->attachTask($task);
 
         return $task;
+    }
+
+    /**
+     * Whether a create queued by {@see queue()} has not finished yet: until it
+     * has, the account may not exist on the host or in its container.
+     */
+    public static function isCreating(User $user): bool
+    {
+        return Task::query()
+            ->where('username', $user->username)
+            ->where('job_type', DeployProject::class)
+            ->whereNotIn('status', Task::TERMINAL_STATUSES)
+            ->exists();
     }
 
     /**
@@ -129,6 +157,8 @@ class ProjectCreator
      */
     private function provision(NewProjectInput $input): User
     {
+        $this->inspection = null;
+
         /** @var array{
          *   username?: ?string,
          *   domain?: ?string,
@@ -211,6 +241,11 @@ class ProjectCreator
         // machine; before the allocator because everything past it spends a
         // panelalpha.online label, and those are never released.
         if (!empty($params['git_repo'])) {
+            // The probe runs in core, which reaches addresses the project's own network refuses.
+            $refused = self::refusedRepositoryAddress($params['git_repo']);
+            if ($refused !== null) {
+                throw ProblemException::one('git_repo', 'git_repo_private_address', $refused);
+            }
             $probe = (new GitRemoteProbe())->problem(
                 'git_repo',
                 $params['git_repo'],
@@ -225,6 +260,16 @@ class ProjectCreator
             if ($probe !== null) {
                 throw ProblemException::of([$probe]);
             }
+
+            // Seconds, and never a refusal: what it finds is reported in the
+            // response and the deploy log, and the create goes ahead.
+            $this->inspection = app(CreateInspector::class)->inspect(
+                $params['git_repo'],
+                $params['git_branch'] ?? null,
+                $params['git_token'] ?? null,
+                RecipeChoiceInput::parse($input->recipe),
+                DeployPlanInput::parse($input->stages),
+            );
         }
 
         // The name, and everything about it worth reporting. Chosen before
@@ -381,6 +426,34 @@ class ProjectCreator
             }
             throw $e;
         }
+    }
+
+    /**
+     * Why the project could not reach the repository's host, when every IPv4
+     * address it has is one the tenant network refuses; null otherwise, or
+     * when it does not resolve (the probe says that).
+     */
+    private static function refusedRepositoryAddress(string $repoUrl): ?string
+    {
+        $host = parse_url(GitRepoInput::normalise($repoUrl), PHP_URL_HOST);
+        if (!is_string($host) || $host === '') {
+            return null;
+        }
+
+        $literal = filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
+        $addresses = $literal ? [$host] : gethostbynamel($host);
+        if (!is_array($addresses) || $addresses === []) {
+            return null;
+        }
+        foreach ($addresses as $address) {
+            if (!TenantNetwork::refuses($address)) {
+                return null;
+            }
+        }
+
+        return ($literal ? "{$host} is" : "{$host} resolves to {$addresses[0]},")
+            . ' a private, loopback, link-local or reserved address. A project\'s network does not reach those, '
+            . 'so the clone would fail. Use a repository on a public address.';
     }
 
     /**

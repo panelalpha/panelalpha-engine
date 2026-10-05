@@ -120,6 +120,8 @@ class PrepareFromSource
             // The resolved image, not the strategy's default one. What gets
             // seeded has to be what the project asked for.
             'deploy_image' => is_string($decision['image'] ?? null) ? $decision['image'] : null,
+            // The app config's `health: {start_period}`, read by AppHealth after `compose up`.
+            AppHealth::DETAIL_START_PERIOD => $appConfig?->startPeriod(),
             'git_commit' => $gitRepo !== null ? $this->readGitCommit($projectDir) : null,
         ]);
 

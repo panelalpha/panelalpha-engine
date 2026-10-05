@@ -112,9 +112,14 @@ final class RecordingMechanics implements DeployMechanics
         return $this->startResult;
     }
 
-    public function abortPartialDeploy(): void
+    public function abortPartialDeploy(bool $removeVolumes = false): void
     {
         $this->calls[] = 'abort';
+    }
+
+    public function settleRedeploy(bool $succeeded): void
+    {
+        $this->calls[] = 'settle';
     }
 
     public function servingWarnings(): array

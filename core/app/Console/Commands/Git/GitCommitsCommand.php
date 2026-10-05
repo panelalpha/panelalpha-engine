@@ -13,7 +13,7 @@ class GitCommitsCommand extends Command
 
     protected $signature = 'git:commits
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}
                             {--branch= : Branch to list commits from}
                             {--limit=50 : Maximum number of commits}';
 

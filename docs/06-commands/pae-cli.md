@@ -115,6 +115,8 @@ These are the values your application reads when it starts. Change one, then reb
 | `pae project:settings:get {name} --project={project}` | Prints one setting. |
 | `pae project:settings:set {name} {value} --project={project}` | Sets one setting. |
 | `pae project:settings:unset {name} --project={project}` | Removes one setting. |
+| `pae project:settings:set persist-paths /app/storage,/app/public/uploads --project={project}` | Keeps what the application writes under these container paths across redeploys and rebuilds, on volumes of the project's own. Takes effect from the next deploy. A project that brings its own `docker-compose.yml` declares its volumes there instead. |
+| `pae project:settings:set registry-auth "ghcr.io {user} {token}" --project={project}` | Logs the project in to private image registries, one `host username token` line per registry. The deploy uses it to pull images and build from them; it is present in the project only while a deploy runs, and an image it covers never goes through the server's shared registries. |
 
 Context: [Environment variables](../05-capabilities/projects.md#environment-variables).
 
@@ -132,6 +134,7 @@ For projects deployed from git, these act on the checkout the engine owns. A pul
 | `pae git:revert {project}` | Returns the checkout to the last deployed commit, then rebuilds. |
 | `pae git:update-credentials {project}` | Replaces the stored git access token. |
 | `pae git:deploy-hook {project}` | Creates the push-to-deploy hook and prints its URL and secret; the secret is shown only this once. Run again, it prints the same URL without the secret. `--rotate` issues a new URL and secret, `--delete` removes the hook, `--path` picks another checkout, `--provider` narrows the TLS setup notes to one git host. |
+| `pae git:deploy-key {project}` | Creates the project's SSH deploy key and prints its public half to add to the repository. Run again, it prints the same key. `--host` also trusts a git server other than github.com, gitlab.com and bitbucket.org, `--delete` removes the key. |
 
 Context: [Connecting with Git](../05-capabilities/connecting-with-git.md), [Push to deploy](../05-capabilities/push-to-deploy.md).
 

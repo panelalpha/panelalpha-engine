@@ -174,7 +174,7 @@ class UserStoreRequestSecurityTest extends TestCase
         $errors = $e->errors();
         $this->assertArrayHasKey('git_repo', $errors);
         $this->assertIsString($errors['git_repo'][0]);
-        $this->assertStringContainsString('SSH remotes are not supported', $errors['git_repo'][0]);
+        $this->assertStringContainsString('POST /projects/{name}/git/deploy-key', $errors['git_repo'][0]);
     }
 
     /** `url` used to wave these through, to fail at clone minutes later. */

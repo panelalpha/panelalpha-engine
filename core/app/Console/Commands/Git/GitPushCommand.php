@@ -13,7 +13,7 @@ class GitPushCommand extends Command
 
     protected $signature = 'git:push
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}';
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}';
 
     protected $description = 'Push local git changes';
 

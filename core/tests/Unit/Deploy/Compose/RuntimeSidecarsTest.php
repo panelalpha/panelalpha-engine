@@ -321,7 +321,9 @@ class RuntimeSidecarsTest extends TestCase
     {
         $result = $this->extract(self::STACK);
 
-        $this->assertSame('unless-stopped', $result['services']['db']['restart']);
+        // Its `ports` are stripped and the app that needed it was dropped, so no
+        // policy is added here: GeneratedCompose gives every sidecar one.
+        $this->assertArrayNotHasKey('restart', $result['services']['db']);
         $this->assertArrayHasKey('mem_limit', $result['services']['db']);
         $this->assertArrayHasKey('pids_limit', $result['services']['db']);
     }

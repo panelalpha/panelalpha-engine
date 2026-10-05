@@ -81,6 +81,10 @@ class Create extends Command
             $params['env_vars'] = $envVars;
         }
 
+        // Validated and provisioned first, as POST /users does: a refused
+        // create prints only its reason, not a progress line and a log hint.
+        $user = $creator->provisionForDeploy(NewProjectInput::fromArray($params));
+
         if (!$this->option('json')) {
             $this->info(isset($params['git_repo'])
                 ? "Creating a project for {$params['git_repo']} — this takes a few minutes."
@@ -94,8 +98,9 @@ class Create extends Command
         $this->followDeployLog();
 
         try {
-            $user = $creator->create(NewProjectInput::fromArray($params));
+            $creator->deploy($user, $creator->startDeployLog($user));
         } catch (ValidationException | DeployAlreadyRunningException | DockerErrorException $e) {
+            $this->warnAboutRepository($creator);
             // The hint first: the console renderer prints the reason after it.
             $this->pointAtDeployLog($params);
 
@@ -104,7 +109,35 @@ class Create extends Command
             DeployLogger::stopStreaming();
         }
 
-        return $this->report((string) (new UserResource($user))->response()->getContent());
+        return $this->report($this->created($user, $creator), $creator);
+    }
+
+    /** The created project as POST /users answers it, `inspection` included. */
+    private function created(User $user, ProjectCreator $creator): string
+    {
+        $response = (new UserResource($user))->response();
+        $payload = $response->getData(true);
+        if (is_array($payload) && is_array($payload['data'] ?? null)) {
+            $payload['data']['inspection'] = $creator->inspection()?->toResponse();
+            $response->setData($payload);
+        }
+
+        return (string) $response->getContent();
+    }
+
+    /** What the inspection before the clone found, when it may not deploy. */
+    private function warnAboutRepository(ProjectCreator $creator): void
+    {
+        $warning = $creator->inspection()?->warning();
+        if ($warning === null) {
+            return;
+        }
+        // stderr under --json, which already carries it as `inspection`.
+        if ($this->option('json')) {
+            $this->deployOutput()->writeln($warning);
+        } else {
+            $this->warn($warning);
+        }
     }
 
     /**
@@ -212,7 +245,7 @@ class Create extends Command
     }
 
     /** The created project, as JSON or as the two lines an installer prints. */
-    private function report(string $body): int
+    private function report(string $body, ProjectCreator $creator): int
     {
         if ($this->option('json')) {
             $this->output->writeln($body);
@@ -234,6 +267,7 @@ class Create extends Command
         if ($domain !== '') {
             $this->info('Live at ' . $this->url($domain));
         }
+        $this->warnAboutRepository($creator);
 
         // Said here rather than left to be discovered in a browser: a host with
         // no license or no public address lands the project on a name that

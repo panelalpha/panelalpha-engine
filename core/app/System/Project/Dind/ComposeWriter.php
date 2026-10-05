@@ -3,8 +3,11 @@
 namespace App\System\Project\Dind;
 
 use App\Lib\Deploy\Checkout\EngineArtifacts;
+use App\Lib\Deploy\Compose\ComposeHarden;
+use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\Compose\GeneratedCompose;
 use App\Lib\Deploy\Platform\Dockerfile\NginxConfig;
+use App\Lib\Deploy\Platform\Probes\ProcfileWebProbe;
 use App\Lib\Deploy\Detect\PlaceholderPage;
 use App\System\Project\Dind as DindProject;
 
@@ -23,6 +26,23 @@ class ComposeWriter
 
     public function writeGeneratedCompose(string $projectDir, string $yaml, ?string $chown): void
     {
+        $paths = $this->project->userModel()->getPersistPaths();
+        if ($paths !== []) {
+            $yaml = GeneratedCompose::withPersistedPaths($yaml, $paths);
+            $this->project->shell()->logger()?->info('Keeping across deploys: ' . implode(', ', $paths));
+        }
+        $procfile = $this->project->projectTree()->readIn($projectDir, 'Procfile');
+        $processes = $procfile === null ? [] : ProcfileWebProbe::otherProcesses($procfile);
+        $withProcesses = GeneratedCompose::withProcesses($yaml, $processes);
+        if ($withProcesses !== $yaml) {
+            $yaml = $withProcesses;
+            $this->project->shell()->logger()?->info('Running the Procfile processes too: ' . implode(', ', array_keys($processes)));
+        }
+        $procFiles = LxcfsProc::inAccount($this->project);
+        $parsed = $procFiles === [] ? null : ComposeYaml::parse($yaml);
+        if ($parsed !== null) {
+            $yaml = ComposeYaml::dump(ComposeHarden::withProcMounts($parsed, $procFiles), $yaml, 6, 2);
+        }
         $this->project->system()->filesystem()->filePutContents(
             $this->project->userAppComposeFilePath(),
             $yaml,

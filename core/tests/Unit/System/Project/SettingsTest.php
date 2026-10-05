@@ -81,6 +81,77 @@ class SettingsTest extends TestCase
         $this->assertFalse($row['set']);
     }
 
+    public function test_registry_auth_is_a_secret_and_read_back_redacted(): void
+    {
+        $user = $this->userWithToken(null);
+        $user->method('getRegistryAuth')->willReturn('ghcr.io acme ghp_abcdefghijklmnop');
+
+        $row = (new Settings($this->projectFor($user)))->get(Settings::KEY_REGISTRY_AUTH);
+
+        $this->assertTrue(Settings::isSecret(Settings::KEY_REGISTRY_AUTH));
+        $this->assertTrue($row['set']);
+        $this->assertStringNotContainsString('ghp_abcdefghijklmnop', (string) $row['value']);
+    }
+
+    public function test_registry_auth_is_stored_once_it_parses(): void
+    {
+        $user = $this->userWithToken(null);
+        $user->expects($this->once())->method('setDetails')
+            ->with(['registry_auth' => "ghcr.io acme tok1\nregistry.example.com:5000 bot tok2"]);
+        $user->expects($this->once())->method('save');
+
+        $result = (new Settings($this->projectFor($user)))->set(
+            Settings::KEY_REGISTRY_AUTH,
+            "  ghcr.io acme tok1\nregistry.example.com:5000 bot tok2\n"
+        );
+
+        $this->assertStringContainsString('ghcr.io, registry.example.com:5000', (string) $result['message']);
+    }
+
+    public function test_registry_auth_refuses_a_line_it_cannot_read_and_stores_nothing(): void
+    {
+        $user = $this->userWithToken(null);
+        $user->expects($this->never())->method('setDetails');
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('line 2');
+        (new Settings($this->projectFor($user)))->set(Settings::KEY_REGISTRY_AUTH, "ghcr.io acme tok\nghcr.io-only-a-host");
+    }
+
+    public function test_persist_paths_are_absolute_and_normalised(): void
+    {
+        $this->assertSame(
+            ['/app/storage', '/app/public/uploads', '/app/.cache'],
+            Settings::persistPaths(' /app/storage/ , //app/public//uploads,,/app/.cache,/app/storage')
+        );
+    }
+
+    public function test_persist_paths_refuse_what_a_volume_cannot_be_mounted_on(): void
+    {
+        foreach (['app/uploads', '/', '/app/../etc', '/app/up loads', '/app/x:/y', ''] as $bad) {
+            try {
+                Settings::persistPaths($bad);
+                $this->fail("'{$bad}' was accepted");
+            } catch (InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function test_persist_paths_are_stored_as_a_list_and_read_back_as_set(): void
+    {
+        $user = $this->userWithToken(null);
+        $user->expects($this->once())->method('setDetails')->with(['persist_paths' => ['/app/uploads', '/data']]);
+        $user->method('getPersistPaths')->willReturn(['/app/uploads', '/data']);
+        $settings = new Settings($this->projectFor($user));
+
+        $settings->set(Settings::KEY_PERSIST_PATHS, '/app/uploads,/data');
+        $row = $settings->get(Settings::KEY_PERSIST_PATHS);
+
+        $this->assertSame('/app/uploads,/data', $row['value']);
+        $this->assertFalse($row['secret']);
+    }
+
     public function test_project_aggregate_declares_settings(): void
     {
         $source = file_get_contents($this->coreAppRoot . '/System/Project.php');

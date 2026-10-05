@@ -48,6 +48,21 @@ class AlternativeDatabasesTest extends TestCase
         $this->assertStringContainsString('@postgresql:5432', $result['env']['DATABASE_URL'] ?? '');
     }
 
+    public function test_a_dropped_database_reports_no_moved_bind(): void
+    {
+        $yaml = str_replace(
+            ["        image: postgres:18\n", "        image: mysql:latest\n"],
+            ["        image: postgres:18\n        volumes:\n            - ./data/pg:/var/lib/postgresql/data\n",
+                "        image: mysql:latest\n        volumes:\n            - ./data/mysql:/var/lib/mysql\n"],
+            self::KOILLECTION
+        );
+        $this->assertStringContainsString('./data/mysql:/var/lib/mysql', $yaml);
+        $result = RuntimeSidecars::fromYaml($yaml, true, null, 'github.com/benjaminjonard/koillection');
+
+        $this->assertSame(['postgresql'], array_keys($result['services']));
+        $this->assertSame(['postgresql: ./data/pg:/var/lib/postgresql/data'], $result['replaced_mounts']);
+    }
+
     public function test_two_sql_databases_are_both_kept_when_the_app_names_neither(): void
     {
         $yaml = str_replace('DB_HOST=postgresql', 'DB_HOST=${DB_HOST}', self::KOILLECTION);

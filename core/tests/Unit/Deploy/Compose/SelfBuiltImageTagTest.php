@@ -194,6 +194,46 @@ class SelfBuiltImageTagTest extends TestCase
         $this->assertCount(3, DeployCompose::imageRefs($compose));
     }
 
+    /**
+     * kassambara/wordpress-docker-compose: `wordpress:${WORDPRESS_VERSION:-latest}`
+     * was skipped as unparseable and never preloaded.
+     */
+    public function test_image_refs_interpolate_when_given_the_projects_env(): void
+    {
+        $compose = <<<'YAML'
+        services:
+          wordpress:
+            image: wordpress:${WORDPRESS_VERSION:-latest}
+          mysql:
+            image: mariadb:${MARIADB_VERSION:-latest}
+          app:
+            image: ${APP_IMAGE}
+          wpcli:
+            build: ./wpcli/
+            image: wpcli:${WPCLI_TAG:-latest}
+          healthcheck:
+            image: wpcli:${WPCLI_TAG:-latest}
+        YAML;
+
+        $this->assertSame(
+            ['wordpress:6.6', 'mariadb:latest'],
+            DeployCompose::imageRefs($compose, env: ['WORDPRESS_VERSION' => '6.6'])
+        );
+        // Teardown reads the file raw, as before.
+        $this->assertSame([], DeployCompose::imageRefs($compose));
+    }
+
+    public function test_resolved_image_ref_is_what_compose_runs_or_nothing(): void
+    {
+        $this->assertSame('wordpress:latest', DeployCompose::resolvedImageRef('wordpress:${WORDPRESS_VERSION:-latest}'));
+        $this->assertSame('wordpress:6.6', DeployCompose::resolvedImageRef('wordpress:${WORDPRESS_VERSION:-latest}', ['WORDPRESS_VERSION' => ['6.6']]));
+        $this->assertSame('redis:latest', DeployCompose::resolvedImageRef('redis'));
+        $this->assertNull(DeployCompose::resolvedImageRef('${IMAGE}'));
+        $this->assertNull(DeployCompose::resolvedImageRef('app:${TAG:?set it}'));
+        // Two values it may take: not a guess worth fetching.
+        $this->assertNull(DeployCompose::resolvedImageRef('wordpress:${V}', ['V' => ['6.5', '6.6']]));
+    }
+
     /** The dpaste shape: the app service builds and another service names it. */
     public function test_built_image_name_from_yaml_reads_the_reference_shape(): void
     {

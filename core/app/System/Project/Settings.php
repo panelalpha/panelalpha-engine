@@ -4,6 +4,7 @@ namespace App\System\Project;
 
 use App\Integrations\Tunnels\Cloudflare;
 use App\Lib\Apis\Cloudflare\CloudflareException;
+use App\Lib\Deploy\Dind\RegistryAuth;
 use App\Models\Tunnel;
 use App\System\Project as UserProject;
 
@@ -11,14 +12,23 @@ class Settings
 {
     public const string KEY_CLOUDFLARE_API_TOKEN = 'cloudflare-api-token';
 
+    /** Private image registry logins, one `host username token` line each. */
+    public const string KEY_REGISTRY_AUTH = 'registry-auth';
+
+    /** Container paths kept on named volumes across deploys, comma-separated. */
+    public const string KEY_PERSIST_PATHS = 'persist-paths';
+
     /** @var list<string> */
     public const array KEYS = [
         self::KEY_CLOUDFLARE_API_TOKEN,
+        self::KEY_REGISTRY_AUTH,
+        self::KEY_PERSIST_PATHS,
     ];
 
     /** @var list<string> */
     public const array SECRET_KEYS = [
         self::KEY_CLOUDFLARE_API_TOKEN,
+        self::KEY_REGISTRY_AUTH,
     ];
 
     public function __construct(
@@ -109,6 +119,25 @@ class Settings
             ];
         }
 
+        if ($key === self::KEY_REGISTRY_AUTH) {
+            $auth = RegistryAuth::parse($value);
+            if ($auth->isEmpty()) {
+                throw new \InvalidArgumentException("registry-auth needs at least one 'host username token' line.");
+            }
+            $projectUser->setDetails(['registry_auth' => trim($value)]);
+            $projectUser->save();
+
+            return ['message' => 'Registry logins saved for: ' . implode(', ', $auth->hosts()) . '.'];
+        }
+
+        if ($key === self::KEY_PERSIST_PATHS) {
+            $paths = self::persistPaths($value);
+            $projectUser->setDetails(['persist_paths' => $paths]);
+            $projectUser->save();
+
+            return ['message' => 'Kept across deploys from the next one: ' . implode(', ', $paths) . '.'];
+        }
+
         throw new \InvalidArgumentException("No setter for '{$key}'.");
     }
 
@@ -139,13 +168,61 @@ class Settings
             return;
         }
 
+        if ($key === self::KEY_REGISTRY_AUTH || $key === self::KEY_PERSIST_PATHS) {
+            $details = $projectUser->getDetails();
+            unset($details[str_replace('-', '_', $key)]);
+            $projectUser->details = $details;
+            $projectUser->save();
+
+            return;
+        }
+
         throw new \InvalidArgumentException("No unsetter for '{$key}'.");
+    }
+
+    /**
+     * Absolute container paths, each a plain directory name a compose volume
+     * can be mounted on.
+     *
+     * @return list<string>
+     */
+    public static function persistPaths(string $value): array
+    {
+        $paths = [];
+        foreach (explode(',', $value) as $path) {
+            $path = trim($path);
+            if ($path === '') {
+                continue;
+            }
+            $normal = '/' . trim((string) preg_replace('#/+#', '/', $path), '/');
+            if (!str_starts_with($path, '/') || $normal === '/'
+                || preg_match('#^(/[A-Za-z0-9._@+-]+)+$#', $normal) !== 1
+                || preg_match('#/\.\.?(/|$)#', $normal) === 1) {
+                throw new \InvalidArgumentException(
+                    "persist-paths: '{$path}' is not an absolute path inside the container (e.g. /app/storage)."
+                );
+            }
+            $paths[$normal] = $normal;
+        }
+        if ($paths === []) {
+            throw new \InvalidArgumentException('persist-paths needs at least one absolute path, e.g. /app/storage,/app/public/uploads.');
+        }
+
+        return array_values($paths);
     }
 
     private function storedValue(string $key): ?string
     {
         if ($key === self::KEY_CLOUDFLARE_API_TOKEN) {
             return $this->project->model()->getCloudflareApiToken();
+        }
+        if ($key === self::KEY_REGISTRY_AUTH) {
+            return $this->project->model()->getRegistryAuth();
+        }
+        if ($key === self::KEY_PERSIST_PATHS) {
+            $paths = $this->project->model()->getPersistPaths();
+
+            return $paths === [] ? null : implode(',', $paths);
         }
 
         return null;

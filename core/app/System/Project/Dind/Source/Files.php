@@ -50,11 +50,15 @@ final class Files
             $system->exec(['sudo', 'cp', '--no-dereference', $archive->path, $staged]);
             $system->exec(['sudo', 'chmod', '0444', $staged]);
 
-            ArchiveSafety::assertSafeListing($system->exec($archive->listNamesArgv($staged), [], 120));
-            // One listing, two checks: member types, and the size the archive
-            // claims -- which is worth rejecting on when it is already too big.
+            $names = $system->exec($archive->listNamesArgv($staged), [], 120);
+            ArchiveSafety::assertSafeListing($names);
+            // One listing, three checks: member types, where each symlink
+            // points, and the size the archive claims -- which is worth
+            // rejecting on when it is already too big.
             $modes = $system->exec($archive->listModesArgv($staged), [], 120);
             ArchiveSafety::assertRegularMembersOnly($modes);
+            $members = ArchiveSafety::names($names);
+            ArchiveSafety::assertLinksStayInside($this->linkTargets($archive, $staged, $modes, $members), $members);
             ArchiveSafety::assertUncompressedSizeWithin($modes);
             // Then the size it really is. The staged copy is root-owned and
             // 0444, so it can be read here and cannot change underneath us.
@@ -71,11 +75,16 @@ final class Files
             // core's PHP would see an empty directory and never unwrap it.
             $source = ProjectArchive::resolveProjectRoot($tmp, $system->exec(ProjectArchive::topLevelArgv($tmp), [], 60));
             $system->exec(['sudo', 'mkdir', '-p', $projectDir]);
+            // Compared by content: archives often carry normalised mtimes. A
+            // changed file gets a new mtime, or BuildKit's context sync (stat
+            // based) keeps sending the old one into the image.
             $system->exec([
                 'sudo',
                 'rsync',
                 '-a',
                 '--delete',
+                '--checksum',
+                '--no-times',
                 rtrim($source, '/') . '/',
                 rtrim($projectDir, '/') . '/',
             ]);
@@ -85,6 +94,26 @@ final class Files
         } finally {
             $system->exec(['sudo', 'rm', '-rf', $tmp, $stageDir]);
         }
+    }
+
+    /**
+     * Each symlink member's target: tar prints it in the listing, zip stores
+     * it as the member's contents.
+     *
+     * @param list<string> $names
+     * @return array<string, string>
+     */
+    private function linkTargets(UploadedArchive $archive, string $staged, string $modes, array $names): array
+    {
+        if (!$archive->isZip) {
+            return ArchiveSafety::tarLinks($modes, $names);
+        }
+        $links = [];
+        foreach (ArchiveSafety::zipLinkNames($modes, $names) as $name) {
+            $links[$name] = $this->project->system()->exec($archive->readMemberArgv($staged, $name), [], 60);
+        }
+
+        return $links;
     }
 
     private function tree(): ProjectTree

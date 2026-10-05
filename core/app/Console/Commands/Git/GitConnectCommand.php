@@ -13,7 +13,7 @@ class GitConnectCommand extends Command
 
     protected $signature = 'git:connect
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}
                             {--repo-url= : Remote repository URL}
                             {--branch= : Branch to track}
                             {--token= : Personal access token}

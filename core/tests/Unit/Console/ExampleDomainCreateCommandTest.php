@@ -85,7 +85,8 @@ class ExampleDomainCreateCommandTest extends TestCase
     public function test_an_unreadable_repository_is_refused(): void
     {
         $this->assertSame(
-            ['Could not reach 127.0.0.1. The engine must be able to open an HTTPS connection to it.'],
+            ['127.0.0.1 is a private, loopback, link-local or reserved address. A project\'s network does not reach '
+                . 'those, so the clone would fail. Use a repository on a public address.'],
             $this->refused(['--git-repo' => 'http://127.0.0.1:1/acme/app.git'])
         );
         $this->assertSame(0, User::query()->count());

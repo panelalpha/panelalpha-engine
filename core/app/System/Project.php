@@ -610,10 +610,10 @@ class Project
         $this->runtime->networking()->detectAndCreateProxyRules($this->model);
     }
 
-    public function abortRunningDeploy(bool $stopInnerDocker = true): void
+    public function abortRunningDeploy(bool $stopInnerDocker = true, bool $removeVolumes = false): void
     {
         if ($this->runtime instanceof Dind) {
-            $this->runtime->abortRunningDeploy($stopInnerDocker);
+            $this->runtime->abortRunningDeploy($stopInnerDocker, $removeVolumes);
         }
     }
 

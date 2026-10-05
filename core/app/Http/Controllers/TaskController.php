@@ -16,6 +16,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TaskController extends Controller
 {
+    /** Silence after which the log stream checks that its reader is still there. */
+    public const STREAM_HEARTBEAT_SECONDS = 2;
+
     #[OA\Get(
         path: '/tasks/{id}',
         summary: 'Poll a task status and new log lines after a cursor',
@@ -98,7 +101,8 @@ class TaskController extends Controller
         path: '/tasks/{id}/logs/stream',
         description: 'Chunked NDJSON without Content-Length. Each log line is one JSON object; '
             . 'a final `{"type":"finish","status":"..."}` frame closes the stream when the task '
-            . 'is terminal and no further lines remain. Optional `since` / `after_id` skip the '
+            . 'is terminal and no further lines remain. While the task logs nothing, a `{"type":"heartbeat"}` '
+            . 'frame follows every 2 seconds without a line; skip it. Optional `since` / `after_id` skip the '
             . 'backlog. Long-lived: MCP clients should poll GET /tasks/{id}/logs instead.',
         summary: 'Stream task log lines as NDJSON until the task finishes',
         // A tool answers once; this never does. task_log_list is the MCP way.
@@ -151,11 +155,13 @@ class TaskController extends Controller
                 }
             }
 
-            $emit = static function (array $frame): void {
+            $lastWrite = microtime(true);
+            $emit = static function (array $frame) use (&$lastWrite): void {
                 echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
                 if (!app()->runningUnitTests()) {
                     flush();
                 }
+                $lastWrite = microtime(true);
             };
 
             $cursor = $afterId;
@@ -194,6 +200,12 @@ class TaskController extends Controller
                 }
 
                 if ($page->isEmpty()) {
+                    // PHP learns the client left only when a write fails, so a
+                    // quiet task gets heartbeats; otherwise this worker stays
+                    // busy until the task logs again.
+                    if (microtime(true) - $lastWrite >= self::STREAM_HEARTBEAT_SECONDS) {
+                        $emit(['type' => 'heartbeat']);
+                    }
                     usleep(200000);
                 }
             }

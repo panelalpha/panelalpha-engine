@@ -138,6 +138,14 @@ class DeployCompose
             $decision['volumes'] = $carried;
         }
 
+        // As the repository's own service runs it: a CMD ending in `exec bash`
+        // exits at once without a terminal.
+        foreach (['tty', 'stdin_open'] as $key) {
+            if (($decision[$key] ?? null) === true) {
+                $service[$key] = true;
+            }
+        }
+
         [$service, $decision] = self::withDeclaredVolumes($service, $decision);
 
         return GeneratedCompose::render(
@@ -272,23 +280,27 @@ class DeployCompose
      *
      * @param list<string>|null $activeProfiles when given, a service behind
      *        any other `profiles:` is skipped: `compose up` will not start it
+     * @param array<string, list<?string>|string>|null $env when given, `image:`
+     *        is interpolated as Compose would ({@see resolvedImageRef()})
      * @return list<string>
      */
-    public static function imageRefs(string $composeYaml, int $limit = self::IMAGE_REF_LIMIT, ?array $activeProfiles = null): array
+    public static function imageRefs(string $composeYaml, int $limit = self::IMAGE_REF_LIMIT, ?array $activeProfiles = null, ?array $env = null): array
     {
         $services = self::servicesIn($composeYaml);
         // A name the same file builds is the image this build produces, not a
         // registry to fetch (dpaste's `migration: image: app`): pre-pulling it
         // asked Docker Hub for `app:latest`. The only reliable signal that an
         // image is local is that the file builds it.
-        $builtHere = self::imagesBuiltHere($services);
+        $builtHere = self::imagesBuiltHere($services, $env);
 
         $images = [];
         foreach ($services as $service) {
             if (isset($service['build']) || !self::isActive($service, $activeProfiles)) {
                 continue;
             }
-            $image = ImageTransfer::normalizeImageRef($service['image'] ?? null);
+            $image = $env === null
+                ? ImageTransfer::normalizeImageRef($service['image'] ?? null)
+                : self::resolvedImageRef($service['image'] ?? null, $env);
             if ($image === null || in_array(strtolower($image), $builtHere, true) || in_array($image, $images, true)) {
                 continue;
             }
@@ -319,22 +331,46 @@ class DeployCompose
      * Every normalized image name this compose file builds for itself.
      *
      * @param list<array<string, mixed>> $services
+     * @param array<string, list<?string>|string>|null $env
      * @return list<string> lowercase
      */
-    private static function imagesBuiltHere(array $services): array
+    public static function imagesBuiltHere(array $services, ?array $env = null): array
     {
         $names = [];
         foreach ($services as $service) {
-            if (!isset($service['build'])) {
+            if (!is_array($service) || !isset($service['build'])) {
                 continue;
             }
-            $image = ImageTransfer::normalizeImageRef($service['image'] ?? null);
+            $image = $env === null
+                ? ImageTransfer::normalizeImageRef($service['image'] ?? null)
+                : self::resolvedImageRef($service['image'] ?? null, $env);
             if ($image !== null) {
                 $names[] = strtolower($image);
             }
         }
 
         return array_values(array_unique($names));
+    }
+
+    /**
+     * An `image:` as Compose runs it: `wordpress:${WORDPRESS_VERSION:-latest}`
+     * interpolated against $env ({@see ComposeInterpolation} shape), then
+     * normalised. Null when the value cannot be told for certain or is not a
+     * reference docker accepts.
+     *
+     * @param array<string, list<?string>|string> $env
+     */
+    public static function resolvedImageRef(mixed $image, array $env = []): ?string
+    {
+        if (is_string($image) && str_contains($image, '$')) {
+            $candidates = ComposeInterpolation::candidates(trim($image), $env);
+            if ($candidates === null || count($candidates) !== 1) {
+                return null;
+            }
+            $image = $candidates[0];
+        }
+
+        return ImageTransfer::normalizeImageRef($image);
     }
 
     /**
@@ -462,7 +498,7 @@ class DeployCompose
             if (isset($taken[$path])) {
                 continue;
             }
-            $name = self::volumeNameFor($path);
+            $name = GeneratedCompose::volumeNameFor($path);
             $mounts[] = $name . ':' . $path;
             $volumes[$name] ??= null;
         }
@@ -473,14 +509,6 @@ class DeployCompose
         $decision['volumes'] = $volumes;
 
         return [$service, $decision];
-    }
-
-    /** `/var/lib/grafana` -> `data-var-lib-grafana`, stable across deploys. */
-    private static function volumeNameFor(string $path): string
-    {
-        $slug = strtolower(trim((string) preg_replace('/[^A-Za-z0-9]+/', '-', $path), '-'));
-
-        return 'data-' . ($slug === '' ? 'root' : $slug);
     }
 
     private static function withoutEmptyVolumes(array $decision): array

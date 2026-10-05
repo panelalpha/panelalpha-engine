@@ -27,6 +27,9 @@ final class CheckRunner
      */
     public const SERVING_RESTARTING = 'restarting';
 
+    /** Nothing answered because the app container is stopped, and not restarting. */
+    public const SERVING_STOPPED = 'stopped';
+
     /** @var array<string, array{check: string, reason: string, covered_by: ?string}> by reference */
     private readonly array $skips;
 

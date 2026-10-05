@@ -87,6 +87,21 @@ final class UploadedArchive
     }
 
     /**
+     * One zip member's contents on stdout: a symlink's target. unzip reads
+     * the name as a pattern, so a name with a wildcard in it is refused.
+     *
+     * @return list<string>
+     */
+    public function readMemberArgv(string $staged, string $name): array
+    {
+        if (strpbrk($name, '*?[]\\') !== false) {
+            throw new InvalidArgumentException('Archive contains a symbolic link, which could redirect extraction outside the project directory.');
+        }
+
+        return ['sudo', 'unzip', '-p', $staged, $name];
+    }
+
+    /**
      * Extraction runs as the account user, and never restores an owner the
      * archive asked for: an upload does not get to choose who owns what it
      * unpacks to. Modes are evened out afterwards by {@see normaliseModesArgv()}.

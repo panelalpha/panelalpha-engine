@@ -16,7 +16,7 @@ class GitDeployHookCommand extends Command
 
     protected $signature = 'git:deploy-hook
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}
                             {--provider= : Git host the hook is for (github); reserved for provider-specific setup instructions}
                             {--rotate : Replace the hook\'s URL and secret; the old URL stops working}
                             {--delete : Delete the hook and its delivery history}';

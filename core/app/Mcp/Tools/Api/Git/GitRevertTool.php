@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Revert local git changes
 
-    Revert local git changes. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Runs `reset --hard` and `clean -fd` to `ref` (default HEAD). Discards local changes. Confirm with the operator.
+    Revert local git changes. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Runs `reset --hard` and `clean -fd` to `ref` (default HEAD). Discards local changes. Confirm with the operator.
     MARKDOWN)]
 #[IsDestructive]
 class GitRevertTool extends ApiTool
@@ -69,7 +69,7 @@ class GitRevertTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
+            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).'),
             'ref' => $schema->string(),
         ];
     }

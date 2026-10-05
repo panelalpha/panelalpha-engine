@@ -135,6 +135,8 @@ return [
     \App\Mcp\Tools\Api\Git\GitDeployHookShowTool::class,
     \App\Mcp\Tools\Api\Git\GitDeployHookCreateTool::class,
     \App\Mcp\Tools\Api\Git\GitDeployHookRotateTool::class,
+    \App\Mcp\Tools\Api\Git\GitDeployKeyDeleteTool::class,
+    \App\Mcp\Tools\Api\Git\GitDeployKeyCreateTool::class,
     \App\Mcp\Tools\Api\Git\GitDisconnectTool::class,
     \App\Mcp\Tools\Api\Git\GitPullTool::class,
     \App\Mcp\Tools\Api\Git\GitPushTool::class,

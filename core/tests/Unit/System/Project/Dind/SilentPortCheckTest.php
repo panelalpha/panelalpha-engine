@@ -53,6 +53,22 @@ class SilentPortCheckTest extends TestCase
         $this->assertStringContainsString('app listens on 4000 on 127.0.0.1 only', $check['detail']);
     }
 
+    /** engine#569: the deploy waits on these, and only these. */
+    public function test_a_container_bound_to_nothing_yet_is_named_as_starting(): void
+    {
+        $ps = '{"Name":"project-app-1","Service":"app","State":"running","Publishers":[{"TargetPort":8080,"PublishedPort":8080}]}';
+        $results = [['port' => 8080, 'status' => AppHealth::STATUS_FAIL]];
+
+        // Only Docker's embedded DNS on loopback: nothing of the app's own.
+        $starting = $this->check($results, $ps, "  sl  local_address rem_address   st\n   0: 0B00007F:A1B2 00000000:0000 0A 00000000:00000000 00:00000000 00000000  0 0 1 1\n");
+        $this->assertStringContainsString('listens on no TCP port yet', $starting['detail']);
+        $this->assertSame(['app'], SilentPortCheck::starting($starting));
+
+        $wrongPort = $this->check($results, $ps, "  sl  local_address rem_address   st\n   0: 00000000:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000 0 1 1\n");
+        $this->assertSame([], SilentPortCheck::starting($wrongPort), 'listening elsewhere is not still starting');
+        $this->assertSame([], SilentPortCheck::starting(null));
+    }
+
     public function test_an_answering_port_needs_no_explanation(): void
     {
         $this->assertNull($this->check(

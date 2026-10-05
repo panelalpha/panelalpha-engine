@@ -116,7 +116,12 @@ final class FakeEngine implements ContainerEngine
                 return 'skopeo copy';
             }
 
-            public function seedCommand(EngineAccount $account, string $image, bool $ours): string
+            public function seedCommand(EngineAccount $account, string $image, bool $ours, bool $private = false, ?string $dockerConfig = null): string
+            {
+                return 'skopeo copy';
+            }
+
+            public function seedThroughHostCommand(EngineAccount $account, string $image): string
             {
                 return 'skopeo copy';
             }

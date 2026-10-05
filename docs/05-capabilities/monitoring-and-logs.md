@@ -117,7 +117,7 @@ Samples are kept over several time windows, from the last few minutes to the las
 How close is this project to its limits?
 ```
 
-Covers storage, domains, subdomains, FTP and SFTP accounts, and databases. To change a limit: [Limits](projects.md#limits).
+Covers storage, the disk its container logs take, domains, subdomains, FTP and SFTP accounts, and databases. To change a limit: [Limits](projects.md#limits).
 
 **From inside a project.** If you run a monitoring app or agent in a project (Zabbix, Netdata, node_exporter and the like), two files in it describe the whole server, not the project:
 

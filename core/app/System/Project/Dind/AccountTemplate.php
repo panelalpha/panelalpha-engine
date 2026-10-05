@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind;
 
 use App\Integrations\Tunnels\Cloudflare;
+use App\Lib\Deploy\Compose\ServiceHardener;
 use App\Lib\Deploy\DetectAppPort;
 use App\Lib\Deploy\Dind\DindEngine;
 use App\Lib\Deploy\Dind\DindImageStore;
@@ -113,6 +114,9 @@ BASH;
             'group' => $username,
             'insecure-registries' => [DindImageStore::CACHE_REGISTRY, DindImageStore::PROXY_REGISTRY],
             'registry-mirrors' => ['http://' . DindImageStore::PROXY_REGISTRY],
+            // Unrotated, a container's log grows inside the account's quota.
+            'log-driver' => 'json-file',
+            'log-opts' => ServiceHardener::LOG_OPTIONS,
         ], JSON_UNESCAPED_SLASHES);
     }
 

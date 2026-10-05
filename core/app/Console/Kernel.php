@@ -2,11 +2,13 @@
 
 namespace App\Console;
 
+use App\Exceptions\Handler;
 use App\Support\RootConsoleOwnership;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Config;
+use Throwable;
 
 class Kernel extends ConsoleKernel
 {
@@ -25,6 +27,18 @@ class Kernel extends ConsoleKernel
 
         if (RootConsoleOwnership::applies(App::runningInConsole(), function_exists('posix_geteuid') ? posix_geteuid() : -1, App::runningUnitTests())) {
             RootConsoleOwnership::register();
+        }
+    }
+
+    /**
+     * Collision (a dev dependency, installed on hosts) replaces the exception
+     * handler's console rendering with a stack dump; a failure the user can
+     * act on stays one plain line either way.
+     */
+    protected function renderException($output, Throwable $e)
+    {
+        if (!Handler::renderPlainForConsole($output, $e)) {
+            parent::renderException($output, $e);
         }
     }
 
@@ -54,6 +68,10 @@ class Kernel extends ConsoleKernel
         // answer rather than waiting out its own timeout; the two-minute grace
         // period keeps it from racing a deploy that has just started.
         $schedule->command('task:reconcile --older-than=120')->everyMinute()->withoutOverlapping();
+        // A redeploy killed halfway can leave traffic on its second app
+        // generation and the old checkout moved aside. Only touches an
+        // account whose deploy lock is free.
+        $schedule->command('deploy:generations:sweep')->everyMinute()->withoutOverlapping();
         $schedule->command('acme:challenge:prune')->hourly();
         // Expired vault entries hold ciphertext nobody can use anymore, but
         // a secret that stopped working should not outlive its usefulness on

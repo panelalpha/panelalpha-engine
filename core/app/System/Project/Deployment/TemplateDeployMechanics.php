@@ -116,9 +116,13 @@ final class TemplateDeployMechanics implements DeployMechanics
         return $this->project->startUserApp();
     }
 
-    public function abortPartialDeploy(): void
+    public function abortPartialDeploy(bool $removeVolumes = false): void
     {
-        $this->project->abortRunningDeploy();
+        $this->project->abortRunningDeploy(removeVolumes: $removeVolumes);
+    }
+
+    public function settleRedeploy(bool $succeeded): void
+    {
     }
 
     public function servingWarnings(): array

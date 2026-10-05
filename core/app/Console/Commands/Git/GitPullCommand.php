@@ -13,7 +13,7 @@ class GitPullCommand extends Command
 
     protected $signature = 'git:pull
                             {username : Project username}
-                            {--path= : Directory path inside the project (defaults to project (DinD) or public_html (FPM/LiteSpeed))}
+                            {--path= : Directory path inside the project (defaults to project (DinD) or the document root of the main domain (FPM/LiteSpeed))}
                             {--strategy= : Pull strategy (ff, force or push_first; defaults to ff)}';
 
     protected $description = 'Pull from the git remote';

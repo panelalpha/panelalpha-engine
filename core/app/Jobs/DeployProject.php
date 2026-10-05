@@ -8,6 +8,7 @@ use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\Source\GitUrl;
+use App\Lib\Project\CreateInspection;
 use App\Lib\Task\DeployLogTail;
 use App\Lib\Task\TaskLogSink;
 use App\Models\User;
@@ -34,11 +35,14 @@ class DeployProject implements ShouldQueue
 
     /**
      * @param array<string, list<array<string, mixed>>>|null $stages
+     * @param ?array<string, mixed> $inspection what the create's inspection
+     *        found, written under the log's first line
      */
     public function __construct(
         public string $username,
         public ?array $stages = null,
         public ?string $recipe = null,
+        public ?array $inspection = null,
     ) {
         $this->onQueue('default');
     }
@@ -65,6 +69,7 @@ class DeployProject implements ShouldQueue
                         $logger->info($gitRepo
                             ? 'Deploy started (source: git, repo: ' . GitUrl::sanitize($gitRepo) . ')'
                             : 'Deploy started (source: dind template)');
+                        CreateInspection::fromArray($this->inspection)?->writeTo($logger);
                     }
                 }
 

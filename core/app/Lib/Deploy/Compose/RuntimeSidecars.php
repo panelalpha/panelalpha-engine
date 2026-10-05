@@ -17,7 +17,7 @@ use Symfony\Component\Yaml\Yaml;
  * services, published host ports and networks that do not exist in an account
  * are dropped; what survives is hardened and has its credentials pinned.
  *
- * @phpstan-type SidecarExtract array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>, app_mounts: list<string>, build_image: ?string, app_aliases: list<string>, dropped_mounts?: list<string>, replaced_mounts?: list<string>, published_secrets: array<string, list<string>>, dropped_proxies?: list<string>, hardening_removed?: list<string>}
+ * @phpstan-type SidecarExtract array{services: array<string, array<string, mixed>>, volumes: array<string, mixed>, env: array<string, string>, app_env: array<string, string>, app_mounts: list<string>, build_image: ?string, app_aliases: list<string>, dropped_mounts?: list<string>, replaced_mounts?: list<string>, published_secrets: array<string, list<string>>, dropped_proxies?: list<string>, dropped_test_services?: list<string>, dropped_test_matrix?: array{engines: int, databases: list<string>, services: list<string>}|null, hardening_removed?: list<string>}
  */
 final class RuntimeSidecars
 {
@@ -32,6 +32,15 @@ final class RuntimeSidecars
 
     /** Name words of a service that runs the app for a test suite (Zerobyte's `zerobyte-e2e`). */
     private const TEST_VARIANT_WORDS = ['e2e', 'test', 'tests', 'testing', 'ci', 'cypress', 'playwright'];
+
+    /** Name or build-target words of an app variant meant for production (Zerobyte's `zerobyte-prod`). */
+    private const PRODUCTION_VARIANT_WORDS = ['prod', 'production', 'release'];
+
+    /** Name or build-target words of an app variant meant for a workstation. */
+    private const DEV_VARIANT_WORDS = ['dev', 'development', 'local'];
+
+    /** SQL Server images (mcr.microsoft.com/mssql/server, azure-sql-edge): SQL engines with no sidecar dialect. */
+    private const SQL_IMAGES_WITHOUT_DIALECT = '#(^|/)(mssql|mssql-server-linux|azure-sql-edge)([/:@]|$)#';
 
     /** @var array<string, array<string, mixed>> */
     private array $kept = [];
@@ -69,6 +78,20 @@ final class RuntimeSidecars
      * @var array<string, string>
      */
     private array $appEnv = [];
+
+    /**
+     * Each dropped app variant's env, by service, until {@see chooseAppEnv()}
+     * picks the variants the build stands in for.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private array $variantEnv = [];
+
+    /** @var list<string> services kept only for a test suite, left out */
+    private array $droppedTestServices = [];
+
+    /** @var array{engines: int, databases: list<string>, services: list<string>}|null a test matrix of databases left out */
+    private ?array $droppedTestMatrix = null;
 
     /** @var array<string, list<int>> ports each kept service declared, before hardening strips them */
     private array $ports = [];
@@ -256,6 +279,8 @@ final class RuntimeSidecars
         foreach ($this->services as $name => $service) {
             $this->consider((string) $name, $service);
         }
+        $this->chooseAppEnv();
+        $this->dropTestSuite();
         $this->dropAlternativeDatabases();
         $this->clearOfAppService();
         foreach ($this->kept as $name => $service) {
@@ -301,11 +326,7 @@ final class RuntimeSidecars
                 $this->appMounts = self::namedMountsOf($service, array_keys($this->declaredVolumes));
                 // The replacement is built from the same repository, so the
                 // dropped service's env still applies (dpaste's DATABASE_URL).
-                $this->appEnv += SidecarCredentials::envFromWorkstationAppService(
-                    $service,
-                    $this->placeholderSeed
-                );
-                $this->notePublishedSecrets($name, $service);
+                $this->noteVariantEnv($name, $service);
             }
             // A proxy in front names this service in its own config, so the
             // generated `app` has to answer to the name. Settled in assemble().
@@ -347,9 +368,136 @@ final class RuntimeSidecars
         // mailpit and vite do not.
         if (!DevServices::isDevSidecar($name, $service) && !self::isTestVariant($name)
             && ComposeFileInspector::isWorkstationAppService($service)) {
-            $this->appEnv += SidecarCredentials::envFromWorkstationAppService($service, $this->placeholderSeed);
-            $this->notePublishedSecrets($name, $service);
+            $this->noteVariantEnv($name, $service);
         }
+    }
+
+    /**
+     * @param array<string, mixed> $service
+     */
+    private function noteVariantEnv(string $name, array $service): void
+    {
+        $this->variantEnv[$name] = ($this->variantEnv[$name] ?? [])
+            + SidecarCredentials::envFromWorkstationAppService($service, $this->placeholderSeed);
+        $this->notePublishedSecrets($name, $service);
+    }
+
+    /**
+     * The env of the app variants the build stands in for. A file with a dev
+     * and a prod variant of the app (Zerobyte) gave the union, so the app ran
+     * with `NODE_ENV=development` from one and `LOG_LEVEL=debug` from the
+     * other. A variant named or targeted for production wins; otherwise a dev
+     * one is skipped when another exists; with no such signal all are merged.
+     */
+    private function chooseAppEnv(): void
+    {
+        $names = array_keys($this->variantEnv);
+        $production = array_values(array_filter($names, fn (string $n): bool => $this->variantSays($n, self::PRODUCTION_VARIANT_WORDS)));
+        $notDev = array_values(array_filter($names, fn (string $n): bool => !$this->variantSays($n, self::DEV_VARIANT_WORDS)));
+        $chosen = match (true) {
+            $production !== [] => $production,
+            $notDev !== [] => $notDev,
+            default => $names,
+        };
+
+        foreach ($chosen as $name) {
+            $this->appEnv += $this->variantEnv[$name];
+        }
+        // A literal in a variant whose env is not used reaches no deploy.
+        $this->publishedSecrets = array_intersect_key($this->publishedSecrets, array_flip($chosen));
+    }
+
+    /**
+     * Whether an app variant's name or `build.target` carries one of $words.
+     *
+     * @param list<string> $words
+     */
+    private function variantSays(string $name, array $words): bool
+    {
+        $service = $this->services[$name] ?? null;
+        $build = is_array($service) ? ($service['build'] ?? null) : null;
+        $target = is_array($build) && is_string($build['target'] ?? null) ? $build['target'] : '';
+        $said = preg_split('/[._-]+/', strtolower($name . '-' . $target)) ?: [];
+
+        return array_intersect($said, $words) !== [];
+    }
+
+    /**
+     * Services kept only for a test suite: named as a test variant, or
+     * depended on only by test variants and by each other (Zerobyte's
+     * e2e caddy and tinyauth). Their settings reached the app's env, and
+     * they ran in the tenant.
+     */
+    private function dropTestSuite(): void
+    {
+        $suite = [];
+        foreach (array_keys($this->kept) as $name) {
+            if (self::isTestVariant((string) $name)) {
+                $suite[strtolower((string) $name)] = true;
+            }
+        }
+        do {
+            $grew = false;
+            foreach (array_keys($this->kept) as $name) {
+                $key = strtolower((string) $name);
+                if (isset($suite[$key])) {
+                    continue;
+                }
+                $dependants = $this->referencesTo((string) $name);
+                if ($dependants === []) {
+                    continue;
+                }
+                $onlySuite = true;
+                foreach ($dependants as $dependant) {
+                    if (!self::isTestVariant($dependant) && !isset($suite[strtolower($dependant)])) {
+                        $onlySuite = false;
+                        break;
+                    }
+                }
+                if ($onlySuite) {
+                    $suite[$key] = true;
+                    $grew = true;
+                }
+            }
+        } while ($grew);
+
+        foreach (array_keys($this->kept) as $name) {
+            if (isset($suite[strtolower((string) $name)])) {
+                unset($this->kept[$name], $this->ports[$name]);
+                $this->dropped[strtolower((string) $name)] = true;
+                $this->droppedTestServices[] = (string) $name;
+            }
+        }
+    }
+
+    /**
+     * The services in the file that depend on, link to or name $target as a
+     * host in their environment.
+     *
+     * @return list<string>
+     */
+    private function referencesTo(string $target): array
+    {
+        $host = '#(^|@|//)' . preg_quote(strtolower($target), '#') . '($|[:/?])#';
+        $found = [];
+        foreach ($this->services as $name => $service) {
+            if (!is_array($service) || strcasecmp((string) $name, $target) === 0) {
+                continue;
+            }
+            $refs = array_map('strtolower', ServiceDependencies::namesIn($service));
+            $named = in_array(strtolower($target), $refs, true);
+            foreach (SidecarCredentials::environmentMap($service['environment'] ?? null) as $value) {
+                if ($named || preg_match($host, strtolower((string) $value)) === 1) {
+                    $named = true;
+                    break;
+                }
+            }
+            if ($named) {
+                $found[] = (string) $name;
+            }
+        }
+
+        return $found;
     }
 
     /**
@@ -456,15 +604,20 @@ final class RuntimeSidecars
      * A file that offers the app a choice of SQL database (Koillection's
      * template runs postgres and mysql, its app uses one) keeps only the one
      * the app's own environment names. With no such evidence all are kept:
-     * a spare database costs memory, a dropped one breaks the app.
+     * a spare database costs memory, a dropped one breaks the app. Except
+     * three or more engines and none named: that is a test matrix, not a
+     * stack (Shlink runs its suite on four), see {@see dropTestMatrix()}.
      */
     private function dropAlternativeDatabases(): void
     {
         $engines = [];
+        // MariaDB is configured as MySQL, but a file running both is testing against both.
+        $products = [];
         foreach ($this->kept as $name => $service) {
             $engine = SidecarEngine::resolve((string) $name, $service, $this->ports[$name] ?? []);
             if ($engine !== null && SidecarEngine::dialect($engine)['driver'] !== null) {
                 $engines[(string) $name] = $engine;
+                $products[] = ComposeService::of($service)->imageFamily() ?: $engine;
             }
         }
         if (count(array_unique($engines)) < 2) {
@@ -472,6 +625,12 @@ final class RuntimeSidecars
         }
 
         $named = array_values(array_unique(array_intersect_key($engines, $this->namedByDroppedServices(array_keys($engines)))));
+        $distinct = count(array_unique($products));
+        if ($named === [] && $distinct >= 3) {
+            $this->dropTestMatrix();
+
+            return;
+        }
         if (count($named) !== 1) {
             return;
         }
@@ -481,6 +640,47 @@ final class RuntimeSidecars
                 $this->dropped[strtolower($name)] = true;
             }
         }
+    }
+
+    /**
+     * Every SQL engine goes, and with them every kept service the dropped app
+     * services' environment does not name as a host: the matrix file links
+     * everything, so `links:` and `depends_on:` are no evidence.
+     */
+    private function dropTestMatrix(): void
+    {
+        $named = $this->namedByDroppedServices(array_map('strval', array_keys($this->kept)));
+        $databases = [];
+        $others = [];
+        foreach (array_keys($this->kept) as $name) {
+            $name = (string) $name;
+            if (isset($named[$name])) {
+                continue;
+            }
+            if ($this->isSqlDatabase($name, $this->kept[$name])) {
+                $databases[] = $name;
+            } else {
+                $others[] = $name;
+            }
+            unset($this->kept[$name], $this->ports[$name]);
+            $this->dropped[strtolower($name)] = true;
+        }
+        // Counted over the dropped services, so the log never names a number its list contradicts.
+        $this->droppedTestMatrix = ['engines' => count($databases), 'databases' => $databases, 'services' => array_merge($databases, $others)];
+    }
+
+    /**
+     * An SQL engine we speak, or SQL Server, which has no dialect but is one.
+     *
+     * @param array<string, mixed> $service
+     */
+    private function isSqlDatabase(string $name, array $service): bool
+    {
+        $engine = SidecarEngine::resolve($name, $service, $this->ports[$name] ?? []);
+        if ($engine !== null && SidecarEngine::dialect($engine)['driver'] !== null) {
+            return true;
+        }
+        return preg_match(self::SQL_IMAGES_WITHOUT_DIALECT, strtolower(ComposeService::of($service)->image())) === 1;
     }
 
     /**
@@ -665,12 +865,29 @@ final class RuntimeSidecars
             'app_env' => $this->appEnv,
             'app_mounts' => $this->appMounts,
             'app_aliases' => $this->appAliases,
-            'dropped_mounts' => $this->droppedMounts,
+            'dropped_mounts' => $this->ofKeptServices($this->droppedMounts),
             'published_secrets' => $this->publishedSecrets,
-            'replaced_mounts' => $this->replacedMounts,
+            'replaced_mounts' => $this->ofKeptServices($this->replacedMounts),
             'dropped_proxies' => $this->droppedProxies,
+            'dropped_test_services' => $this->droppedTestServices,
+            'dropped_test_matrix' => $this->droppedTestMatrix,
             'hardening_removed' => $removed,
         ];
+    }
+
+    /**
+     * `service: mount` lines without the services dropped after their mounts
+     * were rewritten (an alternative database): those run nothing.
+     *
+     * @param list<string> $lines
+     * @return list<string>
+     */
+    private function ofKeptServices(array $lines): array
+    {
+        return array_values(array_filter(
+            $lines,
+            fn (string $line): bool => !isset($this->dropped[strtolower(explode(': ', $line, 2)[0])])
+        ));
     }
 
     /**

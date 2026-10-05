@@ -82,6 +82,20 @@ class HostImageRetentionTest extends TestCase
         $this->assertSame([], $this->candidates($rows));
     }
 
+    /**
+     * A Railpack deploy pulls the builder and runtime its plan names onto the
+     * host. The catalogue cannot list those tags, so the prune has to know the
+     * repositories itself or they stay on the host for good.
+     */
+    public function test_a_railpack_image_a_deploy_fetched_is_in_scope_without_a_catalogue_entry(): void
+    {
+        $builder = 'ghcr.io/railwayapp/railpack-builder:mise-2026.9.15';
+        $this->assertNotContains($builder, ImageCatalog::all());
+
+        $this->assertSame([$builder], array_keys($this->candidates([$this->row($builder, 5 * self::DAY)])));
+        $this->assertSame([], $this->candidates([$this->row($builder, 1 * self::DAY)]), 'used inside the window');
+    }
+
     public function test_the_loopback_registry_alias_goes_with_its_image(): void
     {
         $variant = $this->plainPhpBase() . '-x0123abcd';

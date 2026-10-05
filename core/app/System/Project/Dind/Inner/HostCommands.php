@@ -100,6 +100,16 @@ class HostCommands
         }
     }
 
+    public function logWarn(string $message): void
+    {
+        try {
+            $this->inner->dind()->shell()->logger()?->warn($message);
+        } catch (\Exception $e) {
+            $this->failDeployIfDiskFull($e->getMessage());
+            throw $e;
+        }
+    }
+
     public function logDim(string $message): void
     {
         try {

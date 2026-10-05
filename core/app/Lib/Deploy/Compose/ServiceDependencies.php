@@ -52,6 +52,40 @@ final class ServiceDependencies
     }
 
     /**
+     * The services $service names through `depends_on`, `links`,
+     * `network_mode: service:x` or `volumes_from`.
+     *
+     * @param array<string, mixed> $service
+     * @return list<string>
+     */
+    public static function namesIn(array $service): array
+    {
+        $names = [];
+        foreach (self::REFERENCE_KEYS as $key) {
+            $refs = $service[$key] ?? null;
+            if (!is_array($refs)) {
+                continue;
+            }
+            foreach (self::isStringList($refs) ? $refs : array_keys($refs) as $ref) {
+                if (is_string($ref) && $ref !== '') {
+                    $names[] = self::serviceIn($ref);
+                }
+            }
+        }
+        $network = self::networkServiceOf($service);
+        if ($network !== null) {
+            $names[] = $network;
+        }
+        foreach (is_array($service['volumes_from'] ?? null) ? $service['volumes_from'] : [] as $ref) {
+            if (is_string($ref) && !str_starts_with($ref, 'container:')) {
+                $names[] = self::serviceIn($ref);
+            }
+        }
+
+        return array_values(array_unique($names));
+    }
+
+    /**
      * Points every reference to $from at $to, keeping a `links` alias.
      *
      * @param array<string, mixed> $service

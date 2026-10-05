@@ -40,7 +40,7 @@ final class DeployTimings
         'cloning_end' => "/^Stage 'cloning' finished/",
         'running_start' => '/^Starting stage: running/',
         'detected' => '/^Detected project type/',
-        'base_image' => '/^(Building|Preparing) shared .*base image|^(Fetching|Loaded|Pulled) base image/',
+        'base_image' => '/^(Building|Preparing) shared .*base image|^(Fetching|Loaded|Pulled) base image|^Using shared base image/',
         'app_start' => '/^Starting application/',
         'answered' => '/^Health check:.*answered/',
         'finished' => '/^Deploy finished/',

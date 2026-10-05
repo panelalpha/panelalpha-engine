@@ -109,6 +109,32 @@ class LateRestartLoopTest extends TestCase
         $this->assertNull(AppHealth::restartLoopBetween('garbage', "not json\n{}"));
     }
 
+    /** engine#166: only the sidecar loops, so the verdict names it, not the application. */
+    public function test_a_looping_sidecar_beside_a_steady_app_is_named_as_the_sidecar(): void
+    {
+        $before = self::JUST_STARTED . "\n" . '{"name":"/project-db-1","service":"db","state":"running","exit":0,"restarts":0}';
+        $after = self::JUST_STARTED . "\n" . '{"name":"/project-db-1","service":"db","state":"restarting","exit":1,"restarts":4}';
+
+        $check = AppHealth::restartLoopBetween($before, $after, ['app']);
+
+        $this->assertSame(AppHealth::CHECK_RESTART_LOOPING, $check['id']);
+        $this->assertSame(HealthCheck::SEVERITY_ERROR, $check['severity'], 'still partial, not a failed deploy');
+        $this->assertSame('A backing service is restarting: db (restarting, last exit 1, restarted 4 times).', $check['title']);
+        $this->assertStringNotContainsString('application is restarting', $check['title'] . $check['detail']);
+        $this->assertStringContainsString('db', $check['fix']);
+    }
+
+    public function test_the_app_looping_with_a_sidecar_is_still_the_application(): void
+    {
+        $after = '{"name":"/project-app-1","service":"app","state":"restarting","exit":1,"restarts":4}' . "\n"
+            . '{"name":"/project-db-1","service":"db","state":"restarting","exit":1,"restarts":4}';
+
+        $this->assertSame('The application is restarting, not running.', AppHealth::restartLoopBetween(self::JUST_STARTED, $after, ['app'])['title']);
+        // Not knowing which service is the app keeps the old verdict.
+        $db = '{"name":"/project-db-1","service":"db","state":"restarting","exit":1,"restarts":4}';
+        $this->assertSame('The application is restarting, not running.', AppHealth::restartLoopBetween(null, $db)['title']);
+    }
+
     /** The flattened check is what servingWarnings() turns into a partial deploy. */
     public function test_the_check_makes_the_deploy_not_clean(): void
     {

@@ -280,6 +280,28 @@ class FileManager
         return (int) $mb;
     }
 
+    /**
+     * Bytes the inner Docker's json-file container logs take, rotated files
+     * included. They sit in ~/docker, which diskUsage() leaves out but the
+     * quota does not; root-owned, so read as root, and find follows no link.
+     */
+    public function containerLogBytes(): int
+    {
+        $dir = rtrim($this->homeDirPath(), '/') . '/docker/containers';
+        $process = $this->project->system()->runProcess([
+            'sudo', 'find', $dir, '-mindepth', '2', '-maxdepth', '2', '-type', 'f', '-name', '*-json.log*', '-printf', '%s\n',
+        ]);
+        // No containers directory yet means no logs.
+        $bytes = 0;
+        foreach (explode("\n", $process->getOutput()) as $line) {
+            if (ctype_digit($line)) {
+                $bytes += (int) $line;
+            }
+        }
+
+        return $bytes;
+    }
+
     public function moveDirectoryContents(string $source, string $dest, bool $override = true): void
     {
         $sourceDir = rtrim($this->resolvePath($source), '/');

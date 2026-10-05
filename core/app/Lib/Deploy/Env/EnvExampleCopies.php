@@ -30,6 +30,9 @@ final class EnvExampleCopies
 
     private const LOCAL_EXAMPLE = '.env.local.example';
 
+    /** `<file>.example` and its siblings: a template for exactly that file. */
+    private const OWN_TEMPLATE_SUFFIXES = ['.example', '.sample', '.template', '.dist'];
+
     /**
      * Directories that never hold a project's own configuration, and are big.
      *
@@ -243,6 +246,9 @@ final class EnvExampleCopies
     private static function sourceFor(string $projectDir, string $dest): string
     {
         $candidates = [
+            // The file's own template first: openstatus ships `.env.docker.example`
+            // for its `env_file: .env.docker`, and the root `.env` lacks its keys.
+            ...array_map(static fn (string $suffix): string => $dest . $suffix, self::OWN_TEMPLATE_SUFFIXES),
             dirname($dest) . '/' . self::EXAMPLE,
             $projectDir . '/' . self::EXAMPLE,
             $projectDir . '/' . self::ENV,

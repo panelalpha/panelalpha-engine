@@ -72,6 +72,8 @@ class ServiceHardenerTest extends TestCase
                 '../:/account',
                 'named:/named',
                 '/srv/data:/srv',
+                '/tmp:/t',
+                '/mnt/media:/m',
             ],
         ]);
 
@@ -81,8 +83,43 @@ class ServiceHardenerTest extends TestCase
             '../.panelalpha/app/config.json:/config.json',
             '../:/account',
             'named:/named',
-            '/srv/data:/srv',
         ], $service['volumes']);
+    }
+
+    /**
+     * Bind sources are an allowlist: an absolute path is kept only in the
+     * checkout or ~/.panelalpha. A list of what to refuse kept missing one
+     * (/tmp, /srv, /mnt all passed).
+     */
+    public function test_an_absolute_bind_is_kept_only_inside_the_checkout_or_panelalpha(): void
+    {
+        $volumes = [
+            '/home/acct/project:/app',
+            '/home/acct/project/data:/data',
+            ['type' => 'bind', 'source' => '/home/acct/project/./uploads', 'target' => '/u'],
+            '/home/acct/.panelalpha/state:/state',
+            '/home/acct/projects:/near-miss',
+            '/home/acct/project/../docker:/d',
+            '/tmp:/t',
+            '/srv/data:/s',
+            '/mnt:/m',
+            '/media/usb:/media',
+            '/data:/data2',
+            './rel:/rel',
+        ];
+        $service = ServiceHardener::withoutEscapes(['volumes' => $volumes], [], 'acct', '/nonexistent-core-view/acct/project');
+
+        $this->assertSame([
+            '/home/acct/project:/app',
+            '/home/acct/project/data:/data',
+            ['type' => 'bind', 'source' => '/home/acct/project/./uploads', 'target' => '/u'],
+            '/home/acct/.panelalpha/state:/state',
+            './rel:/rel',
+        ], $service['volumes']);
+        $this->assertSame(
+            ['/home/acct/projects:/near-miss', '/home/acct/project/../docker:/d', '/tmp:/t', '/srv/data:/s', '/mnt:/m', '/media/usb:/media', '/data:/data2'],
+            ServiceHardener::forbiddenMounts(['volumes' => $volumes], [], 'acct', '/nonexistent-core-view/acct/project')
+        );
     }
 
     public function test_only_the_accounts_own_panelalpha_tree_is_bound_by_absolute_path(): void
@@ -278,10 +315,10 @@ class ServiceHardenerTest extends TestCase
     {
         $service = ServiceHardener::withoutEscapes([
             'image' => 'acme/app',
-            'volumes' => ['/bin:/hb', '/sbin/:/s', '/lib:/l', '/lib64:/l64', ['type' => 'bind', 'source' => '/lib32', 'target' => '/l32'], '/binaries:/ok'],
+            'volumes' => ['/bin:/hb', '/sbin/:/s', '/lib:/l', '/lib64:/l64', ['type' => 'bind', 'source' => '/lib32', 'target' => '/l32'], 'binaries:/ok'],
         ]);
 
-        $this->assertSame(['/binaries:/ok'], $service['volumes']);
+        $this->assertSame(['binaries:/ok'], $service['volumes']);
     }
 
     public function test_every_service_may_ping_as_a_non_root_user(): void
@@ -514,12 +551,17 @@ class ServiceHardenerTest extends TestCase
         $kept = [
             '${DATA_DIR:-./data}:/data',
             '${DATA_DIR}/uploads:/uploads',
-            '${UNSET_ROOT}/srv:/srv',
             '${VOLUME_NAME:-pgdata}:/var/lib/postgresql/data',
             './a$$b:/b',
         ];
-        $service = ServiceHardener::withoutEscapes(['volumes' => $kept], ['DATA_DIR' => ['./storage', '/srv/app']]);
+        $service = ServiceHardener::withoutEscapes(
+            ['volumes' => [...$kept, '${UNSET_ROOT}/srv:/srv', '${OUT:-/srv/app}:/o']],
+            ['DATA_DIR' => ['./storage', '/home/acct/project/app']],
+            'acct',
+            '/nonexistent-core-view/acct/project'
+        );
 
+        // An unset variable leaves an absolute `/srv`, outside the checkout.
         $this->assertSame($kept, $service['volumes']);
     }
 
@@ -595,12 +637,33 @@ class ServiceHardenerTest extends TestCase
         $this->assertArrayNotHasKey('start_period', $none['healthcheck']);
     }
 
-    public function test_a_service_that_would_never_restart_is_given_a_policy(): void
+    public function test_a_publishing_service_that_would_never_restart_is_given_a_policy(): void
     {
         foreach ([[], ['restart' => ''], ['restart' => false]] as $extra) {
-            $service = ServiceHardener::harden('app', ['image' => 'acme/app'] + $extra);
+            $service = ServiceHardener::harden('app', ['image' => 'acme/app', 'ports' => ['8080:80']] + $extra);
 
             $this->assertSame('unless-stopped', $service['restart']);
+        }
+    }
+
+    /** kassambara/wordpress-docker-compose's `wpcli` runs `wp shell` and exits; restarted, it looped forever. */
+    public function test_a_service_that_publishes_no_port_gets_no_default_policy(): void
+    {
+        foreach ([[], ['restart' => ''], ['restart' => false], ['expose' => ['3000']]] as $extra) {
+            $service = ServiceHardener::harden('wpcli', ['build' => './wpcli/', 'image' => 'wpcli'] + $extra);
+
+            $this->assertArrayNotHasKey('restart', $service);
+        }
+        // A host-network service has its PORT published first, so it counts as publishing.
+        $host = ServiceHardener::harden('web', ['image' => 'acme/web', 'network_mode' => 'host', 'environment' => ['PORT=3000']]);
+        $this->assertSame('unless-stopped', $host['restart']);
+    }
+
+    public function test_a_policy_the_file_sets_is_kept_with_or_without_ports(): void
+    {
+        foreach (['always', 'on-failure', 'unless-stopped', 'no'] as $policy) {
+            $this->assertSame($policy, ServiceHardener::harden('worker', ['image' => 'acme/app', 'restart' => $policy])['restart']);
+            $this->assertSame($policy, ServiceHardener::harden('web', ['image' => 'acme/app', 'ports' => ['80'], 'restart' => $policy])['restart']);
         }
     }
 
@@ -760,6 +823,86 @@ class ServiceHardenerTest extends TestCase
         $this->assertSame('--max-old-space-size=2048', $service['environment']['NODE_OPTIONS']);
     }
 
+    public function test_the_heap_cap_is_added_to_the_images_own_node_options(): void
+    {
+        // Overleaf's image loads through Yarn PnP in NODE_OPTIONS; a service
+        // value replaces the image's, so the cap alone broke every module load.
+        $pnp = '--require /overleaf/.pnp.cjs --import /overleaf/.pnp.register.mjs';
+        $service = ServiceHardener::harden('sharelatex', ['image' => 'sharelatex/sharelatex:6.3.0', 'mem_limit' => '2g'], null, false, [], null, null,
+            static fn (string $image): array => ['PATH=/usr/bin', "NODE_OPTIONS={$pnp}"]);
+
+        $this->assertSame($pnp . ' --max-old-space-size=1433', $service['environment']['NODE_OPTIONS']);
+    }
+
+    public function test_a_pinned_image_is_read_by_its_digest(): void
+    {
+        $digest = 'sha256:' . str_repeat('d', 64);
+        $asked = [];
+        ServiceHardener::harden('sharelatex', ['image' => "sharelatex/sharelatex:6.3.0@{$digest}"], null, false, [], null, null,
+            static function (string $image) use (&$asked): array {
+                $asked[] = $image;
+
+                return [];
+            });
+        ServiceHardener::harden('app', ['image' => "localhost:5000/acme/app@{$digest}"], null, false, [], null, null,
+            static function (string $image) use (&$asked): array {
+                $asked[] = $image;
+
+                return [];
+            });
+
+        $this->assertSame(["sharelatex/sharelatex@{$digest}", "localhost:5000/acme/app@{$digest}"], $asked);
+    }
+
+    public function test_an_image_that_sizes_its_own_heap_is_left_alone(): void
+    {
+        $service = ServiceHardener::harden('app', ['image' => 'acme/node-app'], null, false, [], null, null,
+            static fn (string $image): array => ['NODE_OPTIONS=--max-old-space-size=4096']);
+
+        $this->assertArrayNotHasKey('NODE_OPTIONS', $service['environment']);
+    }
+
+    public function test_an_image_without_node_options_gets_the_plain_cap(): void
+    {
+        $asked = [];
+        $service = ServiceHardener::harden('app', ['image' => 'node:20-alpine'], null, false, [], null, null,
+            static function (string $image) use (&$asked): array {
+                $asked[] = $image;
+
+                return ['PATH=/usr/bin', 'NODE_VERSION=20.18.0'];
+            });
+
+        $this->assertSame('--max-old-space-size=268', $service['environment']['NODE_OPTIONS']);
+        $this->assertSame(['node:20-alpine'], $asked);
+    }
+
+    public function test_the_images_node_options_are_not_interpolated_by_compose(): void
+    {
+        $service = ServiceHardener::harden('app', ['image' => 'acme/node-app'], null, false, [], null, null,
+            static fn (string $image): array => ['NODE_OPTIONS=--require $HOME/hook.js']);
+
+        $this->assertSame('--require $$HOME/hook.js --max-old-space-size=268', $service['environment']['NODE_OPTIONS']);
+    }
+
+    public function test_the_image_is_not_read_when_the_service_sets_node_options_or_builds(): void
+    {
+        $asked = [];
+        $read = static function (string $image) use (&$asked): array {
+            $asked[] = $image;
+
+            return ['NODE_OPTIONS=--require /pnp.cjs'];
+        };
+        $own = ServiceHardener::harden('app', [
+            'image' => 'node:20',
+            'environment' => ['NODE_OPTIONS' => '--max-old-space-size=2048'],
+        ], null, false, [], null, null, $read);
+        $built = ServiceHardener::harden('app', ['image' => 'acme/app', 'build' => '.'], null, false, [], null, null, $read);
+
+        $this->assertSame('--max-old-space-size=2048', $own['environment']['NODE_OPTIONS']);
+        $this->assertSame('--max-old-space-size=268', $built['environment']['NODE_OPTIONS']);
+        $this->assertSame([], $asked);
+    }
+
     public function test_the_heap_cap_is_appended_in_the_projects_own_form(): void
     {
         $service = ServiceHardener::harden('app', [
@@ -834,5 +977,25 @@ class ServiceHardenerTest extends TestCase
 
         $other = ServiceHardener::harden('db', ['image' => 'mysql:8', 'volumes' => ['d:/var/lib/postgresql/data']]);
         $this->assertArrayNotHasKey('environment', $other);
+    }
+
+    /** An app logging every request filled the account's quota through an uncapped json-file log. */
+    public function test_a_service_without_logging_gets_a_rotated_log(): void
+    {
+        $service = ServiceHardener::harden('app', ['image' => 'acme/app']);
+
+        $this->assertSame(['driver' => 'json-file', 'options' => ['max-size' => '10m', 'max-file' => '3']], $service['logging']);
+    }
+
+    public function test_a_json_file_log_without_a_size_gets_one_and_any_other_log_is_kept(): void
+    {
+        $sized = ServiceHardener::harden('app', ['image' => 'a', 'logging' => ['driver' => 'json-file', 'options' => ['max-size' => '50m']]]);
+        $this->assertSame(['max-size' => '50m'], $sized['logging']['options']);
+
+        $unsized = ServiceHardener::harden('app', ['image' => 'a', 'logging' => ['options' => ['labels' => 'x']]]);
+        $this->assertSame(['labels' => 'x', 'max-size' => '10m', 'max-file' => '3'], $unsized['logging']['options']);
+
+        $none = ServiceHardener::harden('app', ['image' => 'a', 'logging' => ['driver' => 'none']]);
+        $this->assertSame(['driver' => 'none'], $none['logging']);
     }
 }

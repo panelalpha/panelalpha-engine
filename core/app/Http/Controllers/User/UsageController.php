@@ -20,7 +20,7 @@ class UsageController extends Controller
 
     #[OA\Get(
         path: '/projects/{username}/usage',
-        description: 'Includes this calendar month\'s transfer as bandwidth.usage (bytes) against bandwidth.maximum (the project bandwidth_limit in bytes, or null when unlimited).',
+        description: 'Includes this calendar month\'s transfer as bandwidth.usage (bytes) against bandwidth.maximum (the project bandwidth_limit in bytes, or null when unlimited), and the bytes its container logs take as logs.usage.',
         summary: 'Get resource usage for a project',
         security: [['bearerAuth' => []]],
         tags: ['Usage'],

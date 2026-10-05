@@ -61,13 +61,14 @@ class User extends Authenticatable
     private const ENCRYPTED_SECRET_PREFIX = 'laravel-encrypted:v1:';
 
     /** Details stored as one encrypted JSON document each. */
-    private const ENCRYPTED_JSON_DETAILS = ['env_vars', 'app_credentials'];
+    private const ENCRYPTED_JSON_DETAILS = ['env_vars', 'app_credentials', 'git_deploy_key'];
 
     /** Top-level details encrypted at rest; site_git tokens are per entry. */
     private const SECRET_DETAILS = [
         'git_token',
         'cloudflare_api_token',
         'cloudflare_tunnel_token',
+        'registry_auth',
         'site_password_hash',
         AppDatabase::PASSWORD_DETAIL,
         'env_vars',
@@ -76,7 +77,7 @@ class User extends Authenticatable
 
     /** What a project can do about its own unreadable secrets; the APP_KEY is a server matter. */
     public const UNREADABLE_SECRETS_REMEDY = 'Set each one again: env_vars, git_update_credentials for a Git '
-        . 'token, the cloudflare-api-token setting, or the site password.';
+        . 'token, the cloudflare-api-token or registry-auth setting, or the site password.';
 
     protected $fillable = [
         'username',
@@ -169,6 +170,7 @@ class User extends Authenticatable
             'deploy_platform',
             'deploy_checks_dir',
             'deploy_image',
+            'deploy_start_period',
             'git_commit',
             'git_branch',
         ] as $key) {
@@ -287,6 +289,9 @@ class User extends Authenticatable
         if (isset($details['cloudflare_tunnel_token']) && is_string($details['cloudflare_tunnel_token'])) {
             $details['cloudflare_tunnel_token'] = $this->decryptSecretString($details['cloudflare_tunnel_token']);
         }
+        if (isset($details['registry_auth']) && is_string($details['registry_auth'])) {
+            $details['registry_auth'] = $this->decryptSecretString($details['registry_auth']);
+        }
         if (isset($details['site_password_hash']) && is_string($details['site_password_hash'])) {
             $details['site_password_hash'] = $this->decryptSecretString($details['site_password_hash']);
         }
@@ -334,6 +339,9 @@ class User extends Authenticatable
         }
         if (isset($details['cloudflare_tunnel_token']) && is_string($details['cloudflare_tunnel_token']) && $details['cloudflare_tunnel_token'] !== '') {
             $details['cloudflare_tunnel_token'] = $this->encryptSecretString($details['cloudflare_tunnel_token']);
+        }
+        if (isset($details['registry_auth']) && is_string($details['registry_auth']) && $details['registry_auth'] !== '') {
+            $details['registry_auth'] = $this->encryptSecretString($details['registry_auth']);
         }
         if (isset($details['site_password_hash']) && is_string($details['site_password_hash']) && $details['site_password_hash'] !== '') {
             $details['site_password_hash'] = $this->encryptSecretString($details['site_password_hash']);
@@ -1028,6 +1036,24 @@ class User extends Authenticatable
         return self::trimmed($this->getDetails()['cloudflare_api_token'] ?? null);
     }
 
+    /** This project's private registry logins, the `registry-auth` setting as stored, or null. */
+    public function getRegistryAuth(): ?string
+    {
+        return self::trimmed($this->getDetails()['registry_auth'] ?? null);
+    }
+
+    /**
+     * Container paths kept on named volumes across deploys: the `persist-paths` setting.
+     *
+     * @return list<string>
+     */
+    public function getPersistPaths(): array
+    {
+        $paths = $this->getDetails()['persist_paths'] ?? null;
+
+        return is_array($paths) ? array_values(array_filter($paths, 'is_string')) : [];
+    }
+
     /** A details value that is a non-empty string once trimmed, else null. */
     private static function trimmed(mixed $value): ?string
     {
@@ -1316,6 +1342,21 @@ class User extends Authenticatable
             'deployment_warnings' => [],
             'error' => null,
         ]);
+    }
+
+    /** Set by a stop/down through the API, cleared by anything that starts the app again. Saves. */
+    public function markAppStoppedByRequest(bool $stopped): void
+    {
+        if ($this->isAppStoppedByRequest() === $stopped) {
+            return;
+        }
+        $this->setDetails(['app_stopped_by_request' => $stopped ? true : null]);
+        $this->save();
+    }
+
+    public function isAppStoppedByRequest(): bool
+    {
+        return ($this->getDetails()['app_stopped_by_request'] ?? null) === true;
     }
 
     public function delete()

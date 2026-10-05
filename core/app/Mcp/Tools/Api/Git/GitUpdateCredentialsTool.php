@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Update git credentials for a directory
 
-    Update git credentials for a directory. Optional `path` defaults to `project` on DinD and `public_html` on FPM/LiteSpeed. Sending `token` (including empty) updates stored credentials. Omitting `token` is a no-op that returns status.
+    Update git credentials for a directory. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Sending `token` (including empty) updates stored credentials. Omitting `token` is a no-op that returns status.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]
@@ -71,7 +71,7 @@ class GitUpdateCredentialsTool extends ApiTool
     {
         return [
             'name' => $schema->string()->required(),
-            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or `public_html` (FPM/LiteSpeed).'),
+            'path' => $schema->string()->description('Optional. Defaults to `project` (DinD) or the document root of the main domain (FPM/LiteSpeed).'),
             'token' => $schema->string(),
         ];
     }

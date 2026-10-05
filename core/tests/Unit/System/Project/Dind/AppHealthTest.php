@@ -207,6 +207,25 @@ class AppHealthTest extends TestCase
      * in the log. Marking every empty account partial would teach everyone to
      * ignore the field.
      */
+    /**
+     * chatbot-ui, home-information, mafl: up, answering 500, and the reason
+     * only in `docker logs`. A 5xx is what pastes the container output.
+     */
+    public function test_a_port_answering_5xx_is_a_server_error(): void
+    {
+        $ports = static fn (array $codes): array => [AppHealth::DETAIL_PORTS => array_map(
+            static fn (?int $code): array => ['port' => 3000, 'status' => 'fail', 'http_code' => $code],
+            $codes
+        )];
+
+        $this->assertTrue(AppHealth::sawServerError($ports([500])));
+        $this->assertTrue(AppHealth::sawServerError($ports([200, 502])));
+        $this->assertFalse(AppHealth::sawServerError($ports([200, 404])));
+        // Nothing answered: not a 5xx, and the restart-loop check covers it.
+        $this->assertFalse(AppHealth::sawServerError($ports([null])));
+        $this->assertFalse(AppHealth::sawServerError([]));
+    }
+
     public function test_only_error_severity_checks_become_deploy_warnings(): void
     {
         $details = [
@@ -274,6 +293,39 @@ class AppHealthTest extends TestCase
         ];
 
         $this->assertSame([], AppHealth::servingWarnings($details));
+    }
+
+    /**
+     * engine#81: the app answers 200 inside the account, and visitors get the
+     * webserver's 502. That deploy used to end green with one warn line.
+     */
+    public function test_an_edge_gateway_error_over_an_answering_app_is_a_warning(): void
+    {
+        $details = fn (string $verdict, ?int $edge, ?int $app = 200): array => [
+            AppHealth::DETAIL_CHECKED => true,
+            AppHealth::DETAIL_HEALTHY => $app !== null && $app < 500,
+            AppHealth::DETAIL_PORTS => [['port' => 8000, 'status' => $app !== null && $app < 500 ? AppHealth::STATUS_OK : AppHealth::STATUS_FAIL, 'http_code' => $app]],
+            AppHealth::DETAIL_REACHABLE => $verdict,
+            AppHealth::DETAIL_REACHABLE_CODE => $edge,
+        ];
+
+        foreach ([502, 503, 504] as $code) {
+            $this->assertSame(
+                ["The application answers inside the account, but the site answers {$code} through the webserver."],
+                AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, $code))
+            );
+        }
+        $this->assertSame(
+            ['The application answers inside the account, but the webserver did not accept a connection for the site.'],
+            AppHealth::servingWarnings($details(AppHealth::REACH_UNREACHABLE, null))
+        );
+
+        // An app that varies by Host differs with an ordinary answer: still only a log line.
+        $this->assertSame([], AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, 200)));
+        $this->assertSame([], AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, 404)));
+        $this->assertSame([], AppHealth::servingWarnings($details(AppHealth::REACH_OK, 200)));
+        // The app's own 5xx is the app's failure, which the checks already report.
+        $this->assertSame([], AppHealth::servingWarnings($details(AppHealth::REACH_DIFFERS, 502, 502)));
     }
 
     public function test_an_account_with_no_check_verdict_contributes_no_warnings(): void
@@ -519,7 +571,7 @@ class AppHealthTest extends TestCase
     public function test_a_fingerprint_line_is_parsed_into_code_hash_and_marker(): void
     {
         $this->assertSame(
-            ['code' => 404, 'hash' => 'deadbeef', 'default404' => true, 'hash2' => '', 'location' => ''],
+            ['code' => 404, 'hash' => 'deadbeef', 'default404' => true, 'hash2' => '', 'location' => '', 'scheme' => ''],
             AppHealth::parseFingerprint("404\tdeadbeef\tyes")
         );
     }
@@ -619,7 +671,7 @@ class AppHealthTest extends TestCase
     public function test_a_fingerprint_line_carries_the_second_hash_when_there_is_one(): void
     {
         $this->assertSame(
-            ['code' => 200, 'hash' => 'aaa', 'default404' => false, 'hash2' => 'bbb', 'location' => ''],
+            ['code' => 200, 'hash' => 'aaa', 'default404' => false, 'hash2' => 'bbb', 'location' => '', 'scheme' => ''],
             AppHealth::parseFingerprint("200\taaa\tno\tbbb")
         );
     }
@@ -789,5 +841,75 @@ class AppHealthTest extends TestCase
     {
         $this->assertStringNotContainsString('Host:', AppHealth::appProbeScript('http', 8080, 4));
         $this->assertStringNotContainsString('Host:', AppHealth::appProbeScript('http', 8080, 4, ''));
+    }
+
+    /**
+     * An app that needs the forwarded headers (403 without X-Forwarded-For,
+     * 500 unless X-Forwarded-Proto is https) answered the reachability probe
+     * differently from every visitor, and the deploy said "Not reachable".
+     * Both fetches send what the vhost forwards for a visitor on https.
+     */
+    public function test_the_app_probe_sends_what_the_vhost_forwards_for_a_visitor(): void
+    {
+        $script = AppHealth::appProbeScript('http', 8080, 4, 'shop.example.com');
+
+        foreach (["X-Forwarded-Proto: https", "X-Forwarded-Host: shop.example.com", 'X-Forwarded-Port: 443', 'X-Forwarded-For: ', 'X-Real-IP: '] as $header) {
+            $this->assertSame(2, substr_count($script, "-H '{$header}"), $header);
+        }
+    }
+
+    /** @return array{0: string, 1: string} the fingerprint line, and every curl call */
+    private static function runEdgeProbe(bool $https, string $httpsAnswer): array
+    {
+        $dir = sys_get_temp_dir() . '/pa-edge-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        // https answers $httpsAnswer, plain http answers 500.
+        file_put_contents($dir . '/curl', <<<SH
+            #!/bin/sh
+            echo "\$*" >> {$dir}/calls
+            case "\$*" in *https://*) printf '{$httpsAnswer} ' ;; *) printf '500 ' ;; esac
+            SH);
+        chmod($dir . '/curl', 0o755);
+        file_put_contents($dir . '/edge.sh', AppHealth::edgeProbeScript('shop.example.com', '203.0.113.10', 4, $https));
+        $raw = (string) shell_exec('PATH=' . escapeshellarg($dir . ':' . getenv('PATH')) . ' bash ' . escapeshellarg($dir . '/edge.sh'));
+        $calls = (string) @file_get_contents($dir . '/calls');
+        array_map('unlink', glob($dir . '/*') ?: []);
+        rmdir($dir);
+
+        return [$raw, $calls];
+    }
+
+    public function test_the_edge_is_probed_over_https_when_the_domain_has_tls(): void
+    {
+        [$raw, $calls] = self::runEdgeProbe(true, '200');
+
+        $edge = AppHealth::parseFingerprint($raw);
+        $this->assertSame(200, $edge['code']);
+        $this->assertSame('https', $edge['scheme']);
+        // SNI and Host both carry the name; the address is still the vhost's.
+        $this->assertStringContainsString('--resolve shop.example.com:443:203.0.113.10 https://shop.example.com/', $calls);
+        $this->assertStringNotContainsString('http://203.0.113.10/', $calls);
+
+        $verdict = AppHealth::compareFingerprints('shop.example.com', $edge, self::fingerprint(200, $edge['hash']));
+        $this->assertSame('Reachable: https://shop.example.com/ answered 200 through the webserver', AppHealth::describeReach($verdict));
+    }
+
+    public function test_the_edge_falls_back_to_http_when_https_answers_nothing(): void
+    {
+        [$raw] = self::runEdgeProbe(true, '000');
+
+        $edge = AppHealth::parseFingerprint($raw);
+        $this->assertSame(500, $edge['code']);
+        $this->assertSame('http', $edge['scheme']);
+    }
+
+    public function test_the_edge_of_a_domain_without_tls_is_probed_over_http(): void
+    {
+        [$raw, $calls] = self::runEdgeProbe(false, '200');
+
+        $this->assertSame('http', AppHealth::parseFingerprint($raw)['scheme']);
+        $this->assertStringNotContainsString('https://', $calls);
+        $verdict = AppHealth::compareFingerprints('shop.example.com', AppHealth::parseFingerprint($raw), self::fingerprint(200, 'x'));
+        $this->assertStringStartsWith('Not reachable: http://shop.example.com/ answered 500', AppHealth::describeReach($verdict));
     }
 }

@@ -368,7 +368,7 @@ pae mcp:tool:list
 | [Bug reports](#bug-reports) | `bugreports` | On | 1 |
 | [Backups](#backups) | `backups` | On | 5 |
 | [Tunnels](#tunnels) | `tunnels` | On | 3 |
-| [Git](#git) | `git` | On | 14 |
+| [Git](#git) | `git` | On | 16 |
 | [Project settings](#project-settings) | `projectsettings` | On | 4 |
 | [SSH](#ssh) | `ssh` | On | 1 |
 | [Tasks](#tasks) | `tasks` | On | 3 |
@@ -718,6 +718,8 @@ pae mcp:tool:list
 | `git_deploy_hook_delete` | Delete a push-to-deploy hook |
 | `git_deploy_hook_rotate` | Rotate a push-to-deploy hook |
 | `git_deploy_hook_show` | Show a push-to-deploy hook |
+| `git_deploy_key_create` | Create a git deploy key |
+| `git_deploy_key_delete` | Delete a git deploy key |
 | `git_disconnect` | Disconnect git from a directory |
 | `git_pull` | Pull from the git remote |
 | `git_push` | Push local git changes |

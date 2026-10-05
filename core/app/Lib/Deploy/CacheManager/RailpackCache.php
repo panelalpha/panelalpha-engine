@@ -19,6 +19,19 @@ class RailpackCache
      */
     public const FRONTEND_IMAGE = 'ghcr.io/railwayapp/railpack-frontend:latest';
 
+    /** Where Railpack publishes its frontend, builder and runtime images. */
+    private const REPOSITORY_PREFIX = 'ghcr.io/railwayapp/railpack-';
+
+    /**
+     * Whether $ref is one of Railpack's own images. A deploy fetches those
+     * onto the host under whatever tag its plan names, which no catalogue can
+     * list ahead of time.
+     */
+    public static function isRailpackImage(string $ref): bool
+    {
+        return str_starts_with($ref, self::REPOSITORY_PREFIX);
+    }
+
     /**
      * Images to have in the account before the build runs: the frontend plus
      * whatever the plan names as a stage base.

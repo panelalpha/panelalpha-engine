@@ -3,6 +3,7 @@
 namespace App\System\Project\Dind\Inner;
 
 use App\System\Project\Dind\InnerDocker;
+use App\Lib\Deploy\Dind\DindImageStore;
 use App\Lib\Deploy\Dind\RegistryConfigSync;
 use App\Lib\Deploy\CacheManager\ImageTransfer;
 use App\Lib\Deploy\CacheManager\RegistryImageConfig;
@@ -59,12 +60,24 @@ class ImageSeeding
      * reads them out of the plan railpack just wrote, which is the only thing
      * that knows which builder and runtime tags it resolved to.
      *
+     * Railpack's own live on ghcr.io, which registry-proxy does not mirror, so
+     * the host fetches each once and every account after that pulls it from
+     * the cache registry instead of from the internet. A base the project's
+     * railpack config names instead goes the way any public image does.
+     *
      * @param list<string> $images
      */
     public function preloadRailpack(array $images): void
     {
         foreach ($images as $image) {
-            $this->ensure($image);
+            if (!RailpackCache::isRailpackImage($image)) {
+                $this->ensure($image);
+            } elseif (!$this->hasImage($image)) {
+                $this->runSeed($image, $this->inner->imageStore()->seedThroughHostCommand(
+                    $this->inner->dind()->engineAccount(),
+                    $image
+                ));
+            }
         }
     }
 
@@ -87,7 +100,12 @@ class ImageSeeding
             return;
         }
 
-        $this->seedInParallel($images, $concurrency);
+        // A private image is pulled on its own below, with the project's login.
+        $login = $this->inner->dind()->registryLogin();
+        $this->seedInParallel(
+            array_values(array_filter($images, static fn (string $image): bool => !$login->covers($image))),
+            $concurrency
+        );
 
         // Whatever the parallel pass missed still has to be there. Each check
         // is a round-trip into the account, so ask the inner daemon once for
@@ -117,7 +135,14 @@ class ImageSeeding
 
         $images = [];
         $profiles = $this->activeProfiles(dirname($composePath) . '/.env');
-        foreach (DeployCompose::imageRefs($contents, activeProfiles: $profiles) as $image) {
+        // `wordpress:${WORDPRESS_VERSION:-latest}` names an image only once
+        // interpolated; read raw it was skipped and never preloaded.
+        try {
+            $env = $this->inner->dind()->environment()->forInterpolation();
+        } catch (\Throwable) {
+            $env = [];
+        }
+        foreach (DeployCompose::imageRefs($contents, activeProfiles: $profiles, env: $env) as $image) {
             if (is_string($image) && $image !== '' && ImageTransfer::isSafeImageRef($image)) {
                 $images[] = $image;
             }
@@ -150,6 +175,9 @@ class ImageSeeding
      */
     private function seedInParallel(array $images, int $concurrency): void
     {
+        if ($images === []) {
+            return;
+        }
         $this->ensureRegistryConfig();
         $host = $this->inner->host();
         $host->logDim("Seeding {$concurrency} base images at a time");
@@ -245,6 +273,31 @@ class ImageSeeding
         return ImageTransfer::parseExposedPorts(is_string($output) ? $output : '');
     }
 
+    /**
+     * The `KEY=value` lines $image sets for itself: from the account when it
+     * holds the image, otherwise from the registries. Empty when neither says.
+     *
+     * @return list<string>
+     */
+    public function imageEnvironment(string $image): array
+    {
+        if ($image === '' || !ImageTransfer::isSafeImageRef($image)) {
+            return [];
+        }
+
+        try {
+            $env = json_decode(trim($this->inner->dind()->shell()->execQuiet(
+                ['docker', 'image', 'inspect', '--format', '{{json .Config.Env}}', '--', $image],
+                [],
+                30
+            )), true);
+        } catch (\Exception $e) {
+            return (new RegistryImageConfig())->environment($image);
+        }
+
+        return is_array($env) ? array_values(array_filter($env, 'is_string')) : [];
+    }
+
     public function ensure(string $image): void
     {
         if ($this->hasImage($image)) {
@@ -308,36 +361,86 @@ class ImageSeeding
         };
     }
 
-    /** Run the seed ladder for one image and log the line saying where it came from. */
+    /**
+     * Run the seed ladder for one image and log the line saying where it came from.
+     *
+     * One of our shared images is announced once: "Using shared base image",
+     * or nothing when it is not built yet, because the caller then says it is
+     * building it. Only a real failure is a warning.
+     */
     private function seed(string $image, bool $ours): bool
+    {
+        // An image the project logs in for is pulled straight into the account.
+        $login = $this->inner->dind()->registryLogin();
+        $private = !$ours && $login->covers($image);
+
+        return $this->runSeed($image, $this->inner->imageStore()->seedCommand(
+            $this->inner->dind()->engineAccount(),
+            $image,
+            $ours,
+            $private,
+            $private ? $login->configDir() : null
+        ), $ours);
+    }
+
+    /** $ours: one of our shared images, logged as "Using shared base image". */
+    private function runSeed(string $image, string $command, bool $ours = false): bool
     {
         $this->ensureRegistryConfig();
         $host = $this->inner->host();
-        // Opens the image_transfer span; the ladder's own line closes it.
-        $host->logInfo("Fetching base image {$image}");
+        // Opens the image_transfer span; the ladder's own line closes it. Dim for
+        // a shared image, whose one line is the outcome.
+        $fetching = "Fetching base image {$image}";
+        $ours ? $host->logDim($fetching) : $host->logInfo($fetching);
         try {
-            $output = $this->inner->dind()->system()->exec(
-                $this->inner->imageStore()->seedCommand(
-                    $this->inner->dind()->engineAccount(),
-                    $image,
-                    $ours
-                ),
-                [],
-                self::SEED_TIMEOUT_SECONDS
-            );
+            $output = $this->inner->dind()->system()->exec($command, [], self::SEED_TIMEOUT_SECONDS);
         } catch (\Exception $e) {
             $host->failDeployIfDiskFull($e->getMessage());
-            $host->logInfo("Could not get {$image} into the account: " . trim($e->getMessage()));
+            if ($ours && trim($e->getMessage()) === DindImageStore::NOT_BUILT_HERE) {
+                return false;
+            }
+            $host->logWarn(self::seedFailure($image, $e->getMessage()));
 
             return false;
         }
 
         $line = trim((string) $output);
-        if ($line !== '') {
+        $present = $this->hasImage($image);
+        if ($ours && $present) {
+            $host->logInfo(self::usingShared($image, $line));
+        } elseif (!$ours && $line !== '') {
             $host->logInfo($line);
         }
 
-        return $this->hasImage($image);
+        return $present;
+    }
+
+    /** The one line for a shared image the account now has, naming where it came from. */
+    public static function usingShared(string $image, string $seedLine): string
+    {
+        $from = match (true) {
+            str_contains($seedLine, 'from the host') => ' (from this host)',
+            str_contains($seedLine, 'from the cache registry') => ' (from the cache registry)',
+            default => '',
+        };
+
+        return "Using shared base image {$image}{$from}";
+    }
+
+    /**
+     * One line naming the image and why. The seed script ends on its own
+     * "Could not get <image> into the account", after whatever the failing
+     * step printed, so that sentence leads once and the rest is the reason.
+     */
+    public static function seedFailure(string $image, string $error): string
+    {
+        $said = "Could not get {$image} into the account";
+        $lines = array_values(array_filter(
+            array_map('trim', preg_split('/\R/', $error) ?: []),
+            static fn (string $line): bool => $line !== '' && $line !== $said
+        ));
+
+        return $lines === [] ? $said : $said . ': ' . implode(' ', $lines);
     }
 
     /**

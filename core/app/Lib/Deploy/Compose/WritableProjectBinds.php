@@ -2,6 +2,7 @@
 
 namespace App\Lib\Deploy\Compose;
 
+use App\Lib\Deploy\Detect\DockerfileFinder;
 use App\Lib\Deploy\Port\EnvVarDefault;
 
 /**
@@ -72,6 +73,47 @@ final class WritableProjectBinds
         }
 
         return null;
+    }
+
+    /**
+     * Who an image built from $contents runs as, read before it is built: the
+     * last literal `USER` of the final stage (following `FROM <stage>`), or,
+     * when no stage sets one, the registry image the chain starts from, whose
+     * own user it inherits. Both null when a `$` or a loop leaves it unknown.
+     *
+     * @return array{user: ?string, base: ?string}
+     */
+    public static function dockerfileUser(string $contents): array
+    {
+        $stages = [];
+        $current = null;
+        foreach (preg_split('/\R/', DockerfileFinder::withoutHeredocBodies($contents)) ?: [] as $line) {
+            if (preg_match('/^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?\s*$/i', $line, $m) === 1) {
+                $stages[] = ['from' => $m[1], 'alias' => strtolower($m[2] ?? ''), 'user' => null];
+                $current = count($stages) - 1;
+            } elseif ($current !== null && preg_match('/^\s*USER\s+(\S+)\s*$/i', $line, $m) === 1) {
+                $stages[$current]['user'] = $m[1];
+            }
+        }
+
+        for ($i = count($stages) - 1, $hops = 0; $i >= 0 && $hops <= count($stages); $hops++) {
+            $stage = $stages[$i];
+            if ($stage['user'] !== null) {
+                return ['user' => str_contains($stage['user'], '$') ? null : $stage['user'], 'base' => null];
+            }
+            $parent = null;
+            foreach (array_slice($stages, 0, $i) as $j => $earlier) {
+                if ($earlier['alias'] !== '' && $earlier['alias'] === strtolower($stage['from'])) {
+                    $parent = $j;
+                }
+            }
+            if ($parent === null) {
+                return ['user' => null, 'base' => str_contains($stage['from'], '$') ? null : $stage['from']];
+            }
+            $i = $parent;
+        }
+
+        return ['user' => null, 'base' => null];
     }
 
     /**

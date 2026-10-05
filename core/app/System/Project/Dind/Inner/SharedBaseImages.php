@@ -203,7 +203,8 @@ class SharedBaseImages
             return null;
         }
 
-        if (!$this->hostHasImage($tag)) {
+        $announced = !$this->hostHasImage($tag);
+        if ($announced) {
             // The catalogue decides whether a deploy waits. Ruby does not: its
             // per-project Dockerfile installs the same packages. Python does,
             // the base being the only place those headers exist — deferring it
@@ -223,7 +224,7 @@ class SharedBaseImages
         }
 
         try {
-            $this->buildAndLoad('Python', $tag, $dockerfile);
+            $this->buildAndLoad('Python', $tag, $dockerfile, $announced);
         } catch (\Exception $e) {
             // Not fatal: the stock image installs everything that ships a
             // wheel, and the rest get a clear pip error rather than a deploy
@@ -359,7 +360,8 @@ class SharedBaseImages
 
             return false;
         }
-        if (!$this->hostHasImage($tag)) {
+        $announced = !$this->hostHasImage($tag);
+        if ($announced) {
             $this->inner->host()->logInfo(
                 "Shared PHP base image {$tag} has not been built on this host yet; building it now"
                 . ($packages === [] ? '' : ' with ' . implode(', ', $packages))
@@ -370,7 +372,7 @@ class SharedBaseImages
         }
 
         try {
-            $this->buildAndLoad('PHP', $tag, $dockerfile);
+            $this->buildAndLoad('PHP', $tag, $dockerfile, $announced);
         } catch (\Exception $e) {
             $host = $this->inner->host();
             $host->failDeployIfDiskFull($e->getMessage());
@@ -414,12 +416,14 @@ class SharedBaseImages
      * differently: PHP has a stock image to fall back to and a disk-full to
      * re-raise, Ruby only has the packages to install itself.
      */
-    private function buildAndLoad(string $language, string $tag, string $dockerfile): void
+    private function buildAndLoad(string $language, string $tag, string $dockerfile, bool $announced = false): void
     {
         $host = $this->inner->host();
         $store = $this->inner->imageStore();
 
-        $host->logInfo("Preparing shared {$language} base image {$tag}");
+        // Still the image_transfer marker; dim once the caller has said it is building.
+        $preparing = "Preparing shared {$language} base image {$tag}";
+        $announced ? $host->logDim($preparing) : $host->logInfo($preparing);
         $host->cancellable($store->hostBuildCommand($tag, $dockerfile), self::BUILD_TIMEOUT_SECONDS);
         $host->cancellable(
             $store->loadFromHostCommand($this->inner->dind()->engineAccount(), $tag),

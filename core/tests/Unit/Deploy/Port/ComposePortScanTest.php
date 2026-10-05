@@ -562,6 +562,43 @@ class ComposePortScanTest extends TestCase
         $this->assertSame([6077, 5004], ComposePortScan::of($path)['all']);
     }
 
+    /**
+     * Why the primary port leads: Cabernet's 5004 (a stream) over 6077 (its
+     * web UI) is only the lower number, and a probe may still correct it;
+     * Stepifi's and a healthchecked service's are not guesses.
+     */
+    public function test_the_choice_says_when_the_primary_is_only_the_lowest_number(): void
+    {
+        $cabernet = $this->compose(<<<'YAML'
+        services:
+          cabernet:
+            image: ghcr.io/cabernetwork/cabernet
+            ports:
+              - "6077:6077" # Web Interface Port
+              - "5004:5004" # Port used to stream
+        YAML);
+        $this->assertSame(5004, ComposePortScan::of($cabernet)['primary']);
+        $this->assertSame(['reason' => ComposePortScan::CHOSEN_LOWEST, 'alternatives' => [6077]], ComposePortScan::choiceOf($cabernet));
+
+        $stepifi = $this->compose("services:\n  app:\n    build: .\n    ports: ['3169:3000', '3001:3001']\n");
+        $this->assertSame(ComposePortScan::CHOSEN_PREFERRED, ComposePortScan::choiceOf($stepifi)['reason'] ?? null);
+
+        $checked = $this->compose(<<<'YAML'
+        services:
+          app:
+            image: acme/app
+            ports: ["5004:5004", "6077:6077"]
+            healthcheck:
+              test: ["CMD", "curl", "-f", "http://localhost:6077/health"]
+        YAML);
+        $this->assertSame(ComposePortScan::CHOSEN_HEALTHCHECK, ComposePortScan::choiceOf($checked)['reason'] ?? null);
+
+        // Two services, one port each: nothing within a service to choose between.
+        $apart = $this->compose("services:\n  a:\n    image: acme/a\n    ports: ['5004:5004']\n  b:\n    image: acme/b\n    ports: ['6077:6077']\n");
+        $this->assertSame(['reason' => ComposePortScan::CHOSEN_SINGLE, 'alternatives' => []], ComposePortScan::choiceOf($apart));
+        $this->assertNull(ComposePortScan::choiceOf($this->compose("services:\n  a:\n    image: acme/a\n")));
+    }
+
     /** The healthcheck ranks only within its own service: a front door elsewhere still wins. */
     public function test_a_healthcheck_does_not_outrank_another_services_web_port(): void
     {

@@ -50,7 +50,11 @@ interface DeployMechanics
      */
     public function startApplication(): array;
 
-    public function abortPartialDeploy(): void;
+    /** Keeps the app's volumes unless $removeVolumes: only a first deploy has nothing to lose. */
+    public function abortPartialDeploy(bool $removeVolumes = false): void;
+
+    /** After a redeploy, however it ended: what it kept beside the running app is put back or removed. */
+    public function settleRedeploy(bool $succeeded): void;
 
     /**
      * @return list<string>

@@ -46,6 +46,7 @@ test.describe('deploy-kind fixture catalogue', () => {
       'cra',
       'django',
       'dockerfile',
+      'dockerfile-named',
       'dotnet',
       'express',
       'fastify',

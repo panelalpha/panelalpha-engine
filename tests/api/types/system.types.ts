@@ -59,6 +59,11 @@ export interface UsageLimitPair {
 
 export interface UserUsage {
   storage: UsageLimitPair;
+  /** Bytes of the project's container logs, rotated files included. `maximum` is null. */
+  logs: {
+    usage: number;
+    maximum: null;
+  };
   /** Calendar-month transfer in bytes. `maximum` is null when the project is unlimited. */
   bandwidth: {
     usage: number;

@@ -32,6 +32,11 @@ commands:
     stage: [upgrade]
     description: 'setup:upgrade and di:compile against the store that is already there. Does nothing until an install has happened.'
     run: 'bash /app/panelalpha/install.sh upgrade'
+# install.sh runs setup:install and setup:di:compile at the container's first
+# start, and nothing listens until both are done. The deploy's own probe gave
+# up with di:compile at 77%.
+health:
+  start_period: 900
 credentials:
   adopt_from: .panelalpha/magento/admin.env
   fields:

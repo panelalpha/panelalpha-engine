@@ -329,6 +329,40 @@ final class DockerfileFinder
     }
 
     /**
+     * The one `<name>.dockerfile` at the root (otobo's `otobo.web.dockerfile`
+     * form), less the variants DEMOTED_VARIANTS names; of several, the one a
+     * PREFERRED_VARIANTS word marks, else none, since picking would be a guess.
+     */
+    public static function findNamed(string $projectDir): ?string
+    {
+        $finder = new self($projectDir, []);
+        $usable = [];
+        $preferred = [];
+        foreach (scandir($projectDir) ?: [] as $entry) {
+            if (preg_match('/^(.+)\.(?:dockerfile|containerfile)$/i', $entry, $m) !== 1
+                || preg_match(self::NAME_PATTERN, $entry) === 1
+                || !$finder->isUsable($entry)
+            ) {
+                continue;
+            }
+            $parts = array_filter(preg_split('/[._-]+/', strtolower($m[1])) ?: []);
+            if (array_intersect($parts, self::DEMOTED_VARIANTS) !== []) {
+                continue;
+            }
+            $usable[] = $entry;
+            if (array_intersect($parts, self::PREFERRED_VARIANTS) !== []) {
+                $preferred[] = $entry;
+            }
+        }
+
+        if (count($usable) === 1) {
+            return $usable[0];
+        }
+
+        return count($preferred) === 1 ? $preferred[0] : null;
+    }
+
+    /**
      * A `COPY`/`ADD` source the build context does not contain: GoReleaser
      * copies a CI binary that is gitignored, and building fails late as
      * `failed to compute cache key`. A variable the file assigns a default

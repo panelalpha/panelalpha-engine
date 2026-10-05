@@ -5,8 +5,10 @@ namespace Tests\Unit\Console;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DockerErrorException;
 use App\Exceptions\NotFoundException;
+use App\Jobs\DeployProject;
 use App\Models\Admin;
 use App\Models\DeployHook;
+use App\Models\Task;
 use App\Models\User;
 use App\System\Project\Git\CheckoutRedeploy;
 use App\System\Project\Git\Exception as GitException;
@@ -96,6 +98,8 @@ class GitCommandsTest extends DeployHookTestCase
             'tracking' => null,
             'commits_ahead' => null,
             'commits_behind' => null,
+            'connecting' => false,
+            'connecting_since' => null,
         ];
     }
 
@@ -289,6 +293,8 @@ class GitCommandsTest extends DeployHookTestCase
             'tracking' => 'origin/main',
             'commits_ahead' => 1,
             'commits_behind' => 3,
+            'connecting' => false,
+            'connecting_since' => null,
         ]]), $output);
     }
 
@@ -423,6 +429,17 @@ class GitCommandsTest extends DeployHookTestCase
         $this->assertSame("Remote URL does not match the existing origin.\n", $this->failureOf('git:connect', [
             'username' => 'alice', '--repo-url' => self::REPO, '--branch' => 'main',
         ]));
+    }
+
+    public function test_connect_while_the_project_is_being_created_is_refused(): void
+    {
+        $this->siteGitUser();
+        Task::start(DeployProject::class, 'default', 'alice');
+
+        $this->assertSame(
+            "Project 'alice' is still being created; try again when its deploy has finished.\n",
+            $this->failureOf('git:connect', ['username' => 'alice', '--path' => 'public_html', '--repo-url' => self::REPO, '--branch' => 'main']),
+        );
     }
 
     public function test_connect_repair_needs_no_url_or_branch(): void

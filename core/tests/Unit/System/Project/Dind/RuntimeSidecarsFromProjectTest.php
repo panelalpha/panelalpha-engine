@@ -198,6 +198,29 @@ class RuntimeSidecarsFromProjectTest extends TestCase
         }
     }
 
+    /**
+     * Zerobyte (engine#422): every service kept from its workstation file was
+     * its e2e suite. Dropping them must not drop the production variant's env
+     * too, which the app used to get with them.
+     */
+    public function test_a_workstation_file_left_with_only_a_test_suite_still_gives_the_app_its_env(): void
+    {
+        $result = $this->sidecarsFromFiles([
+            'compose.yaml' => (string) file_get_contents(dirname(__DIR__, 4) . '/fixtures/compose/zerobyte-compose.yaml'),
+        ]);
+
+        $this->assertSame([], $result['services']);
+        $this->assertSame('debug', $result['app_env']['LOG_LEVEL'] ?? null);
+        $this->assertArrayHasKey('APP_SECRET', $result['app_env']);
+        $this->assertArrayNotHasKey('NODE_ENV', $result['app_env']);
+
+        $decision = (new RuntimeSidecars($this->stubbedDind($this->stubbedSystem([]))))
+            ->mergeRuntimeSidecars(['env' => ['LOG_LEVEL' => 'info']], $result);
+        $this->assertSame('info', $decision['env']['LOG_LEVEL'], 'what the strategy generates still wins');
+        $this->assertArrayHasKey('APP_SECRET', $decision['env']);
+        $this->assertArrayNotHasKey('depends_on', $decision);
+    }
+
     /** LinkAce's shape, reduced: a workstation stack beside a production one. */
     private const LINKACE_DEV = <<<'YAML'
     name: linkace_dev

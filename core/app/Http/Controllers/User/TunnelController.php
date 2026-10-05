@@ -59,10 +59,13 @@ class TunnelController extends Controller
         description: 'Registers a public hostname that reaches this domain without any DNS record of your own. '
             . 'The `panelalpha` provider allocates a name under panelalpha.online through the licensing proxy '
             . '-- the way to give an application a public address with a trusted certificate on an engine with '
-            . 'no DNS of its own. Attach it to the project domain of the same name: the proxy forwards with '
-            . '`Host: <the domain the tunnel is attached to>`, so a panelalpha hostname on any other local '
-            . 'domain leaves the application answering under a name nobody typed, and anything that '
-            . 'canonicalises its own site URL redirects for ever. Labels are first come, first served across '
+            . 'no DNS of its own. The proxy forwards each name with itself as `Host`, and the domain\'s site '
+            . 'answers to it. Attach the project\'s own name to the project domain of the same name. A project '
+            . 'may also add a few sibling names beside it, such as `api-<name>.panelalpha.online`, for an '
+            . 'application that routes by Host to fixed extra names; the application has to accept those names, '
+            . 'so its prefixes must be configurable. Nested names such as `api.<name>.panelalpha.online` are '
+            . 'not available: an application that needs them needs a domain of the customer\'s own plus addon '
+            . 'domains. Labels are first come, first served across '
             . 'the fleet, so a name in use is refused; deleting the tunnel releases it again. `cloudflare` '
             . 'puts a CNAME in a zone the project\'s own '
             . 'API token controls, so it fits a custom domain; set the token first with PUT '
@@ -80,7 +83,8 @@ class TunnelController extends Controller
                     property: 'hostname',
                     type: 'string',
                     description: 'The public hostname to attach. For the panelalpha provider it must be a '
-                        . 'single label under panelalpha.online, and must equal the domain it is attached to.',
+                        . 'single label under panelalpha.online: the name of the domain it is attached to, '
+                        . 'or a sibling of it such as `api-<name>.panelalpha.online`.',
                     example: 'my-shop.panelalpha.online'
                 ),
                 new OA\Property(

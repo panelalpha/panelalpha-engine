@@ -4,6 +4,7 @@ namespace Tests\Unit\Deploy\CacheManager;
 
 use App\Lib\Deploy\CacheManager\HostPrewarmPlan;
 use App\Lib\Deploy\CacheManager\ImageCatalog;
+use App\Lib\Deploy\CacheManager\RailpackCache;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -47,6 +48,18 @@ class ImageCatalogTest extends TestCase
         foreach ($ids as $id) {
             $this->assertDoesNotMatchRegularExpression('/-pa\d|-x[0-9a-f]/', $id, "{$id} carries a recipe tag");
         }
+    }
+
+    /**
+     * The builder and runtime tags change with every Railpack release and are
+     * read from the plan at deploy time; a dated one here only ever named an
+     * image no deploy asked for. The frontend is the tag the engine passes.
+     */
+    public function test_the_only_railpack_image_named_is_the_frontend_the_engine_passes(): void
+    {
+        $railpack = array_values(array_filter(ImageCatalog::all(), RailpackCache::isRailpackImage(...)));
+
+        $this->assertSame([RailpackCache::FRONTEND_IMAGE], $railpack);
     }
 
     public function test_an_extra_is_known_by_its_repository(): void

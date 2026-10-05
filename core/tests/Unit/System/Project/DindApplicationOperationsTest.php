@@ -51,6 +51,21 @@ class DindApplicationOperationsTest extends TestCase
         $this->assertStringNotContainsString('docker rm -f alice', $flat);
     }
 
+    public function test_abort_running_deploy_keeps_volumes_unless_asked(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'compose']);
+        file_put_contents($this->tmpRoot . '/users/alice/docker-compose.yml', "services:\n  dind:\n    image: test\n");
+        file_put_contents($this->homeRoot . '/alice/project/docker-compose.yml', "services:\n  app:\n    image: test\n");
+        $aggregate = new ProjectAggregate($this->recordingSystem(), $model);
+
+        $aggregate->abortRunningDeploy();
+        $this->assertSame([['down', '--remove-orphans']], $this->composeDowns());
+
+        $this->executed = [];
+        $aggregate->abortRunningDeploy(removeVolumes: true);
+        $this->assertSame([['down', '-v', '--remove-orphans']], $this->composeDowns());
+    }
+
     public function test_start_application_does_not_delete_project(): void
     {
         $model = $this->dindModel(['deploy_strategy' => 'static']);
@@ -104,6 +119,23 @@ class DindApplicationOperationsTest extends TestCase
         $this->assertNotFalse($downPos);
         $this->assertNotFalse($rmPos);
         $this->assertLessThan($rmPos, $downPos);
+    }
+
+    public function test_deleting_a_project_still_removes_the_app_volumes(): void
+    {
+        $model = $this->dindModel(['deploy_strategy' => 'compose']);
+        file_put_contents($this->tmpRoot . '/users/alice/docker-compose.yml', "services:\n  dind:\n    image: test\n");
+        file_put_contents($this->homeRoot . '/alice/project/docker-compose.yml', "services:\n  app:\n    image: test\n");
+
+        $aggregate = new class ($this->recordingSystem(), $model) extends ProjectAggregate {
+            public function tearDownLinuxIsolation(): void
+            {
+            }
+        };
+        $aggregate->deprovision();
+
+        // The app's own compose, run inside the account; the outer stack's down comes later.
+        $this->assertSame(['down', '-v', '--remove-orphans'], $this->composeDowns()[0] ?? null);
     }
 
     public function test_app_certificate_remember_records_missing_ssl_when_no_certificate(): void
@@ -261,6 +293,20 @@ class DindApplicationOperationsTest extends TestCase
         }
 
         return implode("\n", $parts);
+    }
+
+    /** @return list<list<string>> each `compose … down` run, from `down` on */
+    private function composeDowns(): array
+    {
+        $downs = [];
+        foreach ($this->executed as $cmd) {
+            $at = is_array($cmd) ? array_search('down', $cmd, true) : false;
+            if ($at !== false && in_array('compose', $cmd, true)) {
+                $downs[] = array_values(array_slice($cmd, $at));
+            }
+        }
+
+        return $downs;
     }
 
     private function removeTree(string $path): void
