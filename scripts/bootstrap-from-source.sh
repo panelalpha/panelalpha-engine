@@ -571,12 +571,26 @@ else
     warn "Skipped sysctl/monit/firewall/prewarm (--no-hardening) — firewall API tests will fail"
 fi
 
+# Tokens survive a redeploy, so count them rather than assume a fresh engine.
+# Fails when the list cannot be read; prints 0 for an empty one.
+existing_tokens() {
+    local list
+    list=$(docker compose exec -T core php artisan api:token:list 2>/dev/null) || return 1
+    printf '%s\n' "$list" | tr -d '\r' | grep -cE '^\| +[0-9]+ +\|' || true
+}
+
 echo
 step "Engine is up."
 echo "  API URL: https://${PUBLIC_IP}:2011/api"
 echo "  MCP URL: https://${PUBLIC_IP}:2011/mcp"
 echo
-echo "No tokens exist yet — mint them when you need them ('pae', or 'pae-artisan'):"
+if ! tokens=$(existing_tokens); then
+    echo "Mint tokens when you need them ('pae', or 'pae-artisan'):"
+elif [ "$tokens" -gt 0 ]; then
+    echo "${tokens} token(s) already exist ('pae api:token:list'); mint another when you need one ('pae', or 'pae-artisan'):"
+else
+    echo "No tokens exist yet — mint them when you need them ('pae', or 'pae-artisan'):"
+fi
 echo "  pae api:token:create default"
 echo "  pae mcp:token:create default   # prints the registration command for every MCP client"
 echo

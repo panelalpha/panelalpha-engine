@@ -58,17 +58,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 tmp="$(mktemp)"
+# set -e leaves on a failed update; the trap removes the installer either way
+# and keeps the exit code.
+trap 'rm -f "$tmp"' EXIT
 echo "[INFO] Redirecting Engine update to ${GET_BASE}/engine (GitHub)..."
 if ! curl -fsSL --max-time 60 -o "$tmp" "${GET_BASE}/engine"; then
-    rm -f "$tmp"
     echo "[ERROR] Failed to fetch ${GET_BASE}/engine" >&2
     exit 1
 fi
 
 # Always non-interactive here: API / at(1) have no TTY. get-engine sets ENTRY=engine;
 # with shared-hosting present the wrapper chooses update.
-# Do not exec+EXIT-trap: bash runs EXIT traps on exec and would delete $tmp first.
+# Not exec: the trap must outlive the installer to remove it.
 sh "$tmp" --no-tui "${forward[@]}"
-ec=$?
-rm -f "$tmp"
-exit "$ec"

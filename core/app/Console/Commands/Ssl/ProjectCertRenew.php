@@ -2,10 +2,8 @@
 
 namespace App\Console\Commands\Ssl;
 
-use App\System\Project\Dind;
-use App\Lib\Ssl\AcmeIssuer;
 use App\Lib\Ssl\CertificateStatus;
-use App\Lib\Ssl\Issuers;
+use App\Lib\Ssl\ProjectCertificate;
 use App\Models\Domain;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -42,9 +40,7 @@ class ProjectCertRenew extends Command
     {
         $threshold = (int) ($this->option('days') ?: self::RENEW_BELOW_DAYS);
         $only = $this->option('domain');
-        $issuer = $this->option('staging')
-            ? new AcmeIssuer(AcmeIssuer::LETS_ENCRYPT_STAGING, Issuers::email())
-            : new AcmeIssuer(Issuers::directoryUrl(), Issuers::email());
+        $issuer = ProjectCertificate::issuer((bool) $this->option('staging'));
 
         $query = Domain::query();
         if (is_string($only) && $only !== '') {
@@ -54,7 +50,9 @@ class ProjectCertRenew extends Command
         $renewed = 0;
         $failed = 0;
 
-        foreach ($query->cursor() as $model) {
+        // Pages, not a cursor: an open cursor pins SQLite's read snapshot, and once
+        // anything else writes during the HTTP-01 check, recording details.ssl fails.
+        foreach ($query->lazyById() as $model) {
             $name = $model->domain;
 
             if ($issuer->ineligibleReason($name) !== null) {
@@ -82,10 +80,7 @@ class ProjectCertRenew extends Command
             try {
                 $issuer->issue($connection);
                 $connection->rebuild();
-                $project = $model->user?->project();
-                if ($project instanceof Dind) {
-                    $project->appCertificate()->remember();
-                }
+                ProjectCertificate::remember($model->user);
                 $this->info("renewed {$name}");
                 $renewed++;
             } catch (\Throwable $e) {

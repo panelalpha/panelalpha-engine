@@ -173,10 +173,7 @@ test.describe('pae-artisan command parity', () => {
 
     const check = await hostExec!.pae(['project:deploy:check', user.username, '--json']);
     expect([0, 1]).toContain(check.exitCode);
-    test.skip(
-      !check.stdout.trim().startsWith('{'),
-      'project:deploy:check --json printed no object.'
-    );
+    expect(check.stdout.trim(), 'project:deploy:check --json must print the report').toMatch(/^\{/);
     const checkJson: unknown = JSON.parse(check.stdout);
     const report = healthFromRaw({ data: checkJson });
     expect(report.healthy === null || typeof report.healthy === 'boolean').toBe(true);

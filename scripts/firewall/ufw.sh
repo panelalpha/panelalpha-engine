@@ -194,14 +194,53 @@ import_csf_ignores() {
     done | sort -u >>"$F2B_DIR/panelalpha-ignoreip"
 }
 
+# An old core container still bind-mounting /etc/csf recreates it when Docker
+# restarts it after the move; core runs apply once it is recreated without
+# that mount. An empty one always goes. One with anything in it, csf.conf
+# included, goes once the migration has finished (its backup is there) and
+# nothing of CSF is installed or running: a csf.conf left then would only make
+# every later install migrate again. Otherwise it is kept and the reason said.
+clear_csf_leftover() {
+    [ -d "$CSF_DIR" ] || return 0
+    if rmdir "$CSF_DIR" 2>/dev/null; then
+        say "removed the empty $CSF_DIR CSF left behind"
+        return 0
+    fi
+    local why
+    if ! compgen -G "$BACKUP_DIR/panelalpha-csf-*.tgz" >/dev/null; then
+        why="no $BACKUP_DIR/panelalpha-csf-*.tgz, so the move from CSF never finished"
+    elif ! why=$(csf_present); then
+        rm -rf "$CSF_DIR"
+        say "removed $CSF_DIR, left behind after the move from CSF"
+        return 0
+    fi
+    say "kept $CSF_DIR: $why"
+}
+
+# Says what of CSF is still on the host; fails when nothing is.
+csf_present() {
+    local unit
+    for unit in csf lfd; do
+        if command -v "$unit" >/dev/null 2>&1; then
+            echo "$unit is still installed"
+        elif systemctl is-active --quiet "$unit" 2>/dev/null; then
+            echo "$unit is still running"
+        elif [ "$(systemctl show -p LoadState --value "$unit" 2>/dev/null)" = loaded ]; then
+            echo "the $unit service is still installed"
+        else
+            continue
+        fi
+        return 0
+    done
+    return 1
+}
+
 # CSF is replaced, not kept beside ufw: its rules move to ufw, its config is
 # saved, and it is uninstalled. Its uninstaller flushes the whole ruleset,
 # Docker's chains included; the installers restart Docker right after this.
 # A host where CSF had been turned off (csf.disable) keeps ufw off as well.
 migrate_from_csf() {
-    # An old core container still bind-mounting /etc/csf recreates it, empty,
-    # when Docker restarts it after the move; the next run clears that.
-    [ -d "$CSF_DIR" ] && [ ! -f "$CSF_DIR/csf.conf" ] && rmdir "$CSF_DIR" 2>/dev/null
+    clear_csf_leftover
     [ -f "$CSF_DIR/csf.conf" ] || return 0
     local backup
     say "replacing CSF with ufw"
@@ -654,6 +693,7 @@ install) install ;;
 apply)
     # Here as well as in install: a host updated without the installer must
     # not lose the engine's ports when the hook moves to route rules.
+    clear_csf_leftover
     ufw_is_ours && route_rules
     published_on
     ;;

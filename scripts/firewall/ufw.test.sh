@@ -14,7 +14,16 @@ for cmd in systemctl ss fail2ban-client; do
     printf '#!/bin/bash\necho "%s $*" >>"%s/calls"\n' "$cmd" "$W" >"$W/bin/$cmd"
 done
 # systemctl says fail2ban is stopped while $W/f2b-down exists.
-printf '#!/bin/bash\necho "systemctl $*" >>"%s/calls"\n[ "$1" != is-active ] || [ ! -f "%s/f2b-down" ]\n' "$W" "$W" >"$W/bin/systemctl"
+# csf and lfd are running while $W/running-<unit> exists, and loaded while $W/loaded-<unit> does.
+cat >"$W/bin/systemctl" <<FAKE
+#!/bin/bash
+echo "systemctl \$*" >>"$W/calls"
+case "\$*" in
+"is-active --quiet csf" | "is-active --quiet lfd") [ -f "$W/running-\$3" ] ;;
+"show -p LoadState --value csf" | "show -p LoadState --value lfd") [ -f "$W/loaded-\$5" ] && echo loaded || echo not-found ;;
+*) [ "\$1" != is-active ] || [ ! -f "$W/f2b-down" ] ;;
+esac
+FAKE
 # ufw refuses any command matching the regex in $W/ufw-refuses.
 cat >"$W/bin/ufw" <<FAKE
 #!/bin/bash
@@ -71,7 +80,7 @@ expect() { # expect <label> <expected> <actual>
 reset() {
     rm -rf "$W/calls" "$W/chains" "$W/etc" "$W/engine" "$W/backups" "$W/src-csf" \
         "$W/ufw-refuses" "$W/dpkg-missing" "$W/apt-fails" "$W"/restore-* "$W"/iptables-* "$W"/ip6tables-* \
-        "$W/docker-ports" "$W/f2b-down" "$W/no-wait"
+        "$W/docker-ports" "$W/f2b-down" "$W/no-wait" "$W"/running-* "$W"/loaded-* "$W/bin/csf"
     mkdir -p "$W/etc/ufw" "$W/etc/fail2ban" "$W/engine/scripts/firewall" "$W/backups"
     printf 'IPV6=no\nDEFAULT_INPUT_POLICY="DROP"\nMANAGE_BUILTINS=yes\n' >"$W/etc/default-ufw"
     printf 'COMPOSE_PROFILES=full\nCSF_UI=0\nCSF_UI_PASSWORD=secret\n' >"$W/engine/.env"
@@ -219,6 +228,66 @@ reset
 mkdir -p "$W/etc/csf"
 expect "an empty CSF dir: installed" "0" "$(run install)"
 expect "and the dir is cleared" "no" "$([ -d "$W/etc/csf" ] && echo yes || echo no)"
+# It reappears after install's Docker restart; core's apply on the new container clears it.
+reset
+mkdir -p "$W/etc/csf"
+expect "an empty CSF dir: applied" "0" "$(run apply)"
+expect "apply clears it" "no" "$([ -d "$W/etc/csf" ] && echo yes || echo no)"
+expect "and says so" "1" "$(grep -c "removed the empty $W/etc/csf" "$W/out")"
+# Anything left in it goes once the move has finished (its backup is there)
+# and nothing of CSF is installed or running.
+leftover() { reset; mkdir -p "$W/etc/csf"; echo leftover >"$W/etc/csf/notes.txt"; }
+gone() { [ -d "$W/etc/csf" ] && echo kept || echo removed; }
+leftover
+touch "$W/backups/panelalpha-csf-20261005101409.tgz"
+expect "a non-empty CSF dir after the move: applied" "0" "$(run apply)"
+expect "is removed" "removed" "$(gone)"
+expect "and says so" "1" "$(grep -c "removed $W/etc/csf, left behind after the move from CSF" "$W/out")"
+leftover
+expect "no CSF backup: applied" "0" "$(run apply)"
+expect "is kept" "kept" "$(gone)"
+expect "and says why" "1" "$(grep -c "kept $W/etc/csf: no $W/backups/panelalpha-csf-\*.tgz" "$W/out")"
+expect "install keeps it too, without a migration" "kept|0" "$(run install >/dev/null; gone)|$(calls csf-uninstall)"
+leftover
+touch "$W/backups/panelalpha-csf-20261005101409.tgz"
+printf '#!/bin/sh\nexit 0\n' >"$W/bin/csf" && chmod +x "$W/bin/csf"
+run apply >/dev/null
+expect "a csf binary still there: kept" "kept" "$(gone)"
+expect "and says why" "1" "$(grep -c "kept $W/etc/csf: csf is still installed" "$W/out")"
+leftover
+touch "$W/backups/panelalpha-csf-20261005101409.tgz" "$W/running-lfd"
+run apply >/dev/null
+expect "lfd still running: kept" "kept|1" "$(gone)|$(grep -c 'lfd is still running' "$W/out")"
+leftover
+touch "$W/backups/panelalpha-csf-20261005101409.tgz" "$W/loaded-csf"
+run apply >/dev/null
+expect "the csf service still installed: kept" "kept|1" "$(gone)|$(grep -c 'the csf service is still installed' "$W/out")"
+# A csf.conf left after the move goes too, or every later install would migrate again.
+leftover
+echo 'TESTING = "0"' >"$W/etc/csf/csf.conf"
+touch "$W/backups/panelalpha-csf-20261005101409.tgz"
+expect "csf.conf after the move: applied" "0" "$(run apply)"
+expect "is removed" "removed" "$(gone)"
+leftover
+echo 'TESTING = "0"' >"$W/etc/csf/csf.conf"
+touch "$W/backups/panelalpha-csf-20261005101409.tgz"
+run install >/dev/null
+expect "install removes it instead of migrating again" "removed|0" "$(gone)|$(grep -c 'replacing CSF with ufw' "$W/out")"
+leftover
+echo 'TESTING = "0"' >"$W/etc/csf/csf.conf"
+run apply >/dev/null
+expect "csf.conf with no backup: kept" "kept|1" "$(gone)|$(grep -c "kept $W/etc/csf: no $W/backups/panelalpha-csf-\*.tgz" "$W/out")"
+leftover
+echo 'TESTING = "0"' >"$W/etc/csf/csf.conf"
+touch "$W/backups/panelalpha-csf-20261005101409.tgz"
+printf '#!/bin/sh\nexit 0\n' >"$W/bin/csf" && chmod +x "$W/bin/csf"
+run apply >/dev/null
+expect "csf.conf with a csf binary: kept" "kept|1" "$(gone)|$(grep -c "kept $W/etc/csf: csf is still installed" "$W/out")"
+# A host still on CSF is not touched by apply.
+reset
+csf '' ''
+run apply >/dev/null
+expect "apply leaves a live CSF alone" "yes" "$([ -f "$W/etc/csf/csf.conf" ] && echo yes || echo no)"
 
 # A rule ufw refuses is reported and the move goes on.
 reset
