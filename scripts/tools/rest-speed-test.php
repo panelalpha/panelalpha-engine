@@ -20,7 +20,7 @@
  * four have four different fixes.
  *
  * Usage:
- *   scripts/rest-speed-test.php --url=https://HOST:2011/api --token=TOKEN [flags]
+ *   scripts/tools/rest-speed-test.php --url=https://HOST:2011/api --token=TOKEN [flags]
  *
  *   --apps=a,b          Subset by fixture name (matomo,laravel,grav,nextjs,nestjs,express,go,java,django,fastapi)
  *   --modes=…           Which of the four measurements to run, in this order:
@@ -847,7 +847,7 @@ const PHASE_MODEL = [
     ],
     'deploy-files' => [
         // Named for the last thing it logs, which is not the same as what it
-        // spends its time on. Measured 2026-09-04 on 10.10.10.25: between
+        // spends its time on. Measured 2026-09-04 on a dev host: between
         // `Using default environment variables` and the next line the pipeline
         // writes, a Node deploy spends 13s with the host image present and 35s
         // without it — the difference being a `docker pull` of

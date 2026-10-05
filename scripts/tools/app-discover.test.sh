@@ -4,7 +4,7 @@
 # replayed with --reuse-raw and --no-enrich, so no source and no GitHub page is
 # read.
 #
-#   bash scripts/app-discover.test.sh
+#   bash scripts/tools/app-discover.test.sh
 
 set -uo pipefail
 

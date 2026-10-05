@@ -29,7 +29,7 @@ config/pure-ftpd/*
 webserver-config/*
 build/*
 # Runtime artifacts of an engine installed straight from a checkout — what
-# bootstrap-from-source.sh and scripts/engine-container.sh create in place.
+# bootstrap-from-source.sh and scripts/tools/engine-container.sh create in place.
 logs/
 
 # API test suite (tests/api) — build artifacts
@@ -41,13 +41,13 @@ tests/api/env/.env*
 !tests/api/env/.env.example
 
 # dind-test harness composer deps (composer.json/lock are tracked)
-scripts/dind-test/vendor
+scripts/tools/dind-test/vendor
 
 # The supported-apps backlog the batch runner works through, regenerated per
-# run by scripts/fetch-apps.py (it lists issues still unlabeled upstream, so it
-# is stale within minutes and differs per operator). scripts/app-support-batch.py
+# run by scripts/tools/fetch-apps.py (it lists issues still unlabeled upstream, so it
+# is stale within minutes and differs per operator). scripts/tools/app-support-batch.py
 # takes it as --apps; the token it is fetched with is not committed either.
-scripts/apps.json
+scripts/tools/apps.json
 
 # local editor / assistant state
 .idea/

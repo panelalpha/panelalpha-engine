@@ -35,7 +35,7 @@ function endPhase(string $name): string
 
 // ── Bootstrap Laravel from core/ ──────────────────────────────────────────
 
-$coreRoot = realpath(__DIR__ . '/../..') . '/core';
+$coreRoot = realpath(__DIR__ . '/../../..') . '/core';
 require $coreRoot . '/vendor/autoload.php';
 $app = require $coreRoot . '/bootstrap/app.php';
 $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
@@ -115,7 +115,7 @@ $accountDir = "{$testBaseDir}/{$containerName}";
 // (/var/cache/panelalpha/projects is not a core-container volume); keep that
 // property here rather than nesting it inside the account home.
 $hostCacheDir = $diskBase . '/cache-' . $name;
-$engineRoot   = realpath(__DIR__ . '/../..');
+$engineRoot   = realpath(__DIR__ . '/../../..');
 
 if ($useRealHome && !is_dir($accountDir)) {
     fwrite(STDERR, "\033[0;31m✗ --real-home needs {$accountDir} to exist and be yours. Run:\033[0m\n");

@@ -7,14 +7,14 @@
 # host. Hosting accounts still get their own nested Docker daemon; they just
 # ask for privilege instead of sysbox, because sysbox cannot nest.
 #
-#   bash scripts/engine-container.sh up          # build, start, install
-#   bash scripts/engine-container.sh up --installer   # via installer.sh, not bootstrap
-#   bash scripts/engine-container.sh up -p 80:80 -p 443:443   # publish tenant ports
-#   bash scripts/engine-container.sh shell       # a shell inside it
-#   bash scripts/engine-container.sh test        # run scripts/ci-deploy-test.sh in it
-#   bash scripts/engine-container.sh logs        # follow the install/journal
-#   bash scripts/engine-container.sh down        # remove it, keep the image
-#   bash scripts/engine-container.sh destroy     # remove it and its volumes
+#   bash scripts/tools/engine-container.sh up          # build, start, install
+#   bash scripts/tools/engine-container.sh up --installer   # via installer.sh, not bootstrap
+#   bash scripts/tools/engine-container.sh up -p 80:80 -p 443:443   # publish tenant ports
+#   bash scripts/tools/engine-container.sh shell       # a shell inside it
+#   bash scripts/tools/engine-container.sh test        # run scripts/tools/ci-deploy-test.sh in it
+#   bash scripts/tools/engine-container.sh logs        # follow the install/journal
+#   bash scripts/tools/engine-container.sh down        # remove it, keep the image
+#   bash scripts/tools/engine-container.sh destroy     # remove it and its volumes
 #
 # `up` is idempotent: run it again after editing the tree and it redeploys.
 #
@@ -34,7 +34,7 @@
 
 set -euo pipefail
 
-ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
 NAME="${ENGINE_CONTAINER_NAME:-engine-container}"
 IMAGE="${ENGINE_CONTAINER_IMAGE:-panelalpha/engine-container:local}"
 HOME_VOLUME="${NAME}-home"
@@ -211,7 +211,7 @@ assert_home_is_a_volume() {
         die "/home inside ${NAME} is '${fstype:-the container overlay}', not a real filesystem.
     Account Docker daemons will start, pull images, and then fail every
     container start with 'invalid argument'. Recreate with a volume at /home:
-    bash scripts/engine-container.sh destroy && bash scripts/engine-container.sh up"
+    bash scripts/tools/engine-container.sh destroy && bash scripts/tools/engine-container.sh up"
         ;;
     *) step "/home is backed by ${fstype} — account daemons can mount overlays" ;;
     esac
@@ -343,9 +343,9 @@ report() {
     step "Engine is up in ${NAME}"
     echo "  API           https://127.0.0.1:${API_PORT}  (self-signed)"
     echo "  container IP  ${ip}"
-    echo "  a shell       bash scripts/engine-container.sh shell"
+    echo "  a shell       bash scripts/tools/engine-container.sh shell"
     echo "  artisan       docker exec -w ${GUEST_DIR} ${NAME} docker compose exec -T core php artisan list"
-    echo "  a deploy test bash scripts/engine-container.sh test"
+    echo "  a deploy test bash scripts/tools/engine-container.sh test"
     echo
     warn "Accounts here run privileged inside this container, not on sysbox."
     warn "Safe for the host, but accounts are not isolated from each other. CI and dev only."
@@ -364,14 +364,14 @@ up)
     report
     ;;
 shell)
-    exists || die "${NAME} does not exist. Run: bash scripts/engine-container.sh up"
+    exists || die "${NAME} does not exist. Run: bash scripts/tools/engine-container.sh up"
     docker exec -it -w "$GUEST_DIR" "$NAME" bash
     ;;
 test)
-    running || die "${NAME} is not running. Run: bash scripts/engine-container.sh up"
-    step "Running scripts/ci-deploy-test.sh inside ${NAME}"
+    running || die "${NAME} is not running. Run: bash scripts/tools/engine-container.sh up"
+    step "Running scripts/tools/ci-deploy-test.sh inside ${NAME}"
     docker exec -w "$GUEST_DIR" "$NAME" \
-        bash "${GUEST_DIR}/scripts/ci-deploy-test.sh" "${BOOTSTRAP_ARGS[@]+"${BOOTSTRAP_ARGS[@]}"}"
+        bash "${GUEST_DIR}/scripts/tools/ci-deploy-test.sh" "${BOOTSTRAP_ARGS[@]+"${BOOTSTRAP_ARGS[@]}"}"
     ;;
 logs)
     exists || die "${NAME} does not exist"

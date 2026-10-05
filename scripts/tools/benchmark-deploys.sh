@@ -14,13 +14,13 @@
 # a cache regression, and totals alone hide it behind ordinary variance.
 #
 # Usage:
-#   scripts/benchmark-deploys.sh [--host root@HOST] [--apps a,b] [--keep] [--json]
+#   scripts/tools/benchmark-deploys.sh [--host root@HOST] [--apps a,b] [--keep] [--json]
 #                                [--timeout SECONDS]   (per fixture, default 900)
 #
 # See AGENTS.md §9.
 set -uo pipefail
 
-HOST="${BENCH_HOST:-root@10.10.0.25}"
+HOST="${BENCH_HOST:?set BENCH_HOST to the engine host, e.g. root@engine.example.com}"
 CORE="${BENCH_CORE:-}"
 MIN_WARM_RATIO="${MIN_WARM_RATIO:-0.5}"
 # Bound every fixture. Without this one pathological repo stalls the suite

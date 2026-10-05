@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sync the working tree to a test engine host.
 #
-#   scripts/sync-engine.sh root@2.29.1.58 [--check]
+#   scripts/tools/sync-engine.sh root@a dev host [--check]
 #
 # The engine's `core` is bind-mounted (`./core -> /var/www/html`), so files
 # land in the running container the moment they are copied -- no rebuild, no
@@ -27,7 +27,7 @@ set -euo pipefail
 
 REMOTE="${1:?usage: sync-engine.sh root@HOST [--check]}"
 CHECK="${2:-}"
-ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
 DEST='/opt/panelalpha/shared-hosting'
 
 EXCLUDES=(
@@ -74,7 +74,7 @@ for f in \
   core/app/Lib/Deploy/DeployLog/FailureOutput.php \
   core/app/Lib/Deploy/Platform/Runtime/Php/PhpHostBuild.php \
   core/app/Http/Controllers/UserController.php \
-  scripts/app-support-batch.py \
+  scripts/tools/app-support-batch.py \
   config/core/images.yaml
 do
   L=$(md5sum "$ENGINE_DIR/$f" 2>/dev/null | cut -d' ' -f1)

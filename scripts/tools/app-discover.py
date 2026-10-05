@@ -22,7 +22,7 @@ lists, game servers, exporters). It is ranked by how many independent sources
 list it, then by stars.
 
 Usage:
-  python3 scripts/app-discover.py --tracker=tracker.json [--state=discover-state.json]
+  python3 scripts/tools/app-discover.py --tracker=tracker.json [--state=discover-state.json]
       [--out=candidates.json] [--min-stars=100] [--days=45] [--limit=60] [--only=src,src]
 
 --tracker is a JSON array of {iid, title, repo} (the tracker's Repository lines).

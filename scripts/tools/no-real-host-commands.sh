@@ -17,7 +17,7 @@
 # tests/Unit/Deploy. Widen it as other trees are brought up to the same standard.
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SHIM="$(mktemp -d)"
 LOG="$(mktemp)"
 trap 'rm -rf "$SHIM" "$LOG"' EXIT

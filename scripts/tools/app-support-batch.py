@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Batch app-support checker for the PanelAlpha engine.
 
-Reads an app list (JSON: [{iid, title, repo, ...}], e.g. scripts/apps.json)
+Reads an app list (JSON: [{iid, title, repo, ...}], e.g. scripts/tools/apps.json)
 and for each app:
   1. POST /api/source/inspect        -> resolve default branch + strategy (also proves cloneability)
   2. POST /api/projects              -> create account + deploy (async task)
@@ -39,7 +39,7 @@ Multiple instances are also possible, but only with disjoint slices:
 
 Usage:
   PA_API_URL=https://HOST:2011/api PA_API_TOKEN=TOKEN \
-    python3 scripts/app-support-batch.py --apps=scripts/apps.json [--only=slug] \
+    python3 scripts/tools/app-support-batch.py --apps=scripts/tools/apps.json [--only=slug] \
         [--limit=N] [--skip=slug] [--keep] [--redo] [--timeout=1800] \
         [--parallel=4] [--shard=1/4 --email=app-support-shard1@example.com]
 """
@@ -140,7 +140,7 @@ UNFINISHED_VERDICTS = frozenset({
     # cancel. Recording it as `deploy-failed` reads as "this app does not work"
     # and hides it from every later run.
     #
-    # Measured on 2.29.1.58: a queue container restart interrupted six deploys
+    # Measured on a dev host: a queue container restart interrupted six deploys
     # mid-clone, and all six were recorded `deploy-failed` with
     # `deploy=cancelled` -- depay, mafl, pigallery2, servas, bittorrenttracker,
     # zenkocloudserver. None of them is a fact about its app.
@@ -463,7 +463,7 @@ def test_app(app, outdir, timeout_s, keep, email=DEFAULT_EMAIL, memory_limit=Non
     # build legitimately needs longer than --timeout, and recording that as
     # `deploy-timeout` -- which resume then treats as a finished test -- both
     # misreports a working app and hides it from every later run. On
-    # 2.29.1.58 a host reboot left three apps recorded that way and skipped.
+    # a dev host a host reboot left three apps recorded that way and skipped.
     if status in ("running", "queued", "unknown"):
         for _ in range(3):
             time.sleep(20)

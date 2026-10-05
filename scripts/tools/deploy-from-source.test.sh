@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
-mkdir -p "$WORK_DIR/bin" "$WORK_DIR/src/scripts" "$WORK_DIR/src/tests/api/env" "$WORK_DIR/remote/tests/api/env" "$WORK_DIR/remote/core"
+mkdir -p "$WORK_DIR/bin" "$WORK_DIR/src/scripts/tools" "$WORK_DIR/src/tests/api/env" "$WORK_DIR/remote/tests/api/env" "$WORK_DIR/remote/core"
 cat >"$WORK_DIR/bin/ssh" <<'EOF'
 #!/bin/bash
 while [[ $1 == -* ]]; do shift; done
@@ -25,7 +25,7 @@ exec "$REAL_RSYNC" "\${args[@]}"
 EOF
 chmod +x "$WORK_DIR/bin/ssh" "$WORK_DIR/bin/rsync"
 
-cp "$SCRIPT_DIR/deploy-from-source.sh" "$WORK_DIR/src/scripts/"
+cp "$SCRIPT_DIR/deploy-from-source.sh" "$WORK_DIR/src/scripts/tools/"
 # The "bootstrap" records its argv, one argument per line.
 printf '#!/bin/bash\nprintf "%%s\\n" "$@" >"%s/argv"\n' "$WORK_DIR" >"$WORK_DIR/src/scripts/bootstrap-from-source.sh"
 echo 'EXAMPLE=new' >"$WORK_DIR/src/tests/api/env/.env.example"
@@ -42,7 +42,7 @@ expect() { # expect <label> <expected> <actual>
     fi
 }
 
-PATH="$WORK_DIR/bin:$PATH" bash "$WORK_DIR/src/scripts/deploy-from-source.sh" fakehost \
+PATH="$WORK_DIR/bin:$PATH" bash "$WORK_DIR/src/scripts/tools/deploy-from-source.sh" fakehost \
     --remote-dir "$WORK_DIR/remote" -- --services "core mail sites-dns" --domain "a'b \$HOME" >/dev/null 2>&1
 
 expect "a quoted --services value stays one argument" \
@@ -55,7 +55,7 @@ expect "pae configure's core/.env.pae-backup survives the upload" \
     'APP_KEY=before-last-configure' "$(cat "$WORK_DIR/remote/core/.env.pae-backup" 2>/dev/null)"
 
 rm -f "$WORK_DIR/argv"
-PATH="$WORK_DIR/bin:$PATH" bash "$WORK_DIR/src/scripts/deploy-from-source.sh" fakehost \
+PATH="$WORK_DIR/bin:$PATH" bash "$WORK_DIR/src/scripts/tools/deploy-from-source.sh" fakehost \
     --remote-dir "$WORK_DIR/remote" >/dev/null 2>&1
 expect "no bootstrap arguments pass none" "" "$(cat "$WORK_DIR/argv" 2>/dev/null)"
 

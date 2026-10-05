@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Post batch test results to GitLab: an evidence note plus a verdict label.
 
-Companion to scripts/app-support-batch.py. That script deliberately writes
+Companion to scripts/tools/app-support-batch.py. That script deliberately writes
 nothing to GitLab — it only produces /tmp/app-support/<slug>/result.json — so
 this one is the only thing that closes the loop: it reads those result records
 and, for every issue not already carrying a verdict label, posts the evidence
@@ -29,7 +29,7 @@ The target list may be given three ways:
   (neither)         every supported/unsupported target in the classification
 
 Usage:
-  python3 scripts/app-support-post.py [targets.json] [--iids=8,50] [--dry-run]
+  python3 scripts/tools/app-support-post.py [targets.json] [--iids=8,50] [--dry-run]
 """
 
 import argparse
@@ -40,8 +40,7 @@ import subprocess
 import sys
 import time
 
-MCP_URL = os.environ.get(
-    "MCP_URL", "http://autocode.modulesgarden.tech:4000/toolset/autocode/mcp")
+MCP_URL = os.environ.get("MCP_URL", "")
 # No default: this is a GitLab-writing credential, and one committed here would
 # be readable by anyone who clones the branch. Unset is a hard stop, not a
 # fallback -- a silent 401 halfway through a batch is worse than not starting.
@@ -113,6 +112,8 @@ def auth_config():
     long as the process lives, so every call would show the token to any local
     user. `-K -` keeps it on a pipe instead.
     """
+    if not MCP_URL:
+        sys.exit("MCP_URL is not set. Export the GitLab MCP endpoint first.")
     if not MCP_AUTH:
         sys.exit("MCP_AUTH is not set. Export it first, e.g.\n"
                  "  export MCP_AUTH='Bearer <token>'")
@@ -318,7 +319,7 @@ def evidence(rec):
             # The autoloader is looked up next to this script first -- the
             # poster runs from a checkout -- and falls back to the path inside
             # the engine container.
-            root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             for autoload in (os.path.join(root, "core", "vendor", "autoload.php"),
                              "/var/www/html/vendor/autoload.php"):
                 if not os.path.exists(autoload):
@@ -360,7 +361,7 @@ def note_body(rec, lines, fail_line, extra=None):
         body += ["", extra]
     body += ["", "---",
              "Tested by the automated app-support batch "
-             "(https://178.104.84.45:2011), 2026-09-11/12.",
+             "on a test engine, 2026-09-11/12.",
              f"Full per-app artifacts: `{OUT}/{rec['slug']}/` on the test box "
              "(REPORT.md, deploy.log, deploy-log.json, result.json)."]
     return "\n".join(body)

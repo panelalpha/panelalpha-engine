@@ -2,8 +2,8 @@
 # Upload this working tree to a host and bring the engine up from it, in one
 # command. Run it from your workstation, not from the engine host.
 #
-#   bash scripts/deploy-from-source.sh root@a dev host
-#   bash scripts/deploy-from-source.sh root@host -- --no-sysbox --ip 1.2.3.4
+#   bash scripts/tools/deploy-from-source.sh root@engine.example.com
+#   bash scripts/tools/deploy-from-source.sh root@host -- --no-sysbox --ip 1.2.3.4
 #
 # Everything after `--` is passed through to scripts/bootstrap-from-source.sh.
 # Re-run it after any local edit: the upload is incremental and the bootstrap
@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
 REMOTE_DIR='/opt/panelalpha/shared-hosting'
 DRY_RUN=0
 TARGET=''
@@ -65,7 +65,7 @@ EXCLUDES=(
     # The API suite's host config and token. Gitignored, so the uploading tree
     # never has it and --delete would remove it from the host on every sync.
     tests/api/env/.env tests/api/env/.env.*
-    scripts/dind-test/vendor
+    scripts/tools/dind-test/vendor
 )
 
 RSYNC_ARGS=(-az --delete --human-readable --info=stats1)

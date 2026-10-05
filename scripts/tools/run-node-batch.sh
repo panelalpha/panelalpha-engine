@@ -2,7 +2,7 @@
 # Run the Node.js app-support batch against a test engine host, with
 # observability that survives the shell that started it.
 #
-#   scripts/run-node-batch.sh <apps.json> <outdir> [--parallel=N] [--timeout=N]
+#   scripts/tools/run-node-batch.sh <apps.json> <outdir> [--parallel=N] [--timeout=N]
 #
 # Started detached (nohup), so progress has to be readable from the filesystem
 # rather than from a terminal. Three artifacts, all under <outdir>:
@@ -32,8 +32,8 @@ for arg in "$@"; do
   esac
 done
 
-ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-API_URL="${PA_API_URL:?set PA_API_URL, e.g. https://2.29.1.58:2011/api}"
+ENGINE_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
+API_URL="${PA_API_URL:?set PA_API_URL, e.g. https://203.0.113.58:2011/api}"
 : "${PA_API_TOKEN:?set PA_API_TOKEN}"
 export PA_API_URL PA_API_TOKEN
 
@@ -74,7 +74,7 @@ HEARTBEAT=$!
 trap 'kill $HEARTBEAT 2>/dev/null || true' EXIT
 
 set +e
-python3 "$ENGINE_DIR/scripts/app-support-batch.py" \
+python3 "$ENGINE_DIR/scripts/tools/app-support-batch.py" \
   --apps="$APPS" --outdir="$OUTDIR" --redo \
   --parallel="$PARALLEL" --timeout="$TIMEOUT" \
   --email="node-batch-$(date +%m%d)-@example.com" \

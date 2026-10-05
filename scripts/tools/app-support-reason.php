@@ -15,7 +15,7 @@
  * fix that has since landed.
  *
  * Usage:
- *   php scripts/app-support-reason.php <deploy.log> [<deploy.log> ...]
+ *   php scripts/tools/app-support-reason.php <deploy.log> [<deploy.log> ...]
  *
  * Run from the repository root (it needs core/vendor/autoload.php).
  *
@@ -23,7 +23,7 @@
  *   {"file": ..., "rule": ..., "message": ..., "selected_first": ...}
  */
 
-require __DIR__ . '/../core/vendor/autoload.php';
+require __DIR__ . '/../../core/vendor/autoload.php';
 
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\FailureOutput;

@@ -7,7 +7,7 @@ use App\Lib\Deploy\Platform\Strategies;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The fixture table in `scripts/benchmark-deploys.sh`.
+ * The fixture table in `scripts/tools/benchmark-deploys.sh`.
  *
  * Its expectations are strategy names, and a typo in one is a benchmark that
  * fails against a live host after twenty minutes of deploying. Checking them
@@ -26,7 +26,7 @@ class BenchmarkFixturesTest extends TestCase
      */
     private function fixtures(): array
     {
-        $script = dirname(__DIR__, 3) . '/../scripts/benchmark-deploys.sh';
+        $script = dirname(__DIR__, 3) . '/../scripts/tools/benchmark-deploys.sh';
         $this->assertFileExists($script, 'the benchmark script moved');
 
         $contents = (string) file_get_contents($script);

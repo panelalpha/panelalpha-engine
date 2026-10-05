@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch unlabeled supported-apps issues from GitLab into scripts/apps.json.
+"""Fetch unlabeled supported-apps issues from GitLab into scripts/tools/apps.json.
 
 Issues are selected from panelalpha/playground/supported-apps in creation
 order; those that already have a verdict in --outdir are skipped so the batch
@@ -7,7 +7,7 @@ runner works through the backlog one app at a time. `--reset` rebuilds the
 file from scratch.
 
 Usage:
-  GITLAB_TOKEN=TOKEN python3 scripts/fetch-apps.py [--outdir=DIR] [--limit=N] [--reset]
+  GITLAB_API=https://<gitlab>/api/v4 GITLAB_TOKEN=TOKEN python3 scripts/tools/fetch-apps.py [--outdir=DIR] [--limit=N] [--reset]
 """
 
 import argparse
@@ -19,7 +19,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 
-API = "https://git.modulesgarden.tech/api/v4"
+API = os.environ.get("GITLAB_API", "")
 PROJECT = "panelalpha%2Fplayground%2Fsupported-apps"
 TOKEN = os.environ.get("GITLAB_TOKEN", "")
 VERDICT_LABELS = ("Supported", "Unsupported")
@@ -84,7 +84,7 @@ def done_apps(outdir):
             done.add(normalise(rec.get("slug") or d))
     return done
     # NOTE: the batch runner skips apps by reading <outdir>/<slug>/result.json
-    # itself, so this set only matters when regenerating scripts/apps.json.
+    # itself, so this set only matters when regenerating scripts/tools/apps.json.
 
 
 def main():
@@ -97,8 +97,8 @@ def main():
     ap.add_argument("--reset", action="store_true",
                     help="ignore existing result records; rebuild the whole list")
     args = ap.parse_args()
-    if not TOKEN:
-        sys.exit("GITLAB_TOKEN required")
+    if not API or not TOKEN:
+        sys.exit("GITLAB_API and GITLAB_TOKEN required")
 
     done = set() if args.reset else done_apps(args.outdir)
 
@@ -141,11 +141,11 @@ def main():
         if args.limit and len(apps) >= args.limit:
             break
 
-    with open("scripts/apps.json", "w") as f:
+    with open("scripts/tools/apps.json", "w") as f:
         json.dump(apps, f, indent=1)
     print(f"{len(issues)} open issues read, {skipped} skipped (already labelled "
           f"Supported/Unsupported), {tested} already have a verdict in {args.outdir}, "
-          f"{len(apps)} queued -> scripts/apps.json")
+          f"{len(apps)} queued -> scripts/tools/apps.json")
     for a in apps[:20]:
         print(f"  #{a['iid']:>5} {a['title'][:40]:<40} {a['repo']}")
 

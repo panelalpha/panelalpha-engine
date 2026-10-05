@@ -95,7 +95,7 @@ of `npm test`.
 ## 2. Deploy tests (DinD)
 
 ```bash
-php scripts/dind-test/deploy.php <git-url|local-path> [flags]
+php scripts/tools/dind-test/deploy.php <git-url|local-path> [flags]
 ```
 
 Runs the **real** engine code (`Dind`, `DetectProjectStrategy`,
@@ -181,11 +181,11 @@ visible individually. That is the level to optimise at.
 
 ```bash
 # Phase 0 — GLOBAL SEED. One account, 11 base images. Paid ONCE.
-php scripts/dind-test/deploy.php <any-app> --real-home --name=NAME --seed-only
+php scripts/tools/dind-test/deploy.php <any-app> --real-home --name=NAME --seed-only
 
 # Then every app deploys into that seeded account:
-php scripts/dind-test/deploy.php <app> --real-home --name=NAME --reuse-container            # COLD
-php scripts/dind-test/deploy.php <app> --real-home --name=NAME --reuse-container --keep-cache # WARM
+php scripts/tools/dind-test/deploy.php <app> --real-home --name=NAME --reuse-container            # COLD
+php scripts/tools/dind-test/deploy.php <app> --real-home --name=NAME --reuse-container --keep-cache # WARM
 ```
 
 **Global seed is not a per-deploy cost.** It imports the `ImageCatalog` images
@@ -366,12 +366,12 @@ matches the project's lockfile — and nothing counts or stores it. So "how ofte
 was this cache used" cannot be answered from the product today.
 
 It *can* be measured from the cache registry's access log, which is what
-`scripts/dind-test/cache-usage.php` does:
+`scripts/tools/dind-test/cache-usage.php` does:
 
 ```bash
-MARK=$(php scripts/dind-test/cache-usage.php --mark)
-php scripts/dind-test/deploy.php <app> --real-home --name=NAME
-php scripts/dind-test/cache-usage.php --from=$MARK
+MARK=$(php scripts/tools/dind-test/cache-usage.php --mark)
+php scripts/tools/dind-test/deploy.php <app> --real-home --name=NAME
+php scripts/tools/dind-test/cache-usage.php --from=$MARK
 ```
 
 Distinguish the two columns; conflating them is the easy mistake:
@@ -585,16 +585,16 @@ reports, and scores a `CACHED` step as costing zero. Unit tests in
 ## 9. Validating deploy speed and the caches
 
 ```bash
-scripts/benchmark-deploys.sh                      # the whole fixture set
-scripts/benchmark-deploys.sh --apps benchphp --keep
-scripts/benchmark-deploys.sh --json               # for CI
+scripts/tools/benchmark-deploys.sh                      # the whole fixture set
+scripts/tools/benchmark-deploys.sh --apps benchphp --keep
+scripts/tools/benchmark-deploys.sh --json               # for CI
 ```
 
 > Measuring what an **API client** experiences instead — seven apps across
 > three runtimes (PHP 8.1 and 8.3, Node, Python), in four modes that differ by
 > one thing each (no prewarm → prewarmed → rebuild → restart), driven over REST
 > with a full per-phase breakdown of every run — is
-> [`scripts/rest-speed-test.php`](scripts/rest-speed-test.php). Both suites read
+> [`scripts/tools/rest-speed-test.php`](scripts/tools/rest-speed-test.php). Both suites read
 > the same `DeployTimings` numbers, so their results compare directly; this
 > section is the tool for engine work, that script for answering "how fast is
 > this host, from outside". Modes (no prewarm → prewarmed → rebuild → restart)
@@ -908,7 +908,7 @@ cold-deploy time.
 
 ### Reference figures (a dev host, 2026-08-28)
 
-Straight from `scripts/benchmark-deploys.sh`, both PHP base images present:
+Straight from `scripts/tools/benchmark-deploys.sh`, both PHP base images present:
 
 | Fixture | Strategy | Cold | Warm | Restart | Layers | Cached |
 |---|---|---|---|---|---|---|
@@ -1015,7 +1015,7 @@ git clone --depth 1 <url> /tmp/app && ls -A /tmp/app
 php scratch/detect.php /tmp/app
 
 # 3. Deploy it for real.
-php scripts/dind-test/deploy.php <src> --name=<app> --real-home --reuse-container
+php scripts/tools/dind-test/deploy.php <src> --name=<app> --real-home --reuse-container
 
 # 4. Verify the app, not the status code.
 docker exec dind-test-<app> curl -sSL -o /tmp/o.html -w '%{http_code}\n' http://127.0.0.1:8000/
