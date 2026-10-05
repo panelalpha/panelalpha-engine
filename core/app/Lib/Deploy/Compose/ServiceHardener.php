@@ -1093,7 +1093,7 @@ final class ServiceHardener
      * A host path the account's own services never get. An absolute source is
      * allowed only in the checkout or the account's ~/.panelalpha: everything
      * else is the account container's own (its /home holds the inner daemon's
-     * data-root, /run the s6 scan dir, /usr the binaries s6 runs as root), and
+     * data-root, /run its init's state, /usr the binaries its init runs as root), and
      * a list of what to refuse kept missing a path (/tmp, /srv). `/hostfs`
      * bound from `/` was the case that prompted the check.
      */

@@ -92,7 +92,7 @@ class DomainsCreate extends Command
         try {
             $domain->projectDomain()->create();
             $user->project()->syncPhpHandlersScripts();
-            $user->project()->runEntrypointScriptsSync();
+            $user->project()->syncServices();
 
             if ($upstreamHost !== null && $upstreamPort !== null) {
                 $this->proxyTo($user, $domain, $upstreamHost, $upstreamPort);

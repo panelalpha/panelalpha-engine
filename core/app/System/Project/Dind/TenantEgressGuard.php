@@ -38,7 +38,7 @@ final class TenantEgressGuard
 
     /**
      * That service's loop: every second until the inner daemon's DOCKER-USER is
-     * hooked, then every 15s. s6 runs it from services/egress-guard/run.
+     * hooked, then every 15s. The account's service manager runs it.
      */
     public const LOOP = 'while :; do [ -f /entrypoint.d/egress-guard.sh ] && sh /entrypoint.d/egress-guard.sh; '
         . 'if iptables -C DOCKER-USER -j PA-TENANT-EGRESS 2>/dev/null; then sleep 15; else sleep 1; fi; done';

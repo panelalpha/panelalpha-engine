@@ -43,7 +43,7 @@ final class AccountTemplate
         // Rendered from the account's state, not off: a rebuild re-renders the
         // template and used to leave a live tunnel with no connector.
         Cloudflare::renderConnector($model, Cloudflare::connectorWanted($model));
-        // The template is s6's; a re-rendered account keeps nothing of supervisord.
+        // A re-rendered account keeps nothing of the init it ran before.
         SupervisordServiceManager::removeLayout($this->project);
 
         $composePath = $this->bootstrapWelcomeApp($model);

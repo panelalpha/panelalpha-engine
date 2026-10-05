@@ -5,6 +5,7 @@ namespace App\System\Project\PhpHosting;
 use App\Models\User as ModelsUser;
 use App\System\ProcessRunner;
 use App\System\Project\PhpHosting;
+use App\System\Project\PhpHosting\Services\Service;
 
 final class LiteSpeedStack implements PhpStack
 {
@@ -34,9 +35,9 @@ final class LiteSpeedStack implements PhpStack
         return [];
     }
 
-    public function entrypointBackgroundScripts(PhpHosting $project): array
+    public function services(PhpHosting $project): array
     {
-        return $this->getEntrypointPhpScripts();
+        return $this->phpServices();
     }
 
     public function waitForAllRunning(PhpHosting $project, int $tries = 12, int $intervalSeconds = 5): void
@@ -46,35 +47,15 @@ final class LiteSpeedStack implements PhpStack
     public function restartPhpHandler(PhpHosting $project, string $phpVersion): void
     {
         $phpVersion = str_replace('.', '', $phpVersion);
-        if (S6Services::manages($project)) {
-            $this->system->runProcess($project->execArgv([
-                'sh', '-c', S6Services::restartScript("lsphp{$phpVersion}", FpmStack::EXIT_NOT_MANAGED),
-            ]));
-
-            return;
-        }
-        $this->system->runProcess([
-            'sudo',
-            'docker',
-            'compose',
-            '-f',
-            $project->composeFilePath(),
-            'exec',
-            '-T',
-            'php',
-            'bash',
-            '/entrypoint-runner.sh',
-            'restart',
-            "lsphp{$phpVersion}",
-        ]);
+        $this->system->runProcess($project->execArgv($project->services()->restartArgv("lsphp{$phpVersion}")));
     }
 
     /**
-     * @return array<string, string>
+     * @return list<Service>
      */
-    private function getEntrypointPhpScripts(): array
+    private function phpServices(): array
     {
-        $scriptFiles = [];
+        $services = [];
         $settings = $this->model->getLsPhpSettings();
         $children = $settings['PHP_LSAPI_CHILDREN'];
         $maxRequests = $settings['PHP_LSAPI_MAX_REQUESTS'];
@@ -91,9 +72,9 @@ final class LiteSpeedStack implements PhpStack
         foreach ($usedPhpVersions as $phpVersion) {
             $phpVersionShort = str_replace('.', '', $phpVersion);
             $command = "exec runuser -u {$this->model->username} -- env LSPHP_ENABLE_USER_INI=on PHP_LSAPI_CHILDREN={$children} PHP_LSAPI_MAX_REQUESTS={$maxRequests} /usr/local/lsws/lsphp{$phpVersionShort}/bin/lsphp -b *:90{$phpVersionShort}";
-            $scriptFiles["lsphp{$phpVersionShort}.sh"] = $command;
+            $services[] = new Service("lsphp{$phpVersionShort}", $command);
         }
 
-        return $scriptFiles;
+        return $services;
     }
 }

@@ -40,8 +40,10 @@ final class EnvironmentSetup
         $system->exec("sudo cp {$projectDir}/{$dockercompose} {$projectDir}/docker-compose.yml");
 
         $stack->applySettings($project);
-        $this->setupEntrypointInitScripts($project, $stack);
-        $this->setupEntrypointBackgroundScripts($project, $stack);
+        $manager = $project->services();
+        $services = $stack->services($project);
+        $this->setupEntrypointInitScripts($project, $stack, $manager->bootScripts($services));
+        $manager->write($services);
 
         $system->exec("sudo chown -R www-data:www-data {$projectDir}");
 
@@ -93,37 +95,19 @@ BASH;
         return ['useradd.sh' => $passwdEntryScript];
     }
 
-    private function setupEntrypointInitScripts(PhpHosting $project, PhpStack $stack): void
+    /**
+     * @param array<string, string> $bootScripts
+     */
+    private function setupEntrypointInitScripts(PhpHosting $project, PhpStack $stack, array $bootScripts): void
     {
         $scriptFiles = array_merge(
             $this->baseEntrypointInitScripts($project),
             $stack->entrypointInitScripts($project),
+            $bootScripts,
         );
         $dir = $project->system()->projectDirPath($project->username()) . '/entrypoint-init.d';
         $system = $project->system();
         $system->runProcess("sudo rm {$dir}/*.sh");
-        foreach ($scriptFiles as $name => $script) {
-            $file = "{$dir}/{$name}";
-            $system->filesystem()->filePutContents($file, $script);
-        }
-    }
-
-    public function syncEntrypointBackgroundScripts(PhpHosting $project, PhpStack $stack): void
-    {
-        $this->setupEntrypointBackgroundScripts($project, $stack);
-    }
-
-    private function setupEntrypointBackgroundScripts(PhpHosting $project, PhpStack $stack): void
-    {
-        $scriptFiles = $stack->entrypointBackgroundScripts($project);
-        if (S6Services::manages($project)) {
-            S6Services::render($project, $scriptFiles);
-
-            return;
-        }
-        $dir = $project->system()->projectDirPath($project->username()) . '/entrypoint.d';
-        $system = $project->system();
-        $system->runProcess("sudo mkdir -p {$dir} && sudo rm -f {$dir}/*.sh");
         foreach ($scriptFiles as $name => $script) {
             $file = "{$dir}/{$name}";
             $system->filesystem()->filePutContents($file, $script);

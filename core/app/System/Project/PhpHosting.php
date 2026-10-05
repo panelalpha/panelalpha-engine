@@ -12,7 +12,9 @@ use App\System\Project\PhpHosting\FpmApacheStack;
 use App\System\Project\PhpHosting\PhpRuntime;
 use App\System\Project\PhpHosting\PhpStack;
 use App\System\Project\PhpHosting\PhpStackResolver;
-use App\System\Project\PhpHosting\S6Services;
+use App\System\Project\PhpHosting\Services\RunnerServiceManager;
+use App\System\Project\PhpHosting\Services\S6ServiceManager;
+use App\System\Project\PhpHosting\Services\ServiceManager;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Yaml\Yaml;
 
@@ -216,16 +218,18 @@ class PhpHosting implements Runtime
         $this->fpmApache()?->deleteDomainConfig($this, $domainName);
     }
 
+    /**
+     * What keeps the account's processes up: s6, or the entrypoint runner on
+     * an account rendered before s6. Not cached: rendering the template changes it.
+     */
+    public function services(): ServiceManager
+    {
+        return S6ServiceManager::manages($this) ? new S6ServiceManager($this) : new RunnerServiceManager($this);
+    }
+
     public function reloadCron(): void
     {
-        if (S6Services::manages($this)) {
-            $this->system()->exec($this->execArgv(['s6-svc', '-r', S6Services::SCAN_DIR . '/cron']));
-
-            return;
-        }
-        $this->system()->exec(
-            "sudo docker compose -f {$this->composeFilePath()} exec -T php service cron restart"
-        );
+        $this->services()->reload('cron');
     }
 
     public function runEntrypointInitScripts(): void
@@ -235,16 +239,9 @@ class PhpHosting implements Runtime
         ]));
     }
 
-    public function runEntrypointScriptsSync(): void
+    public function syncServices(): void
     {
-        if (S6Services::manages($this)) {
-            $this->system()->runProcess($this->execArgv(['sh', '-c', S6Services::syncScript()]));
-
-            return;
-        }
-        $this->system()->runProcess(
-            "sudo docker compose -f {$this->composeFilePath()} exec -T php bash /entrypoint-runner.sh sync --all"
-        );
+        $this->services()->sync();
     }
 
     /**

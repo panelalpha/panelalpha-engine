@@ -345,7 +345,7 @@ class Cloudflare
             );
         }
 
-        // Legacy path from entrypoint-runner era.
+        // Legacy path from the account's previous init.
         self::removeConnectorToken($user);
 
         $details = $user->getDetails();
@@ -360,7 +360,7 @@ class Cloudflare
     }
 
     /**
-     * @deprecated Legacy file used by entrypoint-runner cloudflared.sh; kept for cleanup.
+     * @deprecated Legacy file the previous init's cloudflared.sh used; kept for cleanup.
      */
     public static function connectorEnvPath(User $user): string
     {

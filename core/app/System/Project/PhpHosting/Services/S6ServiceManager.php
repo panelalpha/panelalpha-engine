@@ -1,6 +1,6 @@
 <?php
 
-namespace App\System\Project\PhpHosting;
+namespace App\System\Project\PhpHosting\Services;
 
 use App\System\Project\PhpHosting;
 use InvalidArgumentException;
@@ -9,10 +9,9 @@ use InvalidArgumentException;
  * s6, as the PHP hosting template sets it up: `services/<name>/run` in the
  * project dir, mounted at {@see SOURCE_DIR} and copied to {@see SCAN_DIR} when
  * the account boots. The template ships redis and cron; the engine writes the
- * PHP handlers (and Apache) next to them. An account rendered before s6 has no
- * services/ and keeps the entrypoint runner until it is rendered again.
+ * PHP handlers (and Apache) next to them, every one in the foreground.
  */
-final class S6Services
+final class S6ServiceManager implements ServiceManager
 {
     /** Relative to the project dir. */
     public const SERVICES_DIR = 'services';
@@ -22,9 +21,6 @@ final class S6Services
 
     /** Where the account's s6-svscan scans. */
     public const SCAN_DIR = '/run/service';
-
-    /** What the entrypoint runner left in the project dir. */
-    private const RUNNER_LAYOUT = ['entrypoint.d', 'entrypoint-runner.sh'];
 
     /**
      * s6 starts each service in a session of its own, and the run file notes
@@ -49,29 +45,37 @@ final class S6Services
 
         SH;
 
+    public function __construct(private readonly PhpHosting $project)
+    {
+    }
+
+    /** Whether the account was rendered from the s6 template. */
     public static function manages(PhpHosting $project): bool
     {
         return is_dir($project->project()->projectDirPath() . '/' . self::SERVICES_DIR);
     }
 
-    /**
-     * Write each background script as a service, and drop the services the
-     * engine wrote before that are no longer wanted. The template's own
-     * services are left alone.
-     *
-     * @param array<string, string> $scripts `<name>.sh` => shell
-     */
-    public static function render(PhpHosting $project, array $scripts): void
+    public function bootScripts(array $services): array
     {
-        $system = $project->system();
-        $dir = $project->project()->projectDirPath() . '/' . self::SERVICES_DIR;
-        $templateDir = $system->projectFilesTemplateDirPath($project->userModel()->getTemplate()) . '/' . self::SERVICES_DIR;
+        return [];
+    }
+
+    /**
+     * Each service gets a run and a finish file. The template's own services
+     * are left alone; the runner's files, if the account still has them, go.
+     */
+    public function write(array $services): void
+    {
+        $system = $this->project->system();
+        $projectDir = $this->project->project()->projectDirPath();
+        $dir = $projectDir . '/' . self::SERVICES_DIR;
+        $templateDir = $system->projectFilesTemplateDirPath($this->project->userModel()->getTemplate()) . '/' . self::SERVICES_DIR;
 
         $wanted = [];
-        foreach ($scripts as $file => $script) {
-            $name = self::name(basename($file, '.sh'));
+        foreach ($services as $service) {
+            $name = self::name($service->name);
             $wanted[] = $name;
-            $system->filesystem()->filePutContents("{$dir}/{$name}/run", self::RUN_PREFIX . "{$script}\n", null, '755');
+            $system->filesystem()->filePutContents("{$dir}/{$name}/run", self::RUN_PREFIX . "{$service->command}\n", null, '755');
             $system->filesystem()->filePutContents("{$dir}/{$name}/finish", self::FINISH, null, '755');
         }
         foreach (glob($dir . '/*', GLOB_ONLYDIR) ?: [] as $path) {
@@ -81,9 +85,28 @@ final class S6Services
             }
         }
 
-        foreach (self::RUNNER_LAYOUT as $path) {
-            $system->exec(['sudo', 'rm', '-rf', $project->project()->projectDirPath() . '/' . $path]);
-        }
+        RunnerServiceManager::removeLayout($this->project);
+    }
+
+    public function sync(): void
+    {
+        $this->project->system()->runProcess($this->project->execArgv(['sh', '-c', self::syncScript()]));
+    }
+
+    public function reload(string $service): void
+    {
+        $this->project->system()->exec($this->project->execArgv(['s6-svc', '-r', self::SCAN_DIR . '/' . self::name($service)]));
+    }
+
+    public function restartArgv(string $service): array
+    {
+        return ['sh', '-c', self::restartScriptFor($service)];
+    }
+
+    /** s6 starts nothing it does not supervise, so there is no stray copy to stop. */
+    public function restartScript(string $service, string $mainProcess): string
+    {
+        return self::restartScriptFor($service);
     }
 
     /**
@@ -129,15 +152,17 @@ final class S6Services
 
     /**
      * Inside the account: restart $service with its current run file, or
-     * start it if it is not running yet. Exits $notManaged when services/ has
-     * no such service. Killed if it has not stopped after 10s, as the runner did.
+     * start it if it is not running yet. Exits EXIT_NOT_MANAGED when services/
+     * has no such service. Killed if it has not stopped after 10s, as the
+     * runner did.
      */
-    public static function restartScript(string $service, int $notManaged): string
+    public static function restartScriptFor(string $service): string
     {
         $name = self::name($service);
         $src = self::SOURCE_DIR . '/' . $name;
         $dst = self::SCAN_DIR . '/' . $name;
         $scan = self::SCAN_DIR;
+        $notManaged = self::EXIT_NOT_MANAGED;
 
         return <<<SH
             [ -f {$src}/run ] || exit {$notManaged}

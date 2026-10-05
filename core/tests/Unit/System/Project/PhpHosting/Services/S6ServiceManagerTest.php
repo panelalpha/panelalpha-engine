@@ -1,21 +1,23 @@
 <?php
 
-namespace Tests\Unit\System\Project\PhpHosting;
+namespace Tests\Unit\System\Project\PhpHosting\Services;
 
 use App\Models\User as ModelsUser;
 use App\System;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\PhpHosting;
-use App\System\Project\PhpHosting\EnvironmentSetup;
 use App\System\Project\PhpHosting\FpmApacheStack;
 use App\System\Project\PhpHosting\FpmStack;
-use App\System\Project\PhpHosting\S6Services;
+use App\System\Project\PhpHosting\LiteSpeedStack;
+use App\System\Project\PhpHosting\Services\RunnerServiceManager;
+use App\System\Project\PhpHosting\Services\S6ServiceManager;
+use App\System\Project\PhpHosting\Services\Service;
 use App\System\Services\Webserver;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 
-class S6ServicesTest extends TestCase
+class S6ServiceManagerTest extends TestCase
 {
     private string $root;
 
@@ -25,7 +27,7 @@ class S6ServicesTest extends TestCase
         $this->root = sys_get_temp_dir() . '/pa-php-s6-' . bin2hex(random_bytes(4));
         mkdir($this->root . '/users/alice', 0777, true);
         // The real template, so its own services are what render() must keep.
-        symlink(dirname(__DIR__, 6) . '/templates', $this->root . '/templates');
+        symlink(dirname(__DIR__, 7) . '/templates', $this->root . '/templates');
         $this->setCurrentWebserver('nginx');
     }
 
@@ -50,10 +52,12 @@ class S6ServicesTest extends TestCase
     public function test_an_account_rendered_before_s6_keeps_the_runner(): void
     {
         $project = $this->project();
-        $this->assertFalse(S6Services::manages($project));
+        $this->assertFalse(S6ServiceManager::manages($project));
+        $this->assertInstanceOf(RunnerServiceManager::class, $project->services());
 
         mkdir($this->projectDir() . '/services');
-        $this->assertTrue(S6Services::manages($project));
+        $this->assertTrue(S6ServiceManager::manages($project));
+        $this->assertInstanceOf(S6ServiceManager::class, $project->services());
     }
 
     public function test_handlers_become_services_and_the_templates_own_stay(): void
@@ -67,7 +71,7 @@ class S6ServicesTest extends TestCase
         file_put_contents("{$dir}/entrypoint.d/php-fpm7.4.sh", "exec php-fpm7.4 -F\n");
         file_put_contents("{$dir}/entrypoint-runner.sh", "#!/bin/bash\n");
 
-        S6Services::render($this->project(), ['php-fpm8.4.sh' => 'exec php-fpm8.4 -F']);
+        (new S6ServiceManager($this->project()))->write([new Service('php-fpm8.4', 'exec php-fpm8.4 -F')]);
 
         $this->assertSame("#!/bin/bash\necho \$\$ > sid\nexec php-fpm8.4 -F\n", file_get_contents("{$dir}/services/php-fpm8.4/run"));
         $this->assertSame('0755', substr(sprintf('%o', fileperms("{$dir}/services/php-fpm8.4/run")), -4));
@@ -88,7 +92,7 @@ class S6ServicesTest extends TestCase
     public function test_finish_kills_what_is_left_of_the_session(): void
     {
         $dir = $this->projectDir();
-        S6Services::render($this->project(), ['php-fpm8.4.sh' => 'exec php-fpm8.4 -F']);
+        (new S6ServiceManager($this->project()))->write([new Service('php-fpm8.4', 'exec php-fpm8.4 -F')]);
         $finish = "{$dir}/services/php-fpm8.4/finish";
 
         $leader = new Process(['setsid', 'sh', '-c', 'echo $$ > sid; sleep 60 >/dev/null 2>&1 & echo $! > orphan'], $dir);
@@ -106,17 +110,16 @@ class S6ServicesTest extends TestCase
         $outsider->stop(0);
     }
 
-    public function test_apache_is_a_service_on_s6_and_an_init_step_under_the_runner(): void
+    public function test_apache_runs_in_the_foreground_as_a_service(): void
     {
         $project = $this->project();
         $stack = new FpmApacheStack($project->system(), $project->userModel());
-
-        $this->assertSame('apache2ctl start', $stack->entrypointInitScripts($project)['20-apache.sh']);
-        $this->assertArrayNotHasKey('apache2.sh', $stack->entrypointBackgroundScripts($project));
-
         mkdir($this->projectDir() . '/services');
+        $services = new S6ServiceManager($project);
+
+        $this->assertSame([], $services->bootScripts($stack->services($project)));
         $this->assertArrayNotHasKey('20-apache.sh', $stack->entrypointInitScripts($project));
-        (new EnvironmentSetup())->syncEntrypointBackgroundScripts($project, $stack);
+        $services->write($stack->services($project));
 
         $run = (string) file_get_contents($this->projectDir() . '/services/apache2/run');
         $this->assertStringContainsString('. /etc/apache2/envvars', $run);
@@ -134,18 +137,38 @@ class S6ServicesTest extends TestCase
 
         $project->phpRuntime()->restartPhpHandler('8.4');
         $project->reloadCron();
-        $project->runEntrypointScriptsSync();
+        $project->syncServices();
 
         $prefix = ['docker', 'compose', '-f', $project->composeFilePath(), 'exec', '-T', 'php'];
-        $this->assertSame([...$prefix, 'bash', '-c', FpmStack::restartFpmS6Script('8.4')], $system->journal[0]);
+        $this->assertSame([...$prefix, 'bash', '-c', FpmStack::restartScript(new S6ServiceManager($project), '8.4')], $system->journal[0]);
         $this->assertSame([...$prefix, 's6-svc', '-r', '/run/service/cron'], $system->journal[1]);
-        $this->assertSame([...$prefix, 'sh', '-c', S6Services::syncScript()], $system->journal[2]);
+        $this->assertSame([...$prefix, 'sh', '-c', S6ServiceManager::syncScript()], $system->journal[2]);
         $this->assertStringNotContainsString('entrypoint-runner', implode("\n", array_merge(...$system->journal)));
+    }
+
+    public function test_lsphp_restarts_through_s6_and_nothing_stray_is_looked_for(): void
+    {
+        $system = $this->system();
+        $project = $this->project($system);
+        mkdir($this->projectDir() . '/services');
+        $system->journal = [];
+
+        (new LiteSpeedStack($system, $project->userModel()))->restartPhpHandler($project, '8.4');
+
+        $prefix = ['docker', 'compose', '-f', $project->composeFilePath(), 'exec', '-T', 'php'];
+        $this->assertSame([[...$prefix, 'sh', '-c', S6ServiceManager::restartScriptFor('lsphp84')]], $system->journal);
+        // s6 starts nothing it does not supervise, so the main process pattern goes unused.
+        $this->assertSame(
+            S6ServiceManager::restartScriptFor('php-fpm8.4'),
+            (new S6ServiceManager($project))->restartScript('php-fpm8.4', '^php-fpm: master')
+        );
+        $this->assertSame([], (new S6ServiceManager($project))->bootScripts([new Service('a', 'b', ['x.sh' => 'y'])]));
     }
 
     public function test_scripts_are_valid_sh(): void
     {
-        foreach ([S6Services::syncScript(), S6Services::restartScript('lsphp84', 3), FpmStack::restartFpmS6Script('8.4')] as $script) {
+        $fpm = FpmStack::restartScript(new S6ServiceManager($this->project()), '8.4');
+        foreach ([S6ServiceManager::syncScript(), S6ServiceManager::restartScriptFor('lsphp84'), $fpm] as $script) {
             exec('sh -n -c ' . escapeshellarg($script) . ' 2>&1', $out, $code);
             $this->assertSame(0, $code, implode("\n", $out));
         }
@@ -155,14 +178,14 @@ class S6ServicesTest extends TestCase
     {
         $this->assertStringStartsWith(
             '[ -f /etc/s6/account/php-fpm8.3/run ] || exit ' . FpmStack::EXIT_NOT_MANAGED,
-            FpmStack::restartFpmS6Script('8.3')
+            FpmStack::restartScript(new S6ServiceManager($this->project()), '8.3')
         );
     }
 
     /** s6-svscan keeps its own state in .s6-svscan; only the dirs sync retired may be removed. */
     public function test_sync_removes_only_what_it_retired(): void
     {
-        $script = S6Services::syncScript();
+        $script = S6ServiceManager::syncScript();
 
         $this->assertStringContainsString('mv "$d" /run/service/.retired-$n-$$', $script);
         $this->assertStringContainsString('for d in /run/service/.retired-*/; do', $script);
@@ -172,7 +195,7 @@ class S6ServicesTest extends TestCase
     public function test_a_name_that_is_not_a_plain_word_is_refused(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        S6Services::restartScript('x; rm -rf /', 3);
+        S6ServiceManager::restartScriptFor('x; rm -rf /');
     }
 
     private function alive(int $pid): bool

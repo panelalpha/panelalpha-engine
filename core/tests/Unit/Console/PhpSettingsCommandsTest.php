@@ -5,7 +5,10 @@ namespace Tests\Unit\Console;
 use App\Models\Domain;
 use App\Models\User;
 use App\System;
+use App\System\Project as ProjectAggregate;
+use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\FpmStack;
+use App\System\Project\PhpHosting\Services\RunnerServiceManager;
 use App\System\Services\Webserver;
 use Illuminate\Routing\Events\Routing;
 use Illuminate\Support\Facades\Artisan;
@@ -440,11 +443,16 @@ class PhpSettingsCommandsTest extends TestCase
 
     private function restartCount(string $version): int
     {
+        // The account has no services/, so it is on the runner.
+        $script = FpmStack::restartScript(
+            new RunnerServiceManager(new PhpHosting(new ProjectAggregate(new System(), new User()))),
+            $version
+        );
         /** @var System&object{processJournal: list<array<int, string>>} $system */
         $system = $this->system;
         $count = 0;
         foreach ($system->processJournal as $command) {
-            if (in_array(FpmStack::restartFpmScript($version), $command, true)) {
+            if (in_array($script, $command, true)) {
                 $count++;
             }
         }

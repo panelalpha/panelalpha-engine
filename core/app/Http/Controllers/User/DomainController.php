@@ -328,7 +328,7 @@ class DomainController extends Controller
         }
 
         $domain->getUser()->project()->syncPhpHandlersScripts();
-        $domain->getUser()->project()->runEntrypointScriptsSync();
+        $domain->getUser()->project()->syncServices();
 
         return new DomainResource($domain);
     }
@@ -473,7 +473,7 @@ class DomainController extends Controller
         $domain->projectDomain()->delete();
         $domain->delete();
         $domain->getUser()->project()->syncPhpHandlersScripts();
-        $domain->getUser()->project()->runEntrypointScriptsSync();
+        $domain->getUser()->project()->syncServices();
 
         return new DomainResource($domain);
     }

@@ -183,10 +183,10 @@ class Project
         }
     }
 
-    public function runEntrypointScriptsSync(): void
+    public function syncServices(): void
     {
         if ($this->runtime instanceof PhpHosting) {
-            $this->runtime->runEntrypointScriptsSync();
+            $this->runtime->syncServices();
         }
     }
 

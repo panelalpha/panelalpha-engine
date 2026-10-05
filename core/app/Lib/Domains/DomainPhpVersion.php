@@ -30,7 +30,7 @@ class DomainPhpVersion
         $domain->projectDomain()->rebuild();
 
         $domain->getUser()->project()->syncPhpHandlersScripts();
-        $domain->getUser()->project()->runEntrypointScriptsSync();
+        $domain->getUser()->project()->syncServices();
         // Nothing tells the caller about a pending reload; reloadWebserver() logs it.
         $system->reloadWebserver();
     }

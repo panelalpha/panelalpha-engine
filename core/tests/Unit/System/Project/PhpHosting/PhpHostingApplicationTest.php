@@ -8,6 +8,7 @@ use App\System\Project as ProjectAggregate;
 use App\System\Project\Dind\App as DindApp;
 use App\System\Project\PhpHosting;
 use App\System\Project\PhpHosting\FpmStack;
+use App\System\Project\PhpHosting\Services\RunnerServiceManager;
 use App\System\Services\Webserver;
 use PHPUnit\Framework\TestCase;
 
@@ -89,7 +90,7 @@ class PhpHostingApplicationTest extends TestCase
                 'php',
                 'bash',
                 '-c',
-                FpmStack::restartFpmScript('8.1'),
+                FpmStack::restartScript(new RunnerServiceManager($project), '8.1'),
             ],
             $system->processJournal[0]
         );
