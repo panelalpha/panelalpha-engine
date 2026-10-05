@@ -62,10 +62,10 @@ final class FpmStack implements PhpStack
             'php',
             'bash',
             '-c',
-            self::restartFpmScript($phpVersion),
+            S6Services::manages($project) ? self::restartFpmS6Script($phpVersion) : self::restartFpmScript($phpVersion),
         ]);
         if ($process->getExitCode() === self::EXIT_NOT_MANAGED) {
-            throw new PhpHandlerNotRunning("php-fpm{$phpVersion} is not run by the entrypoint runner of {$project->username()}");
+            throw new PhpHandlerNotRunning("php-fpm{$phpVersion} is not a service of {$project->username()}");
         }
         if (!$process->isSuccessful()) {
             $message = trim($process->getErrorOutput() ?: $process->getOutput());
@@ -88,13 +88,10 @@ final class FpmStack implements PhpStack
      */
     public static function restartFpmScript(string $phpVersion): string
     {
-        if (preg_match('/^\d+\.\d+$/', $phpVersion) !== 1) {
-            throw new \InvalidArgumentException("Invalid PHP version: {$phpVersion}");
-        }
-        $name = "php-fpm{$phpVersion}";
+        $name = 'php-fpm' . self::version($phpVersion);
         $notManaged = self::EXIT_NOT_MANAGED;
-        // Anchored, so it never matches this script's own `bash -c` command line.
-        $master = '^php-fpm: master process \\(/etc/php/' . str_replace('.', '\\.', $phpVersion) . '/fpm/';
+        $master = self::masterPattern($phpVersion);
+        $started = self::waitForMaster($phpVersion);
 
         return <<<BASH
             [ -f /entrypoint.d/{$name}.sh ] || exit {$notManaged}
@@ -107,8 +104,40 @@ final class FpmStack implements PhpStack
                 pkill -KILL -f '{$master}'
             fi
             bash /entrypoint-runner.sh start {$name} >/dev/null
+            {$started}
+            BASH;
+    }
+
+    /** {@see restartFpmScript()} for an account on s6, which starts nothing it does not supervise. */
+    public static function restartFpmS6Script(string $phpVersion): string
+    {
+        $restart = S6Services::restartScript('php-fpm' . self::version($phpVersion), self::EXIT_NOT_MANAGED);
+
+        return $restart . "\n" . self::waitForMaster($phpVersion);
+    }
+
+    private static function version(string $phpVersion): string
+    {
+        if (preg_match('/^\d+\.\d+$/', $phpVersion) !== 1) {
+            throw new \InvalidArgumentException("Invalid PHP version: {$phpVersion}");
+        }
+
+        return $phpVersion;
+    }
+
+    /** Anchored, so it never matches the command line of the script that runs it. */
+    private static function masterPattern(string $phpVersion): string
+    {
+        return '^php-fpm: master process \\(/etc/php/' . str_replace('.', '\\.', $phpVersion) . '/fpm/';
+    }
+
+    private static function waitForMaster(string $phpVersion): string
+    {
+        $master = self::masterPattern($phpVersion);
+
+        return <<<BASH
             for _ in \$(seq 20); do pgrep -f '{$master}' >/dev/null && exit 0; sleep 0.5; done
-            echo '{$name} did not start' >&2
+            echo 'php-fpm{$phpVersion} did not start' >&2
             exit 1
             BASH;
     }

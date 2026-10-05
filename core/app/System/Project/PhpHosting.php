@@ -12,6 +12,7 @@ use App\System\Project\PhpHosting\FpmApacheStack;
 use App\System\Project\PhpHosting\PhpRuntime;
 use App\System\Project\PhpHosting\PhpStack;
 use App\System\Project\PhpHosting\PhpStackResolver;
+use App\System\Project\PhpHosting\S6Services;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Yaml\Yaml;
 
@@ -217,6 +218,11 @@ class PhpHosting implements Runtime
 
     public function reloadCron(): void
     {
+        if (S6Services::manages($this)) {
+            $this->system()->exec($this->execArgv(['s6-svc', '-r', S6Services::SCAN_DIR . '/cron']));
+
+            return;
+        }
         $this->system()->exec(
             "sudo docker compose -f {$this->composeFilePath()} exec -T php service cron restart"
         );
@@ -224,16 +230,33 @@ class PhpHosting implements Runtime
 
     public function runEntrypointInitScripts(): void
     {
-        $this->system()->runProcess(
-            "sudo docker compose -f {$this->composeFilePath()} exec -T php bash /entrypoint-runner.sh init --all"
-        );
+        $this->system()->runProcess($this->execArgv([
+            'bash', '-c', 'for f in /entrypoint-init.d/*.sh; do [ -f "$f" ] && bash "$f"; done; true',
+        ]));
     }
 
     public function runEntrypointScriptsSync(): void
     {
+        if (S6Services::manages($this)) {
+            $this->system()->runProcess($this->execArgv(['sh', '-c', S6Services::syncScript()]));
+
+            return;
+        }
         $this->system()->runProcess(
             "sudo docker compose -f {$this->composeFilePath()} exec -T php bash /entrypoint-runner.sh sync --all"
         );
+    }
+
+    /**
+     * Run $command in the account's php service.
+     *
+     * @param list<string> $command
+     *
+     * @return list<string>
+     */
+    public function execArgv(array $command): array
+    {
+        return ['sudo', 'docker', 'compose', '-f', $this->composeFilePath(), 'exec', '-T', $this->defaultServiceName(), ...$command];
     }
 
     public function reloadApache(): void

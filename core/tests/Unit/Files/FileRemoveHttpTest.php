@@ -84,6 +84,34 @@ class FileRemoveHttpTest extends TestCase
         $this->assertSame(['rm', '-f', $this->tmpRoot . '/home/alice/file.txt'], $this->rmCall());
     }
 
+    public function test_a_link_whose_target_is_missing_is_removed(): void
+    {
+        symlink($this->tmpRoot . '/gone', $this->tmpRoot . '/home/alice/dangling');
+
+        $this->deleteJson('/api/projects/alice/files/remove?path=dangling')->assertOk();
+
+        $this->assertSame(['rm', '-f', $this->tmpRoot . '/home/alice/dangling'], $this->rmCall());
+    }
+
+    public function test_a_link_to_a_directory_outside_removes_the_link_without_recursive(): void
+    {
+        mkdir($this->tmpRoot . '/outside');
+        symlink($this->tmpRoot . '/outside', $this->tmpRoot . '/home/alice/out');
+
+        $this->deleteJson('/api/projects/alice/files/remove?path=out')->assertOk();
+
+        $this->assertSame(['rm', '-f', $this->tmpRoot . '/home/alice/out'], $this->rmCall());
+    }
+
+    public function test_a_missing_path_is_still_a_404_and_nothing_runs(): void
+    {
+        $this->deleteJson('/api/projects/alice/files/remove?path=nothing-here')
+            ->assertNotFound()
+            ->assertJson(['message' => 'Invalid path']);
+
+        $this->assertSame([], $this->system->processJournal);
+    }
+
     public function test_the_tool_forwards_recursive(): void
     {
         $response = (new FileDeleteTool())->handle(new Request([

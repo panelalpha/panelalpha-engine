@@ -165,7 +165,7 @@ RUN apt-get install -y \
   lsphp84-sybase \
   lsphp84-tidy
 
-RUN apt-get install -y msmtp
+RUN apt-get install -y msmtp s6
 RUN ln -sf /usr/bin/msmtp /usr/sbin/sendmail
 
 RUN rm -rf /var/lib/apt/lists/* && rm -rf /var/cache/apk/*

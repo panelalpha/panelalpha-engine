@@ -96,7 +96,8 @@ class FileController extends Controller
          */
         $params = $request->validated();
         $path = $user->project($system)->resolvePath($params['path']);
-        if (!file_exists($path)) {
+        // file_exists() follows a link; a link whose target is gone is still there to remove.
+        if (!file_exists($path) && !is_link($path)) {
             return new JsonResponse([
                 'message' => 'Invalid path',
             ], 404);

@@ -46,6 +46,13 @@ final class LiteSpeedStack implements PhpStack
     public function restartPhpHandler(PhpHosting $project, string $phpVersion): void
     {
         $phpVersion = str_replace('.', '', $phpVersion);
+        if (S6Services::manages($project)) {
+            $this->system->runProcess($project->execArgv([
+                'sh', '-c', S6Services::restartScript("lsphp{$phpVersion}", FpmStack::EXIT_NOT_MANAGED),
+            ]));
+
+            return;
+        }
         $this->system->runProcess([
             'sudo',
             'docker',

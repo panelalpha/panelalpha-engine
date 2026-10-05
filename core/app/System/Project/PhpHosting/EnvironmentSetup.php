@@ -116,6 +116,11 @@ BASH;
     private function setupEntrypointBackgroundScripts(PhpHosting $project, PhpStack $stack): void
     {
         $scriptFiles = $stack->entrypointBackgroundScripts($project);
+        if (S6Services::manages($project)) {
+            S6Services::render($project, $scriptFiles);
+
+            return;
+        }
         $dir = $project->system()->projectDirPath($project->username()) . '/entrypoint.d';
         $system = $project->system();
         $system->runProcess("sudo mkdir -p {$dir} && sudo rm -f {$dir}/*.sh");

@@ -195,7 +195,7 @@ RUN apt-get install -y \
   php8.4-apcu \
   php8.4-soap
 
-RUN apt-get install -y msmtp
+RUN apt-get install -y msmtp s6
 RUN ln -sf /usr/bin/msmtp /usr/sbin/sendmail
 
 # Clear apt

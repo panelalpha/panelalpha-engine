@@ -38,14 +38,24 @@ final class FpmApacheStack implements PhpStack
     {
         $scripts = [];
         $scripts['10-remoteip.sh'] = 'a2enmod remoteip 2>/dev/null || true';
-        $scripts['20-apache.sh'] = 'apache2ctl start';
+        if (!S6Services::manages($project)) {
+            $scripts['20-apache.sh'] = 'apache2ctl start';
+        }
 
         return $scripts;
     }
 
     public function entrypointBackgroundScripts(PhpHosting $project): array
     {
-        return (new FpmStack($this->system, $this->model))->entrypointBackgroundScripts($project);
+        $scripts = (new FpmStack($this->system, $this->model))->entrypointBackgroundScripts($project);
+        if (S6Services::manages($project)) {
+            // apache2ctl's own setup, then Apache in the foreground for s6.
+            $scripts['apache2.sh'] = '. /etc/apache2/envvars' . "\n"
+                . 'mkdir -p "$APACHE_RUN_DIR" "$APACHE_LOCK_DIR" "$APACHE_LOG_DIR"' . "\n"
+                . 'exec apache2 -DFOREGROUND';
+        }
+
+        return $scripts;
     }
 
     public function waitForAllRunning(PhpHosting $project, int $tries = 12, int $intervalSeconds = 5): void

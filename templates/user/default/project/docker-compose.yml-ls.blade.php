@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
-    image: ghcr.io/panelalpha/engine-user-php-ls:20260619
+    image: ghcr.io/panelalpha/engine-user-php-ls:v2.1.1
     pull_policy: missing
     restart: always
     hostname: {{ $user }}
@@ -16,9 +16,8 @@ services:
       - ./log:/var/log
       - ./crontabs/www-data:/var/spool/cron/crontabs/{{ $user }}
       - ./msmtp/msmtprc:/etc/msmtprc
-      - ./entrypoint.d/:/entrypoint.d/
+      - ./services/:/etc/s6/account/:ro
       - ./entrypoint-init.d/:/entrypoint-init.d/
-      - ./entrypoint-runner.sh:/entrypoint-runner.sh
 @foreach ($php_versions as $php_version)
       - ./php/{{ $php_version }}/default.ini:/usr/local/lsws/lsphp{{ str_replace(".", "", $php_version) }}/etc/php/{{ $php_version }}/mods-available/90-panelalpha-default.ini
       - ./php/{{ $php_version }}/custom.ini:/usr/local/lsws/lsphp{{ str_replace(".", "", $php_version) }}/etc/php/{{ $php_version }}/mods-available/91-panelalpha-custom.ini

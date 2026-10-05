@@ -1,0 +1,5 @@
+#!/bin/sh
+# What Debian's init script did, in the foreground.
+install -d -o redis -g redis -m 755 /run/redis
+umask 007
+exec s6-setuidgid redis redis-server /etc/redis/redis.conf --daemonize no
