@@ -45,8 +45,11 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
         $compiledRules = $compiler->compile($domains);
 
         // Render custom proxy rules (persisted, non-generated rules)
-        $this->renderProxyRuleVhosts($compiledRules['http']);
-        $this->renderStreamRules($compiledRules['stream']);
+        // `*` takes IPv6 too where the main config listens on it; an IPv4-only host cannot bind [::].
+        $listenIpv6 = $this->getAllIpsVars()['ips_v6'] !== [];
+        $this->renderProxyRuleVhosts($compiledRules['http'], $listenIpv6);
+        $this->renderStreamRules($compiledRules['stream'], $listenIpv6);
+        $this->syncProxyRulePorts([...$compiledRules['http'], ...$compiledRules['stream']]);
 
         // Render domain vhost configs (generated defaults)
         $this->rebuildDomainConfigs($domains);
@@ -159,14 +162,14 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
      *
      * nginx retries a failed bind five times at 500ms, so give it a moment
      * before concluding anything.
+     *
+     * The restart runs here rather than through `at`: a host without `at`
+     * dropped the queued one silently and stayed on wildcard sockets for good.
      */
     private function ensureReloadApplied(): void
     {
-        for ($attempt = 0; $attempt < 3; $attempt++) {
-            if ($this->listenersMatchConfig()) {
-                return;
-            }
-            sleep(2);
+        if ($this->listenersSettle()) {
+            return;
         }
 
         Log::warning(
@@ -174,7 +177,38 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
             . 'the rendered config, so the webserver is still serving the '
             . 'configuration it booted with. Restarting the container.'
         );
-        $this->system->webserver()->scheduleWebserverReloadInBackground(true);
+        try {
+            $this->system->webserver()->restartWebserverContainerFromHost();
+        } catch (\Throwable $e) {
+            Log::error('nginx-proxy restart after a failed reload did not run: ' . $e->getMessage());
+            return;
+        }
+
+        if (!$this->listenersSettle()) {
+            Log::error(
+                'nginx-proxy still does not listen where the rendered config says after a restart; '
+                . 'sites added since it started are not being served.'
+            );
+        }
+    }
+
+    private function listenersSettle(): bool
+    {
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            if ($attempt > 0) {
+                $this->pauseBeforeRecheck();
+            }
+            if ($this->listenersMatchConfig()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function pauseBeforeRecheck(): void
+    {
+        sleep(2);
     }
 
     /**
@@ -494,7 +528,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
      * @param array<array> $httpRules HTTP rules from RoutingCompiler
      * @psalm-param list<HttpRule> $httpRules
      */
-    private function renderProxyRuleVhosts(array $httpRules): void
+    private function renderProxyRuleVhosts(array $httpRules, bool $listenIpv6): void
     {
         $vhostsDir = $this->domainsConfigsDirPath();
         $this->system->exec("sudo mkdir -p {$vhostsDir}");
@@ -561,7 +595,7 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
             }
 
             // Render using custom proxy rule template (or inline)
-            $vhostConfig = $this->renderHttpProxyRule($templateVars);
+            $vhostConfig = self::renderHttpProxyRule($templateVars, $listenIpv6);
             $this->system->filesystem()->filePutContents($configPath, $vhostConfig);
         }
     }
@@ -581,15 +615,13 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
      *   ssl_cert_key_file?: ?string
      * } $vars
      */
-    private function renderHttpProxyRule(array $vars): string
+    public static function renderHttpProxyRule(array $vars, bool $listenIpv6 = false): string
     {
         $serverNames = implode(' ', $vars['server_names']);
-        $listenDirective = '';
-        if ($vars['listen_ip'] !== '*') {
-            $listenDirective = "{$vars['listen_ip']}:{$vars['listen_port']}";
-        } else {
-            $listenDirective = "{$vars['listen_port']}";
-        }
+        $ip = $vars['listen_ip'];
+        // Log names keep the bare address; only `listen` needs the IPv6 brackets.
+        $listenDirective = $ip === '*' ? (string) $vars['listen_port'] : "{$ip}:{$vars['listen_port']}";
+        $listenAddress = str_contains($ip, ':') ? "[{$ip}]:{$vars['listen_port']}" : $listenDirective;
 
         $sslConfig = '';
         if (
@@ -608,7 +640,12 @@ NGINX;
         $upstreamProtocol = $vars['upstream_protocol'] ?? 'http';
         $scheme = $upstreamProtocol === 'https' ? 'https' : 'http';
 
-        $listenWithSsl = $listenDirective . ($vars['ssl_enabled'] ? ' ssl' : '');
+        $ssl = $vars['ssl_enabled'] ? ' ssl' : '';
+        $listen = "listen {$listenAddress}{$ssl};";
+        // nginx binds [::] ipv6only by default, so it does not clash with the IPv4 wildcard.
+        if ($ip === '*' && $listenIpv6) {
+            $listen .= "\n    listen [::]:{$vars['listen_port']}{$ssl};";
+        }
 
         return <<<NGINX
 upstream upstream-{$vars['id']}-{$vars['upstream_host']}-{$vars['upstream_port']} {
@@ -617,7 +654,7 @@ upstream upstream-{$vars['id']}-{$vars['upstream_host']}-{$vars['upstream_port']
   server {$vars['upstream_host']}:{$vars['upstream_port']} resolve;
 }
 server {
-    listen {$listenWithSsl};
+    {$listen}
     server_name {$serverNames};
 
     access_log /var/log/nginx/proxy-rule-{$listenDirective}.access.log;
@@ -643,36 +680,92 @@ NGINX;
      * 
      * @psalm-param list<StreamRule> $streamRules
      */
-    private function renderStreamRules(array $streamRules): void
+    private function renderStreamRules(array $streamRules, bool $listenIpv6): void
     {
         $streamConfPath = $this->system->engineDirPath() . '/webserver-config/nginx-proxy/stream.conf';
+
+        // Always write the file (even if empty) to clear old rules
+        $this->system->filesystem()->filePutContents($streamConfPath, self::streamConfig($streamRules, $listenIpv6));
+    }
+
+    /**
+     * Keep the host firewall open for the ports the custom rules listen on.
+     *
+     * Only a host that has or had such a port touches the firewall: the
+     * marker lists what the last successful sync left open.
+     *
+     * @psalm-param list<HttpRule|StreamRule> $rules
+     */
+    public function syncProxyRulePorts(array $rules): void
+    {
+        $markerPath = $this->system->engineDirPath() . '/webserver-config/nginx-proxy/proxy-rule-ports';
+        $wanted = array_keys(ProxyRulePorts::allows($rules));
+        sort($wanted);
+        try {
+            $previous = trim($this->system->filesystem()->fileGetContents($markerPath));
+        } catch (\Throwable $e) {
+            $previous = '';
+        }
+        if ($wanted === [] && $previous === '') {
+            return;
+        }
+
+        if ($this->proxyRulePorts()->sync($rules)) {
+            $this->system->filesystem()->filePutContents($markerPath, implode("\n", $wanted) . "\n");
+        }
+    }
+
+    protected function proxyRulePorts(): ProxyRulePorts
+    {
+        return new ProxyRulePorts();
+    }
+
+    /**
+     * stream {} content for the custom tcp/udp rules.
+     *
+     * The upstream is resolved at run time, as the http rules' are: a name
+     * resolved at load (an account that is not running) makes nginx refuse
+     * the whole config, and an account's address changes when it is recreated.
+     *
+     * @psalm-param list<StreamRule> $streamRules
+     */
+    public static function streamConfig(array $streamRules, bool $listenIpv6 = false): string
+    {
         $config = "# Stream (TCP/UDP) rules\n";
 
         foreach ($streamRules as $rule) {
-            if ($rule['is_generated'] === false) {  // Only custom rules
-                $protocol = strtoupper($rule['transport']);
-                $listenDirective = '';
-                if ($rule['listen_ip'] !== '*') {
-                    $listenDirective = "{$rule['listen_ip']}:{$rule['listen_port']}";
-                } else {
-                    $listenDirective = "{$rule['listen_port']}";
-                }
+            if ($rule['is_generated'] !== false) {  // Only custom rules
+                continue;
+            }
+            $ip = $rule['listen_ip'];
+            $address = match (true) {
+                $ip === '*' => (string) $rule['listen_port'],
+                str_contains($ip, ':') => "[{$ip}]:{$rule['listen_port']}",
+                default => "{$ip}:{$rule['listen_port']}",
+            };
+            // tcp is nginx's default; `udp` is the only transport parameter it takes.
+            $udp = $rule['transport'] === 'udp' ? ' udp' : '';
+            $listen = "listen {$address}{$udp};";
+            if ($ip === '*' && $listenIpv6) {
+                $listen .= "\n    listen [::]:{$rule['listen_port']}{$udp};";
+            }
 
-                $config .= <<<NGINX
+            $config .= <<<NGINX
 
 upstream stream_proxy_{$rule['id']} {
-    server {$rule['upstream_host']}:{$rule['upstream_port']};
+    zone stream_upstreams 64k;
+    resolver 127.0.0.54 valid=30s;
+    server {$rule['upstream_host']}:{$rule['upstream_port']} resolve;
 }
 
 server {
-    listen {$listenDirective} {$protocol};
+    {$listen}
     proxy_pass stream_proxy_{$rule['id']};
 }
+
 NGINX;
-            }
         }
 
-        // Always write the file (even if empty) to clear old rules
-        $this->system->filesystem()->filePutContents($streamConfPath, $config);
+        return $config;
     }
 }

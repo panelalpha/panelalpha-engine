@@ -8,6 +8,7 @@ use OpenApi\Attributes as OA;
     schema: 'FirewallRule',
     properties: [
         new OA\Property(property: 'id', type: 'string', example: '3f2a9c41d0be', description: 'Derived from what the rule matches; stable while other rules change.'),
+        new OA\Property(property: 'scope', type: 'string', enum: ['host', 'published', 'both'], example: 'host', description: 'host: the host\'s own ports. published: ports Docker publishes, matched on the container\'s port and address. both: a deny on both, one rule of each kind.'),
         new OA\Property(property: 'action', type: 'string', enum: ['allow', 'deny'], example: 'allow', description: 'A rule written on the host may also say reject or limit.'),
         new OA\Property(property: 'direction', type: 'string', enum: ['in', 'out', 'both'], example: 'in', description: 'both: traffic from source coming in and to it going out, one rule.'),
         new OA\Property(property: 'protocol', type: 'string', enum: ['tcp', 'udp'], nullable: true, description: 'null is any.'),

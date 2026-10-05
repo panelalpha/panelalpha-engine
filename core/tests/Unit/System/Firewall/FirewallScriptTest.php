@@ -58,8 +58,12 @@ class FirewallScriptTest extends TestCase
 
         $public = array_filter($ports, fn (array $p): bool => !str_starts_with($p[1], '127.'));
         $this->assertCount(4, $public, '2011, 21, the FTP passive range and 2222');
+        $this->assertSame(1, preg_match('/^managed_route_rules\(\) \{\n(.*?)^\}/ms', $this->repo('scripts/firewall/ufw.sh'), $routes));
+        $ufw = $routes[1];
         foreach ($public as [$line, , $host, $container]) {
             $this->assertSame($host, $container, trim($line));
+            // Each gets the engine's route rule, or the hook drops it.
+            $this->assertStringContainsString('echo "' . str_replace('-', ':', $container) . ' tcp ', $ufw, trim($line));
         }
         // The template is what every install and update copies into config/sftp.
         $this->assertStringContainsString('sshd -D -e -p 2222', $this->repo('templates/config/sftp/entrypoint.sh'));

@@ -50,6 +50,7 @@ class FirewallRuleUpdateTool extends ApiTool
     {
         return [
             'action',
+            'scope',
             'direction',
             'protocol',
             'port',
@@ -67,12 +68,13 @@ class FirewallRuleUpdateTool extends ApiTool
         return [
             'id' => $schema->string()->required(),
             'action' => $schema->string()->description('One of: allow, deny.'),
-            'direction' => $schema->string()->description('One of: in, out, both.'),
-            'protocol' => $schema->string()->description('One of: tcp, udp.'),
-            'port' => $schema->string(),
-            'source' => $schema->string(),
-            'destination' => $schema->string(),
-            'comment' => $schema->string(),
+            'scope' => $schema->string()->description('One of: host, published, both.')->nullable(),
+            'direction' => $schema->string()->description('One of: in, out, both.')->nullable(),
+            'protocol' => $schema->string()->description('One of: tcp, udp.')->nullable(),
+            'port' => $schema->string()->nullable(),
+            'source' => $schema->string()->nullable(),
+            'destination' => $schema->string()->nullable(),
+            'comment' => $schema->string()->nullable(),
         ];
     }
 }

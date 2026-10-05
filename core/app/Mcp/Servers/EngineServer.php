@@ -12,7 +12,9 @@ use Laravel\Mcp\Server\Contracts\Transport;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Version;
+use Laravel\Mcp\Server\ServerContext;
 use Laravel\Mcp\Server\Tools\ToolSearch;
+use Laravel\Mcp\Transport\JsonRpcRequest;
 
 #[Name('PanelAlpha Engine')]
 #[Version('1.0.0')]
@@ -86,6 +88,8 @@ class EngineServer extends Server
 
     public int $defaultPaginationLength = 1000;
 
+    private ?PagedToolSearch $catalogue = null;
+
     public function __construct(Transport $transport)
     {
         parent::__construct($transport);
@@ -113,9 +117,20 @@ class EngineServer extends Server
         // The package builds a plain ToolSearch from that key, whose
         // search_tools cannot page; register the paged pair in its place.
         if (isset($this->tools[ToolSearch::class])) {
-            $catalogue = new PagedToolSearch($this->tools[ToolSearch::class]);
+            $this->catalogue = new PagedToolSearch($this->tools[ToolSearch::class]);
             unset($this->tools[ToolSearch::class]);
-            $this->tools = [...$this->tools, ...$catalogue->tools()];
+            $this->tools = [...$this->tools, ...$this->catalogue->tools()];
         }
+    }
+
+    protected function handleInitializeMessage(JsonRpcRequest $request, ServerContext $context): void
+    {
+        // The areas come from what this caller's catalogue holds, so the list
+        // cannot go stale and never names tools the token cannot reach.
+        if ($this->catalogue !== null) {
+            $context->instructions = rtrim($context->instructions) . "\n" . $this->catalogue->areasLine();
+        }
+
+        parent::handleInitializeMessage($request, $context);
     }
 }

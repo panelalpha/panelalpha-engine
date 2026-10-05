@@ -249,6 +249,21 @@ class Filesystem
         return is_numeric($process->getOutput()) ? (int)$process->getOutput() : null;
     }
 
+    /** Permission bits of $path, or null when there is no such file. */
+    public function mode(string $path): ?int
+    {
+        $process = $this->system->runProcess([
+            'sudo',
+            'stat',
+            '-c',
+            '%a',
+            $path,
+        ]);
+        $mode = trim($process->getOutput());
+
+        return $process->getExitCode() === 0 && preg_match('/\A[0-7]{3,4}\z/', $mode) === 1 ? (int) octdec($mode) : null;
+    }
+
     public function cat(string $path): ?string
     {
         $process = $this->system->runProcess([

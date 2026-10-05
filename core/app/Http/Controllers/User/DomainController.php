@@ -12,8 +12,11 @@ use App\Http\Resources\SslCertificateCollection;
 use App\Http\Resources\SslCertificateResource;
 use App\System;
 use App\Lib\Domains\NewDomain;
+use App\Lib\Mail\MailDnsRecords;
 use App\Lib\Ssl\ProjectCertificate;
 use App\Models\Domain;
+use App\Models\Ipv4NatMap;
+use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -154,6 +157,70 @@ class DomainController extends Controller
         }
 
         return new DomainResource($domain);
+    }
+
+    #[OA\Get(
+        path: '/projects/{username}/domains/{domain}/mail-dns',
+        summary: 'List and check the mail DNS records of a domain',
+        description: 'The SPF, DKIM, DMARC and MX records mail sent from this domain through this host needs. '
+            . 'With a relay sender domain set, mail is sent as that domain, and the records are its. '
+            . 'With check=1 each record is looked up and gets a status: ok, missing, wrong or unknown. '
+            . 'The engine does not sign mail; DKIM comes from a relay, whose selector dkim_selector checks.',
+        security: [['bearerAuth' => []]],
+        tags: ['Domains'],
+        parameters: [
+            new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'domain', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'check', in: 'query', required: false, description: 'Look the records up in DNS.', schema: new OA\Schema(type: 'boolean')),
+            new OA\Parameter(name: 'dkim_selector', in: 'query', required: false, description: 'The DKIM selector the relay signs with, to check its key.', schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Mail DNS records', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object')],
+            )),
+            new OA\Response(response: 404, description: 'Project or domain not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+    )]
+    public function mailDns(string $username, string $domain, Request $request): JsonResponse
+    {
+        $user = $this->projectOr404($username);
+
+        /** @var ?Domain */
+        $model = $user->domains()->getQuery()->where('domain', $domain)->first();
+        if (!$model) {
+            abort(new JsonResponse([
+                'message' => 'Domain not found',
+            ], 404));
+        }
+
+        /** @var array{dkim_selector?: ?string} $params */
+        $params = $request->validate([
+            'dkim_selector' => ['sometimes', 'nullable', 'string', 'max:63', 'regex:/^[a-z0-9_]([a-z0-9_-]*[a-z0-9])?(\.[a-z0-9_]([a-z0-9_-]*[a-z0-9])?)*$/i'],
+        ]);
+        $selector = isset($params['dkim_selector']) && $params['dkim_selector'] !== '' ? strtolower($params['dkim_selector']) : null;
+        $check = $request->boolean('check');
+
+        $exim = Setting::getEximConfig();
+        $relay = MailDnsRecords::relay($exim['smarthost_provider']);
+        $sending = MailDnsRecords::sendingDomain($model->domain, $exim['sender_domain']);
+        $ips = $relay === ''
+            ? MailDnsRecords::hostAddresses(Setting::get('default_ipv4'), Setting::get('default_ipv6'), Ipv4NatMap::getLocalToPublicMap())
+            : [];
+
+        $records = MailDnsRecords::usingDns();
+
+        return new JsonResponse([
+            'data' => [
+                'domain' => $model->domain,
+                'sending_domain' => $sending,
+                'relay' => $relay !== '' ? $relay : 'direct',
+                'checked' => $check,
+                'records' => $check
+                    ? $records->check($sending, $relay, $ips, $selector)
+                    : $records->expected($sending, $relay, $ips, $selector),
+            ],
+        ]);
     }
 
     #[OA\Post(

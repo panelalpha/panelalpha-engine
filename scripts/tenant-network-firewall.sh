@@ -41,6 +41,11 @@
 #   panelalpha-tenant-bind   after every Docker start: binds the ports at once.
 # Core's entrypoint and tenant-network service still apply it as before.
 
+# iptables-legacy gives up at once ("Another app is currently holding the
+# xtables lock") while Docker, ufw or fail2ban is changing rules; -w waits for
+# it, for at most 30 s. iptables-nft has no lock and ignores -w.
+iptables() { command iptables -w 30 "$@"; }
+
 CREATE=0
 RESTART=0
 BOOT=0
@@ -253,7 +258,7 @@ flock 9
     echo '-A PA-TENANT-INPUT -p tcp -m multiport --dports 25,80,443 -j ACCEPT'
     echo '-A PA-TENANT-INPUT -j REJECT --reject-with icmp-host-prohibited'
     echo 'COMMIT'
-} | iptables-restore --noflush || exit 1
+} | iptables-restore -w 30 --noflush || exit 1
 
 # DOCKER-USER is where Docker looks first and it survives a daemon restart.
 # FORWARD and INPUT as well, for a host where a flush removed Docker's chains.

@@ -109,7 +109,7 @@ class TenantNetworkTest extends TestCase
         $this->assertStringContainsString('--dports 25,80,443 -j ACCEPT', $script);
         $this->assertStringContainsString('for parent in DOCKER-USER FORWARD', $script);
         // Refilled in one transaction, never left empty.
-        $this->assertStringContainsString('iptables-restore --noflush', $script);
+        $this->assertStringContainsString('iptables-restore -w 30 --noflush', $script);
         // The proxy on the host reaches any app port past CSF's TCP_OUT.
         $this->assertStringContainsString('iptables -I OUTPUT -o "$BRIDGE" -j ACCEPT', $script);
         // Accounts take the upper half; the lower one holds the pinned services.

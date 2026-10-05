@@ -9,6 +9,7 @@ use App\Models\ProxyRule;
 use App\Rules\ListenIp;
 use App\Rules\ProxyServerName;
 use App\Rules\UpstreamHost;
+use App\System\Services\Webserver\ProxyListenPort;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -173,6 +174,10 @@ class ProxyRuleController extends Controller
             ]);
         }
 
+        if ($validated['enabled'] ?? true) {
+            $this->refuseUnusablePort($validated['transport'], $validated['listen_ip'] ?? '*', $validated['listen_port']);
+        }
+
         /** @var ProxyRule */
         $rule = ProxyRule::create([
             'owner_scope' => $ownerScope,
@@ -189,7 +194,7 @@ class ProxyRuleController extends Controller
             'metadata' => $validated['metadata'] ?? null,
         ]);
 
-        $system = new System();
+        $system = app(System::class);
         $system->webserver()->rebuildConfig();
         $system->webserver()->scheduleWebserverReloadInBackground();
 
@@ -237,9 +242,14 @@ class ProxyRuleController extends Controller
             'metadata' => ['nullable', 'array'],
         ]);
 
+        // Its port is the rule's own while it is enabled; only switching it on takes a new one.
+        if (($validated['enabled'] ?? false) && !$rule->enabled) {
+            $this->refuseUnusablePort($rule->transport, $rule->listen_ip ?? '*', $rule->listen_port);
+        }
+
         $rule->update($validated);
 
-        $system = new System();
+        $system = app(System::class);
         $system->webserver()->rebuildConfig();
         $system->webserver()->scheduleWebserverReloadInBackground();
 
@@ -270,11 +280,20 @@ class ProxyRuleController extends Controller
         }
         $rule->delete();
 
-        $system = new System();
+        $system = app(System::class);
         $system->webserver()->rebuildConfig();
         $system->webserver()->scheduleWebserverReloadInBackground();
 
         return new ProxyRuleResource($rule);
+    }
+
+    /** 422 for a port the engine or something else on the host already listens on. */
+    private function refuseUnusablePort(string $transport, string $listenIp, int $port): void
+    {
+        $refusal = (new ProxyListenPort(app(System::class)))->refusal($transport, $listenIp, $port);
+        if ($refusal !== null) {
+            throw ValidationException::withMessages(['listen_port' => $refusal]);
+        }
     }
 
     /**

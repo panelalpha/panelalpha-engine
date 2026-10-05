@@ -20,6 +20,11 @@
 # removed Docker's chains `docker network create` fails
 # ("iptables ... -A DOCKER-FORWARD ...: No chain/target/match by that name").
 
+# iptables-legacy gives up at once ("Another app is currently holding the
+# xtables lock") while Docker, ufw or fail2ban is changing rules; -w waits for
+# it, for at most 30 s. iptables-nft has no lock and ignores -w.
+iptables() { command iptables -w 30 "$@"; }
+
 CREATE=0
 if [ "${1:-}" = "--create" ]; then CREATE=1; shift; fi
 NET="${1:-panelalpha-build}"

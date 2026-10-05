@@ -62,11 +62,13 @@ rm -f "$W/flushed"
 FAKE
 cat >"$W/bin/iptables" <<FAKE
 #!/bin/bash
+# -w 30 (wait for the xtables lock) is recorded apart; a call without it in no-wait.
+if [ "\$1 \$2" = "-w 30" ]; then shift 2; else echo "iptables \$*" >>"$W/no-wait"; fi
 echo "iptables \$*" >>"$W/calls"
 case "\$*" in *" -C "* | "-C "* | *"-t nat -C"*) exit 1 ;; esac
 exit 0
 FAKE
-printf '#!/bin/bash\ncat >"%s/restore.in"\n' "$W" >"$W/bin/iptables-restore"
+printf '#!/bin/bash\necho "$*" >"%s/restore.args"\ncat >"%s/restore.in"\n' "$W" "$W" >"$W/bin/iptables-restore"
 printf '#!/bin/bash\necho "systemctl $*" >>"%s/calls"\n' "$W" >"$W/bin/systemctl"
 printf '#!/bin/bash\nexit 0\n' >"$W/bin/flock"
 chmod +x "$W/bin/"*
@@ -82,7 +84,7 @@ expect() { # expect <label> <expected> <actual>
 }
 reset() {
     rm -f "$W/routes" "$W/addrs" "$W/nets" "$W/tenants" "$W/flushed" "$W/calls" \
-        "$W/members" "$W/pids" "$W/hostlinks" "$W"/ns-* "$W/nft.in" "$W/restore.in" "$W/units"
+        "$W/members" "$W/pids" "$W/hostlinks" "$W"/ns-* "$W/nft.in" "$W/restore.in" "$W/restore.args" "$W/no-wait" "$W/units"
     printf 'default via 192.0.2.1 dev eth0\n10.10.0.0/20 dev eth0 proto kernel scope link src 10.10.0.25\n' >"$W/routes"
     printf '1: lo    inet 127.0.0.1/8 scope host lo\n2: eth0    inet 10.10.0.25/20 brd 10.10.15.255 scope global eth0\n' >"$W/addrs"
     printf 'COMPOSE_PROFILES=full\n' >"$W/env"
@@ -183,6 +185,7 @@ expect "Docker is never asked" "0" "$(grep -c '^docker' "$W/calls")"
 expect "the chains from the prefix in .env" "1" "$(grep -c -- '-d 10.250.0.2/32 -p tcp --dport 3306 -j ACCEPT' "$W/restore.in")"
 expect "DOCKER-USER made for Docker to keep" "1" "$(grep -c '^iptables -N DOCKER-USER' "$W/calls")"
 expect "and jumped to before Docker's own rules" "1" "$(grep -c '^iptables -I DOCKER-USER -i br-pa-tenants -j PA-TENANT-NET' "$W/calls")"
+expect "every iptables call waits for the xtables lock" "0|-w 30 --noflush" "$(cat "$W/no-wait" 2>/dev/null | wc -l)|$(cat "$W/restore.args")"
 expect "no port bound" "0" "$(grep -c 'elements' "$W/nft.in")"
 expect "so every port of the bridge is dropped" "1" "$(grep -c 'counter drop' "$W/nft.in")"
 expect "and says so" "1" "$(grep -c 'closed until its ports are bound' "$W/out")"

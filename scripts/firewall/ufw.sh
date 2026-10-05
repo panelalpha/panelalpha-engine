@@ -3,7 +3,8 @@
 #
 #   ufw.sh install         packages, CSF migration, defaults, the engine's ports,
 #                          the Docker hook, fail2ban; then enable. Idempotent.
-#   ufw.sh apply           the Docker hook only (core runs it when it starts)
+#   ufw.sh apply           the engine's route rules and the Docker hook (core runs
+#                          it when it starts)
 #   ufw.sh fail2ban        rewrite fail2ban's jails and reload it (trusted list changed)
 #   ufw.sh uninstall       disable ufw and remove the engine's hooks
 #   ufw.sh published-on|published-off   the hook, called by ufw itself
@@ -16,13 +17,17 @@
 # ufw does not filter Docker on its own. A port Docker publishes (2011, 21,
 # 2222, the FTP passive range) is DNATed in PREROUTING and forwarded to the
 # container, so it never reaches INPUT, where ufw's rules are: without more,
-# every published port is open to the world whatever ufw says. The hook sends
-# every new connection Docker DNATed from outside through ufw's user rules from
-# DOCKER-USER, and ends in ufw's default incoming policy. So a published port
-# is open only while a ufw rule allows it, and a deny rule -- or a fail2ban
-# ban -- covers it too. ufw's rules see the container's port, after the DNAT;
-# every port the engine publishes is the same on both sides for that reason
-# (SFTP listens on 2222 inside its container too).
+# every published port is open to the world whatever ufw says. Forwarded
+# traffic is what ufw's route rules are for, so the hook sends every new
+# connection Docker DNATed from outside through them (ufw-user-forward) from
+# DOCKER-USER, after the tenant network's rules, and drops what they do not
+# allow. A published port is open only while a route rule allows it
+# (`ufw route allow proto tcp to any port 8080`); the host's own rules
+# (`ufw allow 22`) never open one. By then the destination is the container's,
+# so a route rule names the container's port and address. The engine's own
+# published ports get managed route rules, and are the same on both sides for
+# that reason (SFTP listens on 2222 inside its container too). A fail2ban ban
+# is written as both kinds of rule.
 set -u
 
 ENGINE_DIR=${PA_ENGINE_DIR:-/opt/panelalpha/shared-hosting}
@@ -40,6 +45,12 @@ MANAGED="panelalpha:"
 say() { echo "firewall: $*"; }
 trim() { printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
 warn() { echo "firewall: $*" >&2; }
+# iptables-legacy gives up at once ("Another app is currently holding the
+# xtables lock") while Docker, ufw or fail2ban is changing rules, which left
+# the Docker hook half built; -w waits for it, for at most 30 s so that ufw's
+# start at boot cannot hang on it. iptables-nft has no lock and ignores -w.
+iptables() { command iptables -w 30 "$@"; }
+ip6tables() { command ip6tables -w 30 "$@"; }
 
 # Every port sshd is configured for, is listening on, or this session came in
 # on: enabling ufw without the right one locks the operator out.
@@ -59,6 +70,14 @@ managed_rules() {
     for p in $(ssh_ports); do echo "$p tcp ssh"; done
     echo "80 tcp http"
     echo "443 tcp https"
+    echo "2011 tcp engine api"
+    echo "21 tcp ftp"
+    echo "30000:30009 tcp ftp passive"
+    echo "2222 tcp sftp"
+}
+
+# The ports Docker publishes for the engine, as route rules: <port> <proto> <label>.
+managed_route_rules() {
     echo "2011 tcp engine api"
     echo "21 tcp ftp"
     echo "30000:30009 tcp ftp passive"
@@ -238,6 +257,7 @@ configure_ufw() {
         ufw allow proto "$proto" from any to any port "$port" comment "$MANAGED $label" >/dev/null ||
             warn "could not open $port/$proto ($label)"
     done < <(managed_rules)
+    route_rules
 
     # ufw runs these on start and stop; see the header.
     cat >"$UFW_DIR/before.init" <<EOF
@@ -260,6 +280,134 @@ EOF
     chmod 0750 "$UFW_DIR/before.init" "$UFW_DIR/after.init"
 }
 
+# ufw's rules as "<action> <proto> <dport> <dst> <sport> <src> <direction>
+# <comment as hex, or ->", from both rule files; a route rule's action is
+# route:<action>. Rules with an application profile have more fields and are
+# left out.
+tuples() {
+    cat "$UFW_DIR/user.rules" "$UFW_DIR/user6.rules" 2>/dev/null | awk '
+        $1 == "###" && $2 == "tuple" && $3 == "###" {
+            n = NF; c = "-"
+            if ($n ~ /^comment=/) { c = substr($n, 9); n-- }
+            if (n == 10) print $4, $5, $6, $7, $8, $9, $10, c
+        }'
+}
+
+unhex() { printf '%b' "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
+any() { case "$1" in 0.0.0.0/0 | ::/0) echo any ;; *) echo "$1" ;; esac; }
+
+# Whether the engine set this ufw up: its managed rules are there.
+ufw_is_ours() {
+    grep -q "comment=$(printf '%s' "$MANAGED" | od -An -tx1 | tr -d ' \n')" "$UFW_DIR/user.rules" 2>/dev/null
+}
+
+has_route_allow() { # <port> <proto>
+    tuples | awk -v p="$1" -v t="$2" '
+        function any(a) { return a == "any" || a == "0.0.0.0/0" || a == "::/0" }
+        $1 == "route:allow" && $2 == t && $3 == p && any($4) && any($6) && $7 == "in" { f = 1 }
+        END { exit !f }'
+}
+
+# Ports containers publish now, "<port[-port]> <proto>": the container's side
+# of each mapping, which is what route rules match.
+published_container_ports() {
+    docker ps --format '{{.Ports}}' 2>/dev/null | tr ',' '\n' |
+        sed -n 's/.*->\([0-9][0-9-]*\)\/\([a-z]*\).*/\1 \2/p' | sort -u
+}
+
+# Whether a rule's port (any, a port, a range, or a list of either) covers a
+# published port read from stdin, for its protocol.
+covers_published() { # <proto> <dport>
+    awk -v proto="$1" -v list="$2" '
+        BEGIN { n = split(list, r, ",") }
+        NF < 2 || (proto != "any" && $2 != proto) { next }
+        list == "any" { hit = 1; exit }
+        {
+            split($1, c, "-"); lo = c[1] + 0; hi = c[2] == "" ? lo : c[2] + 0
+            for (i = 1; i <= n; i++) {
+                split(r[i], q, ":"); a = q[1] + 0; b = q[2] == "" ? a : q[2] + 0
+                if (a <= hi && lo <= b) { hit = 1; exit }
+            }
+        }
+        END { exit !hit }'
+}
+
+# Before route rules, the hook judged published ports on the host's own rules,
+# at the container's port. Once, when the engine's route rules first go in: an
+# operator's allow that reached a port a container publishes now gets the same
+# rule as a route rule, so nothing reachable is cut off; every inbound deny gets
+# one too, as a deny made through the API now does, so nothing blocked opens.
+# Bans are mirror_bans' job. Each one is reported.
+convert_published() {
+    local ports rules action proto dport dst sport src dir hex comment words key
+    local -A seen=()
+    ports=$(published_container_ports)
+    # Read before ufw starts rewriting the files.
+    rules=$(tuples)
+    while read -r action proto dport dst sport src dir hex; do
+        case "$action" in allow | deny | reject) ;; *) continue ;; esac
+        [ "$dir" = in ] || continue
+        comment=
+        [ "$hex" = - ] || comment=$(unhex "$hex")
+        case "$comment" in "$MANAGED"* | 'by Fail2Ban'*) continue ;; esac
+        if [ "$action" = allow ]; then
+            [ -n "$ports" ] && printf '%s\n' "$ports" | covers_published "$proto" "$dport" || continue
+        fi
+        words=(route)
+        [ "$action" = allow ] || words+=(prepend)
+        words+=("$action")
+        [ "$proto" = any ] || words+=(proto "$proto")
+        words+=(from "$(any "$src")")
+        [ "$sport" = any ] || words+=(port "$sport")
+        words+=(to "$(any "$dst")")
+        [ "$dport" = any ] || words+=(port "$dport")
+        key="${words[*]}"
+        [ -z "${seen[$key]:-}" ] || continue
+        seen[$key]=1
+        [ -n "$comment" ] && words+=(comment "$comment")
+        if ufw "${words[@]}" </dev/null >/dev/null; then
+            say "carried over to published ports: ufw ${words[*]}"
+        else
+            warn "could not carry over to published ports: ufw ${words[*]}"
+        fi
+    done <<<"$rules"
+}
+
+# The engine's own published ports as route rules (see the header), put back
+# when missing; the first time they go in, the operator's rules are carried over.
+route_rules() {
+    local port proto label have=0
+    while read -r port proto label; do
+        has_route_allow "$port" "$proto" && have=1
+    done < <(managed_route_rules)
+    [ "$have" = 1 ] || convert_published
+    while read -r port proto label; do
+        has_route_allow "$port" "$proto" ||
+            ufw route allow proto "$proto" from any to any port "$port" comment "$MANAGED $label" </dev/null >/dev/null ||
+            warn "could not open published port $port/$proto ($label)"
+    done < <(managed_route_rules)
+}
+
+# A ban made before bans covered published ports, or by an action that only
+# writes the host's rule, gets its route rule; lifting the ban removes both.
+mirror_bans() {
+    local rules action proto dport dst sport src dir hex comment
+    local -A routed=()
+    rules=$(tuples)
+    while read -r action proto dport dst sport src dir hex; do
+        [ "$action" = route:deny ] && routed[$src]=1
+    done <<<"$rules"
+    while read -r action proto dport dst sport src dir hex; do
+        [ "$action $proto $dport $sport $dir" = "deny any any any in" ] && [ "$(any "$dst")" = any ] || continue
+        [ "$hex" != - ] && [ -z "${routed[$src]:-}" ] || continue
+        comment=$(unhex "$hex")
+        case "$comment" in 'by Fail2Ban'*) ;; *) continue ;; esac
+        routed[$src]=1
+        ufw route prepend deny from "$src" to any comment "$comment" </dev/null >/dev/null ||
+            warn "could not extend the ban on $src to published ports"
+    done <<<"$rules"
+}
+
 # fail2ban bans an address after failed logins on what the engine serves:
 #   sshd        the host's SSH, from the journal (ssh.service / sshd.service)
 #   sftp        the SFTP container's sshd: it logs to the host's journal as local5
@@ -270,8 +418,9 @@ EOF
 # Trusted addresses (the firewall API, CSF's old allow and ignore lists) are in
 # $F2B_DIR/panelalpha-ignoreip, one per line, "# comment" after it.
 configure_fail2ban() {
-    local ignore="127.0.0.1/8 ::1" api_log="$ENGINE_DIR/logs/core/nginx/api-access.log"
-    mkdir -p "$F2B_DIR/jail.d" "$F2B_DIR/filter.d" "$(dirname "$api_log")"
+    local ignore="127.0.0.1/8 ::1" api_log="$ENGINE_DIR/logs/core/nginx/api-access.log" actions
+    mkdir -p "$F2B_DIR/jail.d" "$F2B_DIR/filter.d" "$F2B_DIR/action.d" "$(dirname "$api_log")"
+    actions=$(ban_actions)
     touch "$F2B_DIR/panelalpha-ignoreip" "$api_log"
     ignore="$ignore $(awk '!/^[[:space:]]*(#|$)/ { print $1 }' "$F2B_DIR/panelalpha-ignoreip" | sort -u | tr '\n' ' ')"
 
@@ -304,17 +453,33 @@ failregex = ^<HOST> \S+ \S+ \[[^\]]*\] "[A-Z]+ /(?:api|mcp)\S* HTTP/[^"]*" 401
 ignoreregex =
 EOF
 
+    cat >"$F2B_DIR/action.d/panelalpha-ufw.conf" <<'EOF'
+# Written by the PanelAlpha engine: a ban is a ufw deny rule for the host and a
+# route deny rule for the ports Docker publishes; lifting it removes both.
+[Definition]
+actionstart =
+actionstop =
+actioncheck =
+actionban = ufw prepend deny from <ip> to any comment "<comment>"
+            ufw route prepend deny from <ip> to any comment "<comment>"
+actionunban = ufw delete deny from <ip> to any
+              ufw route delete deny from <ip> to any
+
+[Init]
+comment = by Fail2Ban after <failures> attempts against <name>
+EOF
+
     cat >"$F2B_DIR/jail.d/panelalpha.local" <<EOF
 # Written by the PanelAlpha engine (scripts/firewall/ufw.sh) on every install
 # and update, and when the firewall API changes the trusted addresses. Those
 # are in $F2B_DIR/panelalpha-ignoreip, one per line.
 #
 # Bans are ufw deny rules, so the firewall API lists them and removing one
-# lifts the ban. Through the engine's Docker hook they cover the ports Docker
-# publishes as well.
+# lifts the ban: one for the host and a route rule for the ports Docker
+# publishes (action.d/panelalpha-ufw.conf).
 [DEFAULT]
-banaction = ufw[blocktype=deny]
-banaction_allports = ufw[blocktype=deny]
+banaction = panelalpha-ufw
+banaction_allports = panelalpha-ufw
 bantime = 1h
 bantime.increment = true
 bantime.maxtime = 1w
@@ -326,6 +491,9 @@ ignoreip = ${ignore% }
 enabled = true
 filter = panelalpha-sshd
 backend = systemd
+# Repeated from the filter: Debian 13's jail.d/defaults-debian.conf sets one on
+# [sshd], which would win and count the SFTP container's sshd here as well.
+journalmatch = _SYSTEMD_UNIT=ssh.service + _SYSTEMD_UNIT=sshd.service
 port = $(ssh_ports | sed 's/ $//; s/ /,/g')
 
 [sftp]
@@ -350,45 +518,85 @@ port = 2011
 maxretry = 10
 EOF
     systemctl enable fail2ban >/dev/null 2>&1 || true
-    systemctl reload-or-restart fail2ban || warn "fail2ban did not start; see journalctl -u fail2ban"
+    # A plain reload keeps a running jail but drops its action when the action
+    # changed: the sshd jail fail2ban starts with on install (nftables or
+    # iptables) was left with none, logging bans it never applied. A new ban
+    # action gets a restart, which puts the bans back through it; otherwise the
+    # jails are restarted, which also repairs one an earlier reload left bare.
+    if ! systemctl is-active --quiet fail2ban || [ "$actions" != "$(ban_actions)" ]; then
+        systemctl restart fail2ban || warn "fail2ban did not start; see journalctl -u fail2ban"
+    else
+        fail2ban-client reload --restart >/dev/null || warn "fail2ban did not reload; see journalctl -u fail2ban"
+    fi
 }
 
-# ufw's DEFAULT_INPUT_POLICY, as the target that ends the hook.
-default_policy() {
-    case "$(sed -n 's/^DEFAULT_INPUT_POLICY="*\([A-Z]*\).*/\1/p' "$UFW_DEFAULTS" 2>/dev/null)" in
-    ACCEPT) echo RETURN ;;
+# What fail2ban bans with: the jail's ban action and the engine's action file.
+ban_actions() {
+    grep '^banaction' "$F2B_DIR/jail.d/panelalpha.local" 2>/dev/null
+    cat "$F2B_DIR/action.d/panelalpha-ufw.conf" 2>/dev/null
+}
+
+# What ends the hook: ufw's default for routed traffic, but never an accept --
+# only a route rule opens a published port.
+routed_policy() {
+    case "$(sed -n 's/^DEFAULT_FORWARD_POLICY="*\([A-Z]*\).*/\1/p' "$UFW_DEFAULTS" 2>/dev/null)" in
     REJECT) echo REJECT ;;
     *) echo DROP ;;
     esac
 }
 
-# The Docker hook. Connections from Docker's own bridges are left alone: those
-# are containers reaching a published port on the host's address, which the
-# tenant and build chains decide.
+# The Docker hook, PA-PUBLISHED in DOCKER-USER for new connections Docker
+# DNATed; established ones never enter it. Connections from Docker's own
+# bridges are left alone: those are containers reaching a published port on
+# the host's address, which the tenant and build chains decide. The chain is
+# replaced in one iptables-restore, so a rebuild never leaves published ports
+# unfiltered.
 published_on() {
-    local ipt prefix policy
-    policy=$(default_policy)
+    local ipt prefix policy last mine log
+    local jump=(-m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j "$CHAIN")
+    policy=$(routed_policy)
     for ipt in iptables ip6tables; do
         prefix=ufw
         [ "$ipt" = ip6tables ] && prefix=ufw6
-        "$ipt" -n -L "$prefix-user-input" >/dev/null 2>&1 || continue
+        "$ipt" -n -L "$prefix-user-forward" >/dev/null 2>&1 || continue
         if ! "$ipt" -n -L DOCKER-USER >/dev/null 2>&1; then
             # Before Docker starts at boot; Docker keeps a DOCKER-USER it finds.
             [ "$ipt" = iptables ] || continue
             "$ipt" -N DOCKER-USER || continue
         fi
-        "$ipt" -N "$CHAIN" 2>/dev/null || "$ipt" -F "$CHAIN"
-        "$ipt" -A "$CHAIN" -i docker0 -j RETURN
-        "$ipt" -A "$CHAIN" -i br-+ -j RETURN
-        "$ipt" -A "$CHAIN" -j "$prefix-user-input"
         # Logged as ufw logs its own default drops ([UFW BLOCK], rate-limited),
-        # so the firewall's log shows refused published ports too.
-        if [ "$policy" != RETURN ] && "$ipt" -n -L "$prefix-logging-deny" >/dev/null 2>&1; then
-            "$ipt" -A "$CHAIN" -j "$prefix-logging-deny"
+        # so the firewall's log shows refused published ports too. Asked here:
+        # inside the pipe below, iptables-restore already holds the xtables lock
+        # that this call (-w) would wait for.
+        log=""
+        if "$ipt" -n -L "$prefix-logging-deny" >/dev/null 2>&1; then
+            log="$prefix-logging-deny"
         fi
-        "$ipt" -A "$CHAIN" -j "$policy"
-        "$ipt" -C DOCKER-USER -m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j "$CHAIN" 2>/dev/null ||
-            "$ipt" -I DOCKER-USER -m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j "$CHAIN"
+        if ! {
+            echo "*filter"
+            echo ":$CHAIN - [0:0]"
+            echo "-A $CHAIN -i docker0 -j RETURN"
+            echo "-A $CHAIN -i br-+ -j RETURN"
+            echo "-A $CHAIN -j $prefix-user-forward"
+            [ -z "$log" ] || echo "-A $CHAIN -j $log"
+            echo "-A $CHAIN -j $policy"
+            echo COMMIT
+        } | "$ipt-restore" -w 30 --noflush; then
+            warn "$ipt: could not rebuild $CHAIN; published ports keep the rules they had"
+            "$ipt" -n -L "$CHAIN" >/dev/null 2>&1 || continue
+        fi
+        # After the tenant network's rules, which judge an account's traffic first.
+        read -r last mine < <("$ipt" -S DOCKER-USER 2>/dev/null | awk -v c="$CHAIN" '
+            $1 == "-A" { n++ }
+            $1 == "-A" && $NF == "PA-TENANT-NET" { last = n }
+            $1 == "-A" && $NF == c && !mine { mine = n }
+            END { print last + 0, mine + 0 }')
+        if ! "$ipt" -C DOCKER-USER "${jump[@]}" 2>/dev/null; then
+            "$ipt" -I DOCKER-USER $((last + 1)) "${jump[@]}"
+        elif [ "$mine" -lt "$last" ]; then
+            # Added first, then the old one goes: never a moment without it.
+            "$ipt" -I DOCKER-USER $((last + 1)) "${jump[@]}" && "$ipt" -D DOCKER-USER "${jump[@]}"
+        fi
     done
 }
 
@@ -410,6 +618,7 @@ install() {
     migrate_from_csf
     configure_ufw
     configure_fail2ban
+    mirror_bans
     if [ -f "$UFW_DIR/.panelalpha-keep-disabled" ]; then
         say "CSF was disabled on this host, so ufw is left off: run 'ufw enable' to turn it on"
         rm -f "$UFW_DIR/.panelalpha-keep-disabled"
@@ -432,7 +641,7 @@ unhook() {
 uninstall() {
     unhook
     ufw --force disable >/dev/null 2>&1 || true
-    rm -f "$F2B_DIR/jail.d/panelalpha.local"
+    rm -f "$F2B_DIR/jail.d/panelalpha.local" "$F2B_DIR/action.d/panelalpha-ufw.conf"
     systemctl restart fail2ban >/dev/null 2>&1 || true
     say "ufw disabled and the engine's fail2ban jail removed"
 }
@@ -442,7 +651,12 @@ uninstall() {
 
 case "${1:-}" in
 install) install ;;
-apply) published_on ;;
+apply)
+    # Here as well as in install: a host updated without the installer must
+    # not lose the engine's ports when the hook moves to route rules.
+    ufw_is_ours && route_rules
+    published_on
+    ;;
 published-on) published_on ;;
 published-off) published_off ;;
 fail2ban) configure_fail2ban ;;

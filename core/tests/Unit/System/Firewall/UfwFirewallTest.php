@@ -91,6 +91,7 @@ class UfwFirewallTest extends TestCase
         $rule = (new UfwFirewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9/32']));
 
         $this->assertSame(['ufw', 'prepend', 'deny', 'in', 'from', '198.51.100.9', 'to', 'any'], $this->ufwCalls($host)[0]);
+        $this->assertSame(['ufw', 'route', 'prepend', 'deny', 'from', '198.51.100.9', 'to', 'any'], $this->ufwCalls($host)[1], 'and above the published ports\' allows');
         $this->assertSame('198.51.100.9', $rule->source);
     }
 
@@ -100,6 +101,35 @@ class UfwFirewallTest extends TestCase
         (new UfwFirewall($host))->addRule(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']));
 
         $this->assertSame('allow', $this->ufwCalls($host)[0][1]);
+    }
+
+    public function test_a_rule_for_published_ports_is_a_ufw_route_rule(): void
+    {
+        $routes = "### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in\n### tuple ### route:allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in";
+        $host = $this->host(self::OFFICE . "\n" . $routes);
+        $firewall = new UfwFirewall($host);
+        $rule = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8080', 'scope' => 'published']);
+
+        $this->assertSame('published', $firewall->addRule($rule)->scope);
+        $firewall->addRule($rule->with(['action' => 'deny', 'source' => '198.51.100.9', 'port' => null, 'protocol' => null]));
+        $firewall->deleteRule($rule->id());
+
+        $this->assertSame([
+            ['ufw', 'route', 'allow', 'proto', 'tcp', 'from', 'any', 'to', 'any', 'port', '8080'],
+            ['ufw', 'route', 'prepend', 'deny', 'from', '198.51.100.9', 'to', 'any'],
+            ['ufw', 'route', 'delete', 'allow', 'proto', 'tcp', 'from', 'any', 'to', 'any', 'port', '8080'],
+        ], array_slice($this->ufwCalls($host), 0, 3));
+    }
+
+    public function test_deleting_a_ban_on_published_ports_lifts_it_in_fail2ban_too(): void
+    {
+        $host = $this->host('### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'));
+
+        (new UfwFirewall($host))->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9', 'scope' => 'published'])->id());
+
+        $this->assertSame(['ufw', 'route', 'delete', 'deny', 'from', '198.51.100.9', 'to', 'any'], $this->ufwCalls($host)[0]);
+        /** @var object{ran: list<list<string>>} $host */
+        $this->assertContains(['fail2ban-client', 'unban', '198.51.100.9'], $host->ran);
     }
 
     public function test_a_rule_is_deleted_by_what_it_matches_not_by_its_number(): void
@@ -265,23 +295,41 @@ class UfwFirewallTest extends TestCase
         $this->assertContains(['ufw', 'allow', 'in', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '22', 'comment', 'office'], $host->ran);
     }
 
-    private const BOTH = "### tuple ### deny any any 0.0.0.0/0 any 203.0.113.7 in\n### tuple ### deny any any 203.0.113.7 any 0.0.0.0/0 out";
+    private const BOTH = "### tuple ### deny any any 0.0.0.0/0 any 203.0.113.7 in\n### tuple ### deny any any 203.0.113.7 any 0.0.0.0/0 out\n### tuple ### route:deny any any 0.0.0.0/0 any 203.0.113.7 in";
 
-    public function test_a_rule_both_ways_is_added_and_deleted_as_two_ufw_rules(): void
+    public function test_a_deny_both_ways_is_added_and_deleted_as_its_host_and_route_rules(): void
     {
         $host = $this->host(self::BOTH);
         $firewall = new UfwFirewall($host);
         $rule = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7']);
 
-        $this->assertSame('both', $firewall->addRule($rule)->direction);
+        $added = $firewall->addRule($rule);
+        $this->assertSame(['both', 'both'], [$added->direction, $added->scope]);
         $firewall->deleteRule($rule->id());
 
         $this->assertSame([
             ['ufw', 'prepend', 'deny', 'in', 'from', '203.0.113.7', 'to', 'any'],
             ['ufw', 'prepend', 'deny', 'out', 'from', 'any', 'to', '203.0.113.7'],
+            ['ufw', 'route', 'prepend', 'deny', 'from', '203.0.113.7', 'to', 'any'],
             ['ufw', 'delete', 'deny', 'in', 'from', '203.0.113.7', 'to', 'any'],
             ['ufw', 'delete', 'deny', 'out', 'from', 'any', 'to', '203.0.113.7'],
+            ['ufw', 'route', 'delete', 'deny', 'from', '203.0.113.7', 'to', 'any'],
         ], $this->ufwCalls($host));
+    }
+
+    public function test_a_deny_ufw_will_not_write_for_published_ports_is_taken_back_on_the_host(): void
+    {
+        $host = $this->failing(['ufw route prepend deny' => FakeProcess::of(1, 'ERROR: Bad source address')]);
+
+        try {
+            (new UfwFirewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']));
+            $this->fail('a deny on the host alone was left in place');
+        } catch (FirewallException $e) {
+            $this->assertStringContainsString('Bad source address', $e->getMessage());
+        }
+
+        /** @var object{ran: list<list<string>>} $host */
+        $this->assertSame(['ufw', 'delete', 'deny', 'in', 'from', '203.0.113.7', 'to', 'any'], end($host->ran));
     }
 
     public function test_when_the_second_half_is_refused_the_first_is_taken_back(): void

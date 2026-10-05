@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     List firewall rules
 
-    In the order the firewall evaluates them. Rules marked managed are the ports the engine itself needs.
+    In the order the firewall evaluates them. Rules marked managed are the ports the engine itself needs. Host rules by default; scope=published lists the rules for ports Docker publishes. A deny in both scopes is in both lists, once, with scope both.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -33,13 +33,23 @@ class FirewallRuleListTool extends ApiTool
         return '/firewall/rules';
     }
 
-
+    /**
+     * @return array<int, string>
+     */
+    protected function queryParams(): array
+    {
+        return [
+            'scope',
+        ];
+    }
 
     /**
      * @return array<string, \Illuminate\JsonSchema\Types\Type>
      */
     public function schema(JsonSchema $schema): array
     {
-        return [];
+        return [
+            'scope' => $schema->string()->description('host: the host\'s own ports. published: ports Docker publishes, matched on the container\'s port. One of: host, published.'),
+        ];
     }
 }

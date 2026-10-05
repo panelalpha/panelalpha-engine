@@ -4,6 +4,7 @@ namespace App\Mcp\Tools\Api;
 
 use App\Mcp\Tools\Concerns\OmitsTitle;
 use Illuminate\Http\Request as HttpRequest;
+use Illuminate\JsonSchema\JsonSchema as JsonSchemaFactory;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -398,10 +399,34 @@ abstract class ApiTool extends Tool
      */
     private function only(array $input, array $keys): array
     {
+        // A null is dropped like an omitted argument, unless the schema admits
+        // null for that argument: there the API gives null a meaning of its own.
+        $nullable = array_flip($this->nullableParams());
+
         return array_filter(
             array_intersect_key($input, array_flip($keys)),
-            fn (mixed $v): bool => $v !== null
+            fn (mixed $v, int|string $k): bool => $v !== null || isset($nullable[$k]),
+            ARRAY_FILTER_USE_BOTH
         );
+    }
+
+    /**
+     * API names of the parameters whose schema admits null.
+     *
+     * @return array<int, string>
+     */
+    private function nullableParams(): array
+    {
+        $properties = JsonSchemaFactory::object($this->schema(...))->toArray()['properties'] ?? [];
+        $renamed = $this->argumentNames();
+        $names = [];
+        foreach ((array)$properties as $argument => $definition) {
+            if (in_array('null', (array)($definition['type'] ?? []), true)) {
+                $names[] = $renamed[$argument] ?? $argument;
+            }
+        }
+
+        return $names;
     }
 
     /**

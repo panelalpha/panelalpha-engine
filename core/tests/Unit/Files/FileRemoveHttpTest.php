@@ -6,6 +6,7 @@ use App\Http\Middleware\Authenticate;
 use App\Mcp\Tools\Api\Files\FileDeleteTool;
 use App\Models\User;
 use App\System;
+use App\System\Project\FileManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Laravel\Mcp\Request;
@@ -98,8 +99,10 @@ class FileRemoveHttpTest extends TestCase
     /** @return list<string> the rm argv, without the setpriv prefix */
     private function rmCall(): array
     {
-        $this->assertCount(1, $this->system->processJournal);
-        $argv = $this->system->processJournal[0];
+        // The confinement check runs first, then rm.
+        $this->assertCount(2, $this->system->processJournal);
+        $this->assertContains(FileManager::CONFINE_SCRIPT, $this->system->processJournal[0]);
+        $argv = $this->system->processJournal[1];
 
         return array_values(array_slice($argv, (int) array_search('rm', $argv, true)));
     }

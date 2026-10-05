@@ -7,6 +7,7 @@ use App\Lib\Lighthouse\LighthouseTarget;
 use App\Models\Domain;
 use App\Models\Setting;
 use App\System;
+use App\System\ComposeProject;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
@@ -170,7 +171,7 @@ class LighthouseTargetTest extends TestCase
                         $names[] = $definition[$key];
                     }
                 }
-                $names[] = "shared-hosting-{$service}-1";
+                $names[] = ComposeProject::container((string)$service);
             }
         }
 

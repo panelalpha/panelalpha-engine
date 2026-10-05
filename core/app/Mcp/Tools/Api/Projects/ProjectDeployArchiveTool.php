@@ -72,7 +72,7 @@ class ProjectDeployArchiveTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'zip_path' => $schema->string()->description('Example: /app.zip.')->required(),
-            'env_vars' => $schema->object()->description('KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.'),
+            'env_vars' => $schema->object()->description('KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.')->nullable(),
             'recipe' => $schema->string()->description('Recipe id to use instead of the detected one, from source_inspect\'s application.candidates. This deploy only. Example: php.'),
             'stages' => $schema->object()->description('Replace a stage\'s commands for this deploy only: {stage: [{id, run, ...}]} for precheck, prepare, build, install, upgrade, start; [] skips a stage.'),
         ];

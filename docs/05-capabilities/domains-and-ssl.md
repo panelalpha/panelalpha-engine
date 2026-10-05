@@ -84,6 +84,18 @@ List the proxy rules on this engine.
 
 Do not add a rule that opens a public port for an application that already has a hostname. Traffic is supposed to arrive at the engine's webserver, which routes it into the right project: [Security](security.md#the-firewall).
 
+## Mail from a domain
+
+Mail a site sends ends up in spam when its domain does not vouch for the server that sent it. The engine lists the SPF, DKIM, DMARC and MX records a domain needs for mail sent through this host, and checks which of them are published:
+
+```text
+Check the mail DNS records for shop.example.com.
+```
+
+Each record comes back as ok, missing, wrong or unknown, with the value to publish where the engine knows it. If the mail relay rewrites senders to its own sender domain, the records belong to that domain, and the answer says so.
+
+The engine does not sign mail itself. A DKIM signature comes from a relay (SendGrid, Amazon SES, MailChannels or your own SMTP server) that signs for the domain. Give the assistant the relay's DKIM selector to check that record too.
+
 ## Troubleshooting
 
 **The certificate request fails with a DNS error.**

@@ -2,6 +2,7 @@
 
 namespace App\Mcp\ToolSearch;
 
+use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\ExecuteTools;
 use Laravel\Mcp\Server\Tools\ToolSearch;
 
@@ -15,6 +16,28 @@ class PagedToolSearch extends ToolSearch
     public function tools(): array
     {
         return [new PagedSearchTools($this), new ExecuteTools($this, $this->maxToolCalls)];
+    }
+
+    /**
+     * The first word of every tool name in the catalogue, so an agent knows
+     * which areas exist before it has to guess a search word.
+     *
+     * @return list<string>
+     */
+    public function areas(): array
+    {
+        return $this->resolvedTools()
+            ->map(fn (Tool $tool): string => explode('_', $tool->name(), 2)[0])
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+    }
+
+    /** One line naming the areas, for the server instructions and search_tools. */
+    public function areasLine(): string
+    {
+        return 'Tool names in the catalogue begin with: ' . implode(', ', $this->areas()) . '.';
     }
 
     /** @return array<string, mixed> */

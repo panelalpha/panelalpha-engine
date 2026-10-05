@@ -50,19 +50,26 @@ class FirewallController extends Controller
     #[OA\Get(
         path: '/firewall/rules',
         summary: 'List firewall rules',
-        description: 'In the order the firewall evaluates them. Rules marked managed are the ports the engine itself needs.',
+        description: 'In the order the firewall evaluates them. Rules marked managed are the ports the engine itself needs. '
+            . 'Host rules by default; scope=published lists the rules for ports Docker publishes. A deny in both scopes is in both lists, once, with scope both.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
+        parameters: [
+            new OA\Parameter(name: 'scope', in: 'query', required: false, description: 'host: the host\'s own ports. published: ports Docker publishes, matched on the container\'s port.', schema: new OA\Schema(type: 'string', default: 'host', enum: ['host', 'published'])),
+        ],
         responses: [
             new OA\Response(response: 200, description: 'Firewall rules', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'array', items: new OA\Items(ref: '#/components/schemas/FirewallRule'))],
             )),
         ],
     )]
-    public function rules(): JsonResponse
+    public function rules(Request $request): JsonResponse
     {
+        $scope = $request->validate(['scope' => ['nullable', 'string', 'in:' . FirewallRule::HOST . ',' . FirewallRule::PUBLISHED]])['scope'] ?? FirewallRule::HOST;
+        $rules = array_filter($this->firewall()->rules(), static fn (FirewallRule $rule): bool => in_array($rule->scope, [$scope, FirewallRule::BOTH], true));
+
         return new JsonResponse([
-            'data' => array_map(static fn (FirewallRule $rule): array => $rule->toArray(), $this->firewall()->rules()),
+            'data' => array_values(array_map(static fn (FirewallRule $rule): array => $rule->toArray(), $rules)),
         ]);
     }
 
@@ -70,6 +77,7 @@ class FirewallController extends Controller
         path: '/firewall/rules',
         summary: 'Add a firewall rule',
         description: 'A deny rule is placed above every allow rule, so it wins; an allow rule goes last. '
+            . 'An inbound deny covers the host\'s ports and the ports Docker publishes (scope both, as a fail2ban ban does) unless scope published is asked for. '
             . 'A rule needs a port, a source or a destination. Do not open a port for an application: '
             . 'sites are reached through the engine\'s webserver.',
         security: [['bearerAuth' => []]],
@@ -78,6 +86,7 @@ class FirewallController extends Controller
             required: ['action'],
             properties: [
                 new OA\Property(property: 'action', type: 'string', enum: ['allow', 'deny']),
+                new OA\Property(property: 'scope', type: 'string', enum: ['host', 'published', 'both'], nullable: true, description: 'Default host: the host\'s own ports. published: ports Docker publishes; port and destination are the container\'s, and direction is in. Neither scope reaches the other. An inbound deny without scope published is both.'),
                 new OA\Property(property: 'direction', type: 'string', enum: ['in', 'out', 'both'], nullable: true, description: 'Default in. both: traffic from source coming in and to source going out, as one rule; needs source and no destination.'),
                 new OA\Property(property: 'protocol', type: 'string', enum: ['tcp', 'udp'], nullable: true, description: 'Omit for both. Required with a port range or list.'),
                 new OA\Property(property: 'port', type: 'string', nullable: true, example: '22', description: 'Destination port, range (30000:30009) or comma list.'),
@@ -111,12 +120,13 @@ class FirewallController extends Controller
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
             properties: [
                 new OA\Property(property: 'action', type: 'string', enum: ['allow', 'deny']),
-                new OA\Property(property: 'direction', type: 'string', enum: ['in', 'out', 'both'], nullable: true),
-                new OA\Property(property: 'protocol', type: 'string', enum: ['tcp', 'udp'], nullable: true),
-                new OA\Property(property: 'port', type: 'string', nullable: true),
-                new OA\Property(property: 'source', type: 'string', nullable: true),
-                new OA\Property(property: 'destination', type: 'string', nullable: true),
-                new OA\Property(property: 'comment', type: 'string', nullable: true),
+                new OA\Property(property: 'scope', type: 'string', enum: ['host', 'published', 'both'], nullable: true, x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'direction', type: 'string', enum: ['in', 'out', 'both'], nullable: true, x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'protocol', type: 'string', enum: ['tcp', 'udp'], nullable: true, x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'port', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'source', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'destination', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'comment', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
             ],
         )),
         responses: [

@@ -212,7 +212,7 @@ class ProjectEnvironment
 
         if ($overrides !== []) {
             $merged = EnvFile::merge($baseContents ?? '', $overrides);
-            $fs->filePutContents($envPath, $merged, $chown, '644');
+            $fs->filePutContents($envPath, $merged, $chown, $this->envMode($envPath));
             $keys = array_keys($overrides);
             $logger?->info(
                 'Using user-provided environment variables ('
@@ -232,13 +232,26 @@ class ProjectEnvironment
             && (!$fs->fileExists($envPath) || $removed !== [] || $keyAdded
                 || ($requiredUrls !== [] && !$this->envIsTracked()))
         ) {
-            $fs->filePutContents($envPath, $baseContents, $chown, '644');
+            $fs->filePutContents($envPath, $baseContents, $chown, $this->envMode($envPath));
         }
         $this->materializeNestedEnvExamples($projectDir, $chown);
         $this->withNestedComposeEnv($projectDir, $composePath, $chown);
         $logger?->info("Using default environment variables (source: {$source})");
         $user->setDetails(['used_custom_env_vars' => false, self::MERGED_OVERRIDES => []]);
         $user->save();
+    }
+
+    /**
+     * The mode `.env` is written with. A new one is owner-only, like `.env.default`:
+     * it holds env_vars and generated secrets, and ~/project is traversable by every
+     * uid. An existing one keeps its mode, never wider than 0644, so a prepare hook
+     * that made it 0600 keeps it that way.
+     */
+    private function envMode(string $envPath): string
+    {
+        $current = $this->dind->system()->filesystem()->mode($envPath);
+
+        return sprintf('%o', $current === null ? 0600 : $current & 0644);
     }
 
     /**

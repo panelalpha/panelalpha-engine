@@ -16,7 +16,8 @@ class PagedSearchTools extends SearchTools
 
     public function description(): string
     {
-        return 'Search the tools available through execute_tools. Returns exact tool names, descriptions, and complete input schemas. An empty query browses the catalog; when hasMore is true, call again with offset set to nextOffset for the rest.';
+        return 'Search the tools available through execute_tools. Returns exact tool names, descriptions, and complete input schemas. An empty query browses the catalog; when hasMore is true, call again with offset set to nextOffset for the rest. '
+            . $this->pages->areasLine();
     }
 
     public function schema(JsonSchema $schema): array

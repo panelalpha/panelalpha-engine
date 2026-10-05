@@ -18,8 +18,8 @@ use App\System\ProcessRunner;
  * ufw reloads only its own chains, so Docker's rules and the engine's tenant
  * and build chains survive every change made here. ufw does not see ports
  * Docker publishes (2011, FTP, SFTP) on its own; the host hook in
- * scripts/firewall/ufw.sh sends them through ufw's user rules and default
- * policy from DOCKER-USER, so the rules here hold for them too.
+ * scripts/firewall/ufw.sh sends them through ufw's route rules from
+ * DOCKER-USER, which are the rules here with the scope `published`.
  */
 class UfwFirewall implements Firewall
 {
@@ -94,11 +94,11 @@ class UfwFirewall implements Firewall
         $halves = UfwRules::specs($rule, withComment: false);
         foreach (UfwRules::specs($rule) as $i => $spec) {
             try {
-                $this->ufw([...$position, ...$spec]);
+                $this->ufw(self::withVerb($position, $spec));
             } catch (FirewallException $e) {
                 // Half of a two-way rule is not the rule that was asked for.
                 for ($j = 0; $j < $i; $j++) {
-                    $this->system->runProcessOnHost(['ufw', 'delete', ...$halves[$j]]);
+                    $this->system->runProcessOnHost(['ufw', ...self::withVerb(['delete'], $halves[$j])]);
                 }
                 throw $e;
             }
@@ -131,7 +131,7 @@ class UfwFirewall implements Firewall
     {
         $rule = $this->rule($id);
         foreach (UfwRules::specs($rule, withComment: false) as $spec) {
-            $this->ufw(['delete', ...$spec]);
+            $this->ufw(self::withVerb(['delete'], $spec));
         }
         // A fail2ban ban: lift it in fail2ban too, or its ban database writes
         // the rule back the next time fail2ban starts.
@@ -243,6 +243,18 @@ class UfwFirewall implements Firewall
         $file = $this->system->runProcessOnHost(['tail', '-n', (string) self::SCAN, '/var/log/ufw.log']);
 
         return $file->isSuccessful() ? $file->getOutput() : '';
+    }
+
+    /**
+     * `ufw <verb> allow ...`, or `ufw route <verb> allow ...` for a route rule.
+     *
+     * @param list<string> $verb
+     * @param list<string> $spec
+     * @return list<string>
+     */
+    private static function withVerb(array $verb, array $spec): array
+    {
+        return ($spec[0] ?? null) === 'route' ? ['route', ...$verb, ...array_slice($spec, 1)] : [...$verb, ...$spec];
     }
 
     /** @param list<string> $args */

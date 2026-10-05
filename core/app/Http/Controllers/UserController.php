@@ -665,7 +665,10 @@ class UserController extends Controller
                     additionalProperties: new OA\AdditionalProperties(type: 'string'),
                     description: 'KEY=value overrides, merged onto the ones the project already carries — '
                         . 'send only what changes. An empty value removes that key; null clears them all.',
-                    x: ['mcp-description' => 'KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.']
+                    x: [
+                        'mcp-description' => 'KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.',
+                        'mcp-nullable' => true,
+                    ]
                 ),
                 new OA\Property(
                     property: 'zip_path',
@@ -904,7 +907,10 @@ class UserController extends Controller
                     additionalProperties: new OA\AdditionalProperties(type: 'string'),
                     description: 'KEY=value overrides, merged onto the ones the project already carries — '
                         . 'send only what changes. An empty value removes that key; null clears them all.',
-                    x: ['mcp-description' => 'KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.']
+                    x: [
+                        'mcp-description' => 'KEY=value changes merged onto the project\'s; an empty value removes a key, null clears them all.',
+                        'mcp-nullable' => true,
+                    ]
                 ),
                 new OA\Property(
                     property: 'recipe',

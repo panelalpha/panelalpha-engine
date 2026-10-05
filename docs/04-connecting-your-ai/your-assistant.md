@@ -338,7 +338,7 @@ pae mcp:tool:list
 |---|---|---|---|
 | [Engine summaries](#engine-summaries) | `engine` | On | 2 |
 | [Projects](#projects) | `projects` | On | 18 |
-| [Domains](#domains) | `domains` | On | 7 |
+| [Domains](#domains) | `domains` | On | 8 |
 | [Domain PHP](#domain-php) | `domainphp` | On | 4 |
 | [Domain ACME](#domain-acme) | `domainacme` | On | 5 |
 | [Domain log files](#domain-log-files) | `domainlogfiles` | On | 2 |
@@ -362,7 +362,7 @@ pae mcp:tool:list
 | [Server metrics](#server-metrics) | `servermetrics` | On | 5 |
 | [Firewall](#firewall) | `firewall` | On | 12 |
 | [IP management](#ip-management) | `ipmanagement` | On | 6 |
-| [ModSecurity](#modsecurity) | `modsecurity` | On | 9 |
+| [ModSecurity](#modsecurity) | `modsecurity` | On | 11 |
 | [Lighthouse](#lighthouse) | `lighthouse` | On | 1 |
 | [Backup stores](#backup-stores) | `backupcontainers` | On | 6 |
 | [Bug reports](#bug-reports) | `bugreports` | On | 1 |
@@ -413,6 +413,7 @@ pae mcp:tool:list
 | `domain_find` | Get a domain by name (system-wide) |
 | `domain_get` | Get a domain |
 | `domain_list` | List domains of a project |
+| `domain_mail_dns_get` | List and check the mail DNS records of a domain |
 | `domain_update` | Update a domain |
 | `ssl_cert_request` | Request a Let's Encrypt certificate for a domain |
 
@@ -658,6 +659,8 @@ pae mcp:tool:list
 | `modsec_audit_log_download` | Download a ModSecurity audit log file |
 | `modsec_audit_log_list` | List ModSecurity audit log files |
 | `modsec_audit_log_tail` | Tail a ModSecurity audit log file |
+| `modsec_custom_rules_get` | Get the custom ModSecurity rules |
+| `modsec_custom_rules_set` | Replace the custom ModSecurity rules |
 | `modsec_mode_get` | Get ModSecurity mode |
 | `modsec_mode_set` | Set ModSecurity mode |
 | `modsec_ruleset_configs_set` | Toggle ModSecurity ruleset config files |

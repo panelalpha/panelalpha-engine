@@ -12,6 +12,11 @@ export type FirewallAction = 'allow' | 'deny';
 /** `both`: traffic from `source` coming in and to it going out, as one rule. */
 export type FirewallDirection = 'in' | 'out' | 'both';
 export type FirewallProtocol = 'tcp' | 'udp';
+/**
+ * `host`: the host's own ports. `published`: ports Docker publishes, matched on the container's port.
+ * `both`: a deny on both, which an inbound deny is unless `published` is asked for.
+ */
+export type FirewallScope = 'host' | 'published' | 'both';
 
 /**
  * Body of POST /firewall/rules. On PUT every field is optional: an unsent field
@@ -19,6 +24,8 @@ export type FirewallProtocol = 'tcp' | 'udp';
  */
 export interface FirewallRuleRequest {
   action: FirewallAction;
+  /** Default `host`. */
+  scope?: FirewallScope | null;
   direction?: FirewallDirection | null;
   protocol?: FirewallProtocol | null;
   /** A port, a range (`30000:30009`) or a comma list. */
@@ -62,6 +69,7 @@ export interface FirewallLogQuery {
 export interface FirewallRule {
   /** Derived from what the rule matches, so it changes when the match does. */
   id: string;
+  scope: FirewallScope;
   action: string;
   direction: string;
   protocol: string | null;

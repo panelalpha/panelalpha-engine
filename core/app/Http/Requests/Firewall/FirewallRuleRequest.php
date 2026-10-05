@@ -25,6 +25,7 @@ class FirewallRuleRequest extends FormRequest
 
         return [
             'action' => [$required, 'string', 'in:allow,deny'],
+            'scope' => ['nullable', 'string', 'in:host,published,both'],
             'direction' => ['nullable', 'string', 'in:in,out,both'],
             'protocol' => ['nullable', 'string', 'in:tcp,udp'],
             // A port, a range (30000:30009) or a comma list of either.
@@ -54,10 +55,10 @@ class FirewallRuleRequest extends FormRequest
         }];
     }
 
-    /** @return array{action?: string, direction?: ?string, protocol?: ?string, port?: ?string, source?: ?string, destination?: ?string, comment?: ?string} */
+    /** @return array{action?: string, direction?: ?string, protocol?: ?string, port?: ?string, source?: ?string, destination?: ?string, comment?: ?string, scope?: ?string} */
     public function rule(): array
     {
-        /** @var array{action?: string, direction?: ?string, protocol?: ?string, port?: ?string, source?: ?string, destination?: ?string, comment?: ?string} */
+        /** @var array{action?: string, direction?: ?string, protocol?: ?string, port?: ?string, source?: ?string, destination?: ?string, comment?: ?string, scope?: ?string} */
         return $this->validated();
     }
 }

@@ -32,6 +32,7 @@ export const firewallRuleSchema = z.strictObject({
   managed: z.boolean(),
   editable: z.boolean(),
   raw: nullableString,
+  scope: z.enum(['host', 'published', 'both']),
 });
 
 export const firewallRuleResponseSchema = z.object({ data: firewallRuleSchema });

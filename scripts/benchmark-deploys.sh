@@ -20,8 +20,8 @@
 # See AGENTS.md §9.
 set -uo pipefail
 
-HOST="${BENCH_HOST:-root@10.10.10.25}"
-CORE="${BENCH_CORE:-shared-hosting-core-1}"
+HOST="${BENCH_HOST:-root@10.10.0.25}"
+CORE="${BENCH_CORE:-}"
 MIN_WARM_RATIO="${MIN_WARM_RATIO:-0.5}"
 # Bound every fixture. Without this one pathological repo stalls the suite
 # forever: BookStack sat in a cold deploy for 40 minutes and the run had no way
@@ -90,6 +90,13 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 rex() { ssh -o BatchMode=yes "$HOST" "$@"; }
 core() { rex "docker exec $CORE $*"; }
 jq_get() { python3 -c "import json,sys; d=json.load(sys.stdin); print(d$1)" 2>/dev/null; }
+
+# Compose prefixes the core container with the project name; ask the host's stack.
+if [ -z "$CORE" ]; then
+  CORE=$(rex "docker ps --filter label=com.docker.compose.project.working_dir=/opt/panelalpha/shared-hosting \
+    --filter label=com.docker.compose.service=core --format '{{.Names}}'" | head -n 1)
+  [ -n "$CORE" ] || { echo "no engine core container found on $HOST" >&2; exit 2; }
+fi
 
 # Ship the helpers rather than assuming they are already on the host.
 for f in deploy-fixture.php restart-app.php; do

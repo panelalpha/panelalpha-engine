@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Add a firewall rule
 
-    A deny rule is placed above every allow rule, so it wins; an allow rule goes last. A rule needs a port, a source or a destination. Do not open a port for an application: sites are reached through the engine's webserver.
+    A deny rule is placed above every allow rule, so it wins; an allow rule goes last. An inbound deny covers the host's ports and the ports Docker publishes (scope both, as a fail2ban ban does) unless scope published is asked for. A rule needs a port, a source or a destination. Do not open a port for an application: sites are reached through the engine's webserver.
     MARKDOWN)]
 #[IsDestructive]
 class FirewallRuleCreateTool extends ApiTool
@@ -38,6 +38,7 @@ class FirewallRuleCreateTool extends ApiTool
     {
         return [
             'action',
+            'scope',
             'direction',
             'protocol',
             'port',
@@ -54,6 +55,7 @@ class FirewallRuleCreateTool extends ApiTool
     {
         return [
             'action' => $schema->string()->description('One of: allow, deny.')->required(),
+            'scope' => $schema->string()->description('Default host: the host\'s own ports. published: ports Docker publishes; port and destination are the container\'s, and direction is in. Neither scope reaches the other. An inbound deny without scope published is both. One of: host, published, both.'),
             'direction' => $schema->string()->description('Default in. both: traffic from source coming in and to source going out, as one rule; needs source and no destination. One of: in, out, both.'),
             'protocol' => $schema->string()->description('Omit for both. Required with a port range or list. One of: tcp, udp.'),
             'port' => $schema->string()->description('Destination port, range (30000:30009) or comma list. Example: 22.'),

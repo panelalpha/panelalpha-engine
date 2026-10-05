@@ -146,6 +146,7 @@ $projectRoutes = function (): void {
     Route::get('/{username}/domains/installed-ssl-certs', [UserDomainController::class, 'indexInstalledSslCerts']);
     Route::get('/{username}/domains/{domain}', [UserDomainController::class, 'show']);
     Route::get('/{username}/domains/{domain}/installed-ssl-cert', [UserDomainController::class, 'installedSslCert']);
+    Route::get('/{username}/domains/{domain}/mail-dns', [UserDomainController::class, 'mailDns']);
     Route::post('/{username}/domains', [UserDomainController::class, 'store']);
     Route::put('/{username}/domains/{domain}', [UserDomainController::class, 'update']);
     Route::delete('/{username}/domains/{domain}', [UserDomainController::class, 'destroy']);
@@ -392,6 +393,8 @@ Route::get('/modsec/rulesets', [ModsecController::class, 'getRulesets']);
 Route::put('/modsec/rulesets/{name}/enable', [ModsecController::class, 'enableRuleset']);
 Route::put('/modsec/rulesets/{name}/disable', [ModsecController::class, 'disableRuleset']);
 Route::put('/modsec/rulesets/{name}/config-files', [ModsecController::class, 'toggleConfigFiles']);
+Route::get('/modsec/custom-rules', [ModsecController::class, 'getCustomRules']);
+Route::put('/modsec/custom-rules', [ModsecController::class, 'setCustomRules']);
 Route::get('/modsec/audit-log/files', [ModsecController::class, 'listAuditLogFiles']);
 Route::get('/modsec/audit-log/files/{filename}', [ModsecController::class, 'downloadAuditLogFile']);
 Route::get('/modsec/audit-log/files/{filename}/tail', [ModsecController::class, 'tailAuditLogFile']);

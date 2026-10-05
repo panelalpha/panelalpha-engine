@@ -667,6 +667,53 @@ class DindProjectEnvironmentTest extends TestCase
         $this->assertSame('0644', $this->mode('.env'));
     }
 
+    /** Merging env_vars into a .env a hook made 0600 used to rewrite it 0644. */
+    public function test_rewriting_env_never_widens_its_mode(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "ADMIN_PASS=from-the-hook\n");
+        chmod($this->projectDir . '/.env', 0600);
+        $this->forcedEnvironment($this->dindModel(['env_vars' => ['TOKEN' => 'x']]), tracked: false)->apply();
+        $this->assertSame('0600', $this->mode('.env'));
+        $this->assertSame(['ADMIN_PASS' => 'from-the-hook', 'TOKEN' => 'x'], $this->vars((string) file_get_contents($this->projectDir . '/.env')));
+
+        // Without env_vars, the restored base is written back the same way.
+        $this->forcedEnvironment($this->dindModel(), tracked: false)->apply();
+        $this->assertSame('0600', $this->mode('.env'));
+
+        chmod($this->projectDir . '/.env', 0640);
+        $this->forcedEnvironment($this->dindModel(['env_vars' => ['TOKEN' => 'y']]), tracked: false)->apply();
+        $this->assertSame('0640', $this->mode('.env'));
+
+        // Never wider than before either.
+        chmod($this->projectDir . '/.env', 0666);
+        $this->forcedEnvironment($this->dindModel(['env_vars' => ['TOKEN' => 'z']]), tracked: false)->apply();
+        $this->assertSame('0644', $this->mode('.env'));
+    }
+
+    /** A .env the engine creates holds env_vars and generated secrets: owner-only. */
+    public function test_a_new_env_is_created_owner_only(): void
+    {
+        file_put_contents($this->projectDir . '/.env.example', "APP_NAME=Demo\n");
+        $this->dind($this->dindModel())->applyProjectEnvVars();
+        $this->assertSame('0600', $this->mode('.env'));
+
+        unlink($this->projectDir . '/.env');
+        unlink($this->projectDir . '/.env.example');
+        $this->dind($this->dindModel(['env_vars' => ['VI_TOKEN' => 'secret']]))->applyProjectEnvVars();
+        $this->assertSame('0600', $this->mode('.env'));
+        $this->assertStringContainsString('VI_TOKEN=secret', (string) file_get_contents($this->projectDir . '/.env'));
+    }
+
+    public function test_an_existing_env_merged_with_env_vars_keeps_its_mode(): void
+    {
+        file_put_contents($this->projectDir . '/.env', "APP_NAME=Demo\n");
+        chmod($this->projectDir . '/.env', 0644);
+
+        $this->dind($this->dindModel(['env_vars' => ['VI_TOKEN' => 'secret']]))->applyProjectEnvVars();
+
+        $this->assertSame('0644', $this->mode('.env'));
+    }
+
     public function test_env_overrides_are_written_owner_only(): void
     {
         file_put_contents($this->projectDir . '/.env', "APP_NAME=Demo\n");

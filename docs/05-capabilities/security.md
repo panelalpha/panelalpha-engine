@@ -61,9 +61,19 @@ Block 203.0.113.7 from this server, both ways.
 
 A rule applies to one direction, incoming or outgoing, unless you ask for both. A rule in both directions blocks (or allows) traffic from the address and to it, as one rule.
 
-The rules also cover the ports Docker publishes for the engine (2011, FTP and SFTP). On its own, ufw does not see those ports at all. The engine sends their traffic through the same rules, so a blocked address is blocked there too.
+There are two kinds of rule. **Host rules** cover the server's own ports, such as SSH and the sites on 80 and 443: `ufw allow 22/tcp` on the server. **Published-port rules** cover the ports Docker publishes for a container, such as the engine's own 2011, FTP and SFTP: `ufw route allow proto tcp to any port 8080` on the server. On its own, ufw does not see published ports at all; the engine sends their traffic through ufw's route rules, and drops whatever those do not allow. Neither kind reaches the other: allowing 22 on the host does not open a container published on 22, and a published-port rule does not open a host port.
 
-fail2ban watches the logins the server takes: SSH, SFTP, FTP, and the engine's own API on 2011, where a request with a wrong or expired token counts as a failed login. After 5 failed attempts in 10 minutes (10 for the API, since a client with a stale token retries), an address is banned for an hour, and for longer each time it comes back. A ban closes every port to that address. It is a deny rule in the list; delete it to lift the ban early.
+A published-port rule names the port inside the container, not the one on the server. A container started with `-p 28081:8080` is opened by a rule for 8080. The engine's own published ports have published-port rules marked as the engine's, which your assistant cannot change or remove.
+
+```text
+List the published-port rules. Allow 203.0.113.7 to reach published container port 8080.
+```
+
+Through the assistant or the API, an allow is a host rule unless you ask for published ports. A deny covers both kinds, as a ban does: blocking an address closes SSH and the sites, and the engine's 2011, FTP and SFTP and every published container port with them. It is listed once, as a rule for both, and deleting it lifts it everywhere. Ask for a deny on published ports only if that is all you want blocked. A deny you write with `ufw deny` on the server covers the host only; add `ufw route deny` for published ports.
+
+A server updated from an engine without published-port rules keeps working: each allow rule that covered a port a container published at the time, and each incoming deny rule, gets a matching published-port rule, and the update log names each one.
+
+fail2ban watches the logins the server takes: SSH, SFTP, FTP, and the engine's own API on 2011, where a request with a wrong or expired token counts as a failed login. After 5 failed attempts in 10 minutes (10 for the API, since a client with a stale token retries), an address is banned for an hour, and for longer each time it comes back. A ban closes every port to that address, published ports included. It is listed as one deny rule for both; delete it to lift the ban early.
 
 Trust the addresses that must never be locked out: your office, your monitoring, the panel that drives this engine. A trusted address is never banned, and trusting it lifts a ban it has now. It is not an allow rule: the firewall rules still apply to it.
 
@@ -103,7 +113,15 @@ Show me the ModSecurity audit log. A legitimate form submission was blocked.
 
 Two rulesets ship: `owasp-crs`, the OWASP Core Rule Set, and `panelalpha-wordpress`, which stops an anonymous visitor from reading WordPress login names through `?author=1` or the REST users list. Both are off until you switch them on, and neither does anything while ModSecurity itself is off. A WordPress site on this engine is only covered once both are on.
 
-You can read the mode, switch rulesets on and off, and read the audit log. If the assistant cannot, those tools have been turned off: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
+Your own rules go in a third ruleset, `custom`, one rule file for the whole server. The assistant can write them from a description:
+
+```text
+Add a ModSecurity rule that blocks every request to /xyz with a 403, and switch the custom ruleset on.
+```
+
+The webserver checks the rules before they are saved. A rule it cannot parse is refused with the parser's message, and the rules already in place keep working. Rule ids must be between 1100000 and 1199999, which keeps them apart from the OWASP set and the engine's own rules. A rule that parses can still block too much, so test it on one site first.
+
+You can read the mode, switch rulesets on and off, write your own rules, and read the audit log. If the assistant cannot, those tools have been turned off: [Decide what the assistant may do](../04-connecting-your-ai/your-assistant.md#decide-what-the-assistant-may-do).
 
 **When a legitimate request gets blocked**, that is a false positive and it is a tuning problem, not a broken deploy. The audit log names the specific rule that fired. Turn off that rule, not the whole firewall. Ask the assistant to find it:
 

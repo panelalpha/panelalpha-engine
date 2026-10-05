@@ -4,7 +4,7 @@ services:
     build:
       context: ./dockerfiles
       dockerfile: Dockerfile-nginx
-    image: ghcr.io/panelalpha/app-nginx:20260525
+    image: ghcr.io/panelalpha/app-nginx:20261004
     pull_policy: missing
     labels:
       - com.panelalpha.webserver=nginx

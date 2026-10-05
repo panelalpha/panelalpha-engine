@@ -187,6 +187,54 @@ class FirewallHttpTest extends TestCase
         $this->assertTrue($rules[1]['editable']);
     }
 
+    public function test_host_rules_are_listed_unless_published_ones_are_asked_for(): void
+    {
+        $this->hold(['action' => 'allow', 'protocol' => 'tcp', 'port' => '2011', 'comment' => 'panelalpha: engine api']);
+        $this->hold(['action' => 'allow', 'protocol' => 'tcp', 'port' => '2011', 'comment' => 'panelalpha: engine api', 'scope' => 'published']);
+        $this->hold(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8080', 'scope' => 'published']);
+
+        $host = $this->getJson('/api/firewall/rules')->assertOk()->json('data');
+        $published = $this->getJson('/api/firewall/rules?scope=published')->assertOk()->json('data');
+
+        $this->assertSame([['host', '2011']], array_map(fn (array $r): array => [$r['scope'], $r['port']], $host));
+        $this->assertSame([['published', '2011'], ['published', '8080']], array_map(fn (array $r): array => [$r['scope'], $r['port']], $published));
+        $this->assertTrue($published[0]['managed']);
+        $this->assertInvalid($this->getJson('/api/firewall/rules?scope=everything'), ['scope']);
+    }
+
+    public function test_a_deny_is_in_both_scopes_and_listed_once_in_each_list(): void
+    {
+        $data = $this->postJson('/api/firewall/rules', ['action' => 'deny', 'source' => '203.0.113.7'])->assertOk()->json('data');
+        $this->assertSame('both', $data['scope']);
+        $only = $this->postJson('/api/firewall/rules', ['action' => 'deny', 'source' => '198.51.100.9', 'scope' => 'published'])->assertOk()->json('data');
+        $this->assertSame('published', $only['scope']);
+
+        $host = $this->getJson('/api/firewall/rules')->assertOk()->json('data');
+        $published = $this->getJson('/api/firewall/rules?scope=published')->assertOk()->json('data');
+        $this->assertSame([$data['id']], array_column($host, 'id'));
+        $this->assertSame([$data['id'], $only['id']], array_column($published, 'id'));
+
+        $this->assertInvalid($this->postJson('/api/firewall/rules', ['action' => 'allow', 'port' => '22', 'scope' => 'both']), ['scope']);
+        $this->assertInvalid($this->putJson("/api/firewall/rules/{$data['id']}", ['action' => 'allow', 'port' => '22']), ['scope']);
+        $this->putJson("/api/firewall/rules/{$data['id']}", ['action' => 'allow', 'port' => '22', 'scope' => 'host'])->assertOk()->assertJsonPath('data.scope', 'host');
+    }
+
+    public function test_a_rule_for_published_ports_is_added_edited_and_deleted(): void
+    {
+        $data = $this->postJson('/api/firewall/rules', ['action' => 'allow', 'scope' => 'published', 'protocol' => 'tcp', 'port' => '8080'])
+            ->assertOk()->json('data');
+        $this->assertSame(['published', 'in'], [$data['scope'], $data['direction']]);
+
+        $edited = $this->putJson("/api/firewall/rules/{$data['id']}", ['source' => '203.0.113.7'])->assertOk()->json('data');
+        $this->assertSame(['published', '203.0.113.7'], [$edited['scope'], $edited['source']]);
+
+        $this->deleteJson("/api/firewall/rules/{$edited['id']}")->assertOk()->assertJsonPath('data.scope', 'published');
+        $this->assertSame([], $this->firewall->rules);
+
+        $this->assertInvalid($this->postJson('/api/firewall/rules', ['action' => 'allow', 'scope' => 'published', 'direction' => 'out', 'port' => '25']), ['direction']);
+        $this->assertInvalid($this->postJson('/api/firewall/rules', ['action' => 'allow', 'scope' => 'container', 'port' => '25']), ['scope']);
+    }
+
     public function test_a_rule_is_added(): void
     {
         $data = $this->postJson('/api/firewall/rules', [

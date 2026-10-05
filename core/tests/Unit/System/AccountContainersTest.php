@@ -4,6 +4,7 @@ namespace Tests\Unit\System;
 
 use App\System;
 use App\System\AccountContainers;
+use App\System\ComposeProject;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 use Tests\Support\FakeProcess;
@@ -13,7 +14,7 @@ class AccountContainersTest extends TestCase
     private const USERS = '/opt/panelalpha/shared-hosting/users';
 
     /** `docker ps` lines in the shape the engine asks for, labels as Compose writes them on a host. */
-    private const PS = "shared-hosting-core-1\trunning\t/opt/panelalpha/shared-hosting\n"
+    private const PS = ComposeProject::NAME . "-core-1\trunning\t/opt/panelalpha/shared-hosting\n"
         . "rvgotify\trunning\t" . self::USERS . "/rvgotify\n"
         . "swkorphan\texited\t" . self::USERS . "/swkorphan\n"
         . "hubtest\trunning\t/root/hubtest\n"

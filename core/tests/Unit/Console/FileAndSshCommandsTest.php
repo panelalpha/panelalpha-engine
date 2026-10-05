@@ -8,6 +8,7 @@ use App\Models\Domain;
 use App\Models\User;
 use App\System;
 use App\System\EnginePaths;
+use App\System\Project\FileManager;
 use App\System\Services\Webserver;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Routing\Events\RouteMatched;
@@ -153,7 +154,10 @@ class FileAndSshCommandsTest extends TestCase
         $this->assertRun(0, "Set mode 0755 on public_html/x.sh\n", 'project:file:chmod', [
             'project' => self::USER, '--path' => 'public_html/x.sh', '--mode' => '0755',
         ]);
-        $this->assertSame([['chmod', '0755', $this->home() . '/public_html/x.sh']], $this->calls());
+        $this->assertSame([
+            $this->confined('F:' . $this->home() . '/public_html/x.sh'),
+            ['chmod', '0755', $this->home() . '/public_html/x.sh'],
+        ], $this->calls());
     }
 
     public function test_chmod_prints_why_the_command_failed(): void
@@ -344,10 +348,13 @@ class FileAndSshCommandsTest extends TestCase
         $this->assertRun(0, sprintf("Uploaded %s to up/%s\n", basename($local), basename($local)), 'project:file:upload', [
             'project' => self::USER, 'file' => $local, '--path' => 'up/',
         ]);
-        $this->assertSame([[
-            'sh', '-c', 'mkdir -p -- "$(dirname -- "$2")" && cat -- "$1" > "$2" && chmod 644 -- "$2"',
-            'sh', $local, $this->home() . '/up/' . basename($local),
-        ]], $this->calls());
+        $this->assertSame([
+            $this->confined('F:' . $this->home() . '/up/' . basename($local)),
+            [
+                'sh', '-c', 'mkdir -p -- "$(dirname -- "$2")" && cat -- "$1" > "$2" && chmod 644 -- "$2"',
+                'sh', $local, $this->home() . '/up/' . basename($local),
+            ],
+        ], $this->calls());
     }
 
     public function test_upload_prints_why_the_write_failed(): void
@@ -551,7 +558,8 @@ class FileAndSshCommandsTest extends TestCase
 
         $this->assertSame([], $matched);
         $this->assertSame(0, Admin::query()->count());
-        $this->assertCount(4, $this->calls(), 'chmod, upload, ssh and the download check reached the engine');
+        // chmod and upload each check the path first.
+        $this->assertCount(6, $this->calls(), 'chmod, upload, ssh and the download check reached the engine');
     }
 
     // --- helpers ---
@@ -621,6 +629,16 @@ class FileAndSshCommandsTest extends TestCase
         }
 
         return $calls;
+    }
+
+    /**
+     * The file API's check that a path stays in the home, as the shim logs it.
+     *
+     * @return list<string>
+     */
+    private function confined(string ...$paths): array
+    {
+        return ['sh', '-c', FileManager::CONFINE_SCRIPT, 'sh', $this->home(), ...$paths];
     }
 
     private function home(): string

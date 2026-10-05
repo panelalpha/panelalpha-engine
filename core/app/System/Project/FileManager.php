@@ -17,6 +17,13 @@ class FileManager
     /** Beside the deploy's own staging area, and just as root-owned. */
     private const UNZIP_STAGE_DIR = '/var/lib/panelalpha/unzip-stage';
 
+    /** `sh -c` body for assertInsideHome(): $1 the home, then F:<path> / E:<entry>. */
+    public const CONFINE_SCRIPT = 'home=$(realpath -- "$1") || exit 1; shift; for p; do case "$p" in '
+        . 'F:*) r=$(realpath -m -- "${p#F:}") ;; '
+        . '*) q=${p#E:}; q=${q%/}; r=$(realpath -m -- "$(dirname -- "$q")")/$(basename -- "$q") ;; esac; '
+        . 'case "$r" in "$home"|"$home"/*) ;; '
+        . '*) echo "Refusing ${p#?:}: it resolves outside the project home" >&2; exit 3 ;; esac; done';
+
     public function __construct(
         private readonly UserProject $project,
         private readonly string $unzipStageRoot = self::UNZIP_STAGE_DIR,
@@ -88,6 +95,7 @@ class FileManager
     public function mkdir(string $path, bool $parents = false): void
     {
         $path = $this->resolvePath($path);
+        $this->assertInsideHome([$path]);
         $this->assertSucceeded($this->runOnCore($parents ? ['mkdir', '-p', '--', $path] : ['mkdir', '--', $path]));
     }
 
@@ -107,6 +115,7 @@ class FileManager
      */
     private function writeAsUser(string $source, string $target): void
     {
+        $this->assertInsideHome([$target]);
         @chmod($source, 0644);
         $this->assertSucceeded($this->runOnCore([
             'sh', '-c', 'mkdir -p -- "$(dirname -- "$2")" && cat -- "$1" > "$2" && chmod 644 -- "$2"',
@@ -154,6 +163,7 @@ class FileManager
     {
         $sourcePath = $this->resolvePath($sourcePath);
         $destPath = $this->resolvePath($destPath);
+        $this->assertInsideHome([$destPath], [$sourcePath]);
         $this->assertSucceeded($this->runOnCore([
             'mv',
             $sourcePath,
@@ -165,6 +175,7 @@ class FileManager
     {
         $sourcePath = $this->resolvePath($sourcePath);
         $destPath = $this->resolvePath($destPath);
+        $this->assertInsideHome([$destPath], [$sourcePath]);
         $this->assertSucceeded($this->runOnCore([
             'cp',
             '-a',
@@ -183,6 +194,7 @@ class FileManager
     ): void {
         $zipPath = $this->resolvePath($zipPath);
         $path = $this->resolvePath($path);
+        $this->assertInsideHome([$zipPath, $path]);
 
         $workdir = null;
         if ($skipParents) {
@@ -213,6 +225,8 @@ class FileManager
     {
         $zipPath = $this->resolvePath($zipPath);
         $path = $this->resolvePath($path);
+        // The archive too: it is copied to the stage as root.
+        $this->assertInsideHome([$zipPath, $path]);
         $filename = basename($zipPath);
         $isZip = Str::endsWith($filename, '.zip');
 
@@ -258,6 +272,8 @@ class FileManager
     public function remove(string $path, bool $recursive = false): void
     {
         $path = $this->resolvePath($path);
+        // The entry itself may be a link pointing anywhere: rm removes the link.
+        $this->assertInsideHome([], [$path]);
         $command = ['rm', '-f'];
         if ($recursive) {
             $command[] = '-r';
@@ -309,6 +325,7 @@ class FileManager
         if (!is_dir($destDir)) {
             throw new \Exception('Destination directory does not exist');
         }
+        $this->assertInsideHome([$sourceDir, $destDir]);
 
         $this->assertSucceeded($this->runOnCore([
             'find',
@@ -345,6 +362,7 @@ class FileManager
             throw new \Exception('Destination directory does not exist');
         }
 
+        $this->assertInsideHome([$dir . '/' . $filename]);
         $this->assertSucceeded($this->runOnCore([
             'curl',
             '-fSL',
@@ -361,6 +379,7 @@ class FileManager
         }
 
         $path = $this->resolvePath($path);
+        $this->assertInsideHome([$path]);
         $this->assertSucceeded($this->runOnCore(['chmod', $mode, $path]));
     }
 
@@ -396,6 +415,28 @@ class FileManager
         }
 
         return $this->project->system()->runProcess([...$argv, ...$command]);
+    }
+
+    /**
+     * Refuse a path that leaves the home once symlinks are followed. The
+     * commands run as the account, but in the engine's container: a link the
+     * account planted (`~/x -> /tmp/x`) took a write anywhere that uid could
+     * write there. Checked as the account, so the check sees what it sees.
+     *
+     * @param list<string> $paths every symlink followed, the last one too
+     * @param list<string> $entries the last component is the entry itself
+     *                              (what rm removes, what mv and cp take)
+     */
+    private function assertInsideHome(array $paths, array $entries = []): void
+    {
+        $args = [
+            ...array_map(fn (string $p): string => 'F:' . $p, $paths),
+            ...array_map(fn (string $p): string => 'E:' . $p, $entries),
+        ];
+        $process = $this->runOnCore([
+            'sh', '-c', self::CONFINE_SCRIPT, 'sh', $this->homeDirPath(), ...$args,
+        ]);
+        $this->assertSucceeded($process);
     }
 
     /**

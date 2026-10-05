@@ -4,10 +4,13 @@ namespace App\Console\Commands\System;
 
 use App\Models\ProxyRule;
 use App\Models\User;
+use App\Console\Commands\Concerns\AppliesProxyRules;
 use App\Console\Commands\Concerns\ResolvesProject;
 use App\Rules\ListenIp;
 use App\Rules\ProxyServerName;
 use App\Rules\UpstreamHost;
+use App\System;
+use App\System\Services\Webserver\ProxyListenPort;
 use Illuminate\Console\Command;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\Validator;
@@ -15,6 +18,7 @@ use Illuminate\Validation\Rule;
 
 class ProxyRuleCreateCommand extends Command
 {
+    use AppliesProxyRules;
     use ResolvesProject;
 
     /** The old spelling still answers, so nothing scripted against it breaks. */
@@ -72,6 +76,8 @@ class ProxyRuleCreateCommand extends Command
         ]);
 
         $this->info("Rule created successfully (ID: {$created->id})");
+        $this->applyProxyRules();
+
         return 0;
     }
 
@@ -165,6 +171,12 @@ class ProxyRuleCreateCommand extends Command
             foreach ($validator->errors()->all() as $message) {
                 $this->error($message);
             }
+            return null;
+        }
+
+        $refusal = (new ProxyListenPort(app(System::class)))->refusal($transport, $listenIp, $listenPort);
+        if ($refusal !== null) {
+            $this->error($refusal);
             return null;
         }
 

@@ -2,6 +2,8 @@
 
 namespace App\System\Project\Dind;
 
+use App\System\ComposeProject;
+
 /**
  * Egress rules inside a DinD account, for the code the tenant runs (engine#217).
  *
@@ -42,7 +44,7 @@ final class TenantEgressGuard
         . 'if iptables -C DOCKER-USER -j PA-TENANT-EGRESS 2>/dev/null; then sleep 15; else sleep 1; fi; done';
 
     /** Names the account resolves through Docker's DNS on pash-default-network. */
-    public const DATABASE_NAMES = ['database-users.shared-hosting.palocal', 'shared-hosting-sites-db-1'];
+    public const DATABASE_NAMES = ['database-users.shared-hosting.palocal', ComposeProject::NAME . '-sites-db-1'];
     public const REGISTRY_NAMES = ['panelalpha-cache-registry', 'panelalpha-registry-proxy'];
 
     /** Ports an account may use on the host: mail and the sites. */

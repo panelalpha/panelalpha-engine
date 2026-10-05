@@ -81,6 +81,66 @@ class FileManagerWritesAsAccountTest extends TestCase
         @unlink($tmp);
     }
 
+    /** A link the account planted must not carry a write out of its home. */
+    public function test_a_write_through_a_link_out_of_the_home_is_refused(): void
+    {
+        $outside = $this->homeDir . '.outside';
+        mkdir($outside);
+        try {
+            symlink($outside . '/probe', $this->homeDir . '/filelink');
+            symlink($outside, $this->homeDir . '/dirlink');
+            file_put_contents($this->homeDir . '/mine.txt', 'mine');
+            $files = $this->files();
+
+            $refused = [
+                'put-contents through a file link' => fn () => $files->putContents('filelink', 'x'),
+                'put-contents through a directory link' => fn () => $files->putContents('dirlink/probe', 'x'),
+                'mkdir' => fn () => $files->mkdir('dirlink/made', true),
+                'upload' => fn () => $files->moveUploadedFile('dirlink', $this->upload()),
+                'cp' => fn () => $files->cp('mine.txt', 'dirlink/copied'),
+                'mv' => fn () => $files->mv('mine.txt', 'dirlink/moved'),
+                'chmod' => fn () => $files->chmod('filelink', '0777'),
+            ];
+            foreach ($refused as $what => $call) {
+                try {
+                    $call();
+                    $this->fail("{$what} was not refused");
+                } catch (\Exception $e) {
+                    $this->assertStringContainsString('resolves outside the project home', $e->getMessage(), $what);
+                }
+            }
+
+            $this->assertSame(['.', '..'], scandir($outside), 'nothing was written outside the home');
+            $this->assertFileExists($this->homeDir . '/mine.txt');
+        } finally {
+            exec('rm -rf ' . escapeshellarg($outside));
+        }
+    }
+
+    public function test_links_inside_the_home_and_removing_a_link_still_work(): void
+    {
+        mkdir($this->homeDir . '/real');
+        symlink($this->homeDir . '/real', $this->homeDir . '/inner');
+        symlink('/etc/hostname', $this->homeDir . '/away');
+        $files = $this->files();
+
+        $files->putContents('inner/index.html', 'hi');
+        $this->assertSame('hi', file_get_contents($this->homeDir . '/real/index.html'));
+
+        // rm takes the link itself, wherever it points.
+        $files->remove('away');
+        $this->assertFalse(is_link($this->homeDir . '/away'));
+        $this->assertFileExists('/etc/hostname');
+    }
+
+    private function upload(): UploadedFile
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'upl');
+        file_put_contents($tmp, 'uploaded');
+
+        return new UploadedFile($tmp, 'photo.jpg', null, null, true);
+    }
+
     private function assertAllAsAccount(): void
     {
         $this->assertNotSame([], $this->commands);

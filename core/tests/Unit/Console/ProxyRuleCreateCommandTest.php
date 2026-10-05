@@ -4,15 +4,18 @@ namespace Tests\Unit\Console;
 
 use App\Models\ProxyRule;
 use Tests\Support\InMemoryDatabase;
+use Tests\Support\RecordsWebserverApply;
 use Tests\TestCase;
 
 /**
  * proxy:rule:create run the way a script runs it: every value on the
- * command line, --force, no prompts. It only writes the proxy_rules row.
+ * command line, --force, no prompts. It writes the proxy_rules row, then
+ * rebuilds and reloads the webserver the way the API does.
  */
 class ProxyRuleCreateCommandTest extends TestCase
 {
     use InMemoryDatabase;
+    use RecordsWebserverApply;
 
     protected function setUp(): void
     {
@@ -20,6 +23,7 @@ class ProxyRuleCreateCommandTest extends TestCase
         $this->bootInMemoryDatabase();
         $this->makeUser('alice');
         $this->makeUser('bob');
+        $this->recordWebserverApply();
     }
 
     private function create(string $args): \Illuminate\Testing\PendingCommand
@@ -41,6 +45,7 @@ class ProxyRuleCreateCommandTest extends TestCase
             [$rule->owner_scope, $rule->username, $rule->transport, $rule->listen_ip, $rule->listen_port, $rule->server_name,
              $rule->upstream_host, $rule->upstream_port, $rule->upstream_protocol, (bool) $rule->enabled, (bool) $rule->is_generated, $rule->metadata]
         );
+        $this->assertWebserverApplied(1);
     }
 
     public function test_a_given_listen_ip_is_stored(): void
@@ -152,5 +157,38 @@ class ProxyRuleCreateCommandTest extends TestCase
         }
 
         $this->assertSame(0, ProxyRule::query()->count());
+        $this->assertWebserverApplied(0);
+    }
+
+    /** A plain line and exit 1, before anything is stored or asked. */
+    public function test_a_port_the_engine_or_the_host_already_uses_is_refused(): void
+    {
+        $this->hostListens('LISTEN 0 80 127.0.0.1:3306 0.0.0.0:*');
+        $cases = [
+            ['--transport=tcp --listen-port=22', 'Port 22 is reserved by the engine.'],
+            ['--transport=udp --listen-port=2011', 'Port 2011 is reserved by the engine.'],
+            ['--transport=tcp --listen-port=3306', 'Port 3306 is already in use on this host.'],
+            ['--transport=tcp --listen-port=80', "Port 80 is the webserver's own; only an http rule can listen on it."],
+        ];
+
+        foreach ($cases as [$args, $message]) {
+            $this->artisan("proxy:rule:create --no-interaction --scope=system {$args} --upstream-host=db --upstream-port=5432")
+                ->expectsOutput($message)
+                ->assertExitCode(1);
+        }
+
+        $this->assertSame(0, ProxyRule::query()->count());
+        $this->assertWebserverApplied(0);
+    }
+
+    public function test_a_cancelled_create_stores_and_applies_nothing(): void
+    {
+        $this->artisan('proxy:rule:create --scope=system --transport=tcp --listen-port=5432 --upstream-host=db --upstream-port=5432')
+            ->expectsConfirmation('Create this rule?', 'no')
+            ->expectsOutputToContain('Cancelled.')
+            ->assertExitCode(0);
+
+        $this->assertSame(0, ProxyRule::query()->count());
+        $this->assertWebserverApplied(0);
     }
 }

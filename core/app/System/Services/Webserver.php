@@ -517,6 +517,11 @@ class Webserver implements WebserverInterface
 
         $pipeline = 'echo ' . escapeshellarg($inner) . ' | at now';
         $hostCmd = 'bash -lc ' . escapeshellarg($pipeline);
-        $this->system->runProcessOnHost($hostCmd);
+        $process = $this->system->runProcessOnHost($hostCmd);
+        // Nothing else would say so: a host without `at` never runs the job.
+        if (!$process->isSuccessful()) {
+            Log::warning('Could not queue the webserver reload on the host: '
+                . Str::limit(trim($process->getErrorOutput() . ' ' . $process->getOutput()), 200));
+        }
     }
 }

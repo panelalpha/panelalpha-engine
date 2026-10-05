@@ -981,9 +981,16 @@ prepare_config_files() {
     mkdir -p /opt/panelalpha/shared-hosting/webserver-logs/nginx
     mkdir -p /opt/panelalpha/shared-hosting/webserver-logs/nginx-proxy
     cp -n /opt/panelalpha/shared-hosting/docker-compose.yml-nginx-proxy /opt/panelalpha/shared-hosting/docker-compose.yml-webserver
+    bash /opt/panelalpha/shared-hosting/scripts/refresh-webserver-image.sh /opt/panelalpha/shared-hosting ||
+        echo_warning "Could not bring the webserver image tag up to date"
     mkdir -p /opt/panelalpha/shared-hosting/config/pure-ftpd
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/pure-ftpd/. /opt/panelalpha/shared-hosting/config/pure-ftpd/.
     chmod +x /opt/panelalpha/shared-hosting/config/pure-ftpd/entrypoint.sh
+    # Until the first FTP account there is no password database, and pure-ftpd
+    # answers every login 421 without logging it, so fail2ban's ftp jail sees
+    # nothing. The container's entrypoint builds the database from this file.
+    mkdir -p /opt/panelalpha/shared-hosting/pureftpd
+    touch /opt/panelalpha/shared-hosting/pureftpd/pureftpd.passwd
     mkdir -p /opt/panelalpha/shared-hosting/config/sftp
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/sftp/. /opt/panelalpha/shared-hosting/config/sftp/.
     # Scripts are engine code, not host state: -n would keep the installed copy.

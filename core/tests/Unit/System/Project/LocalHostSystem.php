@@ -38,7 +38,12 @@ final class LocalHostSystem extends System
     {
         $argv = is_array($cmd) ? array_values($cmd) : (preg_split('/\s+/', trim($cmd)) ?: []);
         $exit = 0;
-        if (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'test') {
+        $out = '';
+        if (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'stat' && ($argv[3] ?? '') === '%a') {
+            clearstatcache();
+            $perms = @fileperms($argv[4] ?? '');
+            [$exit, $out] = $perms === false ? [1, ''] : [0, sprintf('%o', $perms & 07777) . "\n"];
+        } elseif (($argv[0] ?? '') === 'sudo' && ($argv[1] ?? '') === 'test') {
             $flag = $argv[2] ?? '';
             $path = $argv[3] ?? '';
             $ok = match ($flag) {
@@ -52,8 +57,8 @@ final class LocalHostSystem extends System
             $this->apply($argv);
         }
 
-        return new class ($exit) extends Process {
-            public function __construct(private int $code)
+        return new class ($exit, $out) extends Process {
+            public function __construct(private int $code, private string $out)
             {
                 parent::__construct(['true']);
             }
@@ -70,7 +75,7 @@ final class LocalHostSystem extends System
 
             public function getOutput(): string
             {
-                return '';
+                return $this->out;
             }
 
             public function getErrorOutput(): string

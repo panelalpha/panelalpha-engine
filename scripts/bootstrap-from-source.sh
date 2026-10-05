@@ -106,6 +106,8 @@ command -v rsync >/dev/null || MISSING+=(rsync)
 command -v ipcalc >/dev/null || MISSING+=(ipcalc)
 # engine#529, as in installer.sh: its nftables.service stays disabled.
 command -v nft >/dev/null || MISSING+=(nftables)
+# As in installer.sh: the engine queues its background webserver reloads with `at`.
+command -v at >/dev/null || MISSING+=(at)
 [ "$QUOTA" != 1 ] || command -v setquota >/dev/null || MISSING+=(quota)
 if [ ${#MISSING[@]} -gt 0 ]; then
     step "Installing ${MISSING[*]}"
@@ -233,6 +235,7 @@ chown -R 33:33 core/storage core/bootstrap/cache 2>/dev/null ||
 # file is gitignored — without it compose cannot even parse the project.
 step "Seeding config files from templates/"
 cp -n docker-compose.yml-nginx-proxy docker-compose.yml-webserver
+bash scripts/refresh-webserver-image.sh "$PWD" || warn "Could not bring the webserver image tag up to date"
 
 mkdir -p webserver-config/{apache,nginx,nginx-proxy}/vhosts \
     webserver-config/{litespeed,openlitespeed}-admin \
@@ -242,6 +245,9 @@ mkdir -p webserver-config/{apache,nginx,nginx-proxy}/vhosts \
 cp -Rn templates/webserver-config/. webserver-config/
 cp -Rn templates/config/pure-ftpd/. config/pure-ftpd/
 chmod +x config/pure-ftpd/entrypoint.sh
+# As in installer.sh: without a password database pure-ftpd logs no failed login.
+mkdir -p pureftpd
+touch pureftpd/pureftpd.passwd
 cp -Rn templates/config/sftp/. config/sftp/
 # Scripts are engine code, not host state: -n would keep the installed copy.
 cp templates/config/sftp/{entrypoint.sh,sync-logins.sh} config/sftp/
@@ -360,8 +366,13 @@ if grep -q '^COMPOSE_PROFILES=' .env &&
         # symlink now dangles because stopping resolved took its target away --
         # `-L` is true of the link while `-e` follows it, so the pair is exactly
         # "a link pointing at nothing".
+        #
+        # A third shape is resolved's own file at the link's end: Debian 12's
+        # cloud image links /run/systemd/resolve/resolv.conf, which names real
+        # servers now and is gone after the next boot, leaving no DNS at all.
         if grep -q '^[[:space:]]*nameserver[[:space:]]\+127\.0\.0\.53' /etc/resolv.conf 2>/dev/null ||
-            { [ -L /etc/resolv.conf ] && [ ! -e /etc/resolv.conf ]; }; then
+            { [ -L /etc/resolv.conf ] && [ ! -e /etc/resolv.conf ]; } ||
+            { [ -L /etc/resolv.conf ] && readlink -f /etc/resolv.conf | grep -q '^/run/systemd/resolve/'; }; then
             step "Repointing /etc/resolv.conf away from the resolved stub"
             cp -a /etc/resolv.conf /etc/resolv.conf.backup
             rm -f /etc/resolv.conf
@@ -506,11 +517,19 @@ fi
 # `listen 10.x.x.x:80/443`. nginx cannot make that change on a reload — binding the
 # specific address fails with EADDRINUSE against its own wildcard socket — so the
 # webserver keeps serving the old config and every tenant vhost 502s until it restarts.
-# installer.sh only ever sets the address on a host with no tenant vhosts yet, so it
-# never hits this; a re-run over an existing install does.
+# Render first, as installer.sh's render_webserver_config does: a restart alone boots
+# the shipped wildcard nginx.conf again, and the first project hits the bind failure.
 if [ "$IP_WAS_SET" = 1 ]; then
+    step "Rendering the webserver config for ${PUBLIC_IP}"
+    docker compose exec -T core php artisan system:domain:rebuild || warn "Could not rebuild the webserver configuration"
     step "Restarting the webserver to pick up the address-specific vhosts"
     docker compose restart sites-http
+else
+    # An update can ship a new webserver config (new includes, a new image's modules);
+    # render it now rather than at the next domain change. The reload restarts the
+    # webserver itself if the listen addresses changed.
+    step "Rendering the webserver config"
+    docker compose exec -T core php artisan system:domain:rebuild || warn "Could not rebuild the webserver configuration"
 fi
 
 # SFTP-as-root uploads leave root-owned files where php-fpm needs to write.

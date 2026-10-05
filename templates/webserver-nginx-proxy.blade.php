@@ -9,6 +9,10 @@ pid        /var/run/nginx.pid;
 load_module modules/ngx_http_modsecurity_module.so;
 @endif
 
+# Modules the image ships with their own settings (Brotli). Globs, so an image
+# without them matches nothing and this config still starts.
+include /etc/nginx/modules-enabled/*.conf;
+
 events {
     worker_connections  1024;
 }
@@ -36,7 +40,19 @@ http {
 
     keepalive_timeout  65;
 
-    #gzip  on;
+    # Compress text the app sent uncompressed. An answer that already carries
+    # Content-Encoding passes through as it is. text/html is always included.
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/javascript text/xml application/javascript
+               application/json application/ld+json application/manifest+json
+               application/xml application/rss+xml application/atom+xml
+               application/xhtml+xml image/svg+xml application/wasm
+               font/ttf font/otf application/vnd.ms-fontobject;
+    include /etc/nginx/modules-http/*.conf;
 
     server_names_hash_max_size 1024;
     server_names_hash_bucket_size 512;
@@ -111,4 +127,10 @@ http {
           root /opt/panelalpha/shared-hosting/webserver-config/document-root;
         }
     }
+}
+
+# The tcp and udp proxy rules (NginxProxy::streamConfig). A glob, so a host
+# that has not written the file yet still starts.
+stream {
+    include /opt/panelalpha/shared-hosting/webserver-config/nginx-proxy/stream[.]conf;
 }

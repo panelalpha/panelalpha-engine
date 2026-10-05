@@ -715,6 +715,12 @@ class GenerateApiToolsCommand extends Command
             $call .= '->required()';
         }
 
+        // x-mcp-nullable: null means something to the API (clear, reset), so the
+        // tool forwards it. Elsewhere a null argument is dropped like an omitted one.
+        if (($definition['x-mcp-nullable'] ?? false) === true) {
+            $call .= '->nullable()';
+        }
+
         return "            '{$name}' => {$call},";
     }
 

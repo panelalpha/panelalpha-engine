@@ -54,7 +54,8 @@ class FileHandler
                     $crontab->addJob($job);
                 }
                 catch (\Exception $e) {
-                    \Dsc\System::addMessage('Encountered error (' . $e->getMessage() . ') when parsing cron job: ' . $line, 'error');
+                    // \Dsc\System does not exist in this copy of the library.
+                    throw new \InvalidArgumentException('Encountered error (' . $e->getMessage() . ') when parsing cron job: ' . $line, 0, $e);
                 }
             }
         }

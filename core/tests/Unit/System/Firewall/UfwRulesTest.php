@@ -29,6 +29,7 @@ class UfwRulesTest extends TestCase
 ### tuple ### limit tcp 2222 0.0.0.0/0 any 0.0.0.0/0 in
 ### tuple ### allow_log tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in
 ### tuple ### route:allow any any 10.0.0.0/8 any 0.0.0.0/0 in
+### tuple ### route:allow tcp 80 0.0.0.0/0 any 0.0.0.0/0 in_eth0!out_docker0
 ### tuple ### allow tcp 22 0.0.0.0/0 any 0.0.0.0/0 OpenSSH - in
 ### tuple ### deny tcp 3306 1.2.3.4 any 0.0.0.0/0 out
 garbage line
@@ -93,7 +94,7 @@ RULES;
             'allow tcp 80 any any any in_eth0',
             'limit tcp 2222 any any any in',
             'allow_log tcp 8080 any any any in',
-            'route:allow any any 10.0.0.0/8 any any in',
+            'route:allow tcp 80 any any any in_eth0!out_docker0',
             'allow tcp 22 any any any OpenSSH - in',
         ], array_values($raw));
     }
@@ -165,8 +166,11 @@ RULES;
         $this->assertSame([
             ['deny', 'in', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '25', 'comment', 'spam'],
             ['deny', 'out', 'proto', 'tcp', 'from', 'any', 'to', '203.0.113.7', 'port', '25', 'comment', 'spam'],
+            ['route', 'deny', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '25', 'comment', 'spam'],
         ], UfwRules::specs($rule));
-        $this->assertSame([UfwRules::spec($rule->with(['direction' => 'in']))], UfwRules::specs($rule->with(['direction' => 'in'])));
+        $allow = FirewallRule::fromArray(['action' => 'allow', 'direction' => 'both', 'protocol' => 'tcp', 'port' => '25', 'source' => '203.0.113.7']);
+        $this->assertCount(2, UfwRules::specs($allow));
+        $this->assertSame([UfwRules::spec($allow->with(['direction' => 'in']))], UfwRules::specs($allow->with(['direction' => 'in'])));
     }
 
     public function test_a_parsed_rule_keeps_the_id_it_was_added_under(): void
@@ -176,5 +180,55 @@ RULES;
 
         $this->assertNotNull($listed);
         $this->assertSame($added->id(), $listed->id());
+    }
+
+    public function test_a_route_rule_is_a_rule_for_published_ports(): void
+    {
+        $rules = UfwRules::parse(implode("\n", [
+            '### tuple ### allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in',
+            '### tuple ### route:allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in comment=' . bin2hex('panelalpha: app'),
+            '### tuple ### route:deny any any 0.0.0.0/0 any 203.0.113.7 in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'),
+            '### tuple ### deny any any 203.0.113.7 any 0.0.0.0/0 out comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'),
+        ]), '### tuple ### route:allow tcp 8080 ::/0 any ::/0 in comment=' . bin2hex('panelalpha: app'));
+
+        $this->assertSame(['host', 'published', 'published', 'host'], array_map(fn (FirewallRule $r): string => $r->scope, $rules));
+        [$host, $route, $ban] = $rules;
+        $this->assertSame(['allow', 'in', 'tcp', '8080'], [$route->action, $route->direction, $route->protocol, $route->port]);
+        $this->assertTrue($route->editable);
+        $this->assertTrue($route->managed());
+        $this->assertNotSame($host->id(), $route->id());
+        $this->assertSame(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8080', 'scope' => 'published'])->id(), $route->id());
+        // A route ban and a host rule out to the same address are two rules, not one both ways.
+        $this->assertSame([FirewallRule::IN, '203.0.113.7'], [$ban->direction, $ban->source]);
+    }
+
+    public function test_a_deny_written_to_both_scopes_is_one_rule(): void
+    {
+        $c = 'comment=' . bin2hex('spam');
+        $rules = UfwRules::parse(implode("\n", [
+            "### tuple ### route:deny tcp 22 0.0.0.0/0 any 203.0.113.7 in {$c}",
+            "### tuple ### deny tcp 22 0.0.0.0/0 any 203.0.113.7 in {$c}",
+            "### tuple ### deny any any 0.0.0.0/0 any 198.51.100.1 in {$c}",
+            "### tuple ### deny any any 198.51.100.1 any 0.0.0.0/0 out {$c}",
+            "### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.1 in {$c}",
+            // A different comment: two rules, each in one scope.
+            '### tuple ### deny any any 0.0.0.0/0 any 192.0.2.5 in',
+            "### tuple ### route:deny any any 0.0.0.0/0 any 192.0.2.5 in {$c}",
+        ]));
+
+        $this->assertSame(
+            [['both', 'in', '22', '203.0.113.7'], ['both', 'both', null, '198.51.100.1'], ['host', 'in', null, '192.0.2.5'], ['published', 'in', null, '192.0.2.5']],
+            array_map(fn (FirewallRule $r): array => [$r->scope, $r->direction, $r->port, $r->source], $rules)
+        );
+        $this->assertSame(FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7'])->id(), $rules[0]->id());
+        $this->assertSame(UfwRules::parseTuple("### tuple ### deny tcp 22 0.0.0.0/0 any 203.0.113.7 in {$c}")?->id(), $rules[0]->id(), 'the host half keeps its id');
+    }
+
+    public function test_a_route_rule_is_written_with_route_first(): void
+    {
+        $rule = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8080', 'source' => '203.0.113.7', 'scope' => 'published', 'comment' => 'app']);
+
+        $this->assertSame(['route', 'allow', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '8080', 'comment', 'app'], UfwRules::spec($rule));
+        $this->assertSame([['route', 'allow', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '8080']], UfwRules::specs($rule, withComment: false));
     }
 }

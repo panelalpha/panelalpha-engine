@@ -10,6 +10,7 @@ use App\Models\Setting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use OpenApi\Attributes as OA;
 
@@ -204,6 +205,81 @@ class ModsecController extends Controller
         $system->modsec()->toggleConfigFiles($name, $enable, $disable);
 
         return $this->getRulesets();
+    }
+
+    #[OA\Get(
+        path: '/modsec/custom-rules',
+        summary: 'Get the custom ModSecurity rules',
+        security: [['bearerAuth' => []]],
+        tags: ['ModSecurity'],
+        responses: [
+            new OA\Response(response: 200, description: 'Custom rules', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/ModsecCustomRules')],
+            )),
+        ],
+    )]
+    public function getCustomRules(): JsonResponse
+    {
+        return new JsonResponse([
+            'data' => $this->customRulesData(new System()),
+        ]);
+    }
+
+    #[OA\Put(
+        path: '/modsec/custom-rules',
+        summary: 'Replace the custom ModSecurity rules',
+        description: 'The rules go live only after the webserver config test parses them with every enabled ruleset; '
+            . 'otherwise the call answers 422 with what the test said and the live rules stay as they were. '
+            . 'Rule ids must be in ' . Modsec::CUSTOM_ID_MIN . '-' . Modsec::CUSTOM_ID_MAX . '. '
+            . 'They apply once the `custom` ruleset is enabled and the mode is not off.',
+        security: [['bearerAuth' => []]],
+        tags: ['ModSecurity'],
+        requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
+            required: ['rules'],
+            properties: [new OA\Property(
+                property: 'rules',
+                type: 'string',
+                nullable: true,
+                description: 'The whole rule file: SecRule, SecAction, SecMarker and SecRuleRemove/Update directives. Empty clears it.',
+                example: 'SecRule REQUEST_URI "@beginsWith /xyz" "id:1100001,phase:1,deny,status:403,log"',
+            )],
+        )),
+        responses: [
+            new OA\Response(response: 200, description: 'Custom rules', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', ref: '#/components/schemas/ModsecCustomRules')],
+            )),
+            new OA\Response(response: 422, description: 'Rules refused', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+        ],
+    )]
+    public function setCustomRules(Request $request): JsonResponse
+    {
+        /** @var array{rules: ?string} $params */
+        $params = $request->validate([
+            'rules' => 'present|nullable|string|max:' . Modsec::CUSTOM_RULES_MAX_BYTES,
+        ]);
+
+        $system = new System();
+        try {
+            $system->modsec()->saveCustomRules($params['rules'] ?? '');
+        } catch (\InvalidArgumentException $e) {
+            throw ValidationException::withMessages(['rules' => $e->getMessage()]);
+        }
+
+        return new JsonResponse([
+            'data' => $this->customRulesData($system),
+        ]);
+    }
+
+    /**
+     * @return array{rules: string, enabled: bool, id_range: array{0: int, 1: int}}
+     */
+    private function customRulesData(System $system): array
+    {
+        return [
+            'rules' => $system->modsec()->customRules(),
+            'enabled' => $system->modsec()->customRulesEnabled(),
+            'id_range' => [Modsec::CUSTOM_ID_MIN, Modsec::CUSTOM_ID_MAX],
+        ];
     }
 
     #[OA\Get(

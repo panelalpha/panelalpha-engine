@@ -12,6 +12,12 @@ namespace App\System\Firewall;
  * Direction `both` is one rule for traffic with an address either way, as a
  * bare address in csf.allow/csf.deny was: from `source` coming in, and to it
  * going out. A provider writes it as the two rules it takes.
+ *
+ * Scope `host` is the host's own ports; `published` is the ports Docker
+ * publishes, matched on the container's port and address (ufw's route rules).
+ * Neither reaches the other. Scope `both` is a deny written as one of each,
+ * as a ban is: a deny made here without a scope is one, so blocking an
+ * address closes the engine's published ports (2011, FTP, SFTP) as well.
  */
 final class FirewallRule
 {
@@ -20,6 +26,8 @@ final class FirewallRule
     public const IN = 'in';
     public const OUT = 'out';
     public const BOTH = 'both';
+    public const HOST = 'host';
+    public const PUBLISHED = 'published';
 
     /** Rules the installer opens carry this comment prefix; the API leaves them alone. */
     public const MANAGED_PREFIX = 'panelalpha:';
@@ -37,11 +45,12 @@ final class FirewallRule
         // Listed as it is, never rewritten from a lossy copy.
         public readonly bool $editable = true,
         public readonly ?string $raw = null,
+        public readonly string $scope = self::HOST,
     ) {
     }
 
     /**
-     * @param array{action: string, direction?: ?string, protocol?: ?string, port?: ?string, source?: ?string, destination?: ?string, comment?: ?string} $data
+     * @param array{action: string, direction?: ?string, protocol?: ?string, port?: ?string, source?: ?string, destination?: ?string, comment?: ?string, scope?: ?string} $data
      */
     public static function fromArray(array $data): self
     {
@@ -49,14 +58,24 @@ final class FirewallRule
 
         $address = static fn (mixed $v): ?string => ($v = $blank($v)) === null ? null : self::normalizeAddress($v);
 
+        $direction = $blank($data['direction'] ?? null) ?? self::IN;
+        $scope = $blank($data['scope'] ?? null) ?? self::HOST;
+        // An outbound deny has nothing published to close.
+        if ($data['action'] === self::DENY && $scope === self::HOST && $direction !== self::OUT) {
+            $scope = self::BOTH;
+        } elseif ($scope === self::BOTH && $direction === self::OUT) {
+            $scope = self::HOST;
+        }
+
         return new self(
             action: $data['action'],
-            direction: $blank($data['direction'] ?? null) ?? self::IN,
+            direction: $direction,
             protocol: $blank($data['protocol'] ?? null),
             port: $blank($data['port'] ?? null),
             source: $address($data['source'] ?? null),
             destination: $address($data['destination'] ?? null),
             comment: $blank($data['comment'] ?? null),
+            scope: $scope,
         );
     }
 
@@ -112,8 +131,9 @@ final class FirewallRule
             'source' => $this->source,
             'destination' => $this->destination,
             'comment' => $this->comment,
+            'scope' => $this->scope,
         ];
-        /** @var array{action: string, direction?: ?string, protocol?: ?string, port?: ?string, source?: ?string, destination?: ?string, comment?: ?string} $merged */
+        /** @var array{action: string, direction?: ?string, protocol?: ?string, port?: ?string, source?: ?string, destination?: ?string, comment?: ?string, scope?: ?string} $merged */
         $merged = array_merge($current, array_intersect_key($changes, $current));
 
         return self::fromArray($merged);
@@ -137,6 +157,12 @@ final class FirewallRule
         if ($this->direction === self::BOTH && ($this->source === null || $this->destination !== null)) {
             $problems['source'] = 'A rule in both directions names the address on the other side as source, and no destination.';
         }
+        if ($this->scope === self::BOTH && $this->action !== self::DENY) {
+            $problems['scope'] = 'Only a deny covers host and published ports together; an allow is for one of them.';
+        }
+        if ($this->scope === self::PUBLISHED && $this->direction !== self::IN) {
+            $problems['direction'] = 'A rule for published ports is for connections coming in.';
+        }
 
         return $problems;
     }
@@ -146,6 +172,11 @@ final class FirewallRule
         $key = [$this->action, $this->direction, $this->protocol, $this->port, $this->source, $this->destination];
         if (!$this->editable) {
             $key[] = $this->raw;
+        }
+        // Host rules keep the ids they had before rules had a scope, and a
+        // deny keeps its id when it gains its published half.
+        if ($this->scope === self::PUBLISHED) {
+            $key[] = $this->scope;
         }
 
         return substr(sha1((string) json_encode($key)), 0, 12);
@@ -163,12 +194,13 @@ final class FirewallRule
     }
 
     /**
-     * @return array{id: string, action: string, direction: string, protocol: ?string, port: ?string, source: ?string, destination: ?string, comment: ?string, managed: bool, editable: bool, raw: ?string}
+     * @return array{id: string, scope: string, action: string, direction: string, protocol: ?string, port: ?string, source: ?string, destination: ?string, comment: ?string, managed: bool, editable: bool, raw: ?string}
      */
     public function toArray(): array
     {
         return [
             'id' => $this->id(),
+            'scope' => $this->scope,
             'action' => $this->action,
             'direction' => $this->direction,
             'protocol' => $this->protocol,

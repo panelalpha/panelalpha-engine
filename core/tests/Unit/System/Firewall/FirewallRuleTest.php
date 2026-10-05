@@ -71,4 +71,37 @@ class FirewallRuleTest extends TestCase
         $this->assertFalse($rule->toArray()['editable']);
         $this->assertFalse(FirewallRule::fromArray(['action' => 'allow', 'port' => '22', 'comment' => 'mine'])->managed());
     }
+
+    public function test_a_rule_for_published_ports_is_its_own_rule_and_only_inbound(): void
+    {
+        $host = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8080']);
+        $published = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8080', 'scope' => 'published']);
+
+        $this->assertSame('host', $host->scope);
+        $this->assertSame('published', $published->toArray()['scope']);
+        $this->assertNotSame($host->id(), $published->id());
+        // Host rules keep the ids they were listed under before rules had a scope.
+        $this->assertSame(substr(sha1((string) json_encode(['allow', 'in', 'tcp', '8080', null, null])), 0, 12), $host->id());
+        $this->assertSame('published', $host->with(['scope' => 'published'])->scope);
+
+        $this->assertSame([], $published->problems());
+        $this->assertArrayHasKey('direction', $published->with(['direction' => 'out'])->problems());
+        $this->assertArrayHasKey('direction', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7', 'scope' => 'published'])->problems());
+    }
+
+    public function test_a_deny_covers_both_scopes_unless_it_names_published(): void
+    {
+        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']);
+
+        $this->assertSame('both', $deny->scope);
+        $this->assertSame('both', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7', 'scope' => 'host'])->scope);
+        $this->assertSame('published', FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7', 'scope' => 'published'])->scope);
+        $this->assertSame('host', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'destination' => '203.0.113.7'])->scope, 'nothing published goes out');
+        $this->assertSame('host', FirewallRule::fromArray(['action' => 'allow', 'port' => '22'])->scope);
+        // The same id as the host deny it was before it covered published ports.
+        $this->assertSame(substr(sha1((string) json_encode(['deny', 'in', null, null, '203.0.113.7', null])), 0, 12), $deny->id());
+        $this->assertSame([], $deny->problems());
+        $this->assertArrayHasKey('scope', $deny->with(['action' => 'allow', 'port' => '22'])->problems());
+        $this->assertSame('host', $deny->with(['action' => 'allow', 'port' => '22', 'scope' => 'host'])->scope);
+    }
 }

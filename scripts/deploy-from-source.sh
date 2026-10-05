@@ -75,7 +75,9 @@ for e in "${EXCLUDES[@]}"; do RSYNC_ARGS+=(--exclude "/$e"); done
 [ "$DRY_RUN" = 1 ] && RSYNC_ARGS+=(--dry-run)
 
 echo ">>> Uploading $ENGINE_DIR -> ${TARGET}:${REMOTE_DIR}"
-ssh "$TARGET" "mkdir -p '$REMOTE_DIR'"
+# The upload needs rsync on the host too; Debian's cloud images do not ship it.
+ssh "$TARGET" "mkdir -p '$REMOTE_DIR' && { command -v rsync >/dev/null ||
+    { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rsync >/dev/null; }; }"
 rsync "${RSYNC_ARGS[@]}" "${ENGINE_DIR}/" "${TARGET}:${REMOTE_DIR}/"
 
 if [ "$DRY_RUN" = 1 ]; then

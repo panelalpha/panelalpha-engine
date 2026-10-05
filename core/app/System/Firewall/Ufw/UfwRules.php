@@ -10,7 +10,9 @@ use App\System\Firewall\FirewallRule;
  * ufw keeps one `### tuple ###` line per rule in /etc/ufw/user.rules and
  * user6.rules: `action proto dport dst sport src [dapp sapp] direction[_iface]
  * [comment=<hex>]`. A rule added for any address is written to both files,
- * once with 0.0.0.0/0 and once with ::/0; it is one rule here.
+ * once with 0.0.0.0/0 and once with ::/0; it is one rule here. A route rule
+ * (`ufw route ...`, ufw-user-forward) has its action as route:<action>; it is
+ * a rule for published ports.
  */
 final class UfwRules
 {
@@ -27,7 +29,54 @@ final class UfwRules
             }
         }
 
-        return self::pairBothDirections(array_values($rules));
+        return self::pairScopes(self::pairBothDirections(array_values($rules)));
+    }
+
+    /**
+     * A host deny and a route deny, otherwise alike, are one deny in `both`
+     * scopes, as the API and fail2ban write it; listed once, where the host
+     * half is.
+     *
+     * @param list<FirewallRule> $rules
+     * @return list<FirewallRule>
+     */
+    private static function pairScopes(array $rules): array
+    {
+        $key = static fn (FirewallRule $r): string => (string) json_encode([$r->protocol, $r->port, $r->source, $r->destination, $r->comment]);
+        $routed = [];
+        foreach ($rules as $i => $rule) {
+            if ($rule->editable && $rule->scope === FirewallRule::PUBLISHED && $rule->action === FirewallRule::DENY) {
+                $routed[$key($rule)] ??= $i;
+            }
+        }
+
+        // Either half can come first; the rule is listed where the host half is.
+        $both = [];
+        $taken = [];
+        foreach ($rules as $i => $rule) {
+            if (!$rule->editable || $rule->scope !== FirewallRule::HOST || $rule->action !== FirewallRule::DENY || $rule->direction === FirewallRule::OUT) {
+                continue;
+            }
+            // A deny both ways has its route half on the inbound side only.
+            $inbound = $rule->direction === FirewallRule::BOTH ? $rule->with(['direction' => FirewallRule::IN]) : $rule;
+            if (isset($routed[$k = $key($inbound)])) {
+                $both[$i] = true;
+                $taken[$routed[$k]] = true;
+                unset($routed[$k]);
+            }
+        }
+
+        $paired = [];
+        foreach ($rules as $i => $rule) {
+            if (isset($taken[$i])) {
+                continue;
+            }
+            $paired[] = isset($both[$i])
+                ? new FirewallRule($rule->action, $rule->direction, $rule->protocol, $rule->port, $rule->source, $rule->destination, $rule->comment, scope: FirewallRule::BOTH)
+                : $rule;
+        }
+
+        return $paired;
     }
 
     /**
@@ -77,7 +126,7 @@ final class UfwRules
 
     private static function halfKey(FirewallRule $rule, string $address): string
     {
-        return (string) json_encode([$rule->action, $rule->protocol, $rule->port, $address, $rule->comment]);
+        return (string) json_encode([$rule->scope, $rule->action, $rule->protocol, $rule->port, $address, $rule->comment]);
     }
 
     public static function parseTuple(string $line): ?FirewallRule
@@ -100,10 +149,16 @@ final class UfwRules
         [$action, $proto, $dport, $dst, $sport, $src] = $f;
         $direction = $f[count($f) - 1];
         $any = static fn (string $v): ?string => in_array($v, ['any', ...self::ANY_ADDRESS], true) ? null : $v;
+        $scope = FirewallRule::HOST;
+        if (str_starts_with($action, 'route:')) {
+            $scope = FirewallRule::PUBLISHED;
+            $action = substr($action, strlen('route:'));
+        }
 
+        // A route rule names a direction only with an interface, which the model does not carry.
         $editable = count($f) === 7
             && in_array($action, [FirewallRule::ALLOW, FirewallRule::DENY], true)
-            && in_array($direction, [FirewallRule::IN, FirewallRule::OUT], true)
+            && in_array($direction, $scope === FirewallRule::HOST ? [FirewallRule::IN, FirewallRule::OUT] : [FirewallRule::IN], true)
             && $sport === 'any';
         $raw = str_replace(self::ANY_ADDRESS, 'any', $tuple);
 
@@ -117,35 +172,42 @@ final class UfwRules
             comment: $comment,
             editable: $editable,
             raw: $editable ? null : $raw,
+            scope: $scope,
         );
     }
 
     /**
      * The words after `ufw` (or `ufw delete`) for each ufw rule this one is:
-     * one, or two for a rule in both directions.
+     * one, or two for a rule in both directions, and the route rule of a
+     * deny in both scopes.
      *
      * @return list<list<string>>
      */
     public static function specs(FirewallRule $rule, bool $withComment = true): array
     {
-        if ($rule->direction !== FirewallRule::BOTH) {
-            return [self::spec($rule, $withComment)];
+        $host = $rule->scope === FirewallRule::BOTH ? FirewallRule::HOST : $rule->scope;
+        $half = static fn (string $direction, ?string $source, ?string $destination, string $scope): FirewallRule
+            => new FirewallRule($rule->action, $direction, $rule->protocol, $rule->port, $source, $destination, $rule->comment, scope: $scope);
+
+        $halves = $rule->direction === FirewallRule::BOTH
+            ? [$half(FirewallRule::IN, $rule->source, null, $host), $half(FirewallRule::OUT, null, $rule->source, $host)]
+            : [$half($rule->direction, $rule->source, $rule->destination, $host)];
+        if ($rule->scope === FirewallRule::BOTH) {
+            $halves[] = $half(FirewallRule::IN, $rule->source, $rule->direction === FirewallRule::BOTH ? null : $rule->destination, FirewallRule::PUBLISHED);
         }
 
-        return [
-            self::spec(new FirewallRule($rule->action, FirewallRule::IN, $rule->protocol, $rule->port, $rule->source, null, $rule->comment), $withComment),
-            self::spec(new FirewallRule($rule->action, FirewallRule::OUT, $rule->protocol, $rule->port, null, $rule->source, $rule->comment), $withComment),
-        ];
+        return array_map(static fn (FirewallRule $r): array => self::spec($r, $withComment), $halves);
     }
 
     /**
-     * The words after `ufw` (or `ufw delete`) that name one ufw rule.
+     * The words after `ufw` (or `ufw delete`) that name one ufw rule; a rule
+     * for published ports starts with `route`, and the verb goes after it.
      *
      * @return list<string>
      */
     public static function spec(FirewallRule $rule, bool $withComment = true): array
     {
-        $spec = [$rule->action, $rule->direction];
+        $spec = $rule->scope === FirewallRule::PUBLISHED ? ['route', $rule->action] : [$rule->action, $rule->direction];
         if ($rule->protocol !== null) {
             array_push($spec, 'proto', $rule->protocol);
         }

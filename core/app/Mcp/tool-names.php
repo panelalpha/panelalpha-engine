@@ -75,6 +75,7 @@ return [
     'GET /projects/{username}/domains/{domain}' => 'domain_get',
     'PUT /projects/{username}/domains/{domain}' => 'domain_update',
     'DELETE /projects/{username}/domains/{domain}' => 'domain_delete',
+    'GET /projects/{username}/domains/{domain}/mail-dns' => 'domain_mail_dns_get',
 
     // Project settings -- values the engine holds for a project, such as the
     // Cloudflare API token a cloudflare tunnel needs. Secrets read back
@@ -293,6 +294,8 @@ return [
     'PUT /modsec/rulesets/{name}/enable' => 'modsec_ruleset_enable',
     'PUT /modsec/rulesets/{name}/disable' => 'modsec_ruleset_disable',
     'PUT /modsec/rulesets/{name}/config-files' => 'modsec_ruleset_configs_set',
+    'GET /modsec/custom-rules' => 'modsec_custom_rules_get',
+    'PUT /modsec/custom-rules' => 'modsec_custom_rules_set',
     'GET /modsec/audit-log/files' => 'modsec_audit_log_list',
     'GET /modsec/audit-log/files/{filename}' => 'modsec_audit_log_download',
     'GET /modsec/audit-log/files/{filename}/tail' => 'modsec_audit_log_tail',

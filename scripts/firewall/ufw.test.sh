@@ -13,6 +13,8 @@ mkdir -p "$W/bin"
 for cmd in systemctl ss fail2ban-client; do
     printf '#!/bin/bash\necho "%s $*" >>"%s/calls"\n' "$cmd" "$W" >"$W/bin/$cmd"
 done
+# systemctl says fail2ban is stopped while $W/f2b-down exists.
+printf '#!/bin/bash\necho "systemctl $*" >>"%s/calls"\n[ "$1" != is-active ] || [ ! -f "%s/f2b-down" ]\n' "$W" "$W" >"$W/bin/systemctl"
 # ufw refuses any command matching the regex in $W/ufw-refuses.
 cat >"$W/bin/ufw" <<FAKE
 #!/bin/bash
@@ -26,18 +28,35 @@ FAKE
 printf '#!/bin/bash\necho "dpkg $*" >>"%s/calls"\n[ ! -f "%s/dpkg-missing" ]\n' "$W" "$W" >"$W/bin/dpkg"
 printf '#!/bin/bash\necho "apt-get $*" >>"%s/calls"\n[ ! -f "%s/apt-fails" ]\n' "$W" "$W" >"$W/bin/apt-get"
 printf '#!/bin/bash\nprintf "port 22\\nport 2200\\n"\n' >"$W/bin/sshd"
-# iptables knows the chains listed in $W/chains; -N adds one.
+# iptables knows the chains listed in $W/chains; -N adds one. -S prints and -C
+# looks in $W/<name>-<chain>, the chain's rules as -S prints them.
 cat >"$W/bin/iptables" <<FAKE
 #!/bin/bash
+# -w 30 (wait for the xtables lock) is recorded apart; a call without it in no-wait.
+if [ "\$1 \$2" = "-w 30" ]; then shift 2; else echo "\$(basename "\$0") \$*" >>"$W/no-wait"; fi
 echo "\$(basename "\$0") \$*" >>"$W/calls"
+rules="$W/\$(basename "\$0")-\$2"
 case "\$1 \$2" in
 "-n -L") grep -qx "\$3" "$W/chains" 2>/dev/null ;;
 "-N "*) echo "\$2" >>"$W/chains" ;;
-"-C "*) exit 1 ;;
+"-S "*) cat "\$rules" 2>/dev/null ;;
+"-C "*) shift; chain=\$1; shift; grep -qxF -- "-A \$chain \$*" "\$rules" 2>/dev/null ;;
 "-D "*) exit 1 ;;
 esac
 FAKE
 cp "$W/bin/iptables" "$W/bin/ip6tables"
+# iptables-restore keeps its input in $W/restore-<name>, adds the chains it
+# declares, and fails with $W/restore-fails.
+cat >"$W/bin/iptables-restore" <<FAKE
+#!/bin/bash
+echo "\$(basename "\$0") \$*" >>"$W/calls"
+cat >"$W/restore-\$(basename "\$0" -restore)"
+[ ! -f "$W/restore-fails" ] || exit 1
+sed -n 's/^:\([^ ]*\) .*/\1/p' "$W/restore-\$(basename "\$0" -restore)" >>"$W/chains"
+FAKE
+cp "$W/bin/iptables-restore" "$W/bin/ip6tables-restore"
+# docker ps prints $W/docker-ports, the Ports column of each container.
+printf '#!/bin/bash\necho "docker $*" >>"%s/calls"\ncat "%s/docker-ports" 2>/dev/null || true\n' "$W" "$W" >"$W/bin/docker"
 chmod +x "$W/bin/"*
 
 failures=0
@@ -51,7 +70,8 @@ expect() { # expect <label> <expected> <actual>
 }
 reset() {
     rm -rf "$W/calls" "$W/chains" "$W/etc" "$W/engine" "$W/backups" "$W/src-csf" \
-        "$W/ufw-refuses" "$W/dpkg-missing" "$W/apt-fails"
+        "$W/ufw-refuses" "$W/dpkg-missing" "$W/apt-fails" "$W"/restore-* "$W"/iptables-* "$W"/ip6tables-* \
+        "$W/docker-ports" "$W/f2b-down" "$W/no-wait"
     mkdir -p "$W/etc/ufw" "$W/etc/fail2ban" "$W/engine/scripts/firewall" "$W/backups"
     printf 'IPV6=no\nDEFAULT_INPUT_POLICY="DROP"\nMANAGE_BUILTINS=yes\n' >"$W/etc/default-ufw"
     printf 'COMPOSE_PROFILES=full\nCSF_UI=0\nCSF_UI_PASSWORD=secret\n' >"$W/engine/.env"
@@ -72,6 +92,17 @@ env_run() {
 run() { env_run bash "$DIR/ufw.sh" "$@" >"$W/out" 2>&1; echo $?; }
 calls() { grep -c -- "$1" "$W/calls" 2>/dev/null; }
 line_of() { grep -n -m1 -- "$1" "$W/calls" | cut -d: -f1; }
+restored() { grep -cxF -- "$1" "$W/restore-${2:-iptables}" 2>/dev/null; }
+restored_line() { grep -nxF -m1 -- "$1" "$W/restore-iptables" | cut -d: -f1; }
+hex() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
+# user.rules / user6.rules with the given tuple lines (after "### tuple ###").
+rules() { printf '### tuple ### %s\n' "$@" >"$W/etc/ufw/user.rules"; }
+rules6() { printf '### tuple ### %s\n' "$@" >"$W/etc/ufw/user6.rules"; }
+# The engine's route rules, as ufw writes them, so they count as there.
+ENGINE_ROUTES=("route:allow tcp 2011 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'panelalpha: engine api')"
+    "route:allow tcp 21 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'panelalpha: ftp')"
+    "route:allow tcp 30000:30009 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'panelalpha: ftp passive')"
+    "route:allow tcp 2222 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'panelalpha: sftp')")
 
 # One csf line, through the same function the migration uses.
 convert() { # convert <allow|deny> <line> -> the ufw words, or SKIP
@@ -133,7 +164,7 @@ expect "after.init restores Docker's FORWARD policy" "1" "$(grep -c 'iptables -P
 
 # fail2ban.
 jail="$W/etc/fail2ban/jail.d/panelalpha.local"
-expect "bans are ufw deny rules" "2" "$(grep -c 'ufw\[blocktype=deny\]' "$jail")"
+expect "bans are the engine's ufw action" "2" "$(grep -cE '^banaction(_allports)? = panelalpha-ufw$' "$jail")"
 section() { awk -v s="[$1]" '$0 == s { on = 1; next } /^\[/ { on = 0 } on' "$jail"; }
 expect "sshd jail on every ssh port" "port = 22,2200" "$(section sshd | grep '^port')"
 expect "the host's sshd only" "filter = panelalpha-sshd" "$(section sshd | grep '^filter')"
@@ -143,11 +174,12 @@ expect "engine API jail on its own log" "logpath = $W/engine/logs/core/nginx/api
 expect "which exists before fail2ban looks" "yes" "$([ -f "$W/engine/logs/core/nginx/api-access.log" ] && echo yes)"
 expect "the API takes more retries" "maxretry = 10" "$(section engine-api | grep '^maxretry')"
 expect "the host's sshd is told apart from the SFTP container's" "1" "$(grep -c '^journalmatch = _SYSTEMD_UNIT=ssh.service + _SYSTEMD_UNIT=sshd.service$' "$W/etc/fail2ban/filter.d/panelalpha-sshd.conf")"
+expect "and the jail says it too, over a distribution's own [sshd]" "journalmatch = _SYSTEMD_UNIT=ssh.service + _SYSTEMD_UNIT=sshd.service" "$(section sshd | grep '^journalmatch')"
 expect "SFTP is facility local5" "1" "$(grep -c '^journalmatch = SYSLOG_IDENTIFIER=sshd SYSLOG_FACILITY=21$' "$W/etc/fail2ban/filter.d/panelalpha-sftp.conf")"
 expect "FTP by its syslog name" "1" "$(grep -c '^journalmatch = SYSLOG_IDENTIFIER=pure-ftpd$' "$W/etc/fail2ban/filter.d/panelalpha-ftp.conf")"
 expect "the API filter counts 401s on /api and /mcp" "1" "$(grep -c '"\[A-Z\]+ /(?:api|mcp)' "$W/etc/fail2ban/filter.d/panelalpha-api.conf")"
 expect "with CSF's trusted addresses ignored" "1" "$(grep -c '^ignoreip = 127.0.0.1/8 ::1 1.2.3.4 203.0.113.5$' "$jail")"
-expect "fail2ban reloaded" "1" "$(calls 'systemctl reload-or-restart fail2ban')"
+expect "fail2ban restarted, its ban action being new" "1:0" "$(calls 'systemctl restart fail2ban'):$(calls 'fail2ban-client reload')"
 
 # ufw logging switched off: the firewall log needs it.
 reset
@@ -162,6 +194,17 @@ printf '# trusted\n198.51.100.7 # office\n\n2001:db8::/32 # vpn\n198.51.100.7\n'
 expect "fail2ban alone: done" "0" "$(run fail2ban)"
 expect "comments stay out of ignoreip" "ignoreip = 127.0.0.1/8 ::1 198.51.100.7 2001:db8::/32" "$(grep '^ignoreip' "$W/etc/fail2ban/jail.d/panelalpha.local")"
 expect "and nothing else is touched" "0" "$(calls '^ufw')"
+rm -f "$W/calls"
+run fail2ban >/dev/null
+expect "the same ban action again: the jails restarted, which also repairs one a reload left bare" "1:0" "$(calls 'fail2ban-client reload --restart'):$(calls 'systemctl restart fail2ban')"
+sed -i 's/^banaction = .*/banaction = ufw[blocktype=deny]/' "$W/etc/fail2ban/jail.d/panelalpha.local"
+rm -f "$W/calls"
+run fail2ban >/dev/null
+expect "a jail on the old action: a restart, which a reload would leave without actions" "0:1" "$(calls 'fail2ban-client reload'):$(calls 'systemctl restart fail2ban')"
+touch "$W/f2b-down"
+rm -f "$W/calls"
+run fail2ban >/dev/null
+expect "a stopped fail2ban is started instead" "1|0" "$(calls 'systemctl restart fail2ban')|$(calls 'fail2ban-client reload')"
 
 # CSF turned off by the operator: ufw stays off.
 reset
@@ -225,38 +268,183 @@ expect "nothing to uninstall" "0" "$(calls csf-uninstall)"
 expect "no backup" "0" "$(ls "$W/backups" | wc -l)"
 expect "ufw enabled" "1" "$(calls 'ufw --force enable')"
 
-# The Docker hook: what Docker DNATed from outside meets ufw's rules, then its default.
+# The Docker hook: what Docker DNATed from outside meets ufw's route rules, then a drop.
 reset
-printf 'ufw-user-input\nDOCKER-USER\n' >"$W/chains"
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
 expect "hook applied" "0" "$(run published-on)"
-expect "containers on Docker's bridges are left to their own chains" "2" "$(grep -cE '^iptables -A PA-PUBLISHED -i (docker0|br-\+) -j RETURN$' "$W/calls")"
-expect "then ufw's user rules" "1" "$(calls 'iptables -A PA-PUBLISHED -j ufw-user-input')"
-expect "then ufw's default incoming policy" "1" "$(calls 'iptables -A PA-PUBLISHED -j DROP')"
-expect "the default comes last" "1" "$([ "$(line_of 'PA-PUBLISHED -j DROP')" -gt "$(line_of 'PA-PUBLISHED -j ufw-user-input')" ] && echo 1)"
-expect "no log jump while ufw logs nothing" "0" "$(calls 'PA-PUBLISHED -j ufw-logging-deny')"
+expect "the chain in one restore, added to what is there, once the xtables lock is free" "1" "$(calls 'iptables-restore -w 30 --noflush')"
+expect "containers on Docker's bridges are left to their own chains" "2" "$(grep -cxE -- '-A PA-PUBLISHED -i (docker0|br-\+) -j RETURN' "$W/restore-iptables")"
+expect "then ufw's route rules" "1" "$(restored '-A PA-PUBLISHED -j ufw-user-forward')"
+expect "never the host's own rules" "0" "$(grep -c 'ufw-user-input' "$W/restore-iptables")"
+expect "then a drop" "1" "$(restored '-A PA-PUBLISHED -j DROP')"
+expect "the drop comes last" "1" "$([ "$(restored_line '-A PA-PUBLISHED -j DROP')" -gt "$(restored_line '-A PA-PUBLISHED -j ufw-user-forward')" ] && echo 1)"
+expect "no log jump while ufw logs nothing" "0" "$(restored '-A PA-PUBLISHED -j ufw-logging-deny')"
+expect "only new connections Docker DNATed, first when nothing else is there" "1" "$(calls 'iptables -I DOCKER-USER 1 -m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j PA-PUBLISHED')"
 
 reset
-printf 'ufw-user-input\nDOCKER-USER\nufw-logging-deny\n' >"$W/chains"
+printf 'ufw-user-forward\nDOCKER-USER\nufw-logging-deny\n' >"$W/chains"
 run published-on >/dev/null
-expect "a refused published port is logged as ufw logs its own" "1" "$(calls 'iptables -A PA-PUBLISHED -j ufw-logging-deny')"
-expect "before the drop" "1" "$([ "$(line_of 'PA-PUBLISHED -j DROP')" -gt "$(line_of 'PA-PUBLISHED -j ufw-logging-deny')" ] && echo 1)"
-expect "only new connections Docker DNATed" "1" "$(calls 'iptables -I DOCKER-USER -m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j PA-PUBLISHED')"
-expect "no IPv6 hook without ufw6's chain" "0" "$(calls 'ip6tables -A PA-PUBLISHED')"
+expect "a refused published port is logged as ufw logs its own" "1" "$(restored '-A PA-PUBLISHED -j ufw-logging-deny')"
+expect "before the drop" "1" "$([ "$(restored_line '-A PA-PUBLISHED -j DROP')" -gt "$(restored_line '-A PA-PUBLISHED -j ufw-logging-deny')" ] && echo 1)"
+expect "no IPv6 hook without ufw6's chain" "0" "$(calls 'ip6tables-restore')"
+expect "every iptables call waits for the xtables lock" "0" "$(cat "$W/no-wait" 2>/dev/null | wc -l)"
+expect "the log chain is asked before the restore, which holds the lock" "1" "$([ "$(line_of 'iptables -n -L ufw-logging-deny')" -lt "$(line_of 'iptables-restore')" ] && echo 1)"
+
+reset
+printf 'ufw-user-forward\nDOCKER-USER\nufw6-user-forward\n' >"$W/chains"
+run published-on >/dev/null
+expect "IPv6 gets the same, from ufw6's route rules" "1" "$(restored '-A PA-PUBLISHED -j ufw6-user-forward' ip6tables)"
+expect "and its own hook" "1" "$(calls 'ip6tables -I DOCKER-USER 1 -m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j PA-PUBLISHED')"
+
+# The tenant network's rules stay first.
+reset
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
+printf '%s\n' '-N DOCKER-USER' '-A DOCKER-USER -i br-pa-build -j PA-BUILD-EGRESS' '-A DOCKER-USER -o br-pa-tenants -j PA-TENANT-NET' \
+    '-A DOCKER-USER -i br-pa-tenants -j PA-TENANT-NET' >"$W/iptables-DOCKER-USER"
+run published-on >/dev/null
+expect "the hook goes in after the tenant network's rules" "1" "$(calls 'iptables -I DOCKER-USER 4 -m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j PA-PUBLISHED')"
+
+reset
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
+printf '%s\n' '-N DOCKER-USER' '-A DOCKER-USER -m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j PA-PUBLISHED' \
+    '-A DOCKER-USER -o br-pa-tenants -j PA-TENANT-NET' '-A DOCKER-USER -i br-pa-tenants -j PA-TENANT-NET' >"$W/iptables-DOCKER-USER"
+run published-on >/dev/null
+expect "a hook above them moves below" "1" "$(calls 'iptables -I DOCKER-USER 4 -m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j PA-PUBLISHED')"
+expect "the new one in before the old one goes" "1" "$([ "$(line_of 'iptables -D DOCKER-USER -m conntrack')" -gt "$(line_of 'iptables -I DOCKER-USER 4')" ] && echo 1)"
+
+reset
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
+printf '%s\n' '-N DOCKER-USER' '-A DOCKER-USER -o br-pa-tenants -j PA-TENANT-NET' '-A DOCKER-USER -i br-pa-tenants -j PA-TENANT-NET' \
+    '-A DOCKER-USER -m conntrack --ctstate NEW -m conntrack --ctstate DNAT -j PA-PUBLISHED' >"$W/iptables-DOCKER-USER"
+run published-on >/dev/null
+expect "a hook in place is left as it is" "0" "$(calls 'iptables -[ID] DOCKER-USER')"
+
+reset
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
+touch "$W/restore-fails"
+run published-on >/dev/null
+expect "a restore iptables refuses is reported" "1" "$(grep -c 'could not rebuild PA-PUBLISHED' "$W/out")"
+expect "and nothing jumps into a chain that is not there" "0" "$(calls 'iptables -I DOCKER-USER')"
 
 reset
 sed -i 's/^DEFAULT_INPUT_POLICY=.*/DEFAULT_INPUT_POLICY="ACCEPT"/' "$W/etc/default-ufw"
-printf 'ufw-user-input\nDOCKER-USER\n' >"$W/chains"
+echo 'DEFAULT_FORWARD_POLICY="ACCEPT"' >>"$W/etc/default-ufw"
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
 run published-on >/dev/null
-expect "an accepting default leaves the port to Docker" "1" "$(calls 'iptables -A PA-PUBLISHED -j RETURN')"
+expect "an accepting default never opens a published port" "1" "$(restored '-A PA-PUBLISHED -j DROP')"
+expect "nor returns it to Docker" "0" "$(restored '-A PA-PUBLISHED -j RETURN')"
 
 reset
-sed -i 's/^DEFAULT_INPUT_POLICY=.*/DEFAULT_INPUT_POLICY="REJECT"/' "$W/etc/default-ufw"
-printf 'ufw-user-input\nDOCKER-USER\n' >"$W/chains"
+echo 'DEFAULT_FORWARD_POLICY="REJECT"' >>"$W/etc/default-ufw"
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
+run published-on >/dev/null
+expect "a rejecting routed default rejects published ports" "1" "$(restored '-A PA-PUBLISHED -j REJECT')"
+
+# The engine's own published ports as route rules, put in by install and apply.
+reset
+expect "install: done" "0" "$(run install)"
+for p in "2011 comment panelalpha: engine api" "21 comment panelalpha: ftp" "30000:30009 comment panelalpha: ftp passive" "2222 comment panelalpha: sftp"; do
+    expect "published port ${p%% *} gets a managed route rule" "1" "$(calls "ufw route allow proto tcp from any to any port $p")"
+done
+expect "host ports get none" "0" "$(grep -cE 'ufw route allow .*port (22|80|443) ' "$W/calls")"
+
+reset
+rules "${ENGINE_ROUTES[@]}" "allow tcp 2011 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'panelalpha: engine api')"
+run install >/dev/null
+expect "route rules already there are not added again" "0" "$(calls 'ufw route')"
+expect "nor is anything carried over" "0" "$(calls 'docker ps')"
+
+reset
+rules "${ENGINE_ROUTES[@]:1}" "allow tcp 2011 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'panelalpha: engine api')"
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
+expect "apply: done" "0" "$(run apply)"
+expect "apply puts a missing one back" "1" "$(calls 'ufw route allow proto tcp from any to any port 2011 comment panelalpha: engine api')"
+expect "and only that one" "1" "$(calls 'ufw route')"
+expect "before the hook moves to route rules" "1" "$([ "$(line_of 'iptables-restore')" -gt "$(line_of 'ufw route allow')" ] && echo 1)"
+
+reset
+rules "allow tcp 22 0.0.0.0/0 any 0.0.0.0/0 in"
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
 run apply >/dev/null
-expect "a rejecting default rejects published ports too" "1" "$(calls 'iptables -A PA-PUBLISHED -j REJECT')"
+expect "apply leaves a ufw the engine did not set up alone" "0" "$(calls '^ufw')"
+expect "and still hooks published ports" "1" "$(calls 'iptables-restore')"
+
+# Upgrading: the operator's rules that reached a published container port, at
+# the container's port, are carried over once.
+upgrade() { # <docker ports> <tuple lines...>
+    reset
+    printf '%s\n' "$1" >"$W/docker-ports"
+    shift
+    rules "allow tcp 2011 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'panelalpha: engine api')" "$@"
+    printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
+    run apply >/dev/null
+}
+upgrade '0.0.0.0:28081->8080/tcp, [::]:28081->8080/tcp' "allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'my app')" \
+    "allow tcp 9090 0.0.0.0/0 any 0.0.0.0/0 in"
+expect "an allow for a published container port becomes a route rule" "1" "$(calls 'ufw route allow proto tcp from any to any port 8080 comment my app')"
+expect "and is reported" "1" "$(grep -c 'carried over to published ports: ufw route allow proto tcp from any to any port 8080 comment my app' "$W/out")"
+expect "an allow for a port nothing publishes is not carried over" "0" "$(calls 'port 9090')"
+expect "the engine's own rules are not carried over" "0" "$(calls 'ufw route allow proto tcp from any to any port 2011$')"
+expect "carried over before the engine's route rules go in" "1" "$([ "$(line_of 'port 8080')" -lt "$(line_of 'port 2011 comment')" ] && echo 1)"
+
+upgrade '0.0.0.0:30000-30009->30000-30009/tcp' "allow tcp 30005 0.0.0.0/0 any 203.0.113.7 in" "allow tcp 80,30002:30003 0.0.0.0/0 any 0.0.0.0/0 in" \
+    "allow udp 30001 0.0.0.0/0 any 0.0.0.0/0 in"
+expect "a port inside a published range" "1" "$(calls 'ufw route allow proto tcp from 203.0.113.7 to any port 30005$')"
+expect "a list reaching into one" "1" "$(calls 'ufw route allow proto tcp from any to any port 80,30002:30003$')"
+expect "another protocol does not" "0" "$(calls 'proto udp')"
+
+upgrade '0.0.0.0:28022->22/tcp' "allow any any 0.0.0.0/0 any 10.10.0.1 in comment=$(hex 'office')" "allow any any 10.10.0.1 any 0.0.0.0/0 out" \
+    "deny any any 0.0.0.0/0 any 198.51.100.9 in comment=$(hex 'spam')" "deny tcp 22 0.0.0.0/0 any 192.0.2.0/24 in" \
+    "deny any any 0.0.0.0/0 any 192.0.2.99 in comment=$(hex 'by Fail2Ban after 5 attempts against sshd')" "allow tcp 22 0.0.0.0/0 any 0.0.0.0/0 in_eth0" \
+    "limit tcp 22 0.0.0.0/0 any 0.0.0.0/0 in"
+expect "an address allowed on every port keeps them" "1" "$(calls 'ufw route allow from 10.10.0.1 to any comment office')"
+expect "a deny stays a deny, on top" "1" "$(calls 'ufw route prepend deny from 198.51.100.9 to any comment spam')"
+expect "a deny on the container's port too" "1" "$(calls 'ufw route prepend deny proto tcp from 192.0.2.0/24 to any port 22$')"
+
+upgrade '' "deny tcp 3306 0.0.0.0/0 any 198.51.100.0/24 in" "allow any any 0.0.0.0/0 any 10.10.0.1 in" "deny any any 0.0.0.0/0 any 203.0.113.9 in"
+expect "a deny is carried over whatever is published, as an API deny covers both" "1" "$(calls 'ufw route prepend deny proto tcp from 198.51.100.0/24 to any port 3306$')"
+expect "with nothing published at all" "1" "$(calls 'ufw route prepend deny from 203.0.113.9 to any$')"
+expect "while an allow needs a published port" "0" "$(calls 'ufw route allow from 10.10.0.1')"
+expect "an outbound rule is not carried over" "0" "$(calls 'to 10.10.0.1')"
+expect "a ban is left to mirror_bans" "0" "$(calls 192.0.2.99)"
+expect "nor a rule with options the route rule would lose" "0" "$(grep -cE 'ufw route (allow|limit) proto tcp from any to any port 22( |$)' "$W/calls")"
 
 reset
-printf 'ufw-user-input\n' >"$W/chains"
+printf '%s\n' '0.0.0.0:28081->8080/tcp' >"$W/docker-ports"
+rules "allow tcp 2011 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'panelalpha: engine api')" "allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in"
+rules6 "allow tcp 8080 ::/0 any ::/0 in" "allow tcp 8080 ::/0 any 2001:db8::/32 in"
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
+run apply >/dev/null
+expect "a rule in both files is carried over once" "1" "$(calls 'ufw route allow proto tcp from any to any port 8080$')"
+expect "an IPv6 one as well" "1" "$(calls 'ufw route allow proto tcp from 2001:db8::/32 to any port 8080$')"
+
+upgrade '0.0.0.0:28081->8080/tcp' "allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in" "${ENGINE_ROUTES[@]}"
+expect "once the engine's route rules are there, nothing is carried over" "0" "$(calls 'ufw route')"
+
+# Bans: on the host and on published ports, both lifted together.
+reset
+run install >/dev/null
+action="$W/etc/fail2ban/action.d/panelalpha-ufw.conf"
+expect "a ban denies the host's ports" "1" "$(grep -c '^actionban = ufw prepend deny from <ip> to any comment "<comment>"$' "$action")"
+expect "and published ones" "1" "$(grep -c '^ *ufw route prepend deny from <ip> to any comment "<comment>"$' "$action")"
+expect "unban lifts both" "2" "$(grep -cE '^(actionunban =)? *ufw (route )?delete deny from <ip> to any$' "$action")"
+expect "with fail2ban's comment, so the API knows a ban" "1" "$(grep -c '^comment = by Fail2Ban after <failures> attempts against <name>$' "$action")"
+
+reset
+rules "${ENGINE_ROUTES[@]}" "deny any any 0.0.0.0/0 any 198.51.100.9 in comment=$(hex 'by Fail2Ban after 5 attempts against sshd')" \
+    "deny any any 0.0.0.0/0 any 198.51.100.10 in comment=$(hex 'by Fail2Ban after 5 attempts against ftp')" \
+    "route:deny any any 0.0.0.0/0 any 198.51.100.10 in comment=$(hex 'by Fail2Ban after 5 attempts against ftp')" \
+    "deny any any 0.0.0.0/0 any 203.0.113.7 in comment=$(hex 'spam')"
+rules6 "deny any any ::/0 any 2001:db8::7 in comment=$(hex 'by Fail2Ban after 10 attempts against engine-api')"
+run install >/dev/null
+expect "an earlier ban is extended to published ports" "1" "$(calls 'ufw route prepend deny from 198.51.100.9 to any comment by Fail2Ban after 5 attempts against sshd')"
+expect "an IPv6 one too" "1" "$(calls 'ufw route prepend deny from 2001:db8::7 to any comment by Fail2Ban after 10 attempts against engine-api')"
+expect "one that has it is left alone" "0" "$(calls 'ufw route prepend deny from 198.51.100.10')"
+expect "and so is a deny that is not a ban" "0" "$(calls 'ufw route prepend deny from 203.0.113.7')"
+expect "after fail2ban takes the new action" "1" "$([ "$(line_of 'ufw route prepend deny from 198.51.100.9')" -gt "$(line_of 'systemctl restart fail2ban')" ] && echo 1)"
+
+reset
+printf 'ufw-user-forward\n' >"$W/chains"
 run published-on >/dev/null
 expect "at boot, before Docker, DOCKER-USER is made for it" "1" "$(calls 'iptables -N DOCKER-USER')"
 
@@ -282,13 +470,14 @@ expect "uninstall: done" "0" "$(run uninstall)"
 expect "turns ufw off" "1" "$(calls 'ufw --force disable')"
 expect "removes the hooks" "no" "$([ -e "$W/etc/ufw/before.init" ] || [ -e "$W/etc/ufw/after.init" ] && echo yes || echo no)"
 expect "and the jail" "no" "$([ -e "$W/etc/fail2ban/jail.d/panelalpha.local" ] && echo yes || echo no)"
+expect "and its action" "no" "$([ -e "$W/etc/fail2ban/action.d/panelalpha-ufw.conf" ] && echo yes || echo no)"
 
 # scripts/firewall.sh: the provider comes from FIREWALL_PROVIDER in the engine's .env.
 dispatch() { env_run bash "$(cd "$DIR/.." && pwd)/firewall.sh" "$@" >"$W/out" 2>&1; echo $?; }
 reset
-printf 'ufw-user-input\nDOCKER-USER\n' >"$W/chains"
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
 expect "firewall.sh --apply runs the ufw provider" "0" "$(dispatch --apply)"
-expect "which puts the hook in" "1" "$(calls 'iptables -A PA-PUBLISHED -j ufw-user-input')"
+expect "which puts the hook in" "1" "$(restored '-A PA-PUBLISHED -j ufw-user-forward')"
 reset
 expect "firewall.sh --install installs" "0" "$(dispatch --install)"
 expect "and enables ufw" "1" "$(calls 'ufw --force enable')"

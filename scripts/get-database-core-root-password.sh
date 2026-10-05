@@ -5,7 +5,11 @@ ENGINE_DIR="/opt/panelalpha/shared-hosting"
 ENV_FILE="$ENGINE_DIR/.env"
 VAR_NAME="CORE_MYSQL_ROOT_PASSWORD"
 CONTAINER_NAME="core-db"
-VOLUME_NAME="shared-hosting_database-core-data"
+# Compose prefixes the volume with the project name: read it off the running
+# stack, or take Compose's default, the engine directory's basename.
+PROJECT=$(docker ps -a --filter "label=com.docker.compose.project.working_dir=$ENGINE_DIR" \
+  --format '{{.Label "com.docker.compose.project"}}' | head -n 1)
+VOLUME_NAME="${PROJECT:-$(basename "$ENGINE_DIR")}_database-core-data"
 IMAGE="ghcr.io/panelalpha/app-database:20260525"
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   if ! docker pull "$IMAGE"; then

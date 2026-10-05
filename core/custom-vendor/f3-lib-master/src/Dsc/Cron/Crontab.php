@@ -35,7 +35,8 @@ class Crontab
      */
     public function __construct()
     {
-        $this->getFileHandler()->parseExistingCrontab($this);
+        // Starts empty. Reading `crontab -l` here pulled the calling process's
+        // own crontab into every crontab built from this class.
     }
 
     /**
