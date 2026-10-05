@@ -13,11 +13,30 @@ mkdir -p "$W/bin"
 for cmd in systemctl ss fail2ban-client; do
     printf '#!/bin/bash\necho "%s $*" >>"%s/calls"\n' "$cmd" "$W" >"$W/bin/$cmd"
 done
+# The ufw lock (ufw.sh's default under PA_ENGINE_DIR). ufw called without it goes
+# to $W/unlocked; fail2ban-client or systemctl called with it held, to $W/locked:
+# fail2ban's ban action waits for that lock.
+LOCK="$W/engine/data/ufw.lock"
+# BusyBox's flock (core's test container) has no -w; poll -n in its place.
+if ! flock -w 1 /dev/null true 2>/dev/null; then
+    cat >"$W/bin/flock" <<FAKE
+#!/bin/bash
+[ "\$1" = -w ] || exec $(command -v flock) "\$@"
+end=\$((SECONDS + \$2)); shift 2
+until $(command -v flock) -n "\$@"; do [ \$SECONDS -lt \$end ] || exit 1; sleep 0.1; done
+FAKE
+fi
+cat >"$W/bin/fail2ban-client" <<FAKE
+#!/bin/bash
+echo "fail2ban-client \$*" >>"$W/calls"
+flock -n "$LOCK" true 2>/dev/null || echo "fail2ban-client \$*" >>"$W/locked"
+FAKE
 # systemctl says fail2ban is stopped while $W/f2b-down exists.
 # csf and lfd are running while $W/running-<unit> exists, and loaded while $W/loaded-<unit> does.
 cat >"$W/bin/systemctl" <<FAKE
 #!/bin/bash
 echo "systemctl \$*" >>"$W/calls"
+flock -n "$LOCK" true 2>/dev/null || echo "systemctl \$*" >>"$W/locked"
 case "\$*" in
 "is-active --quiet csf" | "is-active --quiet lfd") [ -f "$W/running-\$3" ] ;;
 "show -p LoadState --value csf" | "show -p LoadState --value lfd") [ -f "$W/loaded-\$5" ] && echo loaded || echo not-found ;;
@@ -28,6 +47,7 @@ FAKE
 cat >"$W/bin/ufw" <<FAKE
 #!/bin/bash
 echo "ufw \$*" >>"$W/calls"
+flock -n "$LOCK" true 2>/dev/null && echo "ufw \$*" >>"$W/unlocked"
 if [ -f "$W/ufw-refuses" ] && echo "\$*" | grep -qE "\$(cat "$W/ufw-refuses")"; then
     echo "ERROR: Bad rule"
     exit 1
@@ -78,10 +98,10 @@ expect() { # expect <label> <expected> <actual>
     fi
 }
 reset() {
-    rm -rf "$W/calls" "$W/chains" "$W/etc" "$W/engine" "$W/backups" "$W/src-csf" \
+    rm -rf "$W/calls" "$W/unlocked" "$W/locked" "$W/chains" "$W/etc" "$W/engine" "$W/backups" "$W/src-csf" \
         "$W/ufw-refuses" "$W/dpkg-missing" "$W/apt-fails" "$W"/restore-* "$W"/iptables-* "$W"/ip6tables-* \
         "$W/docker-ports" "$W/f2b-down" "$W/no-wait" "$W"/running-* "$W"/loaded-* "$W/bin/csf"
-    mkdir -p "$W/etc/ufw" "$W/etc/fail2ban" "$W/engine/scripts/firewall" "$W/backups"
+    mkdir -p "$W/etc/ufw" "$W/etc/fail2ban" "$W/engine/scripts/firewall" "$W/engine/data" "$W/backups"
     printf 'IPV6=no\nDEFAULT_INPUT_POLICY="DROP"\nMANAGE_BUILTINS=yes\n' >"$W/etc/default-ufw"
     printf 'COMPOSE_PROFILES=full\nCSF_UI=0\nCSF_UI_PASSWORD=secret\n' >"$W/engine/.env"
 }
@@ -156,6 +176,8 @@ expect "CSF UI settings leave .env" "0" "$(grep -c CSF_UI "$W/engine/.env")"
 expect "trusted addresses are never banned" "203.0.113.5 1.2.3.4" "$(sort -r "$W/etc/fail2ban/panelalpha-ignoreip" | tr '\n' ' ' | sed 's/ $//')"
 expect "rules move before CSF goes" "1" "$([ "$(line_of 'ufw prepend')" -lt "$(line_of csf-uninstall)" ] && echo 1)"
 expect "ufw is enabled after CSF is gone" "1" "$([ "$(line_of 'ufw --force enable')" -gt "$(line_of csf-uninstall)" ] && echo 1)"
+expect "every ufw write holds the ufw lock" "" "$(cat "$W/unlocked" 2>/dev/null)"
+expect "and fail2ban is never driven while it is held" "" "$(cat "$W/locked" 2>/dev/null)"
 
 # The engine's ports and ufw's defaults.
 expect "every sshd port stays open" "2" "$(grep -cE 'ufw allow proto tcp from any to any port (22|2200) comment panelalpha: ssh' "$W/calls")"
@@ -190,6 +212,34 @@ expect "the API filter counts 401s on /api and /mcp" "1" "$(grep -c '"\[A-Z\]+ /
 expect "with CSF's trusted addresses ignored" "1" "$(grep -c '^ignoreip = 127.0.0.1/8 ::1 1.2.3.4 203.0.113.5$' "$jail")"
 expect "fail2ban restarted, its ban action being new" "1:0" "$(calls 'systemctl restart fail2ban'):$(calls 'fail2ban-client reload')"
 
+# fail2ban's ban action writes both rules under the ufw lock.
+action="$W/etc/fail2ban/action.d/panelalpha-ufw.conf"
+expect "the ban action takes the ufw lock" "ufwlock = exec 9>>\"$LOCK\"; flock -w 50 9 || { echo \"panelalpha-ufw: no ufw lock ($LOCK) after 50 s\" >&2; exit 1; }" "$(grep '^ufwlock' "$action")"
+# A multi-line action is one shell script; its tags filled in as fail2ban does.
+f2b_action() { # <actionban|actionunban>
+    awk -v k="$1" '$1 == k { on = 1; sub(/^[^=]*= /, ""); print; next } on && /^[[:space:]]/ { sub(/^[[:space:]]+/, ""); print; next } { on = 0 }' "$action" |
+        sed "s|<ufwlock>|$(sed -n 's/^ufwlock = //p' "$action" | sed 's/[&|]/\\&/g')|; s|<ip>|192.0.2.9|; s|<comment>|by Fail2Ban|"
+}
+for a in actionban actionunban; do
+    rm -f "$W/calls" "$W/unlocked"
+    PATH="$W/bin:$PATH" sh -c "$(f2b_action "$a")" >/dev/null 2>&1
+    expect "$a: two ufw writes" "2" "$(calls '^ufw .*192.0.2.9')"
+    expect "$a: both under the lock" "" "$(cat "$W/unlocked" 2>/dev/null)"
+done
+# Held elsewhere for longer than the wait: nothing is written, and it says so.
+rules "allow tcp 22 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'panelalpha: ssh')"
+rm -f "$W/calls" "$W/held"
+flock "$LOCK" -c "touch '$W/held'; sleep 3" &
+holder=$!
+until [ -f "$W/held" ]; do sleep 0.1; done
+expect "a held lock: apply fails" "1" "$(PA_UFW_LOCK_WAIT=1 run apply)"
+expect "without writing" "0" "$(calls '^ufw ')"
+expect "and says why" "1" "$(grep -c "another ufw change held $LOCK for over 1s; nothing was changed" "$W/out")"
+wait "$holder"
+rm -f "$W/calls" "$W/unlocked"
+expect "apply: done" "0" "$(run apply)"
+expect "apply writes the engine's route rules under the lock" "1|" "$([ "$(calls '^ufw route allow')" -gt 0 ] && echo 1)|$(cat "$W/unlocked" 2>/dev/null)"
+
 # ufw logging switched off: the firewall log needs it.
 reset
 echo 'LOGLEVEL=off' >"$W/etc/ufw/ufw.conf"
@@ -205,7 +255,10 @@ expect "comments stay out of ignoreip" "ignoreip = 127.0.0.1/8 ::1 198.51.100.7 
 expect "and nothing else is touched" "0" "$(calls '^ufw')"
 rm -f "$W/calls"
 run fail2ban >/dev/null
-expect "the same ban action again: the jails restarted, which also repairs one a reload left bare" "1:0" "$(calls 'fail2ban-client reload --restart'):$(calls 'systemctl restart fail2ban')"
+expect "only the trusted list changed: a plain reload, which keeps every ban" "1:0:0" "$(calls 'fail2ban-client reload$'):$(calls 'reload --restart'):$(calls 'systemctl restart fail2ban')"
+rm -f "$W/calls"
+run install >/dev/null
+expect "an install with the same ban action restarts the jails, which repairs one a reload left bare" "1:0" "$(calls 'fail2ban-client reload --restart'):$(calls 'systemctl restart fail2ban')"
 sed -i 's/^banaction = .*/banaction = ufw[blocktype=deny]/' "$W/etc/fail2ban/jail.d/panelalpha.local"
 rm -f "$W/calls"
 run fail2ban >/dev/null
@@ -494,9 +547,10 @@ expect "once the engine's route rules are there, nothing is carried over" "0" "$
 reset
 run install >/dev/null
 action="$W/etc/fail2ban/action.d/panelalpha-ufw.conf"
-expect "a ban denies the host's ports" "1" "$(grep -c '^actionban = ufw prepend deny from <ip> to any comment "<comment>"$' "$action")"
+expect "a ban and its lifting take the ufw lock first" "2" "$(grep -cE '^action(un)?ban = <ufwlock>$' "$action")"
+expect "a ban denies the host's ports" "1" "$(grep -c '^ *ufw prepend deny from <ip> to any comment "<comment>"$' "$action")"
 expect "and published ones" "1" "$(grep -c '^ *ufw route prepend deny from <ip> to any comment "<comment>"$' "$action")"
-expect "unban lifts both" "2" "$(grep -cE '^(actionunban =)? *ufw (route )?delete deny from <ip> to any$' "$action")"
+expect "unban lifts both" "2" "$(grep -cE '^ *ufw (route )?delete deny from <ip> to any$' "$action")"
 expect "with fail2ban's comment, so the API knows a ban" "1" "$(grep -c '^comment = by Fail2Ban after <failures> attempts against <name>$' "$action")"
 
 reset
@@ -537,6 +591,7 @@ touch "$W/etc/ufw/before.init" "$W/etc/ufw/after.init" "$W/etc/fail2ban/jail.d/p
 }
 expect "uninstall: done" "0" "$(run uninstall)"
 expect "turns ufw off" "1" "$(calls 'ufw --force disable')"
+expect "under the lock" "" "$(cat "$W/unlocked" 2>/dev/null)"
 expect "removes the hooks" "no" "$([ -e "$W/etc/ufw/before.init" ] || [ -e "$W/etc/ufw/after.init" ] && echo yes || echo no)"
 expect "and the jail" "no" "$([ -e "$W/etc/fail2ban/jail.d/panelalpha.local" ] && echo yes || echo no)"
 expect "and its action" "no" "$([ -e "$W/etc/fail2ban/action.d/panelalpha-ufw.conf" ] && echo yes || echo no)"

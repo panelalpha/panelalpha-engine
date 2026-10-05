@@ -5,7 +5,8 @@
 #                          the Docker hook, fail2ban; then enable. Idempotent.
 #   ufw.sh apply           the engine's route rules and the Docker hook (core runs
 #                          it when it starts)
-#   ufw.sh fail2ban        rewrite fail2ban's jails and reload it (trusted list changed)
+#   ufw.sh fail2ban        rewrite fail2ban's jails and reload them, bans kept
+#                          (trusted list changed)
 #   ufw.sh uninstall       disable ufw and remove the engine's hooks
 #   ufw.sh published-on|published-off   the hook, called by ufw itself
 #
@@ -41,6 +42,11 @@ BACKUP_DIR=${PA_BACKUP_DIR:-/var/backups}
 SELF="$ENGINE_DIR/scripts/firewall/ufw.sh"
 CHAIN=PA-PUBLISHED
 MANAGED="panelalpha:"
+# ufw rewrites user.rules whole on every call, so two writers at once lose or
+# resurrect each other's rules. Every ufw write takes this lock: this script's,
+# core's (App\System\Firewall\Ufw\UfwFirewall::LOCK) and fail2ban's ban action.
+UFW_LOCK=${PA_UFW_LOCK:-$ENGINE_DIR/data/ufw.lock}
+UFW_LOCK_WAIT=${PA_UFW_LOCK_WAIT:-30}
 
 say() { echo "firewall: $*"; }
 trim() { printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
@@ -51,6 +57,28 @@ warn() { echo "firewall: $*" >&2; }
 # start at boot cannot hang on it. iptables-nft has no lock and ignores -w.
 iptables() { command iptables -w 30 "$@"; }
 ip6tables() { command ip6tables -w 30 "$@"; }
+
+# Runs "$@" holding the ufw lock, or says why not and fails. Never around
+# fail2ban-client: fail2ban's ban action waits for the same lock.
+with_ufw_lock() {
+    if [ -n "${UFW_LOCKED:-}" ]; then
+        "$@"
+        return
+    fi
+    mkdir -p "$(dirname "$UFW_LOCK")"
+    (
+        flock -w "$UFW_LOCK_WAIT" 9 || {
+            warn "another ufw change held $UFW_LOCK for over ${UFW_LOCK_WAIT}s; nothing was changed"
+            exit 1
+        }
+        UFW_LOCKED=1
+        "$@"
+    ) 9>>"$UFW_LOCK"
+    local rc=$?
+    # core opens it as www-data.
+    chmod 0644 "$UFW_LOCK" 2>/dev/null
+    return $rc
+}
 
 # Every port sshd is configured for, is listening on, or this session came in
 # on: enabling ufw without the right one locks the operator out.
@@ -250,8 +278,8 @@ migrate_from_csf() {
         say "CSF's configuration is saved in $backup"
     fi
 
-    import_csf_file deny "$CSF_DIR/csf.deny"
-    import_csf_file allow "$CSF_DIR/csf.allow"
+    with_ufw_lock import_csf_file deny "$CSF_DIR/csf.deny"
+    with_ufw_lock import_csf_file allow "$CSF_DIR/csf.allow"
     mkdir -p "$F2B_DIR"
     import_csf_ignores
     [ -f "$CSF_DIR/csf.disable" ] && touch "$UFW_DIR/.panelalpha-keep-disabled"
@@ -456,7 +484,7 @@ mirror_bans() {
 # container's sshd as the host's; the engine's own filters match the source.
 # Trusted addresses (the firewall API, CSF's old allow and ignore lists) are in
 # $F2B_DIR/panelalpha-ignoreip, one per line, "# comment" after it.
-configure_fail2ban() {
+configure_fail2ban() { # [trusted]: only the trusted list changed
     local ignore="127.0.0.1/8 ::1" api_log="$ENGINE_DIR/logs/core/nginx/api-access.log" actions
     mkdir -p "$F2B_DIR/jail.d" "$F2B_DIR/filter.d" "$F2B_DIR/action.d" "$(dirname "$api_log")"
     actions=$(ban_actions)
@@ -492,20 +520,25 @@ failregex = ^<HOST> \S+ \S+ \[[^\]]*\] "[A-Z]+ /(?:api|mcp)\S* HTTP/[^"]*" 401
 ignoreregex =
 EOF
 
-    cat >"$F2B_DIR/action.d/panelalpha-ufw.conf" <<'EOF'
+    # The lock is waited for less than fail2ban's 60 s action timeout.
+    cat >"$F2B_DIR/action.d/panelalpha-ufw.conf" <<EOF
 # Written by the PanelAlpha engine: a ban is a ufw deny rule for the host and a
-# route deny rule for the ports Docker publishes; lifting it removes both.
+# route deny rule for the ports Docker publishes; lifting it removes both, each
+# pair under the lock every ufw write on the host takes.
 [Definition]
 actionstart =
 actionstop =
 actioncheck =
-actionban = ufw prepend deny from <ip> to any comment "<comment>"
+actionban = <ufwlock>
+            ufw prepend deny from <ip> to any comment "<comment>"
             ufw route prepend deny from <ip> to any comment "<comment>"
-actionunban = ufw delete deny from <ip> to any
+actionunban = <ufwlock>
+              ufw delete deny from <ip> to any
               ufw route delete deny from <ip> to any
 
 [Init]
 comment = by Fail2Ban after <failures> attempts against <name>
+ufwlock = exec 9>>"$UFW_LOCK"; flock -w 50 9 || { echo "panelalpha-ufw: no ufw lock ($UFW_LOCK) after 50 s" >&2; exit 1; }
 EOF
 
     cat >"$F2B_DIR/jail.d/panelalpha.local" <<EOF
@@ -560,10 +593,15 @@ EOF
     # A plain reload keeps a running jail but drops its action when the action
     # changed: the sshd jail fail2ban starts with on install (nftables or
     # iptables) was left with none, logging bans it never applied. A new ban
-    # action gets a restart, which puts the bans back through it; otherwise the
-    # jails are restarted, which also repairs one an earlier reload left bare.
+    # action gets a restart, which puts the bans back through it. A changed
+    # trusted list alone gets a plain reload, which keeps every ban: a restart
+    # lifts them all and puts each back, two ufw writes apiece, for a minute on
+    # a busy host. Otherwise the jails are restarted, which also repairs one an
+    # earlier reload left bare.
     if ! systemctl is-active --quiet fail2ban || [ "$actions" != "$(ban_actions)" ]; then
         systemctl restart fail2ban || warn "fail2ban did not start; see journalctl -u fail2ban"
+    elif [ "${1:-}" = trusted ]; then
+        fail2ban-client reload >/dev/null || warn "fail2ban did not reload; see journalctl -u fail2ban"
     else
         fail2ban-client reload --restart >/dev/null || warn "fail2ban did not reload; see journalctl -u fail2ban"
     fi
@@ -655,16 +693,16 @@ install() {
         return 1
     }
     migrate_from_csf
-    configure_ufw
+    with_ufw_lock configure_ufw || return 1
     configure_fail2ban
-    mirror_bans
+    with_ufw_lock mirror_bans || return 1
     if [ -f "$UFW_DIR/.panelalpha-keep-disabled" ]; then
         say "CSF was disabled on this host, so ufw is left off: run 'ufw enable' to turn it on"
         rm -f "$UFW_DIR/.panelalpha-keep-disabled"
         return 0
     fi
     # Enabling an active ufw reloads it, which applies the hooks above.
-    ufw --force enable >/dev/null
+    with_ufw_lock ufw --force enable >/dev/null
     published_on
     say "ufw is on; open ports: $(managed_rules | awk '{ printf "%s%s/%s", sep, $1, $2; sep = " " }')"
 }
@@ -677,9 +715,11 @@ unhook() {
     say "the engine's ufw hooks removed; ufw and its rules are left as they are"
 }
 
+ufw_off() { ufw --force disable >/dev/null 2>&1 || true; }
+
 uninstall() {
     unhook
-    ufw --force disable >/dev/null 2>&1 || true
+    with_ufw_lock ufw_off
     rm -f "$F2B_DIR/jail.d/panelalpha.local" "$F2B_DIR/action.d/panelalpha-ufw.conf"
     systemctl restart fail2ban >/dev/null 2>&1 || true
     say "ufw disabled and the engine's fail2ban jail removed"
@@ -694,12 +734,14 @@ apply)
     # Here as well as in install: a host updated without the installer must
     # not lose the engine's ports when the hook moves to route rules.
     clear_csf_leftover
-    ufw_is_ours && route_rules
+    rc=0
+    if ufw_is_ours; then with_ufw_lock route_rules || rc=1; fi
     published_on
+    exit $rc
     ;;
 published-on) published_on ;;
 published-off) published_off ;;
-fail2ban) configure_fail2ban ;;
+fail2ban) configure_fail2ban trusted ;;
 unhook) unhook ;;
 uninstall) uninstall ;;
 *)

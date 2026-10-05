@@ -21,12 +21,6 @@ final class TrustedAddress
         return substr(sha1($this->address), 0, 12);
     }
 
-    /** A single address, as fail2ban can lift a ban on; a range cannot be. */
-    public function isSingle(): bool
-    {
-        return !str_contains($this->address, '/');
-    }
-
     /**
      * One per line, `address # comment`; blank lines and `#` lines are skipped.
      *

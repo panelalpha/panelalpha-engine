@@ -30,8 +30,6 @@ class TrustedAddressTest extends TestCase
     public function test_the_id_follows_the_address_as_stored(): void
     {
         $this->assertSame((new TrustedAddress('203.0.113.7'))->id(), (new TrustedAddress('203.0.113.7/32', 'x'))->id());
-        $this->assertTrue((new TrustedAddress('203.0.113.7'))->isSingle());
-        $this->assertFalse((new TrustedAddress('203.0.113.0/24'))->isSingle());
         $this->assertSame(['id' => (new TrustedAddress('203.0.113.7'))->id(), 'address' => '203.0.113.7', 'comment' => 'x'], (new TrustedAddress('203.0.113.7', 'x'))->toArray());
     }
 }

@@ -18,14 +18,49 @@ class UfwFirewallTest extends TestCase
     private const OFFICE = '### tuple ### allow tcp 22 0.0.0.0/0 any 203.0.113.7 in comment=6f6666696365';
     private const BAN = '### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in';
 
+    private string $lock;
+
+    protected function setUp(): void
+    {
+        $this->lock = (string) tempnam(sys_get_temp_dir(), 'ufw-lock');
+    }
+
+    protected function tearDown(): void
+    {
+        @unlink($this->lock);
+    }
+
+    private function firewall(ProcessRunner $host, int $lockWait = 30): UfwFirewall
+    {
+        return new UfwFirewall($host, $this->lock, $lockWait);
+    }
+
+    /** Whether someone holds the ufw lock: a second handle cannot take it. */
+    public static function lockHeld(string $lock): bool
+    {
+        $h = @fopen($lock, 'r');
+        if ($h === false) {
+            return false;
+        }
+        $free = flock($h, LOCK_EX | LOCK_NB);
+        if ($free) {
+            flock($h, LOCK_UN);
+        }
+        fclose($h);
+
+        return !$free;
+    }
+
     /** A host whose ufw answers from $rules and records every command. */
     private function host(string $rules = self::OFFICE . "\n" . self::BAN, string $ufwOut = 'Rule added', int $ufwCode = 0): ProcessRunner
     {
-        return new class ($rules, $ufwOut, $ufwCode) implements ProcessRunner {
+        return new class ($rules, $ufwOut, $ufwCode, $this->lock) implements ProcessRunner {
             /** @var list<list<string>> */
             public array $ran = [];
+            /** @var list<bool> whether the ufw lock was held, per command in $ran */
+            public array $held = [];
 
-            public function __construct(public string $rules, public string $ufwOut, public int $ufwCode)
+            public function __construct(public string $rules, public string $ufwOut, public int $ufwCode, private string $lock)
             {
             }
 
@@ -33,6 +68,7 @@ class UfwFirewallTest extends TestCase
             {
                 $cmd = (array) $cmd;
                 $this->ran[] = $cmd;
+                $this->held[] = UfwFirewallTest::lockHeld($this->lock);
                 return match (true) {
                     $cmd === ['cat', '/etc/ufw/user.rules'] => FakeProcess::ok($this->rules),
                     $cmd === ['cat', '/etc/ufw/user6.rules'] => FakeProcess::failed('No such file'),
@@ -73,7 +109,7 @@ class UfwFirewallTest extends TestCase
 
     public function test_status_reads_state_version_and_defaults(): void
     {
-        $status = (new UfwFirewall($this->host()))->status()->toArray();
+        $status = ($this->firewall($this->host()))->status()->toArray();
 
         $this->assertSame([
             'provider' => 'ufw',
@@ -88,7 +124,7 @@ class UfwFirewallTest extends TestCase
     public function test_a_deny_is_put_above_the_allows(): void
     {
         $host = $this->host();
-        $rule = (new UfwFirewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9/32']));
+        $rule = ($this->firewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9/32']));
 
         $this->assertSame(['ufw', 'prepend', 'deny', 'in', 'from', '198.51.100.9', 'to', 'any'], $this->ufwCalls($host)[0]);
         $this->assertSame(['ufw', 'route', 'prepend', 'deny', 'from', '198.51.100.9', 'to', 'any'], $this->ufwCalls($host)[1], 'and above the published ports\' allows');
@@ -98,7 +134,7 @@ class UfwFirewallTest extends TestCase
     public function test_an_allow_is_appended(): void
     {
         $host = $this->host();
-        (new UfwFirewall($host))->addRule(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']));
+        ($this->firewall($host))->addRule(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']));
 
         $this->assertSame('allow', $this->ufwCalls($host)[0][1]);
     }
@@ -107,7 +143,7 @@ class UfwFirewallTest extends TestCase
     {
         $routes = "### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in\n### tuple ### route:allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in";
         $host = $this->host(self::OFFICE . "\n" . $routes);
-        $firewall = new UfwFirewall($host);
+        $firewall = $this->firewall($host);
         $rule = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '8080', 'scope' => 'published']);
 
         $this->assertSame('published', $firewall->addRule($rule)->scope);
@@ -125,7 +161,7 @@ class UfwFirewallTest extends TestCase
     {
         $host = $this->host('### tuple ### route:deny any any 0.0.0.0/0 any 198.51.100.9 in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'));
 
-        (new UfwFirewall($host))->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9', 'scope' => 'published'])->id());
+        ($this->firewall($host))->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9', 'scope' => 'published'])->id());
 
         $this->assertSame(['ufw', 'route', 'delete', 'deny', 'from', '198.51.100.9', 'to', 'any'], $this->ufwCalls($host)[0]);
         /** @var object{ran: list<list<string>>} $host */
@@ -135,7 +171,7 @@ class UfwFirewallTest extends TestCase
     public function test_a_rule_is_deleted_by_what_it_matches_not_by_its_number(): void
     {
         $host = $this->host();
-        $firewall = new UfwFirewall($host);
+        $firewall = $this->firewall($host);
         $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
 
         $deleted = $firewall->deleteRule($office->id());
@@ -147,7 +183,7 @@ class UfwFirewallTest extends TestCase
     public function test_deleting_a_fail2ban_ban_lifts_it_in_fail2ban_too(): void
     {
         $host = $this->host("### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in comment=" . bin2hex('by Fail2Ban after 5 attempts against sshd'));
-        $firewall = new UfwFirewall($host);
+        $firewall = $this->firewall($host);
 
         $firewall->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9'])->id());
 
@@ -158,7 +194,7 @@ class UfwFirewallTest extends TestCase
     public function test_deleting_any_other_rule_leaves_fail2ban_alone(): void
     {
         $host = $this->host();
-        (new UfwFirewall($host))->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9'])->id());
+        ($this->firewall($host))->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9'])->id());
 
         /** @var object{ran: list<list<string>>} $host */
         $this->assertSame([], array_filter($host->ran, fn (array $c): bool => $c[0] === 'fail2ban-client'));
@@ -167,7 +203,7 @@ class UfwFirewallTest extends TestCase
     public function test_a_new_comment_is_a_delete_and_an_add(): void
     {
         $host = $this->host();
-        $firewall = new UfwFirewall($host);
+        $firewall = $this->firewall($host);
         $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
 
         $firewall->updateRule($office->id(), $office->with(['comment' => 'home']));
@@ -180,7 +216,7 @@ class UfwFirewallTest extends TestCase
     public function test_a_changed_match_adds_the_new_rule_before_removing_the_old(): void
     {
         $host = $this->host(self::OFFICE . "\n" . self::BAN . "\n### tuple ### allow tcp 2222 0.0.0.0/0 any 203.0.113.7 in");
-        $firewall = new UfwFirewall($host);
+        $firewall = $this->firewall($host);
         $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
 
         $new = $firewall->updateRule($office->id(), $office->with(['port' => '2222']));
@@ -195,7 +231,7 @@ class UfwFirewallTest extends TestCase
     {
         $this->expectException(FirewallNotFound::class);
 
-        (new UfwFirewall($this->host()))->deleteRule('000000000000');
+        ($this->firewall($this->host()))->deleteRule('000000000000');
     }
 
     public function test_ufws_refusal_is_reported_in_its_own_words(): void
@@ -203,7 +239,7 @@ class UfwFirewallTest extends TestCase
         $this->expectException(FirewallException::class);
         $this->expectExceptionMessage('Invalid position');
 
-        (new UfwFirewall($this->host(ufwOut: "ERROR: Invalid position '1'", ufwCode: 1)))
+        ($this->firewall($this->host(ufwOut: "ERROR: Invalid position '1'", ufwCode: 1)))
             ->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9']));
     }
 
@@ -212,18 +248,21 @@ class UfwFirewallTest extends TestCase
     {
         $base = $this->host(ufwOut: $ufwOut, ufwCode: $ufwCode);
 
-        return new class ($base, $answers) implements ProcessRunner {
+        return new class ($base, $answers, $this->lock) implements ProcessRunner {
             /** @var list<list<string>> */
             public array $ran = [];
+            /** @var list<bool> */
+            public array $held = [];
 
             /** @param array<string, Process> $answers */
-            public function __construct(private ProcessRunner $base, private array $answers)
+            public function __construct(private ProcessRunner $base, private array $answers, private string $lock)
             {
             }
 
             public function runProcessOnHost(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
                 $this->ran[] = (array) $cmd;
+                $this->held[] = UfwFirewallTest::lockHeld($this->lock);
                 foreach ($this->answers as $prefix => $answer) {
                     if (str_starts_with(implode(' ', (array) $cmd), $prefix)) {
                         return $answer;
@@ -257,7 +296,7 @@ class UfwFirewallTest extends TestCase
 
     public function test_status_without_ufw_says_so_instead_of_failing(): void
     {
-        $status = (new UfwFirewall($this->failing(['ufw version' => FakeProcess::failed('', 127)])))->status();
+        $status = ($this->firewall($this->failing(['ufw version' => FakeProcess::failed('', 127)])))->status();
 
         $this->assertNull($status->enabled);
         $this->assertSame('ufw is not installed', $status->error);
@@ -265,7 +304,7 @@ class UfwFirewallTest extends TestCase
 
     public function test_status_reports_ufws_own_error(): void
     {
-        $status = (new UfwFirewall($this->failing(['ufw status' => FakeProcess::failed('ERROR: problem running iptables')])))->status();
+        $status = ($this->firewall($this->failing(['ufw status' => FakeProcess::failed('ERROR: problem running iptables')])))->status();
 
         $this->assertNull($status->enabled);
         $this->assertSame('ERROR: problem running iptables', $status->error);
@@ -276,7 +315,7 @@ class UfwFirewallTest extends TestCase
         $this->expectException(FirewallException::class);
         $this->expectExceptionMessage('/etc/ufw/user.rules');
 
-        (new UfwFirewall($this->failing(['cat /etc/ufw/user.rules' => FakeProcess::failed('Permission denied')])))->rules();
+        ($this->firewall($this->failing(['cat /etc/ufw/user.rules' => FakeProcess::failed('Permission denied')])))->rules();
     }
 
     public function test_a_comment_change_that_ufw_refuses_puts_the_old_rule_back(): void
@@ -285,7 +324,7 @@ class UfwFirewallTest extends TestCase
         $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
 
         try {
-            (new UfwFirewall($host))->updateRule($office->id(), $office->with(['comment' => 'bad']));
+            ($this->firewall($host))->updateRule($office->id(), $office->with(['comment' => 'bad']));
             $this->fail('the refusal was swallowed');
         } catch (FirewallException $e) {
             $this->assertStringContainsString('Bad comment', $e->getMessage());
@@ -300,7 +339,7 @@ class UfwFirewallTest extends TestCase
     public function test_a_deny_both_ways_is_added_and_deleted_as_its_host_and_route_rules(): void
     {
         $host = $this->host(self::BOTH);
-        $firewall = new UfwFirewall($host);
+        $firewall = $this->firewall($host);
         $rule = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7']);
 
         $added = $firewall->addRule($rule);
@@ -322,7 +361,7 @@ class UfwFirewallTest extends TestCase
         $host = $this->failing(['ufw route prepend deny' => FakeProcess::of(1, 'ERROR: Bad source address')]);
 
         try {
-            (new UfwFirewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']));
+            ($this->firewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '203.0.113.7']));
             $this->fail('a deny on the host alone was left in place');
         } catch (FirewallException $e) {
             $this->assertStringContainsString('Bad source address', $e->getMessage());
@@ -337,7 +376,7 @@ class UfwFirewallTest extends TestCase
         $host = $this->failing(['ufw prepend deny out' => FakeProcess::of(1, "ERROR: Bad destination address")]);
 
         try {
-            (new UfwFirewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7', 'comment' => 'spam']));
+            ($this->firewall($host))->addRule(FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7', 'comment' => 'spam']));
             $this->fail('half a rule was left in place');
         } catch (FirewallException $e) {
             $this->assertStringContainsString('Bad destination address', $e->getMessage());
@@ -357,7 +396,7 @@ class UfwFirewallTest extends TestCase
             'date' => FakeProcess::ok("+00:00\n"),
             'tail -n 5000 /var/log/fail2ban.log' => FakeProcess::ok("2026-10-01 12:01:00,000 fail2ban.actions [1]: NOTICE  [sshd] Ban 198.51.100.9\n"),
         ]);
-        $firewall = new UfwFirewall($host);
+        $firewall = $this->firewall($host);
 
         $this->assertSame(['203.0.113.7', '198.51.100.9', '198.51.100.9'], array_map(fn ($e) => $e->address, $firewall->logs()));
         $this->assertSame(['ban'], array_map(fn ($e) => $e->type, $firewall->logs(type: 'ban')));
@@ -372,7 +411,7 @@ class UfwFirewallTest extends TestCase
             'tail -n 5000 /var/log/ufw.log' => FakeProcess::ok("2026-10-01T12:00:00.1+00:00 h kernel: [UFW BLOCK] IN=eth0 OUT= SRC=198.51.100.9 DST=10.0.0.1 PROTO=TCP DPT=23\n"),
         ]);
 
-        $entries = (new UfwFirewall($host))->logs(type: 'blocked');
+        $entries = ($this->firewall($host))->logs(type: 'blocked');
 
         $this->assertSame(['198.51.100.9'], array_map(fn ($e) => $e->address, $entries));
         /** @var object{ran: list<list<string>>} $host */
@@ -384,7 +423,7 @@ class UfwFirewallTest extends TestCase
     public function test_trusting_an_address_writes_the_list_applies_it_and_lifts_its_ban(): void
     {
         $host = $this->failing(['cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::ok(self::TRUSTED_FILE)]);
-        $firewall = new UfwFirewall($host);
+        $firewall = $this->firewall($host);
 
         $this->assertSame(['198.51.100.7', '2001:db8::/32'], array_map(fn ($a) => $a->address, $firewall->trustedAddresses()));
 
@@ -398,20 +437,20 @@ class UfwFirewallTest extends TestCase
         $this->assertContains(['fail2ban-client', 'unban', '203.0.113.7'], $host->ran);
     }
 
-    public function test_a_range_is_trusted_without_an_unban_fail2ban_cannot_do(): void
+    public function test_trusting_a_range_lifts_the_bans_inside_it_which_the_reload_keeps(): void
     {
         $host = $this->failing(['cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::failed('No such file')]);
 
-        (new UfwFirewall($host))->trust(new TrustedAddress('203.0.113.0/24'));
+        ($this->firewall($host))->trust(new TrustedAddress('203.0.113.0/24'));
 
         /** @var object{ran: list<list<string>>} $host */
-        $this->assertSame([], array_filter($host->ran, fn (array $c): bool => $c[0] === 'fail2ban-client'));
+        $this->assertSame([['fail2ban-client', 'unban', '203.0.113.0/24']], array_values(array_filter($host->ran, fn (array $c): bool => $c[0] === 'fail2ban-client')));
     }
 
     public function test_untrusting_removes_it_and_an_unknown_id_is_not_found(): void
     {
         $host = $this->failing(['cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::ok(self::TRUSTED_FILE)]);
-        $firewall = new UfwFirewall($host);
+        $firewall = $this->firewall($host);
 
         $removed = $firewall->untrust((new TrustedAddress('198.51.100.7'))->id());
 
@@ -428,7 +467,7 @@ class UfwFirewallTest extends TestCase
         $this->expectException(FirewallException::class);
         $this->expectExceptionMessage('fail2ban did not start');
 
-        (new UfwFirewall($this->failing([
+        ($this->firewall($this->failing([
             'cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::ok(''),
             'bash /opt/panelalpha/shared-hosting/scripts/firewall.sh' => FakeProcess::failed('firewall: fail2ban did not start'),
         ])))->trust(new TrustedAddress('203.0.113.7'));
@@ -439,7 +478,7 @@ class UfwFirewallTest extends TestCase
         $this->expectException(FirewallException::class);
         $this->expectExceptionMessage('Could not write /etc/fail2ban/panelalpha-ignoreip');
 
-        (new UfwFirewall($this->failing([
+        ($this->firewall($this->failing([
             'cat /etc/fail2ban/panelalpha-ignoreip' => FakeProcess::ok(''),
             'sh -c' => FakeProcess::failed('Read-only file system'),
         ])))->trust(new TrustedAddress('203.0.113.7'));
@@ -448,11 +487,128 @@ class UfwFirewallTest extends TestCase
     public function test_switching_it_on_and_off_and_reloading(): void
     {
         $host = $this->host();
-        $firewall = new UfwFirewall($host);
+        $firewall = $this->firewall($host);
         $firewall->enable();
         $firewall->disable();
         $firewall->reload();
 
         $this->assertSame([['ufw', '--force', 'enable'], ['ufw', 'disable'], ['ufw', 'reload']], $this->ufwCalls($host));
+    }
+
+    /** @return list<array{list<string>, bool}> each ufw write and whether the lock was held for it */
+    private function ufwWrites(ProcessRunner $host): array
+    {
+        /** @var object{ran: list<list<string>>, held: list<bool>} $host */
+        $writes = [];
+        foreach ($host->ran as $i => $cmd) {
+            if ($cmd[0] === 'ufw' && !in_array($cmd[1] ?? '', ['version', 'status'], true)) {
+                $writes[] = [$cmd, $host->held[$i]];
+            }
+        }
+
+        return $writes;
+    }
+
+    public function test_every_ufw_write_holds_the_host_wide_lock(): void
+    {
+        $host = $this->host(self::OFFICE . "\n" . self::BOTH . "\n### tuple ### allow tcp 2222 0.0.0.0/0 any 203.0.113.7 in");
+        $firewall = $this->firewall($host);
+        $both = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7']);
+        $office = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7']);
+
+        $firewall->addRule($both);
+        $firewall->deleteRule($both->id());
+        $firewall->updateRule($office->id(), $office->with(['comment' => 'home']));
+        $firewall->updateRule($office->id(), $office->with(['port' => '2222']));
+        $firewall->enable();
+        $firewall->disable();
+        $firewall->reload();
+
+        $writes = $this->ufwWrites($host);
+        $this->assertCount(13, $writes);
+        $this->assertSame([], array_values(array_filter($writes, fn (array $w): bool => !$w[1])), 'a ufw write ran without the lock');
+        $this->assertFalse(self::lockHeld($this->lock), 'and it is released afterwards');
+    }
+
+    public function test_a_rule_is_written_and_read_back_under_one_hold_of_the_lock(): void
+    {
+        $host = $this->host(self::BOTH);
+
+        $this->firewall($host)->addRule(FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7']));
+
+        /** @var object{ran: list<list<string>>, held: list<bool>} $host */
+        $this->assertSame(['ufw', 'ufw', 'ufw', 'cat', 'cat'], array_column($host->ran, 0));
+        $this->assertSame([true, true, true, true, true], $host->held, 'all three halves and the read-back');
+    }
+
+    public function test_fail2ban_is_told_of_a_lifted_ban_only_once_the_lock_is_released(): void
+    {
+        // fail2ban's unban action waits for the same lock: asking while holding it would deadlock.
+        $comment = bin2hex('by Fail2Ban after 5 attempts against sshd');
+        $host = $this->host("### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in comment={$comment}");
+
+        $this->firewall($host)->deleteRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9'])->id());
+
+        /** @var object{ran: list<list<string>>, held: list<bool>} $host */
+        $unban = array_search(['fail2ban-client', 'unban', '198.51.100.9'], $host->ran, true);
+        $this->assertNotFalse($unban);
+        $this->assertFalse($host->held[$unban]);
+        $this->assertGreaterThan(array_search('ufw', array_column($host->ran, 0), true), $unban, 'after the rules are gone');
+    }
+
+    public function test_a_ban_given_a_new_comment_is_lifted_in_fail2ban_before_the_rule_is_re_added(): void
+    {
+        $ban = FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9']);
+        $host = $this->host('### tuple ### deny any any 0.0.0.0/0 any 198.51.100.9 in comment=' . bin2hex('by Fail2Ban after 5 attempts against sshd'));
+
+        $this->firewall($host)->updateRule($ban->id(), $ban->with(['comment' => 'keep out']));
+
+        /** @var object{ran: list<list<string>>, held: list<bool>} $host */
+        $steps = [];
+        foreach ($host->ran as $i => $cmd) {
+            if (in_array($cmd[0], ['ufw', 'fail2ban-client'], true)) {
+                $steps[] = [$cmd[0], $cmd[1], $host->held[$i]];
+            }
+        }
+        $this->assertSame([
+            ['ufw', 'delete', true],
+            ['fail2ban-client', 'unban', false],
+            ['ufw', 'prepend', true],
+        ], array_slice($steps, 0, 3));
+    }
+
+    public function test_a_lock_held_elsewhere_fails_loudly_and_writes_nothing(): void
+    {
+        $host = $this->host();
+        $other = fopen($this->lock, 'r');
+        $this->assertNotFalse($other);
+        flock($other, LOCK_EX);
+
+        try {
+            $this->firewall($host, lockWait: 1)->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9']));
+            $this->fail('the rule was written without the lock');
+        } catch (FirewallException $e) {
+            $this->assertStringContainsString('Another firewall change held ' . $this->lock . ' for over 1 s; nothing was changed', $e->getMessage());
+        } finally {
+            fclose($other);
+        }
+
+        $this->assertSame([], $this->ufwWrites($host));
+    }
+
+    public function test_a_lock_core_cannot_open_is_made_on_the_host_first(): void
+    {
+        $host = $this->host();
+        $missing = sys_get_temp_dir() . '/ufw-lock-' . bin2hex(random_bytes(4)) . '/ufw.lock';
+
+        try {
+            (new UfwFirewall($host, $missing))->enable();
+            $this->fail('enabled without the lock');
+        } catch (FirewallException $e) {
+            $this->assertSame('Could not open the firewall lock ' . $missing, $e->getMessage());
+        }
+
+        /** @var object{ran: list<list<string>>} $host */
+        $this->assertSame([['sh', '-c', 'mkdir -p "$(dirname "$0")" && touch "$0" && chmod 0644 "$0"', $missing]], $host->ran);
     }
 }

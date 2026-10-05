@@ -30,9 +30,24 @@ class UfwFirewall implements Firewall
     /** fail2ban's ignore list, which scripts/firewall/ufw.sh turns into jail config. */
     private const TRUSTED = '/etc/fail2ban/panelalpha-ignoreip';
     private const SCRIPT = '/opt/panelalpha/shared-hosting/scripts/firewall.sh';
+    /**
+     * ufw rewrites user.rules whole on every call, so two writers at once lose
+     * or resurrect each other's rules. Every ufw write on the host takes this
+     * lock: the engine's, scripts/firewall/ufw.sh's and fail2ban's ban action.
+     */
+    public const LOCK = '/opt/panelalpha/shared-hosting/data/ufw.lock';
+    private const LOCK_WAIT = 30;
 
-    public function __construct(private ProcessRunner $system)
-    {
+    /** @var resource|null the lock, while a write holds it */
+    private $held = null;
+    /** @var list<callable(): void> */
+    private array $afterUnlock = [];
+
+    public function __construct(
+        private ProcessRunner $system,
+        private string $lockFile = self::LOCK,
+        private int $lockWait = self::LOCK_WAIT,
+    ) {
     }
 
     public function name(): string
@@ -89,6 +104,11 @@ class UfwFirewall implements Firewall
 
     public function addRule(FirewallRule $rule): FirewallRule
     {
+        return $this->locked(fn (): FirewallRule => $this->add($rule));
+    }
+
+    private function add(FirewallRule $rule): FirewallRule
+    {
         // ufw takes the first rule that matches: a deny goes above the allows.
         $position = $rule->action === FirewallRule::DENY ? ['prepend'] : [];
         $halves = UfwRules::specs($rule, withComment: false);
@@ -110,33 +130,52 @@ class UfwFirewall implements Firewall
     public function updateRule(string $id, FirewallRule $rule): FirewallRule
     {
         $old = $this->rule($id);
-        if ($old->sameMatch($rule)) {
-            // Only the comment changed, which ufw cannot edit in place.
-            $this->deleteRule($id);
-            try {
-                return $this->addRule($rule);
-            } catch (FirewallException $e) {
-                $this->addRule($old);
-                throw $e;
-            }
+        if (!$old->sameMatch($rule)) {
+            return $this->locked(function () use ($id, $rule): FirewallRule {
+                $new = $this->add($rule);
+                $this->delete($this->rule($id));
+
+                return $new;
+            });
         }
 
-        $new = $this->addRule($rule);
-        $this->deleteRule($id);
+        // Only the comment changed, which ufw cannot edit in place. A ban is
+        // deleted on its own first: fail2ban's unban, which runs once the lock
+        // is released, would otherwise take the re-added rule with it.
+        $ban = self::isBan($old);
+        if ($ban) {
+            $this->deleteRule($id);
+        }
 
-        return $new;
+        return $this->locked(function () use ($id, $old, $rule, $ban): FirewallRule {
+            if (!$ban) {
+                $this->delete($this->rule($id));
+            }
+            try {
+                return $this->add($rule);
+            } catch (FirewallException $e) {
+                $this->add($old);
+                throw $e;
+            }
+        });
     }
 
     public function deleteRule(string $id): FirewallRule
     {
-        $rule = $this->rule($id);
+        return $this->locked(fn (): FirewallRule => $this->delete($this->rule($id)));
+    }
+
+    private function delete(FirewallRule $rule): FirewallRule
+    {
         foreach (UfwRules::specs($rule, withComment: false) as $spec) {
             $this->ufw(self::withVerb(['delete'], $spec));
         }
         // A fail2ban ban: lift it in fail2ban too, or its ban database writes
-        // the rule back the next time fail2ban starts.
-        if ($rule->source !== null && str_starts_with((string) $rule->comment, 'by Fail2Ban')) {
-            $this->system->runProcessOnHost(['fail2ban-client', 'unban', $rule->source]);
+        // the rule back the next time fail2ban starts. Only once the lock is
+        // released: fail2ban's unban action waits for it.
+        if (self::isBan($rule)) {
+            $source = (string) $rule->source;
+            $this->afterUnlock[] = fn () => $this->system->runProcessOnHost(['fail2ban-client', 'unban', $source]);
         }
 
         return $rule;
@@ -144,17 +183,17 @@ class UfwFirewall implements Firewall
 
     public function enable(): void
     {
-        $this->ufw(['--force', 'enable']);
+        $this->locked(fn () => $this->ufw(['--force', 'enable']));
     }
 
     public function disable(): void
     {
-        $this->ufw(['disable']);
+        $this->locked(fn () => $this->ufw(['disable']));
     }
 
     public function reload(): void
     {
-        $this->ufw(['reload']);
+        $this->locked(fn () => $this->ufw(['reload']));
     }
 
     public function logs(int $limit = 100, ?string $type = null, ?string $address = null): array
@@ -192,10 +231,10 @@ class UfwFirewall implements Firewall
         }
         $list[$address->id()] = $address;
         $this->saveTrusted(array_values($list));
-        if ($address->isSingle()) {
-            // Not banned is not an error: the answer is only "was it?".
-            $this->system->runProcessOnHost(['fail2ban-client', 'unban', $address->address]);
-        }
+        // The jails are reloaded, not restarted, so their bans stay. fail2ban
+        // lifts every ban inside a range. Not banned is not an error: the
+        // answer is only "was it?".
+        $this->system->runProcessOnHost(['fail2ban-client', 'unban', $address->address]);
 
         return $address;
     }
@@ -231,6 +270,63 @@ class UfwFirewall implements Firewall
         if (!$apply->isSuccessful()) {
             throw new FirewallException(trim($apply->getErrorOutput() ?: $apply->getOutput()) ?: 'fail2ban did not take the new list');
         }
+    }
+
+    private static function isBan(FirewallRule $rule): bool
+    {
+        return $rule->source !== null && str_starts_with((string) $rule->comment, 'by Fail2Ban');
+    }
+
+    /**
+     * Runs $write holding the host-wide ufw lock, for its whole read-modify-write.
+     *
+     * @template T
+     * @param callable(): T $write
+     * @return T
+     */
+    private function locked(callable $write): mixed
+    {
+        if ($this->held !== null) {
+            return $write();
+        }
+        $this->held = $this->acquireLock();
+        try {
+            return $write();
+        } finally {
+            flock($this->held, LOCK_UN);
+            fclose($this->held);
+            $this->held = null;
+            $after = $this->afterUnlock;
+            $this->afterUnlock = [];
+            foreach ($after as $task) {
+                $task();
+            }
+        }
+    }
+
+    /** @return resource */
+    private function acquireLock()
+    {
+        $lock = @fopen($this->lockFile, 'r');
+        if ($lock === false) {
+            // scripts/firewall/ufw.sh makes it; core may get here first, or find it unreadable to www-data.
+            $this->system->runProcessOnHost(['sh', '-c', 'mkdir -p "$(dirname "$0")" && touch "$0" && chmod 0644 "$0"', $this->lockFile]);
+            $lock = @fopen($this->lockFile, 'r');
+        }
+        if ($lock === false) {
+            throw new FirewallException('Could not open the firewall lock ' . $this->lockFile);
+        }
+        // Polled: PHP's flock() cannot time out on its own.
+        $deadline = microtime(true) + $this->lockWait;
+        while (!flock($lock, LOCK_EX | LOCK_NB)) {
+            if (microtime(true) >= $deadline) {
+                fclose($lock);
+                throw new FirewallException(sprintf('Another firewall change held %s for over %d s; nothing was changed', $this->lockFile, $this->lockWait));
+            }
+            usleep(10000);
+        }
+
+        return $lock;
     }
 
     /** ufw's blocked packets, from the journal, or /var/log/ufw.log where rsyslog keeps it. */
