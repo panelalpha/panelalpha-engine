@@ -69,6 +69,27 @@ class JavaNodeToolingTest extends TestCase
         $this->assertNotNull(JavaNodeTooling::nodeImageFor($this->dir));
     }
 
+    /** halo: the plugin id is only in the version catalog; ui/build.gradle applies an alias. */
+    public function test_node_gradle_plugin_from_a_version_catalog_needs_node(): void
+    {
+        $this->write('settings.gradle', "include 'ui'\n");
+        $this->write('ui/build.gradle', "plugins {\n  id 'base'\n  alias(libs.plugins.node)\n}\n");
+        $this->write('gradle/libs.versions.toml', "[plugins]\nnode = 'com.github.node-gradle.node:7.1.0'\n"
+            . "spring-boot = { id = 'org.springframework.boot', version.ref = 'spring-boot' }\n");
+
+        $this->assertNotNull(JavaNodeTooling::nodeImageFor($this->dir));
+    }
+
+    /** A catalog naming no JS plugin leaves the build alone, whatever its version keys are called. */
+    public function test_a_version_catalog_without_the_node_plugin_needs_no_node(): void
+    {
+        $this->write('build.gradle', "plugins { alias(libs.plugins.spring.boot) }\n");
+        $this->write('gradle/libs.versions.toml', "[versions]\nnode = \"20\"\n[libraries]\n"
+            . "foo = { module = \"org.example:foo\", version.ref = \"node\" }\n");
+
+        $this->assertNull(JavaNodeTooling::nodeImageFor($this->dir));
+    }
+
     public function test_maven_exec_of_npm_needs_node(): void
     {
         $this->write('pom.xml', '<project><build><plugins><plugin><configuration>'

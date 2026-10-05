@@ -28,6 +28,15 @@ final class ShellOperations
      */
     private const BUSY_CPU_PERCENT = 20.0;
 
+    /**
+     * Runs inside dind: its uptime and the CPU time of its whole cgroup, two
+     * seconds apart. Under sysbox `docker stats` reads only the container's
+     * init.scope, while every BuildKit step runs in a sibling cgroup; the
+     * container's cgroup root holds both.
+     */
+    private const CGROUP_CPU_SCRIPT = 'u() { echo "$(cut -d" " -f1 /proc/uptime) $(sed -n "s/^usage_usec //p" /sys/fs/cgroup/cpu.stat)"; }; '
+        . 'echo "$(u)"; sleep 2; echo "$(u)"';
+
     /** Runs inside dind: TERM, then KILL, every process carrying the tag ($1) in its env. */
     private const KILL_TAGGED_SCRIPT = 'for sig in TERM KILL; do '
         . 'for d in /proc/[0-9]*; do '
@@ -377,10 +386,10 @@ final class ShellOperations
     }
 
     /**
-     * Is a silent step still working? Its container's CPU, from `docker stats`:
-     * the account's DinD for a build inside it (BuildKit is not a child of the
-     * exec, so the process tree says nothing), the tagged container for a host
-     * build. A download stalled on the network sits near 0%, a compile at 100%.
+     * Is a silent step still working? Its container's CPU: the account's DinD
+     * cgroup for a build inside it (BuildKit is not a child of the exec, so the
+     * process tree says nothing), `docker stats` of the tagged container for a
+     * host build. A download stalled on the network sits near 0%, a compile at 100%.
      *
      * @param list<string> $cmd
      */
@@ -389,6 +398,14 @@ final class ShellOperations
         $system = $this->project->system();
         $stats = ['sudo', 'docker', 'stats', '--no-stream', '--format', '{{.CPUPerc}}'];
         if ($this->isDindExec($cmd)) {
+            try {
+                $percent = self::cgroupCpuPercent($system->exec($this->wrap(['sh', '-c', self::CGROUP_CPU_SCRIPT]), [], 30));
+            } catch (\Throwable) {
+                $percent = null;
+            }
+            if ($percent !== null) {
+                return $percent >= self::BUSY_CPU_PERCENT;
+            }
             $argv = ['sudo', 'docker', 'compose', '-f', $this->project->composeFilePath(), ...array_slice($stats, 2), 'dind'];
         } elseif (self::isHostDockerRun($cmd)) {
             $ids = preg_split('/\s+/', trim($system->exec(
@@ -406,6 +423,24 @@ final class ShellOperations
         }
 
         return self::cpuPercent($system->exec($argv, [], 30)) >= self::BUSY_CPU_PERCENT;
+    }
+
+    /**
+     * CPU percent (100 = one core) from two `<uptime> <usage_usec>` lines of
+     * {@see CGROUP_CPU_SCRIPT}; null when they cannot be read.
+     */
+    public static function cgroupCpuPercent(string $samples): ?float
+    {
+        if (preg_match_all('/^\s*([0-9]+(?:\.[0-9]+)?)\s+([0-9]+)\s*$/m', $samples, $m) !== 2) {
+            return null;
+        }
+        $elapsed = (float) $m[1][1] - (float) $m[1][0];
+        $used = (int) $m[2][1] - (int) $m[2][0];
+        if ($elapsed <= 0 || $used < 0) {
+            return null;
+        }
+
+        return $used / 1_000_000 / $elapsed * 100;
     }
 
     /** Sum of `docker stats` CPUPerc lines, e.g. "102.15%". */

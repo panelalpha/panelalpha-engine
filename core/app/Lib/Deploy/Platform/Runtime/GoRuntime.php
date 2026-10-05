@@ -283,7 +283,7 @@ final class GoRuntime implements Runtime
             if (!is_string($contents) || preg_match('/^package\s+main\s*$/m', $contents) !== 1) {
                 continue;
             }
-            if (preg_match('#^//(go:build|\s*\+build)\s+ignore\b#m', $contents) === 1) {
+            if (!self::constraintsHold($contents)) {
                 continue;
             }
             $dir = substr(dirname($file->getPathname()), strlen($projectDir));
@@ -295,6 +295,109 @@ final class GoRuntime implements Runtime
         }
 
         return array_keys(array_filter($found));
+    }
+
+    /**
+     * Whether the build compiles this file: its `//go:build` line (or legacy
+     * `// +build` lines) evaluated for linux with cgo off, which is how the
+     * golang alpine image builds. `ignore`, `tools` and any other custom tag
+     * are off, so the tools.go idiom's `package main` is not the program.
+     */
+    public static function constraintsHold(string $source): bool
+    {
+        $header = preg_split('/^package\s/m', $source, 2)[0] ?? '';
+        if (preg_match('#^//go:build\s+(.+?)\s*$#m', $header, $m) === 1) {
+            return self::evaluateConstraint($m[1]) ?? true;
+        }
+        preg_match_all('#^//\s*\+build\s+(.+?)\s*$#m', $header, $lines);
+        foreach ($lines[1] as $line) {
+            // Space-separated options are ORed, comma-separated terms ANDed.
+            $any = false;
+            foreach (preg_split('/\s+/', $line) ?: [] as $option) {
+                $all = true;
+                foreach (explode(',', $option) as $term) {
+                    $negated = str_starts_with($term, '!');
+                    $all = $all && (self::tagIsSet(ltrim($term, '!')) !== $negated);
+                }
+                $any = $any || $all;
+            }
+            if (!$any) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** Null when the expression cannot be parsed: the file is then counted, as before. */
+    private static function evaluateConstraint(string $expression): ?bool
+    {
+        if (preg_match_all('/\s*(\|\||&&|!|\(|\)|[\w.]+)/A', $expression, $m) === 0
+            || implode('', $m[0]) !== $expression
+        ) {
+            return null;
+        }
+        $tokens = $m[1];
+        $pos = 0;
+        $value = self::parseOr($tokens, $pos);
+
+        return $value !== null && $pos === count($tokens) ? $value : null;
+    }
+
+    /** @param list<string> $tokens */
+    private static function parseOr(array $tokens, int &$pos): ?bool
+    {
+        $value = self::parseAnd($tokens, $pos);
+        while ($value !== null && ($tokens[$pos] ?? null) === '||') {
+            $pos++;
+            $right = self::parseAnd($tokens, $pos);
+            $value = $right === null ? null : ($value || $right);
+        }
+
+        return $value;
+    }
+
+    /** @param list<string> $tokens */
+    private static function parseAnd(array $tokens, int &$pos): ?bool
+    {
+        $value = self::parseUnary($tokens, $pos);
+        while ($value !== null && ($tokens[$pos] ?? null) === '&&') {
+            $pos++;
+            $right = self::parseUnary($tokens, $pos);
+            $value = $right === null ? null : ($value && $right);
+        }
+
+        return $value;
+    }
+
+    /** @param list<string> $tokens */
+    private static function parseUnary(array $tokens, int &$pos): ?bool
+    {
+        $token = $tokens[$pos++] ?? null;
+        if ($token === '!') {
+            $value = self::parseUnary($tokens, $pos);
+
+            return $value === null ? null : !$value;
+        }
+        if ($token === '(') {
+            $value = self::parseOr($tokens, $pos);
+
+            return ($tokens[$pos++] ?? null) === ')' ? $value : null;
+        }
+
+        return $token !== null && preg_match('/^[\w.]+$/', $token) === 1 ? self::tagIsSet($token) : null;
+    }
+
+    /** Tags a linux build without cgo satisfies; the architecture is the host's. */
+    private static function tagIsSet(string $tag): bool
+    {
+        $arch = match (php_uname('m')) {
+            'aarch64', 'arm64' => 'arm64',
+            default => 'amd64',
+        };
+
+        return in_array($tag, ['linux', 'unix', 'gc', $arch], true)
+            || preg_match('/^go1\.\d+$/', $tag) === 1;
     }
 
     /**

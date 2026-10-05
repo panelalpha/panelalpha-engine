@@ -4,7 +4,7 @@ namespace App\Lib\Deploy\CacheManager;
 
 /**
  * A host build image with Node copied in: the recipe's own toolchain image
- * (gradle, maven) plus node, npm, npx, corepack and yarn 1 from a Node image.
+ * (gradle, maven) plus node, npm, npx, corepack, yarn 1 and pnpm from a Node image.
  *
  * For a JVM build that shells out to npm. It runs in a single `docker run` of
  * the toolchain image on the host, which has no Dockerfile to add Node to, so
@@ -33,7 +33,9 @@ final class NodeBuildImage
     /**
      * The official Node images keep node and its tools in these three
      * directories. The RUN fails this image, not the deploy's build, when the
-     * copied node cannot start on the toolchain image's libc.
+     * copied node cannot start on the toolchain image's libc. pnpm ships only
+     * as a corepack shim, which the node-gradle plugin's PnpmTask needs on
+     * PATH (halo); a Node without corepack (25+) just goes without it.
      */
     public static function dockerfile(string $image, string $nodeImage): ?string
     {
@@ -49,7 +51,7 @@ final class NodeBuildImage
             'COPY --from=node /usr/local/bin/ /usr/local/bin/',
             'COPY --from=node /usr/local/lib/node_modules/ /usr/local/lib/node_modules/',
             'COPY --from=node /opt/ /opt/',
-            'RUN node --version && npm --version',
+            'RUN node --version && npm --version && { ! command -v corepack >/dev/null || corepack enable pnpm; }',
             '',
         ]);
     }

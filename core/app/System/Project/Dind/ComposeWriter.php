@@ -53,6 +53,31 @@ class ComposeWriter
     }
 
     /**
+     * Point the app service at another image, after the host compile had to
+     * build with it: the run file was written before the compile. False when
+     * the file does not name $from as the app's image.
+     */
+    public function replaceAppImage(string $from, string $to, ?string $chown): bool
+    {
+        $path = $this->project->userAppComposeFilePath();
+        $yaml = $this->project->system()->filesystem()->fileGetContents($path);
+        if (GeneratedCompose::appImage($yaml) !== $from) {
+            return false;
+        }
+        $replaced = preg_replace(
+            '/^(\s*image:\s*)([\'"]?)' . preg_quote($from, '/') . '\2\s*$/m',
+            '${1}' . "'" . $to . "'",
+            $yaml
+        );
+        if (!is_string($replaced) || GeneratedCompose::appImage($replaced) !== $to) {
+            return false;
+        }
+        $this->writeGeneratedCompose(dirname($path), $replaced, $chown);
+
+        return true;
+    }
+
+    /**
      * The nginx config that goes with {@see DeployCompose::staticNginx()}.
      *
      * Written by every caller of that compose file, including the fallback

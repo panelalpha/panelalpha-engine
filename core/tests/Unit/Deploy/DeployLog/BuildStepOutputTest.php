@@ -149,6 +149,19 @@ class BuildStepOutputTest extends TestCase
         $this->assertStringContainsString('`github.com/livekit/media-sdk/opus`', $match['message'] ?? '');
     }
 
+    /** #328: the package asked for is excluded by its own tag; cgo is not the reason. */
+    public function test_an_excluded_own_package_is_not_blamed_on_cgo(): void
+    {
+        $output = "ERROR: Unable to open log: Permission denied\n"
+            . 'package example.com/vf328: build constraints exclude all Go files in /app';
+
+        $match = DeployFailureExplainer::match($output);
+
+        $this->assertSame('go-package-excluded', $match['rule'] ?? null);
+        $this->assertStringContainsString('`example.com/vf328`', $match['message'] ?? '');
+        $this->assertStringNotContainsString('cgo', $match['message'] ?? '');
+    }
+
     private function exited(string $stdout, string $stderr, int $code): Process
     {
         $process = new Process([

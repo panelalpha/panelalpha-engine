@@ -18,6 +18,8 @@ use App\Lib\Deploy\Platform\Runtime\RustRuntimeLibraries;
 use App\Lib\Deploy\Platform\Runtime\Ruby\RubyApp;
 use App\Lib\Deploy\Platform\Runtime\Images;
 use App\Lib\Deploy\Platform\Runtime\JavaNodeTooling;
+use App\Lib\Deploy\Platform\Runtime\JavaRuntime;
+use App\Lib\Deploy\Platform\Runtime\Requirement;
 use App\Lib\Deploy\Platform\Runtime\PhpRuntime;
 use App\Lib\Deploy\Platform\Runtime\NodeRuntime;
 use App\Lib\Deploy\Platform\PlatformManifest;
@@ -164,24 +166,28 @@ class HostCompile
         try {
             $this->runContainer($projectDir, $image, $installCmd, $buildCmd, $recipeEnv, $isolateNodeModules && $cached, $isNode, $appRoot);
         } catch (\Exception $e) {
-            // Standalone Node must keep compile and runtime on the same
-            // interpreter. Falling back to Node after a bun install leaves
-            // bun-only packages in node_modules.
-            if ($isNitro || $isMounted || !$isNode || $image === $nodeImage) {
+            $jdkImage = $e instanceof DeployCancelledException ? null : self::newerJdkImage($decision, $e->getMessage());
+            if ($jdkImage !== null) {
+                $this->compileOnNewerJdk($decision, $projectDir, $jdkImage, $installCmd, $buildCmd, $recipeEnv, $appRoot);
+            } elseif ($isNitro || $isMounted || !$isNode || $image === $nodeImage) {
+                // Standalone Node must keep compile and runtime on the same
+                // interpreter. Falling back to Node after a bun install leaves
+                // bun-only packages in node_modules.
                 throw $e;
+            } else {
+                $logger?->info('Bun compile failed, retrying with Node: ' . $e->getMessage());
+                // The recipe's own commands are bun-flavoured for a bun-lockfile
+                // project (`bun install`, `bun run build`), so replaying them in the
+                // Node image only fails again with `bun: not found`.
+                $this->runContainer(
+                    $projectDir,
+                    $nodeImage,
+                    HostNodeBuild::nodeInstallCommand($install),
+                    HostNodeBuild::nodeBuildCommand($build),
+                    $recipeEnv,
+                    $isolateNodeModules && $cached
+                );
             }
-            $logger?->info('Bun compile failed, retrying with Node: ' . $e->getMessage());
-            // The recipe's own commands are bun-flavoured for a bun-lockfile
-            // project (`bun install`, `bun run build`), so replaying them in the
-            // Node image only fails again with `bun: not found`.
-            $this->runContainer(
-                $projectDir,
-                $nodeImage,
-                HostNodeBuild::nodeInstallCommand($install),
-                HostNodeBuild::nodeBuildCommand($build),
-                $recipeEnv,
-                $isolateNodeModules && $cached
-            );
         }
 
         if (($decision['strategy'] ?? null) === Strategies::RUST) {
@@ -579,6 +585,66 @@ class HostCompile
         // A no-op for Go, Rust and Java -- their images are not python tags,
         // so the swap declines and the declared image passes through.
         return PythonBase::imageFor($this->project, $projectDir, $declared);
+    }
+
+    /**
+     * The engine's JDK image for the release javac just refused, when it is
+     * not the one the build ran on. A parent pom fetched from a repository
+     * (Tigase's) is not on disk at detection, so the release it sets could
+     * not choose the JDK. Null for a recipe that names its own image.
+     *
+     * @param array<string, mixed> $decision
+     */
+    public static function newerJdkImage(array $decision, string $failure): ?string
+    {
+        if (($decision['strategy'] ?? null) !== Strategies::JAVA
+            || preg_match('/error: release version ([0-9]+) not supported/i', $failure, $release) !== 1
+        ) {
+            return null;
+        }
+        $declared = trim((string) ($decision['image'] ?? ''));
+        foreach (is_array($decision['requirements'] ?? null) ? $decision['requirements'] : [] as $requirement) {
+            if (!$requirement instanceof Requirement || $requirement->id !== 'java'
+                || preg_match('/^\d+-(maven|gradle)$/', $requirement->version, $tool) !== 1
+                || JavaRuntime::imageTag($requirement->version) !== $declared
+            ) {
+                continue;
+            }
+            $image = JavaRuntime::imageTag(JavaRuntime::toolchain($tool[1], (int) $release[1]));
+
+            return $image !== $declared ? $image : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Compile again on $jdkImage, then run the app on it: a class file built
+     * for a newer release does not load on the older JDK.
+     *
+     * @param array<string, mixed> $decision
+     * @param array<string, mixed> $env
+     */
+    private function compileOnNewerJdk(
+        array $decision,
+        string $projectDir,
+        string $jdkImage,
+        string $install,
+        string $build,
+        array $env,
+        string $appRoot
+    ): void {
+        $declared = trim((string) ($decision['image'] ?? ''));
+        $this->project->shell()->logger()?->info(
+            "The JDK in {$declared} cannot compile the Java release this project targets; compiling again with {$jdkImage}"
+        );
+        $image = $this->commandRuntimeImage(['image' => $jdkImage] + $decision, $projectDir);
+        $this->runContainer($projectDir, $image, $install, $build, $env, false, false, $appRoot);
+        $this->project->composeWriter()->replaceAppImage(
+            $declared,
+            $jdkImage,
+            $this->project->userModel()->getChownString()
+        );
     }
 
     /**

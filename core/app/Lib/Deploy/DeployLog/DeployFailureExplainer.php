@@ -739,14 +739,25 @@ class DeployFailureExplainer
                         . 'and that step is not part of the automatic recipe. It needs a PanelAlpha page to describe its build.',
             ],
 
-            // A package whose every file is behind a build tag -- in practice cgo, which the
+            // A dependency whose every file is behind a build tag -- in practice cgo, which the
             // build has off: no C compiler in golang:*-alpine, or CGO_ENABLED=0 set outright.
             'go-cgo-required' => [
-                '/(?:package|imports) ([\w.\/@-]+): build constraints exclude all Go files/',
+                '/imports ([\w.\/@-]+): build constraints exclude all Go files/',
                 static fn (array $m): string =>
                     "The Go package `{$m[1]}` has no files this build can compile. That is almost always "
                         . 'because it needs cgo (a C compiler and the C library it wraps), and this build '
                         . 'compiles without it. The full output is in the deploy log.',
+            ],
+
+            // The package the build was asked for, not a dependency: a constraint such as the
+            // tools.go idiom's `//go:build tools` excludes it, which says nothing about cgo.
+            'go-package-excluded' => [
+                '/\bpackage ([\w.\/@-]+): build constraints exclude all Go files/',
+                static fn (array $m): string =>
+                    "The Go package `{$m[1]}` that this build compiles has no file the build includes: "
+                        . 'a build constraint (a `//go:build` line, such as a tag the build does not set) '
+                        . 'excludes every one of them. The program is most likely in another directory; '
+                        . 'set the build command to build that package. The full output is in the deploy log.',
             ],
 
             // Anchored to a BuildKit *output* line (#<step> <seconds>): the same words appear
