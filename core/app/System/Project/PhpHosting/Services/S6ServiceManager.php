@@ -112,9 +112,11 @@ final class S6ServiceManager implements ServiceManager
     /**
      * Inside the account: bring the scan dir in line with services/. A new
      * service is started; one that is gone is stopped and retired (hidden
-     * first, as s6-svscan ignores dot-names, then removed by a later sync once
-     * its supervisor has let go). A changed run file takes effect at the
-     * service's next restart, as with the runner's `sync`.
+     * first, as s6-svscan ignores dot-names, then removed once its supervisor
+     * has let go). s6-svscan stops that supervisor asynchronously, so sync
+     * waits up to 5s in all for it; a dir still supervised then is left to the
+     * next sync. A changed run file takes effect at the service's next
+     * restart, as with the runner's `sync`.
      */
     public static function syncScript(): string
     {
@@ -142,6 +144,15 @@ final class S6ServiceManager implements ServiceManager
               n=\$(basename "\$d")
               i=0; until s6-svok {$scan}/\$n || [ \$i -ge 50 ]; do sleep 0.1; i=\$((i+1)); done
               s6-svc -u {$scan}/\$n
+            done
+            i=0
+            while [ \$i -lt 50 ]; do
+              up=0
+              for d in {$scan}/.retired-*/; do
+                if [ -d "\$d" ] && s6-svok "\$d"; then up=1; fi
+              done
+              [ \$up = 1 ] || break
+              sleep 0.1; i=\$((i+1))
             done
             for d in {$scan}/.retired-*/; do
               [ -d "\$d" ] && ! s6-svok "\$d" && rm -rf "\$d"

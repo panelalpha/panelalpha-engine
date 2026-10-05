@@ -188,8 +188,81 @@ class S6ServiceManagerTest extends TestCase
         $script = S6ServiceManager::syncScript();
 
         $this->assertStringContainsString('mv "$d" /run/service/.retired-$n-$$', $script);
-        $this->assertStringContainsString('for d in /run/service/.retired-*/; do', $script);
+        $this->assertStringEndsWith(<<<'SH'
+            s6-svscanctl -an /run/service
+            for d in /etc/s6/account/*/; do
+              [ -d "$d" ] || continue
+              n=$(basename "$d")
+              i=0; until s6-svok /run/service/$n || [ $i -ge 50 ]; do sleep 0.1; i=$((i+1)); done
+              s6-svc -u /run/service/$n
+            done
+            i=0
+            while [ $i -lt 50 ]; do
+              up=0
+              for d in /run/service/.retired-*/; do
+                if [ -d "$d" ] && s6-svok "$d"; then up=1; fi
+              done
+              [ $up = 1 ] || break
+              sleep 0.1; i=$((i+1))
+            done
+            for d in /run/service/.retired-*/; do
+              [ -d "$d" ] && ! s6-svok "$d" && rm -rf "$d"
+            done
+            true
+            SH, $script);
         $this->assertStringNotContainsString('/run/service/.*', $script);
+    }
+
+    /**
+     * s6-svscan stops a retired service's supervisor after sync has asked it
+     * to. Sync waits for that, so the dir goes in the same sync, but never
+     * for more than 5s in all; a dir still supervised then is left.
+     */
+    public function test_sync_waits_briefly_for_retired_supervisors_before_removing(): void
+    {
+        $src = $this->root . '/account';
+        $scan = $this->root . '/service';
+        $bin = $this->root . '/bin';
+        mkdir("{$src}/php-fpm8.3", 0777, true);
+        file_put_contents("{$src}/php-fpm8.3/run", "#!/bin/sh\n");
+        mkdir("{$scan}/php-fpm8.4", 0777, true);
+        mkdir("{$scan}/.s6-svscan");
+        foreach (['.retired-php-fpm8.1-7', '.retired-php-fpm8.2-7'] as $stuck) {
+            mkdir("{$scan}/{$stuck}");
+            touch("{$scan}/{$stuck}/stuck");
+        }
+        mkdir($bin);
+        // A retired dir stays supervised for its first three checks, then its supervisor is gone.
+        file_put_contents("{$bin}/s6-svok", <<<'SH'
+            #!/bin/sh
+            [ -d "$1" ] || exit 1
+            case "$1" in *.retired-*) ;; *) exit 0 ;; esac
+            [ -f "$1/stuck" ] && exit 0
+            n=$(cat "$1/checks" 2>/dev/null || echo 0)
+            echo $((n + 1)) > "$1/checks"
+            [ "$n" -lt 3 ]
+            SH);
+        file_put_contents("{$bin}/s6-svc", "#!/bin/sh\nexit 0\n");
+        file_put_contents("{$bin}/s6-svscanctl", "#!/bin/sh\nexit 0\n");
+        foreach (['s6-svok', 's6-svc', 's6-svscanctl'] as $tool) {
+            chmod("{$bin}/{$tool}", 0755);
+        }
+
+        $script = str_replace(['/etc/s6/account', '/run/service'], [$src, $scan], S6ServiceManager::syncScript());
+        $sync = new Process(['sh', '-c', $script], null, ['PATH' => $bin . ':' . getenv('PATH')]);
+        $started = microtime(true);
+        $sync->run();
+        $took = microtime(true) - $started;
+
+        $this->assertSame(0, $sync->getExitCode(), $sync->getErrorOutput());
+        $this->assertDirectoryExists("{$scan}/php-fpm8.3");
+        $this->assertDirectoryDoesNotExist("{$scan}/php-fpm8.4");
+        $this->assertSame([], glob("{$scan}/.retired-php-fpm8.4-*"), 'removed in the same sync once its supervisor let go');
+        $this->assertDirectoryExists("{$scan}/.retired-php-fpm8.1-7", 'still supervised when the wait ran out');
+        $this->assertDirectoryExists("{$scan}/.retired-php-fpm8.2-7", 'still supervised when the wait ran out');
+        $this->assertDirectoryExists("{$scan}/.s6-svscan");
+        $this->assertGreaterThan(4.5, $took);
+        $this->assertLessThan(8, $took, 'one 5s wait for the whole sync, not one per dir');
     }
 
     public function test_a_name_that_is_not_a_plain_word_is_refused(): void
