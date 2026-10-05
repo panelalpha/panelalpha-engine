@@ -98,3 +98,6 @@ Ask your assistant to inspect the repository and explain what it found. Most cas
 
 **Inspect says this cannot be deployed.**
 The engine found no way to start a website from these files. Often it is a library, or the start file is missing. Fix the repository before you deploy.
+
+**The build fails with "Cannot change ownership to uid …".**
+Every file in a build or image must be owned by a user and group id between 0 and 65535; an account cannot hold anything owned above that. This happens when a build extracts an archive made on another system, for example `tar` in a Flutter web build. Extract it with `tar --no-same-owner` (or set `TAR_OPTIONS=--no-same-owner` in that `RUN` step), or deploy the project's published image instead.

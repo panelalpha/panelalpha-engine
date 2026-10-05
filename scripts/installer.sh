@@ -1003,6 +1003,8 @@ prepare_config_files() {
     fi
     mkdir -p /opt/panelalpha/shared-hosting/config/logrotate
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/logrotate/. /opt/panelalpha/shared-hosting/config/logrotate/.
+    # Their postrotate reopens the webserver's logs: engine code, not host state.
+    cp /opt/panelalpha/shared-hosting/templates/config/logrotate/{apache,nginx,nginx-proxy}.conf /opt/panelalpha/shared-hosting/config/logrotate/
     mkdir -p /opt/panelalpha/shared-hosting/config/exim
     mkdir -p /opt/panelalpha/shared-hosting/logs/exim
     cp -Rn /opt/panelalpha/shared-hosting/templates/config/exim/. /opt/panelalpha/shared-hosting/config/exim/.

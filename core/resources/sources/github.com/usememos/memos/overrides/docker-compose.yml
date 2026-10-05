@@ -1,0 +1,28 @@
+# REPLACE compose: this becomes the project's docker-compose.yml. The published
+# image runs instead of the repository's source; see panelalpha.yaml for why a
+# build of the checkout does not work.
+services:
+  app:
+    image: neosmemo/memos:0.31.0
+    restart: unless-stopped
+    ports:
+      # Published so ComposePortScan routes the public domain to 5230.
+      - "5230:5230"
+    environment:
+      MEMOS_PORT: "5230"
+      MEMOS_DATA: /var/opt/memos
+      # Rewritten to the account's public https URL by ComposePlaceholders.
+      MEMOS_INSTANCE_URL: http://localhost
+    volumes:
+      # SQLite database and local attachments. A named volume survives
+      # project_rebuild; ~/project does not.
+      - memos-data:/var/opt/memos
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5230/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    mem_limit: 256m
+volumes:
+  memos-data:

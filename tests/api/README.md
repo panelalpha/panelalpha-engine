@@ -61,4 +61,6 @@ This serves the report on port 9323 and prints the address to open. If you are n
 ssh -L 9323:127.0.0.1:9323 root@engine.example.com
 ```
 
-A failed test keeps a trace. Open it from the report.
+A failed test keeps a trace. Open it from the report. The API token (and `LICENSE_KEY` /
+`SYSTEM_UPDATE_LICENSE_KEY` when set) is replaced with `[REDACTED]` in every trace and report
+archive once the run ends, so a published report does not carry it.

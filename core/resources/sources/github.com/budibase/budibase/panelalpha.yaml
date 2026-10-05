@@ -53,8 +53,10 @@ description: >-
   an admin out of whoever calls it, which on a public HTTPS name is the first
   stranger to find the site. The server creates the admin from those two on
   first boot instead, which closes that window by itself -- there is no
-  separate setup service here, and no open self-signup afterwards. The password
-  is generated per account into ~/project/.panelalpha-admin-password (0600),
+  separate setup service here, and no open self-signup afterwards. The login is
+  the engine's (`credentials:` below), read by app-service from
+  ~/.panelalpha/app-credentials.env and returned by
+  GET /projects/{name}/app-credentials; the password is generated per account,
   never a default.
 
   One service in the compose file is a no-op that exits 0. The engine runs
@@ -86,3 +88,10 @@ description: >-
   Mail is left unconfigured. Budibase boots, the admin signs in and workspaces
   can be built without it, but invitations and password resets need an SMTP
   server the engine does not provide; configure one in Settings -> Email.
+credentials:
+  login_path: /builder/auth/login
+  # The old recipe wrote the admin into the account's .env under these names.
+  adopt_from: project/.env
+  fields:
+    BB_ADMIN_USER_EMAIL: {kind: email, value: admin@example.com}
+    BB_ADMIN_USER_PASSWORD: {kind: password}

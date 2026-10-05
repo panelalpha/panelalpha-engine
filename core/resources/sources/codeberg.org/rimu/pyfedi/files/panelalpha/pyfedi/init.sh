@@ -44,13 +44,21 @@ PY
 if [ "${STATE}" = "SEED" ]; then
     admin_user="${ADMIN_USER:-paadmin}"
     admin_email="${ADMIN_EMAIL:-admin@${SERVER_NAME}}"
-    : "${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set by prepare.sh}"
+    : "${ADMIN_PASSWORD:?ADMIN_PASSWORD must be in ~/.panelalpha/app-credentials.env}"
     echo "[panelalpha] pyfedi init: fresh database -- seeding site + admin '${admin_user}'"
-    # init-db prompts for admin user name, email, password on stdin (it loops
-    # until the name has no '@'/space and the password is >= 8 chars, both of
-    # which prepare.sh guarantees). The seeded admin is verified=True, so login
-    # works immediately with no email confirmation.
-    printf '%s\n%s\n%s\n' "${admin_user}" "${admin_email}" "${ADMIN_PASSWORD}" | flask init-db
+    # init-db prompts for admin user name, email, password (it loops until the
+    # name has no '@'/space and the password is >= 8 chars, both of which the
+    # engine's generated login satisfies). The seeded admin is verified=True, so
+    # login works immediately with no email confirmation. The password prompt is
+    # pwinput, which needs a terminal (termios.error on a pipe), so upstream's
+    # init-db runs with pwinput swapped for input().
+    printf '%s\n%s\n%s\n' "${admin_user}" "${admin_email}" "${ADMIN_PASSWORD}" | python3 -c '
+import sys, pwinput
+pwinput.pwinput = lambda prompt="", mask="*": input(prompt)
+from flask.cli import main
+sys.argv = ["flask", "init-db"]
+main()
+'
     echo "[panelalpha] pyfedi init: seed complete"
 else
     echo "[panelalpha] pyfedi init: site already initialised -- skipping init-db"

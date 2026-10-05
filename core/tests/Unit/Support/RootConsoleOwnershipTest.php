@@ -30,6 +30,15 @@ class RootConsoleOwnershipTest extends TestCase
         }
     }
 
+    public function test_awstats_directories_are_repaired_with_storage(): void
+    {
+        $paths = RootConsoleOwnership::paths();
+
+        $this->assertContains(storage_path(), $paths);
+        $this->assertContains('/opt/panelalpha/shared-hosting/awstats-config', $paths);
+        $this->assertContains('/opt/panelalpha/shared-hosting/awstats-data', $paths);
+    }
+
     public function test_nothing_runs_without_the_user_or_any_path(): void
     {
         $this->assertNull(RootConsoleOwnership::repairArgv([sys_get_temp_dir()], null));

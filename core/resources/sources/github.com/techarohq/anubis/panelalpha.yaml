@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Anubis, a proof-of-work challenge that sits in front of a website to keep
+  AI scrapers out (reverse proxy on :8923). The repository embeds its
+  challenge page assets (static/app.js, wasm) from a Makefile that needs Go,
+  Node, Rust, binaryen, zstd and brotli, so the Go strategy stopped on
+  "pattern static/app.js: no matching files found". This recipe runs
+  upstream's published ghcr.io/techarohq/anubis image of the current release
+  (v1.27.0, pinned by digest). A fresh deploy protects a bundled placeholder
+  page; the project's TARGET environment variable points it at the real site
+  (TARGET_HOST sets the Host header sent there, DIFFICULTY the challenge
+  strength). The ed25519 signing key is generated once into
+  ~/.panelalpha/anubis, so passes survive a redeploy.

@@ -950,6 +950,16 @@ class DeployFailureExplainer
                         . '.dockerignore excludes it.',
             ],
 
+            // hitobito (engine#116): a rake task requires a gem from a group the
+            // Dockerfile's own BUNDLE_WITHOUT leaves out.
+            'ruby-gem-not-loaded' => [
+                '/LoadError: cannot load such file -- (\S+)/',
+                static fn (array $m): string =>
+                    "A Ruby build step requires `{$m[1]}`, which is not in the installed bundle "
+                        . "(often a gem in a group the Dockerfile's BUNDLE_WITHOUT leaves out). The project's "
+                        . 'Dockerfile has to install it or stop requiring it.',
+            ],
+
             // Generic build failure — last resort, still better than the dump.
             'build-step-failed' => [
                 '/did not complete successfully: exit code: (\d+)/i',

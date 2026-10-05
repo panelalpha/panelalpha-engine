@@ -2,6 +2,7 @@
 
 namespace App\System;
 
+use App\Integrations\Statistics\Statistics;
 use App\Integrations\Tunnels\Cloudflare;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\Domain as DomainModel;
@@ -266,6 +267,23 @@ class Project
      * Product delete: every resource owned by this Project, including the users row.
      * Distinct from delete()/deprovision(), which tear down host isolation only.
      */
+    /**
+     * Domain::delete() forgets a domain's statistics; the bulk delete here did
+     * not, so the next project given the same domain inherited its traffic.
+     *
+     * @param list<string> $domainNames
+     */
+    protected function forgetDomainsStatistics(array $domainNames): void
+    {
+        foreach ($domainNames as $name) {
+            try {
+                app(Statistics::class)->forgetDomain($name);
+            } catch (\Throwable $e) {
+                Log::warning("Statistics cleanup during project delete failed for {$name}: " . $e->getMessage());
+            }
+        }
+    }
+
     public function destroy(): void
     {
         $user = $this->model;
@@ -303,6 +321,7 @@ class Project
         $domainNames = $user->domains->pluck('domain')->all();
         $user->domains()->delete();
         $this->system->webserver()->deleteDomainsConfigs($domainNames);
+        $this->forgetDomainsStatistics($domainNames);
         if (!config('env.KEEP_WEBSERVER_LOGS_FOR_DELETED_DOMAINS')) {
             $this->system->webserver()->deleteDomainsLogsDirs($domainNames);
         }

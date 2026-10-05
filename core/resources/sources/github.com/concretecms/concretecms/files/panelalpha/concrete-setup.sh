@@ -105,9 +105,9 @@ if [ "$installed" = "no" ]; then
     # This is the security half of the recipe. An uninstalled Concrete
     # redirects *every* request to /install, and that wizard creates the
     # administrator: whoever reaches it first owns the site. Running
-    # c5:install from the install stage, before Apache binds, with a password
-    # generated per account into ~/.panelalpha/concrete/concrete.env, means
-    # the window never opens.
+    # c5:install from the install stage, before Apache binds, with the login
+    # the engine generates (~/.panelalpha/app-credentials.env), means the
+    # window never opens.
     #
     # --session-handler=database rather than Concrete's default `file`.
     # PHP's own session directory in this image is /tmp, which is inside the
@@ -136,7 +136,7 @@ if [ "$installed" = "no" ]; then
         --db-username="${DB_USERNAME}" \
         --db-password="${DB_PASSWORD}" \
         --admin-email="${PA_CONCRETE_ADMIN_EMAIL:-admin@example.com}" \
-        --admin-password="${PA_CONCRETE_ADMIN_PASSWORD:?no administrator password in the environment}" \
+        --admin-password="${PA_CONCRETE_ADMIN_PASSWORD:?no administrator password in ~/.panelalpha/app-credentials.env}" \
         --site="${PA_CONCRETE_SITE_NAME:-Concrete CMS}" \
         --canonical-url="$site_url" \
         --starting-point="${PA_CONCRETE_STARTING_POINT:-atomik_blank}" \

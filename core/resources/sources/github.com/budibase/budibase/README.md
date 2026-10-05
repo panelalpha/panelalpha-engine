@@ -131,8 +131,10 @@ stranger to open the site becomes the admin.
 `BB_ADMIN_USER_EMAIL` / `BB_ADMIN_USER_PASSWORD` close that window rather than a
 setup service: `packages/server/src/startup/index.ts` calls
 `users.UserDB.createAdminUser` from them on first boot when `SELF_HOSTED` is set
-and `MULTI_TENANCY` is not. The password is 20 alphanumeric characters generated
-per account into `~/project/.panelalpha-admin-password` (0600), never a default.
+and `MULTI_TENANCY` is not. The login is the engine's (`credentials:` in
+`panelalpha.yaml`): app-service reads it from `~/.panelalpha/app-credentials.env`,
+and `GET /projects/{name}/app-credentials` (MCP `app_credentials_get`) returns it.
+The password is generated per account, never a default.
 There is no self-signup afterwards — Budibase self-host has no public
 registration at all, so unlike NocoDB and Mattermost nothing further has to be
 turned off. Verified on a live deploy: `POST /api/global/users/init` answers

@@ -52,7 +52,8 @@ final class FailureOutput
         '/Cannot change ownership to uid \d+, gid \d+: Invalid argument/',
         '/^failed to solve:/',                    // ...and the summary that names it
         '/^Error response from daemon:/',         // the daemon refusing to run a container
-        '/^runc create failed:/',
+        // `runc run failed:` is a RUN step that could not start (minthcm, engine#111).
+        '/^runc (?:create|run) failed:/',
         // apt's own error lines (`E: Failed to fetch ... 404`), above the step's `#N ERROR:`.
         // The account's apt-lists denial is no finding (see NOISE).
         '/^E: (?!List directory \/var\/lib\/apt\/lists\/partial is missing)/',
@@ -91,6 +92,8 @@ final class FailureOutput
         '/^gyp: /',
         '/^\s*PHP Fatal error:/i',
         '/^Traceback \(most recent call last\)/',
+        // Ruby's require of a gem the bundle does not have; its backtrace follows.
+        '/^LoadError: cannot load such file -- /',
         '/^fatal:/',                             // git
         '/^(?:Memory cgroup )?[Oo]ut of memory\b/',
         '/^Killed\b/',

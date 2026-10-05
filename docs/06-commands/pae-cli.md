@@ -225,7 +225,7 @@ Context: [A token shared by several projects](../05-capabilities/connecting-with
 | `pae project:bandwidth {project} --start= --end= --group-by=day` | Transfer series for the project, in bytes. |
 | `pae project:domain:bandwidth {project} {domain} --start= --end=` | Transfer series for one hostname. |
 | `pae project:domain:visitors {project} {domain} --start= --end=` | Visitor overview for one hostname (`domain_visitors`). Daily hits and visits clip to the range; unique visitors and session length are calendar months. |
-| `pae project:domain:visitors-breakdown {project} {domain} {dimension} --start= --end=` | Visitor breakdown (`domain_visitors_breakdown`): pages, countries, continents, regions, referrers, os, or browsers. Month grain. |
+| `pae project:domain:visitors-breakdown {project} {domain} {dimension} --start= --end=` | Visitor breakdown (`domain_visitors_breakdown`): pages, countries, continents, regions, referrers, os, or browsers, at month grain; or `status_codes`, requests and bytes per HTTP status for exactly the range. |
 | `pae geolocation:database update` | Downloads the local City MMDB used for country / continent / region. Not scheduled. Geo lists stay empty until this has run. `--accept-terms` for scripts; `--force` to replace this month's file. |
 
 Country charts still need a visible [DB-IP](https://db-ip.com) backlink: [Visitor statistics](../05-capabilities/visitor-statistics.md).

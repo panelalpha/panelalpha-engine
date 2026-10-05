@@ -112,21 +112,14 @@ class DindHostBuilderComposerTest extends TestCase
     }
 
     /**
-     * The point of the change is that a dev-only advisory no longer blocks
-     * the build -- not that advisories stop being checked. Nothing here
-     * disables the policy; the manifest is the only thing swapped, and the
-     * project's own composer.json is never edited. A vulnerable *runtime*
-     * package still fails the resolve (verified against the real Composer).
+     * A lockless project whose runtime `require` has an advisory on every
+     * allowed version (providence's league/flysystem 1.x) could not resolve at
+     * all. Advisories go to the audit in the log, not into the resolver.
      */
-    public function test_the_fix_does_not_disable_advisory_blocking(): void
+    public function test_advisories_never_block_the_resolve(): void
     {
         foreach ([null, PhpHostBuild::RUNTIME_MANIFEST_FILE] as $manifest) {
-            $argv = $this->argv('8.3', $manifest);
-
-            $this->assertStringNotContainsString('--no-blocking', $argv);
-            $this->assertStringNotContainsString('--no-security-blocking', $argv);
-            $this->assertStringNotContainsString('policy', $argv);
-            $this->assertStringNotContainsString('advisories', $argv);
+            $this->assertStringContainsString('-e COMPOSER_NO_BLOCKING=1', $this->argv('8.3', $manifest));
         }
     }
 

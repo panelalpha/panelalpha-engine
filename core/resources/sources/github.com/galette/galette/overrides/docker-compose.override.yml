@@ -5,9 +5,11 @@
 # ~/project; hooks/prepare.sh creates it) into the app container at
 # /pa-data/galette; galette-setup.sh seeds it and symlinks /app/config +
 # /app/data onto it. Never the whole ~/.panelalpha: it is private to the
-# account. The volume list merges into the engine-generated `app` service,
-# whose base mount is ./galette:/app (app_root: galette).
+# account; the engine's login file is mounted on its own, read-only. The volume
+# list merges into the engine-generated `app` service, whose base mount is
+# ./galette:/app (app_root: galette).
 services:
   app:
     volumes:
       - '../.panelalpha/galette:/pa-data/galette'
+      - '../.panelalpha/app-credentials.env:/pa-data/app-credentials.env:ro'

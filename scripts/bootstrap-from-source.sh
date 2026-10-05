@@ -252,6 +252,8 @@ cp -Rn templates/config/sftp/. config/sftp/
 # Scripts are engine code, not host state: -n would keep the installed copy.
 cp templates/config/sftp/{entrypoint.sh,sync-logins.sh} config/sftp/
 cp -Rn templates/config/logrotate/. config/logrotate/
+# Their postrotate reopens the webserver's logs: engine code, not host state.
+cp templates/config/logrotate/{apache,nginx,nginx-proxy}.conf config/logrotate/
 cp -Rn templates/config/exim/. config/exim/
 cp -Rn templates/config/modsecurity/. config/modsecurity/
 [ -f config/sftp/ssh_host_ed25519_key ] ||

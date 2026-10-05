@@ -571,7 +571,7 @@ pae mcp:tool:list
 | `project_bandwidth` | Project transfer over a date range (`start`, `end`, `group_by` day or month), in bytes |
 | `domain_bandwidth` | Transfer over a date range for one domain |
 | `domain_visitors` | Visitor overview for a domain. `start`/`end` clip daily hits and visits; unique visitors, session length, and breakdowns are overlapping calendar months. Period aliases such as last-week stay in the client. |
-| `domain_visitors_breakdown` | Visitor breakdown by pages, countries, continents, regions, referrers, os, or browsers (month grain) |
+| `domain_visitors_breakdown` | Visitor breakdown by pages, countries, continents, regions, referrers, os, or browsers (month grain), or requests and bytes per HTTP status (`status_codes`, exact range) |
 
 ## WP-CLI
 

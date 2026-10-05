@@ -94,6 +94,10 @@ class Awstats implements Statistics
 
     public function domainVisitorBreakdown(string $domain, string $dimension, string $start, string $end): array
     {
+        if ($dimension === 'status_codes') {
+            return $this->statusCodeRows($domain, $start, $end);
+        }
+
         $merged = [];
         foreach ($this->monthFiles($domain, $start, $end) as $contents) {
             foreach ($this->breakdownRows($contents, $dimension) as $row) {
@@ -127,6 +131,77 @@ class Awstats implements Statistics
             'countries', 'continents', 'regions' => $this->geoRows($contents, $dimension),
             default => [],
         };
+    }
+
+    /**
+     * ERRORS holds code, hits and bytes for every status but 200 and 304,
+     * which AWStats does not tell apart; they are what is left of the TIME
+     * totals. Per-day databases make this exact to the day; a month that
+     * has none is counted whole, like the other breakdowns.
+     *
+     * @return list<array{label: string, visits: int, code: string, bytes: int}>
+     */
+    private function statusCodeRows(string $domain, string $start, string $end): array
+    {
+        // Whole months, so a month that has per-day databases, just none in
+        // the range, counts as zero rather than falling back to the month.
+        $byMonth = [];
+        $from = Carbon::parse($start)->startOfMonth();
+        $to = Carbon::parse($end)->endOfMonth();
+        foreach ($this->dailyFiles($domain, $from->toDateString(), $to->toDateString()) as $date => $contents) {
+            $byMonth[substr($date, 0, 7)][$date] = $contents;
+        }
+        $codes = [];
+        foreach ($this->monthsCovering(Carbon::parse($start)->startOfDay(), Carbon::parse($end)->startOfDay()) as $month) {
+            $days = $byMonth[$month->format('Y-m')] ?? null;
+            if ($days !== null) {
+                $sources = array_values(array_filter(
+                    $days,
+                    static fn (string $date): bool => $date >= $start && $date <= $end,
+                    ARRAY_FILTER_USE_KEY,
+                ));
+            } else {
+                $path = $this->monthlyFile($domain, $month);
+                $sources = is_file($path) ? [(string) file_get_contents($path)] : [];
+            }
+            foreach ($sources as $contents) {
+                $hits = 0;
+                $bytes = 0;
+                foreach ($this->parseSection($contents, 'TIME') as $parts) {
+                    $hits += (int) ($parts[2] ?? 0) + (int) ($parts[5] ?? 0);
+                    $bytes += (int) ($parts[3] ?? 0) + (int) ($parts[6] ?? 0);
+                }
+                foreach ($this->parseSection($contents, 'ERRORS') as $parts) {
+                    if (count($parts) < 3) {
+                        continue;
+                    }
+                    $codes[$parts[0]]['hits'] = ($codes[$parts[0]]['hits'] ?? 0) + (int) $parts[1];
+                    $codes[$parts[0]]['bytes'] = ($codes[$parts[0]]['bytes'] ?? 0) + (int) $parts[2];
+                    $hits -= (int) $parts[1];
+                    $bytes -= (int) $parts[2];
+                }
+                $codes['200/304']['hits'] = ($codes['200/304']['hits'] ?? 0) + max(0, $hits);
+                $codes['200/304']['bytes'] = ($codes['200/304']['bytes'] ?? 0) + max(0, $bytes);
+            }
+        }
+
+        $rows = [];
+        foreach ($codes as $code => $count) {
+            if ($count['hits'] <= 0) {
+                continue;
+            }
+            $rows[] = [
+                'label' => (string) $code,
+                'visits' => $count['hits'],
+                'code' => (string) $code,
+                'bytes' => $count['bytes'],
+            ];
+        }
+        usort($rows, static function (array $a, array $b): int {
+            return $b['visits'] <=> $a['visits'] ?: strcmp($a['label'], $b['label']);
+        });
+
+        return $rows;
     }
 
     /**
@@ -333,21 +408,30 @@ class Awstats implements Statistics
         }
 
         $this->ensureDirectories();
-        $merged = sys_get_temp_dir() . '/pa-awstats-merge-' . preg_replace('/[^a-z0-9.-]/i', '_', $domain) . '.log';
-        if ($this->run(array_merge(['perl', $this->mergeBin], $logs), $merged) !== 0) {
-            return;
+        // A fixed name was left behind holding up to a year of logs, and once
+        // a root run had created it the scheduled www-data run could not write it.
+        $merged = tempnam(sys_get_temp_dir(), 'pa-awstats-merge-');
+        if ($merged === false) {
+            throw new \RuntimeException('Could not create a temporary file for the merged access logs');
         }
+        try {
+            if ($this->run(array_merge(['perl', $this->mergeBin], $logs), $merged) !== 0) {
+                return;
+            }
 
-        $update = [
-            'perl',
-            $this->awstatsBin,
-            '-config=' . $domain,
-            '-configdir=' . $this->configDir,
-            '-update',
-            '-logfile=' . $merged,
-        ];
-        $this->run($update);
-        $this->run(array_merge($update, ['-databasebreak=day']));
+            $update = [
+                'perl',
+                $this->awstatsBin,
+                '-config=' . $domain,
+                '-configdir=' . $this->configDir,
+                '-update',
+                '-logfile=' . $merged,
+            ];
+            $this->run($update);
+            $this->run(array_merge($update, ['-databasebreak=day']));
+        } finally {
+            @unlink($merged);
+        }
     }
 
     /**
@@ -571,6 +655,7 @@ class Awstats implements Statistics
     /**
      * Current access.log plus rotated `.log` / `.gz` siblings from the last
      * 12 months. logrotate keeps a longer history; charts only need a year.
+     * Its `extension .log` + `dateext` names them `access-2026-09.log[.gz]`.
      *
      * @return list<string>
      */
@@ -582,7 +667,7 @@ class Awstats implements Statistics
         $cutoff = Carbon::now()->subMonths(12)->timestamp;
         $files = [];
         foreach (scandir($logDirectory) ?: [] as $name) {
-            if ($name === '.' || $name === '..' || !str_starts_with($name, 'access.log')) {
+            if (!str_starts_with($name, 'access.log') && !str_starts_with($name, 'access-')) {
                 continue;
             }
             if ($name !== 'access.log' && !str_ends_with($name, '.gz') && !str_ends_with($name, '.log')) {

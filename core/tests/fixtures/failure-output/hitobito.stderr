@@ -1,0 +1,25 @@
+------
+> [build  9/13] RUN    bundle config set --local deployment 'true'     && bundle config set --local without development:metrics:test     && bundle install     && bundle clean     && bundle exec bootsnap precompile --gemfile     && RAILS_DB_ADAPTER=nulldb bundle exec rails locales:patch_de:
+51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/command.rb:150:in `invoke_rake'
+51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/command.rb:67:in `block in invoke'
+51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/command.rb:143:in `with_argv'
+51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/command.rb:63:in `invoke'
+51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/commands.rb:18:in `<main>'
+51.95 <internal:/usr/local/lib/ruby/3.2.0/rubygems/core_ext/kernel_require.rb>:38:in `require'
+51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/bootsnap-1.18.6/lib/bootsnap/load_path_cache/core_ext/kernel_require.rb:30:in `require'
+51.95 bin/rails:5:in `<main>'
+51.95 (See full trace by running task with --trace)
+------
+WARNING: current commit information was not captured by the build: failed to read current commit information with git rev-parse --is-inside-work-tree
+Dockerfile:125
+--------------------
+124 |     # install gems and build the app
+125 | >>> RUN    bundle config set --local deployment 'true' \
+126 | >>>     && bundle config set --local without ${BUNDLE_WITHOUT_GROUPS} \
+127 | >>>     && bundle install \
+128 | >>>     && bundle clean \
+129 | >>>     && bundle exec bootsnap precompile --gemfile \
+130 | >>>     && RAILS_DB_ADAPTER=nulldb bundle exec rails locales:patch_de
+131 |
+--------------------
+failed to solve: process "/bin/bash -c bundle config set --local deployment 'true'     && bundle config set --local without ${BUNDLE_WITHOUT_GROUPS}     && bundle install     && bundle clean     && bundle exec bootsnap precompile --gemfile     && RAILS_DB_ADAPTER=nulldb bundle exec rails locales:patch_de" did not complete successfully: exit code: 1

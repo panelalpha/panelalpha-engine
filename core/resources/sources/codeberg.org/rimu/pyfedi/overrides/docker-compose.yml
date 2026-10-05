@@ -77,11 +77,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # .env carries the account-overridable tunables; app.env carries SECRET_KEY,
-    # DATABASE_URL (with the db password) and the seeded admin's credentials.
+    # .env carries the account-overridable tunables; app.env carries SECRET_KEY
+    # and DATABASE_URL (with the db password); app-credentials.env is the seeded
+    # admin's login, which the engine generates (`credentials:`).
     env_file:
       - .env
       - ../.panelalpha/pyfedi/app.env
+      - ../.panelalpha/app-credentials.env
     environment:
       # Rewritten to the account's public https URL before the stack starts (key
       # ends in _URL, value is a bare localhost). The script strips the scheme

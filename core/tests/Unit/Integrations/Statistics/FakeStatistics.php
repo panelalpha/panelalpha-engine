@@ -26,6 +26,9 @@ final class FakeStatistics implements Statistics
     /** @var list<string> */
     public array $ingested = [];
 
+    /** @var array<string, \Throwable> forget/ingest of these domains throws */
+    public array $failures = [];
+
     public function domainBandwidth(string $domain, string $start, string $end, string $groupBy): array
     {
         $days = $this->domainSeries[$domain] ?? [];
@@ -99,11 +102,17 @@ final class FakeStatistics implements Statistics
 
     public function forgetDomain(string $domain): void
     {
+        if (isset($this->failures[$domain])) {
+            throw $this->failures[$domain];
+        }
         $this->forgotten[] = $domain;
     }
 
     public function ingestDomain(string $domain, string $logDirectory, array $aliases = []): void
     {
+        if (isset($this->failures[$domain])) {
+            throw $this->failures[$domain];
+        }
         $this->ingested[] = $domain;
     }
 }

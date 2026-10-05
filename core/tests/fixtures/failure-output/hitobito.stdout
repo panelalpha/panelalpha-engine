@@ -1,0 +1,576 @@
+#17 [build  9/13] RUN    bundle config set --local deployment 'true'     && bundle config set --local without development:metrics:test     && bundle install     && bundle clean     && bundle exec bootsnap precompile --gemfile     && RAILS_DB_ADAPTER=nulldb bundle exec rails locales:patch_de
+#17 1.503 Fetching https://github.com/puzzle/graphiti-openapi.git
+#17 6.115 Fetching gem metadata from https://rubygems.org/........
+#17 15.22 Fetching rake 13.4.2
+#17 15.54 Installing rake 13.4.2
+#17 15.56 Fetching bigdecimal 3.3.1
+#17 15.56 Fetching base64 0.3.0
+#17 15.56 Fetching benchmark 0.5.0
+#17 15.56 Fetching concurrent-ruby 1.3.8
+#17 15.56 Fetching connection_pool 3.0.2
+#17 15.56 Fetching drb 2.2.3
+#17 15.56 Fetching i18n 1.15.2
+#17 15.56 Fetching logger 1.7.0
+#17 15.65 Fetching prism 1.9.0
+#17 15.70 Installing bigdecimal 3.3.1 with native extensions
+#17 15.75 Fetching minitest 6.0.6
+#17 15.88 Fetching securerandom 0.4.1
+#17 15.92 Fetching tzinfo 2.0.6
+#17 15.98 Fetching uri 1.1.1
+#17 16.03 Fetching activesupport 8.0.5.1
+#17 16.08 Fetching builder 3.3.0
+#17 16.25 Fetching erubi 1.13.1
+#17 16.26 Fetching racc 1.8.1
+#17 16.30 Installing prism 1.9.0 with native extensions
+#17 16.36 Fetching nokogiri 1.19.4 (x86_64-linux-gnu)
+#17 16.40 Fetching rails-dom-testing 2.3.0
+#17 16.47 Fetching crass 1.0.6
+#17 16.51 Fetching loofah 2.25.1
+#17 16.56 Fetching rails-html-sanitizer 1.7.0
+#17 16.62 Fetching actionview 8.0.5.1
+#17 16.98 Installing racc 1.8.1 with native extensions
+#17 17.03 Fetching rack 3.2.6
+#17 17.13 Fetching rack-session 2.1.2
+#17 17.18 Fetching rack-test 2.2.0
+#17 17.21 Fetching useragent 0.16.11
+#17 17.30 Fetching actionpack 8.0.5.1
+#17 17.31 Fetching nio4r 2.7.5
+#17 17.35 Fetching websocket-extensions 0.1.5
+#17 17.56 Fetching websocket-driver 0.8.2
+#17 17.63 Fetching zeitwerk 2.7.5
+#17 17.72 Fetching actioncable 8.0.5.1
+#17 17.73 Fetching globalid 1.3.0
+#17 17.74 Fetching activejob 8.0.5.1
+#17 17.79 Installing nio4r 2.7.5 with native extensions
+#17 17.84 Fetching activemodel 8.0.5.1
+#17 17.89 Fetching timeout 0.6.1
+#17 17.95 Fetching activerecord 8.0.5.1
+#17 18.00 Fetching marcel 1.1.0
+#17 18.05 Fetching activestorage 8.0.5.1
+#17 18.11 Fetching mini_mime 1.1.5
+#17 18.16 Fetching date 3.5.1
+#17 18.24 Fetching net-protocol 0.2.2
+#17 18.29 Fetching net-imap 0.6.4.1
+#17 18.34 Fetching net-pop 0.1.2
+#17 18.39 Fetching net-smtp 0.5.1
+#17 18.44 Fetching mail 2.9.0
+#17 18.50 Installing date 3.5.1 with native extensions
+#17 18.56 Fetching actionmailbox 8.0.5.1
+#17 18.61 Fetching actionmailer 8.0.5.1
+#17 18.67 Fetching actiontext 8.0.5.1
+#17 18.78 Fetching active_record_distinct_on 1.9.0
+#17 18.79 Fetching active_storage_validations 3.0.2
+#17 18.85 Fetching activemodel-serializers-xml 1.0.3
+#17 18.90 Fetching activerecord-nulldb-adapter 1.1.1
+#17 18.95 Fetching cgi 0.5.0
+#17 19.01 Fetching prettyprint 0.2.0
+#17 19.07 Fetching pp 0.6.3
+#17 19.12 Fetching erb 6.0.4
+#17 19.19 Fetching stringio 3.2.0
+#17 19.24 Installing cgi 0.5.0 with native extensions
+#17 19.29 Fetching psych 5.3.1
+#17 19.39 Fetching tsort 0.2.0
+#17 19.41 Installing erb 6.0.4 with native extensions
+#17 19.45 Installing stringio 3.2.0 with native extensions
+#17 19.51 Fetching rdoc 7.2.0
+#17 19.60 Fetching io-console 0.8.2
+#17 19.66 Fetching reline 0.6.3
+#17 19.71 Installing io-console 0.8.2 with native extensions
+#17 19.90 Fetching irb 1.18.0
+#17 19.96 Fetching rackup 2.3.1
+#17 20.02 Fetching thor 1.5.0
+#17 20.08 Fetching railties 8.0.5.1
+#17 20.17 Fetching activerecord-session_store 2.2.0
+#17 20.22 Fetching acts-as-taggable-on 12.0.0
+#17 20.30 Fetching public_suffix 7.0.5
+#17 20.31 Fetching addressable 2.9.0
+#17 20.37 Fetching rbtree3 0.7.1
+#17 20.42 Fetching airbrake-ruby 6.2.2
+#17 20.48 Fetching airbrake 13.0.5
+#17 20.55 Installing rbtree3 0.7.1 with native extensions
+#17 20.62 Fetching amazing_print 2.0.0
+#17 20.67 Fetching awesome_nested_set 3.8.0
+#17 20.73 Fetching aws-eventstream 1.4.0
+#17 20.79 Fetching aws-partitions 1.1203.0
+#17 20.87 Fetching aws-sigv4 1.12.1
+#17 20.93 Fetching jmespath 1.6.2
+#17 20.99 Fetching aws-sdk-core 3.241.3
+#17 21.00 Fetching aws-sdk-kms 1.120.0
+#17 21.09 Fetching aws-sdk-s3 1.208.0
+#17 21.16 Fetching bcrypt 3.1.22
+#17 21.22 Fetching debug_inspector 1.2.0
+#17 21.27 Fetching binding_of_caller 1.0.1
+#17 21.33 Installing bcrypt 3.1.22 with native extensions
+#17 21.38 Installing debug_inspector 1.2.0 with native extensions
+#17 21.79 Fetching bleib 0.0.16
+#17 21.87 Fetching msgpack 1.8.0
+#17 21.90 Fetching bootsnap 1.18.6
+#17 21.93 Fetching cancancan 3.6.1
+#17 21.99 Installing msgpack 1.8.0 with native extensions
+#17 22.05 Fetching htmlentities 4.4.2
+#17 22.11 Fetching rubyzip 2.4.1
+#17 22.17 Fetching caxlsx 4.2.0
+#17 22.25 Fetching charlock_holmes 0.7.9
+#17 22.31 Fetching chunky_png 1.4.0
+#17 22.40 Installing charlock_holmes 0.7.9 with native extensions
+#17 22.40 Fetching coderay 1.1.3
+#17 22.47 Fetching commonmarker 2.5.0 (x86_64-linux)
+#17 22.55 Fetching deep_merge 1.2.2
+#17 22.83 Fetching ostruct 0.6.3
+#17 22.91 Fetching config 5.6.1
+#17 22.93 Fetching unaccent 0.4.0
+#17 22.98 Fetching countries 8.0.4
+#17 23.03 Fetching country_select 11.0.0
+#17 23.22 Fetching cssbundling-rails 1.4.3
+#17 23.25 Fetching csv 3.3.5
+#17 23.28 Fetching csv-safe 3.3.1
+#17 23.33 Fetching daemons 1.4.1
+#17 23.39 Fetching dalli 3.2.8
+#17 23.44 Fetching delayed_job 4.1.13
+#17 23.56 Fetching delayed_job_active_record 4.1.11
+#17 23.57 Fetching delayed_job_heartbeat_plugin 0.6.0
+#17 23.58 Fetching orm_adapter 0.5.0
+#17 23.65 Fetching responders 3.2.0
+#17 23.71 Fetching warden 1.2.9
+#17 23.76 Fetching devise 4.9.4
+#17 23.81 Fetching domain_name 0.6.20240107
+#17 23.86 Fetching doorkeeper 5.8.2
+#17 23.95 Fetching doorkeeper-i18n 5.2.7
+#17 23.99 Fetching jwt 3.2.0
+#17 24.05 Fetching doorkeeper-jwt 0.4.2
+#17 24.11 Fetching doorkeeper-openid_connect 1.8.11
+#17 24.17 Fetching request_store 1.7.0
+#17 24.22 Fetching ruby2_keywords 0.0.5
+#17 24.28 Fetching draper 4.0.2
+#17 24.33 Fetching draper-cancancan 1.1.1
+#17 24.38 Fetching dry-core 1.2.0
+#17 24.44 Fetching dry-configurable 1.3.0
+#17 24.49 Fetching dry-inflector 1.3.1
+#17 24.54 Fetching dry-initializer 3.2.0
+#17 24.60 Fetching dry-logic 1.6.0
+#17 24.65 Fetching dry-types 1.9.1
+#17 24.71 Fetching dry-schema 1.14.1
+#17 24.76 Fetching ice_nine 0.11.2
+#17 24.82 Fetching dry-struct 1.8.0
+#17 24.88 Fetching dry-validation 1.11.1
+#17 24.95 Fetching net-http 0.9.1
+#17 25.01 Fetching faraday-net_http 3.4.4
+#17 25.07 Fetching json 2.21.2
+#17 25.15 Fetching faraday 2.14.4
+#17 25.26 Fetching rexml 3.4.4
+#17 25.30 Fetching epics 3.0.0.rc1
+#17 25.30 Installing json 2.21.2 with native extensions
+#17 25.33 Fetching faker 3.5.2
+#17 25.38 Fetching ffi 1.17.2 (x86_64-linux-gnu)
+#17 25.45 Fetching multi_json 1.17.0
+#17 25.69 Fetching gibbon 3.5.0
+#17 25.69 Fetching globalize 7.0.0
+#17 25.72 Fetching google-cloud-env 2.3.1
+#17 25.78 Fetching google-logging-utils 0.2.0
+#17 25.83 Fetching os 1.1.4
+#17 25.91 Fetching signet 0.21.0
+#17 25.96 Fetching googleauth 1.16.2
+#17 26.01 Fetching jsonapi-renderer 0.2.2
+#17 26.07 Fetching jsonapi-serializable 0.3.1
+#17 26.13 Fetching graphiti_errors 1.1.2
+#17 26.18 Fetching graphiti 1.13.3
+#17 26.23 Fetching transproc 1.1.1
+#17 26.28 Fetching rescue_registry 1.0.0
+#17 26.39 Fetching graphiti-rails 0.4.1
+#17 26.44 Fetching temple 0.10.4
+#17 26.49 Fetching tilt 2.6.1
+#17 26.55 Fetching haml 6.3.0
+#17 26.63 Fetching hirb 0.7.3
+#17 26.66 Fetching http-accept 1.7.0
+#17 26.67 Fetching http-cookie 1.1.0
+#17 26.72 Fetching http_accept_language 2.1.1
+#17 26.77 Fetching ice_cube 0.17.0
+#17 26.82 Fetching icalendar 2.12.0
+#17 26.88 Fetching mini_magick 5.3.1
+#17 26.93 Fetching ruby-vips 2.2.5
+#17 26.98 Fetching image_processing 1.14.0
+#17 27.04 Fetching jsbundling-rails 1.3.1
+#17 27.09 Fetching kaminari-core 1.2.2
+#17 27.14 Fetching kaminari-actionview 1.2.2
+#17 27.19 Fetching kaminari-activerecord 1.2.2
+#17 27.24 Fetching kaminari 1.2.2
+#17 27.29 Fetching lograge 0.14.0
+#17 27.36 Fetching lograge-sql 2.5.1
+#17 27.42 Fetching lograge_activejob 0.3.2
+#17 27.46 Fetching magiclabs-userstamp 3.0
+#17 27.47 Fetching matrix 0.4.3
+#17 27.53 Fetching method_source 1.1.0
+#17 27.59 Fetching mime-types-data 3.2025.0924
+#17 27.64 Fetching mime-types 3.7.0
+#17 27.70 Fetching net-ssh 7.0.1
+#17 27.75 Fetching net-sftp 4.0.0
+#17 27.80 Fetching netrc 0.11.0
+#17 27.89 Fetching oat 0.6.1
+#17 27.89 Fetching paper_trail 16.0.0
+#17 27.91 Fetching parallel 1.27.0
+#17 27.96 Fetching paranoia 3.0.1
+#17 28.01 Fetching pdf-core 0.9.0
+#17 28.06 Fetching pg 1.6.2 (x86_64-linux)
+#17 28.12 Fetching phonelib 0.10.12
+#17 28.17 Fetching ttfunk 1.7.0
+#17 28.22 Fetching prawn 2.4.0
+#17 28.27 Fetching prawn-table 0.2.2
+#17 28.33 Fetching prawn-markup 1.1.0
+#17 28.88 Fetching webrick 1.9.1
+#17 28.92 Fetching prometheus_exporter 2.3.0
+#17 28.92 Fetching propshaft 1.3.2
+#17 28.99 Fetching protective 0.2.0
+#17 29.04 Fetching pry 0.15.2
+#17 29.09 Fetching pry-rails 0.3.11
+#17 29.15 Fetching slop 3.6.0
+#17 29.20 Fetching pry-remote 0.1.8
+#17 29.25 Fetching pry-stack_explorer 0.6.1
+#17 29.30 Fetching puma 7.2.1
+#17 29.36 Fetching rack-cors 3.0.0
+#17 29.41 Fetching rack-mini-profiler 4.0.1
+#17 29.48 Fetching rails 8.0.5.1
+#17 29.55 Fetching rails-i18n 8.0.2
+#17 29.62 Fetching rails_autolink 1.1.8
+#17 29.69 Fetching rbtree 0.4.6
+#17 29.75 Installing puma 7.2.1 with native extensions
+#17 29.82 Fetching redcarpet 3.6.1
+#17 29.87 Fetching redis-client 0.26.4
+#17 29.93 Fetching redis 5.4.1
+#17 29.98 Fetching rest-client 2.1.0
+#17 30.03 Fetching rotp 6.3.0
+#17 30.10 Installing rbtree 0.4.6 with native extensions
+#17 30.16 Installing redcarpet 3.6.1 with native extensions
+#17 30.21 Fetching rqrcode_core 2.0.0
+#17 30.28 Fetching rqrcode 3.1.0
+#17 30.37 Fetching rswag-api 2.16.0
+#17 30.39 Fetching rswag-ui 2.16.0
+#17 30.45 Fetching seed-fu 2.3.9
+#17 30.50 Fetching seed-fu-ndo 0.0.3
+#17 30.73 Fetching sentry-ruby 6.1.0
+#17 30.79 Fetching sentry-delayed_job 6.1.0
+#17 30.80 Fetching sentry-rails 6.1.0
+#17 30.84 Fetching set 1.1.2
+#17 30.89 Fetching simple_xlsx_reader 5.1.0
+#17 30.95 Fetching simpleidn 0.2.3
+#17 31.00 Fetching sorted_set 1.0.3
+#17 31.27 Fetching strip_attributes 2.0.1
+#17 31.33 Fetching timeliness 0.5.3
+#17 31.38 Fetching truemail 3.3.1
+#17 31.44 Fetching turbo-rails 2.0.17
+#17 31.49 Fetching validates_by_schema 0.3.1
+#17 31.55 Fetching validates_timeliness 8.0.0
+#17 31.61 Fetching validates_zipcode 0.5.4
+#17 31.68 Fetching vcard 0.4.0
+#17 31.74 Fetching view_component 3.23.2
+#17 31.79 Fetching wagons 0.9.1
+#17 31.85 Fetching wirble 0.1.3
+#17 31.96 Installing base64 0.3.0
+#17 31.96 Installing benchmark 0.5.0
+#17 31.97 Installing concurrent-ruby 1.3.8
+#17 32.03 Installing connection_pool 3.0.2
+#17 32.04 Installing i18n 1.15.2
+#17 32.05 Installing drb 2.2.3
+#17 32.07 Installing logger 1.7.0
+#17 32.10 Installing minitest 6.0.6
+#17 32.11 Installing securerandom 0.4.1
+#17 32.12 Installing tzinfo 2.0.6
+#17 32.13 Installing uri 1.1.1
+#17 32.15 Installing activesupport 8.0.5.1
+#17 32.16 Installing builder 3.3.0
+#17 32.19 Installing erubi 1.13.1
+#17 32.21 Installing rails-dom-testing 2.3.0
+#17 32.21 Installing crass 1.0.6
+#17 32.23 Installing loofah 2.25.1
+#17 32.26 Installing rails-html-sanitizer 1.7.0
+#17 32.29 Installing nokogiri 1.19.4 (x86_64-linux-gnu)
+#17 32.30 Installing rack 3.2.6
+#17 32.39 Installing actionview 8.0.5.1
+#17 32.55 Installing rack-session 2.1.2
+#17 32.56 Installing rack-test 2.2.0
+#17 32.57 Installing useragent 0.16.11
+#17 32.59 Installing actionpack 8.0.5.1
+#17 32.60 Installing websocket-extensions 0.1.5
+#17 32.61 Installing zeitwerk 2.7.5
+#17 32.65 Installing websocket-driver 0.8.2 with native extensions
+#17 32.78 Installing actioncable 8.0.5.1
+#17 32.87 Installing globalid 1.3.0
+#17 32.88 Installing activejob 8.0.5.1
+#17 32.91 Installing activemodel 8.0.5.1
+#17 32.93 Installing timeout 0.6.1
+#17 32.95 Installing activerecord 8.0.5.1
+#17 32.97 Installing marcel 1.1.0
+#17 32.99 Installing activestorage 8.0.5.1
+#17 33.16 Installing mini_mime 1.1.5
+#17 33.21 Installing net-protocol 0.2.2
+#17 33.22 Installing net-imap 0.6.4.1
+#17 33.26 Installing net-pop 0.1.2
+#17 33.27 Installing net-smtp 0.5.1
+#17 33.29 Installing mail 2.9.0
+#17 33.31 Installing actionmailbox 8.0.5.1
+#17 33.41 Installing actionmailer 8.0.5.1
+#17 33.46 Installing actiontext 8.0.5.1
+#17 33.48 Installing active_record_distinct_on 1.9.0
+#17 33.49 Installing active_storage_validations 3.0.2
+#17 33.56 Installing activemodel-serializers-xml 1.0.3
+#17 33.59 Installing activerecord-nulldb-adapter 1.1.1
+#17 33.60 Installing prettyprint 0.2.0
+#17 33.63 Installing pp 0.6.3
+#17 33.64 Installing tsort 0.2.0
+#17 33.65 Installing psych 5.3.1 with native extensions
+#17 33.67 Installing rdoc 7.2.0
+#17 33.67 Installing reline 0.6.3
+#17 33.72 Installing irb 1.18.0
+#17 33.77 Installing rackup 2.3.1
+#17 33.80 Installing thor 1.5.0
+#17 33.90 Installing railties 8.0.5.1
+#17 33.91 Installing activerecord-session_store 2.2.0
+#17 33.94 Installing acts-as-taggable-on 12.0.0
+#17 33.95 Installing public_suffix 7.0.5
+#17 34.01 Installing addressable 2.9.0
+#17 34.06 Installing airbrake-ruby 6.2.2
+#17 34.58 Installing airbrake 13.0.5
+#17 34.59 Installing amazing_print 2.0.0
+#17 34.66 Installing awesome_nested_set 3.8.0
+#17 34.71 Installing aws-eventstream 1.4.0
+#17 34.72 Installing aws-partitions 1.1203.0
+#17 34.72 Installing aws-sigv4 1.12.1
+#17 34.75 Installing jmespath 1.6.2
+#17 34.76 Installing aws-sdk-core 3.241.3
+#17 34.76 Installing aws-sdk-kms 1.120.0
+#17 34.78 Installing aws-sdk-s3 1.208.0
+#17 34.85 Installing binding_of_caller 1.0.1
+#17 34.86 Installing bleib 0.0.16
+#17 34.87 Installing cancancan 3.6.1
+#17 34.90 Installing bootsnap 1.18.6 with native extensions
+#17 35.01 Installing htmlentities 4.4.2
+#17 35.04 Installing rubyzip 2.4.1
+#17 35.10 Installing caxlsx 4.2.0
+#17 35.13 Installing chunky_png 1.4.0
+#17 35.24 Installing coderay 1.1.3
+#17 35.34 Installing deep_merge 1.2.2
+#17 35.37 Installing ostruct 0.6.3
+#17 35.42 Installing commonmarker 2.5.0 (x86_64-linux)
+#17 35.51 Installing config 5.6.1
+#17 35.53 Installing unaccent 0.4.0
+#17 35.55 Installing country_select 11.0.0
+#17 35.59 Installing countries 8.0.4
+#17 35.61 Installing cssbundling-rails 1.4.3
+#17 35.66 Installing csv 3.3.5
+#17 35.68 Installing csv-safe 3.3.1
+#17 35.69 Installing daemons 1.4.1
+#17 35.87 Installing dalli 3.2.8
+#17 35.89 Installing delayed_job 4.1.13
+#17 35.92 Installing delayed_job_active_record 4.1.11
+#17 35.95 Installing delayed_job_heartbeat_plugin 0.6.0
+#17 35.96 Installing orm_adapter 0.5.0
+#17 36.03 Installing responders 3.2.0
+#17 36.04 Installing warden 1.2.9
+#17 36.07 Installing devise 4.9.4
+#17 36.08 Installing domain_name 0.6.20240107
+#17 36.09 Installing doorkeeper 5.8.2
+#17 36.20 Installing doorkeeper-i18n 5.2.7
+#17 36.27 Installing jwt 3.2.0
+#17 36.32 Installing doorkeeper-jwt 0.4.2
+#17 36.42 Installing doorkeeper-openid_connect 1.8.11
+#17 36.42 Installing request_store 1.7.0
+#17 36.46 Installing ruby2_keywords 0.0.5
+#17 36.48 Installing draper 4.0.2
+#17 36.50 Installing draper-cancancan 1.1.1
+#17 36.51 Installing dry-core 1.2.0
+#17 36.52 Installing dry-configurable 1.3.0
+#17 36.54 Installing dry-inflector 1.3.1
+#17 36.54 Installing dry-initializer 3.2.0
+#17 36.56 Installing dry-logic 1.6.0
+#17 36.57 Installing dry-types 1.9.1
+#17 36.58 Installing dry-schema 1.14.1
+#17 36.65 Installing ice_nine 0.11.2
+#17 36.71 Installing dry-struct 1.8.0
+#17 36.72 Installing dry-validation 1.11.1
+#17 36.74 Installing net-http 0.9.1
+#17 36.78 Installing faraday-net_http 3.4.4
+#17 36.80 Installing faraday 2.14.4
+#17 36.83 Installing rexml 3.4.4
+#17 36.84 Installing epics 3.0.0.rc1
+#17 36.87 Installing ffi 1.17.2 (x86_64-linux-gnu)
+#17 36.88 Installing faker 3.5.2
+#17 37.03 Installing multi_json 1.17.0
+#17 37.05 Installing gibbon 3.5.0
+#17 37.10 Installing globalize 7.0.0
+#17 37.11 Installing google-cloud-env 2.3.1
+#17 37.13 Installing google-logging-utils 0.2.0
+#17 37.18 Installing os 1.1.4
+#17 37.21 Installing signet 0.21.0
+#17 37.22 Installing googleauth 1.16.2
+#17 37.27 Installing jsonapi-renderer 0.2.2
+#17 37.32 Installing jsonapi-serializable 0.3.1
+#17 37.33 Installing graphiti_errors 1.1.2
+#17 37.35 Installing graphiti 1.13.3
+#17 37.35 Installing transproc 1.1.1
+#17 37.39 Installing rescue_registry 1.0.0
+#17 37.41 Installing graphiti-rails 0.4.1
+#17 37.47 Installing temple 0.10.4
+#17 37.49 Installing tilt 2.6.1
+#17 37.54 Installing haml 6.3.0
+#17 37.65 Installing hirb 0.7.3
+#17 37.68 Installing http-accept 1.7.0
+#17 37.71 Installing http-cookie 1.1.0
+#17 37.74 Installing http_accept_language 2.1.1
+#17 37.76 Installing ice_cube 0.17.0
+#17 37.80 Installing icalendar 2.12.0
+#17 37.83 Installing mini_magick 5.3.1
+#17 37.85 Installing ruby-vips 2.2.5
+#17 37.87 Installing image_processing 1.14.0
+#17 37.89 Installing jsbundling-rails 1.3.1
+#17 37.90 Installing kaminari-core 1.2.2
+#17 37.98 Installing kaminari-actionview 1.2.2
+#17 38.00 Installing kaminari-activerecord 1.2.2
+#17 38.02 Installing kaminari 1.2.2
+#17 38.05 Installing lograge 0.14.0
+#17 38.08 Installing lograge-sql 2.5.1
+#17 38.09 Installing lograge_activejob 0.3.2
+#17 38.11 Installing magiclabs-userstamp 3.0
+#17 38.13 Installing matrix 0.4.3
+#17 38.15 Installing method_source 1.1.0
+#17 38.18 Installing mime-types-data 3.2025.0924
+#17 38.18 Installing net-ssh 7.0.1
+#17 38.19 Installing mime-types 3.7.0
+#17 38.24 Installing net-sftp 4.0.0
+#17 38.25 Installing netrc 0.11.0
+#17 38.31 Installing oat 0.6.1
+#17 38.33 Installing paper_trail 16.0.0
+#17 38.36 Installing parallel 1.27.0
+#17 38.39 Installing paranoia 3.0.1
+#17 38.39 Installing pdf-core 0.9.0
+#17 38.45 Installing pg 1.6.2 (x86_64-linux)
+#17 38.51 Installing phonelib 0.10.12
+#17 38.53 Installing ttfunk 1.7.0
+#17 38.56 Installing prawn 2.4.0
+#17 38.57 Installing prawn-table 0.2.2
+#17 38.62 Installing prawn-markup 1.1.0
+#17 38.70 Installing webrick 1.9.1
+#17 38.71 Installing prometheus_exporter 2.3.0
+#17 38.80 Installing propshaft 1.3.2
+#17 38.87 Installing protective 0.2.0
+#17 38.89 Installing pry 0.15.2
+#17 38.89 Installing pry-rails 0.3.11
+#17 38.93 Installing slop 3.6.0
+#17 38.97 Installing pry-remote 0.1.8
+#17 39.00 Installing rack-cors 3.0.0
+#17 39.00 Installing pry-stack_explorer 0.6.1
+#17 39.04 Installing rack-mini-profiler 4.0.1
+#17 39.05 Installing rails 8.0.5.1
+#17 39.08 Installing rails-i18n 8.0.2
+#17 39.09 Installing rails_autolink 1.1.8
+#17 39.12 Installing redis-client 0.26.4
+#17 39.21 Installing redis 5.4.1
+#17 39.31 Installing rest-client 2.1.0
+#17 39.32 Installing rotp 6.3.0
+#17 39.34 Installing rqrcode_core 2.0.0
+#17 39.34 Installing rqrcode 3.1.0
+#17 39.43 Installing rswag-api 2.16.0
+#17 39.45 Installing seed-fu 2.3.9
+#17 39.46 Installing seed-fu-ndo 0.0.3
+#17 39.49 Installing rswag-ui 2.16.0
+#17 39.52 Installing sentry-ruby 6.1.0
+#17 39.56 Installing sentry-delayed_job 6.1.0
+#17 39.60 Installing sentry-rails 6.1.0
+#17 39.61 Installing set 1.1.2
+#17 39.63 Installing simple_xlsx_reader 5.1.0
+#17 39.69 Installing simpleidn 0.2.3
+#17 39.74 Installing sorted_set 1.0.3
+#17 39.77 Installing strip_attributes 2.0.1
+#17 39.78 Installing timeliness 0.5.3
+#17 39.79 Installing truemail 3.3.1
+#17 39.80 Installing turbo-rails 2.0.17
+#17 39.83 Installing validates_by_schema 0.3.1
+#17 39.87 Installing validates_timeliness 8.0.0
+#17 39.87 Installing validates_zipcode 0.5.4
+#17 39.87 Installing vcard 0.4.0
+#17 40.01 Installing view_component 3.23.2
+#17 40.01 Installing wagons 0.9.1
+#17 40.04 Installing wirble 0.1.3
+#17 44.89 Bundle complete! 149 Gemfile dependencies, 245 gems now installed.
+#17 44.89 Gems in the groups 'development', 'metrics' and 'test' were not installed.
+#17 44.89 Bundled gems are installed into `./vendor/bundle`
+#17 44.89 Post-install message from rubyzip:
+#17 44.89 RubyZip 3.0 is coming!
+#17 44.89 **********************
+#17 44.89
+#17 44.89 The public API of some Rubyzip classes has been modernized to use named
+#17 44.89 parameters for optional arguments. Please check your usage of the
+#17 44.89 following classes:
+#17 44.89   * `Zip::File`
+#17 44.89   * `Zip::Entry`
+#17 44.89   * `Zip::InputStream`
+#17 44.89   * `Zip::OutputStream`
+#17 44.89   * `Zip::DOSTime`
+#17 44.89
+#17 44.89 Run your test suite with the `RUBYZIP_V3_API_WARN` environment
+#17 44.89 variable set to see warnings about usage of the old API. This will
+#17 44.89 help you to identify any changes that you need to make to your code.
+#17 44.89 See https://github.com/rubyzip/rubyzip/wiki/Updating-to-version-3.x for
+#17 44.89 more information.
+#17 44.89
+#17 44.89 Please ensure that your Gemfiles and .gemspecs are suitably restrictive
+#17 44.89 to avoid an unexpected breakage when 3.0 is released (e.g. ~> 2.3.0).
+#17 44.89 See https://github.com/rubyzip/rubyzip for details. The Changelog also
+#17 44.89 lists other enhancements and bugfixes that have been implemented since
+#17 44.89 version 2.3.0.
+#17 44.89 Post-install message from devise:
+#17 44.89
+#17 44.89 [DEVISE] Please review the [changelog] and [upgrade guide] for more info on Hotwire / Turbo integration.
+#17 44.89
+#17 44.89   [changelog] https://github.com/heartcombo/devise/blob/main/CHANGELOG.md
+#17 44.89   [upgrade guide] https://github.com/heartcombo/devise/wiki/How-To:-Upgrade-to-Devise-4.9.0-%5BHotwire-Turbo-integration%5D
+#17 44.89   Post-install message from doorkeeper:
+#17 44.89 Starting from 5.5.0 RC1 Doorkeeper requires client authentication for Resource Owner Password Grant
+#17 44.89 as stated in the OAuth RFC. You have to create a new OAuth client (Doorkeeper::Application) if you didn't
+#17 44.89 have it before and use client credentials in HTTP Basic auth if you previously used this grant flow without
+#17 44.89 client authentication.
+#17 44.89
+#17 44.89 To opt out of this you could set the "skip_client_authentication_for_password_grant" configuration option
+#17 44.89 to "true", but note that this is in violation of the OAuth spec and represents a security risk.
+#17 44.89
+#17 44.89 Read https://github.com/doorkeeper-gem/doorkeeper/issues/561#issuecomment-612857163 for more details.
+#17 44.89 Post-install message from epics:
+#17 44.89
+#17 44.89 ************************************************************
+#17 44.89 Thanks for using Epics - your epic EBICS client!
+#17 44.89 Epics provides a full production-tested implementation of the Electronic Banking Internet Communication Standard.
+#17 44.89 Railslove as the maintainer is commited to provide extensive developer tools to make integrating financial institutions fun and easy.
+#17 44.89 Please create an issue on github (railslove/epics) if anything does not work as expected. And contact team@railslove.com if you are looking for support with your integration.
+#17 44.89 ************************************************************
+#17 44.89
+#17 44.89 Post-install message from icalendar:
+#17 44.89 ActiveSupport is required for TimeWithZone support, but not required for general use.
+#17 44.89 6 installed gems you directly depend on are looking for funding.
+#17 44.89   Run `bundle fund` for details
+#17 46.18 /app-src/vendor/bundle/ruby/3.2.0/gems/wirble-0.1.3/setup.rb:283: warning: key "bin-dir" is duplicated and overwritten on line 284
+#17 51.78 bin/rails aborted!
+#17 51.95 LoadError: cannot load such file -- annotate_rb (LoadError)
+#17 51.95 <internal:/usr/local/lib/ruby/3.2.0/rubygems/core_ext/kernel_require.rb>:38:in `require'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/bootsnap-1.18.6/lib/bootsnap/load_path_cache/core_ext/kernel_require.rb:27:in `require'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/zeitwerk-2.7.5/lib/zeitwerk/core_ext/kernel.rb:34:in `require'
+#17 51.95 /app-src/lib/tasks/annotate_rb.rake:5:in `<main>'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/engine.rb:687:in `load'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/engine.rb:687:in `block in run_tasks_blocks'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/engine.rb:687:in `each'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/engine.rb:687:in `run_tasks_blocks'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/application.rb:566:in `run_tasks_blocks'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/engine.rb:470:in `load_tasks'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/railtie.rb:226:in `public_send'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/railtie.rb:226:in `method_missing'
+#17 51.95 /app-src/Rakefile:19:in `<main>'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/commands/rake/rake_command.rb:43:in `block in with_rake'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/commands/rake/rake_command.rb:41:in `with_rake'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/commands/rake/rake_command.rb:20:in `perform'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/command.rb:150:in `invoke_rake'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/command.rb:67:in `block in invoke'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/command.rb:143:in `with_argv'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/command.rb:63:in `invoke'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/railties-8.0.5.1/lib/rails/commands.rb:18:in `<main>'
+#17 51.95 <internal:/usr/local/lib/ruby/3.2.0/rubygems/core_ext/kernel_require.rb>:38:in `require'
+#17 51.95 /app-src/vendor/bundle/ruby/3.2.0/gems/bootsnap-1.18.6/lib/bootsnap/load_path_cache/core_ext/kernel_require.rb:30:in `require'
+#17 51.95 bin/rails:5:in `<main>'
+#17 51.95 (See full trace by running task with --trace)
+#17 ERROR: process "/bin/bash -c bundle config set --local deployment 'true'     && bundle config set --local without ${BUNDLE_WITHOUT_GROUPS}     && bundle install     && bundle clean     && bundle exec bootsnap precompile --gemfile     && RAILS_DB_ADAPTER=nulldb bundle exec rails locales:patch_de" did not complete successfully: exit code: 1

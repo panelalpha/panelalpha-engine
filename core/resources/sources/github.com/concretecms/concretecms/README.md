@@ -114,8 +114,12 @@ generates carries `/index.php/` in it.
 redirects *every* request to `/install`, and that wizard creates the
 administrator: whoever arrives first owns the site.
 `concrete/bin/concrete c5:install` is upstream's supported non-interactive
-path, and it runs from the install stage before Apache binds, with a password
-generated per account into `~/.panelalpha/concrete/concrete.env` at 0600.
+path, and it runs from the install stage before Apache binds, with the login
+the engine generates (`credentials:` in `panelalpha.yaml`), delivered as
+`~/.panelalpha/app-credentials.env` and returned by
+`GET /projects/{name}/app-credentials` (MCP `app_credentials_get`). An account
+installed before keeps its password, adopted from
+`~/.panelalpha/concrete/concrete.env`.
 On a finished site `/install` answers 404.
 
 One ordering trap, and it cost a deploy: `application/config/database.php`
@@ -146,7 +150,7 @@ deploy, so the site follows the account's domain when it changes.
 
 ## What was measured
 
-Host `mariusz.panelalpha.tools`, 2026-09-20, with other agents deploying on
+A dev host, 2026-09-20, with other agents deploying on
 the same host at the same time — so the wall-clock numbers are an upper bound,
 and the control and the recipe were run the same way minutes apart.
 
@@ -215,17 +219,15 @@ container's environment).
 ## Knobs
 
 All in `~/.panelalpha/concrete/concrete.env`, read into the container as a
-second `env_file`. Changing one takes effect on the next deploy; the three
+second `env_file`. Changing one takes effect on the next deploy; the
 install-time ones do nothing once the site exists.
 
 | name | default | what it does |
 |---|---|---|
-| `PA_CONCRETE_ADMIN_EMAIL` | `admin@example.com` | the first administrator's email |
-| `PA_CONCRETE_ADMIN_PASSWORD` | generated, 20 chars | its password. The username is always `admin` — Concrete's installer has no flag for it |
 | `PA_CONCRETE_SITE_NAME` | `Concrete CMS` | the site name |
 | `PA_CONCRETE_STARTING_POINT` | `atomik_blank` | upstream's own CLI default: the Atomik theme, page types and templates, and an empty home page. `atomik_full` adds demo pages and images; `elemental_full` is the older theme's |
 
-A copy of the administrator's credentials is written to
-`~/project/.panelalpha-admin-password` at 0600 on every deploy, for whoever has
-shell on the account. The leading dot and the `panelalpha` in the name are each
-independently denied by the generated vhost.
+The first administrator's login is not a knob here: the engine generates it
+(`PA_CONCRETE_ADMIN_EMAIL`, `PA_CONCRETE_ADMIN_PASSWORD`; the username is always
+`admin`, as Concrete's installer has no flag for it) and returns it from
+`GET /projects/{name}/app-credentials`.

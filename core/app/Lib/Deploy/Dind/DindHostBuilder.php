@@ -447,6 +447,8 @@ final class DindHostBuilder implements HostBuilder
                 'COMPOSER_ALLOW_SUPERUSER' => '1',
                 'COMPOSER_MAX_PARALLEL_HTTP' => '6',
                 'COMPOSER_HOME' => '/tmp/composer',
+                // Advisories are reported, never a reason to refuse the build ({@see PhpHostBuild::environment()}).
+                'COMPOSER_NO_BLOCKING' => '1',
                 // Why this is safe is {@see PhpHostBuild::runtimeManifest()}.
                 // Null means the project's own composer.json.
                 ...($manifest !== null ? [PhpHostBuild::MANIFEST_ENV => $manifest] : []),

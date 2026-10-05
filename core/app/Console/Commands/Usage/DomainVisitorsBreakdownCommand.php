@@ -11,7 +11,7 @@ class DomainVisitorsBreakdownCommand extends UsageCommand
     protected $signature = 'project:domain:visitors-breakdown
                             {project : Project username}
                             {domain : Domain hostname}
-                            {dimension : pages, countries, continents, regions, referrers, os, or browsers}
+                            {dimension : pages, countries, continents, regions, referrers, os, browsers, or status_codes}
                             {--start= : Range start (Y-m-d)}
                             {--end= : Range end (Y-m-d)}';
 

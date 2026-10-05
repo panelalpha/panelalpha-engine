@@ -118,6 +118,8 @@ export default defineConfig({
     ...(process.env.JUNIT_REPORT_FILE
       ? ([['junit', { outputFile: process.env.JUNIT_REPORT_FILE }]] as const)
       : []),
+    // Last: traces record the Authorization header, and html copies them in its onEnd.
+    ['./reporters/redact-secrets.ts', { dirs: [outputDir, reportDir] }],
   ],
 
   use: {

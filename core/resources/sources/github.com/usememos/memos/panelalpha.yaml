@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=../../../_schema.json
+description: >-
+  Memos, a self-hosted note-taking service (Go server with an embedded React
+  UI, SQLite by default). REPLACE compose: the published neosmemo/memos image
+  runs instead of a build of the checkout. A source build does not give a
+  working app: the repository embeds server/frontend/dist, which upstream
+  commits only as a placeholder ("No embeddable frontend found") and fills from
+  a separate web build, the server refuses to start without build metadata
+  ("missing build version") that upstream's Dockerfile injects with -ldflags,
+  and the Go compile itself peaked at ~4.1 GB, more than the build container is
+  given on hosts below ~12.5 GB RAM. The image is pinned to 0.31.0 and serves
+  on 5230; notes, attachments and the SQLite database live in a named volume on
+  /var/opt/memos, which survives a redeploy. ComposePlaceholders rewrites
+  MEMOS_INSTANCE_URL from http://localhost to the account's public https URL.
+  The first account registered in the web UI becomes the instance's host
+  (admin).

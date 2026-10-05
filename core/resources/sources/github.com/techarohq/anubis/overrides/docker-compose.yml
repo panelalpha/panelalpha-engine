@@ -1,0 +1,33 @@
+# The repository builds anubis through a Makefile that needs Go, Node, Rust
+# (wasm), binaryen, zstd and brotli, and the Go strategy alone produces a
+# binary without its challenge scripts. This runs upstream's published image
+# of the current release in front of a placeholder site; TARGET points it at
+# the site to protect.
+services:
+  anubis:
+    image: ghcr.io/techarohq/anubis:v1.27.0@sha256:8828275668b7bc675679f100970f9714f731388fbbf66ae94de8aca952e3fc4a
+    restart: unless-stopped
+    ports:
+      - "8923:8923"
+    env_file:
+      # ED25519_PRIVATE_KEY_HEX, generated once by hooks/prepare.sh, so a
+      # redeploy does not invalidate every visitor's pass.
+      - ../.panelalpha/anubis/key.env
+    environment:
+      BIND: ":8923"
+      TARGET: ${TARGET:-http://backend:80}
+      # The Host header sent to TARGET, when it is another virtual host.
+      TARGET_HOST: ${TARGET_HOST:-}
+      DIFFICULTY: ${DIFFICULTY:-4}
+      SERVE_ROBOTS_TXT: "true"
+    depends_on:
+      - backend
+    mem_limit: 128m
+
+  # What a fresh deploy protects until TARGET is set: one static page.
+  backend:
+    image: nginx:alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
+    restart: unless-stopped
+    volumes:
+      - ./panelalpha/anubis:/usr/share/nginx/html:ro
+    mem_limit: 64m

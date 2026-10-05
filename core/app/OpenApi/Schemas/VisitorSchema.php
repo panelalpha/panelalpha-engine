@@ -40,6 +40,7 @@ use OpenApi\Attributes as OA;
         new OA\Property(property: 'label', type: 'string', example: 'direct'),
         new OA\Property(property: 'visits', type: 'integer', example: 30, description: 'Hits or visits from the monthly AWStats section; not clipped to the day range'),
         new OA\Property(property: 'code', type: 'string', example: 'direct'),
+        new OA\Property(property: 'bytes', type: 'integer', example: 2775, description: 'Bytes sent; status_codes only'),
     ],
     type: 'object',
 )]

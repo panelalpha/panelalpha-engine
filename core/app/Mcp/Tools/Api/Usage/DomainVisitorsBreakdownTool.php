@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description(<<<'MARKDOWN'
     Get a visitor breakdown for a domain
 
-    Breakdown visits are the hits/visits from the AWStats section for every calendar month overlapping start/end; they are not clipped to the day range. Geo dimensions (countries, continents, regions) are empty until `geolocation:database update` has stored a local City MMDB. Device and device-brand are not implemented.
+    Breakdown visits are the hits/visits from the AWStats section for every calendar month overlapping start/end; they are not clipped to the day range. Geo dimensions (countries, continents, regions) are empty until `geolocation:database update` has stored a local City MMDB. status_codes gives hits and bytes per HTTP status, clipped to the day range; AWStats does not tell 200 from 304, so those share one `200/304` row. Device and device-brand are not implemented.
     MARKDOWN)]
 #[IsReadOnly]
 #[IsIdempotent]
@@ -74,7 +74,7 @@ class DomainVisitorsBreakdownTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'domain' => $schema->string()->required(),
-            'dimension' => $schema->string()->description('One of: pages, countries, continents, regions, referrers, os, browsers.')->required(),
+            'dimension' => $schema->string()->description('One of: pages, countries, continents, regions, referrers, os, browsers, status_codes.')->required(),
             'start' => $schema->string()->description('Example: 2026-09-01.')->required(),
             'end' => $schema->string()->description('Example: 2026-09-30.')->required(),
         ];

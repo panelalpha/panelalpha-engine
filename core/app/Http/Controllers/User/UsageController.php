@@ -159,7 +159,7 @@ class UsageController extends Controller
 
     #[OA\Get(
         path: '/projects/{username}/domains/{domain}/visitors/{dimension}',
-        description: 'Breakdown visits are the hits/visits from the AWStats section for every calendar month overlapping start/end; they are not clipped to the day range. Geo dimensions (countries, continents, regions) are empty until `geolocation:database update` has stored a local City MMDB. Device and device-brand are not implemented.',
+        description: 'Breakdown visits are the hits/visits from the AWStats section for every calendar month overlapping start/end; they are not clipped to the day range. Geo dimensions (countries, continents, regions) are empty until `geolocation:database update` has stored a local City MMDB. status_codes gives hits and bytes per HTTP status, clipped to the day range; AWStats does not tell 200 from 304, so those share one `200/304` row. Device and device-brand are not implemented.',
         summary: 'Get a visitor breakdown for a domain',
         security: [['bearerAuth' => []]],
         tags: ['Usage'],
@@ -170,7 +170,7 @@ class UsageController extends Controller
                 name: 'dimension',
                 in: 'path',
                 required: true,
-                schema: new OA\Schema(type: 'string', enum: ['pages', 'countries', 'continents', 'regions', 'referrers', 'os', 'browsers']),
+                schema: new OA\Schema(type: 'string', enum: ['pages', 'countries', 'continents', 'regions', 'referrers', 'os', 'browsers', 'status_codes']),
             ),
             new OA\Parameter(name: 'start', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'date', example: '2026-09-01')),
             new OA\Parameter(name: 'end', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'date', example: '2026-09-30')),

@@ -482,6 +482,9 @@ final class PhpHostBuild
             // Nothing here is a terminal, and a progress bar redrawn into a
             // deploy log is thousands of lines of escape codes.
             'COMPOSER_NO_INTERACTION' => '1',
+            // An app's dependencies are its own call: Composer 2.9+ drops every
+            // version with a security advisory, so a lockless resolve could not finish.
+            'COMPOSER_NO_BLOCKING' => '1',
             'CI' => 'true',
         ];
     }

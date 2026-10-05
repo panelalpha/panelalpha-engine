@@ -48,8 +48,10 @@ description: >-
   **The installer must not be left for a visitor.** An uninstalled Concrete
   redirects every request to /install and hands the site to whoever gets there
   first. `concrete/bin/concrete c5:install` is the supported non-interactive
-  path; it runs from the install stage with a password generated per account
-  into ~/.panelalpha/concrete/concrete.env, before Apache binds.
+  path; it runs from the install stage, before Apache binds, with the login the
+  engine generates (`credentials:` below, returned by
+  GET /projects/{name}/app-credentials). An account installed before keeps its
+  password, adopted from ~/.panelalpha/concrete/concrete.env.
 
   **And the site's configuration is not code.** Concrete writes everything it
   is told from the dashboard into `application/config/` -- the database
@@ -98,3 +100,13 @@ commands:
     # measured on this host with nothing else running, and this host is not
     # the slow case.
     timeout: 900
+credentials:
+  login_path: /login
+  # The old recipe wrote the admin into concrete.env under these names.
+  adopt_from: .panelalpha/concrete/concrete.env
+  fields:
+    # Not passed anywhere: Concrete's installer always names the first
+    # administrator `admin`. Declared so the API says what to sign in with.
+    PA_CONCRETE_ADMIN_USER: {kind: username, value: admin}
+    PA_CONCRETE_ADMIN_EMAIL: {kind: email, value: admin@example.com}
+    PA_CONCRETE_ADMIN_PASSWORD: {kind: password}

@@ -15,8 +15,8 @@
 services:
   app:
     # The second env_file is the whole reason this file has one at all. The
-    # administrator password is generated once per account by hooks/prepare.sh
-    # and must be the same on every deploy, so it cannot live in ~/project --
+    # account's settings are written once by hooks/prepare.sh and must be the
+    # same on every deploy, so they cannot live in ~/project --
     # which is re-cloned each time -- and it must not live in .env, which
     # ProjectEnvironment::apply() copies to a world-readable .env.default
     # (engine#173). It is read from ~/.panelalpha/concrete/concrete.env at 0600
@@ -29,6 +29,8 @@ services:
     env_file:
       - .env
       - ../.panelalpha/concrete/concrete.env
+      # The administrator's login, which the engine generates (`credentials:`).
+      - ../.panelalpha/app-credentials.env
 
     # Everything Concrete writes that is data rather than code. All three are
     # inside the checkout by default, and

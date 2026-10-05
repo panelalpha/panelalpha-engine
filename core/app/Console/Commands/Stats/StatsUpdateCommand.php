@@ -30,22 +30,29 @@ class StatsUpdateCommand extends Command
             return self::SUCCESS;
         }
 
+        $failed = 0;
         try {
             $webserver = $system->webserver()->getCurrentWebserver();
             $logsRoot = $system->engineDirPath() . '/webserver-logs/' . $webserver;
             foreach ($this->candidateDomains() as $domain) {
-                $stats->ingestDomain(
-                    $domain->domain,
-                    $logsRoot . '/' . $domain->domain,
-                    $domain->getAliases(),
-                );
+                // One domain that cannot be written must not cost every domain after it its day.
+                try {
+                    $stats->ingestDomain(
+                        $domain->domain,
+                        $logsRoot . '/' . $domain->domain,
+                        $domain->getAliases(),
+                    );
+                } catch (\Throwable $e) {
+                    $failed++;
+                    $this->error("{$domain->domain}: {$e->getMessage()}");
+                }
             }
         } finally {
             flock($lock, LOCK_UN);
             fclose($lock);
         }
 
-        return self::SUCCESS;
+        return $failed === 0 ? self::SUCCESS : self::FAILURE;
     }
 
     /**

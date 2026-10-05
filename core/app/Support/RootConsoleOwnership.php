@@ -2,12 +2,15 @@
 
 namespace App\Support;
 
+use App\System\EnginePaths;
 use Symfony\Component\Process\Process;
 
 /**
  * `pae` runs artisan as root, everything else as www-data. Whatever root
  * creates first in storage/ or bootstrap/cache (a cache key, a scheduler lock
- * directory, a log) www-data can never write again, so hand it back.
+ * directory, a log) www-data can never write again, so hand it back. The
+ * AWStats directories too: `pae stats:update` writes there, and the scheduled
+ * run is www-data.
  */
 final class RootConsoleOwnership
 {
@@ -30,7 +33,7 @@ final class RootConsoleOwnership
 
     public static function repair(): void
     {
-        $argv = self::repairArgv([storage_path(), base_path('bootstrap/cache')], self::owner());
+        $argv = self::repairArgv(self::paths(), self::owner());
         if ($argv === null) {
             return;
         }
@@ -39,6 +42,17 @@ final class RootConsoleOwnership
         } catch (\Throwable $e) {
             // Never fail the command over this; the next root run or a restart repairs it.
         }
+    }
+
+    /** @return list<string> */
+    public static function paths(): array
+    {
+        return [
+            storage_path(),
+            base_path('bootstrap/cache'),
+            EnginePaths::ENGINE_DIR . '/awstats-config',
+            EnginePaths::ENGINE_DIR . '/awstats-data',
+        ];
     }
 
     /**
