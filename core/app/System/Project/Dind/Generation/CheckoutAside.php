@@ -162,6 +162,28 @@ final class CheckoutAside
         return $outcome;
     }
 
+    /** The tree a running app was deployed from is still aside, to start the previous version from. */
+    public function restorable(): bool
+    {
+        return (new GenerationState($this->project->username()))->get(GenerationState::CHECKOUT) !== null
+            && $this->project->system()->filesystem()->directoryExists($this->asidePath());
+    }
+
+    /** Back in place whatever runs now: the previous version starts from it again. */
+    public function bringBack(): bool
+    {
+        try {
+            $this->putBack();
+        } catch (\Throwable $e) {
+            Log::warning("Could not put the previous checkout of {$this->project->username()} back: " . $e->getMessage());
+
+            return false;
+        }
+        (new GenerationState($this->project->username()))->forget(GenerationState::CHECKOUT);
+
+        return true;
+    }
+
     /** The old tree back where its containers' configuration says it is. */
     private function putBack(): void
     {

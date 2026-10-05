@@ -176,7 +176,11 @@ final class AppLauncher
             $report = $this->project->appHealth()->report();
             // Asked again on the new route, so the remembered verdict is about it.
             if ($report !== null && $this->routeToTheAnsweringPort($report)) {
-                $this->project->appHealth()->report();
+                $report = $this->project->appHealth()->report();
+            }
+            // A version that answered is kept if the deploy dies before it finishes.
+            if (($report['healthy'] ?? null) === true) {
+                RoutingSnapshot::markGated($this->project->username());
             }
             // `up` returning 0 is not the only way to end up with nothing
             // serving: a container that starts and then dies on its own

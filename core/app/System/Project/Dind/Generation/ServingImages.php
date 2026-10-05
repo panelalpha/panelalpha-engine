@@ -95,6 +95,70 @@ final class ServingImages
         return (int) trim($out);
     }
 
+    /** Whether every image noted is still held by its tag: what a start of the previous version needs. */
+    public function stillHeld(): bool
+    {
+        $args = [];
+        foreach ($this->noted() as $container) {
+            array_push($args, self::keepTag($container['image']), $container['image']);
+        }
+        if ($args === []) {
+            return false;
+        }
+        $script = 'while [ $# -ge 2 ]; do [ "$(docker image inspect --format "{{.Id}}" "$1" 2>/dev/null)" = "$2" ] || { echo gone; exit 0; }; shift 2; done; echo held';
+        try {
+            return trim($this->project->shell()->execQuiet(['bash', '-c', $script, 'held', ...$args], [], self::TIMEOUT_SECONDS)) === 'held';
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Every name back on the image its container ran before the redeploy,
+     * whether that container still runs or not; then the holding tags go.
+     * Null when nothing was noted, or the account could not be asked.
+     */
+    public function restoreNames(): ?int
+    {
+        $args = [];
+        foreach ($this->noted() as $container) {
+            array_push($args, $container['ref'], self::keepTag($container['image']));
+        }
+        if ($args === []) {
+            return null;
+        }
+        $script = 'n=0; keep=; while [ $# -ge 2 ]; do docker tag "$2" "$1" && n=$((n+1)); keep="$keep $2"; shift 2; done; '
+            . 'for k in $(printf "%s\\n" $keep | sort -u); do docker rmi "$k" >/dev/null 2>&1; done; echo $n';
+        try {
+            $out = $this->project->shell()->execQuiet(['bash', '-c', $script, 'restore', ...$args], [], self::TIMEOUT_SECONDS);
+        } catch (\Throwable $e) {
+            Log::warning("Could not point the image tags of {$this->project->username()} at the previous version: " . $e->getMessage());
+
+            return null;
+        }
+        (new GenerationState($this->project->username()))->forget(GenerationState::IMAGES);
+
+        return (int) trim($out);
+    }
+
+    /**
+     * What {@see remember()} noted.
+     *
+     * @return list<array{id: string, image: string, ref: string}>
+     */
+    public function noted(): array
+    {
+        $noted = (new GenerationState($this->project->username()))->get(GenerationState::IMAGES);
+        $containers = [];
+        foreach ((array) ($noted['containers'] ?? []) as $container) {
+            if (is_array($container) && isset($container['id'], $container['image'], $container['ref'])) {
+                $containers[] = ['id' => (string) $container['id'], 'image' => (string) $container['image'], 'ref' => (string) $container['ref']];
+            }
+        }
+
+        return $containers;
+    }
+
     /**
      * Lines of {@see INSPECT_FORMAT}; a reference pinned to a digest cannot be retagged.
      *

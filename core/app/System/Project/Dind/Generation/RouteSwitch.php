@@ -8,8 +8,8 @@ use App\Models\Tunnel;
 use App\System as EngineSystem;
 
 /**
- * Moves the account's HTTP proxy rules between ports in its container, then
- * one graceful reload: requests in flight finish on the old upstream.
+ * Moves the account's proxy rules between ports in its container, then one
+ * graceful reload: requests in flight finish on the old upstream.
  */
 final class RouteSwitch
 {
@@ -37,15 +37,14 @@ final class RouteSwitch
     }
 
     /**
-     * Host ports published through TCP/UDP rules, which a vhost reload does not move.
+     * Enabled rules of every transport; an operator's own rules to these ports included.
      *
      * @param list<int> $ports
      * @return list<ProxyRule>
      */
-    public function streamRulesTo(array $ports): array
+    public function rulesTo(array $ports): array
     {
         return ProxyRule::query()
-            ->whereIn('transport', ['tcp', 'udp'])
             ->where('enabled', true)
             ->where('upstream_host', $this->username)
             ->whereIn('upstream_port', $ports)
@@ -83,23 +82,70 @@ final class RouteSwitch
      */
     public function move(array $map, ?array $onlyIds = null): array
     {
-        $rules = $this->httpRulesTo(array_keys($map));
-        if ($onlyIds !== null) {
-            $rules = array_values(array_filter($rules, static fn (ProxyRule $rule): bool => in_array($rule->id, $onlyIds, true)));
-        }
-        if ($rules === []) {
-            return [];
+        if ($onlyIds === null) {
+            $rules = $this->rulesTo(array_keys($map));
+        } else {
+            // Back by id, whatever its owner switched off meanwhile: it stays off, on its own port.
+            $rules = $onlyIds === [] ? [] : ProxyRule::query()
+                ->whereIn('id', $onlyIds)
+                ->where('upstream_host', $this->username)
+                ->whereIn('upstream_port', array_keys($map))
+                ->get()
+                ->all();
         }
         foreach ($rules as $rule) {
             $rule->upstream_port = $map[$rule->upstream_port];
             $rule->save();
         }
-        foreach (self::domainsOf($rules) as $domain) {
-            $this->system->webserver()->rebuildDomainConfig($domain);
-        }
-        $this->system->webserver()->reload(false);
+        $this->render($rules);
 
         return array_map(static fn (ProxyRule $rule): int => (int) $rule->id, $rules);
+    }
+
+    /**
+     * The operator's own rules to the app's port, enabled or not, follow it
+     * to the port the new version answers on. The ids moved.
+     *
+     * @return list<int>
+     */
+    public function follow(int $from, int $to): array
+    {
+        if ($from === $to) {
+            return [];
+        }
+        $rules = ProxyRule::query()
+            ->where('is_generated', false)
+            ->where('upstream_host', $this->username)
+            ->where('upstream_port', $from)
+            ->get()
+            ->all();
+
+        return $this->move([$from => $to], array_map(static fn (ProxyRule $rule): int => (int) $rule->id, $rules));
+    }
+
+    /**
+     * A rule named after a domain lives in its vhost; any other is written by
+     * the full rebuild, which also keeps the firewall open for its port.
+     *
+     * @param list<ProxyRule> $rules
+     */
+    private function render(array $rules): void
+    {
+        $live = array_values(array_filter($rules, static fn (ProxyRule $rule): bool => (bool) $rule->enabled));
+        if ($live === []) {
+            return;
+        }
+        $inVhost = static fn (ProxyRule $rule): bool => $rule->transport === 'http'
+            && !in_array(trim((string) $rule->server_name), ['', '_'], true);
+        $webserver = $this->system->webserver();
+        if (count(array_filter($live, $inVhost)) === count($live)) {
+            foreach (self::domainsOf($live) as $domain) {
+                $webserver->rebuildDomainConfig($domain);
+            }
+        } else {
+            $webserver->rebuildConfig();
+        }
+        $webserver->reload(false);
     }
 
     /**

@@ -89,7 +89,9 @@ class ZeroDowntimeRedeployTest extends TestCase
     public function test_the_switch_starts_from_the_port_the_site_is_on(): void
     {
         $this->assertSame([3000 => 32771], ZeroDowntimeRedeploy::switchMap([3000 => 32771], 3000, 3000));
-        $this->assertSame([8080 => 32771, 3000 => 32771], ZeroDowntimeRedeploy::switchMap([8080 => 32771], 8080, 3000));
+        $this->assertSame([3000 => 32771], ZeroDowntimeRedeploy::switchMap([8080 => 32771], 8080, 3000));
+        // engine#691: a rule to another port of the app is not the site's route, and stays where it is.
+        $this->assertSame([3000 => 32771], ZeroDowntimeRedeploy::switchMap([3000 => 32771, 9000 => 32772], 3000, 3000));
         // Moving back after a failure lands on the port the running version answers on.
         $this->assertSame([32771 => 3000], ZeroDowntimeRedeploy::inverse(ZeroDowntimeRedeploy::switchMap([8080 => 32771], 8080, 3000)));
         // Taking traffic lands on the new version's own port.

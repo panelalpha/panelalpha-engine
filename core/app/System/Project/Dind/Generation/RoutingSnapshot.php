@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind\Generation;
 
+use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Sidecar\SidecarPasswords;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\AppHealth;
@@ -44,6 +45,8 @@ final class RoutingSnapshot
             'details' => self::pick($details),
             'containers' => $read['running'],
             'applied' => false,
+            'gated' => false,
+            'deploy' => $this->project->shell()->logger()?->getDeployId(),
             'owner' => GenerationState::owner(),
         ]);
     }
@@ -71,6 +74,40 @@ final class RoutingSnapshot
         return $entry === null || $port === null ? null : (int) $port;
     }
 
+    /** The new version answered its health check in this process's redeploy: a sweep keeps it if it still does. */
+    public static function markGated(string $username): void
+    {
+        $entry = self::ownEntry($username);
+        if ($entry !== null) {
+            (new GenerationState($username))->put(GenerationState::ROUTES, ['gated' => true] + $entry);
+        }
+    }
+
+    /** @return ?array<string, mixed> what {@see take()} noted, whichever process noted it */
+    public function entry(): ?array
+    {
+        return (new GenerationState($this->project->username()))->get(GenerationState::ROUTES);
+    }
+
+    /**
+     * True when the deploy that took this snapshot closed as a success, false
+     * when it closed otherwise, null when that is not known.
+     */
+    public function verdict(): ?bool
+    {
+        $id = $this->entry()['deploy'] ?? null;
+        $latest = is_string($id) ? DeployLogger::readLatestFor($this->project->username()) : null;
+        if ($latest === null || ($latest['id'] ?? null) !== $id) {
+            return null;
+        }
+        $status = $latest['status'] ?? null;
+        if (in_array($status, [DeployLogger::STATUS_SUCCESS, DeployLogger::STATUS_PARTIAL], true)) {
+            return true;
+        }
+
+        return $status === DeployLogger::STATUS_RUNNING ? null : false;
+    }
+
     /** Whether the proxy rules wait for the new version instead of following the detected port now. */
     public static function defers(string $username): bool
     {
@@ -79,7 +116,7 @@ final class RoutingSnapshot
         return $entry !== null && ($entry['applied'] ?? false) !== true;
     }
 
-    /** The new version takes traffic: route to the port it answers on. */
+    /** The new version takes traffic: route to the port it answers on, the operator's rules to it too. */
     public function apply(): void
     {
         $state = new GenerationState($this->project->username());
@@ -90,9 +127,17 @@ final class RoutingSnapshot
         $state->put(GenerationState::ROUTES, ['applied' => true] + $entry);
         $user = $this->project->userModel();
         $port = $user->getAppPort();
-        if ($port !== null) {
-            $this->project->networking()->applyRoutes($user, $port);
+        if ($port === null) {
+            return;
         }
+        $served = $entry['details']['app_port'] ?? null;
+        if ($served !== null) {
+            $followed = (new RouteSwitch($this->project->system(), $this->project->username()))->follow((int) $served, $port);
+            if ($followed !== []) {
+                $state->put(GenerationState::ROUTES, ['applied' => true, 'followed' => $followed] + $entry);
+            }
+        }
+        $this->project->networking()->applyRoutes($user, $port);
     }
 
     /**
@@ -132,6 +177,47 @@ final class RoutingSnapshot
         $state->forget(GenerationState::ROUTES);
 
         return $outcome;
+    }
+
+    /** The details noted before the redeploy, back for a start of the previous version; the port it answers on. */
+    public function restoreDetails(): ?int
+    {
+        $state = new GenerationState($this->project->username());
+        $entry = $state->get(GenerationState::ROUTES);
+        if ($entry === null) {
+            return null;
+        }
+        $user = $this->project->userModel();
+        $state->put(GenerationState::ROUTES, ['left' => $user->getAppPort()] + $entry);
+        $user->setDetails((array) ($entry['details'] ?? []));
+        $user->save();
+        $port = $entry['details']['app_port'] ?? null;
+
+        return $port === null ? null : (int) $port;
+    }
+
+    /** The previous version is back: the site, and the operator's rules that followed the new one, on its port. */
+    public function routeBack(): void
+    {
+        $state = new GenerationState($this->project->username());
+        $entry = $state->get(GenerationState::ROUTES);
+        if ($entry === null) {
+            return;
+        }
+        $served = $entry['details']['app_port'] ?? null;
+        $left = $entry['left'] ?? null;
+        if (($entry['applied'] ?? false) === true && $served !== null) {
+            try {
+                $followed = array_values(array_map('intval', (array) ($entry['followed'] ?? [])));
+                if ($followed !== [] && $left !== null && (int) $left !== (int) $served) {
+                    (new RouteSwitch($this->project->system(), $this->project->username()))->move([(int) $left => (int) $served], $followed);
+                }
+                $this->project->networking()->applyRoutes($this->project->userModel(), (int) $served);
+            } catch (\Throwable $e) {
+                Log::warning("Could not route {$this->project->username()} back to its previous version: " . $e->getMessage());
+            }
+        }
+        $state->forget(GenerationState::ROUTES);
     }
 
     /** @return ?array<string, mixed> */

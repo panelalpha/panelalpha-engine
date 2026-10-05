@@ -49,7 +49,7 @@ final class ZeroDowntimeRedeploy
     /** @var array<int, int> published port => the second generation's port */
     private array $routes = [];
 
-    /** @var array<int, int> port the rules are on => the second generation's port, the served port last */
+    /** @var array<int, int> the port the site is on => the second generation's copy of the routed port */
     private array $switched = [];
 
     /** @var list<int> */
@@ -114,7 +114,7 @@ final class ZeroDowntimeRedeploy
     {
         $state = new GenerationState($this->project->username());
         $nextProject = $this->next->projectName();
-        $state->put(GenerationState::NEXT, ['project' => $nextProject, 'routes' => [], 'rules' => []]);
+        $state->put(GenerationState::NEXT, ['project' => $nextProject, 'routed' => $this->routedPort, 'routes' => [], 'rules' => []]);
 
         try {
             $this->project->shell()->execQuiet(
@@ -147,7 +147,7 @@ final class ZeroDowntimeRedeploy
         if (!isset($this->routes[$this->routedPort])) {
             return $this->inPlace('the second copy published no port Docker would name');
         }
-        $state->put(GenerationState::NEXT, ['project' => $nextProject, 'routes' => $this->routes, 'rules' => []]);
+        $state->put(GenerationState::NEXT, ['project' => $nextProject, 'routed' => $this->routedPort, 'routes' => $this->routes, 'rules' => []]);
 
         $port = $this->routes[$this->routedPort];
         $failure = $this->awaitAnswer($port, $container);
@@ -164,6 +164,7 @@ final class ZeroDowntimeRedeploy
             ];
         }
         $this->logger->ok("The new version answers on port {$port}");
+        RoutingSnapshot::markGated($this->project->username());
 
         $this->switched = self::switchMap($this->routes, $this->routedPort, $this->servedPort);
         $switch = new RouteSwitch($this->project->system(), $this->project->username());
@@ -181,7 +182,7 @@ final class ZeroDowntimeRedeploy
         if ($this->movedRules === []) {
             return $this->inPlace("no proxy rule sends traffic to port {$this->servedPort}");
         }
-        $state->put(GenerationState::NEXT, ['project' => $nextProject, 'routes' => $this->switched, 'rules' => $this->movedRules]);
+        $state->put(GenerationState::NEXT, ['project' => $nextProject, 'routed' => $this->routedPort, 'routes' => $this->switched, 'rules' => $this->movedRules]);
         $this->logger->info("Traffic moved to the new version on port {$port}; the running one finishes its requests");
         sleep(self::DRAIN_SECONDS);
 
@@ -286,22 +287,15 @@ final class ZeroDowntimeRedeploy
     }
 
     /**
-     * What the switch moves: each port of the new version to its second copy,
-     * and the port the site is on now -- when the new version moved it -- to
-     * the copy of the routed one. Last, so moving back lands on it.
+     * What the switch moves: the port the site is on now to the copy of the
+     * routed port. Rules to the app's other ports are not the site's route.
      *
      * @param array<int, int> $routes the new version's published port => the second copy's
      * @return array<int, int>
      */
     public static function switchMap(array $routes, int $routed, int $served): array
     {
-        $map = $routes;
-        if ($served !== $routed && isset($routes[$routed])) {
-            unset($map[$served]);
-            $map[$served] = $routes[$routed];
-        }
-
-        return $map;
+        return isset($routes[$routed]) ? [$served => $routes[$routed]] : [];
     }
 
     /**
@@ -401,12 +395,6 @@ final class ZeroDowntimeRedeploy
         }
         $switch = new RouteSwitch($project->system(), $project->username());
         $ports = array_values(array_unique([...array_keys($next->ports), $served]));
-        $streams = $switch->streamRulesTo($ports);
-        if ($streams !== []) {
-            $listen = implode(', ', array_unique(array_map(static fn ($rule): string => (string) $rule->listen_port, $streams)));
-
-            return "it publishes host port(s) {$listen} through TCP/UDP rules, which a vhost reload does not move";
-        }
         $tunnelled = RouteSwitch::tunnelledDomain($switch->httpRulesTo($ports));
         if ($tunnelled !== null) {
             return "{$tunnelled} reaches it through a Cloudflare tunnel, which a vhost reload does not move";
@@ -418,6 +406,22 @@ final class ZeroDowntimeRedeploy
         }
 
         return null;
+    }
+
+    /** Null once $port answers below 500 within $seconds, else what it said last. */
+    public static function answersWithin(DindProject $project, int $port, int $seconds): ?string
+    {
+        $deadline = time() + $seconds;
+        while (true) {
+            $answer = self::probe($project, $port);
+            if ($answer['status'] === AppHealth::STATUS_OK) {
+                return null;
+            }
+            if (time() >= $deadline) {
+                return $answer['http_code'] !== null ? "it answers HTTP {$answer['http_code']}" : $answer['detail'];
+            }
+            sleep(self::POLL_SECONDS);
+        }
     }
 
     /**
