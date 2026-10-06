@@ -1,6 +1,10 @@
 import { expect, test } from '@/fixtures/test-options';
 import { expectOneOf } from '@/helpers/expect-one-of';
-import { VALID_SLUGS, getWebserverInfo } from '@/helpers/webserver-helpers';
+import {
+  VALID_SLUGS,
+  getWebserverInfo,
+  switchingDisabledReason,
+} from '@/helpers/webserver-helpers';
 
 /** Change-webserver is asynchronous, so a queued job and a refusal both count. */
 const CHANGE_HANDLED = [200, 202, 204, 400, 409, 422, 500] as const;
@@ -65,23 +69,11 @@ test.describe('change-webserver validation', () => {
     expect(response.status()).toBe(422);
   });
 
-  /**
-   * Some engine builds refuse every switch up front — nginx-proxy is required
-   * for DinD projects — and answer 422 on `new_webserver` before they ever look
-   * at the rest of the payload.
-   *
-   * That makes the tests below unable to see what they are about: they would
-   * pass on the 422 without the engine having validated anything. So the
-   * refusal is recognised and the test skips, rather than reporting a pass it
-   * did not earn.
-   */
-  function switchingDisabledReason(body: unknown): string | null {
-    const errors = (body as { errors?: Record<string, string[] | undefined> } | null)?.errors;
-    const newWebserver = errors?.new_webserver?.join(' ') ?? '';
-    return /temporarily disabled|only nginx-proxy is supported/i.test(newWebserver)
-      ? `This engine refuses every webserver switch: ${newWebserver}`
-      : null;
-  }
+  // Some engine builds refuse every switch up front -- nginx-proxy is required
+  // for DinD projects -- and answer 422 on `new_webserver` before they ever look
+  // at the rest of the payload. The tests below would pass on that 422 without
+  // the engine having validated anything, so they recognise the refusal
+  // (switchingDisabledReason) and skip rather than report a pass they did not earn.
 
   /** The serial only means something for LiteSpeed Enterprise. */
   const nonLicensedTargets = ['nginx', 'openlitespeed'] as const;

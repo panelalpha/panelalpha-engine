@@ -14,6 +14,13 @@ test.describe('isEngineUnreachable', () => {
     expect(
       isEngineUnreachable(new Error('apiRequestContext.get: connect ECONNREFUSED 10.0.0.1:2011'))
     ).toBe(true);
+    expect(
+      isEngineUnreachable(
+        new Error(
+          'apiRequestContext.get: Client network socket disconnected before secure TLS connection was established'
+        )
+      )
+    ).toBe(true);
   });
 
   test('a proxy answering 502, 503 or 504 is a restart', () => {

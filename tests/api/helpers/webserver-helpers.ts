@@ -79,6 +79,23 @@ export const ACME_CHALLENGE_VHOST_TEMPLATE_MAP: Record<string, string[]> = {
   nginx: ['virtualHost-nginx.blade.php'],
 };
 
+type RefusalBody = { errors?: Record<string, string[] | undefined> } | null;
+
+const SWITCHING_DISABLED = /[^"\n]*(?:temporarily disabled|only nginx-proxy is supported)[^"\n]*/i;
+
+/**
+ * The engine's refusal of every webserver switch (nginx-proxy is required for
+ * DinD projects), from a 422 body or a failed call's message; null otherwise.
+ */
+export function switchingDisabledReason(refusal: unknown): string | null {
+  const text =
+    typeof refusal === 'string'
+      ? refusal
+      : ((refusal as RefusalBody)?.errors?.new_webserver?.join(' ') ?? '');
+  const sentence = SWITCHING_DISABLED.exec(text);
+  return sentence ? `This engine refuses every webserver switch: ${sentence[0].trim()}` : null;
+}
+
 export interface WebserverInfo {
   slug: string;
   raw: SystemInfo['webserver'];

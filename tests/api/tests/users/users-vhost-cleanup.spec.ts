@@ -1,6 +1,6 @@
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { expect, test } from '@/fixtures/test-options';
+import type { HostExec } from '@/helpers/host-exec';
 import { getDomainBasePath, randomFileContent, randomFileName } from '@/helpers/file-path-helpers';
 import { fetchSite } from '@/helpers/webserver-helpers';
 
@@ -94,13 +94,21 @@ test.describe('vhost cleanup on user deletion', () => {
 });
 
 /**
- * The engine root, when the suite runs on the engine host.
- *
- * `tests/api` lives inside the engine checkout, so two levels up is the
- * directory holding `docker-compose.yml` and `users/`. Only meaningful for a
- * local runner — over SSH these paths belong to a different machine.
+ * The engine root on the host: the directory holding `docker-compose.yml` and
+ * `users/`, as the core container's compose labels name it. Asked of the host
+ * rather than derived from where this suite sits, which may be a copy.
  */
-const engineRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
+async function engineRoot(hostExec: HostExec): Promise<string | null> {
+  const { exitCode, stdout } = await hostExec.run('docker', [
+    'ps',
+    '--filter',
+    'label=com.docker.compose.service=core',
+    '--format',
+    '{{.Label "com.docker.compose.project.working_dir"}}',
+  ]);
+  const root = stdout.trim().split('\n')[0]?.trim();
+  return exitCode === 0 && root ? root : null;
+}
 
 test.describe('home directory cleanup on user deletion', () => {
   test('deleting a project removes its home directory from the host', async ({
@@ -109,10 +117,8 @@ test.describe('home directory cleanup on user deletion', () => {
     userFactory,
   }) => {
     test.skip(!hostExec, 'pae-artisan is not reachable from this runner.');
-    test.skip(
-      hostExec!.mode !== 'local',
-      'Host paths only mean something when the suite runs on the engine itself.'
-    );
+    const root = await engineRoot(hostExec!);
+    test.skip(!root, 'The engine root could not be read from the core container on the host.');
 
     // Deleted on the last line rather than by the factory: the assertion is
     // about what the delete leaves behind, so it has to own the delete.
@@ -123,7 +129,7 @@ test.describe('home directory cleanup on user deletion', () => {
     const details = (await api.getUser(user.username)).data;
     const containerHome = details.details?.home_dir ?? details.config?.home_dir;
     expect(containerHome, 'the engine reports no home_dir for the project').toBeTruthy();
-    const hostHome = path.join(engineRoot, 'users', path.basename(String(containerHome)));
+    const hostHome = path.posix.join(root!, 'users', path.posix.basename(String(containerHome)));
 
     const exists = async () => (await hostExec!.run('test', ['-d', hostHome])).exitCode === 0;
     expect(await exists(), `${hostHome} was never created`).toBe(true);

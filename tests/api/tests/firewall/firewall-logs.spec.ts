@@ -1,4 +1,6 @@
+import { lookup } from 'node:dns/promises';
 import { connect } from 'node:net';
+import { networkInterfaces } from 'node:os';
 import { expect, test } from '@/fixtures/test-options';
 import {
   deleteFirewallRulesQuietly,
@@ -20,6 +22,15 @@ function knock(host: string, port: number): Promise<void> {
   });
 }
 
+/** Whether `host` is this runner's own machine, where a knock never crosses the firewall. */
+async function isThisMachine(host: string): Promise<boolean> {
+  const { address } = await lookup(host);
+  const own = Object.values(networkInterfaces())
+    .flat()
+    .map((nic) => nic?.address);
+  return address.startsWith('127.') || address === '::1' || own.includes(address);
+}
+
 test.describe('Firewall log', () => {
   test.beforeEach(async ({ api }) => {
     await requireFirewall(api);
@@ -30,6 +41,10 @@ test.describe('Firewall log', () => {
     settings,
   }) => {
     const host = new URL(settings.apiBaseUrl).hostname;
+    test.skip(
+      await isThisMachine(host),
+      `${host} is this runner's own address: the knock goes over lo, which ufw accepts without logging. Run it from another machine.`
+    );
     // Far from anything the engine opens, and different every run.
     const port = 47_000 + Math.floor(Math.random() * 2_000);
 

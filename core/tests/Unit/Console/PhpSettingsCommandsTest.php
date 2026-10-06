@@ -131,6 +131,9 @@ class PhpSettingsCommandsTest extends TestCase
         $this->makeDocumentRoot('a.example');
         file_put_contents($this->userIni('a.example'), "memory_limit=256M\n");
         chmod($this->userIni('a.example'), 0);
+        if (is_readable($this->userIni('a.example'))) {
+            $this->markTestSkipped('running as root, a mode-0 file is still readable');
+        }
 
         $this->expectExceptionMessage('Permission denied');
         Artisan::call('domain:php-directives', ['domain' => 'a.example']);

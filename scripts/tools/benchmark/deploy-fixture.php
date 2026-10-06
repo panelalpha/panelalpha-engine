@@ -15,6 +15,7 @@ $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 
 use App\Http\Controllers\UserController;
 use App\Http\Requests\UserStoreRequest;
+use App\Lib\Domains\PublicUrl;
 use Illuminate\Http\Request;
 
 [, $username, $repo] = array_pad($argv, 3, null);
@@ -41,13 +42,20 @@ $started = microtime(true);
 $error = null;
 try {
     $request->validateResolved();
-    $app->make(UserController::class)->store($request);
+    // The container supplies store()'s other arguments, as the router does.
+    $app->call([$app->make(UserController::class), 'store'], ['request' => $request]);
 } catch (Throwable $e) {
     $error = substr(str_replace("\n", ' ', $e->getMessage()), 0, 300);
 }
 
 $user = App\Models\User::where('username', $username)->first();
 $details = $user?->getDetails() ?? [];
+
+// A partial deploy names why. The public URL's warnings (a certificate browsers
+// refuse, a name that resolves on this network only) are about the fixture's
+// made-up domain and this host; the rest are about the application.
+$warnings = array_values((array) ($details['deployment_warnings'] ?? []));
+$urlWarnings = $user === null ? [] : PublicUrl::warnings((string) $user->domain, $details);
 
 echo json_encode([
     'username' => $username,
@@ -56,5 +64,7 @@ echo json_encode([
     'runtime' => $details['deploy_runtime'] ?? null,
     'port' => $details['app_port'] ?? null,
     'status' => $details['deployment_status'] ?? ($error === null ? null : 'failed'),
-    'error' => $error,
+    'error' => $error ?? (is_string($details['error'] ?? null) ? $details['error'] : null),
+    'url_warnings' => array_values(array_intersect($warnings, $urlWarnings)),
+    'app_warnings' => array_values(array_diff($warnings, $urlWarnings)),
 ], JSON_UNESCAPED_SLASHES), "\n";

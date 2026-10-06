@@ -70,7 +70,8 @@ final class ContractRemoveConnectCutoverTest extends TestCase
                 $hits[] = $path . ' (unreadable)';
                 continue;
             }
-            if (preg_match('/->connect\\(/', $contents) === 1) {
+            // The removed System connect() took no arguments; Git's connect($repoUrl, ...) is another method.
+            if (preg_match('/->connect\\(\\s*\\)/', $contents) === 1) {
                 $hits[] = str_replace($appRoot . DIRECTORY_SEPARATOR, '', $path);
             }
         }

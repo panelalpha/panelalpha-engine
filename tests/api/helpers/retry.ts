@@ -47,11 +47,12 @@ export async function waitForCondition(
 }
 
 const ENGINE_UNREACHABLE =
-  /socket hang up|ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|EPIPE|Got: 50[234]\b/;
+  /socket hang up|socket disconnected before secure TLS|ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|EPIPE|Got: 50[234]\b/;
 
 /**
  * True for what an engine restarting its own containers looks like from here:
- * a dropped or refused connection, or the proxy answering 502/503/504.
+ * a dropped or refused connection (also mid TLS handshake), or the proxy
+ * answering 502/503/504.
  */
 export function isEngineUnreachable(error: unknown): boolean {
   return ENGINE_UNREACHABLE.test(error instanceof Error ? error.message : String(error));

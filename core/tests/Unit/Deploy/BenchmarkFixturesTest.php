@@ -90,9 +90,11 @@ class BenchmarkFixturesTest extends TestCase
 
         // Each of these takes a different path through the build and the
         // caches: no build at all, the repo's own definition, a generated
-        // Dockerfile, and the fallback builder.
+        // Dockerfile. Railpack is not among them: every runtime it recognises
+        // has a platform now, and a recipe pinned to it holds for one deploy,
+        // so a warm rebuild would detect again and measure another strategy.
         foreach ([Strategies::STATIC, Strategies::COMPOSE, Strategies::DOCKERFILE,
-                  Strategies::PHP, Strategies::LARAVEL, Strategies::RAILPACK] as $strategy) {
+                  Strategies::PHP, Strategies::LARAVEL, Strategies::NODE] as $strategy) {
             $this->assertContains($strategy, $covered, "no fixture exercises '{$strategy}'");
         }
     }

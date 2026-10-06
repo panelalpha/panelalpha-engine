@@ -1,4 +1,5 @@
 import { expect, test } from '@/fixtures/test-options';
+import { isPrivateOrLocalIp } from '@/helpers/real-ip-helpers';
 import { skipUnless } from '@/helpers/test-helpers';
 
 /**
@@ -34,6 +35,13 @@ test.describe('PanelAlpha Direct', () => {
     expect(user.domain).toMatch(/\.panelalpha\.direct$/);
     expect(data.details.domain?.source).toBe('panelalpha_direct');
     expect(data.details.domain?.tls_terminated_at).toBe('engine');
+    // The name spells the address it resolves to (<label>.10-0-0-5.panelalpha.direct);
+    // a private one answers on that network only, which the engine reports as not public.
+    const address = user.domain.split('.').at(-3)?.replace(/-/g, '.');
+    test.skip(
+      isPrivateOrLocalIp(address),
+      `${user.domain} resolves to the private address ${address}; publicly_resolvable is false there by design.`
+    );
     expect(data.details.domain?.publicly_resolvable).toBe(true);
   });
 });
