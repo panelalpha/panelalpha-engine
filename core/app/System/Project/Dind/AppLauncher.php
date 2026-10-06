@@ -178,6 +178,13 @@ final class AppLauncher
             if ($report !== null && $this->routeToTheAnsweringPort($report)) {
                 $report = $this->project->appHealth()->report();
             }
+            // What a rebuild keeps while the app's ports stay as they are.
+            if ($report !== null) {
+                try {
+                    AnsweringPort::remember($this->project, $report);
+                } catch (\Throwable) {
+                }
+            }
             // A version that answered is kept if the deploy dies before it finishes.
             if (($report['healthy'] ?? null) === true) {
                 RoutingSnapshot::markGated($this->project->username());
@@ -762,15 +769,16 @@ final class AppLauncher
     /**
      * The site was routed before anything ran, to the lowest of the ports one
      * service publishes when nothing else told them apart (Cabernet: 5004, a
-     * stream, over 6077, its web UI). When the probe has since shown that
-     * port serving no page and exactly one of the others serving one, the
-     * site goes there.
+     * stream, over 6077, its web UI), or a rebuild kept it on one of the
+     * others. When the probe has since shown that port serving no page and
+     * exactly one of the others serving one, the site goes there.
      *
      * @param array<string, mixed> $report
      */
     private function routeToTheAnsweringPort(array $report): bool
     {
         $model = $this->project->userModel();
+        $routed = $model->getAppPort();
         try {
             $composePath = $this->project->userAppComposeFileForPorts();
             $env = $this->project->environment()->forPortDetection();
@@ -779,7 +787,7 @@ final class AppLauncher
                 ComposePortScan::choiceOf($composePath, $env),
                 $primary,
                 Networking::recipeComposePort($model),
-                $model->getAppPort(),
+                $routed,
                 is_array($report['ports'] ?? null) ? $report['ports'] : []
             );
         } catch (\Throwable $e) {
@@ -790,15 +798,15 @@ final class AppLauncher
         }
 
         $this->project->networking()->routeTo($model, $better['port']);
-        $this->project->shell()->logger()?->info("Routed the site to {$better['port']} instead of {$primary}: {$better['reason']}");
+        $this->project->shell()->logger()?->info("Routed the site to {$better['port']} instead of {$routed}: {$better['reason']}");
 
         return true;
     }
 
     /**
-     * The rule itself: only a `lowest` guess that the routed port did not
-     * bear out (no answer, or 4xx/5xx), and only to the one alternative that
-     * answered 2xx/3xx.
+     * The rule itself: only a `lowest` guess whose routed port, the guess or
+     * the equal a rebuild kept, did not bear it out (no answer, or 4xx/5xx),
+     * and only to the one other port of the guess that answered 2xx/3xx.
      *
      * @param array{reason: string, alternatives: list<int>}|null $choice
      * @param list<array<string, mixed>> $results the health probe's per-port results
@@ -807,7 +815,11 @@ final class AppLauncher
     public static function betterRoute(?array $choice, ?int $primary, ?int $recipePort, ?int $routed, array $results): ?array
     {
         if ($choice === null || $choice['reason'] !== ComposePortScan::CHOSEN_LOWEST
-            || $recipePort !== null || $primary === null || $routed !== $primary) {
+            || $recipePort !== null || $primary === null) {
+            return null;
+        }
+        $equals = array_values(array_unique([$primary, ...$choice['alternatives']]));
+        if (!in_array($routed, $equals, true)) {
             return null;
         }
 
@@ -824,7 +836,7 @@ final class AppLauncher
         }
 
         $answering = array_values(array_filter(
-            $choice['alternatives'],
+            array_diff($equals, [$routed]),
             static fn (int $port): bool => $serves($codes[$port] ?? null)
         ));
         if (count($answering) !== 1) {

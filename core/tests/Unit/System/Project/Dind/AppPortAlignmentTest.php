@@ -335,6 +335,28 @@ class AppPortAlignmentTest extends TestCase
         $this->assertSame([9000, 4000, 5555], $probed);
     }
 
+    public function test_the_window_ends_with_no_candidate_once_the_container_stopped(): void
+    {
+        $polls = 0;
+        $candidates = AppPortAlignment::awaitCandidates(
+            8080,
+            function () use (&$polls): array {
+                $polls++;
+
+                return [['addr' => '00000000', 'port' => 9000]];
+            },
+            static function (int $seconds): void {
+            },
+            [],
+            function () use (&$polls): bool {
+                return $polls >= 2;
+            }
+        );
+
+        $this->assertSame([], $candidates);
+        $this->assertSame(2, $polls);
+    }
+
     public function test_the_window_hands_back_every_candidate_best_first(): void
     {
         $candidates = AppPortAlignment::awaitCandidates(

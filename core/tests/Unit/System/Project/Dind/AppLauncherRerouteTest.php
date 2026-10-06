@@ -37,6 +37,19 @@ class AppLauncherRerouteTest extends TestCase
         );
     }
 
+    /** A rebuild kept the site on 6077; once 6077 serves no page and the guess does, the site goes back to the guess. */
+    public function test_a_kept_equal_serving_no_page_is_left_for_the_one_that_serves(): void
+    {
+        $this->assertSame(
+            ['port' => 5004, 'reason' => '6077 answered 404, 5004 answered 200'],
+            AppLauncher::betterRoute(self::LOWEST, 5004, null, 6077, self::probed(200, 404))
+        );
+        $this->assertSame(
+            ['port' => 5004, 'reason' => '6077 did not answer, 5004 answered 200'],
+            AppLauncher::betterRoute(self::LOWEST, 5004, null, 6077, self::probed(200, null))
+        );
+    }
+
     /** The re-checked verdict is about the port the site now goes to, not the first one published. */
     public function test_the_routed_port_is_probed_first(): void
     {
@@ -56,7 +69,8 @@ class AppLauncherRerouteTest extends TestCase
         yield 'a preferred port' => [['reason' => ComposePortScan::CHOSEN_PREFERRED, 'alternatives' => []], 5004, null, 5004, self::probed(501, 200)];
         yield 'the healthcheck port' => [['reason' => ComposePortScan::CHOSEN_HEALTHCHECK, 'alternatives' => []], 5004, null, 5004, self::probed(501, 200)];
         yield 'a recipe port' => [self::LOWEST, 5004, 5004, 5004, self::probed(501, 200)];
-        yield 'already routed elsewhere' => [self::LOWEST, 5004, null, 6077, self::probed(501, 200)];
+        yield 'kept on an equal that serves' => [self::LOWEST, 5004, null, 6077, self::probed(501, 200)];
+        yield 'routed outside the guess' => [self::LOWEST, 5004, null, 8080, self::probed(200, 200)];
         yield 'no choice' => [null, null, null, 5004, self::probed(501, 200)];
         yield 'two others serve' => [
             ['reason' => ComposePortScan::CHOSEN_LOWEST, 'alternatives' => [6077, 8502]],

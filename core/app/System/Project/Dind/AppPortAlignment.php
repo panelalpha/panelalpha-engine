@@ -35,9 +35,38 @@ final class AppPortAlignment
 
     public function alignIfNeeded(): void
     {
+        if (!$this->realign(null)) {
+            return;
+        }
+        try {
+            $this->project->shell()->exec(
+                $this->project->userAppComposeCommand(['up', '-d', '--no-build']),
+                [],
+                300
+            );
+        } catch (\Exception $e) {
+            Log::warning('Could not align the published app port: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * The same, measured on a redeploy's second copy instead of the running
+     * app; the caller starts the copy again. True when the run file changed.
+     * The wait ends early once $stopped() says the copy no longer runs.
+     *
+     * @param (\Closure(): bool)|null $stopped
+     */
+    public function alignTo(string $container, ?\Closure $stopped = null): bool
+    {
+        return $this->realign($container, $stopped);
+    }
+
+    /** True once the run file forwards to the port $container (default: the app's own) binds. */
+    private function realign(?string $container, ?\Closure $stopped = null): bool
+    {
         $composePath = $this->project->userAppComposeFilePath();
         if ($this->project->userAppComposeFileToRun() !== $composePath) {
-            return;
+            return false;
         }
 
         $filesystem = $this->project->system()->filesystem();
@@ -46,33 +75,35 @@ final class AppPortAlignment
         try {
             $raw = $filesystem->fileGetContents($composePath);
             if ($raw === '') {
-                return;
+                return false;
             }
             $parsed = Yaml::parse($raw);
             if (!is_array($parsed) || !isset($parsed['services']['app']['ports'])) {
-                return;
+                return false;
             }
             $ports = $parsed['services']['app']['ports'];
             if (!is_array($ports) || !isset($ports[0]) || !is_string($ports[0])) {
-                return;
+                return false;
             }
             $mapping = PublishedPort::parse($ports[0]);
             if ($mapping === null) {
-                return;
+                return false;
             }
 
             $candidates = $this->settledCandidates(
                 $mapping->container,
-                $this->declaredPorts(dirname($composePath), $parsed['services']['app']['build'] ?? null)
+                $this->declaredPorts(dirname($composePath), $parsed['services']['app']['build'] ?? null),
+                $container,
+                $stopped
             );
             if ($candidates === []) {
-                return;
+                return false;
             }
             // A socket is not a website: epmd, php-fpm and SSH bind first and
             // never answer HTTP, and forwarding there leaves the site dead.
             $actual = self::firstAnsweringHttp(
                 $candidates,
-                fn (int $port): ?bool => self::answersHttp($this->httpStatusOf($port))
+                fn (int $port): ?bool => self::answersHttp($this->httpStatusOf($port, $container))
             );
             if ($actual === null) {
                 $probed = array_slice($candidates, 0, self::MAX_PROBED);
@@ -83,7 +114,7 @@ final class AppPortAlignment
                         . " HTTP; still forwarding to {$mapping->container}"
                 );
 
-                return;
+                return false;
             }
 
             $logger?->info(
@@ -101,13 +132,12 @@ final class AppPortAlignment
                 $this->project->userModel()->getChownString(),
                 EngineArtifacts::RUN_COMPOSE_MODE
             );
-            $this->project->shell()->exec(
-                $this->project->userAppComposeCommand(['up', '-d', '--no-build']),
-                [],
-                300
-            );
+
+            return true;
         } catch (\Exception $e) {
             Log::warning('Could not align the published app port: ' . $e->getMessage());
+
+            return false;
         }
     }
 
@@ -115,9 +145,9 @@ final class AppPortAlignment
      * @param list<int> $declared
      * @return list<int>
      */
-    private function settledCandidates(int $expected, array $declared): array
+    private function settledCandidates(int $expected, array $declared, ?string $container, ?\Closure $stopped): array
     {
-        return self::awaitCandidates($expected, fn (): array => $this->listeningSockets(), $this->sleep, $declared);
+        return self::awaitCandidates($expected, fn (): array => $this->listeningSockets($container), $this->sleep, $declared, $stopped);
     }
 
     /**
@@ -152,6 +182,18 @@ final class AppPortAlignment
         return $code !== '000';
     }
 
+    /** The script line that sets `cid`: $container, else the app service's container. */
+    private function containerIdLine(?string $container): string
+    {
+        if ($container !== null) {
+            return 'cid=' . escapeshellarg($container);
+        }
+        $composeFile = escapeshellarg($this->project->userAppComposeFileToRun());
+        $projectDir = escapeshellarg($this->project->userAppDirPath());
+
+        return 'cid=$(' . $this->envFilesAssignment() . "docker compose --project-directory {$projectDir} -f {$composeFile} ps -q app 2>/dev/null | head -1)";
+    }
+
     /** `COMPOSE_ENV_FILES=… ` for a script's bare compose call, or '' when compose's default `.env` is all there is. */
     private function envFilesAssignment(): string
     {
@@ -161,13 +203,11 @@ final class AppPortAlignment
     }
 
     /** The status the app container answers on $port, over http then https; '' when it cannot be asked. */
-    private function httpStatusOf(int $port): string
+    private function httpStatusOf(int $port, ?string $container): string
     {
-        $composeFile = escapeshellarg($this->project->userAppComposeFileToRun());
-        $projectDir = escapeshellarg($this->project->userAppDirPath());
-        $envFiles = $this->envFilesAssignment();
+        $cid = $this->containerIdLine($container);
         $script = <<<SH
-cid=\$({$envFiles}docker compose --project-directory {$projectDir} -f {$composeFile} ps -q app 2>/dev/null | head -1)
+{$cid}
 [ -n "\$cid" ] || exit 0
 ip=\$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "\$cid" 2>/dev/null | awk '{print \$1}')
 [ -n "\$ip" ] || exit 0
@@ -224,14 +264,15 @@ SH;
 
     /**
      * {@see awaitPort()}, with every candidate of the last poll that saw one,
-     * best first.
+     * best first; none once $stopped() says the container stopped running.
      *
      * @param callable(): list<array{addr: string, port: int}> $sockets
      * @param (callable(int): void)|null $sleep
      * @param list<int> $declared
+     * @param (callable(): bool)|null $stopped
      * @return list<int>
      */
-    public static function awaitCandidates(int $expected, callable $sockets, ?callable $sleep = null, array $declared = []): array
+    public static function awaitCandidates(int $expected, callable $sockets, ?callable $sleep = null, array $declared = [], ?callable $stopped = null): array
     {
         $sleep ??= static fn (int $seconds) => sleep($seconds);
         $candidates = [];
@@ -241,6 +282,10 @@ SH;
             }
             $seen = $sockets();
             if (DetectAppPort::servesPort($seen, $expected)) {
+                return [];
+            }
+            // A crash-looping container binds nothing worth the rest of the window.
+            if ($stopped !== null && $stopped()) {
                 return [];
             }
             $ranked = DetectAppPort::rankedAppPorts($seen, $expected, $declared);
@@ -253,13 +298,11 @@ SH;
     /**
      * @return list<array{addr: string, port: int}>
      */
-    private function listeningSockets(): array
+    private function listeningSockets(?string $container): array
     {
-        $composeFile = escapeshellarg($this->project->userAppComposeFileToRun());
-        $projectDir = escapeshellarg($this->project->userAppDirPath());
-        $envFiles = $this->envFilesAssignment();
+        $cid = $this->containerIdLine($container);
         $script = <<<SH
-cid=\$({$envFiles}docker compose --project-directory {$projectDir} -f {$composeFile} ps -q app 2>/dev/null | head -1)
+{$cid}
 [ -n "\$cid" ] || exit 0
 state=\$(docker inspect -f '{{.State.Status}}' "\$cid" 2>/dev/null)
 [ "\$state" = "running" ] || exit 0

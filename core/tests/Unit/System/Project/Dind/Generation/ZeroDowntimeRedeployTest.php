@@ -27,6 +27,8 @@ class ZeroDowntimeRedeployTest extends TestCase
     {
         $this->assertNull(ZeroDowntimeRedeploy::containerFailure('running 0 0'));
         $this->assertNull(ZeroDowntimeRedeploy::containerFailure("created 0 0\n"));
+        // Docker's code for a start that failed elsewhere than on the image's command (the network, the daemon).
+        $this->assertNull(ZeroDowntimeRedeploy::containerFailure('created 128 0'));
     }
 
     public function test_a_container_that_stopped_or_loops_will_not_answer(): void
@@ -35,6 +37,8 @@ class ZeroDowntimeRedeployTest extends TestCase
         $this->assertSame('it keeps restarting (last exit code 1)', ZeroDowntimeRedeploy::containerFailure('restarting 1 3'));
         $this->assertSame('it keeps restarting (2 restarts so far)', ZeroDowntimeRedeploy::containerFailure('running 0 2'));
         $this->assertSame('its container is gone', ZeroDowntimeRedeploy::containerFailure(''));
+        $this->assertSame('it could not be started (exit code 127)', ZeroDowntimeRedeploy::containerFailure('created 127 0'));
+        $this->assertSame('it could not be started (exit code 126)', ZeroDowntimeRedeploy::containerFailure('created 126 0'));
     }
 
     public function test_traffic_goes_back_the_way_it_came(): void
