@@ -9,6 +9,7 @@ use App\Lib\Helpers\UpstreamSpec;
 use App\Models\Domain;
 use App\Models\ProxyRule;
 use App\Models\User;
+use App\System\Services\Webserver\ProxyRuleUpstream;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 use Symfony\Component\Console\Helper\Table;
@@ -27,7 +28,7 @@ class DomainsCreate extends Command
         {--type=addon : Domain type: addon or sub}
         {--parent-domain= : Parent domain (required for type=sub)}
         {--alias=* : Optional alias hostname(s)}
-        {--proxy-to= : Optional upstream (port or host:port); creates ProxyRules for 80/443}
+        {--proxy-to= : Optional upstream port, or host:port where host is the project\'s own name; creates ProxyRules for 80/443}
         {--no-ssl : Disable SSL for this domain}
         {--force : Skip confirmation}';
 
@@ -57,6 +58,12 @@ class DomainsCreate extends Command
                 [$upstreamHost, $upstreamPort] = UpstreamSpec::parse($proxyToRaw, $user->username);
             } catch (\InvalidArgumentException $e) {
                 $this->error($e->getMessage());
+                return 1;
+            }
+            // The rules are the project's own.
+            $refusal = ProxyRuleUpstream::refusal('user', $user->username, $upstreamHost);
+            if ($refusal !== null) {
+                $this->error($refusal);
                 return 1;
             }
         }

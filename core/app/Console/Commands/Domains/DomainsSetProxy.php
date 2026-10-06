@@ -9,6 +9,7 @@ use App\System;
 use App\Lib\Helpers\UpstreamSpec;
 use App\Models\Domain;
 use App\Models\ProxyRule;
+use App\System\Services\Webserver\ProxyRuleUpstream;
 use Illuminate\Console\Command;
 use Symfony\Component\Console\Helper\Table;
 
@@ -22,7 +23,7 @@ class DomainsSetProxy extends Command
         {--domain= : Domain name or alias}
         {--project= : Project username (optional; used as default host for port-only --proxy-to)}
         {--username= : Deprecated alias for --project}
-        {--proxy-to= : Upstream port (shorthand) or host:port}
+        {--proxy-to= : Upstream port, or host:port where host is the project\'s own name}
         {--port=* : Listen port(s); defaults to 80 and 443}
         {--force : Skip confirmation}';
 
@@ -70,6 +71,12 @@ class DomainsSetProxy extends Command
             [$upstreamHost, $upstreamPort] = UpstreamSpec::parse($proxyTo, $username);
         } catch (\InvalidArgumentException $e) {
             $this->error($e->getMessage());
+            return 1;
+        }
+        // The rules are the project's own.
+        $refusal = ProxyRuleUpstream::refusal('user', $username, $upstreamHost);
+        if ($refusal !== null) {
+            $this->error($refusal);
             return 1;
         }
 

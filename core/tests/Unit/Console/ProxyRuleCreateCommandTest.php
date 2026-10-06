@@ -21,8 +21,8 @@ class ProxyRuleCreateCommandTest extends TestCase
     {
         parent::setUp();
         $this->bootInMemoryDatabase();
-        $this->makeUser('alice');
-        $this->makeUser('bob');
+        $this->makeMainDomain($this->makeUser('alice'), 'shop.test');
+        $this->makeMainDomain($this->makeUser('bob'), 'bob.test');
         $this->recordWebserverApply();
     }
 
@@ -105,14 +105,36 @@ class ProxyRuleCreateCommandTest extends TestCase
     /** A duplicate is judged per owner: the same listener for another project is a separate rule. */
     public function test_a_duplicate_is_refused_for_the_same_owner_only(): void
     {
-        $args = '--transport=http --listen-port=443 --server-name=shop.test --upstream-host=h --upstream-port=8080';
+        $args = '--transport=http --listen-port=443 --server-name=shop.test --upstream-port=8080';
 
-        $this->create("--scope=user --project=alice {$args}")->assertExitCode(0);
-        $this->create("--scope=user --project=alice {$args}")
+        $this->create("--scope=user --project=alice --upstream-host=alice {$args}")->assertExitCode(0);
+        $this->create("--scope=user --project=alice --upstream-host=alice {$args}")
             ->expectsOutputToContain('A rule with this configuration already exists.')
             ->assertExitCode(1);
-        $this->create("--scope=user --project=bob {$args}")->assertExitCode(0);
+        // A server name is its project's own, so two projects share only a stream listener.
+        $tcp = '--transport=tcp --listen-port=5432 --upstream-port=5432';
+        $this->create("--scope=user --project=alice --upstream-host=alice {$tcp}")->assertExitCode(0);
+        $this->create("--scope=user --project=bob --upstream-host=bob {$tcp}")->assertExitCode(0);
 
+        $this->assertSame(3, ProxyRule::query()->count());
+    }
+
+    /** A project's rule answers for its own domains only; the operator's for any. */
+    public function test_a_project_rule_named_after_another_projects_site_is_refused(): void
+    {
+        foreach (['shop.test', 'nobody.test', '*.shop.test'] as $name) {
+            $this->create("--scope=user --project=bob --transport=http --listen-port=8089 --server-name={$name} --upstream-host=bob --upstream-port=80")
+                ->expectsOutput("The server name must be empty or one of the project's own domains or aliases: "
+                    . "a project's rule cannot answer for another project's site.")
+                ->assertExitCode(1);
+        }
+        $this->assertSame(0, ProxyRule::query()->count());
+        $this->assertWebserverApplied(0);
+
+        $this->create('--scope=user --project=bob --transport=http --listen-port=8089 --server-name=bob.test --upstream-host=bob --upstream-port=80')
+            ->assertExitCode(0);
+        $this->create('--scope=system --transport=http --listen-port=8090 --server-name=shop.test --upstream-host=10.0.0.5 --upstream-port=80')
+            ->assertExitCode(0);
         $this->assertSame(2, ProxyRule::query()->count());
     }
 
@@ -134,6 +156,23 @@ class ProxyRuleCreateCommandTest extends TestCase
         }
 
         $this->assertSame(0, ProxyRule::query()->count());
+    }
+
+    /** A project's rule reaches its own app only; the operator's may point anywhere. */
+    public function test_a_project_rule_to_anything_but_its_own_app_is_refused(): void
+    {
+        foreach (['bob', 'sites-db', '172.25.0.2', 'core', '127.0.0.1', 'db.example.com'] as $upstream) {
+            $this->create("--scope=user --project=alice --transport=tcp --listen-port=17002 --upstream-host={$upstream} --upstream-port=3306")
+                ->expectsOutput("The upstream must be the project's own app, 'alice': "
+                    . "a project's rule cannot reach another project, the engine's services or the host.")
+                ->assertExitCode(1);
+        }
+        $this->assertSame(0, ProxyRule::query()->count());
+        $this->assertWebserverApplied(0);
+
+        $this->create('--scope=system --transport=tcp --listen-port=17002 --upstream-host=172.25.0.2 --upstream-port=3306')
+            ->assertExitCode(0);
+        $this->assertSame('172.25.0.2', ProxyRule::query()->sole()->upstream_host);
     }
 
     public function test_bad_input_is_refused_before_anything_is_stored(): void

@@ -61,6 +61,23 @@ class ProxyRulePortHttpTest extends TestCase
         $this->assertWebserverApplied(3);
     }
 
+    public function test_a_duplicate_rule_is_refused_on_its_listen_port(): void
+    {
+        $message = 'A rule with the same transport, port, and server_name already exists';
+        foreach ([$this->rule('tcp', 17092), $this->rule('http', 8081, ['server_name' => 'shop.test'])] as $body) {
+            $this->postJson('/api/proxy-rules', $body)->assertSuccessful();
+            $this->postJson('/api/proxy-rules', $body)
+                ->assertStatus(422)
+                ->assertJsonPath('errors.listen_port.0', $message)
+                ->assertJsonPath('problems.0.field', 'listen_port')
+                ->assertJsonPath('problems.0.code', 'listen_port_invalid')
+                ->assertJsonPath('problems.0.message', $message);
+        }
+
+        $this->assertSame(2, ProxyRule::query()->count());
+        $this->assertWebserverApplied(2);
+    }
+
     public function test_a_disabled_rule_is_stored_whatever_its_port_and_checked_when_enabled(): void
     {
         $this->postJson('/api/proxy-rules', $this->rule('tcp', 3306, ['enabled' => false]))->assertSuccessful();

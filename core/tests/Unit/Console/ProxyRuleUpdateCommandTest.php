@@ -24,7 +24,7 @@ class ProxyRuleUpdateCommandTest extends TestCase
         parent::setUp();
         $this->bootInMemoryDatabase();
         $this->recordWebserverApply();
-        $this->makeUser('alice');
+        $this->makeMainDomain($this->makeUser('alice'), 'shop.test');
         $this->rule = ProxyRule::query()->create([
             'owner_scope' => 'user',
             'username' => 'alice',
@@ -46,15 +46,62 @@ class ProxyRuleUpdateCommandTest extends TestCase
 
     public function test_valid_values_are_stored(): void
     {
-        $this->update('--upstream-host=10.0.0.9 --upstream-port=8443 --upstream-protocol=https')
+        $this->update('--upstream-host=alice --upstream-port=8443 --upstream-protocol=https')
             ->expectsOutput('New values:')
             ->doesntExpectOutputToContain('\\n')
             ->expectsOutputToContain('Rule updated successfully')
             ->assertExitCode(0);
 
         $rule = $this->rule->fresh();
-        $this->assertSame(['10.0.0.9', 8443, 'https'], [$rule->upstream_host, $rule->upstream_port, $rule->upstream_protocol]);
+        $this->assertSame(['alice', 8443, 'https'], [$rule->upstream_host, $rule->upstream_port, $rule->upstream_protocol]);
         $this->assertWebserverApplied(1);
+    }
+
+    /** A project's rule reaches its own app only; the operator's may point anywhere. */
+    public function test_a_project_rule_cannot_be_pointed_elsewhere(): void
+    {
+        $this->makeUser('bob');
+        foreach (['bob', 'sites-db', '172.25.0.2', '10.0.0.9'] as $upstream) {
+            $this->update("--upstream-host={$upstream}")
+                ->expectsOutput("The upstream must be the project's own app, 'alice': "
+                    . "a project's rule cannot reach another project, the engine's services or the host.")
+                ->assertExitCode(1);
+        }
+        $this->assertSame('alice', $this->rule->fresh()->upstream_host);
+        $this->assertWebserverApplied(0);
+
+        $this->rule->update(['owner_scope' => 'system', 'username' => null]);
+        $this->update('--upstream-host=10.0.0.9')->assertExitCode(0);
+        $this->assertSame('10.0.0.9', $this->rule->fresh()->upstream_host);
+    }
+
+    /** One stored before the check can be switched off or fixed, and nothing else. */
+    public function test_a_rule_stored_before_the_check_is_fixed_or_switched_off(): void
+    {
+        $this->rule->update(['upstream_host' => '172.25.0.2']);
+
+        $this->update('--upstream-port=3307')->assertExitCode(1);
+        $this->update('--enabled=0')->assertExitCode(0);
+        $this->update('--enabled=1')->assertExitCode(1);
+        $this->update('--upstream-host=alice --enabled=1')->assertExitCode(0);
+
+        $this->assertSame(['alice', true], [$this->rule->fresh()->upstream_host, $this->rule->fresh()->enabled]);
+    }
+
+    /** A rule named after another project's site cannot be renamed here, so it can only be switched off. */
+    public function test_a_rule_on_another_projects_site_can_only_be_switched_off(): void
+    {
+        $this->makeMainDomain($this->makeUser('bob'), 'bob.test');
+        $this->rule->update(['server_name' => 'bob.test']);
+
+        $this->update('--upstream-port=8081')
+            ->expectsOutput("The server name must be empty or one of the project's own domains or aliases: "
+                . "a project's rule cannot answer for another project's site.")
+            ->assertExitCode(1);
+        $this->update('--enabled=0')->assertExitCode(0);
+        $this->update('--enabled=1')->assertExitCode(1);
+
+        $this->assertSame([8080, false], [$this->rule->fresh()->upstream_port, $this->rule->fresh()->enabled]);
     }
 
     public function test_disabling_a_rule_is_applied(): void

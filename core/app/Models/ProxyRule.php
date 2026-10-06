@@ -190,11 +190,13 @@ class ProxyRule extends Model
         ?string $upstreamProtocol = null
     ): ?self {
         // The domain vhost renders one rule per port, and an operator's rule beats the default.
+        // Another project's rule named after the domain is never rendered, so it beats nothing.
         $handMade = self::query()
             ->where('transport', 'http')
             ->where('listen_port', $listenPort)
             ->where('server_name', $fqdn)
             ->where('is_generated', false)
+            ->where(static fn (Builder $q) => $q->where('owner_scope', 'system')->orWhere('username', $username))
             ->exists();
         if ($handMade) {
             return null;

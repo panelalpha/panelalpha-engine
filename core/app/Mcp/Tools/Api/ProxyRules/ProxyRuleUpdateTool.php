@@ -64,7 +64,7 @@ class ProxyRuleUpdateTool extends ApiTool
     {
         return [
             'id' => $schema->integer()->required(),
-            'upstream_host' => $schema->string(),
+            'upstream_host' => $schema->string()->description('For a user rule, the project\'s own name. A system rule may name any host or address.'),
             'upstream_port' => $schema->integer(),
             'upstream_protocol' => $schema->string(),
             'enabled' => $schema->boolean(),

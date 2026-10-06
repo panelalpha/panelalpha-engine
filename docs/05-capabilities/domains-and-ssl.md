@@ -84,6 +84,8 @@ List the proxy rules on this engine.
 
 Do not add a rule that opens a public port for an application that already has a hostname. Traffic is supposed to arrive at the engine's webserver, which routes it into the right project: [Security](security.md#the-firewall).
 
+A rule that belongs to a project can only send traffic to that project's own app, named by the project's name. The engine refuses any other destination: another project, an address, the engine's own services (its database server, its API, its image registries) or the server itself. Its hostname, if it has one, must be one of the project's own domains or aliases: a project cannot answer for another project's site, on any port. A rule that belongs to the engine (a system rule) is yours as the server's administrator and may point anywhere the server reaches, the engine's own services included. Its port is opened in the firewall like any other, so a system rule to the database server puts that database on the internet.
+
 ## Mail from a domain
 
 Mail a site sends ends up in spam when its domain does not vouch for the server that sent it. The engine lists the SPF, DKIM, DMARC and MX records a domain needs for mail sent through this host, and checks which of them are published:

@@ -445,6 +445,10 @@ class NginxProxy extends AbstractWebserver implements WebserverInterface
         $proxyExtra = [];
 
         foreach ($rules as $rule) {
+            // Another project's rule named after this domain does not answer for it.
+            if (!ProxyRuleUpstream::serves($rule) || !ProxyRuleServerName::answersFor($rule, $user->username)) {
+                continue;
+            }
             $listenIps = $this->resolveProxyRuleListenIps($rule->listen_ip, $accountIps);
             $upstream = [
                 'host' => $rule->upstream_host,

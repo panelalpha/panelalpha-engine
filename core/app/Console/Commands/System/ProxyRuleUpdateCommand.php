@@ -7,6 +7,8 @@ use App\Models\ProxyRule;
 use App\Rules\UpstreamHost;
 use App\System;
 use App\System\Services\Webserver\ProxyListenPort;
+use App\System\Services\Webserver\ProxyRuleServerName;
+use App\System\Services\Webserver\ProxyRuleUpstream;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -86,6 +88,17 @@ class ProxyRuleUpdateCommand extends Command
         if (($updates['enabled'] ?? false) && !$rule->enabled) {
             $refusal = (new ProxyListenPort(app(System::class)))
                 ->refusal($rule->transport, $rule->listen_ip ?? '*', $rule->listen_port);
+            if ($refusal !== null) {
+                $this->error($refusal);
+                return 1;
+            }
+        }
+
+        // As the API: checked whenever the rule stays or goes live.
+        if ($updates['enabled'] ?? $rule->enabled) {
+            $host = (string) ($updates['upstream_host'] ?? $rule->upstream_host);
+            $refusal = ProxyRuleUpstream::refusal($rule->owner_scope, $rule->username, $host)
+                ?? ProxyRuleServerName::refusal($rule->owner_scope, $rule->username, $rule->server_name);
             if ($refusal !== null) {
                 $this->error($refusal);
                 return 1;
