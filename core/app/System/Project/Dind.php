@@ -260,6 +260,11 @@ class Dind implements DeployableDindProject, Runtime
         return $this->containerOperations()->getServiceLogs($service, $lines, $since, $until);
     }
 
+    public function assertServiceExists(string $service): void
+    {
+        $this->containerOperations()->assertServiceExists($service);
+    }
+
     /**
      * @param callable(string, ?string): void $onLine
      * @param ?callable(): void $onIdle

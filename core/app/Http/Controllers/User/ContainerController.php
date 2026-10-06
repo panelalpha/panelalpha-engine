@@ -111,11 +111,12 @@ class ContainerController extends Controller
                     new OA\Property(property: 'stdout', type: 'string'),
                 ],
             )),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     public function serviceAction(string $username, string $service, Request $request): JsonResponse
     {
-        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $service)) {
+        if (!preg_match(ContainerOperations::SERVICE_NAME, $service)) {
             return new JsonResponse(['message' => 'Invalid service name'], 422);
         }
 
@@ -137,10 +138,15 @@ class ContainerController extends Controller
         return new JsonResponse($result, $result['exit_code'] === 0 ? 200 : 500);
     }
 
-    /** Docker's --since/--until: an RFC 3339 time, or a duration back from now. */
-    private const LOG_TIME = '/^(\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2}))?|(\d+(ms|s|m|h))+)$/';
+    /**
+     * Docker's --since/--until: an RFC 3339 time, or a duration back from now.
+     * \z, since $ also matches before a final newline.
+     */
+    private const LOG_TIME = '/^(\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2}))?|(\d+(ms|s|m|h))+)\z/';
 
     private const LOG_TIME_EXPECTED = 'an RFC 3339 time (2026-10-03T12:00:00Z) or a duration back from now (10m, 2h, 1h30m)';
+
+    private const LOG_LINES_EXPECTED = 'a number of lines, at least 1; at most ' . ContainerOperations::MAX_LOG_LINES . ' are returned';
 
     #[OA\Get(
         path: '/projects/{username}/containers/{service}/logs',
@@ -151,7 +157,7 @@ class ContainerController extends Controller
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'service', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'lines', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 200, maximum: 5000)),
+            new OA\Parameter(name: 'lines', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 200, minimum: 1, maximum: 5000)),
             new OA\Parameter(name: 'since', description: 'Only lines written after this: ' . self::LOG_TIME_EXPECTED . '.', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'until', description: 'Only lines written before this: ' . self::LOG_TIME_EXPECTED . '.', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],
@@ -164,12 +170,12 @@ class ContainerController extends Controller
     )]
     public function logs(string $username, string $service, Request $request): JsonResponse
     {
-        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $service)) {
+        if (!preg_match(ContainerOperations::SERVICE_NAME, $service)) {
             return new JsonResponse(['message' => 'Invalid service name'], 422);
         }
 
         $times = $this->validateLogTimes($request, ['since', 'until']);
-        $lines = min((int) $request->input('lines', 200), ContainerOperations::MAX_LOG_LINES);
+        $lines = $this->validateLogLines($request);
 
         $dind = $this->getDind($username);
         $logs = $dind->getServiceLogs($service, $lines, $times['since'], $times['until']);
@@ -193,7 +199,7 @@ class ContainerController extends Controller
         parameters: [
             new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'service', in: 'path', required: true, schema: new OA\Schema(type: 'string')),
-            new OA\Parameter(name: 'lines', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 200, maximum: 5000)),
+            new OA\Parameter(name: 'lines', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 200, minimum: 1, maximum: 5000)),
             new OA\Parameter(name: 'since', description: 'Only lines written after this: ' . self::LOG_TIME_EXPECTED . '.', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],
         responses: [
@@ -203,13 +209,15 @@ class ContainerController extends Controller
     )]
     public function streamLogs(string $username, string $service, Request $request): StreamedResponse|JsonResponse
     {
-        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $service)) {
+        if (!preg_match(ContainerOperations::SERVICE_NAME, $service)) {
             return new JsonResponse(['message' => 'Invalid service name'], 422);
         }
 
         $since = $this->validateLogTimes($request, ['since'])['since'];
-        $lines = min((int) $request->input('lines', 200), ContainerOperations::MAX_LOG_LINES);
+        $lines = $this->validateLogLines($request);
         $dind = $this->getDind($username);
+        // The stream answers 200 before the follow runs, so an unknown service is refused here.
+        $dind->assertServiceExists($service);
 
         ignore_user_abort(true);
         set_time_limit(0);
@@ -263,6 +271,20 @@ class ContainerController extends Controller
             'X-Accel-Buffering' => 'no',
             'Cache-Control' => 'no-cache',
         ]);
+    }
+
+    /** Docker reads a negative tail as every line, past MAX_LOG_LINES, and 0 as none. */
+    private function validateLogLines(Request $request): int
+    {
+        $lines = (int) $request->input('lines', 200);
+        if ($lines < 1) {
+            throw ProblemException::one('lines', 'lines_invalid', 'The lines must be at least 1.', [
+                'expected' => self::LOG_LINES_EXPECTED,
+                'examples' => ['200', (string) ContainerOperations::MAX_LOG_LINES],
+            ]);
+        }
+
+        return min($lines, ContainerOperations::MAX_LOG_LINES);
     }
 
     /**

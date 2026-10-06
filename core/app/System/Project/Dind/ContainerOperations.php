@@ -2,6 +2,7 @@
 
 namespace App\System\Project\Dind;
 
+use App\Exceptions\ProblemException;
 use App\Lib\Deploy\Platform\Strategies;
 use App\System\Project\Dind as DindProject;
 
@@ -57,6 +58,15 @@ final class ContainerOperations
 
     /** Silence after which a follow asks whether its reader is still there. */
     public const FOLLOW_IDLE_SECONDS = 2;
+
+    /** How long a stream waits for compose to know the service; a slow answer refuses nothing. */
+    public const SERVICE_CHECK_SECONDS = 10;
+
+    /**
+     * A service name as a request may give it; a leading '-' would reach compose as a flag.
+     * \z, since $ also matches before a final newline.
+     */
+    public const SERVICE_NAME = '/^[a-zA-Z0-9_][a-zA-Z0-9_-]*\z/';
 
     /**
      * Inner compose stop for backup downtime (throws on failure).
@@ -215,7 +225,7 @@ final class ContainerOperations
 
         try {
             $output = $this->shell->execAsUser(
-                $this->project->userAppComposeCommand([$action, $service]),
+                $this->project->userAppComposeCommand([$action, '--', $service]),
                 [],
                 120
             );
@@ -223,6 +233,8 @@ final class ContainerOperations
 
             return ['stdout' => $output, 'stderr' => '', 'exit_code' => 0];
         } catch (\Exception $e) {
+            $this->refuseUnknownService($service, $e->getMessage());
+
             return ['stdout' => '', 'stderr' => $e->getMessage(), 'exit_code' => 1];
         }
     }
@@ -242,17 +254,88 @@ final class ContainerOperations
 
     public function getServiceLogs(string $service, int $lines = 200, ?string $since = null, ?string $until = null): string
     {
+        return $this->readServiceLogs($service, $lines, $since, $until, 60);
+    }
+
+    /**
+     * Refuses a service the project does not have. Compose decides, as the
+     * follow would: it takes a profiled service that `config --services` leaves out.
+     */
+    public function assertServiceExists(string $service): void
+    {
+        $this->readServiceLogs($service, 0, null, null, self::SERVICE_CHECK_SECONDS);
+    }
+
+    private function readServiceLogs(string $service, int $lines, ?string $since, ?string $until, int $timeout): string
+    {
         self::assertServiceName($service);
 
         try {
             return $this->shell->execAsUser(
                 $this->project->userAppComposeCommand(self::logsArgs($service, $lines, $since, $until, false)),
                 [],
-                60
+                $timeout
             );
         } catch (\Exception $e) {
+            $this->refuseUnknownService($service, $e->getMessage());
+
             return $e->getMessage();
         }
+    }
+
+    /**
+     * Whether compose refused this very name, quoted or not; not a longer name,
+     * a dependency, or a profiled service it calls disabled.
+     */
+    private static function meansNoSuchService(string $error, string $service): bool
+    {
+        $name = preg_quote($service, '/');
+
+        return preg_match('/no such service: "?' . $name . '(?![\w.-])(?!"?: disabled)/', $error) === 1;
+    }
+
+    /** Throws service_not_found when compose refused the service and does not list it either. */
+    private function refuseUnknownService(string $service, string $error): void
+    {
+        if (!self::meansNoSuchService($error, $service)) {
+            return;
+        }
+
+        $services = [];
+        try {
+            // Every profile, since logs and the actions take a profiled service as well.
+            $listed = $this->shell->execAsUser(
+                $this->project->userAppComposeCommand(['--profile', '*', 'config', '--services']),
+                [],
+                60
+            );
+            $names = array_map('trim', explode("\n", $listed));
+            $services = array_values(array_filter($names, static fn (string $s): bool => $s !== ''));
+            // Compose lists them in a different order on every call; sorted, the same ten show each time.
+            sort($services, SORT_NATURAL);
+        } catch (\Exception) {
+            // The refusal stands without the list.
+        }
+        // Listed after all, so the refusal meant something else; the caller keeps compose's error.
+        if (in_array($service, $services, true)) {
+            return;
+        }
+
+        $message = "The project has no service named '{$service}'.";
+        if ($services === []) {
+            throw ProblemException::one('service', 'service_not_found', $message);
+        }
+
+        // Every service is a valid value, so expected names them all; the message
+        // shows ten, as a missing git branch does, and examples five, as the `in` rule does.
+        $more = count($services) - 10;
+        $message .= ' Its services: ' . implode(', ', array_slice($services, 0, 10))
+            . ($more > 0 ? " and {$more} more" : '') . '.';
+
+        throw ProblemException::one('service', 'service_not_found', $message, [
+            'expected' => 'one of: ' . implode(', ', $services),
+            'examples' => array_slice($services, 0, 5),
+        ]);
     }
 
     /**
@@ -318,7 +401,8 @@ final class ContainerOperations
         if ($until !== null && $until !== '') {
             $args[] = '--until=' . $until;
         }
-        $args[] = $service;
+        // Whatever the name, compose reads it as a service, never as an option.
+        array_push($args, '--', $service);
 
         return $args;
     }
@@ -339,7 +423,7 @@ final class ContainerOperations
 
     private static function assertServiceName(string $service): void
     {
-        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $service)) {
+        if (!preg_match(self::SERVICE_NAME, $service)) {
             throw new \InvalidArgumentException("Invalid service name: {$service}");
         }
     }

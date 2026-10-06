@@ -74,7 +74,7 @@ class ContainerServiceLogsTool extends ApiTool
         return [
             'name' => $schema->string()->required(),
             'service' => $schema->string()->required(),
-            'lines' => $schema->integer()->max(5000),
+            'lines' => $schema->integer()->min(1)->max(5000),
             'since' => $schema->string()->description('Only lines written after this: an RFC 3339 time (2026-10-03T12:00:00Z) or a duration back from now (10m, 2h, 1h30m).'),
             'until' => $schema->string()->description('Only lines written before this: an RFC 3339 time (2026-10-03T12:00:00Z) or a duration back from now (10m, 2h, 1h30m).'),
         ];
