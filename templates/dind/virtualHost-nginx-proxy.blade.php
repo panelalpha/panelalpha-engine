@@ -59,6 +59,9 @@ server {
             proxy_set_header Connection $pa_connection_upgrade;
             proxy_read_timeout 3600s;
             proxy_send_timeout 3600s;
+            # nginx still honours it for its own buffering; passing it on lets a
+            # front such as the panelalpha.online tunnel stream the answer too.
+            proxy_pass_header X-Accel-Buffering;
             set $proxyupstream {{ $proxy_http['host'] }};
             proxy_pass {{ $proxy_http['protocol'] ?? 'http' }}://$proxyupstream:{{ $proxy_http['port'] }};
             # An absolute redirect built upstream (Apache's DirectorySlash, a
@@ -171,6 +174,7 @@ server {
                 proxy_set_header Connection $pa_connection_upgrade;
                 proxy_read_timeout 3600s;
                 proxy_send_timeout 3600s;
+                proxy_pass_header X-Accel-Buffering;
                 proxy_ssl_server_name on;
                 proxy_ssl_name $host;
                 set $proxyupstream {{ $proxy_https['host'] }};
@@ -293,6 +297,7 @@ server {
             proxy_set_header Connection $pa_connection_upgrade;
             proxy_read_timeout 3600s;
             proxy_send_timeout 3600s;
+            proxy_pass_header X-Accel-Buffering;
             set $proxyupstream {{ $extra['host'] }};
             proxy_pass {{ $extra['protocol'] ?? 'http' }}://$proxyupstream:{{ $extra['port'] }};
             proxy_redirect {{ $extra['protocol'] ?? 'http' }}://$host:{{ $extra['port'] }}/ /;

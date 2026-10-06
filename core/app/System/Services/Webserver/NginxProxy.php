@@ -674,6 +674,7 @@ server {
         proxy_set_header X-Forwarded-Host \$server_name;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
+        proxy_pass_header X-Accel-Buffering;
     }
 }
 NGINX;
