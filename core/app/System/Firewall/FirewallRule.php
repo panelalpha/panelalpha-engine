@@ -32,6 +32,9 @@ final class FirewallRule
     /** Rules the installer opens carry this comment prefix; the API leaves them alone. */
     public const MANAGED_PREFIX = 'panelalpha:';
 
+    /** fail2ban's bans carry this comment prefix; a deny from an address with it is handled as a ban. */
+    public const BAN_PREFIX = 'by Fail2Ban';
+
     /**
      * What a comment cannot hold: ufw refuses a ' (ufw/parser.py), a comment
      * is one line, and a NUL cannot be passed in a command's argument.
@@ -165,9 +168,10 @@ final class FirewallRule
     /**
      * What makes this rule unsafe or unwritable whatever the provider.
      *
+     * @param self|null $current the rule this one replaces, on an edit
      * @return array<string, string> field => message
      */
-    public function problems(): array
+    public function problems(?self $current = null): array
     {
         $problems = [];
         // A rule on nothing would allow or drop every connection.
@@ -192,11 +196,34 @@ final class FirewallRule
         if ($this->scope === self::PUBLISHED && $this->direction !== self::IN) {
             $problems['direction'] = 'A rule for published ports is for connections coming in.';
         }
-        if ($this->comment !== null && ($problem = $this->commentProblem($this->comment)) !== null) {
+        if ($this->comment !== null && ($problem = $this->banPrefixProblem($this->comment, $current) ?? $this->commentProblem($this->comment)) !== null) {
             $problems['comment'] = $problem;
         }
 
         return $problems;
+    }
+
+    /**
+     * Deleting a rule taken for a ban lifts the ban on its address in fail2ban.
+     * So the prefix stays only on a rule that has it already, and on a deny
+     * from an address only on a ban that still bans the same address.
+     */
+    private function banPrefixProblem(string $comment, ?self $current): ?string
+    {
+        if (!str_starts_with($comment, self::BAN_PREFIX)) {
+            return null;
+        }
+        // Read as this rule was, so a stored comment with trailing blanks is the same comment.
+        $was = $current?->with([]);
+        if ($was === null || $comment !== $was->comment) {
+            return 'The comment prefix "' . self::BAN_PREFIX . '" marks the bans fail2ban makes.';
+        }
+        // Whether it was a ban is read from the comment as stored, as ufw's own check reads it.
+        if ($this->isBan() && !($current->isBan() && $was->source === $this->source)) {
+            return 'A deny from an address with the comment prefix "' . self::BAN_PREFIX . '" is taken for a fail2ban ban; only a ban keeps it, from the address it bans. Change the comment.';
+        }
+
+        return null;
     }
 
     /**
@@ -247,6 +274,15 @@ final class FirewallRule
     public function managed(): bool
     {
         return $this->comment !== null && str_starts_with($this->comment, self::MANAGED_PREFIX);
+    }
+
+    /**
+     * A fail2ban ban. fail2ban writes only denies: an allow made from a ban keeps its comment, and handled
+     * as a ban, its edit could put it back over a new ban, and fail2ban would be told to lift that one.
+     */
+    public function isBan(): bool
+    {
+        return $this->action === self::DENY && $this->source !== null && $this->comment !== null && str_starts_with($this->comment, self::BAN_PREFIX);
     }
 
     /** Whether both match the same traffic the same way; the comment does not count. */

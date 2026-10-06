@@ -185,4 +185,48 @@ class FirewallRuleTest extends TestCase
             }
         }
     }
+
+    public function test_a_comment_that_marks_a_fail2ban_ban_is_refused_unless_it_cannot_make_a_new_ban(): void
+    {
+        $message = 'The comment prefix "by Fail2Ban" marks the bans fail2ban makes.';
+        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => '192.0.2.160']);
+        $allow = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '25392']);
+        // fromArray trims, so leading blanks are the same comment.
+        foreach (['by Fail2Ban', 'by Fail2Ban test', 'by Fail2Ban after 5 attempts against sshd', '  by Fail2Ban test', "\tby Fail2Ban test"] as $comment) {
+            foreach ([$deny, $allow] as $rule) {
+                $this->assertSame($message, $rule->with(['comment' => $comment])->problems()['comment'] ?? null, $comment);
+                $this->assertSame($message, $rule->with(['comment' => $comment])->problems($rule)['comment'] ?? null, $comment);
+            }
+        }
+
+        $ban = $deny->with(['comment' => 'by Fail2Ban after 5 attempts against sshd']);
+        $this->assertTrue($ban->isBan());
+        $this->assertSame([], $ban->with(['protocol' => 'tcp', 'port' => '22'])->problems($ban), 'a ban keeps its comment on an edit');
+        $this->assertSame([], $ban->with(['source' => '192.0.2.160/32'])->problems($ban), 'the same address, spelled otherwise');
+        $this->assertSame([], $ban->with(['action' => 'allow', 'scope' => 'host'])->problems($ban));
+        $this->assertSame($message, $ban->with(['comment' => 'by Fail2Ban after 6 attempts against sshd'])->problems($ban)['comment'] ?? null);
+        // A stored comment with trailing blanks is the comment the edit sends back trimmed.
+        $stored = new FirewallRule('deny', 'in', null, null, '192.0.2.160', null, 'by Fail2Ban after 5 attempts against sshd  ', scope: FirewallRule::BOTH);
+        $this->assertSame([], $stored->with(['protocol' => 'tcp', 'port' => '22'])->problems($stored));
+
+        // An edit that keeps the comment but makes a ban of another rule, or of another address, is refused.
+        $kept = 'A deny from an address with the comment prefix "by Fail2Ban" is taken for a fail2ban ban; only a ban keeps it, from the address it bans. Change the comment.';
+        $fromBan = $ban->with(['action' => 'allow', 'scope' => 'host', 'protocol' => 'tcp', 'port' => '80']);
+        $this->assertFalse($fromBan->isBan());
+        $this->assertSame([], $fromBan->with(['port' => '8080'])->problems($fromBan), 'an allow made from a ban keeps its comment');
+        $this->assertSame($kept, $fromBan->with(['action' => 'deny'])->problems($fromBan)['comment'] ?? null);
+        $this->assertSame($kept, $fromBan->with(['action' => 'deny', 'source' => '192.0.2.163'])->problems($fromBan)['comment'] ?? null);
+        $this->assertSame($kept, $ban->with(['source' => '192.0.2.164'])->problems($ban)['comment'] ?? null);
+        $operator = new FirewallRule('allow', 'in', 'tcp', '80', null, null, 'by Fail2Ban test');
+        $this->assertSame([], $operator->with(['port' => '8080'])->problems($operator));
+        $this->assertSame($kept, $operator->with(['action' => 'deny', 'source' => '192.0.2.165'])->problems($operator)['comment'] ?? null);
+        $this->assertSame([], $operator->with(['action' => 'deny'])->problems($operator), 'a deny from any address is not taken for a ban');
+
+        // Only this prefix, as written, is taken for a ban.
+        foreach (['Blocked by Fail2Ban by hand', 'by fail2ban, by hand', 'by Fail2ban', 'BY FAIL2BAN', 'fail2ban test', 'by  Fail2Ban'] as $comment) {
+            foreach ([$deny, $allow] as $rule) {
+                $this->assertSame([], $rule->with(['comment' => $comment])->problems(), $comment);
+            }
+        }
+    }
 }

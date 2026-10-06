@@ -333,6 +333,70 @@ class FirewallHttpTest extends TestCase
         $this->assertSame(['both', 'let them in'], [$data['scope'], $data['comment']]);
     }
 
+    public function test_a_comment_that_marks_a_fail2ban_ban_is_refused_and_a_ban_keeps_its_own(): void
+    {
+        $message = 'The comment prefix "by Fail2Ban" marks the bans fail2ban makes.';
+        $f2b = 'by Fail2Ban after 5 attempts against sshd';
+        $cases = [
+            ['action' => 'deny', 'source' => '192.0.2.160', 'comment' => 'by Fail2Ban test'],
+            ['action' => 'deny', 'source' => '192.0.2.160', 'comment' => '  by Fail2Ban test'],
+            ['action' => 'deny', 'source' => '192.0.2.160', 'protocol' => 'tcp', 'port' => '22', 'comment' => $f2b],
+            ['action' => 'allow', 'protocol' => 'tcp', 'port' => '25392', 'comment' => 'by Fail2Ban'],
+        ];
+        foreach ($cases as $body) {
+            $response = $this->postJson('/api/firewall/rules', $body);
+            $this->assertInvalid($response, ['comment']);
+            $this->assertSame(['comment' => [$message]], $response->json('errors'), (string) $response->getContent());
+        }
+        $this->assertSame([], $this->firewall->rules);
+
+        // An operator's rule cannot be given the prefix; a ban sent back with its own comment is edited as before.
+        $office = $this->hold(['action' => 'deny', 'source' => '192.0.2.161', 'comment' => 'office']);
+        $this->assertSame([$message], $this->putJson("/api/firewall/rules/{$office->id()}", ['comment' => $f2b])->assertStatus(422)->json('errors.comment'));
+        $ban = $this->hold(['action' => 'deny', 'source' => '198.51.100.9', 'comment' => $f2b]);
+        $edited = $this->putJson("/api/firewall/rules/{$ban->id()}", ['action' => 'deny', 'source' => '198.51.100.9', 'protocol' => 'tcp', 'port' => '22', 'comment' => $f2b])
+            ->assertOk()->json('data');
+        $this->assertSame(['22', $f2b], [$edited['port'], $edited['comment']]);
+        $this->assertSame([$message], $this->putJson("/api/firewall/rules/{$edited['id']}", ['comment' => 'by Fail2Ban after 6 attempts against sshd'])->assertStatus(422)->json('errors.comment'));
+        // An allow made from a ban keeps the comment it has.
+        $allow = $this->putJson("/api/firewall/rules/{$edited['id']}", ['action' => 'allow', 'scope' => 'host', 'comment' => $f2b])->assertOk()->json('data');
+        $allow = $this->putJson("/api/firewall/rules/{$allow['id']}", ['port' => '2222', 'comment' => $f2b])->assertOk()->assertJsonPath('data.comment', $f2b)->json('data');
+
+        // Keeping the comment does not make a ban of another rule or another address.
+        $kept = 'A deny from an address with the comment prefix "by Fail2Ban" is taken for a fail2ban ban; only a ban keeps it, from the address it bans. Change the comment.';
+        $ban2 = $this->hold(['action' => 'deny', 'source' => '198.51.100.20', 'comment' => $f2b]);
+        $old = $this->hold(new FirewallRule('allow', 'in', 'tcp', '80', null, null, 'by Fail2Ban test'));
+        $refused = [
+            'an allow made from a ban, made a deny from an address' => ["/api/firewall/rules/{$allow['id']}", ['action' => 'deny', 'source' => '192.0.2.163']],
+            'the same, from its own address' => ["/api/firewall/rules/{$allow['id']}", ['action' => 'deny']],
+            'a ban moved to another address' => ["/api/firewall/rules/{$ban2->id()}", ['source' => '192.0.2.164', 'comment' => $f2b]],
+            'an old allow with the prefix, made a deny from an address' => ["/api/firewall/rules/{$old->id()}", ['action' => 'deny', 'source' => '192.0.2.165']],
+        ];
+        $before = $this->firewall->rules;
+        foreach ($refused as $case => [$url, $body]) {
+            $this->assertSame([$kept], $this->putJson($url, $body)->assertStatus(422)->json('errors.comment'), $case);
+        }
+        $this->assertSame($before, $this->firewall->rules);
+        // A ban whose stored comment has trailing blanks is still edited.
+        $blanks = $this->hold(new FirewallRule('deny', 'in', null, null, '198.51.100.21', null, $f2b . '  ', scope: FirewallRule::BOTH));
+        $this->putJson("/api/firewall/rules/{$blanks->id()}", ['protocol' => 'tcp', 'port' => '22', 'comment' => $f2b])->assertOk()->assertJsonPath('data.comment', $f2b);
+
+        foreach ([[FirewallRuleCreateTool::class, ['action' => 'deny', 'source' => '192.0.2.162']], [FirewallRuleUpdateTool::class, ['id' => $office->id()]]] as [$tool, $args]) {
+            $response = (new $tool())->handle(new Request($args + ['comment' => 'by Fail2Ban test']));
+            $this->assertTrue($response->isError());
+            $payload = json_decode((string) $response->content(), true);
+            $this->assertSame(422, $payload['status']);
+            $this->assertSame([$message], $payload['data']['errors']['comment']);
+        }
+        $this->assertSame('office', $this->firewall->rules[$office->id()]->comment);
+
+        foreach (['Blocked by Fail2Ban by hand', 'by fail2ban, by hand', 'fail2ban test'] as $i => $comment) {
+            $this->postJson('/api/firewall/rules', ['action' => 'deny', 'source' => '192.0.2.' . (170 + $i), 'comment' => $comment])
+                ->assertOk()->assertJsonPath('data.comment', $comment);
+        }
+        $this->putJson("/api/firewall/rules/{$office->id()}", ['comment' => 'seen by Fail2Ban'])->assertOk()->assertJsonPath('data.comment', 'seen by Fail2Ban');
+    }
+
     public function test_the_providers_refusal_is_a_422_in_its_words(): void
     {
         $this->firewall->refuse = 'Invalid position';

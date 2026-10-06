@@ -93,7 +93,7 @@ class FirewallController extends Controller
                 new OA\Property(property: 'port', type: 'string', nullable: true, example: '22', description: 'Destination port, range (30000:30009) or comma list.'),
                 new OA\Property(property: 'source', type: 'string', nullable: true, example: '203.0.113.7', description: 'IPv4/IPv6 address or CIDR. Omit for any.'),
                 new OA\Property(property: 'destination', type: 'string', nullable: true, description: 'IPv4/IPv6 address or CIDR. Omit for any.'),
-                new OA\Property(property: 'comment', type: 'string', nullable: true, description: 'One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words.'),
+                new OA\Property(property: 'comment', type: 'string', nullable: true, description: 'One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words. A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused.'),
             ],
         )),
         responses: [
@@ -128,7 +128,7 @@ class FirewallController extends Controller
                 new OA\Property(property: 'port', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'source', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'destination', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'comment', type: 'string', nullable: true, description: 'One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words.', x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'comment', type: 'string', nullable: true, description: 'One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words. A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused unless the rule has that comment already, and on a deny from an address only if the rule is a ban from that same address.', x: ['mcp-nullable' => true]),
             ],
         )),
         responses: [
@@ -141,8 +141,8 @@ class FirewallController extends Controller
     {
         $current = $this->changeable($id);
         $rule = $current->with($request->rule());
-        if ($rule->problems() !== []) {
-            throw ValidationException::withMessages($rule->problems());
+        if (($problems = $rule->problems($current)) !== []) {
+            throw ValidationException::withMessages($problems);
         }
 
         $updated = $this->attempt(fn () => $this->firewall()->updateRule($id, $rule));

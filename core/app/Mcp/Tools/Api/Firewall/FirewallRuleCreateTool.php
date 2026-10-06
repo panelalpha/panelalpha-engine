@@ -61,7 +61,7 @@ class FirewallRuleCreateTool extends ApiTool
             'port' => $schema->string()->description('Destination port, range (30000:30009) or comma list. Example: 22.'),
             'source' => $schema->string()->description('IPv4/IPv6 address or CIDR. Omit for any. Example: 203.0.113.7.'),
             'destination' => $schema->string()->description('IPv4/IPv6 address or CIDR. Omit for any.'),
-            'comment' => $schema->string()->description('One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words.'),
+            'comment' => $schema->string()->description('One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words. A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused.'),
         ];
     }
 }

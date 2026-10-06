@@ -74,7 +74,7 @@ class FirewallRuleUpdateTool extends ApiTool
             'port' => $schema->string()->nullable(),
             'source' => $schema->string()->nullable(),
             'destination' => $schema->string()->nullable(),
-            'comment' => $schema->string()->description('One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words.')->nullable(),
+            'comment' => $schema->string()->description('One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words. A comment that starts with by Fail2Ban, which marks the bans fail2ban makes, is refused unless the rule has that comment already, and on a deny from an address only if the rule is a ban from that same address.')->nullable(),
         ];
     }
 }

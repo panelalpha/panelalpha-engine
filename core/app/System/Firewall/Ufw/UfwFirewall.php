@@ -219,7 +219,7 @@ class UfwFirewall implements Firewall
             $this->delete($old);
             // A ban's new rule goes in under a lock of its own: fail2ban's unban, run
             // once this one is released, would take it too.
-            if (self::isBan($old)) {
+            if ($old->isBan()) {
                 return [$old, null, $others];
             }
 
@@ -292,7 +292,7 @@ class UfwFirewall implements Firewall
         // A fail2ban ban: lift it in fail2ban too, or its ban database writes
         // the rule back the next time fail2ban starts. Only once the lock is
         // released: fail2ban's unban action waits for it.
-        if (self::isBan($rule)) {
+        if ($rule->isBan()) {
             $source = (string) $rule->source;
             $this->afterUnlock[] = fn () => $this->system->runProcessOnHost(['fail2ban-client', 'unban', $source]);
         }
@@ -389,13 +389,6 @@ class UfwFirewall implements Firewall
         if (!$apply->isSuccessful()) {
             throw new FirewallException(trim($apply->getErrorOutput() ?: $apply->getOutput()) ?: 'fail2ban did not take the new list');
         }
-    }
-
-    private static function isBan(FirewallRule $rule): bool
-    {
-        // fail2ban writes only denies. An allow made from a ban keeps its comment; handled as a
-        // ban, its edit could put it back over a new ban, and fail2ban would be told to lift that one.
-        return $rule->action === FirewallRule::DENY && $rule->source !== null && str_starts_with((string) $rule->comment, 'by Fail2Ban');
     }
 
     /**
