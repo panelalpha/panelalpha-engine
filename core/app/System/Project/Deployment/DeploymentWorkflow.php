@@ -368,9 +368,7 @@ final class DeploymentWorkflow
             if ($hint !== null) {
                 $deployLogger?->info($hint);
             }
-            $full = $hint !== null
-                ? "Failed to start app: {$message} | {$hint}"
-                : "Failed to start app: {$message}";
+            $full = self::startFailure($message) . ($hint !== null ? " | {$hint}" : '');
             // The rule is matched here, on the output, as telemetry does: the
             // sentence thrown on no longer carries anything a rule can match.
             $region = trim(FailureOutput::select($raw));
@@ -436,7 +434,13 @@ final class DeploymentWorkflow
     {
         $logger?->recordFailureOutput($output);
 
-        return 'Failed to start app: ' . $this->failureSentence($output);
+        return self::startFailure($this->failureSentence($output));
+    }
+
+    /** A new version the switch refused for an empty page did start: only the sentence is said. */
+    private static function startFailure(string $sentence): string
+    {
+        return str_starts_with($sentence, DeployFailureExplainer::EMPTY_NEW_VERSION) ? $sentence : "Failed to start app: {$sentence}";
     }
 
     /**

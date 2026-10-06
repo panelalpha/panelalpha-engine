@@ -643,6 +643,35 @@ class DeploymentWorkflowTest extends TestCase
         }
     }
 
+    /** A new version refused for an empty page did start; the failure says what it served, not that it did not start. */
+    public function test_a_new_version_refused_for_an_empty_page_is_not_called_a_failed_start(): void
+    {
+        $domain = new DomainModel();
+        $domain->domain = 'alice.example.test';
+        $refusal = ZeroDowntimeRedeploy::refusal('it answers HTTP 200 with an empty page');
+        $paths = [
+            'checkout' => fn (DeploymentWorkflow $w, DeployLogger $l) => $w->rebuildFromCheckout($l),
+            'source' => fn (DeploymentWorkflow $w, DeployLogger $l) => $w->rebuildFromSource($l, null),
+            'archive' => fn (DeploymentWorkflow $w, DeployLogger $l) => $w->deployFromArchive($l, '/project/app.zip'),
+        ];
+        foreach ($paths as $name => $run) {
+            $mechanics = new RecordingDeployMechanics($this->dindModel(['deploy_strategy' => 'dockerfile']), $domain);
+            $mechanics->hasGit = true;
+            $mechanics->startResult = ZeroDowntimeRedeploy::previousKept('', $refusal, 1);
+
+            try {
+                $run(new DeploymentWorkflow(new StubDindProject($mechanics->user()), $mechanics), $this->silentDeployLogger());
+                $this->fail("{$name}: expected the deploy to fail");
+            } catch (ProblemException $e) {
+                $this->assertSame('new-version-empty-page', $e->problems[0]['code'], $name);
+                $this->assertSame($refusal, $e->problems[0]['message'], $name);
+            }
+            $this->assertFalse($mechanics->aborted, $name);
+        }
+        $this->assertStringContainsString('previous version is still serving', $refusal);
+        $this->assertStringContainsString('answers 204', $refusal);
+    }
+
     public function test_a_failed_checkout_redeploy_without_a_kept_version_still_tears_down(): void
     {
         $model = $this->dindModel(['deploy_strategy' => 'express']);

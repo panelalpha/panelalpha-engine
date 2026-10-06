@@ -11,6 +11,9 @@ use App\Lib\Deploy\Dind\RegistryAuth;
  */
 class DeployFailureExplainer
 {
+    /** Leads the failure of a redeploy whose new version the switch refused for an empty page. */
+    public const EMPTY_NEW_VERSION = 'The new version answers with an empty page';
+
     private const REGISTRY_ERROR = '/(?:manifest unknown|manifest for \S+ not found|pull access denied'
         . '|failed to resolve source metadata|failed to do request'
         . '|failed to resolve reference (?:"([^"\n]+)"|(\S+)))/i';
@@ -298,6 +301,13 @@ class DeployFailureExplainer
                         ? $sentence . ' The full output is in the deploy log.'
                         : $sentence . ' It printed: ' . self::clip($said) . ' The full output is in the deploy log.';
                 },
+            ],
+
+            // The zero-downtime switch refused a new version serving an empty page. The
+            // sentence is already the gate's own; the rule gives the failure its name.
+            'new-version-empty-page' => [
+                '/' . preg_quote(self::EMPTY_NEW_VERSION, '/') . '[^\n]*/',
+                static fn (array $m): string => $m[0],
             ],
 
             // Language toolchain too old for what the project declares.

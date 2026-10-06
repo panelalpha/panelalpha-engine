@@ -2,6 +2,9 @@
 
 namespace Tests\Unit\System\Project\Dind\Generation;
 
+use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
+use App\Lib\Deploy\Health\ProbedResponse;
+use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\Generation\CheckoutAside;
 use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
 use PHPUnit\Framework\TestCase;
@@ -96,5 +99,75 @@ class ZeroDowntimeRedeployTest extends TestCase
         $this->assertSame([32771 => 3000], ZeroDowntimeRedeploy::inverse(ZeroDowntimeRedeploy::switchMap([8080 => 32771], 8080, 3000)));
         // Taking traffic lands on the new version's own port.
         $this->assertSame([32771 => 8080], ZeroDowntimeRedeploy::inverse([8080 => 32771]));
+    }
+
+    /** One line of the probe script's output, as the gate parses it. */
+    private static function probed(string $codeAndTime, string $body): array
+    {
+        return AppHealth::parseProbeOutput("32768\thttp\t{$codeAndTime}\t\t" . base64_encode($body) . "\t/\n", [32768])[0];
+    }
+
+    /** An empty 200 answers, and moving traffic to it would serve every visitor a blank page. */
+    public function test_a_new_version_answering_an_empty_page_does_not_take_traffic(): void
+    {
+        $this->assertSame(
+            ['status' => 'fail', 'http_code' => 200, 'detail' => 'HTTP 200 with an empty page'],
+            ZeroDowntimeRedeploy::gateAnswer(self::probed('200 0.002', ''))
+        );
+        $this->assertSame('fail', ZeroDowntimeRedeploy::gateAnswer(self::probed('200 0.002', "\n"))['status']);
+    }
+
+    public function test_a_page_with_content_or_no_content_on_purpose_takes_traffic(): void
+    {
+        foreach ([[200, '<html>v2</html>'], [200, '{}'], [200, '[]'], [200, 'ok'], [204, ''], [302, ''], [404, '']] as [$code, $body]) {
+            $answer = ZeroDowntimeRedeploy::gateAnswer(self::probed("{$code} 0.002", $body));
+
+            $this->assertSame(['status' => 'ok', 'http_code' => $code, 'detail' => "HTTP {$code}"], $answer, "{$code} '{$body}'");
+        }
+    }
+
+    /** The probe brings back 4096 bytes; whitespace filling all of them is the start of a longer page. */
+    public function test_a_page_padded_past_the_sample_takes_traffic(): void
+    {
+        $answer = ZeroDowntimeRedeploy::gateAnswer(self::probed('200 0.002', str_repeat("\n", ProbedResponse::SAMPLE_BYTES)));
+
+        $this->assertSame(['status' => 'ok', 'http_code' => 200, 'detail' => 'HTTP 200'], $answer);
+    }
+
+    /** Refused for an empty page, the new version did start: the failure says what it served and that the old one serves. */
+    public function test_a_refusal_for_an_empty_page_says_so_and_names_its_rule(): void
+    {
+        foreach (['it answers HTTP 200 with an empty page', 'nothing answered within 300 s (HTTP 200 with an empty page)'] as $failure) {
+            $refusal = ZeroDowntimeRedeploy::refusal($failure);
+
+            $this->assertStringStartsWith(DeployFailureExplainer::EMPTY_NEW_VERSION, $refusal);
+            $this->assertStringContainsString('the previous version is still serving', $refusal);
+            $this->assertStringContainsString('A route meant to send nothing answers 204.', $refusal);
+            $this->assertStringNotContainsString('healthy', $refusal);
+            $this->assertSame(['rule' => 'new-version-empty-page', 'message' => $refusal], DeployFailureExplainer::match($refusal));
+        }
+    }
+
+    public function test_other_refusals_read_as_before(): void
+    {
+        $this->assertSame(
+            'The new version did not become healthy: it answers HTTP 502. The previous version is still serving.',
+            ZeroDowntimeRedeploy::refusal('it answers HTTP 502')
+        );
+        $this->assertSame(
+            'The new version did not become healthy: it exited with code 1. The previous version is still serving.',
+            ZeroDowntimeRedeploy::refusal('it exited with code 1')
+        );
+    }
+
+    public function test_a_server_error_or_silence_still_fails_the_gate_as_before(): void
+    {
+        $this->assertSame(
+            ['status' => 'fail', 'http_code' => 502, 'detail' => 'HTTP 502'],
+            ZeroDowntimeRedeploy::gateAnswer(self::probed('502 0.001', ''))
+        );
+        $silent = ZeroDowntimeRedeploy::gateAnswer(AppHealth::parseProbeOutput("32768\thttp\t000 0\tConnection refused\t\t/\n", [32768])[0]);
+        $this->assertSame('fail', $silent['status']);
+        $this->assertNull($silent['http_code']);
     }
 }

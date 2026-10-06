@@ -49,8 +49,11 @@ class GenerationSweepTest extends TestCase
 
     private int $appPort = 3000;
 
-    /** @var array<int, int> port => the HTTP code it answers */
+    /** @var array<int, int> port => the HTTP code it answers, with a page */
     private array $answers = [];
+
+    /** @var list<int> ports that answer their code with an empty body */
+    private array $blank = [];
 
     protected function setUp(): void
     {
@@ -220,6 +223,24 @@ class GenerationSweepTest extends TestCase
         $this->assertSame([3000], $this->routed, 'the site\'s own rules too');
     }
 
+    /** A new version left serving an empty page is not one worth keeping. */
+    public function test_a_new_version_that_answers_an_empty_page_is_replaced_by_the_previous_one(): void
+    {
+        $this->appPort = 8080;
+        $this->interrupted(gated: true, applied: true);
+        $this->answers = [8080 => 200, 3000 => 200];
+        $this->blank = [8080];
+
+        $done = GenerationSweep::settleInterrupted($this->project());
+
+        $this->assertSame('previous version started again', $done[0]);
+        $this->assertSame([3000], $this->routed);
+        $this->assertStringContainsString(
+            'because the new version passed its health check but no longer answers (it answers HTTP 200 with an empty page); it answers',
+            $this->lastLine()
+        );
+    }
+
     public function test_with_nothing_of_the_previous_version_left_the_new_one_stays_and_the_log_says_it_does_not_answer(): void
     {
         $this->interrupted(gated: false);
@@ -344,7 +365,12 @@ class GenerationSweepTest extends TestCase
             return 'sha256:cccccccccccc0000';
         }
         if (str_contains($line, 'curl')) {
-            return implode("\n", array_map(static fn (int $port, int $code): string => "{$port}\thttp\t{$code} 0.010\t", array_keys($this->answers), $this->answers)) . "\n";
+            return implode("\n", array_map(
+                fn (int $port, int $code): string => "{$port}\thttp\t{$code} 0.010\t\t"
+                    . (in_array($port, $this->blank, true) ? '' : base64_encode("<html>{$code}</html>")) . "\t/",
+                array_keys($this->answers),
+                $this->answers
+            )) . "\n";
         }
 
         return '';

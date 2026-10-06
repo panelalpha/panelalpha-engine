@@ -6,6 +6,7 @@ use App\System\Project\Dind;
 use App\Lib\Deploy\Compose\ComposeYaml;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\DetectAppPort;
+use App\Lib\Deploy\Health\CheckRegistry;
 use App\Lib\Deploy\Health\CheckResult;
 use App\Lib\Deploy\Health\CheckRunner;
 use App\Lib\Deploy\Health\HealthCheck;
@@ -564,21 +565,33 @@ class AppHealth
     }
 
     /**
-     * A PHP front page that answers 2xx with nothing in it is not serving.
-     *
-     * A fatal the application suppresses itself (PHP Server Monitor masks
-     * E_ERROR before config.php exists) ends every request with an empty 200,
-     * and no check can match text that is not there. PHP only: an empty 200
-     * from an API or a worker's status port can be correct.
+     * A 2xx with nothing in it: what a visitor sees as a blank page. 204 and
+     * 205 mean "no content" on purpose; any body at all, an API's `{}` or `[]`
+     * included, is content.
+     */
+    public static function isBlankPage(int $status, string $body): bool
+    {
+        // A full sample can be the start of a longer page; only a shorter one is the whole body.
+        return $status >= 200 && $status < 300 && !in_array($status, [204, 205], true)
+            && strlen($body) < ProbedResponse::SAMPLE_BYTES && trim($body) === '';
+    }
+
+    /**
+     * A front page that answers 2xx with nothing in it is not serving, in any
+     * runtime: no check can match text that is not there, and every visitor
+     * gets a blank page. In PHP it is usually a fatal the application
+     * suppresses itself (PHP Server Monitor masks E_ERROR before config.php
+     * exists).
      *
      * @param array{serving: string, checks: list<array<string, mixed>>} $verdict
      * @return array{serving: string, checks: list<array<string, mixed>>}
      */
     public static function withBlankPageCheck(array $verdict, ?string $runtime, ProbedResponse $front): array
     {
-        if ($runtime !== PlatformManifest::RUNTIME_PHP || !$front->statusMatches(['2xx']) || trim($front->body) !== '') {
+        if (!self::isBlankPage($front->status, $front->body)) {
             return $verdict;
         }
+        $php = $runtime === PlatformManifest::RUNTIME_PHP;
 
         $outranked = false;
         foreach ($verdict['checks'] as $check) {
@@ -588,13 +601,16 @@ class AppHealth
 
         $verdict['checks'][] = [
             'id' => self::CHECK_BLANK_PAGE,
-            'group' => PlatformManifest::RUNTIME_PHP,
+            'group' => $php ? PlatformManifest::RUNTIME_PHP : CheckRegistry::BASELINE,
             'status' => CheckResult::STATUS_FAIL,
             'severity' => HealthCheck::SEVERITY_ERROR,
             'title' => "The front page answered {$front->status} with an empty page.",
             'detail' => "{$front->url} returned no content.",
-            'fix' => 'Usually a PHP fatal error the application suppresses. Read the container output, '
-                . 'or turn on the application\'s debug mode, to see it.',
+            'fix' => $php
+                ? 'Usually a PHP fatal error the application suppresses. Read the container output, '
+                    . 'or turn on the application\'s debug mode, to see it.'
+                : 'Read the container output with container_service_logs to see why it sends nothing. '
+                    . 'A route meant to send nothing answers 204.',
             'evidence' => ['url' => $front->url, 'http_code' => $front->status],
         ];
         // Errors outrank warnings, as in CheckRunner; an error already found says more than "empty".

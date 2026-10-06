@@ -13,7 +13,8 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * PHP Server Monitor without config.php: a suppressed fatal ends every request
- * with 200 and zero bytes, and every check passed it as serving: ok.
+ * with 200 and zero bytes, and every check passed it as serving: ok. A Node app
+ * answering an empty 200 was reported the same way, in every runtime but PHP.
  */
 class BlankPageCheckTest extends TestCase
 {
@@ -80,15 +81,67 @@ class BlankPageCheckTest extends TestCase
         }
     }
 
-    /** An API or a status port may answer an empty 200 on purpose. */
-    public function test_other_runtimes_are_not_asked(): void
+    public function test_an_empty_front_page_is_not_serving_in_any_runtime(): void
     {
-        foreach ([PlatformManifest::RUNTIME_NODE, PlatformManifest::RUNTIME_COMPOSE, PlatformManifest::RUNTIME_COMMAND] as $runtime) {
+        $runtimes = [
+            PlatformManifest::RUNTIME_NODE, PlatformManifest::RUNTIME_DOCKERFILE, PlatformManifest::RUNTIME_COMPOSE,
+            PlatformManifest::RUNTIME_COMMAND, PlatformManifest::RUNTIME_NGINX,
+        ];
+        foreach ($runtimes as $runtime) {
             $report = self::probe($runtime, 200, '');
 
-            $this->assertSame(CheckRunner::SERVING_OK, $report['serving'], $runtime);
-            $this->assertNull(self::blank($report), $runtime);
+            $this->assertSame('blank_page', $report['serving'], $runtime);
+            $check = self::blank($report);
+            $this->assertNotNull($check, $runtime);
+            $this->assertSame(HealthCheck::SEVERITY_ERROR, $check['severity']);
+            $this->assertSame('_baseline', $check['group']);
+            $this->assertStringContainsString('container_service_logs', $check['fix']);
+            $this->assertStringNotContainsString('PHP', $check['fix']);
         }
+    }
+
+    /**
+     * Where the line is: no content on purpose (204, 205), any body at all,
+     * an API's `{}` or `[]` and a two-byte "ok" included, and anything not 2xx.
+     */
+    public function test_answers_with_no_page_on_purpose_are_left_alone(): void
+    {
+        $cases = [
+            '204' => [204, ''],
+            '205' => [205, ''],
+            'json object' => [200, '{}'],
+            'json list' => [200, '[]'],
+            'tiny page' => [200, 'ok'],
+            'redirect' => [301, ''],
+            'not found' => [404, ''],
+        ];
+        foreach ($cases as $name => [$status, $body]) {
+            $report = self::probe(PlatformManifest::RUNTIME_NODE, $status, $body);
+
+            $this->assertNull(self::blank($report), $name);
+            $this->assertFalse(AppHealth::isBlankPage($status, $body), $name);
+        }
+        $this->assertTrue(AppHealth::isBlankPage(200, " \r\n"));
+        $this->assertTrue(AppHealth::isBlankPage(201, ''));
+    }
+
+    /** The probe keeps the first 4096 bytes: a sample that full of whitespace may begin a real page. */
+    public function test_a_full_sample_of_whitespace_is_not_judged_blank(): void
+    {
+        $padded = str_repeat(" \n", ProbedResponse::SAMPLE_BYTES / 2);
+
+        $this->assertFalse(AppHealth::isBlankPage(200, $padded));
+        $this->assertNull(self::blank(self::probe(PlatformManifest::RUNTIME_NODE, 200, $padded)));
+        $this->assertTrue(AppHealth::isBlankPage(200, str_repeat(' ', ProbedResponse::SAMPLE_BYTES - 1)), 'shorter: the whole body');
+    }
+
+    public function test_nothing_answering_is_not_a_blank_page(): void
+    {
+        $this->assertNull(self::blank(AppHealth::withBlankPageCheck(
+            ['serving' => CheckRunner::SERVING_UNKNOWN, 'checks' => []],
+            PlatformManifest::RUNTIME_NODE,
+            ProbedResponse::none('http://127.0.0.1:8000/')
+        )));
     }
 
     public function test_an_error_another_check_already_found_keeps_its_word(): void

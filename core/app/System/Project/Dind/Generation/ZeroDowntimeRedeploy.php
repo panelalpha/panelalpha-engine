@@ -2,11 +2,14 @@
 
 namespace App\System\Project\Dind\Generation;
 
+use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\Strategies;
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\AppHealth;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Sleep;
 
 /**
  * A redeploy with the site always served (engine#33): the new version starts
@@ -33,10 +36,13 @@ final class ZeroDowntimeRedeploy
 
     private const START_PERIOD_SECONDS = 300;
 
-    /** How long an app answering 5xx gets to stop doing so: a backend may still be booting. */
+    /** How long an app answering 5xx or an empty page gets to stop doing so: a backend may still be booting. */
     private const SERVER_ERROR_SECONDS = 60;
 
     private const POLL_SECONDS = 2;
+
+    /** Ends the probe detail of a 2xx with nothing in it. */
+    private const EMPTY_PAGE = 'with an empty page';
 
     private const PROBE_TIMEOUT_SECONDS = 3;
 
@@ -158,7 +164,7 @@ final class ZeroDowntimeRedeploy
 
             return [
                 'stdout' => '',
-                'stderr' => "The new version did not become healthy: {$failure}. The previous version is still serving.",
+                'stderr' => self::refusal($failure),
                 'exit_code' => 1,
                 self::PREVIOUS_KEPT => true,
             ];
@@ -408,7 +414,7 @@ final class ZeroDowntimeRedeploy
         return null;
     }
 
-    /** Null once $port answers below 500 within $seconds, else what it said last. */
+    /** Null once $port serves a page within $seconds, else what it said last. */
     public static function answersWithin(DindProject $project, int $port, int $seconds): ?string
     {
         $deadline = time() + $seconds;
@@ -418,10 +424,41 @@ final class ZeroDowntimeRedeploy
                 return null;
             }
             if (time() >= $deadline) {
-                return $answer['http_code'] !== null ? "it answers HTTP {$answer['http_code']}" : $answer['detail'];
+                return $answer['http_code'] !== null ? "it answers {$answer['detail']}" : $answer['detail'];
             }
             sleep(self::POLL_SECONDS);
         }
+    }
+
+    /**
+     * One port's probe result as the gate reads it: below 500 and not a blank
+     * page. An empty 200 answers, but there is nothing to move traffic to.
+     *
+     * @param array{status: string, http_code: ?int, detail: string, body?: string} $result one {@see AppHealth::parseProbeOutput()} entry
+     * @return array{status: string, http_code: ?int, detail: string}
+     */
+    public static function gateAnswer(array $result): array
+    {
+        $code = $result['http_code'];
+        if ($result['status'] === AppHealth::STATUS_OK && AppHealth::isBlankPage((int) $code, $result['body'] ?? '')) {
+            return ['status' => AppHealth::STATUS_FAIL, 'http_code' => $code, 'detail' => "HTTP {$code} " . self::EMPTY_PAGE];
+        }
+
+        return ['status' => $result['status'], 'http_code' => $code, 'detail' => $result['detail']];
+    }
+
+    /**
+     * What the redeploy fails with when the gate turned the new version away.
+     * One serving an empty page did start, so it is not called unhealthy.
+     */
+    public static function refusal(string $failure): string
+    {
+        if (str_contains($failure, self::EMPTY_PAGE)) {
+            return DeployFailureExplainer::EMPTY_NEW_VERSION . ', so the site was not moved to it and the previous version is still serving. '
+                . 'What the new version printed is in the deploy log. A route meant to send nothing answers 204.';
+        }
+
+        return "The new version did not become healthy: {$failure}. The previous version is still serving.";
     }
 
     /**
@@ -441,15 +478,15 @@ final class ZeroDowntimeRedeploy
         } catch (\Throwable $e) {
             return ['status' => AppHealth::STATUS_FAIL, 'http_code' => null, 'detail' => 'the probe could not run: ' . AppHealth::trimReason($e->getMessage())];
         }
-        $result = AppHealth::parseProbeOutput($raw, [$port])[0];
 
-        return ['status' => $result['status'], 'http_code' => $result['http_code'], 'detail' => $result['detail']];
+        return self::gateAnswer(AppHealth::parseProbeOutput($raw, [$port])[0]);
     }
 
-    /** Null once $port answers below 500, else why it will not. */
+    /** Null once $port serves a page, else why it will not. */
     private function awaitAnswer(int $port, ?string $container): ?string
     {
-        $deadline = time() + $this->startPeriod();
+        // Laravel's clock and sleep, so a test runs these windows without waiting them out.
+        $deadline = Carbon::now()->getTimestamp() + $this->startPeriod();
         $erroringSince = null;
         while (true) {
             $this->logger->throwIfCancelled();
@@ -461,16 +498,17 @@ final class ZeroDowntimeRedeploy
             if ($dead !== null) {
                 return $dead;
             }
+            $now = Carbon::now()->getTimestamp();
             if ($answer['http_code'] !== null) {
-                $erroringSince ??= time();
-                if (time() - $erroringSince >= self::SERVER_ERROR_SECONDS) {
-                    return "it answers HTTP {$answer['http_code']}";
+                $erroringSince ??= $now;
+                if ($now - $erroringSince >= self::SERVER_ERROR_SECONDS) {
+                    return "it answers {$answer['detail']}";
                 }
             }
-            if (time() >= $deadline) {
+            if ($now >= $deadline) {
                 return 'nothing answered within ' . $this->startPeriod() . " s ({$answer['detail']})";
             }
-            sleep(self::POLL_SECONDS);
+            Sleep::sleep(self::POLL_SECONDS);
         }
     }
 
