@@ -76,6 +76,8 @@ Use this when the code is not in git. After the first deploy, updating that proj
 
 The engine keeps a copy of the repository. Ask the assistant to pull, switch branch, or go back to the last deployed commit. A successful pull rebuilds the site. You do not ask for the rebuild as well. Switching branch, or going back to an earlier commit, rebuilds the same way.
 
+The engine checks the request at once: the repository answers, and the branch or commit exists. The pull or switch and the rebuild then run in the background, like any rebuild, and the assistant follows them until they end. Asking again while one is still running is refused and points at the one under way. If the new version fails, or the change is cancelled, while the previous one is still running, the site keeps serving the previous one, and the project stays on the branch and commit it was on.
+
 ```text
 Pull the latest commit on this project.
 ```

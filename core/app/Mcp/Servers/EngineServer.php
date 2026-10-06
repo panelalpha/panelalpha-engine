@@ -36,12 +36,15 @@ use Laravel\Mcp\Transport\JsonRpcRequest;
     operator on a production server.
 
     Deploys run in the background: `project_create`, `project_rebuild` and
-    `project_deploy_archive` answer at once with a task `id`. Follow it with
-    `task_get` until it is completed, failed or cancelled; never start another
-    deploy while it runs.
+    `project_deploy_archive` answer at once with a task `id`, and so do
+    `git_pull`, `git_change_branch` and `git_revert` on a `managed_by: deploy`
+    checkout. Follow it with `task_get` until it is completed, failed or
+    cancelled; never start another deploy while it runs.
 
-    Git on a project starts with `git_status`: `managed_by: deploy` means
-    redeploy with `project_rebuild`, `site_git` means the git tools. `git_push`
+    Git on a project starts with `git_status`. On `managed_by: deploy` a
+    pull, branch change or revert rebuilds the app after it, as the task
+    above; `project_rebuild` redeploys without changing the checkout. On
+    `site_git` the git tools change the checkout and rebuild nothing. `git_push`
     commits a dirty tree itself; confirm first.
 
     Only the everyday tools are listed. Find any other (MySQL, FTP, cron,

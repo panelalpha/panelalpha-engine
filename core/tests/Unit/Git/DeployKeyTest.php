@@ -152,8 +152,8 @@ class DeployKeyTest extends DeployHookTestCase
         $this->postJson(self::URL . '/deploy-key')->assertStatus(201);
         $this->deleteJson(self::URL . '/deploy-key')->assertStatus(204);
         $this->withRepository();
-        // With no key nothing is pinned, so ssh stops at the host key.
-        $this->respond("'fetch'", 128, "Host key verification failed.\nfatal: Could not read from remote repository.\n");
+        // With no key nothing is pinned, so ssh stops at the host key: reading the remote, before the pull is queued.
+        $this->respond("'ls-remote'", 128, "Host key verification failed.\nfatal: Could not read from remote repository.\n");
 
         $response = $this->postJson(self::URL . '/pull', ['strategy' => 'force'])
             ->assertStatus(422)

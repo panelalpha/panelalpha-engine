@@ -65,9 +65,13 @@ class ProjectBusyException extends \RuntimeException
     {
         return match ($task->job_type) {
             DeployProject::class => 'deploy',
-            RebuildProject::class => ($task->details['action'] ?? null) === ProjectRebuild::DEPLOY_ARCHIVE
-                ? 'archive deploy'
-                : 'rebuild',
+            RebuildProject::class => match ($task->details['action'] ?? null) {
+                ProjectRebuild::DEPLOY_ARCHIVE => 'archive deploy',
+                ProjectRebuild::GIT_PULL => 'git pull',
+                ProjectRebuild::CHANGE_BRANCH => 'branch change',
+                ProjectRebuild::REVERT => 'git revert',
+                default => 'rebuild',
+            },
             CreateStaging::class => 'staging copy',
             CreateBackup::class => 'backup',
             RestoreBackup::class => 'restore',

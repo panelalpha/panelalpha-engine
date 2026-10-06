@@ -219,11 +219,13 @@ class ProjectRebuildHttpTest extends TestCase
             {
             }
 
-            public function run(User $user, string $action, ?DeployLogger $logger, ?string $zipPath): void
+            public function run(User $user, string $action, ?DeployLogger $logger, ?string $zipPath, array $git = []): array
             {
                 $this->ran[] = [$action, $zipPath, $logger !== null];
                 $logger?->info('built in the request');
                 $logger?->finish(DeployLogger::STATUS_SUCCESS);
+
+                return [];
             }
         });
 

@@ -4,6 +4,7 @@ namespace App\System\Project\Dind\Generation;
 
 use App\System\Project\Dind as DindProject;
 use App\System\Project\Dind\ProjectBindMounts;
+use App\System\Project\Git\Path as GitPath;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -11,7 +12,8 @@ use Illuminate\Support\Facades\Log;
  * aside while a redeploy prepares the new one in its place. A container that
  * bind-mounts ~/project keeps the directory, not the path, so it serves on.
  * Afterwards it is removed, or put back if the deploy failed and its
- * containers still run: a failed redeploy leaves the project as it was.
+ * containers still run: a failed redeploy leaves the project as it was,
+ * the branch its records name included.
  */
 final class CheckoutAside
 {
@@ -50,6 +52,7 @@ final class CheckoutAside
         $system = $this->project->system();
         $projectDir = $this->project->userAppDirPath();
         $aside = $this->asidePath();
+        $records = $this->branchRecords();
         try {
             $system->exec(['sudo', 'rm', '-rf', $aside], [], 300);
             $system->exec(['sudo', 'mv', '-T', $projectDir, $aside], [], 120);
@@ -62,6 +65,7 @@ final class CheckoutAside
             'path' => $aside,
             'containers' => array_values($containers),
             'binds' => $binds,
+            'records' => $records,
             'owner' => GenerationState::owner(),
         ]);
 
@@ -158,6 +162,9 @@ final class CheckoutAside
             return null;
         }
         $state->forget(GenerationState::CHECKOUT);
+        if ($outcome === 'restored') {
+            $this->recordsBack($aside);
+        }
 
         return $outcome;
     }
@@ -172,6 +179,8 @@ final class CheckoutAside
     /** Back in place whatever runs now: the previous version starts from it again. */
     public function bringBack(): bool
     {
+        $state = new GenerationState($this->project->username());
+        $aside = $state->get(GenerationState::CHECKOUT) ?? [];
         try {
             $this->putBack();
         } catch (\Throwable $e) {
@@ -179,9 +188,64 @@ final class CheckoutAside
 
             return false;
         }
-        (new GenerationState($this->project->username()))->forget(GenerationState::CHECKOUT);
+        $state->forget(GenerationState::CHECKOUT);
+        $this->recordsBack($aside);
 
         return true;
+    }
+
+    /**
+     * The branch the project's records name for this checkout. A branch change
+     * rewrites them before its rebuild; the tree aside is still on this one.
+     *
+     * @return array{git_branch: mixed, branch: mixed}
+     */
+    private function branchRecords(): array
+    {
+        $details = $this->project->userModel()->getDetails();
+        $entry = $details['site_git'][$this->pathKey()] ?? null;
+
+        return [
+            'git_branch' => $details['git_branch'] ?? null,
+            // Null: no entry of its own, the branch is read from git_branch.
+            'branch' => is_array($entry) ? ($entry['branch'] ?? '') : null,
+        ];
+    }
+
+    /**
+     * The tree aside is back: so is the branch the records named for it, or
+     * the next pull would fetch the other branch into it.
+     *
+     * @param array<string, mixed> $aside the CHECKOUT entry
+     */
+    private function recordsBack(array $aside): void
+    {
+        $records = $aside['records'] ?? null;
+        try {
+            if (!is_array($records) || $records === $this->branchRecords()) {
+                return;
+            }
+            $user = $this->project->userModel();
+            $site = $user->getDetails()['site_git'] ?? [];
+            $site = is_array($site) ? $site : [];
+            $key = $this->pathKey();
+            if (($records['branch'] ?? null) === null) {
+                unset($site[$key]);
+            } elseif (is_array($site[$key] ?? null)) {
+                $site[$key]['branch'] = $records['branch'];
+            }
+            $user->setDetails(['site_git' => $site, 'git_branch' => $records['git_branch'] ?? null]);
+            if ($user->exists) {
+                $user->save();
+            }
+        } catch (\Throwable $e) {
+            Log::warning("Could not put the branch records of {$this->project->username()} back: " . $e->getMessage());
+        }
+    }
+
+    private function pathKey(): string
+    {
+        return GitPath::key($this->project->userAppDirPath(), $this->project->homeDirPath());
     }
 
     /** The old tree back where its containers' configuration says it is. */

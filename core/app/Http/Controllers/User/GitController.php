@@ -12,20 +12,50 @@ use App\Http\Requests\Git\GitPullRequest;
 use App\Http\Requests\Git\GitRevertRequest;
 use App\Http\Requests\Git\GitStatusRequest;
 use App\Http\Requests\Git\GitUpdateCredentialsRequest;
+use App\Http\Resources\TaskResource;
 use App\Lib\Git\DeployKey;
 use App\Lib\Git\GitActions;
+use App\Lib\Project\ProjectRebuild;
+use App\Models\User;
 use App\System\Project\Git\Exception as GitException;
 use Illuminate\Http\JsonResponse;
 use OpenApi\Attributes as OA;
 
 class GitController extends Controller
 {
+    private const QUEUED_ON_DEPLOY = 'On a Deploy-managed checkout (`managed_by` is `deploy`) the request is checked at once '
+        . '(the remote is read, 400 with git\'s error when it cannot be; the branch or ref must exist, 422 otherwise), then the change and the rebuild after it '
+        . 'run in a queue job: the answer is 202 with a task. Poll GET /tasks/{id} until it is completed, failed or '
+        . 'cancelled: a failure is on the task as `details.error` and `details.problems`, and `details.commit` is the '
+        . 'commit a completed one deployed. A new version that fails while the previous one still runs leaves it '
+        . 'serving, with its checkout put back';
+
+    private const BUSY = 'While a deploy of a Deploy-managed checkout\'s project is queued or running the answer is 409 with '
+        . 'that deploy\'s `task_id`: follow it rather than calling again, or cancel it with POST /tasks/{id}/cancel if '
+        . 'it is stuck; `task_id` is null when the running deploy was not started as a task (the CLI, a push), and '
+        . 'GET /projects/{username}/deploy-log follows it then.';
+
+    private const QUEUED_RESPONSE = 'Deploy-managed checkout: the change and the rebuild are queued; `data` is the task to follow';
+
+    private const BUSY_RESPONSE = 'A deploy of this project is already queued or running';
+
+    private const GIT_ERROR_RESPONSE = 'Git failed, e.g. the remote could not be read';
+
+    private const LOCK_RESPONSE = 'Deploy-managed checkout: the project could not be locked to queue the change; try again';
+
+    private const MCP_QUEUED = 'On a managed_by deploy checkout the change and the rebuild after it run in the background: '
+        . 'the answer is a task `id` at once; follow it with task_get until completed, failed or cancelled (a failure '
+        . 'is in details.error and details.problems, the deployed commit in details.commit). A 409 means a deploy is '
+        . 'already running: follow the task_id it names with task_get (task_cancel if it is stuck), or deploy_log_get '
+        . 'when task_id is null, instead of calling again.';
+
     #[OA\Get(
         path: '/projects/{username}/git/status',
         description: 'Call this first. Optional `path` defaults to `project` on DinD and the document root '
             . 'of the main domain on FPM/LiteSpeed. Query `fetch` updates remote-tracking refs before reporting. The '
-            . 'payload includes `managed_by`: `deploy` (account provisioned with git_repo; mutating '
-            . 'Git must go through `project_rebuild`) or `site_git` (these Git tools). `connecting: true` '
+            . 'payload includes `managed_by`: `deploy` (account provisioned with git_repo; a pull, branch change '
+            . 'or revert rebuilds the app after it, as a task, and `project_rebuild` redeploys it unchanged) or '
+            . '`site_git` (the Git tools change the checkout and nothing is rebuilt). `connecting: true` '
             . 'means a connect is still fetching the repository: wait and poll; do not call connect again.',
         summary: 'Git repository status',
         security: [['bearerAuth' => []]],
@@ -185,8 +215,9 @@ class GitController extends Controller
         path: '/projects/{username}/git/change-branch',
         description: 'Change the tracked git branch. Optional `path` defaults to `project` on DinD and '
             . 'the document root of the main domain on FPM/LiteSpeed. Body `branch` is required. Returns 422 if the working '
-            . 'tree is dirty, the remote branch does not exist, or managed_by is `deploy` — then use '
-            . '`project_rebuild`.',
+            . 'tree is dirty or the remote branch does not exist. On a `site_git` checkout the change runs in the request '
+            . 'and the answer is 200 with the checkout. ' . self::QUEUED_ON_DEPLOY . ' (`details.action: change_branch`). '
+            . self::BUSY,
         summary: 'Change the tracked git branch',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: true, content: new OA\JsonContent(
@@ -199,18 +230,33 @@ class GitController extends Controller
         tags: ['Git'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         responses: [
-            new OA\Response(response: 200, description: 'Branch changed', content: new OA\JsonContent(
+            new OA\Response(response: 200, description: 'Branch changed (a `site_git` checkout)', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 202, description: self::QUEUED_RESPONSE, content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object')],
+            )),
+            new OA\Response(response: 400, description: self::GIT_ERROR_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'message', type: 'string'),
+                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
+                ],
+            )),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
+        x: ['mcp-description' => 'Switches the checkout to another branch. Optional `path` defaults to `project` on DinD and '
+            . 'the document root of the main domain on FPM/LiteSpeed. Refused (422) when the working tree is dirty or the '
+            . 'remote has no such branch. ' . self::MCP_QUEUED . ' Use project_rebuild to redeploy without changing the branch.'],
     )]
     public function changeBranch(string $username, GitChangeBranchRequest $request, GitActions $git): JsonResponse
     {
         $user = $this->projectOr404($username);
+        $params = $request->validated();
 
-        return $this->respond(fn () => $git->changeBranch($user, $request->validated()));
+        return $this->queuedOrDone($git, $user, ProjectRebuild::CHANGE_BRANCH, $params, fn () => $git->changeBranch($user, $params));
     }
 
     #[OA\Put(
@@ -249,11 +295,12 @@ class GitController extends Controller
             . 'the document root of the main domain on FPM/LiteSpeed. Body `strategy` is `ff` (default), `force` '
             . '(`reset --hard` origin/<branch> plus clean -fd), or `push_first`. `ff` fetches and fast-forwards, '
             . 'and git alone decides whether the checkout allows it: untracked files (uploads, caches) and edits to '
-            . 'files the incoming commits leave alone do not block it. It returns 422 naming the paths when a local '
-            . 'edit or untracked file sits where an incoming commit writes, or 422 when history has diverged '
-            . '(for example after a force-push); the checkout is left as it was. On a Deploy-managed checkout '
-            . '(`managed_by` is `deploy`) a successful pull rebuilds the app from the pulled files. '
-            . 'Confirm with the operator before `force`.',
+            . 'files the incoming commits leave alone do not block it. It is refused, naming the paths, when a local '
+            . 'edit or untracked file sits where an incoming commit writes, or when history has diverged '
+            . '(for example after a force-push); the checkout is left as it was. On a `site_git` checkout the pull '
+            . 'runs in the request: 200 with the checkout, or 422 for those refusals. ' . self::QUEUED_ON_DEPLOY
+            . ' (`details.action: git_pull`); a refused pull fails the task the same way. ' . self::BUSY
+            . ' Confirm with the operator before `force`.',
         summary: 'Pull from the git remote',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -265,18 +312,35 @@ class GitController extends Controller
         tags: ['Git'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         responses: [
-            new OA\Response(response: 200, description: 'Pulled', content: new OA\JsonContent(
+            new OA\Response(response: 200, description: 'Pulled (a `site_git` checkout)', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 202, description: self::QUEUED_RESPONSE, content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object')],
+            )),
+            new OA\Response(response: 400, description: self::GIT_ERROR_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'message', type: 'string'),
+                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
+                ],
+            )),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
+        x: ['mcp-description' => 'Pulls the connected branch. Optional `path` defaults to `project` on DinD and the document '
+            . 'root of the main domain on FPM/LiteSpeed. `strategy`: `ff` (default) fast-forwards and is refused when history '
+            . 'has diverged or a local edit or untracked file sits where an incoming commit writes; `force` is `reset --hard` '
+            . 'to origin plus clean -fd; `push_first` pushes local commits first. Confirm with the operator before `force`. '
+            . self::MCP_QUEUED],
     )]
     public function pull(string $username, GitPullRequest $request, GitActions $git): JsonResponse
     {
         $user = $this->projectOr404($username);
+        $params = $request->validated();
 
-        return $this->respond(fn () => $git->pull($user, $request->validated()));
+        return $this->queuedOrDone($git, $user, ProjectRebuild::GIT_PULL, $params, fn () => $git->pull($user, $params));
     }
 
     #[OA\Post(
@@ -311,7 +375,9 @@ class GitController extends Controller
         path: '/projects/{username}/git/revert',
         description: 'Revert local git changes. Optional `path` defaults to `project` on DinD and '
             . 'the document root of the main domain on FPM/LiteSpeed. Runs `reset --hard` and `clean -fd` to `ref` (default '
-            . 'HEAD). Discards local changes. Confirm with the operator.',
+            . 'HEAD). Discards local changes. Confirm with the operator. 422 when `ref` names no commit in the checkout. '
+            . 'On a `site_git` checkout it runs in the request and the answer is 200 with the checkout. '
+            . self::QUEUED_ON_DEPLOY . ' (`details.action: revert`). ' . self::BUSY,
         summary: 'Revert local git changes',
         security: [['bearerAuth' => []]],
         requestBody: new OA\RequestBody(required: false, content: new OA\JsonContent(
@@ -323,18 +389,33 @@ class GitController extends Controller
         tags: ['Git'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
         responses: [
-            new OA\Response(response: 200, description: 'Reverted', content: new OA\JsonContent(
+            new OA\Response(response: 200, description: 'Reverted (a `site_git` checkout)', content: new OA\JsonContent(
                 properties: [new OA\Property(property: 'data', type: 'object')],
             )),
+            new OA\Response(response: 202, description: self::QUEUED_RESPONSE, content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object')],
+            )),
+            new OA\Response(response: 400, description: self::GIT_ERROR_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: self::BUSY_RESPONSE, content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'message', type: 'string'),
+                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
+                ],
+            )),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 503, description: self::LOCK_RESPONSE, content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
+        x: ['mcp-description' => 'Discards local changes: `reset --hard` and `clean -fd` to `ref` (default HEAD). Optional '
+            . '`path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Confirm with '
+            . 'the operator. ' . self::MCP_QUEUED],
     )]
     public function revert(string $username, GitRevertRequest $request, GitActions $git): JsonResponse
     {
         $user = $this->projectOr404($username);
+        $params = $request->validated();
 
-        return $this->respond(fn () => $git->revert($user, $request->validated()));
+        return $this->queuedOrDone($git, $user, ProjectRebuild::REVERT, $params, fn () => $git->revert($user, $params));
     }
 
     /** The action's data, or the git layer's refusal with the status it carries. */
@@ -405,12 +486,43 @@ class GitController extends Controller
         return new JsonResponse(null, 204);
     }
 
+    /**
+     * 202 with the task when the change was queued with a rebuild; otherwise
+     * the change, made here.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function queuedOrDone(GitActions $git, User $user, string $action, array $params, callable $run): JsonResponse
+    {
+        try {
+            $task = $git->queueRedeploy($user, $action, $params);
+        } catch (GitException $e) {
+            return self::refusal($e);
+        }
+        if ($task !== null) {
+            return TaskResource::make($task)->response()->setStatusCode(202);
+        }
+
+        return $this->respond($run);
+    }
+
     private function respond(callable $action): JsonResponse
     {
         try {
             return new JsonResponse(['data' => $action()]);
         } catch (GitException $e) {
-            return new JsonResponse(['message' => $e->getMessage()], $e->httpStatus);
+            return self::refusal($e);
         }
+    }
+
+    /** A 409 names the deploy it waits for, as a busy rebuild's does: null when that is no task. */
+    private static function refusal(GitException $e): JsonResponse
+    {
+        $body = ['message' => $e->getMessage()];
+        if ($e->httpStatus === 409) {
+            $body['task_id'] = $e->taskId;
+        }
+
+        return new JsonResponse($body, $e->httpStatus);
     }
 }

@@ -190,6 +190,15 @@ create calls said `wp`.
 `project_create`, `project_deploy_archive` and `project_rebuild` answer at
 once with **202** and a task (`id`, `status`, `details.action`); the deploy
 runs in the background until the application answers its health check.
+`git_pull`, `git_change_branch` and `git_revert` on a `managed_by: deploy`
+checkout do the same: the remote, branch or ref is checked at once (a 422
+says what is wrong, a 400 that the remote could not be read), then the
+change and the rebuild after it run as a task
+(`details.action`: `git_pull`, `change_branch`, `revert`; a completed one
+names the deployed commit in `details.commit`). A new version that fails,
+or is cancelled, while the previous one still runs leaves it serving, on its
+old checkout and branch.
+On a `site_git` checkout they answer 200 with the checkout, as before.
 Expect, with prewarmed base images: static ~5 s, Express ~10-20 s, PHP
 ~20 s, a Laravel or Next.js build 1.5-6 min, a first deploy of a runtime
 whose base image is not on the host longer still.
@@ -387,8 +396,9 @@ with the user's explicit go-ahead.
 
 - Never re-run a deploy call after a client timeout; poll `task_get` on the
   returned task id instead. A 202 means the deploy is queued — not that the
-  app is up yet. A `409` on `project_rebuild` / `project_deploy_archive` names
-  the deploy already running as `task_id`: follow that one with `task_get`
+  app is up yet. A `409` on `project_rebuild` / `project_deploy_archive`, or
+  on a git pull, branch change or revert of a `managed_by: deploy` checkout,
+  names the deploy already running as `task_id`: follow that one with `task_get`
   (`task_cancel` it only if it is clearly stuck). A `task_id` of `null` means
   the running deploy was started without a task (the CLI, a git push): follow
   it with `deploy_log_get` (`offset: 100000`) until it is no longer `running`.

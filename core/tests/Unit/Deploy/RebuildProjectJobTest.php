@@ -76,9 +76,11 @@ class RebuildProjectJobTest extends TestCase
                 return $this->opens !== null ? ($this->opens)($user) : parent::openLog($user, $action);
             }
 
-            public function run(User $user, string $action, ?DeployLogger $logger, ?string $zipPath): void
+            public function run(User $user, string $action, ?DeployLogger $logger, ?string $zipPath, array $git = []): array
             {
                 ($this->runs)($user, $logger, $zipPath);
+
+                return [];
             }
         });
     }

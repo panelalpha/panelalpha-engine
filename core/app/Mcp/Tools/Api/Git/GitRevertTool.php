@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Revert local git changes
 
-    Revert local git changes. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Runs `reset --hard` and `clean -fd` to `ref` (default HEAD). Discards local changes. Confirm with the operator.
+    Discards local changes: `reset --hard` and `clean -fd` to `ref` (default HEAD). Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Confirm with the operator. On a managed_by deploy checkout the change and the rebuild after it run in the background: the answer is a task `id` at once; follow it with task_get until completed, failed or cancelled (a failure is in details.error and details.problems, the deployed commit in details.commit). A 409 means a deploy is already running: follow the task_id it names with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, instead of calling again.
     MARKDOWN)]
 #[IsDestructive]
 class GitRevertTool extends ApiTool

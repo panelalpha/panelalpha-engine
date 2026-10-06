@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 #[Description(<<<'MARKDOWN'
     Change the tracked git branch
 
-    Change the tracked git branch. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Body `branch` is required. Returns 422 if the working tree is dirty, the remote branch does not exist, or managed_by is `deploy` — then use `project_rebuild`.
+    Switches the checkout to another branch. Optional `path` defaults to `project` on DinD and the document root of the main domain on FPM/LiteSpeed. Refused (422) when the working tree is dirty or the remote has no such branch. On a managed_by deploy checkout the change and the rebuild after it run in the background: the answer is a task `id` at once; follow it with task_get until completed, failed or cancelled (a failure is in details.error and details.problems, the deployed commit in details.commit). A 409 means a deploy is already running: follow the task_id it names with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, instead of calling again. Use project_rebuild to redeploy without changing the branch.
     MARKDOWN)]
 #[IsDestructive]
 #[IsIdempotent]

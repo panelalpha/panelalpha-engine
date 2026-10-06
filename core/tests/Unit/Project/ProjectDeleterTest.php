@@ -184,6 +184,18 @@ class ProjectDeleterTest extends TestCase
         $e = $this->refusal(fn () => $this->deleter()->delete($user));
 
         $this->assertStringStartsWith("Project '{$this->name}' is busy: archive deploy task {$archive->id} is running.", $e->getMessage());
+
+        // A pull, branch change or revert queued with its rebuild.
+        $archive->markCompleted();
+        $named = [ProjectRebuild::GIT_PULL => 'git pull', ProjectRebuild::CHANGE_BRANCH => 'branch change', ProjectRebuild::REVERT => 'git revert'];
+        foreach ($named as $action => $kind) {
+            $git = $this->running($this->task(RebuildProject::class, $this->name, ['action' => $action]), "job-{$action}");
+
+            $e = $this->refusal(fn () => $this->deleter()->delete($user));
+
+            $this->assertStringStartsWith("Project '{$this->name}' is busy: {$kind} task {$git->id} is running.", $e->getMessage());
+            $git->markCompleted();
+        }
         $this->assertSame([], $this->destroyed);
     }
 

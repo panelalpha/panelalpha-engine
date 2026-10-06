@@ -455,6 +455,12 @@ class DeployLogger
         return $this->status->is(self::STATUS_CANCELLED);
     }
 
+    /** finish() has run. A cancel request alone sets `cancelled` without it. */
+    public function isFinished(): bool
+    {
+        return $this->status->value('finished_at') !== null;
+    }
+
     /**
      * @throws DeployCancelledException
      */

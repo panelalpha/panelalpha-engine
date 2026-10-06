@@ -58,14 +58,16 @@ final class ShellOperations
         } catch (\Throwable $e) {
             return null;
         }
-        if ($logger === null) {
-            return null;
+        if ($logger === null || $logger->isRunning()) {
+            return $logger;
         }
-        if (!$logger->isRunning() && !$logger->isCancelled()) {
-            return null;
+        // Cancelled: every command throws until the deploy winds down. Once it
+        // has finished, or its process is gone, commands run again.
+        if ($logger->isCancelled() && !$logger->isFinished() && DeployLogger::isLockedFor($this->project->username())) {
+            return $logger;
         }
 
-        return $logger;
+        return null;
     }
 
     /**

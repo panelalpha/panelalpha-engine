@@ -24,8 +24,10 @@ use RuntimeException;
 use Throwable;
 
 /**
- * A rebuild or an archive deploy of a project that exists, behind the 202
- * POST /projects/{username}/rebuild and /deploy-archive answer with.
+ * A rebuild or an archive deploy of a project that exists, or a git pull,
+ * branch change or revert of its Deploy-managed checkout and the rebuild
+ * after it: behind the 202 POST /projects/{username}/rebuild, /deploy-archive
+ * and the three /git endpoints answer with.
  */
 class RebuildProject implements ShouldQueue
 {
@@ -41,6 +43,7 @@ class RebuildProject implements ShouldQueue
 
     /**
      * @param array<string, list<array<string, mixed>>>|null $stages
+     * @param array<string, string>|null $git a git action's input: `path` and `strategy`, `branch` or `ref`
      */
     public function __construct(
         public string $username,
@@ -48,6 +51,7 @@ class RebuildProject implements ShouldQueue
         public ?string $zipPath = null,
         public ?array $stages = null,
         public ?string $recipe = null,
+        public ?array $git = null,
     ) {
         $this->onQueue('default');
     }
@@ -72,7 +76,7 @@ class RebuildProject implements ShouldQueue
                 $this->throwIfCancelled();
                 $logger = $rebuild->openLog($user, $this->action);
                 $this->recordDeployId($logger);
-                $rebuild->run($user, $this->action, $logger, $this->zipPath);
+                $result = $rebuild->run($user, $this->action, $logger, $this->zipPath, $this->git ?? []);
             } catch (DeployAlreadyRunningException $e) {
                 // A deploy started without a task (the CLI, a push) took the lock since this was queued.
                 throw $this->failure(ProblemException::one('deploy', 'deploy_already_running', $e->getMessage()));
@@ -84,7 +88,7 @@ class RebuildProject implements ShouldQueue
             }
 
             $user->refresh();
-            $this->recordOutcome($user);
+            $this->recordOutcome($user, $result);
         });
     }
 
@@ -136,14 +140,17 @@ class RebuildProject implements ShouldQueue
         return new RuntimeException($messages !== [] ? implode(' | ', $messages) : $e->getMessage(), 0, $e);
     }
 
-    private function recordOutcome(User $user): void
+    /**
+     * @param array<string, mixed> $result what the run reported, e.g. the commit a git action left
+     */
+    private function recordOutcome(User $user, array $result): void
     {
         $task = $this->task();
         if ($task === null) {
             return;
         }
 
-        $details = $task->details ?? [];
+        $details = array_merge($task->details ?? [], $result);
         $status = $user->getDeploymentStatus();
         if ($status === 'partial') {
             $details['deployment_status'] = 'partial';

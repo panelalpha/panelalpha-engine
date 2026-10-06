@@ -907,6 +907,68 @@ abstract class WorkTree
     }
 
     /**
+     * What pull() refuses before it fetches, and the remote answering with the
+     * connected branch on it. Reads only: the checkout is not touched.
+     */
+    public function assertPullable(?string $strategy = null): void
+    {
+        $siteGit = $this->requireConnected();
+        $this->requireRepository();
+
+        if (!in_array($strategy ?? self::STRATEGY_FF, [self::STRATEGY_FF, self::STRATEGY_FORCE, self::STRATEGY_PUSH_FIRST], true)) {
+            throw new GitException('Unknown pull strategy.', 422);
+        }
+        $branch = $siteGit['branch'];
+        if ($branch === '') {
+            throw new GitException('Connected branch is empty.', 422);
+        }
+        GitRef::assertName($branch);
+
+        $this->assertRemoteHasBranch($branch, $siteGit['token'] ?? null);
+    }
+
+    /** What changeBranch() refuses, the remote's branches included, without touching the checkout. */
+    public function assertBranchChangeable(string $branch): void
+    {
+        $siteGit = $this->requireConnected();
+        $this->requireRepository();
+        GitRef::assertName($branch);
+
+        if ($this->hasWorkingTreeChanges()) {
+            throw new GitException('Working tree is dirty.', 422);
+        }
+
+        $this->assertRemoteHasBranch($branch, $siteGit['token'] ?? null);
+    }
+
+    /** What revert() refuses, and a `$ref` that names no commit here, without touching the checkout. */
+    public function assertRevertable(?string $ref = null): void
+    {
+        $this->requireRepository();
+        $ref = $ref ?? 'HEAD';
+        if ($ref !== 'HEAD') {
+            GitRef::assertName($ref);
+        }
+
+        try {
+            $this->git(['rev-parse', '--verify', '--quiet', '--end-of-options', $ref . '^{commit}']);
+        } catch (GitException) {
+            throw $ref === 'HEAD'
+                ? new GitException('Nothing to revert', 422)
+                : new GitException("No commit named '{$ref}' in this checkout.", 422, 'git_ref_not_found');
+        }
+    }
+
+    /** One round trip: the remote answers, and has `$branch`. */
+    private function assertRemoteHasBranch(string $branch, ?string $token): void
+    {
+        $heads = $this->gitOverNetwork(['ls-remote', '--heads', 'origin', 'refs/heads/' . $branch], $token);
+        if (preg_match('#\srefs/heads/' . preg_quote($branch, '#') . '$#m', $heads) !== 1) {
+            throw $this->branchNotFound($branch, $token);
+        }
+    }
+
+    /**
      * A single-branch clone's origin fetches its own branch only, and git will
      * not set or resolve an upstream outside origin's fetch refspec. Added only
      * once the branch is known to exist: a refspec naming a missing branch

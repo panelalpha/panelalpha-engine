@@ -16,6 +16,7 @@ use App\Lib\Deploy\Platform\DeployPlan;
 use App\Lib\Deploy\Platform\PlatformStage;
 use App\Lib\Deploy\Source\UploadedArchive;
 use App\Lib\Domains\PublicUrl;
+use App\Lib\Git\GitActions;
 use App\Models\Task;
 use App\Models\User;
 use App\System\Project as ProjectAggregate;
@@ -25,7 +26,9 @@ use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 
 /**
  * Deploying a project that already exists: a rebuild from ~/project (after
- * importing an archive when one is given), or an archive deployed into it.
+ * importing an archive when one is given), an archive deployed into it, or a
+ * git pull, branch change or revert of its Deploy-managed checkout and the
+ * rebuild after it.
  *
  * One body for both ways of running it -- the RebuildProject job behind the
  * 202, and the NDJSON stream a client can still ask for -- so the two cannot
@@ -37,10 +40,21 @@ class ProjectRebuild
 
     public const DEPLOY_ARCHIVE = 'deploy_archive';
 
+    public const GIT_PULL = 'git_pull';
+
+    public const CHANGE_BRANCH = 'change_branch';
+
+    public const REVERT = 'revert';
+
+    /** Actions that change the checkout first, with their input: `path` and `strategy`, `branch` or `ref`. */
+    public const GIT_ACTIONS = [self::GIT_PULL, self::CHANGE_BRANCH, self::REVERT];
+
     /**
      * Queue the run and return its task.
+     *
+     * @param array<string, string> $git the git action's input, also shown on the task
      */
-    public function queue(User $user, string $action, ?string $zipPath, ?DeployPlan $plan, ?string $recipe): Task
+    public function queue(User $user, string $action, ?string $zipPath, ?DeployPlan $plan, ?string $recipe, array $git = []): Task
     {
         $task = Task::start(
             jobType: RebuildProject::class,
@@ -51,9 +65,10 @@ class ProjectRebuild
                 'domain' => $user->domain,
                 'action' => $action,
                 'zip_path' => $zipPath,
+                ...$git,
             ], static fn (mixed $v): bool => $v !== null),
         );
-        RebuildProject::dispatch($user->username, $action, $zipPath, $plan?->toArray(), $recipe)->attachTask($task);
+        RebuildProject::dispatch($user->username, $action, $zipPath, $plan?->toArray(), $recipe, $git !== [] ? $git : null)->attachTask($task);
 
         return $task;
     }
@@ -93,15 +108,26 @@ class ProjectRebuild
             throw new ServiceUnavailableHttpException(null, 'Could not lock the project to start its deploy; try again.');
         }
         try {
-            $task = self::pendingTask($user->username);
-            if ($task !== null || DeployLogger::isLockedFor($user->username)) {
-                throw new DeployBusyException($user->username, $task);
-            }
+            $this->assertIdle($user);
 
             return $start();
         } finally {
             flock($handle, LOCK_UN);
             fclose($handle);
+        }
+    }
+
+    /**
+     * The 409 whileIdle() answers, without its lock: for a check that must
+     * not run beside a deploy, made before whileIdle() checks again.
+     *
+     * @throws DeployBusyException
+     */
+    public function assertIdle(User $user): void
+    {
+        $task = self::pendingTask($user->username);
+        if ($task !== null || DeployLogger::isLockedFor($user->username)) {
+            throw new DeployBusyException($user->username, $task);
         }
     }
 
@@ -165,6 +191,11 @@ class ProjectRebuild
         if ($action === self::REBUILD && $user->getTemplate() !== 'dind') {
             return null;
         }
+        // Always a new deploy, as a push starts one: a `running` log here is a
+        // dead process's, never a create waiting for files (that has no git).
+        if (in_array($action, self::GIT_ACTIONS, true)) {
+            return DeployLogger::startSafely($user->username);
+        }
 
         $logger = DeployLogger::resumeRunningOrStartSafely($user->username);
         if ($action === self::DEPLOY_ARCHIVE) {
@@ -179,17 +210,57 @@ class ProjectRebuild
      * thrown in the shape the API answers it in -- a ProblemException with a
      * code and the stage, or a refused archive as a 422 on zip_path.
      *
+     * @param array<string, string> $git a git action's input
+     * @return array<string, mixed> what to add to the task's details
      * @throws ValidationException
      */
-    public function run(User $user, string $action, ?DeployLogger $logger, ?string $zipPath): void
+    public function run(User $user, string $action, ?DeployLogger $logger, ?string $zipPath, array $git = []): array
     {
         if ($action === self::DEPLOY_ARCHIVE) {
             $this->deployArchive($user, $logger, (string) $zipPath);
 
-            return;
+            return [];
+        }
+        if (in_array($action, self::GIT_ACTIONS, true)) {
+            return $this->changeCheckout($user, $action, $logger, $git);
         }
 
         $this->rebuild($user, $logger, $zipPath);
+
+        return [];
+    }
+
+    /**
+     * The git action and the rebuild after it, in this process: the tree the
+     * app was deployed from is kept aside only for the process that changes
+     * the checkout, and is put back if the new version fails.
+     *
+     * @param array<string, string> $git
+     * @return array{commit: ?string, checkout: array<string, mixed>}
+     */
+    private function changeCheckout(User $user, string $action, ?DeployLogger $logger, array $git): array
+    {
+        try {
+            return $this->gitActions()->redeploy($user, $action, $git, $logger);
+        } catch (\Exception $e) {
+            $answered = $e instanceof ProblemException && ($e->problems[0]['code'] ?? null) === 'deploy_cancelled';
+            // A cancel during the git step reaches here as git's own failure.
+            if (!$answered && ($e instanceof DeployCancelledException || $logger?->isCancelled() === true)) {
+                $message = $e instanceof DeployCancelledException ? $e->getMessage() : 'Deployment cancelled by user';
+                $stage = $logger?->currentStage();
+                self::finishRebuildLog($logger, DeployLogger::STATUS_CANCELLED, $message);
+                throw ProblemException::deploy('deploy_cancelled', $message, $stage);
+            }
+            if ($e instanceof ValidationException) {
+                throw $e;
+            }
+            throw self::rebuildFailure($e, $logger);
+        }
+    }
+
+    protected function gitActions(): GitActions
+    {
+        return app(GitActions::class);
     }
 
     /**
