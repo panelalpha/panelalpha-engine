@@ -2,11 +2,10 @@
 
 namespace Tests\Unit;
 
-use App\Http\Controllers\UserController;
 use App\Lib\Domains\DomainPlan;
+use App\Lib\Project\ProjectRebuild;
 use App\Lib\Ssl\CertificateStatus;
 use App\Models\User;
-use ReflectionMethod;
 use Tests\TestCase;
 
 /**
@@ -32,7 +31,7 @@ class RebuildRecordsPublicUrlWarningsTest extends TestCase
 
     private function record(User $user): void
     {
-        (new ReflectionMethod(UserController::class, 'recordRebuildSucceeded'))->invoke(new UserController(), $user);
+        ProjectRebuild::recordSucceeded($user);
     }
 
     /** @return array<string, mixed> */

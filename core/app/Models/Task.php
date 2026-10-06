@@ -27,6 +27,19 @@ class Task extends Model
         self::STATUS_CANCELLED,
     ];
 
+    /** `details` key of the worker process running the task; never shown to a client. */
+    public const WORKER = 'worker';
+
+    /**
+     * Jobs that deploy a project and write its deploy log.
+     *
+     * @var list<class-string>
+     */
+    public const DEPLOY_JOB_TYPES = [
+        \App\Jobs\DeployProject::class,
+        \App\Jobs\RebuildProject::class,
+    ];
+
     protected $fillable = [
         'job_id',
         'username',
@@ -186,13 +199,13 @@ class Task extends Model
     /**
      * Whether this task was a project deploy.
      *
-     * Deploys are the only job type that writes a per-account deploy log, and
-     * the only one whose liveness can be read from the pid that log records —
+     * Deploys are the only job types that write a per-account deploy log, and
+     * the only ones whose liveness can be read from the pid that log records —
      * {@see \App\Lib\Task\TaskReconciler} relies on both facts.
      */
     public function isDeploy(): bool
     {
-        return $this->job_type === \App\Jobs\DeployProject::class;
+        return in_array($this->job_type, self::DEPLOY_JOB_TYPES, true);
     }
 
     public function markRunning(?string $jobId = null): bool

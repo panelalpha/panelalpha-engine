@@ -8,6 +8,7 @@ use App\Lib\Deploy\SafeName;
  *   storage/logs/deploy/{username}/{deployId}.log   JSON lines, one per entry
  *   storage/logs/deploy/{username}/latest.json      status pointer
  *   storage/logs/deploy/{username}/.deploy.lock     one deploy at a time
+ *   storage/logs/deploy/{username}/.queue.lock      one request queueing or starting one
  */
 final class DeployLogPaths
 {
@@ -16,6 +17,8 @@ final class DeployLogPaths
     private const LATEST_FILE = 'latest.json';
 
     private const LOCK_FILE = '.deploy.lock';
+
+    private const QUEUE_LOCK_FILE = '.queue.lock';
 
     public function __construct(public readonly string $username)
     {
@@ -56,6 +59,11 @@ final class DeployLogPaths
     public function lock(): string
     {
         return $this->directory() . '/' . self::LOCK_FILE;
+    }
+
+    public function queueLock(): string
+    {
+        return $this->directory() . '/' . self::QUEUE_LOCK_FILE;
     }
 
     /**

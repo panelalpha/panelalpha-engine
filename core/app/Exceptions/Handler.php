@@ -34,7 +34,8 @@ class Handler extends ExceptionHandler
      * @var array<int, class-string<\Throwable>>
      */
     protected $dontReport = [
-        //
+        // A 409 the client is told how to act on, not a fault.
+        DeployBusyException::class,
     ];
 
     /**
@@ -74,6 +75,10 @@ class Handler extends ExceptionHandler
         // HTTP boundary knows it should read as 409.
         $this->renderable(function (DeployAlreadyRunningException $e) {
             return new JsonResponse(['message' => $e->getMessage()], 409);
+        });
+
+        $this->renderable(function (DeployBusyException $e) {
+            return new JsonResponse(['message' => $e->getMessage(), 'task_id' => $e->task?->id], 409);
         });
 
         // Rendered, not reported: this decides the response, so it belongs on

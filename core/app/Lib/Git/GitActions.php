@@ -6,7 +6,8 @@ use App\Exceptions\ProblemException;
 use App\Lib\Deploy\Source\GitRepoInput;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\DeployHook\DeployHooks;
-use App\Lib\Project\ProjectCreator;
+use App\Jobs\DeployProject;
+use App\Lib\Project\ProjectRebuild;
 use App\Models\User;
 use App\System\Project as ProjectAggregate;
 use App\System\Project\Git;
@@ -206,18 +207,25 @@ class GitActions
 
     /**
      * A change to the checkout while the project's create is still running
-     * would reach an account that may not exist yet (`sudo: unknown user`).
+     * would reach an account that may not exist yet (`sudo: unknown user`);
+     * one while a queued rebuild or archive deploy runs would change the files
+     * it is building from.
      *
      * @throws GitException
      */
     private function refuseWhileCreating(User $user): void
     {
-        if (ProjectCreator::isCreating($user)) {
-            throw new GitException(
-                "Project '{$user->username}' is still being created; try again when its deploy has finished.",
-                409,
-            );
+        $task = ProjectRebuild::pendingTask($user->username);
+        if ($task === null) {
+            return;
         }
+
+        throw new GitException(
+            $task->job_type === DeployProject::class
+                ? "Project '{$user->username}' is still being created; try again when its deploy has finished."
+                : "A deploy of project '{$user->username}' is queued or running (task {$task->id}); try again when it has finished.",
+            409,
+        );
     }
 
     /**

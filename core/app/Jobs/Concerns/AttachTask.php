@@ -61,7 +61,25 @@ trait AttachTask
         if (isset($this->job) && is_object($this->job) && method_exists($this->job, 'uuid')) {
             $jobId = $this->job->uuid();
         }
-        $task->markRunning(is_string($jobId) ? $jobId : null);
+        if ($task->markRunning(is_string($jobId) ? $jobId : null)) {
+            $this->recordWorker($task);
+        }
+    }
+
+    /**
+     * The worker process running this task. Its queue row stays reserved for a
+     * day after the worker dies, so the reconciler asks whether this process
+     * is still alive instead ({@see \App\Lib\Task\TaskReconciler::workerGone()}).
+     */
+    private function recordWorker(Task $task): void
+    {
+        $pid = getmypid();
+        $start = is_int($pid) ? ProcessIdentity::startTime($pid) : null;
+        if ($start === null) {
+            return;
+        }
+        $task->details = array_merge($task->details ?? [], [Task::WORKER => ['pid' => $pid, 'start' => $start]]);
+        $task->save();
     }
 
     public function markCompleted(): void

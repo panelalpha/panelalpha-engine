@@ -45,6 +45,8 @@ Rebuild this project.
 
 Use it after you change files directly, after you change an environment variable, or when a site has degraded and you want it put back the way it shipped.
 
+A rebuild runs in the background, and so does deploying an uploaded archive. The engine answers the assistant at once and the assistant follows the deploy until it ends, however long the build takes. Asking again while one is still running is refused and points at the one already under way, so a slow deploy is never started twice.
+
 A rebuild does not wipe what the application keeps. For applications with a ready-made recipe, the passwords and keys the engine generated and the files people uploaded stay as they were. A project you set up yourself keeps only the storage you declared for it.
 
 A rebuild judges itself on what the site is actually serving afterwards, not merely on whether the process started. So a rebuild that "succeeded" but left a broken page will be marked `partial` and tell you why. See [What the engine checks](monitoring-and-logs.md#what-the-engine-checks).

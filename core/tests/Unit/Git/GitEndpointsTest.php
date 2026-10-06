@@ -3,6 +3,7 @@
 namespace Tests\Unit\Git;
 
 use App\Jobs\DeployProject;
+use App\Jobs\RebuildProject;
 use App\Models\DeployHook;
 use App\Models\Task;
 use App\Models\User;
@@ -214,6 +215,27 @@ class GitEndpointsTest extends DeployHookTestCase
         $task->markCompleted();
         $this->postJson(self::URL . '/connect', $body)->assertStatus(200);
         $this->assertTrue($this->called("'ls-remote' '--heads'"));
+    }
+
+    /** A queued rebuild or archive deploy builds from the checkout: it is not changed under it. */
+    public function test_a_change_while_a_rebuild_is_queued_is_a_409(): void
+    {
+        $this->siteGitUser();
+        $task = Task::start(RebuildProject::class, 'default', 'alice');
+        $this->withoutRepository();
+        $body = ['path' => 'public_html', 'repo_url' => self::REPO, 'branch' => 'main'];
+
+        $response = $this->postJson(self::URL . '/pull', $body);
+
+        $response->assertStatus(409);
+        $this->assertSame(
+            "A deploy of project 'alice' is queued or running (task {$task->id}); try again when it has finished.",
+            $response->json('message'),
+        );
+        $this->assertSame([], $this->calls());
+
+        $task->markFailed('earlier');
+        $this->postJson(self::URL . '/connect', $body)->assertStatus(200);
     }
 
     public function test_disconnect_forgets_the_checkout_and_its_hook(): void

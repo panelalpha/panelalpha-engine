@@ -43,7 +43,9 @@ class UsersRebuildTest extends TestCase
 
         // Perform rebuild
         $rebuildResponse = $this->postJson("/api/users/{$username}/rebuild");
-        $rebuildResponse->assertStatus(200);
+        $rebuildResponse->assertStatus(202);
+        // The suite's queue is sync, so the job has run by the time the 202 is back.
+        $this->assertSame('completed', $this->getJson('/api/tasks/' . $rebuildResponse->json('data.id'))->json('data.status'));
 
         // Verify nothing was lost after rebuild
         $this->authenticate();

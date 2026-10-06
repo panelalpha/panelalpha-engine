@@ -1560,7 +1560,7 @@ SH;
      * The one place the question is answered, because three callers ask it
      * and each of them writes down a different consequence: the create path
      * finishes its deploy log with these, `User::rebuild()` finishes its own
-     * with them, and `recordRebuildSucceeded()` puts them on the account
+     * with them, and `ProjectRebuild::recordSucceeded()` puts them on the account
      * record. They diverged twice already -- rebuild reported a degraded
      * application as a clean success for as long as it finished its log
      * itself, and this line, the one case where nothing answers at all, was

@@ -2,7 +2,11 @@
 
 namespace Tests\Unit\Task;
 
+use App\Jobs\RebuildProject;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Deploy\DeployLog\DeployLogPaths;
+use App\Lib\Deploy\DeployLog\DeployStatus;
+use App\Lib\Deploy\DeployLog\ProcessIdentity;
 use App\Lib\Task\TaskReconciler;
 use App\Models\Task;
 use Illuminate\Support\Facades\DB;
@@ -180,6 +184,87 @@ class TaskReconcilerTest extends SqliteTaskTestCase
         } finally {
             DeployLogger::deleteUserLogs($username);
         }
+    }
+
+    // ---- a rebuild resumes a log it did not start; its worker may die ----
+
+    /** A finished deploy, its log backdated as a create's waiting log would be. */
+    private function finishedLogStartedAnHourAgo(string $username, string $status, string $error): string
+    {
+        $logger = DeployLogger::start($username);
+        $id = $logger->getDeployId();
+        $logger->finish($status, $error);
+        $paths = new DeployStatus(new DeployLogPaths($username));
+        $paths->write(array_merge($paths->read() ?? [], ['started_at' => time() - 3600]));
+
+        return $id;
+    }
+
+    private function runningRebuild(string $username, array $details): Task
+    {
+        $task = Task::start(jobType: RebuildProject::class, queue: 'default', username: $username);
+        $task->markRunning('h-' . ++self::$jobSeq);
+        $task->started_at = now()->subMinutes(10);
+        $task->details = $details;
+        $task->save();
+
+        return $task->refresh();
+    }
+
+    public function test_a_rebuild_is_judged_by_the_deploy_it_recorded_however_old_that_log_is(): void
+    {
+        $username = 'rec-' . bin2hex(random_bytes(4));
+        try {
+            $id = $this->finishedLogStartedAnHourAgo($username, DeployLogger::STATUS_FAILED, 'Failed to start app: boom');
+            $task = $this->runningRebuild($username, ['deploy_id' => $id]);
+
+            $this->assertSame([(int) $task->id], TaskReconciler::reconcile(isPending: $this->queued()));
+            $this->assertSame(Task::STATUS_FAILED, $task->refresh()->status);
+            $this->assertSame('Failed to start app: boom', $task->details['error']);
+        } finally {
+            DeployLogger::deleteUserLogs($username);
+        }
+    }
+
+    public function test_a_rebuild_is_not_judged_by_a_deploy_it_did_not_record(): void
+    {
+        $username = 'rec-' . bin2hex(random_bytes(4));
+        try {
+            $this->finishedLogStartedAnHourAgo($username, DeployLogger::STATUS_FAILED, 'someone else');
+            $task = $this->runningRebuild($username, ['deploy_id' => 'another-deploy']);
+
+            $this->assertSame([], TaskReconciler::reconcile(isPending: $this->queued()));
+            $this->assertSame(Task::STATUS_RUNNING, $task->refresh()->status);
+        } finally {
+            DeployLogger::deleteUserLogs($username);
+        }
+    }
+
+    /** The killed job's queue row stays reserved for a day; its dead worker says it is gone. */
+    public function test_a_task_whose_worker_died_is_retired_though_its_job_is_still_reserved(): void
+    {
+        $task = $this->runningRebuild('shop', [Task::WORKER => ['pid' => getmypid(), 'start' => '0']]);
+
+        $this->assertTrue(TaskReconciler::workerGone($task));
+        $this->assertSame(Task::STATUS_CANCELLED, TaskReconciler::decide($task, null, $this->queued()));
+    }
+
+    public function test_a_task_whose_worker_is_alive_waits_for_its_queue_row(): void
+    {
+        $pid = getmypid();
+        $task = $this->runningRebuild('shop', [Task::WORKER => ['pid' => $pid, 'start' => ProcessIdentity::startTime($pid)]]);
+
+        $this->assertFalse(TaskReconciler::workerGone($task));
+        $this->assertNull(TaskReconciler::decide($task, null, $this->queued()));
+        $this->assertSame(Task::STATUS_CANCELLED, TaskReconciler::decide($task, null, $this->gone()));
+    }
+
+    public function test_a_worker_that_was_not_recorded_is_not_evidence_of_anything(): void
+    {
+        $task = $this->runningRebuild('shop', []);
+
+        $this->assertFalse(TaskReconciler::workerGone($task));
+        $this->assertNull(TaskReconciler::decide($task, null, $this->queued()));
     }
 
     // ---- the sweep -------------------------------------------------------

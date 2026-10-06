@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Deploy an uploaded zip/tar into ~/project
 
-    Deploys an archive already in the account (put there with file_upload or FTP), e.g. zip_path /project/app.zip. A single top-level directory is unwrapped.
+    Deploys an archive already in the account (put there with file_upload or FTP), e.g. zip_path /project/app.zip. A single top-level directory is unwrapped. Answers at once with a task `id`: follow it with task_get until completed, failed or cancelled; a failure is in details.error and details.problems. A 409 means a deploy is already running: follow the task_id it names with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, instead of calling again.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectDeployArchiveTool extends ApiTool

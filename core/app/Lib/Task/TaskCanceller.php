@@ -31,6 +31,7 @@ class TaskCanceller
             ];
         }
 
+        $wasRunning = $task->status === Task::STATUS_RUNNING;
         $task->markCancelled();
 
         // The deploy subprocess pid comes from the deploy log, not from
@@ -45,9 +46,14 @@ class TaskCanceller
         // `pid_start_time`: a *running* deploy has no recorded start time to
         // check against, and the window this opens is the same one
         // `requestCancel()` already accepted when it wrote the status.
+        //
+        // Only the deploy this task is running. A queued task runs none, and
+        // the account's latest log may be another's: a deploy started without
+        // a task, or a create's log still waiting for its files.
         $pid = null;
-        if (is_string($task->username) && $task->username !== '') {
-            $pid = DeployLogger::requestCancel($task->username)['pid'];
+        $log = $wasRunning ? TaskReconciler::deployLogOf($task) : null;
+        if ($log !== null && ($log['status'] ?? null) === DeployLogger::STATUS_RUNNING) {
+            $pid = DeployLogger::requestCancel((string) $task->username)['pid'];
         }
 
         // Fall back to the task's own pid for the job types that do set it,

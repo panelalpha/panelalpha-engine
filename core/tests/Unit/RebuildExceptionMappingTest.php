@@ -3,16 +3,18 @@
 namespace Tests\Unit;
 
 use App\Exceptions\ProblemException;
-use App\Http\Controllers\UserController;
 use App\Lib\Deploy\DeployLog\DeployLogger;
+use App\Lib\Project\ProjectRebuild;
+use App\Models\User;
 use Illuminate\Validation\ValidationException;
 use ReflectionMethod;
 use Tests\TestCase;
 
 /**
- * `rebuild()` was the one deploy entry point with no handler around its
- * pipeline call. `clone()` and `deployArchive()` both catch and translate
- * through `deployProblem()`; the two `runProjectRebuild()` calls did not, so
+ * The rebuild was the one deploy entry point with no handler around its
+ * pipeline call. `clone()` and the archive deploy both caught and translated
+ * through a deploy problem (now `ProblemException::deploy()`); the two
+ * rebuild calls did not, so
  * a rebuild whose compose dependency failed answered
  *
  *   HTTP 500
@@ -31,9 +33,12 @@ class RebuildExceptionMappingTest extends TestCase
 {
     private function translate(\Exception $e): ProblemException
     {
-        $method = new ReflectionMethod(UserController::class, 'rebuildFailure');
+        return $this->failure($e, null);
+    }
 
-        return $method->invoke(new UserController(), $e, null);
+    private function failure(\Exception $e, ?DeployLogger $logger): ProblemException
+    {
+        return (new ReflectionMethod(ProjectRebuild::class, 'rebuildFailure'))->invoke(null, $e, $logger);
     }
 
     public function test_a_failed_rebuild_is_a_problem_response_not_a_raw_500(): void
@@ -94,8 +99,7 @@ class RebuildExceptionMappingTest extends TestCase
         $logger = DeployLogger::start($username);
         $logger->stage(DeployLogger::STAGE_RUNNING);
 
-        $problem = (new ReflectionMethod(UserController::class, 'rebuildFailure'))
-            ->invoke(new UserController(), new \RuntimeException('exited with code 1'), $logger);
+        $problem = $this->failure(new \RuntimeException('exited with code 1'), $logger);
 
         $this->assertSame('running', $problem->problems[0]['stage']);
     }
@@ -113,8 +117,7 @@ class RebuildExceptionMappingTest extends TestCase
         $logger->stage(DeployLogger::STAGE_RUNNING);
         $logger->finish(DeployLogger::STATUS_FAILED, 'exited with code 33');
 
-        $problem = (new ReflectionMethod(UserController::class, 'rebuildFailure'))
-            ->invoke(new UserController(), new \RuntimeException('exited with code 33'), $logger);
+        $problem = $this->failure(new \RuntimeException('exited with code 33'), $logger);
 
         $finished = array_filter(
             $logger->entries(),
@@ -133,8 +136,7 @@ class RebuildExceptionMappingTest extends TestCase
         $logger = DeployLogger::start($username);
         $logger->stage(DeployLogger::STAGE_RUNNING);
 
-        (new ReflectionMethod(UserController::class, 'rebuildFailure'))
-            ->invoke(new UserController(), new \RuntimeException('exited with code 1'), $logger);
+        $this->failure(new \RuntimeException('exited with code 1'), $logger);
 
         $this->assertSame('failed', $logger->readLatest()['status'] ?? null);
     }
@@ -148,8 +150,7 @@ class RebuildExceptionMappingTest extends TestCase
         $logger->stage(DeployLogger::STAGE_RUNNING);
         DeployLogger::requestCancel($username);
 
-        (new ReflectionMethod(UserController::class, 'rebuildFailure'))
-            ->invoke(new UserController(), new \RuntimeException('killed'), $logger);
+        $this->failure(new \RuntimeException('killed'), $logger);
 
         $this->assertNotNull($logger->readLatest()['finished_at'] ?? null);
         $this->assertSame('cancelled', $logger->readLatest()['status'] ?? null);
@@ -157,37 +158,44 @@ class RebuildExceptionMappingTest extends TestCase
 
     /**
      * The plain JSON rebuild used to get no logger (only the stream opened
-     * one), so its failures could not say where they happened.
+     * one), so its failures could not say where they happened. The job and
+     * the stream both open it through the same call now.
      */
-    public function test_the_logger_does_not_depend_on_streaming(): void
+    public function test_a_dind_rebuild_opens_its_deploy_log_whichever_way_it_runs(): void
     {
-        $source = file_get_contents(__DIR__ . '/../../app/Http/Controllers/UserController.php');
-        $this->assertIsString($source);
+        $username = 'rblog' . bin2hex(random_bytes(3));
+        $this->beforeApplicationDestroyed(static fn () => DeployLogger::deleteUserLogs($username));
+        $user = new User();
+        $user->username = $username;
 
-        $body = substr($source, (int) strpos($source, 'public function rebuild(string $username'));
-        $body = substr($body, 0, (int) strpos($body, '$rebuild = function'));
+        $user->setDetails(['template' => 'php']);
+        $this->assertNull((new ProjectRebuild())->openLog($user, ProjectRebuild::REBUILD), 'a template project has no deploy log');
 
-        $this->assertStringContainsString("if (\$user->getTemplate() === 'dind') {", $body);
-        $this->assertStringNotContainsString("=== 'dind' && \$this->wantsDeployStream", $body);
+        $user->setDetails(['template' => 'dind']);
+        $logger = (new ProjectRebuild())->openLog($user, ProjectRebuild::REBUILD);
+        $this->assertNotNull($logger);
+        $this->assertTrue(DeployLogger::isLockedFor($username), 'opening it takes the deploy lock');
+        $logger->finish(DeployLogger::STATUS_SUCCESS);
     }
 
     /**
-     * The gap itself: both call sites now go through one closure, so the
-     * streamed and the plain response cannot answer differently again.
+     * The gap itself: the controller no longer runs a deploy, so the streamed
+     * and the queued one both go through the one handler in ProjectRebuild.
      */
     public function test_both_rebuild_paths_go_through_the_handler(): void
     {
-        $source = file_get_contents(__DIR__ . '/../../app/Http/Controllers/UserController.php');
-        $this->assertIsString($source);
+        $controller = (string) file_get_contents(__DIR__ . '/../../app/Http/Controllers/UserController.php');
+        $this->assertStringNotContainsString('rebuildFromSource(', $controller);
+        $this->assertStringNotContainsString('deployFromArchive(', $controller);
+        $this->assertStringContainsString('$rebuild->run(', $controller);
 
-        $body = substr($source, (int) strpos($source, 'public function rebuild(string $username'));
-        $body = substr($body, 0, (int) strpos($body, 'private function rebuildFailure'));
+        $job = (string) file_get_contents(__DIR__ . '/../../app/Jobs/RebuildProject.php');
+        $this->assertStringContainsString('$rebuild->run(', $job);
 
-        $this->assertSame(
-            1,
-            substr_count($body, '$this->runProjectRebuild('),
-            'a second unguarded rebuild call is how this regressed the first time'
-        );
-        $this->assertStringContainsString('$this->rebuildFailure(', $body);
+        $service = (string) file_get_contents(__DIR__ . '/../../app/Lib/Project/ProjectRebuild.php');
+        $body = substr($service, (int) strpos($service, 'private function rebuild(User'));
+        $body = substr($body, 0, (int) strpos($body, 'private function deployArchive('));
+        $this->assertSame(1, substr_count($body, '->rebuildFromSource('), 'a second unguarded rebuild call is how this regressed the first time');
+        $this->assertStringContainsString('self::rebuildFailure(', $body);
     }
 }

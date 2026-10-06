@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Redeploy a project
 
-    Detects, builds and starts the app again from ~/project, importing `zip_path` first when given (refused on a git project). Answers when the deploy ends; if the call times out the deploy carries on, so follow deploy_log_get instead of calling again.
+    Detects, builds and starts the app again from ~/project, importing `zip_path` first when given (refused on a git project). Answers at once with a task `id`: follow it with task_get until completed, failed or cancelled; a failure is in details.error and details.problems. A 409 means a deploy is already running: follow the task_id it names with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, instead of calling again.
     MARKDOWN)]
 #[IsDestructive]
 class ProjectRebuildTool extends ApiTool

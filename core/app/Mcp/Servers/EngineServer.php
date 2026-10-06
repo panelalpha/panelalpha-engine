@@ -35,6 +35,11 @@ use Laravel\Mcp\Transport\JsonRpcRequest;
     offline. Follow the annotations, and confirm destructive calls with the
     operator on a production server.
 
+    Deploys run in the background: `project_create`, `project_rebuild` and
+    `project_deploy_archive` answer at once with a task `id`. Follow it with
+    `task_get` until it is completed, failed or cancelled; never start another
+    deploy while it runs.
+
     Git on a project starts with `git_status`: `managed_by: deploy` means
     redeploy with `project_rebuild`, `site_git` means the git tools. `git_push`
     commits a dirty tree itself; confirm first.

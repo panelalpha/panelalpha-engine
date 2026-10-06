@@ -56,10 +56,12 @@ class ArchiveOnGitProjectTest extends TestCase
 
         foreach (['public function deployArchive(', 'public function rebuild(string $username'] as $entry) {
             $body = substr($source, (int) strpos($source, $entry));
+            $body = substr($body, 0, (int) strpos($body, '$this->startRedeploy('));
             $refuse = strpos($body, 'self::refuseArchiveOnGitProject($user)');
-            $work = strpos($body, 'DeployPlanInput::arm($request)');
+            $work = strpos($body, 'EnvVarOverrides::applyIncoming(');
 
             $this->assertNotFalse($refuse, "{$entry} does not refuse an archive into a git project");
+            $this->assertNotFalse($work, "{$entry} no longer applies env_vars before it queues");
             $this->assertLessThan($work, $refuse, "{$entry} refuses only after it has started work");
         }
     }

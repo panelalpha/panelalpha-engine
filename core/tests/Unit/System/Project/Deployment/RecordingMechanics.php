@@ -12,6 +12,8 @@ final class RecordingMechanics implements DeployMechanics
 {
     public ?\Throwable $prepareException = null;
 
+    public ?\Throwable $ingestArchiveException = null;
+
     /** @var array{exit_code: int, stdout: string, stderr: string} */
     public array $startResult = ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
 
@@ -98,6 +100,9 @@ final class RecordingMechanics implements DeployMechanics
     public function ingestArchive(string $zipPath): void
     {
         $this->calls[] = 'ingestArchive';
+        if ($this->ingestArchiveException !== null) {
+            throw $this->ingestArchiveException;
+        }
     }
 
     public function publishDomain(DomainModel $domain): void

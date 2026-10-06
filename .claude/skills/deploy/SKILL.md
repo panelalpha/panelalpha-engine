@@ -187,30 +187,26 @@ create calls said `wp`.
 
 ## 3. Deploy calls, timeouts and polling
 
-`project_create` with `git_repo`, `project_deploy_archive` and
-`project_rebuild` all block until the application answers its health check
-and return the project with `details.deployment_status`, `deploy_strategy`,
-`deploy_label`, `deploy_port`, `deploy_image` and `health_healthy`. Expect,
-with prewarmed base images: static ~5 s, Express ~10-20 s, PHP ~20 s, a
-Laravel or Next.js build 1.5-6 min, a first deploy of a runtime whose base
-image is not on the host longer still.
+`project_create`, `project_deploy_archive` and `project_rebuild` answer at
+once with **202** and a task (`id`, `status`, `details.action`); the deploy
+runs in the background until the application answers its health check.
+Expect, with prewarmed base images: static ~5 s, Express ~10-20 s, PHP
+~20 s, a Laravel or Next.js build 1.5-6 min, a first deploy of a runtime
+whose base image is not on the host longer still.
 
-**The MCP client's timeout is shorter than a slow deploy.** A timeout error is
-the client giving up, not the deploy failing; the deploy keeps running.
-Never retry the create — it would collide with the running deploy on the
-same name. Instead:
+Follow every deploy the same way:
 
-1. `project_list_summary` — the project exists and its `status`.
-2. `task_get` / `task_log_list` with `since` — task status and new log lines.
-   Or `deploy_log_get` with `offset: 100000` — an absurd offset returns
-   `status` (`running` / `success` / `partial` / `failed` / `cancelled`),
-   `stage`, `error`, `started_at`/`finished_at` and `timings` (per-stage
-   seconds and the `timeline` of steps) with an empty `lines` array. Poll
-   this every 20-30 s until it is no longer `running` — `partial` is
-   terminal too: the container came up and nothing answered on the detected
-   port, so treat it as failed and go to section 5.
+1. `task_get` every 20-30 s until `status` is `completed`, `failed` or
+   `cancelled`; `task_log_list` with `since` (unix or ISO) returns new log
+   lines meanwhile. A `completed` task carries `details.deployment_status`:
+   `partial` means the container came up and nothing answered on the
+   detected port, so treat it as failed and go to section 5. A `failed` task
+   says why in `details.error` and `details.problems` (`code`, `stage`,
+   `deploy_log_offset`).
+2. Then `project_get` for `deploy_strategy`, `deploy_label`, `deploy_port`,
+   `deploy_image` and `health_healthy`.
 3. Only when you need the actual file-log output, call `deploy_log_get`
-   again with `offset: 0`, then with `next_offset` while `more` is true:
+   with `offset: 0`, then with `next_offset` while `more` is true:
    each call returns about 48 KB of `lines`, `{at, level, step}` entries.
    Composer/npm output is one entry per line, so a build is several pages;
    when only the end matters, skip ahead rather than reading every page.
@@ -284,10 +280,10 @@ Work down this ladder; each rung is one or two calls.
 
 **A. What did the engine say?** `deploy_log_get` (`offset: 100000`). The
 `error` field is already a diagnosis when the engine recognised the failure.
-**Match on the slug, not the sentence.** A failing `project_create` /
-`project_deploy_archive` / `project_rebuild` answers `422` with a `problems`
-array, and each entry's `code` is that same slug — so branch on the code and
-show the user the `message`:
+**Match on the slug, not the sentence.** A refused request answers `422` with
+a `problems` array, and a deploy that fails records the same array on its task
+as `details.problems`; each entry's `code` is that same slug — so branch on
+the code and show the user the `message`:
 
 ```json
 {"errors":{"deploy":["The repository could not be read. …"]},
@@ -389,9 +385,13 @@ with the user's explicit go-ahead.
 
 ## 6. Rules
 
-- Never retry `project_create` after a client timeout; poll `task_get` on the
-  returned task id instead. A 202 means the account exists and the deploy is
-  queued — not that the app is up yet.
+- Never re-run a deploy call after a client timeout; poll `task_get` on the
+  returned task id instead. A 202 means the deploy is queued — not that the
+  app is up yet. A `409` on `project_rebuild` / `project_deploy_archive` names
+  the deploy already running as `task_id`: follow that one with `task_get`
+  (`task_cancel` it only if it is clearly stuck). A `task_id` of `null` means
+  the running deploy was started without a task (the CLI, a git push): follow
+  it with `deploy_log_get` (`offset: 100000`) until it is no longer `running`.
 - Upload into `/project/`, never at the account root.
 - Do not pass secrets in the repository URL; `git_token` is the field for it.
 - Do not read `.env` values back to the user; the inspect tools withhold

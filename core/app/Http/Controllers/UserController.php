@@ -2,7 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Exceptions\DeployCancelledException;
+use App\Exceptions\DeployAlreadyRunningException;
+use App\Exceptions\DeployBusyException;
 use App\Exceptions\ProblemException;
 use App\Http\Requests\DeployPlanInput;
 use App\Http\Requests\RecipeChoiceInput;
@@ -18,22 +19,21 @@ use App\System;
 use App\Lib\Helper;
 use App\Lib\Deploy\DeployLog\DeployFailureExplainer;
 use App\Lib\Deploy\DeployLog\DeployLogger;
-use App\Lib\Deploy\DeployLog\FailureOutput;
 use App\Lib\Deploy\EnvVarOverrides;
-use App\Lib\Deploy\Platform\PlatformStage;
+use App\Lib\Deploy\Platform\DeployPlan;
+use App\Lib\Deploy\Platform\DeployPlanContext;
+use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Project\NewProjectInput;
 use App\Lib\Project\ProjectCreator;
+use App\Lib\Project\ProjectRebuild;
 use App\Lib\Domains\DomainPlan;
 use App\Lib\Domains\MainDomainRename;
-use App\Lib\Domains\PublicUrl;
 use App\Lib\Limits\ResourceLimit;
 use App\Lib\Vault\RequestVault;
 use App\Models\Domain;
 use App\Models\Setting;
 use App\System\Project\Dind;
-use App\System\Project\Dind\AppHealth;
-use App\System\Project as ProjectAggregate;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -489,15 +489,6 @@ class UserController extends Controller
     }
 
     /**
-     * A failed deploy, said in a way a program can act on.
-     *
-     * These used to be `withMessages([$message])`, which keys on 0 -- so the
-     * response carried `errors: {"0": ["..."]}`: no field to attach it to, no
-     * code to branch on, and no clue where in the deploy it happened. A
-     * client had to read English to tell "pin a PHP image" from "the
-     * repository needs a token".
-     */
-    /**
      * An archive cannot replace a project that deploys from git (engine#269).
      *
      * The deploy treated the uploaded tree as the repository's checkout -- its
@@ -519,16 +510,6 @@ class UserController extends Controller
             . 'Push the change to the repository and rebuild, or deploy the archive into a project created without a repository.',
             ['git_repo' => GitUrl::sanitize((string) $user->getGitRepo())]
         );
-    }
-
-    private static function deployProblem(string $code, string $message, ?string $stage): ProblemException
-    {
-        return ProblemException::one('deploy', $code, $message, array_filter([
-            'stage' => $stage,
-            // Where to start reading the log for the rest of the story. The
-            // account is gone by now, but its deploy log is kept.
-            'deploy_log_offset' => 0,
-        ], static fn (mixed $v): bool => $v !== null));
     }
 
     /**
@@ -564,8 +545,11 @@ class UserController extends Controller
         set_time_limit(0);
 
         return response()->stream(function () use ($pipeline, $deployLogger, $userFrame) {
-            while (ob_get_level() > 0) {
-                ob_end_clean();
+            // Under PHPUnit, TestResponse::streamedContent() owns a buffer.
+            if (!app()->runningUnitTests()) {
+                while (ob_get_level() > 0) {
+                    ob_end_clean();
+                }
             }
             $emit = static function (array $frame): void {
                 echo json_encode($frame, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n";
@@ -647,12 +631,22 @@ class UserController extends Controller
         path: '/projects/{username}/rebuild',
         summary: 'Redeploy a project',
         description: 'Detects, builds and starts the application again from ~/project, after importing '
-            . '`zip_path` into it when given (refused on a project deployed from git). The request stays '
-            . 'open until the deploy ends; a client that times out has not stopped it, so follow '
-            . 'GET /projects/{username}/deploy-log rather than calling again.',
+            . '`zip_path` into it when given (refused on a project deployed from git). The request is '
+            . 'checked and `env_vars` applied at once; the deploy itself runs in a queue job, and the answer '
+            . 'is 202 with a task (`details.action: rebuild`). Poll GET /tasks/{id} until it is completed, '
+            . 'failed or cancelled: a failure is on the task as `details.error`, and `details.problems` '
+            . 'carries its code, stage and deploy_log_offset. While a deploy of this project is queued or '
+            . 'running the answer is 409 with that deploy\'s `task_id`: follow it rather than calling again, '
+            . 'or cancel it with POST /tasks/{id}/cancel if it is stuck. `task_id` is null when the running '
+            . 'deploy was not started as a task (the CLI, a push); follow GET /projects/{username}/deploy-log '
+            . 'then. With X-Deploy-Stream: ndjson the deploy runs in the request instead and its log is '
+            . 'streamed as NDJSON.',
         x: ['mcp-description' => 'Detects, builds and starts the app again from ~/project, importing '
-            . '`zip_path` first when given (refused on a git project). Answers when the deploy ends; if the '
-            . 'call times out the deploy carries on, so follow deploy_log_get instead of calling again.'],
+            . '`zip_path` first when given (refused on a git project). Answers at once with a task `id`: '
+            . 'follow it with task_get until completed, failed or cancelled; a failure is in details.error '
+            . 'and details.problems. A 409 means a deploy is already running: follow the task_id it names '
+            . 'with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, instead '
+            . 'of calling again.'],
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -700,16 +694,28 @@ class UserController extends Controller
             ],
         )),
         responses: [
-            new OA\Response(response: 200, description: 'Project rebuilt', content: new OA\JsonContent(ref: '#/components/schemas/User')),
+            new OA\Response(
+                response: 200,
+                description: 'With X-Deploy-Stream: ndjson: the deploy runs in the request and its log streams as '
+                    . 'NDJSON, a `start` frame, `line` and `stage` frames, then a `finish` frame with the status',
+                content: new OA\MediaType(mediaType: 'application/x-ndjson'),
+            ),
+            new OA\Response(response: 202, description: 'Deploy queued; `data` is the task to follow', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object')],
+            )),
+            new OA\Response(response: 400, description: 'Unsupported X-Deploy-Stream value'),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
-            new OA\Response(response: 422, description: 'Rebuild failed', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'message', type: 'string'),
+                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
+                ],
+            )),
+            new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 503, description: 'The project could not be locked to start the deploy, or, with X-Deploy-Stream: ndjson, its deploy log could not be opened to stream from'),
         ],
     )]
-    /**
-     * @param string $username
-     * @return UserResource
-     */
-    public function rebuild(string $username, Request $request)
+    public function rebuild(string $username, Request $request, ProjectRebuild $rebuild): JsonResponse|StreamedResponse
     {
         $user = $this->projectOr404($username);
 
@@ -721,178 +727,102 @@ class UserController extends Controller
             'stages' => 'array|nullable',
             'recipe' => 'string|nullable|max:64',
         ]);
-        if (($params['zip_path'] ?? '') !== '') {
+        $zipPath = ($params['zip_path'] ?? '') !== '' ? $params['zip_path'] : null;
+        if ($zipPath !== null) {
             self::refuseArchiveOnGitProject($user);
         }
-        DeployPlanInput::arm($request);
-        RecipeChoiceInput::arm($request);
-        if (array_key_exists('env_vars', $params)) {
-            $user->setDetails([
-                'env_vars' => EnvVarOverrides::applyIncoming(
-                    is_array($params['env_vars'] ?? null) ? RequestVault::get('env_vars', $user->username) : null,
-                    $user->getEnvVars()
-                ),
-            ]);
+        $plan = DeployPlanInput::parse($request->input(DeployPlanInput::FIELD));
+        $recipe = RecipeChoiceInput::parse($request->input(RecipeChoiceInput::FIELD));
+        if ($zipPath !== null && $user->getTemplate() === 'dind') {
+            $rebuild->assertArchive($user, $zipPath);
+        }
+        $stream = $user->getTemplate() === 'dind' && $this->wantsDeployStream($request);
+        $envVars = array_key_exists('env_vars', $params)
+            ? static fn (): array => EnvVarOverrides::applyIncoming(
+                is_array($params['env_vars'] ?? null) ? RequestVault::get('env_vars', $user->username) : null,
+                $user->getEnvVars()
+            )
+            : null;
+
+        return $rebuild->whileIdle($user, fn () => $this->startRedeploy(
+            $rebuild, $user, ProjectRebuild::REBUILD, $zipPath, $plan, $recipe, $stream, $envVars
+        ));
+    }
+
+    /**
+     * Queue the redeploy and answer 202 with its task; or, when the client
+     * asked for the stream, run it here and stream its log. Runs while no
+     * other deploy of the project can be queued or started.
+     *
+     * @param ?\Closure(): array<string, string> $envVars the env_vars to store, null to leave them
+     */
+    private function startRedeploy(
+        ProjectRebuild $rebuild,
+        User $user,
+        string $action,
+        ?string $zipPath,
+        ?DeployPlan $plan,
+        ?string $recipe,
+        bool $stream,
+        ?\Closure $envVars,
+    ): JsonResponse|StreamedResponse {
+        // Resolved before anything starts, so a vault reference it cannot use is still a 422.
+        $env = $envVars !== null ? $envVars() : null;
+
+        try {
+            $deployLogger = $stream ? $rebuild->openLog($user, $action) : null;
+        } catch (DeployAlreadyRunningException) {
+            // A deploy with no task took the lock since the check: answered as the check would.
+            throw new DeployBusyException($user->username, null);
+        }
+        if ($stream && $deployLogger === null) {
+            abort(new JsonResponse([
+                'message' => 'The deploy log could not be opened, so there is nothing to stream. '
+                    . 'Try again, or leave out X-Deploy-Stream to queue the deploy.',
+            ], 503));
+        }
+
+        if ($env !== null) {
+            $user->setDetails(['env_vars' => $env]);
             $user->save();
         }
-        $zipPath = $params['zip_path'] ?? null;
 
-        $deployLogger = null;
-        $stream = false;
-        if ($user->getTemplate() === 'dind') {
-            // Created here rather than inside the workflow, which would open
-            // the same one: a failure then knows its stage (the plain response
-            // used to be the only deploy answer without one), and the stream
-            // can attach its backlog/start frames before the pipeline runs.
-            $deployLogger = DeployLogger::resumeRunningOrStartSafely($user->username);
-            $stream = $this->wantsDeployStream($request);
-        }
+        if ($deployLogger !== null) {
+            app(DeployPlanContext::class)->set($plan);
+            app(RecipeChoiceContext::class)->set($recipe);
 
-        // One closure for both shapes, so the streamed and the plain response
-        // cannot drift -- which is how this endpoint came to be the only
-        // deploy entry point with no handler at all. A rebuild whose compose
-        // dependency failed answered `500 {"message":"Server Error"}`: no
-        // problem code, no stage, no offset, and nothing to tell a client
-        // "your compose file is wrong" from "the engine is broken". The deploy
-        // log for the same run already had the real error in it.
-        $rebuild = function () use ($user, $deployLogger, $zipPath): void {
-            try {
-                $this->runProjectRebuild($user->project(), $deployLogger, $zipPath);
-                $user->project()->system()->webserver()->rebuildDomains();
-                $this->recordRebuildSucceeded($user);
-            } catch (DeployCancelledException $e) {
-                $stage = $deployLogger?->currentStage();
-                self::finishRebuildLog($deployLogger, DeployLogger::STATUS_CANCELLED, $e->getMessage());
-                throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
-            } catch (ValidationException $e) {
-                // ProblemException is one of these, so anything already in the
-                // documented shape passes through rather than being re-wrapped.
-                throw $e;
-            } catch (\Exception $e) {
-                throw $this->rebuildFailure($e, $deployLogger);
-            }
-        };
-
-        if ($stream && $deployLogger !== null) {
             return $this->respondWithDeployStream(
-                $rebuild,
+                fn () => $rebuild->run($user, $action, $deployLogger, $zipPath),
                 $deployLogger,
                 static fn () => ['username' => $user->username, 'domain' => $user->domain]
             );
         }
 
-        $rebuild();
+        $task = $rebuild->queue($user, $action, $zipPath, $plan, $recipe);
 
-        return new UserResource($user);
-    }
-
-    /**
-     * A failed rebuild, in the shape every other deploy endpoint answers in.
-     *
-     * Its own method so it can be exercised without a request: the defect was
-     * that this translation did not exist here at all, and a test that has to
-     * stand up a controller to see it would not have caught that either.
-     */
-    private function rebuildFailure(\Exception $e, ?DeployLogger $deployLogger): ProblemException
-    {
-        $deployLogger?->recordFailureOutput($e->getMessage());
-        // The same slug deploy telemetry reports, so a client and a dashboard
-        // name one failure the same way.
-        $match = DeployFailureExplainer::match($e->getMessage());
-        $message = $match['message'] ?? FailureOutput::withoutNoise($e->getMessage());
-        $stage = $deployLogger?->currentStage();
-        self::finishRebuildLog($deployLogger, DeployLogger::STATUS_FAILED, $message);
-
-        return self::deployProblem($match['rule'] ?? 'rebuild_failed', $message, $stage);
-    }
-
-    /**
-     * The workflow finishes the log itself when a rebuild fails or is cancelled.
-     * Finishing it again wrote a second "Deploy failed" line and filed a second
-     * telemetry report for the same rebuild. A cancel request alone sets the
-     * status without finishing, so `finished_at` is what says it was done.
-     */
-    private static function finishRebuildLog(?DeployLogger $deployLogger, string $status, string $error): void
-    {
-        if ($deployLogger === null) {
-            return;
-        }
-        $latest = $deployLogger->readLatest() ?? [];
-        $settled = in_array($latest['status'] ?? null, [DeployLogger::STATUS_FAILED, DeployLogger::STATUS_CANCELLED], true);
-        if ($settled && ($latest['finished_at'] ?? null) !== null) {
-            return;
-        }
-        $deployLogger->finish($status, $error);
-    }
-
-    /**
-     * DinD wipe-rebuild goes through DeploymentWorkflow; PhpHosting only recreates outer hosting.
-     */
-    private function runProjectRebuild(ProjectAggregate $project, ?DeployLogger $deployLogger, ?string $zipPath): void
-    {
-        $project->rebuildFromSource($deployLogger, $zipPath);
-    }
-
-    /**
-     * A rebuild that worked is a deploy that worked, and the next one needs to
-     * know that.
-     *
-     * The deployment status is what the entrypoint's install/upgrade phase is
-     * derived from ({@see PlatformStage::phaseFor()}), and rebuild used to
-     * leave it untouched. An account that had only ever been rebuilt was
-     * therefore stuck reporting a first install for the rest of its life:
-     * every rebuild re-ran `php artisan key:generate --force`, throwing away
-     * the APP_KEY that every session cookie and encrypted column depends on,
-     * and re-ran the seeders behind it. The whole point of splitting install
-     * from upgrade is that install runs once.
-     */
-    private function recordRebuildSucceeded(User $user): void
-    {
-        // A rebuild does not run the deploy pipeline, so the verdict the
-        // health checks reached has to be applied here as well -- and it is
-        // applied first, because "the site is serving our placeholder" is
-        // true whether this account had ever deployed successfully before or
-        // not. Without this the whole mechanism was invisible on the one path
-        // most redeploys take.
-        //
-        // The account record only. The deploy log -- and telemetry with it --
-        // is finished by the pipeline itself, which reaches the same verdict
-        // through the same helper in the deploy pipeline ({@see \App\System\Project\Deployment\DeploymentWorkflow::rebuildFromSource()}). Doing
-        // it here as well would file a second terminal status for one rebuild
-        // and report it twice.
-        //
-        // Both lists the pipeline finishes the log with: with the health one
-        // alone, a rebuild logged `partial` for its public URL and recorded `success`.
-        $warnings = array_merge(
-            AppHealth::servingWarnings($user->getDetails()),
-            PublicUrl::warnings((string) $user->domain, $user->getDetails()),
-        );
-        if ($warnings !== []) {
-            $user->setDetails([
-                'deployment_status' => 'partial',
-                'deployment_warnings' => $warnings,
-                'error' => null,
-            ]);
-            $user->save();
-
-            return;
-        }
-
-        // A clean rebuild clears a previous run's warnings: leaving them would
-        // report a fault that has since been fixed.
-        if ($user->getDeploymentStatus() === 'success' && ($user->getDetails()['deployment_warnings'] ?? []) === []) {
-            return;
-        }
-        $user->markDeploySucceeded();
-        $user->save();
+        return TaskResource::make($task)->response()->setStatusCode(202);
     }
 
     #[OA\Post(
         path: '/projects/{username}/deploy-archive',
         summary: 'Deploy an uploaded zip/tar into ~/project',
-        description: 'Engine-only path: unwrap a single top-level directory, detect project type, apply strategy, docker compose up. Upload the archive first: POST /projects/{username}/files/upload (file_upload over MCP, with file_contents or file_url), or an FTP/SFTP account; zip_path is relative to the account home, e.g. /project/app.zip.',
+        description: 'Engine-only path: unwrap a single top-level directory, detect project type, apply strategy, '
+            . 'docker compose up. Upload the archive first: POST /projects/{username}/files/upload (file_upload '
+            . 'over MCP, with file_contents or file_url), or an FTP/SFTP account; zip_path is relative to the '
+            . 'account home, e.g. /project/app.zip. The archive is checked (it exists in the home and is a .zip '
+            . 'or .tar.gz) and `env_vars` applied at once; the deploy runs in a queue job, and the answer is '
+            . '202 with a task (`details.action: deploy_archive`). Poll GET /tasks/{id} until it is completed, '
+            . 'failed or cancelled: a failure is on the task as `details.error`, and `details.problems` carries '
+            . 'its code, stage and deploy_log_offset. While a deploy of this project is queued or running the '
+            . 'answer is 409 with that deploy\'s `task_id`, as POST /projects/{username}/rebuild describes. '
+            . 'With X-Deploy-Stream: ndjson the deploy runs in the request instead and its log is streamed '
+            . 'as NDJSON.',
         x: ['mcp-description' => 'Deploys an archive already in the account (put there with file_upload or FTP), '
-            . 'e.g. zip_path /project/app.zip. A single top-level directory is unwrapped.'],
+            . 'e.g. zip_path /project/app.zip. A single top-level directory is unwrapped. Answers at once with a '
+            . 'task `id`: follow it with task_get until completed, failed or cancelled; a failure is in '
+            . 'details.error and details.problems. A 409 means a deploy is already running: follow the task_id '
+            . 'it names with task_get (task_cancel if it is stuck), or deploy_log_get when task_id is null, '
+            . 'instead of calling again.'],
         security: [['bearerAuth' => []]],
         tags: ['Projects'],
         parameters: [new OA\Parameter(name: 'username', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],
@@ -936,12 +866,28 @@ class UserController extends Controller
             ],
         )),
         responses: [
-            new OA\Response(response: 200, description: 'Archive deployed', content: new OA\JsonContent(ref: '#/components/schemas/User')),
+            new OA\Response(
+                response: 200,
+                description: 'With X-Deploy-Stream: ndjson: the deploy runs in the request and its log streams as '
+                    . 'NDJSON, a `start` frame, `line` and `stage` frames, then a `finish` frame with the status',
+                content: new OA\MediaType(mediaType: 'application/x-ndjson'),
+            ),
+            new OA\Response(response: 202, description: 'Deploy queued; `data` is the task to follow', content: new OA\JsonContent(
+                properties: [new OA\Property(property: 'data', type: 'object')],
+            )),
+            new OA\Response(response: 400, description: 'Unsupported X-Deploy-Stream value'),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'A deploy of this project is already queued or running', content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'message', type: 'string'),
+                    new OA\Property(property: 'task_id', type: 'integer', nullable: true),
+                ],
+            )),
             new OA\Response(response: 422, description: 'Validation error', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
+            new OA\Response(response: 503, description: 'The project could not be locked to start the deploy, or, with X-Deploy-Stream: ndjson, its deploy log could not be opened to stream from'),
         ],
     )]
-    public function deployArchive(string $username, Request $request): UserResource|StreamedResponse
+    public function deployArchive(string $username, Request $request, ProjectRebuild $rebuild): JsonResponse|StreamedResponse
     {
         $user = $this->projectOr404($username);
         if ($user->getTemplate() !== 'dind') {
@@ -959,64 +905,17 @@ class UserController extends Controller
             'recipe' => 'string|nullable|max:64',
         ]);
         self::refuseArchiveOnGitProject($user);
-        DeployPlanInput::arm($request);
-        RecipeChoiceInput::arm($request);
-        if (array_key_exists('env_vars', $params)) {
-            $user->setDetails([
-                'env_vars' => EnvVarOverrides::applyIncoming($params['env_vars'] ?? null, $user->getEnvVars()),
-            ]);
-            $user->save();
-        }
-        $zipPath = $params['zip_path'];
+        $plan = DeployPlanInput::parse($request->input(DeployPlanInput::FIELD));
+        $recipe = RecipeChoiceInput::parse($request->input(RecipeChoiceInput::FIELD));
+        $rebuild->assertArchive($user, $params['zip_path']);
+        $stream = $this->wantsDeployStream($request);
+        $envVars = array_key_exists('env_vars', $params)
+            ? static fn (): array => EnvVarOverrides::applyIncoming($params['env_vars'] ?? null, $user->getEnvVars())
+            : null;
 
-        $deployLogger = DeployLogger::resumeRunningOrStartSafely($user->username);
-        $deployLogger?->info('Deploy started (source: archive)');
-
-        $run = function () use ($user, $zipPath, $deployLogger): void {
-            try {
-                $user->project()->deployment()->deployFromArchive($deployLogger, $zipPath);
-                // The vhosts were rendered when the account was created, against
-                // the welcome app's port. Detection has just re-pointed app_port
-                // at what the archive really serves on (8000 for PHP, 3000 for
-                // Express, ...), so the proxy must be re-rendered the same way
-                // rebuild() does it — or every non-8080 app answers 502 behind
-                // a green deploy.
-                $user->project()->system()->webserver()->rebuildDomains();
-                $this->recordRebuildSucceeded($user);
-            } catch (DeployCancelledException $e) {
-                $stage = $deployLogger?->currentStage();
-                $deployLogger?->finish(DeployLogger::STATUS_CANCELLED, $e->getMessage());
-                throw self::deployProblem('deploy_cancelled', $e->getMessage(), $stage);
-            } catch (\InvalidArgumentException $e) {
-                $deployLogger?->finish(DeployLogger::STATUS_FAILED, $e->getMessage());
-                throw ValidationException::withMessages([
-                    'zip_path' => $e->getMessage(),
-                ]);
-            } catch (ProblemException $e) {
-                // A start failure already carries its rule; finish() is a no-op once finished.
-                $deployLogger?->finish(DeployLogger::STATUS_FAILED, $e->getMessage());
-                throw $e;
-            } catch (\Exception $e) {
-                $deployLogger?->recordFailureOutput($e->getMessage());
-                $match = DeployFailureExplainer::match($e->getMessage());
-                $message = $match['message'] ?? FailureOutput::withoutNoise($e->getMessage());
-                $stage = $deployLogger?->currentStage();
-                $deployLogger?->finish(DeployLogger::STATUS_FAILED, $message);
-                throw self::deployProblem($match['rule'] ?? 'deploy_failed', $message, $stage);
-            }
-        };
-
-        if ($deployLogger !== null && $this->wantsDeployStream($request)) {
-            return $this->respondWithDeployStream(
-                $run,
-                $deployLogger,
-                static fn () => ['username' => $user->username, 'domain' => $user->domain]
-            );
-        }
-
-        $run();
-
-        return new UserResource($user);
+        return $rebuild->whileIdle($user, fn () => $this->startRedeploy(
+            $rebuild, $user, ProjectRebuild::DEPLOY_ARCHIVE, $params['zip_path'], $plan, $recipe, $stream, $envVars
+        ));
     }
 
     #[OA\Post(
@@ -1154,7 +1053,7 @@ class UserController extends Controller
             } catch (\Throwable $ignored) {
             }
             $match = DeployFailureExplainer::match($e->getMessage());
-            throw self::deployProblem(
+            throw ProblemException::deploy(
                 $match['rule'] ?? 'clone_failed',
                 $match['message'] ?? $e->getMessage(),
                 null
@@ -1165,7 +1064,7 @@ class UserController extends Controller
             } catch (\Throwable $ignored) {
             }
             $match = DeployFailureExplainer::match($e->getMessage());
-            throw self::deployProblem(
+            throw ProblemException::deploy(
                 $match['rule'] ?? 'clone_failed',
                 $match['message'] ?? $e->getMessage(),
                 null

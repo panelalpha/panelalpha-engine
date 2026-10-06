@@ -92,7 +92,7 @@ final class ProvisionCutoverTest extends TestCase
         $this->assertStringContainsString('prepareLinuxIsolation', $source);
 
         foreach ([
-            '/Http/Controllers/UserController.php',
+            '/Lib/Project/ProjectRebuild.php',
             '/Console/Commands/Users/Rebuild.php',
             '/Console/Commands/Users/RecoverDind.php',
         ] as $caller) {

@@ -115,7 +115,7 @@ The assistant does this on its own when you ask for something that is not in the
 
 ```bash
 MCP_TOOL_SEARCH=true
-MCP_DIRECT_TOOLS=project_get,project_create,project_rebuild,deploy_log_get
+MCP_DIRECT_TOOLS=project_get,project_create,project_rebuild,task_get,deploy_log_get
 ```
 
 `MCP_DIRECT_TOOLS` is the short list, comma-separated, with `*` wildcards. To list every tool directly, as older engines did, set `MCP_TOOL_SEARCH=false`. Left unset, the short list is:

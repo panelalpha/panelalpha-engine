@@ -32,7 +32,7 @@ class TaskResource extends JsonResource
 
         $details = $task->details;
         if (is_array($details)) {
-            $details = Arr::except($details, ['api_token_id']);
+            $details = Arr::except($details, ['api_token_id', Task::WORKER]);
             if ($details === []) {
                 $details = null;
             }

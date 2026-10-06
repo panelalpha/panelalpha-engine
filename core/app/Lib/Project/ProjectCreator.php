@@ -139,19 +139,6 @@ class ProjectCreator
     }
 
     /**
-     * Whether a create queued by {@see queue()} has not finished yet: until it
-     * has, the account may not exist on the host or in its container.
-     */
-    public static function isCreating(User $user): bool
-    {
-        return Task::query()
-            ->where('username', $user->username)
-            ->where('job_type', DeployProject::class)
-            ->whereNotIn('status', Task::TERMINAL_STATUSES)
-            ->exists();
-    }
-
-    /**
      * Validate, allocate a domain, and persist the user + main domain.
      * Shared by the sync and async create paths; does not start a deploy.
      */

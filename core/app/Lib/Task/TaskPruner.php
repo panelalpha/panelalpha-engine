@@ -2,7 +2,6 @@
 
 namespace App\Lib\Task;
 
-use App\Jobs\DeployProject;
 use App\Models\Task;
 use App\Models\TaskLog;
 use Illuminate\Database\Eloquent\Builder;
@@ -55,7 +54,7 @@ final class TaskPruner
 
     public static function keepForJobType(string $jobType, int $keepDeploy = self::KEEP_DEPLOY, int $keepOther = self::KEEP_OTHER): int
     {
-        return $jobType === DeployProject::class ? $keepDeploy : $keepOther;
+        return in_array($jobType, Task::DEPLOY_JOB_TYPES, true) ? $keepDeploy : $keepOther;
     }
 
     /**

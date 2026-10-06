@@ -4,6 +4,7 @@ import {
   type ApiListResponse,
   type ApiResponse,
   type CreateUserRequest,
+  type TaskSnapshot,
   type UpdateUserRequest,
   type User,
   type UserUsage,
@@ -120,9 +121,43 @@ export class UsersApi extends EngineApiBase {
     return response.status();
   }
 
-  async rebuildUser(username: string): Promise<void> {
-    const response = await this.api.post(`projects/${username}/rebuild`);
-    await this.assertStatus(response, 200);
+  /**
+   * POST /projects/{username}/rebuild answers 202 with a task. Polls it until
+   * it is terminal and throws unless it completed.
+   */
+  async rebuildUser(username: string, data: Record<string, unknown> = {}): Promise<TaskSnapshot> {
+    const response = await this.api.post(`projects/${username}/rebuild`, { data });
+    await this.assertStatus(response, 202);
+    return this.followDeployTask(await response.json(), `POST /projects/${username}/rebuild`);
+  }
+
+  async rebuildUserRaw(
+    username: string,
+    data: Record<string, unknown> = {}
+  ): Promise<{ status: number; body: any }> {
+    const response = await this.api.post(`projects/${username}/rebuild`, { data });
+    return this.rawCall(response);
+  }
+
+  /** Follows the task a 202 deploy answer named until it is terminal; throws unless it completed. */
+  async followDeployTask(body: unknown, what: string): Promise<TaskSnapshot> {
+    const taskId = taskIdFromBody(body);
+    if (taskId === undefined) {
+      throw new Error(`${what} returned 202 without a task id`);
+    }
+    const task = await waitForTask(
+      {
+        getTaskRaw: async (id) => this.rawCall(await this.api.get(`tasks/${id}`)),
+      },
+      taskId,
+      { timeout: Timeouts.deploy }
+    );
+    if (task.status !== 'completed') {
+      throw new Error(
+        `${what} task ${taskId} ended ${task.status}: ${JSON.stringify(task.details)}`
+      );
+    }
+    return task;
   }
 
   async suspendUser(username: string): Promise<void> {
@@ -174,13 +209,17 @@ export class UsersApi extends EngineApiBase {
     return this.rawCall(response);
   }
 
+  /** 202 with a task, followed until it completed; see rebuildUser(). */
   async deployArchive(
     username: string,
     data: { zip_path: string; env_vars?: Record<string, string | null> }
-  ): Promise<ApiResponse<User>> {
+  ): Promise<TaskSnapshot> {
     const response = await this.api.post(`projects/${username}/deploy-archive`, { data });
-    await this.assertStatus(response, [200, 201]);
-    return response.json();
+    await this.assertStatus(response, 202);
+    return this.followDeployTask(
+      await response.json(),
+      `POST /projects/${username}/deploy-archive`
+    );
   }
 
   async deployArchiveRaw(
