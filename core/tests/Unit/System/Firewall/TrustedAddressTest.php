@@ -27,6 +27,17 @@ class TrustedAddressTest extends TestCase
         $this->assertSame("10.10.0.1\n198.51.100.7 # office # second floor\n2001:db8::1 # vpn\n", TrustedAddress::formatList($list));
     }
 
+    public function test_a_comment_is_one_line_whatever_letters_or_control_characters_it_holds(): void
+    {
+        // ą is C4 85 in UTF-8: \R would split it in half. A vertical tab or form feed is not a line break either.
+        $list = TrustedAddress::parseList("203.0.113.7 # biuro ąę Å Ņ\n198.51.100.7 # office\x0b10.0.0.0/8\x0cend\n");
+
+        $this->assertSame([
+            ['address' => '203.0.113.7', 'comment' => 'biuro ąę Å Ņ'],
+            ['address' => '198.51.100.7', 'comment' => "office\x0b10.0.0.0/8\x0cend"],
+        ], array_map(fn (TrustedAddress $a): array => ['address' => $a->address, 'comment' => $a->comment], $list));
+    }
+
     public function test_the_id_follows_the_address_as_stored(): void
     {
         $this->assertSame((new TrustedAddress('203.0.113.7'))->id(), (new TrustedAddress('203.0.113.7/32', 'x'))->id());

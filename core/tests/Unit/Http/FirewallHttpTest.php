@@ -3,6 +3,8 @@
 namespace Tests\Unit\Http;
 
 use App\Http\Middleware\Authenticate;
+use App\Mcp\Tools\Api\Firewall\FirewallRuleCreateTool;
+use App\Mcp\Tools\Api\Firewall\FirewallRuleUpdateTool;
 use App\System\Firewall\Firewall;
 use App\System\Firewall\FirewallException;
 use App\System\Firewall\FirewallFactory;
@@ -12,6 +14,7 @@ use App\System\Firewall\FirewallNotFound;
 use App\System\Firewall\FirewallStatus;
 use App\System\Firewall\TrustedAddress;
 use Illuminate\Testing\TestResponse;
+use Laravel\Mcp\Request;
 use Tests\Support\InMemoryDatabase;
 use Tests\TestCase;
 
@@ -268,6 +271,68 @@ class FirewallHttpTest extends TestCase
         $this->assertSame([], $this->firewall->rules);
     }
 
+    public function test_a_comment_ufw_cannot_store_is_refused_on_comment_before_the_firewall_is_asked(): void
+    {
+        $characters = "The comment cannot contain ' (an apostrophe), a line break or a NUL character.";
+        $rule = ['action' => 'allow', 'protocol' => 'tcp', 'port' => '25392', 'source' => '192.0.2.150'];
+        $cases = [
+            [$rule + ['comment' => "it's"], $characters],
+            [$rule + ['comment' => "'"], $characters],
+            [$rule + ['comment' => "a\x00b"], $characters],
+            [$rule + ['comment' => "two\nlines"], $characters],
+            [$rule + ['comment' => "a\rb"], $characters],
+            [$rule + ['comment' => 'in'], 'ufw takes the comment "in" for part of the rule; reword it.'],
+            [$rule + ['comment' => 'out'], null],
+            [$rule + ['comment' => 'log'], null],
+            [$rule + ['comment' => 'log-all'], null],
+            [['action' => 'deny', 'source' => '192.0.2.151', 'comment' => 'block in office hours'],
+                'On a rule for published ports, which an incoming deny also is, ufw takes the word in or out followed by more words for part of the rule; reword it.'],
+            [['action' => 'allow', 'scope' => 'published', 'protocol' => 'tcp', 'port' => '25393', 'comment' => 'delete'], null],
+            [['action' => 'allow', 'scope' => 'published', 'protocol' => 'tcp', 'port' => '25393', 'comment' => 'out of office'], null],
+        ];
+        foreach ($cases as [$body, $message]) {
+            $response = $this->postJson('/api/firewall/rules', $body);
+            $this->assertInvalid($response, ['comment']);
+            $this->assertSame(['comment'], array_keys($response->json('errors')), (string) $response->getContent());
+            if ($message !== null) {
+                $this->assertSame([$message], $response->json('errors.comment'));
+            }
+        }
+        $this->assertSame([], $this->firewall->rules);
+
+        $office = $this->hold($rule + ['comment' => 'office']);
+        $this->assertSame([$characters], $this->putJson("/api/firewall/rules/{$office->id()}", ['comment' => "it's"])->assertStatus(422)->json('errors.comment'));
+        // Kept on an allow; a deny is also a route rule, which reads "in" followed by more words as an interface.
+        $this->putJson("/api/firewall/rules/{$office->id()}", ['comment' => 'let in office'])->assertOk();
+        $edited = FirewallRule::fromArray($rule + ['comment' => 'let in office']);
+        $this->assertInvalid($this->putJson("/api/firewall/rules/{$edited->id()}", ['action' => 'deny']), ['comment']);
+        $this->assertSame('let in office', $this->firewall->rules[$edited->id()]->comment);
+        $this->assertSame('allow', $this->firewall->rules[$edited->id()]->action);
+
+        foreach ([[FirewallRuleCreateTool::class, $rule], [FirewallRuleUpdateTool::class, ['id' => $edited->id()]]] as [$tool, $args]) {
+            $response = (new $tool())->handle(new Request($args + ['comment' => "it's"]));
+            $this->assertTrue($response->isError());
+            $payload = json_decode((string) $response->content(), true);
+            $this->assertSame(422, $payload['status']);
+            $this->assertSame([$characters], $payload['data']['errors']['comment']);
+        }
+        $this->assertSame(['let in office'], array_map(static fn (FirewallRule $r): ?string => $r->comment, array_values($this->firewall->rules)));
+    }
+
+    public function test_a_comment_ufw_stores_is_written_as_it_was_sent(): void
+    {
+        $comments = ['office 2 - VPN_gw.example.org:22/tcp @ HQ, (backup)', 'say "hi"', 'back\\slash', 'zażółć gęślą jaźń 日本 🙂',
+            "tab\there", '#1 $%&*+=?![]{}<>|;~^`', 'IN', 'LOG', 'delete', 'block in office hours', 'let them in', str_repeat('x', 255)];
+        foreach ($comments as $i => $comment) {
+            $data = $this->postJson('/api/firewall/rules', ['action' => 'allow', 'protocol' => 'tcp', 'port' => (string) (25400 + $i), 'comment' => $comment])
+                ->assertOk()->json('data');
+            $this->assertSame($comment, $data['comment']);
+            $this->assertSame($comment, $this->firewall->rules[$data['id']]->comment);
+        }
+        $data = $this->postJson('/api/firewall/rules', ['action' => 'deny', 'source' => '192.0.2.151', 'comment' => 'let them in'])->assertOk()->json('data');
+        $this->assertSame(['both', 'let them in'], [$data['scope'], $data['comment']]);
+    }
+
     public function test_the_providers_refusal_is_a_422_in_its_words(): void
     {
         $this->firewall->refuse = 'Invalid position';
@@ -366,6 +431,14 @@ class FirewallHttpTest extends TestCase
         $this->assertInvalid($this->postJson('/api/firewall/trusted', []), ['address']);
         $this->assertInvalid($this->postJson('/api/firewall/trusted', ['address' => 'example.com']), ['address']);
         $this->assertInvalid($this->postJson('/api/firewall/trusted', ['address' => '203.0.113.7', 'comment' => "a\nb"]), ['comment']);
+        $this->assertSame(
+            ['The comment cannot contain a line break or a NUL character.'],
+            $this->postJson('/api/firewall/trusted', ['address' => '203.0.113.7', 'comment' => "a\x00b"])->assertStatus(422)->json('errors.comment')
+        );
+        $this->assertSame([], $this->firewall->trusted);
+        // Never on a ufw command line, so a ' is kept.
+        $this->postJson('/api/firewall/trusted', ['address' => '203.0.113.8', 'comment' => "Bob's office"])->assertOk()->assertJsonPath('data.comment', "Bob's office");
+        $this->firewall->trusted = [];
 
         $this->firewall->refuse = 'fail2ban did not take the new list';
         $this->assertInvalid($this->postJson('/api/firewall/trusted', ['address' => '203.0.113.7']), ['rule']);

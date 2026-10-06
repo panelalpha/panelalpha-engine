@@ -93,7 +93,7 @@ class FirewallController extends Controller
                 new OA\Property(property: 'port', type: 'string', nullable: true, example: '22', description: 'Destination port, range (30000:30009) or comma list.'),
                 new OA\Property(property: 'source', type: 'string', nullable: true, example: '203.0.113.7', description: 'IPv4/IPv6 address or CIDR. Omit for any.'),
                 new OA\Property(property: 'destination', type: 'string', nullable: true, description: 'IPv4/IPv6 address or CIDR. Omit for any.'),
-                new OA\Property(property: 'comment', type: 'string', nullable: true),
+                new OA\Property(property: 'comment', type: 'string', nullable: true, description: 'One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words.'),
             ],
         )),
         responses: [
@@ -128,7 +128,7 @@ class FirewallController extends Controller
                 new OA\Property(property: 'port', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'source', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
                 new OA\Property(property: 'destination', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
-                new OA\Property(property: 'comment', type: 'string', nullable: true, x: ['mcp-nullable' => true]),
+                new OA\Property(property: 'comment', type: 'string', nullable: true, description: 'One line, without \'. Also refused, as ufw would read it as part of the rule: a comment that is only in, out, log or log-all, and on an incoming deny or a published-port rule, delete or in or out followed by more words.', x: ['mcp-nullable' => true]),
             ],
         )),
         responses: [
@@ -294,7 +294,12 @@ class FirewallController extends Controller
                     $fail('The address must be an IPv4 or IPv6 address or a CIDR range.');
                 }
             }],
-            'comment' => ['nullable', 'string', 'max:255', 'not_regex:/[\r\n]/'],
+            // A line of the list file; a NUL cannot be passed to the host command that writes it.
+            'comment' => ['nullable', 'string', 'max:255', function (string $attribute, mixed $value, \Closure $fail): void {
+                if (is_string($value) && preg_match('/[\r\n\x00]/', $value) === 1) {
+                    $fail('The comment cannot contain a line break or a NUL character.');
+                }
+            }],
         ]);
         $comment = isset($data['comment']) && trim((string) $data['comment']) !== '' ? trim((string) $data['comment']) : null;
         $trusted = $this->attempt(fn () => $this->firewall()->trust(new TrustedAddress((string) $data['address'], $comment)));

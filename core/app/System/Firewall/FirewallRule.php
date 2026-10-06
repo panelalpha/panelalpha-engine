@@ -32,6 +32,12 @@ final class FirewallRule
     /** Rules the installer opens carry this comment prefix; the API leaves them alone. */
     public const MANAGED_PREFIX = 'panelalpha:';
 
+    /**
+     * What a comment cannot hold: ufw refuses a ' (ufw/parser.py), a comment
+     * is one line, and a NUL cannot be passed in a command's argument.
+     */
+    public const COMMENT_REFUSED_CHARACTERS = '/[\'\r\n\x00]/';
+
     public function __construct(
         public readonly string $action,
         public readonly string $direction = self::IN,
@@ -186,8 +192,41 @@ final class FirewallRule
         if ($this->scope === self::PUBLISHED && $this->direction !== self::IN) {
             $problems['direction'] = 'A rule for published ports is for connections coming in.';
         }
+        if ($this->comment !== null && ($problem = $this->commentProblem($this->comment)) !== null) {
+            $problems['comment'] = $problem;
+        }
 
         return $problems;
+    }
+
+    /**
+     * ufw checks a rule's words before it takes the comment out of them
+     * (ufw/parser.py), so a few comments read as part of the rule. A route
+     * rule's words are also checked joined by spaces, the comment last.
+     */
+    private function commentProblem(string $comment): ?string
+    {
+        // /usr/sbin/ufw drops these arguments before it parses the rule.
+        if (str_starts_with($comment, '--rootdir=') || str_starts_with($comment, '--datadir=')) {
+            return 'ufw drops a comment that starts with --rootdir= or --datadir= before it reads the rule; reword it.';
+        }
+        if (in_array($comment, ['in', 'out', 'log', 'log-all'], true)) {
+            return "ufw takes the comment \"{$comment}\" for part of the rule; reword it.";
+        }
+        if ($this->scope === self::HOST) {
+            return null;
+        }
+        $route = 'On a rule for published ports, which an incoming deny also is, ufw takes ';
+        if ($comment === 'delete') {
+            return $route . 'the comment "delete" for part of the rule; reword it.';
+        }
+        $words = ' ' . $comment;
+        if ((str_contains($words, ' in on ') && str_contains($words, ' out on '))
+            || (preg_match('/ (in|out) /', $words) === 1 && preg_match('/ (in|out) on | app (in|out) /', $words) !== 1)) {
+            return $route . 'the word in or out followed by more words for part of the rule; reword it.';
+        }
+
+        return null;
     }
 
     public function id(): string

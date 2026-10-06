@@ -29,7 +29,8 @@ final class TrustedAddress
     public static function parseList(string $text): array
     {
         $list = [];
-        foreach (preg_split('/\R/', $text) ?: [] as $line) {
+        // Real line breaks only: \R also matches byte 0x85, which sits inside letters such as ą.
+        foreach (preg_split('/\r\n|\r|\n/', $text) ?: [] as $line) {
             $line = trim($line);
             if ($line === '' || str_starts_with($line, '#')) {
                 continue;

@@ -692,6 +692,48 @@ class UfwFirewallTest extends TestCase
             ->addRule(FirewallRule::fromArray(['action' => 'deny', 'source' => '198.51.100.9']));
     }
 
+    public function test_a_rule_ufw_cannot_parse_is_refused_in_its_error_line_without_the_usage_page_or_traceback(): void
+    {
+        // What ufw 0.36.2 prints for a comment its parser refuses: the usage page, or a traceback.
+        $usage = "\nUsage: ufw COMMAND\n\nCommands:\n enable                          enables the firewall\n disable                         disables the firewall\n";
+        $traceback = "ERROR: Invalid syntax\nTraceback (most recent call last):\n  File \"/usr/sbin/ufw\", line 97, in <module>\n"
+            . "    pr = ufw.frontend.parse_command(args)\nIndexError: list index out of range\n";
+        $published = FirewallRule::fromArray(['action' => 'allow', 'scope' => 'published', 'protocol' => 'tcp', 'port' => '8080']);
+        foreach ([[$usage, "ERROR: Invalid syntax\n"], ['', $traceback]] as [$stdout, $stderr]) {
+            $host = $this->failing(['ufw route allow' => FakeProcess::of(1, $stdout, $stderr)]);
+
+            try {
+                ($this->firewall($host))->addRule($published);
+                $this->fail('the refusal was swallowed');
+            } catch (FirewallException $e) {
+                $this->assertSame('Invalid syntax', $e->getMessage());
+            }
+        }
+    }
+
+    public function test_a_ufw_failure_keeps_the_line_that_says_why(): void
+    {
+        $published = FirewallRule::fromArray(['action' => 'allow', 'scope' => 'published', 'protocol' => 'tcp', 'port' => '8080']);
+        $cases = [
+            // ufw-init names the iptables-restore line after its own ERROR line.
+            ["ERROR: problem running ufw-init\niptables-restore: line 12 failed\n", "problem running ufw-init\niptables-restore: line 12 failed"],
+            // An empty ERROR: line does not swallow the usage page that follows it.
+            ["ERROR:\nUsage: ufw COMMAND\n\nCommands:\n enable  enables the firewall\n", ''],
+        ];
+        foreach ($cases as [$stderr, $expected]) {
+            $host = $this->failing(['ufw route allow' => FakeProcess::of(1, '', $stderr)]);
+            try {
+                ($this->firewall($host))->addRule($published);
+                $this->fail('the refusal was swallowed');
+            } catch (FirewallException $e) {
+                $this->assertStringNotContainsString('Usage: ufw', $e->getMessage());
+                if ($expected !== '') {
+                    $this->assertSame($expected, $e->getMessage());
+                }
+            }
+        }
+    }
+
     /** @param array<string, Process> $answers command => what the host returns, overriding host() */
     private function failing(array $answers, string $ufwOut = 'Rule added', int $ufwCode = 0): ProcessRunner
     {

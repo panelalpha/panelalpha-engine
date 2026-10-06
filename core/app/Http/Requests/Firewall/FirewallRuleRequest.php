@@ -32,8 +32,13 @@ class FirewallRuleRequest extends FormRequest
             'port' => ['nullable', 'string', 'regex:/\A[0-9]{1,5}(?::[0-9]{1,5})?(?:,[0-9]{1,5}(?::[0-9]{1,5})?)*\z/'],
             'source' => ['nullable', 'string', 'max:64', $address],
             'destination' => ['nullable', 'string', 'max:64', $address],
-            'comment' => ['nullable', 'string', 'max:255', 'not_regex:/[\r\n]/', function (string $attribute, mixed $value, \Closure $fail): void {
-                if (is_string($value) && str_starts_with(trim($value), FirewallRule::MANAGED_PREFIX)) {
+            'comment' => ['nullable', 'string', 'max:255', function (string $attribute, mixed $value, \Closure $fail): void {
+                if (!is_string($value)) {
+                    return;
+                }
+                if (preg_match(FirewallRule::COMMENT_REFUSED_CHARACTERS, $value) === 1) {
+                    $fail('The comment cannot contain \' (an apostrophe), a line break or a NUL character.');
+                } elseif (str_starts_with(trim($value), FirewallRule::MANAGED_PREFIX)) {
                     $fail('The comment prefix "' . FirewallRule::MANAGED_PREFIX . '" marks the rules the engine opens.');
                 }
             }],

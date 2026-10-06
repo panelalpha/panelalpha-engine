@@ -133,4 +133,56 @@ class FirewallRuleTest extends TestCase
         $this->assertArrayHasKey('scope', $deny->with(['action' => 'allow', 'port' => '22'])->problems());
         $this->assertSame('host', $deny->with(['action' => 'allow', 'port' => '22', 'scope' => 'host'])->scope);
     }
+
+    public function test_a_comment_ufw_would_read_as_part_of_the_rule_is_refused(): void
+    {
+        // Measured with `ufw --dry-run` on ufw 0.36.2, as the engine writes a host rule and a route rule.
+        $host = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '25392', 'source' => '192.0.2.150']);
+        $published = $host->with(['scope' => 'published']);
+        $deny = FirewallRule::fromArray(['action' => 'deny', 'source' => '192.0.2.150']);
+        $denyOut = FirewallRule::fromArray(['action' => 'deny', 'direction' => 'out', 'destination' => '192.0.2.150']);
+
+        foreach (['in', 'out', 'log', 'log-all'] as $comment) {
+            foreach ([$host, $published, $deny, $denyOut] as $rule) {
+                $this->assertSame(
+                    "ufw takes the comment \"{$comment}\" for part of the rule; reword it.",
+                    $rule->with(['comment' => $comment])->problems()['comment'] ?? null,
+                    $comment
+                );
+            }
+        }
+        foreach (['--rootdir=x', '--datadir=/tmp', '--rootdir=a=b'] as $comment) {
+            foreach ([$host, $published, $deny, $denyOut] as $rule) {
+                $this->assertSame(
+                    'ufw drops a comment that starts with --rootdir= or --datadir= before it reads the rule; reword it.',
+                    $rule->with(['comment' => $comment])->problems()['comment'] ?? null,
+                    $comment
+                );
+            }
+        }
+        $route = 'On a rule for published ports, which an incoming deny also is, ufw takes ';
+        $words = $route . 'the word in or out followed by more words for part of the rule; reword it.';
+        $routeOnly = [
+            'delete' => $route . 'the comment "delete" for part of the rule; reword it.',
+            'in from office' => $words,
+            'block in office hours' => $words,
+            'out of office' => $words,
+            'keep out please' => $words,
+            'x in on y out on z' => $words,
+        ];
+        foreach ($routeOnly as $comment => $message) {
+            $this->assertSame($message, $published->with(['comment' => $comment])->problems()['comment'] ?? null, $comment);
+            $this->assertSame($message, $deny->with(['comment' => $comment])->problems()['comment'] ?? null, $comment);
+            $this->assertSame([], $host->with(['comment' => $comment])->problems(), $comment);
+            $this->assertSame([], $denyOut->with(['comment' => $comment])->problems(), $comment);
+        }
+        $stored = ['IN', 'LOG', 'let them in', 'keep out', "a\tin\tb", 'x in on y', 'x app in y', 'block IN office',
+            'do not delete this', 'delete 1', 'comment', 'on', 'from', 'turn on now', 'a log b', 'zażółć 日本',
+            'see --rootdir=x', '--ROOTDIR=x', 'login', 'inside'];
+        foreach ($stored as $comment) {
+            foreach ([$host, $published, $deny, $denyOut] as $rule) {
+                $this->assertSame([], $rule->with(['comment' => $comment])->problems(), $comment);
+            }
+        }
+    }
 }

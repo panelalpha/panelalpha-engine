@@ -481,7 +481,12 @@ class UfwFirewall implements Firewall
         $out = trim($process->getOutput() . "\n" . $process->getErrorOutput());
         // ufw prints ERROR: and exits 1, but some refusals ("Invalid syntax") exit 0.
         if (!$process->isSuccessful() || preg_match('/^(ERROR|Invalid|Bad)/mi', $out) === 1) {
-            throw new FirewallException(preg_replace('/^ERROR:\s*/m', '', $out) ?: 'ufw ' . implode(' ', $args) . ' failed');
+            // A rule it cannot parse also prints the whole usage page, or a traceback: keep what comes before them,
+            // which holds the ERROR line and, for ufw-init, the line that says why.
+            $head = static fn (string $s): string => trim(preg_split('/^(?:Usage: ufw|Traceback \(most recent call last\))/m', $s, 2)[0] ?? '');
+            $kept = trim($head($process->getOutput()) . "\n" . $head($process->getErrorOutput()));
+            $errors = trim(preg_replace('/^ERROR:[ \t]*/m', '', $kept) ?? $kept);
+            throw new FirewallException($errors ?: 'ufw ' . implode(' ', $args) . ' failed');
         }
 
         return $out;
