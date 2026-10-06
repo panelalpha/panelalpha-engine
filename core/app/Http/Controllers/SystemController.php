@@ -131,14 +131,12 @@ class SystemController extends Controller
      */
     private static function servedCertificate(string $url): ?array
     {
-        $engine = new EngineCertificate();
-        $path = $engine->certificatePath();
-
-        if (!is_readable($path)) {
+        $pem = (new EngineCertificate())->served();
+        if ($pem === null) {
             return null;
         }
 
-        $facts = CertificateFacts::fromPem((string) file_get_contents($path));
+        $facts = CertificateFacts::fromPem($pem);
         if ($facts === null) {
             return null;
         }

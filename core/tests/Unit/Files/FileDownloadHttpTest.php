@@ -3,7 +3,6 @@
 namespace Tests\Unit\Files;
 
 use App\Http\Middleware\Authenticate;
-use App\Lib\Helpers\FileStreamWrapper;
 use App\Models\User;
 use App\System;
 use Illuminate\Support\Facades\DB;
@@ -29,6 +28,7 @@ class FileDownloadHttpTest extends TestCase
         mkdir($this->tmpRoot . '/etc', 0777, true);
         file_put_contents($this->tmpRoot . '/etc/shadow', 'root:*:');
         symlink($this->tmpRoot . '/etc/shadow', $this->tmpRoot . '/home/alice/project/shadowlink');
+        file_put_contents($this->tmpRoot . '/home/alice/project/readme.txt', 'hello');
 
         config([
             'database.default' => 'sqlite',
@@ -48,11 +48,13 @@ class FileDownloadHttpTest extends TestCase
 
         $this->app->instance(System::class, $this->fakeSystem($this->tmpRoot));
         $this->withoutMiddleware(Authenticate::class);
+        // The real helper, without sudo: it answers the stat and the read, and confines both.
+        UnprivilegedFileStreamWrapper::install();
     }
 
     protected function tearDown(): void
     {
-        FileStreamWrapper::confineTo(null);
+        UnprivilegedFileStreamWrapper::uninstall();
         Schema::dropIfExists('users');
         exec('rm -rf ' . escapeshellarg($this->tmpRoot));
         parent::tearDown();
@@ -66,9 +68,21 @@ class FileDownloadHttpTest extends TestCase
         $response->assertJson(['message' => 'Invalid path']);
     }
 
+    public function test_a_file_is_sized_and_read_through_the_helper(): void
+    {
+        $response = $this->get('/api/projects/alice/files/download?path=project/readme.txt');
+
+        $response->assertOk();
+        $response->assertHeader('Content-Length', '5');
+        ob_start();
+        $response->baseResponse->sendContent();
+        $this->assertSame('hello', ob_get_clean());
+        $this->assertGreaterThan(0, UnprivilegedFileStreamWrapper::$helperStarts);
+    }
+
     private function fakeSystem(string $root): System
     {
-        // `sudo test -f` is answered with a real test -f, which follows symlinks too.
+        // The account's `test -f` is answered with a real test -f, which follows symlinks too.
         return new class ($root) extends System {
             public function __construct(private string $root)
             {
@@ -86,9 +100,9 @@ class FileDownloadHttpTest extends TestCase
 
             public function runProcess(string|array $cmd, array $env = [], int $timeout = 600): Process
             {
-                $argv = is_array($cmd) ? $cmd : [$cmd];
-                $code = ($argv[0] ?? null) === 'sudo' && ($argv[1] ?? null) === 'test' && ($argv[2] ?? null) === '-f'
-                    ? (is_file((string) $argv[3]) ? 0 : 1)
+                $argv = array_slice(is_array($cmd) ? $cmd : [$cmd], 7);
+                $code = ($argv[0] ?? null) === 'test' && ($argv[1] ?? null) === '-f'
+                    ? (is_file((string) $argv[2]) ? 0 : 1)
                     : 0;
 
                 return new class ($code) extends Process {

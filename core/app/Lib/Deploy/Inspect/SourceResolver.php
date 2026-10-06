@@ -274,6 +274,38 @@ final class SourceResolver
     }
 
     /**
+     * Where a hosting project keeps the application's files: `~/project` for a
+     * container project, else the main domain's document root for the classic
+     * PHP templates, which have no `~/project`. `$relative` overrides the guess.
+     * Each is held to the home like a caller's subdirectory: a `~/project` that
+     * leaves it is refused, a document root that does is skipped.
+     *
+     * @throws InspectException
+     */
+    public static function projectDirectory(string $home, ?string $documentRoot, ?string $relative): string
+    {
+        $relative = trim((string) $relative);
+        if ($relative !== '') {
+            return self::descend($home, self::underRoot($home, $relative));
+        }
+
+        $appDir = $home . '/project';
+        if (file_exists($appDir) || is_link($appDir)) {
+            return self::descend($home, 'project');
+        }
+
+        if ($documentRoot !== null) {
+            try {
+                return self::descend($home, $documentRoot);
+            } catch (InspectException) {
+                // Not there, or not inside the home: the read reports ~/project missing.
+            }
+        }
+
+        return $appDir;
+    }
+
+    /**
      * $base plus a caller-supplied relative path, refusing anything that
      * climbs out of it.
      *
@@ -303,6 +335,9 @@ final class SourceResolver
             return $base;
         }
 
+        // realpath() answers from a cache that outlives the request; a link
+        // swapped in since then would be taken for the directory it replaced.
+        clearstatcache(true);
         $candidate = realpath($base . '/' . implode('/', $parts));
         $root = realpath($base);
         if ($candidate === false || $root === false || !is_dir($candidate)) {

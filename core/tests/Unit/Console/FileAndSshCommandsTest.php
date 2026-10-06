@@ -192,16 +192,23 @@ class FileAndSshCommandsTest extends TestCase
 
     public function test_fetch_into_a_missing_directory_fails(): void
     {
+        $this->setEnv('SHIM_STDOUT', "missing\n");
+        $dir = 'no-such-dir-' . bin2hex(random_bytes(3));
+
         $this->assertFails(ValidationException::class, "Destination directory does not exist\n", 'project:file:fetch', [
-            'project' => self::USER, '--url' => 'https://example.com/a.zip', '--path' => 'no-such-dir-' . bin2hex(random_bytes(3)),
+            'project' => self::USER, '--url' => 'https://example.com/a.zip', '--path' => $dir,
         ]);
-        $this->assertSame([], $this->calls());
+        $this->assertSame([
+            $this->confined('F:' . $this->home() . "/{$dir}/a.zip"),
+            $this->entryType($this->home() . "/{$dir}"),
+        ], $this->calls());
     }
 
     public function test_fetch_downloads_with_curl_as_the_account(): void
     {
         $this->needsRealPaths();
         mkdir($this->home() . '/dl', 0777, true);
+        $this->setEnv('SHIM_EXEC', 'sh');
 
         $this->assertRun(0, "Fetched https://example.com/a.zip?x=1 into dl\n", 'project:file:fetch', [
             'project' => self::USER, '--url' => 'https://example.com/a.zip?x=1', '--path' => 'dl',
@@ -210,7 +217,11 @@ class FileAndSshCommandsTest extends TestCase
             'project' => self::USER, '--url' => 'https://example.com/get', '--path' => 'dl/', '--filename' => 'b.bin',
         ]);
         $this->assertSame([
+            $this->confined('F:' . $this->home() . '/dl/a.zip'),
+            $this->entryType($this->home() . '/dl'),
             ['curl', '-fSL', 'https://example.com/a.zip?x=1', '-o', $this->home() . '/dl/a.zip'],
+            $this->confined('F:' . $this->home() . '/dl/b.bin'),
+            $this->entryType($this->home() . '/dl'),
             ['curl', '-fSL', 'https://example.com/get', '-o', $this->home() . '/dl/b.bin'],
         ], $this->calls());
     }
@@ -231,6 +242,7 @@ class FileAndSshCommandsTest extends TestCase
 
     public function test_move_contents_into_a_missing_directory_fails(): void
     {
+        $this->setEnv('SHIM_STDOUT', "missing\n");
         $this->assertFails(ValidationException::class, "Destination directory does not exist\n", 'project:file:move-contents', [
             'project' => self::USER, '--source' => 'a', '--dest' => 'no-such-dir-' . bin2hex(random_bytes(3)),
         ]);
@@ -240,6 +252,7 @@ class FileAndSshCommandsTest extends TestCase
     {
         $this->needsRealPaths();
         mkdir($this->home() . '/dst', 0777, true);
+        $this->setEnv('SHIM_EXEC', 'sh');
 
         $this->assertRun(0, "Moved children of src into dst\n", 'project:file:move-contents', [
             'project' => self::USER, '--source' => 'src', '--dest' => 'dst',
@@ -251,7 +264,11 @@ class FileAndSshCommandsTest extends TestCase
             'find', $this->home() . '/src', '-mindepth', '1', '-maxdepth', '1',
             '-exec', 'mv', $flag, '-t', $this->home() . '/dst', '--', '{}', '+',
         ];
-        $this->assertSame([$find('--force'), $find('--no-clobber')], $this->calls());
+        $checks = [
+            $this->confined('F:' . $this->home() . '/src', 'F:' . $this->home() . '/dst'),
+            $this->entryType($this->home() . '/dst'),
+        ];
+        $this->assertSame([...$checks, $find('--force'), ...$checks, $find('--no-clobber')], $this->calls());
     }
 
     // --- project:file:download ---
@@ -558,8 +575,9 @@ class FileAndSshCommandsTest extends TestCase
 
         $this->assertSame([], $matched);
         $this->assertSame(0, Admin::query()->count());
-        // chmod and upload each check the path first.
-        $this->assertCount(6, $this->calls(), 'chmod, upload, ssh and the download check reached the engine');
+        // chmod and upload each check the path first; fetch and move-contents
+        // check it and then ask what the destination is.
+        $this->assertCount(10, $this->calls(), 'the file commands, ssh and the download check reached the engine');
     }
 
     // --- helpers ---
@@ -639,6 +657,16 @@ class FileAndSshCommandsTest extends TestCase
     private function confined(string ...$paths): array
     {
         return ['sh', '-c', FileManager::CONFINE_SCRIPT, 'sh', $this->home(), ...$paths];
+    }
+
+    /**
+     * The file API asking, as the account, what is at a path.
+     *
+     * @return list<string>
+     */
+    private function entryType(string $path): array
+    {
+        return ['sh', '-c', FileManager::ENTRY_TYPE_SCRIPT, 'sh', $path, rtrim($path, '/')];
     }
 
     private function home(): string

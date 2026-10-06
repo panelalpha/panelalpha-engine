@@ -4,6 +4,7 @@ namespace Tests\Unit\Helpers;
 
 use App\Lib\Helpers\FileStreamWrapper;
 use PHPUnit\Framework\TestCase;
+use Tests\Unit\Files\UnprivilegedFileStreamWrapper;
 
 /**
  * The file download helper runs as root and follows symlinks. Given a root
@@ -85,15 +86,24 @@ class FileStreamConfinementTest extends TestCase
         $this->assertSame('root:*:', $out);
     }
 
-    public function test_the_wrapper_side_check_agrees(): void
+    /** The engine's PHP user cannot see into a directory only the account can enter; the helper can. */
+    public function test_a_stat_is_asked_of_the_helper_and_confined_like_the_read(): void
     {
         $root = $this->dir . '/home/acme';
+        UnprivilegedFileStreamWrapper::install();
+        FileStreamWrapper::confineTo($root);
+        clearstatcache();
 
-        $this->assertTrue(FileStreamWrapper::isUnder($root, $root . '/own-link'));
-        $this->assertFalse(FileStreamWrapper::isUnder($root, $root . '/shadow-link'));
-        $this->assertFalse(FileStreamWrapper::isUnder($root, $root . '/victim-link/secret.txt'));
-        $this->assertFalse(FileStreamWrapper::isUnder($root, $root . '/../victim/secret.txt'));
-        $this->assertFalse(FileStreamWrapper::isUnder($root, $root));
+        try {
+            $this->assertTrue(is_file('sudophp://' . $root . '/public_html/index.php'));
+            $this->assertSame(5, filesize('sudophp://' . $root . '/own-link'));
+            $this->assertFalse(is_file('sudophp://' . $root . '/shadow-link'));
+            $this->assertFalse(file_exists('sudophp://' . $root . '/victim-link/secret.txt'));
+            $this->assertFalse(file_exists('sudophp://' . $root . '/../victim/secret.txt'));
+            $this->assertSame(5, UnprivilegedFileStreamWrapper::$helperStarts, 'every answer came from the helper');
+        } finally {
+            UnprivilegedFileStreamWrapper::uninstall();
+        }
     }
 
     /**

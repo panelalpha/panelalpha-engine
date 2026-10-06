@@ -2,6 +2,7 @@
 
 namespace App\System\Project;
 
+use App\Exceptions\NotFoundException;
 use App\Lib\Deploy\Source\ArchiveSafety;
 use App\Lib\Deploy\Source\ArchiveUnpackedSize;
 use App\System\Project as UserProject;
@@ -23,6 +24,11 @@ class FileManager
         . '*) q=${p#E:}; q=${q%/}; r=$(realpath -m -- "$(dirname -- "$q")")/$(basename -- "$q") ;; esac; '
         . 'case "$r" in "$home"|"$home"/*) ;; '
         . '*) echo "Refusing ${p#?:}: it resolves outside the project home" >&2; exit 3 ;; esac; done';
+
+    /** `sh -c` body for entryType(): $1 the path, $2 the same without its trailing slash. */
+    public const ENTRY_TYPE_SCRIPT = 'if [ ! -e "$1" ]; then if [ -L "$1" ]; then echo dangling; else echo missing; fi; '
+        . 'elif [ -d "$1" ]; then if [ -L "$2" ]; then echo dir-link; else echo dir; fi; '
+        . 'else echo file; fi';
 
     public function __construct(
         private readonly UserProject $project,
@@ -126,9 +132,17 @@ class FileManager
     public function exists(string $path): bool
     {
         $path = $this->resolvePath($path);
+        // Every link followed, the last one too: test -e answers for the target.
+        $this->assertInsideHome([$path]);
         $process = $this->runOnCore(['test', '-e', $path]);
 
         return $process->getExitCode() === 0;
+    }
+
+    /** A regular file, links followed, as the account sees it. */
+    public function isFile(string $path): bool
+    {
+        return $this->runOnCore(['test', '-f', $this->resolvePath($path)])->getExitCode() === 0;
     }
 
     /**
@@ -137,6 +151,11 @@ class FileManager
     public function stat(string $path): array
     {
         $path = $this->resolvePath($path);
+        // Like exists(): a link out of the home is refused, not described.
+        $this->assertInsideHome([$path]);
+        if (in_array($this->entryType($path), ['missing', 'dangling'], true)) {
+            throw new NotFoundException("No such file or directory: {$path}");
+        }
         $process = $this->runOnCore([
             'stat',
             '--printf=%n %s %u %g %X %Y %Z %W',
@@ -200,6 +219,9 @@ class FileManager
         if ($skipParents) {
             $workdir = dirname($path);
             $path = basename($path);
+            if (!$this->isDirectory($workdir)) {
+                throw new \Exception('Invalid path');
+            }
         }
 
         $recurse = $compressionLevel === null ? '-r' : '-r' . $compressionLevel;
@@ -274,6 +296,17 @@ class FileManager
         $path = $this->resolvePath($path);
         // The entry itself may be a link pointing anywhere: rm removes the link.
         $this->assertInsideHome([], [$path]);
+        // rm -f is silent about a missing path. A link whose target is gone is still there to remove.
+        $type = $this->entryType($path);
+        if ($type === 'missing') {
+            throw new NotFoundException("No such file or directory: {$path}");
+        }
+        if ($type === 'dir' && !$recursive) {
+            // Otherwise rm answers a bare "Is a directory".
+            throw ValidationException::withMessages([
+                'recursive' => 'The path is a directory. Set recursive to true to delete it and everything in it.',
+            ]);
+        }
         $command = ['rm', '-f'];
         if ($recursive) {
             $command[] = '-r';
@@ -322,10 +355,10 @@ class FileManager
     {
         $sourceDir = rtrim($this->resolvePath($source), '/');
         $destDir = rtrim($this->resolvePath($dest), '/');
-        if (!is_dir($destDir)) {
+        $this->assertInsideHome([$sourceDir, $destDir]);
+        if (!$this->isDirectory($destDir)) {
             throw new \Exception('Destination directory does not exist');
         }
-        $this->assertInsideHome([$sourceDir, $destDir]);
 
         $this->assertSucceeded($this->runOnCore([
             'find',
@@ -358,11 +391,11 @@ class FileManager
         }
 
         $dir = rtrim($this->resolvePath($destinationDir), '/');
-        if (!is_dir($dir)) {
+        $this->assertInsideHome([$dir . '/' . $filename]);
+        if (!$this->isDirectory($dir)) {
             throw new \Exception('Destination directory does not exist');
         }
 
-        $this->assertInsideHome([$dir . '/' . $filename]);
         $this->assertSucceeded($this->runOnCore([
             'curl',
             '-fSL',
@@ -394,27 +427,33 @@ class FileManager
      */
     private function runOnCore(array $command, ?string $workdir = null): Process
     {
+        if ($workdir !== null) {
+            $command = ['env', '--chdir=' . $workdir, ...$command];
+        }
+
+        return $this->project->system()->runProcess($this->asAccount($command));
+    }
+
+    /**
+     * $command run as the account, by uid and gid.
+     *
+     * @param list<string> $command
+     * @return list<string>
+     */
+    public function asAccount(array $command): array
+    {
         $model = $this->project->model();
-        $uid = $model->getUid() ?? 33;
-        $gid = $model->getGid() ?? 33;
-        $argv = [
+
+        return [
             'sudo',
             'setpriv',
             '--reuid',
-            (string) $uid,
+            (string) ($model->getUid() ?? 33),
             '--regid',
-            (string) $gid,
+            (string) ($model->getGid() ?? 33),
             '--clear-groups',
+            ...$command,
         ];
-        if ($workdir !== null) {
-            if (!is_dir($workdir)) {
-                throw new \Exception('Invalid path');
-            }
-            $argv[] = 'env';
-            $argv[] = '--chdir=' . $workdir;
-        }
-
-        return $this->project->system()->runProcess([...$argv, ...$command]);
     }
 
     /**
@@ -437,6 +476,28 @@ class FileManager
             'sh', '-c', self::CONFINE_SCRIPT, 'sh', $this->homeDirPath(), ...$args,
         ]);
         $this->assertSucceeded($process);
+    }
+
+    /**
+     * What is at $path, asked as the account like the command it guards: the
+     * engine's PHP is another user and cannot enter the account's private directories.
+     *
+     * @return 'missing'|'dangling'|'dir'|'dir-link'|'file'
+     */
+    private function entryType(string $path): string
+    {
+        $process = $this->runOnCore(['sh', '-c', self::ENTRY_TYPE_SCRIPT, 'sh', $path, rtrim($path, '/')]);
+        $this->assertSucceeded($process);
+        $type = trim($process->getOutput());
+
+        return in_array($type, ['missing', 'dangling', 'dir', 'dir-link', 'file'], true)
+            ? $type
+            : throw new \RuntimeException("Cannot tell what {$path} is: {$type}");
+    }
+
+    private function isDirectory(string $path): bool
+    {
+        return in_array($this->entryType($path), ['dir', 'dir-link'], true);
     }
 
     /**

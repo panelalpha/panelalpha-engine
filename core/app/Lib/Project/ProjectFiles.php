@@ -27,15 +27,15 @@ final class ProjectFiles
      */
     public static function readablePath(User $user, string $path, ?System $system = null): ?string
     {
-        $system ??= new System();
-        if (!$system->filesystem()->fileExists($path)) {
+        $files = $user->project($system ?? new System())->fileManager();
+        if (!$files->isFile($path)) {
             return null;
         }
 
         FileStreamWrapper::register();
-        // The path is confined as a string only; the read runs as root and
-        // follows symlinks, so the helper re-checks the resolved file.
-        FileStreamWrapper::confineTo($user->project($system)->homeDirPath());
+        // The path is confined as a string only; the read follows symlinks, so
+        // the helper re-checks the resolved file, as the account.
+        FileStreamWrapper::confineTo($files->homeDirPath(), $files->asAccount([]));
 
         return 'sudophp://' . $path;
     }

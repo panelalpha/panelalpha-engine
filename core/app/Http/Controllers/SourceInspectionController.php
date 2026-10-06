@@ -231,7 +231,7 @@ class SourceInspectionController extends Controller
             // getHomeDir() honours an account whose home was recorded
             // somewhere other than /home/<username>, and falls back to it.
             $home = rtrim($user->getHomeDir(), '/');
-            $directory = $this->projectDirectory($user, $home, $relative);
+            $directory = SourceResolver::projectDirectory($home, $user->getMainDomain()?->getDocumentRoot(), $relative);
             $resolved = $this->resolver()->fromDirectory(SourceResolver::TYPE_PROJECT, $username, $directory);
 
             return $this->report(
@@ -307,39 +307,6 @@ class SourceInspectionController extends Controller
         $seconds = (int) config('deploy.clone_timeout', 600);
 
         return $seconds > 0 ? $seconds : 600;
-    }
-
-    /**
-     * Where a hosting project keeps the application's files.
-     *
-     * `~/project` for a container project, the main domain's document root for
-     * the classic PHP templates. Both are checked because the endpoint takes a
-     * username, not a template. `$relative` overrides the guess, and may not
-     * leave the home directory.
-     *
-     * @throws InspectException
-     */
-    private function projectDirectory(User $user, string $home, ?string $relative): string
-    {
-        $relative = trim((string) $relative);
-        if ($relative !== '') {
-            return SourceResolver::descend($home, SourceResolver::underRoot($home, $relative));
-        }
-
-        $appDir = $home . '/project';
-        if (is_dir($appDir)) {
-            return $appDir;
-        }
-
-        $domain = $user->getMainDomain();
-        if ($domain !== null) {
-            $documentRoot = $home . $domain->getDocumentRoot();
-            if (is_dir($documentRoot)) {
-                return $documentRoot;
-            }
-        }
-
-        return $appDir;
     }
 
     /**

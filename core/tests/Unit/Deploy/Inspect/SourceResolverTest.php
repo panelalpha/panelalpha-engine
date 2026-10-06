@@ -99,6 +99,79 @@ class SourceResolverTest extends TestCase
         SourceResolver::descend($this->tmpDir, '../..');
     }
 
+    public function test_a_project_directory_is_project_else_the_document_root(): void
+    {
+        $home = $this->tmpDir . '/home';
+        mkdir($home . '/site.test/public_html', 0777, true);
+
+        $this->assertSame(
+            realpath($home . '/site.test/public_html'),
+            SourceResolver::projectDirectory($home, '/site.test/public_html', null)
+        );
+        $this->assertSame($home . '/project', SourceResolver::projectDirectory($home, null, null));
+
+        mkdir($home . '/project');
+        $this->assertSame(realpath($home . '/project'), SourceResolver::projectDirectory($home, '/site.test/public_html', null));
+        $this->assertSame(realpath($home . '/site.test'), SourceResolver::projectDirectory($home, null, $home . '/site.test'));
+    }
+
+    public function test_a_document_root_linked_out_of_the_home_is_not_inspected(): void
+    {
+        $home = $this->tmpDir . '/home';
+        mkdir($this->tmpDir . '/elsewhere');
+        mkdir($home . '/site.test', 0777, true);
+        symlink($this->tmpDir . '/elsewhere', $home . '/site.test/public_html');
+
+        try {
+            $this->assertSame($home . '/project', SourceResolver::projectDirectory($home, '/site.test/public_html', null));
+        } finally {
+            unlink($home . '/site.test/public_html');
+        }
+    }
+
+    public function test_a_project_directory_linked_out_of_the_home_is_never_read(): void
+    {
+        $home = $this->tmpDir . '/home';
+        mkdir($this->tmpDir . '/elsewhere');
+        mkdir($home . '/site.test/public_html', 0777, true);
+        symlink($this->tmpDir . '/elsewhere', $home . '/project');
+
+        try {
+            // With a document root and without one: refused, never followed and never swapped for another directory.
+            foreach (['/site.test/public_html', null] as $documentRoot) {
+                try {
+                    SourceResolver::projectDirectory($home, $documentRoot, null);
+                    $this->fail('~/project linked out of the home was not refused');
+                } catch (InspectException $e) {
+                    $this->assertSame('The requested directory must stay inside the source.', $e->getMessage());
+                }
+            }
+        } finally {
+            unlink($home . '/project');
+        }
+    }
+
+    public function test_a_directory_swapped_for_a_link_out_since_the_last_look_is_refused(): void
+    {
+        $home = $this->tmpDir . '/home';
+        mkdir($home . '/project', 0777, true);
+        mkdir($this->tmpDir . '/elsewhere');
+        $this->assertSame(realpath($home . '/project'), SourceResolver::projectDirectory($home, null, null));
+
+        // Swapped by another process, as the account would: PHP's own rmdir()
+        // and symlink() would drop the cached entry themselves.
+        exec('rmdir ' . escapeshellarg($home . '/project') . ' && ln -s '
+            . escapeshellarg($this->tmpDir . '/elsewhere') . ' ' . escapeshellarg($home . '/project'));
+        try {
+            SourceResolver::projectDirectory($home, null, null);
+            $this->fail('the cached directory was trusted');
+        } catch (InspectException $e) {
+            $this->assertSame('The requested directory must stay inside the source.', $e->getMessage());
+        } finally {
+            unlink($home . '/project');
+        }
+    }
+
     public function test_a_path_under_a_root_may_be_given_absolute_or_relative(): void
     {
         $home = '/home/johndoe';

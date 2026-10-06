@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\User;
 
+use App\Exceptions\NotFoundException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\FileExistsRequest;
 use App\Http\Requests\FileRemoveRequest;
@@ -43,7 +44,7 @@ class FileController extends Controller
             )),
         ],
     )]
-    public function exists(string $username, FileExistsRequest $request): JsonResponse
+    public function exists(string $username, FileExistsRequest $request, EngineSystem $system): JsonResponse
     {
         $user = $this->projectOr404($username);
 
@@ -51,9 +52,9 @@ class FileController extends Controller
          * @var array{path: string}
          */
         $params = $request->validated();
-        $path = $user->project()->resolvePath($params['path']);
+        $path = $user->project($system)->resolvePath($params['path']);
 
-        $fileMan = $user->project()->fileManager();
+        $fileMan = $user->project($system)->fileManager();
         try {
             $exists = $fileMan->exists($path);
         } catch (\Exception $e) {
@@ -96,19 +97,6 @@ class FileController extends Controller
          */
         $params = $request->validated();
         $path = $user->project($system)->resolvePath($params['path']);
-        // file_exists() follows a link; a link whose target is gone is still there to remove.
-        if (!file_exists($path) && !is_link($path)) {
-            return new JsonResponse([
-                'message' => 'Invalid path',
-            ], 404);
-        }
-
-        // Otherwise rm answers a bare "Is a directory" with a 400.
-        if (empty($params['recursive']) && is_dir($path) && !is_link(rtrim($path, '/'))) {
-            throw ValidationException::withMessages([
-                'recursive' => 'The path is a directory. Set recursive to true to delete it and everything in it.',
-            ]);
-        }
 
         $fileMan = $user->project($system)->fileManager();
 
@@ -117,6 +105,12 @@ class FileController extends Controller
             if (basename($path) === '.htaccess') {
                 ProjectFiles::htaccessChanged($path);
             }
+        } catch (NotFoundException) {
+            return new JsonResponse([
+                'message' => 'Invalid path',
+            ], 404);
+        } catch (ValidationException $e) {
+            throw $e;
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
@@ -533,7 +527,7 @@ class FileController extends Controller
             )),
         ],
     )]
-    public function stat(string $username, StatRequest $request): JsonResponse
+    public function stat(string $username, StatRequest $request, EngineSystem $system): JsonResponse
     {
         $user = $this->projectOr404($username);
 
@@ -543,16 +537,15 @@ class FileController extends Controller
          * }
          */
         $params = $request->validated();
-        $path = $user->project()->resolvePath($params['path']);
-        if (!file_exists($path)) {
+        $path = $user->project($system)->resolvePath($params['path']);
+
+        $fileMan = $user->project($system)->fileManager();
+        try {
+            $result = $fileMan->stat($path);
+        } catch (NotFoundException) {
             return new JsonResponse([
                 'message' => 'Invalid path',
             ], 404);
-        }
-
-        $fileMan = $user->project()->fileManager();
-        try {
-            $result = $fileMan->stat($path);
         } catch (\Exception $e) {
             return new JsonResponse([
                 'message' => $e->getMessage(),
