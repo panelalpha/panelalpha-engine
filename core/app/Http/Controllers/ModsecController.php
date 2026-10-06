@@ -228,8 +228,14 @@ class ModsecController extends Controller
     #[OA\Put(
         path: '/modsec/custom-rules',
         summary: 'Replace the custom ModSecurity rules',
-        description: 'The rules go live only after the webserver config test parses them with every enabled ruleset; '
+        description: 'The rules go live only after the webserver config test parses them with every enabled ruleset, '
+            . 'and, when they are loaded, passes the live config with them in place; '
             . 'otherwise the call answers 422 with what the test said and the live rules stay as they were. '
+            . 'On nginx the test also runs them, and refuses rules that would switch ModSecurity off or to detection-only, '
+            . 'stop the rules around them or the reading of request bodies, or deny an ordinary request; '
+            . 'SecRuleEngine and ctl:ruleEngine are refused '
+            . 'anywhere in the rules, skip is refused, and a skipAfter must name a SecMarker after it. '
+            . 'An operator ModSecurity does not know is refused too, since ModSecurity would read it as a regular expression. '
             . 'Rule ids must be in ' . Modsec::CUSTOM_ID_MIN . '-' . Modsec::CUSTOM_ID_MAX . '. '
             . 'They apply once the `custom` ruleset is enabled and the mode is not off.',
         security: [['bearerAuth' => []]],
