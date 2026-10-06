@@ -71,7 +71,7 @@ final class FirewallRule
             action: $data['action'],
             direction: $direction,
             protocol: $blank($data['protocol'] ?? null),
-            port: $blank($data['port'] ?? null),
+            port: ($port = $blank($data['port'] ?? null)) === null ? null : self::normalizePort($port),
             source: $address($data['source'] ?? null),
             destination: $address($data['destination'] ?? null),
             comment: $blank($data['comment'] ?? null),
@@ -120,6 +120,23 @@ final class FirewallRule
         return inet_ntop($packed & $mask) . '/' . (int) $prefix;
     }
 
+    /**
+     * A port list in the order ufw stores it, ranges after the port they
+     * start at: 443,80 is 80,443, and is the same rule.
+     */
+    public static function normalizePort(string $port): string
+    {
+        $ports = explode(',', $port);
+        $key = static function (string $p): array {
+            [$from, $to] = array_pad(explode(':', $p, 2), 2, null);
+
+            return [(int) $from, $to === null ? 0 : 1, (int) $to];
+        };
+        usort($ports, static fn (string $a, string $b): int => $key($a) <=> $key($b));
+
+        return implode(',', $ports);
+    }
+
     /** @param array<string, mixed> $changes */
     public function with(array $changes): self
     {
@@ -150,6 +167,12 @@ final class FirewallRule
         // A rule on nothing would allow or drop every connection.
         if ($this->port === null && $this->source === null && $this->destination === null) {
             $problems['port'] = 'A rule needs a port, a source or a destination.';
+        }
+        // ufw stores "any" as these, so it would take the rule for the one on any address.
+        foreach (['source' => $this->source, 'destination' => $this->destination] as $field => $address) {
+            if (in_array($address, ['0.0.0.0/0', '::/0'], true)) {
+                $problems[$field] = "The {$field} {$address} is every address; leave it out to match any address.";
+            }
         }
         if ($this->port !== null && $this->protocol === null && preg_match('/[:,]/', $this->port) === 1) {
             $problems['protocol'] = 'A port range or list needs a protocol.';

@@ -231,4 +231,41 @@ RULES;
         $this->assertSame(['route', 'allow', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '8080', 'comment', 'app'], UfwRules::spec($rule));
         $this->assertSame([['route', 'allow', 'proto', 'tcp', 'from', '203.0.113.7', 'to', 'any', 'port', '8080']], UfwRules::specs($rule, withComment: false));
     }
+
+    public function test_a_rule_that_would_be_listed_as_one_with_another_is_found(): void
+    {
+        $c = 'comment=' . bin2hex('spam');
+        $rules = UfwRules::parse(implode("\n", [
+            "### tuple ### deny tcp 3306 192.0.2.1 any 0.0.0.0/0 out {$c}",
+            "### tuple ### deny any any 0.0.0.0/0 any 198.51.100.1 in {$c}",
+            "### tuple ### deny any any 0.0.0.0/0 any 203.0.113.7 in {$c}",
+            "### tuple ### deny any any 203.0.113.7 any 0.0.0.0/0 out {$c}",
+        ]));
+        [$out, $host, $both] = $rules;
+        $rule = static fn (array $r): FirewallRule => FirewallRule::fromArray($r + ['action' => 'deny', 'comment' => 'spam']);
+
+        // The other direction of an outbound rule, and the published half of a host deny.
+        $this->assertSame($out->id(), UfwRules::pairsWith($rule(['protocol' => 'tcp', 'port' => '3306', 'source' => '192.0.2.1']), $rules)?->id());
+        $this->assertSame($host->id(), UfwRules::pairsWith($rule(['source' => '198.51.100.1', 'scope' => 'published']), $rules)?->id());
+        $this->assertSame($both->id(), UfwRules::pairsWith($rule(['source' => '203.0.113.7', 'scope' => 'published']), $rules)?->id(), 'its id stays, its scope would not');
+        // Another comment, action or port: a rule of its own.
+        $this->assertNull(UfwRules::pairsWith($rule(['protocol' => 'tcp', 'port' => '3306', 'source' => '192.0.2.1', 'comment' => 'other']), $rules));
+        $this->assertNull(UfwRules::pairsWith($rule(['action' => 'allow', 'protocol' => 'tcp', 'port' => '3306', 'source' => '192.0.2.1']), $rules));
+        $this->assertNull(UfwRules::pairsWith($rule(['protocol' => 'tcp', 'port' => '3307', 'source' => '192.0.2.1']), $rules));
+    }
+
+    public function test_a_clash_is_found_whatever_the_spelling_of_any_address_or_the_port_order(): void
+    {
+        $rules = UfwRules::parse(self::V4 . "\n### tuple ### deny tcp 80,443 0.0.0.0/0 any 192.0.2.1 in\n### tuple ### route:deny tcp 80,443 0.0.0.0/0 any 192.0.2.1 in", self::V6);
+        $ssh = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'comment' => 'panelalpha: ssh']);
+        $deny = FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '80,443', 'source' => '192.0.2.1']);
+
+        // ufw keeps 0.0.0.0/0 and ::/0 as its spelling of any, in user.rules and user6.rules.
+        foreach (['0.0.0.0/0', '::/0'] as $every) {
+            $this->assertSame($ssh->id(), UfwRules::clash(new FirewallRule('allow', 'in', 'tcp', '22', source: $every), $rules)?->id(), $every);
+            $this->assertSame($ssh->id(), UfwRules::clash(new FirewallRule('allow', 'in', 'tcp', '22', destination: $every), $rules)?->id(), $every);
+        }
+        $this->assertSame($deny->id(), UfwRules::clash(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '443,80', 'source' => '192.0.2.1']), $rules)?->id());
+        $this->assertNull(UfwRules::clash(FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '443,8080', 'source' => '192.0.2.1']), $rules));
+    }
 }

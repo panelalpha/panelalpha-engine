@@ -78,7 +78,8 @@ class FirewallController extends Controller
         summary: 'Add a firewall rule',
         description: 'A deny rule is placed above every allow rule, so it wins; an allow rule goes last. '
             . 'An inbound deny covers the host\'s ports and the ports Docker publishes (scope both, as a fail2ban ban does) unless scope published is asked for. '
-            . 'A rule needs a port, a source or a destination. Do not open a port for an application: '
+            . 'A rule needs a port, a source or a destination. A rule that matches the same traffic as one already there, '
+            . 'whatever its action or comment, is refused naming that rule, which is left as it is. Do not open a port for an application: '
             . 'sites are reached through the engine\'s webserver.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
@@ -113,7 +114,8 @@ class FirewallController extends Controller
     #[OA\Put(
         path: '/firewall/rules/{id}',
         summary: 'Edit a firewall rule',
-        description: 'A field not sent keeps its current value; send null to clear it. The rule gets a new id when what it matches changes.',
+        description: 'A field not sent keeps its current value; send null to clear it. The rule gets a new id when what it matches changes; '
+            . 'an edit that would make it match the same traffic as another rule is refused.',
         security: [['bearerAuth' => []]],
         tags: ['Firewall'],
         parameters: [new OA\Parameter(name: 'id', in: 'path', required: true, schema: new OA\Schema(type: 'string'))],

@@ -40,6 +40,35 @@ class FirewallRuleTest extends TestCase
         $this->assertArrayHasKey('source', FirewallRule::fromArray(['action' => 'deny', 'direction' => 'both', 'source' => '203.0.113.7', 'destination' => '198.51.100.1'])->problems());
     }
 
+    public function test_an_address_that_is_every_address_is_refused(): void
+    {
+        // ufw would take it for the rule on any address, the engine's own included.
+        foreach (['0.0.0.0/0', '::/0', '203.0.113.7/0', '2001:db8::1/0'] as $every) {
+            $this->assertArrayHasKey('source', FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => $every])->problems(), $every);
+            $this->assertArrayHasKey('destination', FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '22', 'destination' => $every])->problems(), $every);
+        }
+        // Not a deny of every connection either.
+        $this->assertSame(
+            ['source' => 'The source 0.0.0.0/0 is every address; leave it out to match any address.'],
+            FirewallRule::fromArray(['action' => 'deny', 'source' => '0.0.0.0/0'])->problems()
+        );
+        $this->assertSame([], FirewallRule::fromArray(['action' => 'deny', 'source' => '0.0.0.0'])->problems());
+        $this->assertSame([], FirewallRule::fromArray(['action' => 'deny', 'source' => '0.0.0.0/1'])->problems());
+    }
+
+    public function test_a_port_list_is_in_the_order_ufw_stores_it(): void
+    {
+        $this->assertSame('80,443', FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '443,80'])->port);
+        $this->assertSame('22,80,8000:8010', FirewallRule::normalizePort('8000:8010,80,22'));
+        $this->assertSame('80:90,8000', FirewallRule::normalizePort('8000,80:90'));
+        $this->assertSame('80,80:85,80:90', FirewallRule::normalizePort('80:90,80,80:85'));
+        $this->assertSame('30000:30009', FirewallRule::normalizePort('30000:30009'));
+        $this->assertSame(
+            FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '80,443', 'source' => '192.0.2.1'])->id(),
+            FirewallRule::fromArray(['action' => 'deny', 'protocol' => 'tcp', 'port' => '443,80', 'source' => '192.0.2.1'])->id()
+        );
+    }
+
     public function test_the_id_follows_what_the_rule_matches_not_its_comment(): void
     {
         $rule = FirewallRule::fromArray(['action' => 'allow', 'protocol' => 'tcp', 'port' => '22', 'source' => '203.0.113.7/32', 'comment' => 'office']);

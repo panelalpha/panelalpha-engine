@@ -29,7 +29,18 @@ final class UfwRules
             }
         }
 
-        return self::pairScopes(self::pairBothDirections(array_values($rules)));
+        return self::listed(array_values($rules));
+    }
+
+    /**
+     * ufw's rules, each one direction and one scope, as they are listed.
+     *
+     * @param list<FirewallRule> $halves
+     * @return list<FirewallRule>
+     */
+    private static function listed(array $halves): array
+    {
+        return self::pairScopes(self::pairBothDirections($halves));
     }
 
     /**
@@ -185,6 +196,12 @@ final class UfwRules
      */
     public static function specs(FirewallRule $rule, bool $withComment = true): array
     {
+        return array_map(static fn (FirewallRule $r): array => self::spec($r, $withComment), self::halves($rule));
+    }
+
+    /** @return list<FirewallRule> the ufw rules this one is written as, each in one direction and one scope */
+    private static function halves(FirewallRule $rule): array
+    {
         $host = $rule->scope === FirewallRule::BOTH ? FirewallRule::HOST : $rule->scope;
         $half = static fn (string $direction, ?string $source, ?string $destination, string $scope): FirewallRule
             => new FirewallRule($rule->action, $direction, $rule->protocol, $rule->port, $source, $destination, $rule->comment, scope: $scope);
@@ -196,7 +213,98 @@ final class UfwRules
             $halves[] = $half(FirewallRule::IN, $rule->source, $rule->direction === FirewallRule::BOTH ? null : $rule->destination, FirewallRule::PUBLISHED);
         }
 
-        return array_map(static fn (FirewallRule $r): array => self::spec($r, $withComment), $halves);
+        return $halves;
+    }
+
+    /**
+     * The rule in $rules that ufw would take $rule for. ufw keeps one rule
+     * per match: adding one that differs from a rule already there only in
+     * its action or comment writes over that rule, or, inserted, is skipped.
+     *
+     * @param list<FirewallRule> $rules
+     */
+    public static function clash(FirewallRule $rule, array $rules): ?FirewallRule
+    {
+        $slots = self::slots($rule);
+        foreach ($rules as $other) {
+            if (array_intersect($slots, self::slots($other)) !== []) {
+                return $other;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The rule in $rules that $rule would be listed as one with. An inbound rule
+     * from an address and an outbound one to it, or a host and a published deny,
+     * otherwise alike, are how one rule both ways or on both scopes is written;
+     * ufw keeps nothing that tells them apart, so they read back as that rule.
+     *
+     * @param list<FirewallRule> $rules
+     */
+    public static function pairsWith(FirewallRule $rule, array $rules): ?FirewallRule
+    {
+        $halves = [];
+        foreach ($rules as $other) {
+            array_push($halves, ...($other->editable ? self::halves($other) : [$other]));
+        }
+        $scopes = [];
+        foreach (self::listed([...$halves, ...self::halves($rule)]) as $listed) {
+            $scopes[$listed->id()] = $listed->scope;
+        }
+        foreach ($rules as $other) {
+            if (($scopes[$other->id()] ?? null) !== $other->scope) {
+                return $other;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The rules in $rules each of whose ufw rules is one of $rule's, action and
+     * comment included: adding $rule, ufw skips those and writes the rest.
+     *
+     * @param list<FirewallRule> $rules
+     * @return list<FirewallRule>
+     */
+    public static function partsOf(FirewallRule $rule, array $rules): array
+    {
+        $mine = array_map(static fn (FirewallRule $h): array => $h->toArray(), self::halves($rule));
+
+        return array_values(array_filter($rules, static function (FirewallRule $other) use ($mine): bool {
+            foreach ($other->editable ? self::halves($other) : [$other] as $half) {
+                if (!in_array($half->toArray(), $mine, true)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }));
+    }
+
+    /**
+     * What ufw tells its rules apart by, per ufw rule: the tuple without
+     * the action and the comment.
+     *
+     * @return list<string>
+     */
+    private static function slots(FirewallRule $rule): array
+    {
+        if (!$rule->editable) {
+            $f = preg_split('/\s+/', (string) $rule->raw) ?: [];
+
+            return [(str_starts_with($f[0] ?? '', 'route:') ? 'route ' : '') . implode(' ', array_slice($f, 1))];
+        }
+
+        // ufw stores any address as 0.0.0.0/0 and ::/0, so it takes those for any.
+        $address = static fn (?string $a): string => $a === null || in_array($a, self::ANY_ADDRESS, true) ? 'any' : $a;
+
+        return array_map(static fn (FirewallRule $h): string => implode(' ', [
+            ...($h->scope === FirewallRule::PUBLISHED ? ['route'] : []),
+            $h->protocol ?? 'any', $h->port ?? 'any', $address($h->destination), 'any', $address($h->source), $h->direction,
+        ]), self::halves($rule));
     }
 
     /**

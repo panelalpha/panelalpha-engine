@@ -226,6 +226,48 @@ for a in actionban actionunban; do
     expect "$a: two ufw writes" "2" "$(calls '^ufw .*192.0.2.9')"
     expect "$a: both under the lock" "" "$(cat "$W/unlocked" 2>/dev/null)"
 done
+# A ban and its lifting touch only fail2ban's own rules. ufw skips the ban of an
+# address an operator's deny already holds, and lifting the ban must leave that
+# deny. This ufw keeps one rule per match, as ufw does: an insert whose match is
+# held is skipped, and a delete that names no comment takes any comment.
+mkdir -p "$W/store-bin"
+cat >"$W/store-bin/ufw" <<FAKE
+#!/bin/bash
+store="$W/ufw-store"
+touch "\$store"
+route=
+[ "\$1" = route ] && { route="route "; shift; }
+verb=\$1 action=\$2
+shift 2
+comment= match=
+while [ \$# -gt 0 ]; do
+    if [ "\$1" = comment ]; then comment=\$2; shift 2; else match="\$match \$1"; shift; fi
+done
+match="\$route\${match# }"
+case \$verb in
+prepend)
+    if ! awk -F'|' -v m="\$match" '\$1 == m { f = 1 } END { exit !f }' "\$store"; then
+        { echo "\$match|\$action|\$comment"; cat "\$store"; } >"\$store.new"
+        mv "\$store.new" "\$store"
+    fi ;;
+delete)
+    awk -F'|' -v m="\$match" -v a="\$action" -v c="\$comment" '!d && \$1 == m && \$2 == a && (\$3 == c || c == "") { d = 1; next } { print }' "\$store" >"\$store.new"
+    mv "\$store.new" "\$store" ;;
+esac
+FAKE
+chmod +x "$W/store-bin/ufw"
+store_ufw() { PATH="$W/store-bin:$W/bin:$PATH" "$@" >/dev/null 2>&1; }
+stored() { sort "$W/ufw-store" 2>/dev/null | tr '\n' ';'; }
+rm -f "$W/ufw-store"
+store_ufw sh -c "$(f2b_action actionban)"
+expect "a ban is fail2ban's two rules" "from 192.0.2.9 to any|deny|by Fail2Ban;route from 192.0.2.9 to any|deny|by Fail2Ban;" "$(stored)"
+store_ufw sh -c "$(f2b_action actionunban)"
+expect "and lifting it deletes them" "" "$(stored)"
+store_ufw ufw prepend deny from 192.0.2.9 to any comment 'keep out'
+store_ufw ufw route prepend deny from 192.0.2.9 to any
+store_ufw sh -c "$(f2b_action actionban)"
+store_ufw sh -c "$(f2b_action actionunban)"
+expect "an operator's deny for a banned address outlives the ban" "from 192.0.2.9 to any|deny|keep out;route from 192.0.2.9 to any|deny|;" "$(stored)"
 # Held elsewhere for longer than the wait: nothing is written, and it says so.
 rules "allow tcp 22 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'panelalpha: ssh')"
 rm -f "$W/calls" "$W/held"
@@ -550,7 +592,7 @@ action="$W/etc/fail2ban/action.d/panelalpha-ufw.conf"
 expect "a ban and its lifting take the ufw lock first" "2" "$(grep -cE '^action(un)?ban = <ufwlock>$' "$action")"
 expect "a ban denies the host's ports" "1" "$(grep -c '^ *ufw prepend deny from <ip> to any comment "<comment>"$' "$action")"
 expect "and published ones" "1" "$(grep -c '^ *ufw route prepend deny from <ip> to any comment "<comment>"$' "$action")"
-expect "unban lifts both" "2" "$(grep -cE '^ *ufw (route )?delete deny from <ip> to any$' "$action")"
+expect "unban lifts both, by fail2ban's comment" "2" "$(grep -cE '^ *ufw (route )?delete deny from <ip> to any comment "<comment>"$' "$action")"
 expect "with fail2ban's comment, so the API knows a ban" "1" "$(grep -c '^comment = by Fail2Ban after <failures> attempts against <name>$' "$action")"
 
 reset

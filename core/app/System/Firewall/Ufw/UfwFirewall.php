@@ -3,6 +3,7 @@
 namespace App\System\Firewall\Ufw;
 
 use App\System\Firewall\Firewall;
+use App\System\Firewall\FirewallClash;
 use App\System\Firewall\FirewallException;
 use App\System\Firewall\FirewallFactory;
 use App\System\Firewall\FirewallLogEntry;
@@ -104,7 +105,71 @@ class UfwFirewall implements Firewall
 
     public function addRule(FirewallRule $rule): FirewallRule
     {
-        return $this->locked(fn (): FirewallRule => $this->add($rule));
+        // Checked under the lock, so no other writer (a fail2ban ban) adds the clashing rule in between.
+        return $this->locked(function () use ($rule): FirewallRule {
+            self::refuseClash($rule, $this->rules());
+
+            return $this->add($rule);
+        });
+    }
+
+    /**
+     * ufw would write over a rule that differs from this one only in its
+     * action or comment, or skip this one for it: a managed rule would lose
+     * its prefix, a deny would turn into an allow, or half a rule would go in.
+     *
+     * @param list<FirewallRule> $rules
+     */
+    private static function refuseClash(FirewallRule $rule, array $rules): void
+    {
+        $clash = UfwRules::clash($rule, $rules);
+        if ($clash === null) {
+            self::refusePair($rule, $rules);
+
+            return;
+        }
+
+        throw new FirewallClash(sprintf(
+            'Rule %s (%s) already matches this traffic and is left as it is; %s.',
+            $clash->id(),
+            self::describe($clash),
+            $clash->managed() ? 'the engine opened it and needs it' : 'change or delete that rule instead',
+        ));
+    }
+
+    /**
+     * The rule would be listed as one with a rule already there, under an id
+     * neither has: the API would answer that it does not exist.
+     *
+     * @param list<FirewallRule> $rules
+     */
+    private static function refusePair(FirewallRule $rule, array $rules): void
+    {
+        $pair = UfwRules::pairsWith($rule, $rules);
+        if ($pair === null) {
+            return;
+        }
+
+        throw new FirewallClash(sprintf(
+            'Rule %s (%s) and this one would be listed as a single rule %s: ufw keeps nothing that tells the two apart. It is left as it is; change that rule instead.',
+            $pair->id(),
+            self::describe($pair),
+            in_array(FirewallRule::PUBLISHED, [$pair->scope, $rule->scope], true) ? 'on host and published ports' : 'both ways',
+        ));
+    }
+
+    private static function describe(FirewallRule $rule): string
+    {
+        return $rule->raw ?? implode(' ', array_filter([
+            $rule->action, $rule->direction, $rule->protocol, $rule->port,
+            $rule->source === null ? null : 'from ' . $rule->source,
+            $rule->destination === null ? null : 'to ' . $rule->destination,
+            match ($rule->scope) {
+                FirewallRule::PUBLISHED => 'on published ports',
+                FirewallRule::BOTH => 'on host and published ports',
+                default => null,
+            },
+        ]));
     }
 
     private function add(FirewallRule $rule): FirewallRule
@@ -129,35 +194,89 @@ class UfwFirewall implements Firewall
 
     public function updateRule(string $id, FirewallRule $rule): FirewallRule
     {
-        $old = $this->rule($id);
-        if (!$old->sameMatch($rule)) {
-            return $this->locked(function () use ($id, $rule): FirewallRule {
+        // The old rule is read under the lock: read before it, another edit of the
+        // rule could land first, and this one would act on and put back a stale copy.
+        [$old, $new, $seen] = $this->locked(function () use ($id, $rule): array {
+            $old = $this->rule($id);
+            $others = $this->others($id);
+            $sameMatch = $old->sameMatch($rule);
+            if (!$sameMatch && UfwRules::clash($rule, [$old]) === null && UfwRules::pairsWith($rule, [$old]) === null) {
+                self::refuseClash($rule, $others);
                 $new = $this->add($rule);
-                $this->delete($this->rule($id));
+                $this->delete($old);
 
-                return $new;
-            });
-        }
-
-        // Only the comment changed, which ufw cannot edit in place. A ban is
-        // deleted on its own first: fail2ban's unban, which runs once the lock
-        // is released, would otherwise take the re-added rule with it.
-        $ban = self::isBan($old);
-        if ($ban) {
-            $this->deleteRule($id);
-        }
-
-        return $this->locked(function () use ($id, $old, $rule, $ban): FirewallRule {
-            if (!$ban) {
-                $this->delete($this->rule($id));
+                return [$old, $new, null];
             }
-            try {
-                return $this->add($rule);
-            } catch (FirewallException $e) {
-                $this->add($old);
-                throw $e;
+
+            // ufw cannot hold the new rule beside the old one (a new comment, a shared
+            // ufw rule, or one the two would be listed as), so the old one goes first.
+            // A new comment shares no ufw rule with another, but can pair it with one.
+            if ($sameMatch) {
+                self::refusePair($rule, $others);
+            } else {
+                self::refuseClash($rule, $others);
             }
+            $this->delete($old);
+            // A ban's new rule goes in under a lock of its own: fail2ban's unban, run
+            // once this one is released, would take it too.
+            if (self::isBan($old)) {
+                return [$old, null, $others];
+            }
+
+            return [$old, $this->replace($old, $rule), null];
         });
+
+        return $new ?? $this->locked(fn (): FirewallRule => $this->replace($old, $rule, $seen));
+    }
+
+    /**
+     * Adds $rule in place of $old, which is out already, or puts $old back when it cannot go in.
+     *
+     * @param list<FirewallRule>|null $seen the other rules when $old went out, if fail2ban has had its turn since
+     */
+    private function replace(FirewallRule $old, FirewallRule $rule, ?array $seen = null): FirewallRule
+    {
+        try {
+            if ($seen !== null) {
+                $this->refuseNewBan($rule, $seen);
+            }
+
+            return $this->add($rule);
+        } catch (FirewallException $e) {
+            try {
+                $this->add($old);
+            } catch (FirewallNotFound) {
+                // fail2ban's new ban holds part of the old rule's place, so the old one cannot read back whole.
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * fail2ban may have banned the address again between an edit's two locks,
+     * also when the edit keeps what the ban matched. The rules that came in
+     * since are checked against, a ban with the old rule's id included. One
+     * made only of ufw rules $rule has too, action and comment alike, is no
+     * clash: ufw skips those and writes the rest. fail2ban usually bans again
+     * with the comment it banned with before.
+     *
+     * @param list<FirewallRule> $seen
+     */
+    private function refuseNewBan(FirewallRule $rule, array $seen): void
+    {
+        $known = array_map(static fn (FirewallRule $r): array => $r->toArray(), $seen);
+        $rules = $this->rules();
+        $parts = UfwRules::partsOf($rule, $rules);
+        self::refuseClash($rule, array_values(array_filter(
+            $rules,
+            static fn (FirewallRule $r): bool => !in_array($r->toArray(), $known, true) && !in_array($r, $parts, true),
+        )));
+    }
+
+    /** @return list<FirewallRule> every rule but $id */
+    private function others(string $id): array
+    {
+        return array_values(array_filter($this->rules(), static fn (FirewallRule $r): bool => $r->id() !== $id));
     }
 
     public function deleteRule(string $id): FirewallRule
@@ -274,7 +393,9 @@ class UfwFirewall implements Firewall
 
     private static function isBan(FirewallRule $rule): bool
     {
-        return $rule->source !== null && str_starts_with((string) $rule->comment, 'by Fail2Ban');
+        // fail2ban writes only denies. An allow made from a ban keeps its comment; handled as a
+        // ban, its edit could put it back over a new ban, and fail2ban would be told to lift that one.
+        return $rule->action === FirewallRule::DENY && $rule->source !== null && str_starts_with((string) $rule->comment, 'by Fail2Ban');
     }
 
     /**

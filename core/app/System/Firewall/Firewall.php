@@ -20,10 +20,22 @@ interface Firewall
     /** @throws FirewallNotFound */
     public function rule(string $id): FirewallRule;
 
-    /** Deny rules go before every allow, so they win; allow rules go last. */
+    /**
+     * Deny rules go before every allow, so they win; allow rules go last.
+     * A rule already there for the same traffic is never changed: the add is refused.
+     *
+     * @throws FirewallClash
+     * @throws FirewallException
+     */
     public function addRule(FirewallRule $rule): FirewallRule;
 
-    /** @throws FirewallNotFound */
+    /**
+     * Refused when the rule would match the same traffic as another.
+     *
+     * @throws FirewallNotFound
+     * @throws FirewallClash
+     * @throws FirewallException
+     */
     public function updateRule(string $id, FirewallRule $rule): FirewallRule;
 
     /** @throws FirewallNotFound */

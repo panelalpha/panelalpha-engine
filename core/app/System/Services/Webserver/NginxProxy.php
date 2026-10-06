@@ -696,7 +696,7 @@ NGINX;
      * Keep the host firewall open for the ports the custom rules listen on.
      *
      * Only a host that has or had such a port touches the firewall: the
-     * marker lists what the last successful sync left open.
+     * marker lists the ports the last successful sync was asked to open.
      *
      * @psalm-param list<HttpRule|StreamRule> $rules
      */

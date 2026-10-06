@@ -524,7 +524,9 @@ EOF
     cat >"$F2B_DIR/action.d/panelalpha-ufw.conf" <<EOF
 # Written by the PanelAlpha engine: a ban is a ufw deny rule for the host and a
 # route deny rule for the ports Docker publishes; lifting it removes both, each
-# pair under the lock every ufw write on the host takes.
+# pair under the lock every ufw write on the host takes. They are deleted by
+# their comment: ufw skips a ban on an address an operator's rule already
+# denies, and a delete that names no comment takes that rule instead.
 [Definition]
 actionstart =
 actionstop =
@@ -533,8 +535,8 @@ actionban = <ufwlock>
             ufw prepend deny from <ip> to any comment "<comment>"
             ufw route prepend deny from <ip> to any comment "<comment>"
 actionunban = <ufwlock>
-              ufw delete deny from <ip> to any
-              ufw route delete deny from <ip> to any
+              ufw delete deny from <ip> to any comment "<comment>"
+              ufw route delete deny from <ip> to any comment "<comment>"
 
 [Init]
 comment = by Fail2Ban after <failures> attempts against <name>

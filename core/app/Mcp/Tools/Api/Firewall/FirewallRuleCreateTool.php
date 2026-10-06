@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 #[Description(<<<'MARKDOWN'
     Add a firewall rule
 
-    A deny rule is placed above every allow rule, so it wins; an allow rule goes last. An inbound deny covers the host's ports and the ports Docker publishes (scope both, as a fail2ban ban does) unless scope published is asked for. A rule needs a port, a source or a destination. Do not open a port for an application: sites are reached through the engine's webserver.
+    A deny rule is placed above every allow rule, so it wins; an allow rule goes last. An inbound deny covers the host's ports and the ports Docker publishes (scope both, as a fail2ban ban does) unless scope published is asked for. A rule needs a port, a source or a destination. A rule that matches the same traffic as one already there, whatever its action or comment, is refused naming that rule, which is left as it is. Do not open a port for an application: sites are reached through the engine's webserver.
     MARKDOWN)]
 #[IsDestructive]
 class FirewallRuleCreateTool extends ApiTool

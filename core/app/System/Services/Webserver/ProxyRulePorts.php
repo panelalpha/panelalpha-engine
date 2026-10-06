@@ -3,6 +3,7 @@
 namespace App\System\Services\Webserver;
 
 use App\System\Firewall\Firewall;
+use App\System\Firewall\FirewallClash;
 use App\System\Firewall\FirewallFactory;
 use App\System\Firewall\FirewallRule;
 use Illuminate\Support\Facades\Log;
@@ -29,8 +30,11 @@ class ProxyRulePorts
 
     /**
      * Allow every custom rule's port, and drop the allows of rules that are
-     * gone or disabled. A firewall that cannot be read or changed never fails
-     * the caller; false tells it to try again next time.
+     * gone or disabled. A port another rule already holds, such as an
+     * operator's deny, is left as that rule has it while the others open;
+     * every sync tries it again while its proxy rule exists. A firewall that
+     * cannot be read or changed never fails the caller; false tells it to
+     * try again next time.
      *
      * @psalm-param list<PortRule> $rules
      */
@@ -48,8 +52,14 @@ class ProxyRulePorts
                 }
             }
             foreach ($wanted as $id => $rule) {
-                if (!isset($present[$id])) {
+                if (isset($present[$id])) {
+                    continue;
+                }
+                try {
                     $firewall->addRule($rule);
+                } catch (FirewallClash $e) {
+                    // Still synced: the caller's marker has to hold the ports opened beside it, so they close later.
+                    Log::warning('Could not update the firewall for the proxy rules: ' . $e->getMessage());
                 }
             }
         } catch (\Throwable $e) {
