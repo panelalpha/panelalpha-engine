@@ -116,19 +116,144 @@ is_address() {
     echo "$1" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$|^[0-9A-Fa-f]*:[0-9A-Fa-f:.]*(/[0-9]{1,3})?$'
 }
 
+# A comment without the bytes ufw drops, those that are not UTF-8: as python3, ufw's
+# runtime, drops them; iconv is made to match (glibc keeps > U+10FFFF, musl a cut end).
+utf8_only() {
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import os, sys; sys.stdout.buffer.write(os.fsencode(sys.argv[1]).decode("utf-8", "ignore").encode())' "$1" ||
+            printf '%s' "$1"
+    elif command -v iconv >/dev/null 2>&1; then
+        local s
+        s=$(
+            export LC_ALL=C
+            s=${1//$'\xf4'[$'\x90'-$'\xbf']/$'\xff\xff'}
+            printf '%sx' "${s//[$'\xf5'-$'\xfe']/$'\xff'}" | iconv -c -f UTF-8 -t UTF-8 2>/dev/null
+        )
+        case "$s" in *x) printf '%s' "${s%x}" ;; *) printf '%s' "$1" ;; esac
+    else
+        printf '%s' "$1"
+    fi
+}
+
+# A comment changed as little as ufw (ufw/parser.py) and the API
+# (FirewallRule::commentProblem()) need; prints it, then why, a line each.
+safe_comment() ( # <comment> <host|route>
+    export LC_ALL=C
+    why=()
+    # First, or "\xffin" would be stored as "in".
+    c=$(utf8_only "$1" && printf x)
+    c=${c%x}
+    [ "$c" = "$1" ] || why+=("bytes that are not UTF-8 are dropped, as ufw drops them")
+    # C0, DEL, and C1 as UTF-8.
+    u=$c
+    c=${c//[[:cntrl:]]/ }
+    c=${c//$'\xc2'[$'\x80'-$'\x9f']/ }
+    [ "$c" = "$u" ] || why+=("control characters become spaces")
+    if [ "$c" != "$1" ]; then
+        c=${c#"${c%%[! ]*}"}
+        c=${c%"${c##*[! ]}"}
+    fi
+    case "$c" in *\'*)
+        c=${c//\'/$'\xe2\x80\x99'}
+        why+=("ufw refuses ' in a comment")
+        ;;
+    esac
+    # The prefix is quoted to the end of its word: "--rootdir=/srv" old.
+    for p in --rootdir= --datadir= "$MANAGED" 'by Fail2Ban'; do
+        case "$c" in "$p"*)
+            rest=${c#"$p"}
+            word=${rest%%' '*}
+            c="\"$p$word\"${rest#"$word"}"
+            case "$p" in
+            --*) why+=("ufw would take it for its own $p option") ;;
+            "$MANAGED") why+=("the engine's own rules start with $MANAGED") ;;
+            *) why+=("fail2ban's bans start with $p") ;;
+            esac
+            ;;
+        esac
+    done
+    case "$c" in in | out | log | log-all)
+        c="\"$c\""
+        why+=("ufw would read it as part of the rule")
+        ;;
+    esac
+    if [ "$2" = route ]; then
+        w=" $c"
+        if [ "$c" = delete ] || [[ $w == *' in on '* && $w == *' out on '* ]] ||
+            { [[ $w == *' in '* || $w == *' out '* ]] &&
+                ! [[ $w == *' in on '* || $w == *' out on '* || $w == *' app in '* || $w == *' app out '* ]]; }; then
+            [ "$c" = delete ] && w=' "delete"'
+            while [[ $w == *' in '* || $w == *' out '* ]]; do
+                w=${w//' in '/' "in" '}
+                w=${w//' out '/' "out" '}
+            done
+            c=${w# }
+            why+=("ufw would read it as part of a route rule")
+        fi
+    fi
+    printf '%s\n' "$c" "${why[@]}"
+)
+
+# A comment for a log line: in single quotes, which a written one never holds,
+# or as $'...' with control characters or bytes that are not UTF-8.
+shown() {
+    local u
+    u=$(utf8_only "$1" && printf x)
+    if [[ $1 == *[[:cntrl:]]* ]] || [ "${u%x}" != "$1" ]; then printf '%q' "$1"; else printf "'%s'" "$1"; fi
+}
+
+# UFW_COMMENT: what ufw stores of an operator's comment; a change is said.
+UFW_COMMENT=
+ufw_comment() { # <comment> <host|route> <the rule, for the log>
+    local out why
+    out=$(safe_comment "$1" "$2")
+    UFW_COMMENT=${out%%$'\n'*}
+    [ "$UFW_COMMENT" != "$1" ] || return 0
+    why=${out#*$'\n'}
+    why=${why//$'\n'/; }
+    if [ -n "$UFW_COMMENT" ]; then
+        say "$3: the comment $(shown "$1") is written as $(shown "$UFW_COMMENT"): $why"
+    else
+        say "$3: the comment $(shown "$1") is left out: $why"
+    fi
+}
+
+# ufw <words...> with UFW_COMMENT, else without it: 0 as asked, 1 without the
+# comment, 2 not written. UFW_ERROR: ufw's ERROR line alone.
+UFW_ERROR=
+ufw_write() {
+    local out
+    UFW_ERROR=
+    if [ -n "$UFW_COMMENT" ]; then
+        out=$(ufw "$@" comment "$UFW_COMMENT" </dev/null 2>&1) && ! ufw_refused "$out" && return 0
+        UFW_ERROR=$(ufw_error "$out")
+    fi
+    if out=$(ufw "$@" </dev/null 2>&1) && ! ufw_refused "$out"; then
+        [ -z "$UFW_COMMENT" ] && return 0
+        return 1
+    fi
+    UFW_ERROR=$(ufw_error "$out")
+    return 2
+}
+# Some refusals exit 0.
+ufw_refused() { printf '%s\n' "$1" | grep -qi '^error'; }
+ufw_error() { printf '%s\n' "$1" | grep -i -m1 '^error' || printf '%s\n' "$1" | sed -n '/./{p;q;}'; }
+
 # One csf.allow / csf.deny line into UFW_ARGS (the words after `ufw prepend`),
 # and for a bare address, which CSF applied both ways, UFW_ARGS_OUT as well:
-# the API lists the two as one rule in both directions.
+# the API lists the two as one rule in both directions. Its comment, as ufw
+# can store it, into UFW_COMMENT.
 # Fails for comments, blank lines, the entries the engine itself wrote, lfd's
 # own automatic blocks (fail2ban takes over from lfd and starts empty) and
 # anything ufw cannot express, which is reported.
 UFW_ARGS=()
 UFW_ARGS_OUT=()
 csf_line_to_ufw() { # <allow|deny> <line>
-    local action=$1 line=${2%$'\r'} rule comment="" proto dir pspec aspec extra
-    local from=any to=any sport="" dport="" addr ports
+    local action=$1 line=${2%$'\r'} rule comment="" proto dir=in pspec aspec extra
+    local from=any to=any sport="" dport="" addr ports kind=host
     UFW_ARGS=()
     UFW_ARGS_OUT=()
+    UFW_COMMENT=
     rule=$(trim "${line%%#*}")
     case "$line" in *'#'*) comment=$(trim "${line#*#}") ;; esac
     [ -n "$rule" ] || return 1
@@ -184,26 +309,36 @@ csf_line_to_ufw() { # <allow|deny> <line>
         UFW_ARGS+=(to "$to")
         [ -n "$dport" ] && UFW_ARGS+=(port "$dport")
     fi
-    if [ -n "$comment" ]; then
-        UFW_ARGS+=(comment "$comment")
-        [ ${#UFW_ARGS_OUT[@]} -gt 0 ] && UFW_ARGS_OUT+=(comment "$comment")
-    fi
+    # An inbound deny is carried over to published ports (convert_published),
+    # and the API lists the two as one rule only when their comments match.
+    [ "$action" = deny ] && [ "$dir" = in ] && kind=route
+    ufw_comment "$comment" "$kind" "$rule from csf.$action"
     return 0
 }
 
 # Each rule goes on top; called for csf.deny first, then csf.allow, so the
 # allows end up above the denies and win, as they did under CSF.
 import_csf_file() { # <allow|deny> <file>
-    local action=$1 file=$2 line moved=0 out
+    local action=$1 file=$2 line moved=0 rc refused comment what
     [ -f "$file" ] || return 0
     while IFS= read -r line || [ -n "$line" ]; do
         csf_line_to_ufw "$action" "$line" || continue
-        if out=$(ufw prepend "${UFW_ARGS[@]}" 2>&1) && ! echo "$out" | grep -qi '^error' &&
-            { [ ${#UFW_ARGS_OUT[@]} = 0 ] || { out=$(ufw prepend "${UFW_ARGS_OUT[@]}" 2>&1) && ! echo "$out" | grep -qi '^error'; }; }; then
-            moved=$((moved + 1))
-        else
-            warn "not moved: $line ($out)"
+        what="$(trim "${line%%#*}") from $(basename "$file")"
+        comment=$UFW_COMMENT refused=
+        ufw_write prepend "${UFW_ARGS[@]}"
+        rc=$?
+        [ $rc = 1 ] && refused=$UFW_ERROR UFW_COMMENT=
+        if [ $rc != 2 ] && [ ${#UFW_ARGS_OUT[@]} -gt 0 ]; then
+            ufw_write prepend "${UFW_ARGS_OUT[@]}"
+            rc=$?
+            [ $rc = 1 ] && refused=$UFW_ERROR
         fi
+        if [ $rc = 2 ]; then
+            warn "not moved: $what ($UFW_ERROR)"
+            continue
+        fi
+        moved=$((moved + 1))
+        [ -z "$refused" ] || warn "$what: moved without its comment $(shown "$comment"), which ufw refused ($refused)"
     done <"$file"
     say "moved $moved rule(s) from $(basename "$file")"
 }
@@ -431,12 +566,13 @@ convert_published() {
         key="${words[*]}"
         [ -z "${seen[$key]:-}" ] || continue
         seen[$key]=1
-        [ -n "$comment" ] && words+=(comment "$comment")
-        if ufw "${words[@]}" </dev/null >/dev/null; then
-            say "carried over to published ports: ufw ${words[*]}"
-        else
-            warn "could not carry over to published ports: ufw ${words[*]}"
-        fi
+        ufw_comment "$comment" route "ufw $key"
+        ufw_write "${words[@]}"
+        case $? in
+        0) say "carried over to published ports: ufw $key${UFW_COMMENT:+ comment $UFW_COMMENT}" ;;
+        1) warn "carried over to published ports without its comment $(shown "$UFW_COMMENT"), which ufw refused ($UFW_ERROR): ufw $key" ;;
+        *) warn "could not carry over to published ports: ufw $key ($UFW_ERROR)" ;;
+        esac
     done <<<"$rules"
 }
 

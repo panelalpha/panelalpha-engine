@@ -43,13 +43,15 @@ case "\$*" in
 *) [ "\$1" != is-active ] || [ ! -f "$W/f2b-down" ] ;;
 esac
 FAKE
-# ufw refuses any command matching the regex in $W/ufw-refuses.
+# ufw refuses any command matching the regex in $W/ufw-refuses, as ufw does a
+# rule it cannot parse: an error and a traceback, then its usage page.
 cat >"$W/bin/ufw" <<FAKE
 #!/bin/bash
 echo "ufw \$*" >>"$W/calls"
 flock -n "$LOCK" true 2>/dev/null && echo "ufw \$*" >>"$W/unlocked"
 if [ -f "$W/ufw-refuses" ] && echo "\$*" | grep -qE "\$(cat "$W/ufw-refuses")"; then
-    echo "ERROR: Bad rule"
+    printf 'ERROR: Bad rule\nTraceback (most recent call last):\n  File "/usr/sbin/ufw"\n' >&2
+    printf '\nUsage: ufw COMMAND\n\nCommands:\n enable    enables the firewall\n'
     exit 1
 fi
 FAKE
@@ -135,7 +137,7 @@ ENGINE_ROUTES=("route:allow tcp 2011 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'p
 
 # One csf line, through the same function the migration uses.
 convert() { # convert <allow|deny> <line> -> the ufw words, or SKIP
-    env_run bash -c 'source "$1"; if csf_line_to_ufw "$2" "$3" 2>/dev/null; then echo "${UFW_ARGS[*]}${UFW_ARGS_OUT[*]:+ + ${UFW_ARGS_OUT[*]}}"; else echo SKIP; fi' _ "$DIR/ufw.sh" "$1" "$2"
+    env_run bash -c 'source "$1"; if csf_line_to_ufw "$2" "$3" >/dev/null 2>&1; then c=${UFW_COMMENT:+ comment $UFW_COMMENT}; echo "${UFW_ARGS[*]}$c${UFW_ARGS_OUT[*]:+ + ${UFW_ARGS_OUT[*]}$c}"; else echo SKIP; fi' _ "$DIR/ufw.sh" "$1" "$2"
 }
 
 expect "a bare address, both ways as in CSF" "allow in from 1.2.3.4 to any comment office + allow out from any to 1.2.3.4 comment office" "$(convert allow '1.2.3.4 # office')"
@@ -159,6 +161,72 @@ expect "a fifth field" "SKIP" "$(convert allow 'tcp|in|d=22|s=1.2.3.4|x')"
 expect "an unknown address prefix" "SKIP" "$(convert allow 'tcp|in|d=22|x=1.2.3.4')"
 expect "a hostname in an advanced rule" "SKIP" "$(convert allow 'tcp|in|d=22|s=example.com')"
 expect "an unknown port prefix" "SKIP" "$(convert allow 'tcp|in|p=22|s=1.2.3.4')"
+
+# A comment ufw cannot store as it is (ufw 0.36.2, parser.py) is changed as
+# little as it can be, never the rule; FirewallRule::commentProblem() is the
+# same rule in the API. An inbound deny gets a route rule as well, so its
+# comment must suit one.
+expect "an apostrophe, which ufw refuses anywhere, becomes ’" "allow in from 1.2.3.4 to any comment Bob’s office + allow out from any to 1.2.3.4 comment Bob’s office" "$(convert allow "1.2.3.4 # Bob's office")"
+expect "on a deny too" "deny in proto tcp from 5.6.7.8 to any port 22 comment it’s ’quoted’" "$(convert deny "tcp|in|d=22|s=5.6.7.8 # it's 'quoted'")"
+expect "control characters become spaces" "allow in proto tcp from 1.2.3.4 to any port 22 comment office VPN [31m end x" "$(convert allow $'tcp|in|d=22|s=1.2.3.4 # office\tVPN\e[31m\x7fend\rx')"
+expect "C1 ones too, as UTF-8" "allow in proto tcp from 1.2.3.4 to any port 22 comment a b" "$(convert allow $'tcp|in|d=22|s=1.2.3.4 # a\xc2\x85b')"
+expect "a comment of control characters alone is left out, the rule kept" "allow in from 1.2.3.4 to any + allow out from any to 1.2.3.4" "$(convert allow $'1.2.3.4 # \x01\x02')"
+for w in in out log log-all; do
+    expect "a comment that is just $w is quoted" "allow in proto tcp from 1.2.3.4 to any port 22 comment \"$w\"" "$(convert allow "tcp|in|d=22|s=1.2.3.4 # $w")"
+done
+expect "--rootdir= at the start, which ufw takes for its option, is quoted to the end of the word" "allow in proto tcp from 1.2.3.4 to any port 22 comment \"--rootdir=/srv\" old" "$(convert allow 'tcp|in|d=22|s=1.2.3.4 # --rootdir=/srv old')"
+expect "--datadir= as well" "deny out proto tcp from any to 5.6.7.8 port 25 comment \"--datadir=x\"" "$(convert deny 'tcp|out|d=25|d=5.6.7.8 # --datadir=x')"
+expect "the engine's own prefix is not taken for an engine rule" "allow in proto tcp from 1.2.3.4 to any port 22 comment \"panelalpha:\" mine" "$(convert allow 'tcp|in|d=22|s=1.2.3.4 # panelalpha: mine')"
+expect "nor fail2ban's for a ban" "deny in from 5.6.7.9 to any comment \"by Fail2Ban\" after 5 attempts against sshd + deny out from any to 5.6.7.9 comment \"by Fail2Ban\" after 5 attempts against sshd" "$(convert deny '5.6.7.9 # by Fail2Ban after 5 attempts against sshd')"
+expect "an inbound deny: in or out followed by more words, which a route rule reads, is quoted" "deny in from 5.6.7.8 to any comment block \"in\" office hours + deny out from any to 5.6.7.8 comment block \"in\" office hours" "$(convert deny '5.6.7.8 # block in office hours')"
+expect "at the start, every one of them" "deny in proto tcp from 5.6.7.8 to any port 22 comment \"out\" of office, \"in\" \"in\" \"out\" later" "$(convert deny 'tcp|in|d=22|s=5.6.7.8 # out of office, in in out later')"
+expect "both interface clauses" "deny in proto tcp from 5.6.7.8 to any port 22 comment x \"in\" on y \"out\" on z" "$(convert deny 'tcp|in|d=22|s=5.6.7.8 # x in on y out on z')"
+expect "delete, which a route rule reads" "deny in proto tcp from 5.6.7.8 to any port 22 comment \"delete\"" "$(convert deny 'tcp|in|d=22|s=5.6.7.8 # delete')"
+expect "a tab between such words is a space first" "deny in proto tcp from 5.6.7.8 to any port 22 comment a \"in\" b" "$(convert deny $'tcp|in|d=22|s=5.6.7.8 # a\tin\tb')"
+expect "an allow is a host rule only: in a sentence is kept" "allow in proto tcp from 1.2.3.4 to any port 22 comment block in office hours" "$(convert allow 'tcp|in|d=22|s=1.2.3.4 # block in office hours')"
+expect "and delete" "allow in proto tcp from 1.2.3.4 to any port 22 comment delete" "$(convert allow 'tcp|in|d=22|s=1.2.3.4 # delete')"
+expect "so is an outbound deny" "deny out proto tcp from any to 5.6.7.8 port 25 comment out of office" "$(convert deny 'tcp|out|d=25|d=5.6.7.8 # out of office')"
+for c in IN LOG 'let them in' 'keep out' 'x in on y' 'x app in y' 'see --rootdir=x' 'do not delete this' 'say "hi" back\slash #2' 'zażółć 日本 ✓' 'Panelalpha: x' 'by fail2ban'; do
+    expect "a comment ufw stores is kept: $c" "deny in proto tcp from 5.6.7.8 to any port 22 comment $c" "$(convert deny "tcp|in|d=22|s=5.6.7.8 # $c")"
+done
+# ufw drops bytes that are not UTF-8 before it stores a comment, so they go
+# first: a stray byte cannot hide a prefix or a word. Through python3, which
+# drops exactly what ufw does, and through iconv where there is no python3.
+# A PATH with every command but python3.
+mkdir -p "$W/nopy"
+IFS=: read -ra dirs <<<"$PATH"
+for d in "${dirs[@]}"; do
+    for f in "$d"/*; do
+        case "${f##*/}" in python3*) ;; *) [ -x "$f" ] && [ ! -e "$W/nopy/${f##*/}" ] && ln -s "$f" "$W/nopy/${f##*/}" ;; esac
+    done
+done
+utf8_case() { # <label> <expected> <allow|deny> <line>
+    expect "$1" "$2" "$(convert "$3" "$4")"
+    [ -x "$W/nopy/iconv" ] && expect "$1 (iconv)" "$2" "$(PATH="$W/nopy" convert "$3" "$4")"
+}
+utf8_case "a stray byte before fail2ban's prefix" "deny in from 5.6.7.9 to any comment \"by Fail2Ban\" after 5 + deny out from any to 5.6.7.9 comment \"by Fail2Ban\" after 5" "deny" $'5.6.7.9 # \xffby Fail2Ban after 5'
+utf8_case "before the engine's" "allow in proto tcp from 1.2.3.4 to any port 22 comment \"panelalpha:\" mine" "allow" $'tcp|in|d=22|s=1.2.3.4 # \xffpanelalpha: mine'
+utf8_case "inside a word ufw reads" "allow in proto tcp from 1.2.3.4 to any port 22 comment \"in\"" "allow" $'tcp|in|d=22|s=1.2.3.4 # i\xffn'
+utf8_case "before --rootdir=" "allow in proto tcp from 1.2.3.4 to any port 22 comment \"--rootdir=x\"" "allow" $'tcp|in|d=22|s=1.2.3.4 # \xc0\x80--rootdir=x'
+utf8_case "a code point past U+10FFFF" "allow in proto tcp from 1.2.3.4 to any port 22 comment \"log\"" "allow" $'tcp|in|d=22|s=1.2.3.4 # \xf4\x90\x80\x80log'
+utf8_case "on a route word" "deny in proto tcp from 5.6.7.8 to any port 22 comment block \"in\" office" "deny" $'tcp|in|d=22|s=5.6.7.8 # block i\xe2\x80n office'
+utf8_case "Latin-1 text loses its byte, as ufw stores it" "allow in proto tcp from 1.2.3.4 to any port 22 comment Bobs caf" "allow" $'tcp|in|d=22|s=1.2.3.4 # Bob\x92s caf\xe9'
+utf8_case "a lead byte that cannot start a character, before a prefix" "deny in proto tcp from 5.6.7.8 to any port 22 comment \"by Fail2Ban\" x" "deny" $'tcp|in|d=22|s=5.6.7.8 # \xe2\xf5\x80\x80by Fail2Ban x'
+utf8_case "a character cut off at the end" "allow in proto tcp from 1.2.3.4 to any port 22 comment cut ab" "allow" $'tcp|in|d=22|s=1.2.3.4 # cut ab\xf0\x9f\x99'
+utf8_case "only invalid bytes: no comment" "allow in proto tcp from 1.2.3.4 to any port 22" "allow" $'tcp|in|d=22|s=1.2.3.4 # \xff\xfe'
+utf8_case "valid UTF-8 is kept" "allow in proto tcp from 1.2.3.4 to any port 22 comment zażółć 日本 🙂 U+10FFFF:􏿿" "allow" 'tcp|in|d=22|s=1.2.3.4 # zażółć 日本 🙂 U+10FFFF:􏿿'
+reset
+# (No space after #: BusyBox sed does not trim one before a byte that is not UTF-8.)
+csf $'1.2.3.4 #\xffby Fail2Ban x\n' ''
+run install >/dev/null
+expect "and said" "1" "$(grep -cxF "firewall: 1.2.3.4 from csf.allow: the comment \$'\\377by Fail2Ban x' is written as '\"by Fail2Ban\" x': bytes that are not UTF-8 are dropped, as ufw drops them; fail2ban's bans start with by Fail2Ban" "$W/out")"
+
+# What it writes it keeps as it is.
+safe() { env_run bash -c 'source "$1"; safe_comment "$2" "$3" | head -n1' _ "$DIR/ufw.sh" "$1" "$2"; }
+for c in "Bob's office" $'a\tin\tb' in delete 'block in office hours' 'x in on y out on z' '--rootdir=/srv old' 'panelalpha: x' 'by Fail2Ban x'; do
+    once=$(safe "$c" route)
+    expect "written once, kept the next time: $c" "$once" "$(safe "$once" route)"
+done
 
 # A host on CSF moves to ufw.
 reset
@@ -397,6 +465,34 @@ csf '9.8.7.6 # both\n' ''
 echo 'out from any to 9\.8\.7\.6' >"$W/ufw-refuses"
 run install >/dev/null
 expect "a refused outbound half is reported" "1" "$(grep -c 'not moved: 9.8.7.6' "$W/out")"
+expect "with ufw's ERROR line alone" "1|0" "$(grep -cxF 'firewall: not moved: 9.8.7.6 from csf.allow (ERROR: Bad rule)' "$W/out")|$(grep -cE '^Usage:|Traceback' "$W/out")"
+
+# Comments ufw refuses: each rule moves, with the comment changed and said.
+reset
+csf "1.2.3.4 # Bob's office\n1.2.3.5 # in\n1.2.3.6 # of\0fice\n1.2.3.7 # \x01\n" '5.6.7.8 # block in office hours\n5.6.7.9 # by Fail2Ban after 5 attempts\n'
+echo "'" >"$W/ufw-refuses"
+expect "comments ufw refuses: installed" "0" "$(run install)"
+expect "an apostrophe no longer keeps a rule from moving" "2" "$(grep -cE "^ufw prepend allow (in from 1.2.3.4 to any|out from any to 1.2.3.4) comment Bob’s office$" "$W/calls")"
+expect "every rule moved" "1|1" "$(grep -c 'moved 4 rule(s) from csf.allow' "$W/out")|$(grep -c 'moved 2 rule(s) from csf.deny' "$W/out")"
+expect "the change is said: the rule, the comment it had and the one written" "1" "$(grep -cxF "firewall: 1.2.3.4 from csf.allow: the comment 'Bob's office' is written as 'Bob’s office': ufw refuses ' in a comment" "$W/out")"
+expect "a word ufw would read as the rule's" "1|1" "$(calls '^ufw prepend allow in from 1.2.3.5 to any comment "in"$')|$(grep -cxF "firewall: 1.2.3.5 from csf.allow: the comment 'in' is written as '\"in\"': ufw would read it as part of the rule" "$W/out")"
+expect "a NUL is gone as the line is read" "1" "$(calls '^ufw prepend allow in from 1.2.3.6 to any comment office$')"
+expect "control characters alone: the rule without them" "1|1" "$(calls '^ufw prepend allow in from 1.2.3.7 to any$')|$(grep -cxF "firewall: 1.2.3.7 from csf.allow: the comment \$'\\001' is left out: control characters become spaces" "$W/out")"
+expect "a deny's comment suits its route rule" "1" "$(calls '^ufw prepend deny in from 5.6.7.8 to any comment block "in" office hours$')"
+expect "a deny commented like a ban is not taken for one" "1" "$(calls '^ufw prepend deny in from 5.6.7.9 to any comment "by Fail2Ban" after 5 attempts$')"
+expect "nothing is refused, so nothing is said of it" "0|0" "$(grep -c 'refused' "$W/out")|$(grep -cE '^Usage:|Traceback|ERROR' "$W/out")"
+
+# ufw refuses the comment all the same: the rule moves without it.
+reset
+csf '1.2.3.4 # office\n1.2.3.5\n' 'tcp|in|d=22|s=5.6.7.8 # spam\n'
+echo 'comment (office|spam)' >"$W/ufw-refuses"
+expect "a comment ufw still refuses: installed" "0" "$(run install)"
+expect "the allow moves without it, both ways" "1|1" "$(calls '^ufw prepend allow in from 1.2.3.4 to any$')|$(calls '^ufw prepend allow out from any to 1.2.3.4$')"
+expect "the outbound half is not asked with it again" "0" "$(calls '^ufw prepend allow out from any to 1.2.3.4 comment')"
+expect "the deny too" "1" "$(calls '^ufw prepend deny in proto tcp from 5.6.7.8 to any port 22$')"
+expect "each is counted" "1|1" "$(grep -c 'moved 2 rule(s) from csf.allow' "$W/out")|$(grep -c 'moved 1 rule(s) from csf.deny' "$W/out")"
+expect "and said, with ufw's ERROR line" "1" "$(grep -cxF "firewall: 1.2.3.4 from csf.allow: moved without its comment 'office', which ufw refused (ERROR: Bad rule)" "$W/out")"
+expect "never its usage page or a traceback" "0" "$(grep -cE '^Usage:|Traceback|enables the firewall' "$W/out")"
 
 # CSF installed with only its unpacked source holding the uninstaller.
 reset
@@ -572,6 +668,30 @@ expect "while an allow needs a published port" "0" "$(calls 'ufw route allow fro
 expect "an outbound rule is not carried over" "0" "$(calls 'to 10.10.0.1')"
 expect "a ban is left to mirror_bans" "0" "$(calls 192.0.2.99)"
 expect "nor a rule with options the route rule would lose" "0" "$(grep -cE 'ufw route (allow|limit) proto tcp from any to any port 22( |$)' "$W/calls")"
+
+# A host rule's comment a route rule cannot take is changed, and said.
+upgrade '0.0.0.0:28081->8080/tcp' "deny any any 0.0.0.0/0 any 198.51.100.9 in comment=$(hex 'block in office hours')" \
+    "allow tcp 8080 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'delete')" "deny tcp 22 0.0.0.0/0 any 192.0.2.0/24 in comment=$(hex $'two\nlines')" \
+    "deny any any 0.0.0.0/0 any 203.0.113.9 in comment=$(hex 'x in on y out on z')" "deny any any 0.0.0.0/0 any 203.0.113.10 in comment=$(hex 'let them in')"
+expect "in followed by more words is quoted" "1" "$(calls '^ufw route prepend deny from 198.51.100.9 to any comment block "in" office hours$')"
+expect "and said" "1" "$(grep -cxF "firewall: ufw route prepend deny from 198.51.100.9 to any: the comment 'block in office hours' is written as 'block \"in\" office hours': ufw would read it as part of a route rule" "$W/out")"
+expect "delete is quoted" "1" "$(calls '^ufw route allow proto tcp from any to any port 8080 comment "delete"$')"
+expect "a line break is a space" "1" "$(calls '^ufw route prepend deny proto tcp from 192.0.2.0/24 to any port 22 comment two lines$')"
+expect "both interface clauses are quoted" "1" "$(calls '^ufw route prepend deny from 203.0.113.9 to any comment x "in" on y "out" on z$')"
+expect "a comment a route rule takes is kept" "1" "$(calls '^ufw route prepend deny from 203.0.113.10 to any comment let them in$')"
+expect "each carried over, with the comment written" "1" "$(grep -cxF 'firewall: carried over to published ports: ufw route prepend deny from 198.51.100.9 to any comment block "in" office hours' "$W/out")"
+
+reset
+printf '%s\n' '0.0.0.0:28081->8080/tcp' >"$W/docker-ports"
+rules "allow tcp 2011 0.0.0.0/0 any 0.0.0.0/0 in comment=$(hex 'panelalpha: engine api')" "deny any any 0.0.0.0/0 any 198.51.100.7 in comment=$(hex 'keep away')" \
+    "allow tcp 8080 0.0.0.0/0 any 192.0.2.5 in comment=$(hex 'app')"
+printf 'ufw-user-forward\nDOCKER-USER\n' >"$W/chains"
+printf '%s\n' 'comment keep|from 192\.0\.2\.5' >"$W/ufw-refuses"
+run apply >/dev/null
+expect "a route rule ufw refuses with its comment goes in without it" "1" "$(calls '^ufw route prepend deny from 198.51.100.7 to any$')"
+expect "said, with ufw's ERROR line" "1" "$(grep -cxF "firewall: carried over to published ports without its comment 'keep away', which ufw refused (ERROR: Bad rule): ufw route prepend deny from 198.51.100.7 to any" "$W/out")"
+expect "one refused either way is reported" "1" "$(grep -cxF 'firewall: could not carry over to published ports: ufw route allow proto tcp from 192.0.2.5 to any port 8080 (ERROR: Bad rule)' "$W/out")"
+expect "never with ufw's usage page or a traceback" "0" "$(grep -cE '^Usage:|Traceback|enables the firewall' "$W/out")"
 
 reset
 printf '%s\n' '0.0.0.0:28081->8080/tcp' >"$W/docker-ports"
