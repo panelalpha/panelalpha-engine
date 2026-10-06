@@ -194,9 +194,9 @@ final class DeploymentWorkflow
                 if (!empty($result[AppLauncher::RELEASE_FAILED])) {
                     // Nothing new was started: tearing down now would only stop the version still serving.
                     $deployLogger->info(self::releaseFailedLine($result));
-                } elseif (!empty($result[ZeroDowntimeRedeploy::PREVIOUS_KEPT])) {
-                    // The new version never replaced the old one: tearing down would stop what still serves.
-                    $deployLogger->info('The previous version is still serving; nothing was torn down');
+                } elseif (($serving = ZeroDowntimeRedeploy::keptServing($result)) !== null) {
+                    // A version still serves: tearing down would stop it.
+                    $deployLogger->info($serving);
                 } else {
                     try {
                         $mechanics->abortPartialDeploy();
@@ -357,9 +357,9 @@ final class DeploymentWorkflow
         if ($result['exit_code'] !== 0) {
             if (!empty($result[AppLauncher::RELEASE_FAILED])) {
                 $deployLogger?->info(self::releaseFailedLine($result));
-            } elseif (!empty($result[ZeroDowntimeRedeploy::PREVIOUS_KEPT])) {
-                // Said as a checkout redeploy says it: the failed version never replaced the running one.
-                $deployLogger?->info('The previous version is still serving; nothing was torn down');
+            } elseif (($serving = ZeroDowntimeRedeploy::keptServing($result)) !== null) {
+                // Said as a checkout redeploy says it.
+                $deployLogger?->info($serving);
             }
             $raw = $result['stderr'] ?: $result['stdout'];
             $deployLogger?->recordFailureOutput($raw);

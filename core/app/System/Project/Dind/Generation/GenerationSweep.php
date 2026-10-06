@@ -27,6 +27,9 @@ final class GenerationSweep
     /** A new version that passed its health check answers at once, or not at all. Tests shorten it. */
     public static int $newAnswerSeconds = 20;
 
+    /** How long the port traffic would go back to gets, before a second copy that serves is kept. */
+    public static int $backAnswerSeconds = 10;
+
     /**
      * @return list<string> one line per account settled
      */
@@ -145,8 +148,12 @@ final class GenerationSweep
         return $restorable ? self::RESTORE : self::NEW;
     }
 
-    /** The caller holds the deploy lock. $forward settles traffic on the new version's port instead. */
-    public static function settleNext(DindProject $project, bool $forward = false): bool
+    /**
+     * The caller holds the deploy lock. $forward settles traffic on the new version's port instead, $to on
+     * that port. A copy that serves the site while that port does not answer stays, with the port noted
+     * for the next call: the site never moves to nothing. False when it stays or could not be settled.
+     */
+    public static function settleNext(DindProject $project, bool $forward = false, ?int $to = null, ?int $wait = null): bool
     {
         $state = new GenerationState($project->username());
         $next = $state->get(GenerationState::NEXT);
@@ -157,15 +164,25 @@ final class GenerationSweep
         try {
             $rules = array_values(array_map('intval', (array) ($next['rules'] ?? [])));
             $routes = [];
-            foreach ((array) ($next['routes'] ?? []) as $from => $to) {
-                $routes[(int) $from] = (int) $to;
+            foreach ((array) ($next['routes'] ?? []) as $from => $copy) {
+                $routes[(int) $from] = (int) $copy;
             }
             $map = ZeroDowntimeRedeploy::inverse($routes);
             $routed = $next['routed'] ?? null;
-            if ($forward && $routed !== null) {
-                $map = array_map(static fn (): int => (int) $routed, $map);
+            $back = $to ?? (isset($next['back']) ? (int) $next['back'] : ($forward && $routed !== null ? (int) $routed : null));
+            if ($back !== null) {
+                $map = array_map(static fn (): int => $back, $map);
             }
             if ($rules !== [] && $map !== []) {
+                $silent = self::silentWhileTheCopyServes($project, $map, $wait ?? self::$backAnswerSeconds);
+                if ($silent !== null) {
+                    if ($back !== null && ($next['back'] ?? null) !== $back) {
+                        $state->put(GenerationState::NEXT, ['back' => $back] + $next);
+                    }
+                    Log::info("Kept the second generation of {$project->username()}: it serves the site, and port {$silent} does not answer");
+
+                    return false;
+                }
                 (new RouteSwitch($project->system(), $project->username()))->move($map, $rules);
             }
             $name = (string) ($next['project'] ?? '');
@@ -180,6 +197,28 @@ final class GenerationSweep
         $state->forget(GenerationState::NEXT);
 
         return true;
+    }
+
+    /**
+     * The port traffic would go to, when it does not answer while one of the copy's does; else null and
+     * traffic moves. A copy that answers nothing either holds nothing worth keeping.
+     *
+     * @param array<int, int> $map the copy's port => where its traffic would go
+     */
+    private static function silentWhileTheCopyServes(DindProject $project, array $map, int $wait): ?int
+    {
+        foreach (array_values(array_unique($map)) as $port) {
+            if (ZeroDowntimeRedeploy::answersWithin($project, $port, $wait) === null) {
+                continue;
+            }
+            foreach (array_keys($map) as $copy) {
+                if (ZeroDowntimeRedeploy::answersWithin($project, $copy, 0) === null) {
+                    return $port;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -239,6 +278,7 @@ final class GenerationSweep
         if (self::decide(false, $gated, $restorable, $gated || !$restorable ? $silent === null : null) === self::RESTORE) {
             $failure = $previousVersion->start();
             $done = self::settleNext($project) ? ['second generation removed'] : [];
+            $kept = ZeroDowntimeRedeploy::copyHeld($project->username());
             (new RoutingSnapshot($project))->routeBack();
             array_unshift($done, 'previous version started again');
             $why = $gated
@@ -247,7 +287,8 @@ final class GenerationSweep
 
             return [$done, "The redeploy stopped before it finished, after the new version replaced the running one: "
                 . "the {$previous} was started again on port {$served}, because {$why}"
-                . ($failure === null ? '; it answers' : "; it does not answer: {$failure}")];
+                . ($failure === null ? '; it answers' : "; it does not answer: {$failure}")
+                . ($kept ? '. The new version\'s second copy keeps serving the site until it does' : '')];
         }
 
         $new = self::name('new', $project->userModel()->getDetails()['git_commit'] ?? null, self::imageOn($project, $port));
@@ -255,7 +296,17 @@ final class GenerationSweep
             ? 'it passed its health check before the deploy stopped, and the previous one had already been replaced'
             : 'the previous one had been replaced, and its checkout or images are no longer there to start it again';
 
-        return [self::settleHeld($project, null, forward: true), "The redeploy stopped before it finished: the {$new} serves on port {$port}, because {$why}"
+        $done = self::settleHeld($project, null, forward: true);
+        if (ZeroDowntimeRedeploy::copyHeld($project->username())) {
+            return [$done, "The redeploy stopped before it finished: the {$new} does not answer on port {$port}" . ($silent === null ? '' : " ({$silent})") . ", and the previous one had been replaced "
+                . 'and cannot be started again, so the new version\'s second copy keeps serving the site until the app answers'];
+        }
+        // The site moved once it answered, which it may have begun to do while the sweep waited.
+        if ($silent !== null && ZeroDowntimeRedeploy::answersWithin($project, $port, 0) === null) {
+            $silent = null;
+        }
+
+        return [$done, "The redeploy stopped before it finished: the {$new} serves on port {$port}, because {$why}"
             . ($silent === null ? '; it answers' : "; it does not answer: {$silent}")];
     }
 

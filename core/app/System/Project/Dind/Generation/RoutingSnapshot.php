@@ -18,6 +18,9 @@ use Illuminate\Support\Facades\Log;
  */
 final class RoutingSnapshot
 {
+    /** How long a new version replacing an app in place gets to answer before the site leaves a copy that serves it. */
+    private const COPY_HANDOVER_SECONDS = 60;
+
     /** Written by the prepare step and read again by stop/start, health and routing. */
     private const DETAILS = [
         'app_port', 'app_port_scheme', 'git_commit',
@@ -111,9 +114,15 @@ final class RoutingSnapshot
         return $status === DeployLogger::STATUS_RUNNING ? null : false;
     }
 
-    /** Whether the proxy rules wait for the new version instead of following the detected port now. */
+    /**
+     * Whether the proxy rules wait for the new version instead of following the detected port now: while
+     * this process redeploys, and while a second copy holds the site, whichever deploy runs.
+     */
     public static function defers(string $username): bool
     {
+        if (ZeroDowntimeRedeploy::copyHeld($username)) {
+            return true;
+        }
         $entry = self::ownEntry($username);
 
         return $entry !== null && ($entry['applied'] ?? false) !== true;
@@ -123,13 +132,18 @@ final class RoutingSnapshot
     public function apply(): void
     {
         $state = new GenerationState($this->project->username());
+        $user = $this->project->userModel();
+        $port = $user->getAppPort();
+        // An earlier redeploy's copy holds the site: it leaves the copy only for a version that answers.
+        if ($port !== null && ZeroDowntimeRedeploy::copyHeld($this->project->username())
+            && !GenerationSweep::settleNext($this->project, to: $port, wait: self::COPY_HANDOVER_SECONDS)) {
+            return;
+        }
         $entry = $state->get(GenerationState::ROUTES);
         if ($entry === null || ($entry['applied'] ?? false) === true) {
             return;
         }
         $state->put(GenerationState::ROUTES, ['applied' => true] + $entry);
-        $user = $this->project->userModel();
-        $port = $user->getAppPort();
         if ($port === null) {
             return;
         }
@@ -151,6 +165,12 @@ final class RoutingSnapshot
         $entry = $state->get(GenerationState::ROUTES);
         if ($entry === null) {
             return null;
+        }
+        if (ZeroDowntimeRedeploy::copyHeld($this->project->username())) {
+            // Nothing routes the site away from a second copy while it is all that answers.
+            $state->forget(GenerationState::ROUTES);
+
+            return 'routes left on the second copy';
         }
         $running = $succeeded === true
             ? false
@@ -205,7 +225,8 @@ final class RoutingSnapshot
             return;
         }
         $served = $entry['details']['app_port'] ?? null;
-        if ($served !== null) {
+        // The previous version does not answer and the copy does: the site stays on the copy.
+        if ($served !== null && !ZeroDowntimeRedeploy::copyHeld($this->project->username())) {
             try {
                 // The new version's port, and a second copy's should its routes not have gone back yet.
                 $from = [(int) ($entry['left'] ?? $this->project->userModel()->getAppPort())];

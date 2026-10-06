@@ -16,6 +16,8 @@ use App\System\Services\Webserver;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
 /**
@@ -60,6 +62,7 @@ class GenerationSweepTest extends TestCase
         parent::setUp();
         $this->username = 'sweep-' . bin2hex(random_bytes(6));
         GenerationSweep::$newAnswerSeconds = 0;
+        GenerationSweep::$backAnswerSeconds = 0;
         config([
             'database.default' => 'sqlite',
             'database.connections.sqlite.database' => ':memory:',
@@ -101,6 +104,9 @@ class GenerationSweepTest extends TestCase
         Schema::dropIfExists('domains');
         Schema::dropIfExists('proxy_rules');
         GenerationSweep::$newAnswerSeconds = 20;
+        GenerationSweep::$backAnswerSeconds = 10;
+        Sleep::fake(false);
+        Carbon::setTestNow();
         parent::tearDown();
     }
 
@@ -255,6 +261,61 @@ class GenerationSweepTest extends TestCase
             $this->lastLine()
         );
         $this->assertClosedAsInterrupted();
+    }
+
+    /**
+     * engine#757, interrupted: the new version took the site through its copy, replaced the running one and
+     * does not answer, and the previous one cannot be started. The copy keeps the site, not the silent app.
+     */
+    public function test_with_nothing_of_the_previous_version_left_a_silent_new_version_does_not_take_the_site_from_its_copy(): void
+    {
+        $this->appPort = 8080;
+        $site = $this->rule(true, 32771);
+        $this->interrupted(gated: true, next: ['project' => 'project-next', 'routed' => 8080, 'routes' => [3000 => 32771], 'rules' => [$site]]);
+        $this->held = false;
+        $this->answers = [8080 => 500, 32771 => 200];
+
+        $done = GenerationSweep::settleInterrupted($this->project());
+
+        $this->assertNotContains('second generation removed', $done);
+        $this->assertContains('routes left on the second copy', $done);
+        $this->assertSame(32771, ProxyRule::find($site)->upstream_port, 'the site stays where it is served');
+        $this->assertSame([], $this->routed);
+        $this->assertNotRan('rm -f -v');
+        $this->assertSame(8080, (new GenerationState($this->username))->get(GenerationState::NEXT)['back']);
+        $this->assertSame(
+            'The redeploy stopped before it finished: the new version (commit bbbbbbb) does not answer on port 8080 (it answers HTTP 500), and the previous one '
+            . 'had been replaced and cannot be started again, so the new version\'s second copy keeps serving the site until the app answers',
+            $this->lastLine()
+        );
+
+        // Once the app answers, the next sweep moves the site to it.
+        $this->answers = [8080 => 200, 32771 => 200];
+        $this->assertContains('second generation removed', GenerationSweep::settleInterrupted($this->project()));
+        $this->assertSame(8080, ProxyRule::find($site)->upstream_port);
+        $this->assertRan('rm -f -v');
+    }
+
+    /** The previous version is started again but does not answer: the copy keeps the site until it does. */
+    public function test_a_previous_version_started_again_takes_the_site_from_the_copy_only_once_it_answers(): void
+    {
+        Carbon::setTestNow(Carbon::create(2026, 10, 6, 18));
+        Sleep::fake(syncWithCarbon: true);
+        $site = $this->rule(true, 32771);
+        $this->interrupted(gated: false, next: ['project' => 'project-next', 'routed' => 3000, 'routes' => [3000 => 32771], 'rules' => [$site]]);
+        $this->answers = [3000 => 500, 32771 => 200];
+
+        $done = GenerationSweep::settleInterrupted($this->project());
+
+        $this->assertSame(['previous version started again'], $done);
+        $this->assertRan(self::UP . " '--remove-orphans' '--no-build'");
+        $this->assertSame(32771, ProxyRule::find($site)->upstream_port);
+        $this->assertSame([], $this->routed, 'not routed to a version that does not answer');
+        $this->assertNotRan('rm -f -v');
+        $this->assertStringEndsWith(
+            'because the new version had not passed its health check; it does not answer: it answers HTTP 500. The new version\'s second copy keeps serving the site until it does',
+            $this->lastLine()
+        );
     }
 
     public function test_a_deploy_killed_after_it_finished_is_settled_as_the_success_it_was(): void

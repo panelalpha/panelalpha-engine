@@ -4,6 +4,7 @@ namespace App\System\Project\Dind;
 
 use App\System\Project\Dind\AppHealth;
 use App\System\Project\Dind\Generation\RoutingSnapshot;
+use App\System\Project\Dind\Generation\ZeroDowntimeRedeploy;
 use App\System\Project\Dind as DindProject;
 use App\Lib\Apis\Cloudflare\CloudflareException;
 use App\Lib\Deploy\DetectAppPort;
@@ -77,7 +78,11 @@ class Networking
         // version answers until the new version takes traffic.
         $served = RoutingSnapshot::servedPort($user->username);
         if (RoutingSnapshot::defers($user->username)) {
-            if ($served !== null && $served !== $primaryPort) {
+            if (ZeroDowntimeRedeploy::copyHeld($user->username)) {
+                $this->project->shell()->logger()?->info(
+                    'The site stays on the second copy an earlier redeploy left, until a version answers on its own port'
+                );
+            } elseif ($served !== null && $served !== $primaryPort) {
                 $this->project->shell()->logger()?->info(
                     "The site stays on port {$served}, where the running version answers, until the new version takes traffic"
                 );

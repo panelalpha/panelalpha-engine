@@ -62,7 +62,11 @@ final class AppLauncher
      */
     public function start(): array
     {
-        return $this->project->registryLogin()->during(fn (): array => $this->startWithLogins());
+        // A copy an earlier redeploy left still serves when a start fails: nothing is torn down under it.
+        return ZeroDowntimeRedeploy::withHeldCopy(
+            $this->project->username(),
+            $this->project->registryLogin()->during(fn (): array => $this->startWithLogins())
+        );
     }
 
     /**
@@ -122,10 +126,14 @@ final class AppLauncher
         if ($swap !== null) {
             try {
                 $process = $this->replaceBehind($swap, $forceRecreate);
-                $swap->finish($process->getExitCode() === 0);
+                $rolledBack = $swap->finish($process->getExitCode() === 0, self::failureOutput($process));
             } catch (\Throwable $e) {
                 $swap->abandon();
                 throw $e;
+            }
+            // The replaced app never answered: the previous version, or the copy, serves instead.
+            if ($rolledBack !== null) {
+                return $rolledBack;
             }
         } else {
             $command = $this->project->userAppComposeCommand(['up', '-d', '--remove-orphans']);
