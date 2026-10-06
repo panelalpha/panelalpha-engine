@@ -212,6 +212,9 @@ class ProjectRebuild
             // ProblemException is one of these, so anything already in the
             // documented shape passes through rather than being re-wrapped.
             throw $e;
+        } catch (DeployAlreadyRunningException $e) {
+            // A template rebuild takes the account's lock in here, not in openLog(): still a lock conflict.
+            throw $e;
         } catch (\Exception $e) {
             throw self::rebuildFailure($e, $logger);
         }

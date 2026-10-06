@@ -116,11 +116,15 @@ class StorageReclaim
         $dind->awaitReady(10, 2);
     }
 
+    /**
+     * Part of deleting the account. Quiet: a deploy log left cancelled -- a
+     * delete may follow a cancelled deploy -- must not stop it.
+     */
     public function wipeDataRoot(): void
     {
         $dind = $this->inner->dind();
         $dind->shell()->runProcess($dind->services()->stopArgv('docker'), [], 120);
-        $dind->shell()->exec(['sh', '-lc', $this->storage()->fullWipeScript()], [], 300);
+        $dind->shell()->execQuiet(['sh', '-lc', $this->storage()->fullWipeScript()], [], 300);
     }
 
     private function storage(): AccountStorage

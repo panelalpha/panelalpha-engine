@@ -4,6 +4,7 @@ namespace App\System;
 
 use App\Integrations\Statistics\Statistics;
 use App\Integrations\Tunnels\Cloudflare;
+use App\Lib\Deploy\DeployLog\DeployLock;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Models\Domain as DomainModel;
 use App\Models\User as ModelsUser;
@@ -286,12 +287,8 @@ class Project
 
     public function destroy(): void
     {
+        $this->assertDeletable();
         $user = $this->model;
-        if ($user->stagingUser()->exists()) {
-            throw new \Exception(
-                "Cannot delete project '{$user->username}' while staging '{$user->stagingUser->username}' exists. Delete the staging project first."
-            );
-        }
 
         foreach ($user->backups()->with('container')->get() as $record) {
             $backupId = $record->id;
@@ -374,6 +371,17 @@ class Project
         $user->deployHooks()->delete();
         DeployLogger::deleteUserLogs($username);
         $this->deleteAccountRow($user);
+    }
+
+    /** A live project goes after its staging copy, never before it. */
+    public function assertDeletable(): void
+    {
+        $user = $this->model;
+        if ($user->stagingUser()->exists()) {
+            throw new \Exception(
+                "Cannot delete project '{$user->username}' while staging '{$user->stagingUser->username}' exists. Delete the staging project first."
+            );
+        }
     }
 
     /**
@@ -459,8 +467,15 @@ class Project
             return;
         }
 
-        $this->prepareLinuxIsolation();
-        $this->recreateOuterCompose();
+        // The lock a DinD rebuild takes through its deploy log: a delete holds
+        // it, and this would otherwise recreate the account it is removing.
+        $lock = DeployLock::acquireFor($this->username());
+        try {
+            $this->prepareLinuxIsolation();
+            $this->recreateOuterCompose();
+        } finally {
+            $lock->release();
+        }
     }
 
     public function prepareLinuxIsolation(): void

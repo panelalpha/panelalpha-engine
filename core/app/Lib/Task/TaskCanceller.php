@@ -70,4 +70,14 @@ class TaskCanceller
 
         return ['cancelled' => true];
     }
+
+    /**
+     * Cancel a task only while it is still queued. Its job then exits before
+     * doing anything ({@see \App\Jobs\Concerns\AttachTask::runTask()}), so
+     * there is no process to stop. False when a worker took it first.
+     */
+    public function cancelQueued(Task $task): bool
+    {
+        return $task->cancelIfQueued();
+    }
 }

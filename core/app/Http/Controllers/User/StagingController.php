@@ -133,7 +133,7 @@ class StagingController extends Controller
                 'action' => 'staging',
             ],
         );
-        CreateStaging::dispatch($dest->username)->attachTask($task);
+        CreateStaging::dispatch($dest->username, (int) $dest->getKey())->attachTask($task);
 
         return (new UserResource($dest->loadMissing(['liveUser', 'stagingUser'])))
             ->additional(['task_id' => $task->id])

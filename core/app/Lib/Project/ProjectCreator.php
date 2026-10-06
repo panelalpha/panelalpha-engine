@@ -133,7 +133,8 @@ class ProjectCreator
                 'action' => 'deploy',
             ],
         );
-        DeployProject::dispatch($user->username, $stages, $recipe, $this->inspection?->toArray())->attachTask($task);
+        DeployProject::dispatch($user->username, $stages, $recipe, $this->inspection?->toArray(), (int) $user->getKey())
+            ->attachTask($task);
 
         return $task;
     }

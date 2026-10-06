@@ -33,8 +33,12 @@ final class AccountTeardown
         $this->tryStep($storage->pruneAllArgv(), 300, true);
 
         // Stops dockerd through the account's init, then removes its store.
+        // With the account container stopped there is no dockerd to reach,
+        // and the store goes with the home.
         try {
-            $this->project->innerDocker()->wipeDataRoot();
+            if ($this->project->isRunning()) {
+                $this->project->innerDocker()->wipeDataRoot();
+            }
         } catch (\Exception $e) {
             Log::warning(
                 "Could not wipe inner Docker data-root for {$username}: " . $e->getMessage(),

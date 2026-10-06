@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\NotFoundException;
 use App\Jobs\Concerns\AttachTask;
 use App\Lib\Deploy\DeployLog\DeployLogger;
 use App\Lib\Deploy\Platform\DeployPlan;
@@ -33,6 +34,9 @@ class DeployProject implements ShouldQueue
 
     public int $timeout = 7200;
 
+    /** The project's row; null on a job queued before it was recorded. */
+    public ?int $userId = null;
+
     /**
      * @param array<string, list<array<string, mixed>>>|null $stages
      * @param ?array<string, mixed> $inspection what the create's inspection
@@ -43,14 +47,16 @@ class DeployProject implements ShouldQueue
         public ?array $stages = null,
         public ?string $recipe = null,
         public ?array $inspection = null,
+        ?int $userId = null,
     ) {
+        $this->userId = $userId;
         $this->onQueue('default');
     }
 
     public function handle(): void
     {
         $this->runTask(function (): void {
-            $user = User::findByUsernameOrFail($this->username);
+            $user = $this->project();
 
             $plan = $this->stages !== null ? DeployPlan::fromArray($this->stages) : null;
             app(DeployPlanContext::class)->set($plan);
@@ -96,6 +102,20 @@ class DeployProject implements ShouldQueue
                 DeployLogger::stopStreaming();
             }
         });
+    }
+
+    /**
+     * By row id once the job carries one: a project deleted and created again
+     * under the same name is not the one this deploy was queued for.
+     */
+    private function project(): User
+    {
+        if ($this->userId === null) {
+            return User::findByUsernameOrFail($this->username);
+        }
+
+        return User::query()->whereKey($this->userId)->first()
+            ?? throw new NotFoundException("Project '{$this->username}' not found.", User::class);
     }
 
     public function failed(?Throwable $e): void

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Exceptions\DeployAlreadyRunningException;
 use App\Exceptions\DeployBusyException;
 use App\Exceptions\ProblemException;
+use App\Exceptions\ProjectBusyException;
 use App\Http\Requests\DeployPlanInput;
 use App\Http\Requests\RecipeChoiceInput;
 use App\Http\Requests\UserCloneRequest;
@@ -25,6 +26,7 @@ use App\Lib\Deploy\Platform\DeployPlanContext;
 use App\Lib\Deploy\Platform\RecipeChoiceContext;
 use App\Lib\Deploy\Source\GitUrl;
 use App\Lib\Project\NewProjectInput;
+use App\Lib\Project\ProjectDeleter;
 use App\Lib\Project\ProjectCreator;
 use App\Lib\Project\ProjectRebuild;
 use App\Lib\Domains\DomainPlan;
@@ -1281,6 +1283,7 @@ class UserController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'Project deleted', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 409, description: 'Project busy: a task, deploy or push is working on it', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
         ],
     )]
     /**
@@ -1292,7 +1295,10 @@ class UserController extends Controller
         $user = $this->projectOr404($username);
 
         try {
-            $user->project()->destroy();
+            (new ProjectDeleter())->delete($user);
+        } catch (ProjectBusyException $e) {
+            // A refusal, answered 409; nothing failed.
+            throw $e;
         } catch (\Exception $e) {
             Log::warning(
                 "Could not delete user '{$user->username}': " . $e->getMessage(),

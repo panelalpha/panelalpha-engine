@@ -40,6 +40,22 @@ class TaskCancellerTest extends SqliteTaskTestCase
         $this->assertNotNull($task->cancelled_at);
     }
 
+    public function test_cancel_queued_cancels_only_a_task_no_worker_has_taken(): void
+    {
+        $queued = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $running = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');
+        $running->markRunning('h-1');
+        $killer = Mockery::mock(ProcessTreeKiller::class);
+        $killer->shouldNotReceive('kill');
+        $canceller = new TaskCanceller($killer);
+
+        $this->assertTrue($canceller->cancelQueued($queued));
+        $this->assertFalse($canceller->cancelQueued($running));
+
+        $this->assertSame(Task::STATUS_CANCELLED, $queued->refresh()->status);
+        $this->assertSame(Task::STATUS_RUNNING, $running->refresh()->status);
+    }
+
     public function test_cancel_does_not_kill_when_pid_is_no_longer_the_same_process(): void
     {
         $task = Task::start(jobType: 'App\\Jobs\\RebuildJob', queue: 'default');

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\NotFoundException;
 use App\Jobs\Concerns\AttachTask;
 use App\Models\User;
 use App\System;
@@ -24,15 +25,20 @@ class CreateStaging implements ShouldQueue
 
     public int $timeout = 7200;
 
-    public function __construct(public string $destUsername)
+    /** The destination's row; null on a job queued before it was recorded. */
+    public ?int $destId = null;
+
+    public function __construct(public string $destUsername, ?int $destId = null)
     {
+        $this->destId = $destId;
         $this->onQueue('default');
     }
 
     public function handle(): void
     {
         $this->runTask(function (): void {
-            $dest = User::findByUsernameOrFail($this->destUsername);
+            $dest = $this->destination()
+                ?? throw new NotFoundException("Project '{$this->destUsername}' not found.", User::class);
             $source = $dest->liveUser;
             if ($source === null) {
                 throw new \RuntimeException("Staging '{$this->destUsername}' has no live parent.");
@@ -52,7 +58,7 @@ class CreateStaging implements ShouldQueue
             $this->markFailed($e);
         }
 
-        $dest = User::findByUsername($this->destUsername);
+        $dest = $this->destination();
         if ($dest === null) {
             return;
         }
@@ -79,5 +85,16 @@ class CreateStaging implements ShouldQueue
                 'exception' => $cleanup,
             ]);
         }
+    }
+
+    /**
+     * By row id once the job carries one: a project that took the name of a
+     * deleted destination is not this copy's to copy into or destroy.
+     */
+    private function destination(): ?User
+    {
+        return $this->destId === null
+            ? User::findByUsername($this->destUsername)
+            : User::query()->whereKey($this->destId)->first();
     }
 }

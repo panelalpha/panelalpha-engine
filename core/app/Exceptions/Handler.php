@@ -34,6 +34,8 @@ class Handler extends ExceptionHandler
      * @var array<int, class-string<\Throwable>>
      */
     protected $dontReport = [
+        // A delete refused while a job works on the project: answered 409, nothing failed.
+        ProjectBusyException::class,
         // A 409 the client is told how to act on, not a fault.
         DeployBusyException::class,
     ];
@@ -74,6 +76,11 @@ class Handler extends ExceptionHandler
         // DeployLogger raises it from HTTP, queue and CLI alike, and only the
         // HTTP boundary knows it should read as 409.
         $this->renderable(function (DeployAlreadyRunningException $e) {
+            return new JsonResponse(['message' => $e->getMessage()], 409);
+        });
+
+        // The same for a delete refused while something works on the project.
+        $this->renderable(function (ProjectBusyException $e) {
             return new JsonResponse(['message' => $e->getMessage()], 409);
         });
 

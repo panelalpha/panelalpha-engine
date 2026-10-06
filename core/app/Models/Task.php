@@ -208,20 +208,51 @@ class Task extends Model
         return in_array($this->job_type, self::DEPLOY_JOB_TYPES, true);
     }
 
-    public function markRunning(?string $jobId = null): bool
+    /**
+     * @param array<string, mixed> $details merged into `details` by the same write
+     */
+    public function markRunning(?string $jobId = null, array $details = []): bool
+    {
+        $values = ['status' => self::STATUS_RUNNING, 'started_at' => now()];
+        if (is_string($jobId) && $jobId !== '') {
+            $values['job_id'] = $jobId;
+        }
+        if ($details !== []) {
+            // Written only while the row is queued, and nothing else writes a queued task's details.
+            $values['details'] = $this->castAttributeAsJson('details', array_merge($this->details ?? [], $details));
+        }
+
+        return $this->leaveQueued($values);
+    }
+
+    /**
+     * Cancel a task no worker has taken yet. False once one has: a delete
+     * that cancels queued work must then see the task as running instead.
+     */
+    public function cancelIfQueued(): bool
+    {
+        return $this->leaveQueued(['status' => self::STATUS_CANCELLED, 'cancelled_at' => now()]);
+    }
+
+    /**
+     * Decided by the row, not by this copy of it: a worker taking the task and
+     * a delete cancelling it may each have read it as queued.
+     *
+     * @param array<string, mixed> $values
+     */
+    private function leaveQueued(array $values): bool
     {
         if ($this->status !== self::STATUS_QUEUED) {
             return false;
         }
 
-        $this->status = self::STATUS_RUNNING;
-        $this->started_at = now();
-        if (is_string($jobId) && $jobId !== '') {
-            $this->job_id = $jobId;
-        }
-        $this->save();
+        $moved = static::query()
+            ->whereKey($this->getKey())
+            ->where('status', self::STATUS_QUEUED)
+            ->update($values) === 1;
+        $this->refresh();
 
-        return true;
+        return $moved;
     }
 
     public function markCompleted(): bool
