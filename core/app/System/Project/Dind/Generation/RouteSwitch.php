@@ -124,6 +124,48 @@ final class RouteSwitch
     }
 
     /**
+     * The operator's own rules to $port, enabled or not, as they are before a redeploy.
+     *
+     * @return list<array{id: int, port: int}>
+     */
+    public function handRulesTo(int $port): array
+    {
+        return array_map(static fn (ProxyRule $rule): array => ['id' => (int) $rule->id, 'port' => (int) $rule->upstream_port], ProxyRule::query()
+            ->where('is_generated', false)
+            ->where('upstream_host', $this->username)
+            ->where('upstream_port', $port)
+            ->orderBy('id')
+            ->get()
+            ->all());
+    }
+
+    /**
+     * Each recorded rule back on its port, while it still points at this app
+     * on one of $from: a rule its owner pointed elsewhere, or deleted, stays
+     * as they left it. The ids moved.
+     *
+     * @param list<array{id: int, port: int}> $recorded
+     * @param list<int> $from the ports a redeploy put them on
+     * @return list<int>
+     */
+    public function putBack(array $recorded, array $from): array
+    {
+        $byPort = [];
+        foreach ($recorded as $rule) {
+            $byPort[$rule['port']][] = $rule['id'];
+        }
+        $moved = [];
+        foreach ($byPort as $port => $ids) {
+            $away = array_values(array_unique(array_filter($from, static fn (int $p): bool => $p > 0 && $p !== $port)));
+            if ($away !== []) {
+                $moved = [...$moved, ...$this->move(array_fill_keys($away, $port), $ids)];
+            }
+        }
+
+        return $moved;
+    }
+
+    /**
      * A rule named after a domain lives in its vhost; any other is written by
      * the full rebuild, which also keeps the firewall open for its port.
      *

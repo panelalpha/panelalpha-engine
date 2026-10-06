@@ -41,9 +41,12 @@ final class RoutingSnapshot
             return;
         }
         $details = $this->project->userModel()->getDetails();
+        $served = $details['app_port'] ?? null;
         $state->put(GenerationState::ROUTES, [
             'details' => self::pick($details),
             'containers' => $read['running'],
+            // Whichever way the redeploy moves them, a restore puts these back.
+            'hand' => $served === null ? [] : (new RouteSwitch($this->project->system(), $this->project->username()))->handRulesTo((int) $served),
             'applied' => false,
             'gated' => false,
             'deploy' => $this->project->shell()->logger()?->getDeployId(),
@@ -132,10 +135,7 @@ final class RoutingSnapshot
         }
         $served = $entry['details']['app_port'] ?? null;
         if ($served !== null) {
-            $followed = (new RouteSwitch($this->project->system(), $this->project->username()))->follow((int) $served, $port);
-            if ($followed !== []) {
-                $state->put(GenerationState::ROUTES, ['applied' => true, 'followed' => $followed] + $entry);
-            }
+            (new RouteSwitch($this->project->system(), $this->project->username()))->follow((int) $served, $port);
         }
         $this->project->networking()->applyRoutes($user, $port);
     }
@@ -196,7 +196,7 @@ final class RoutingSnapshot
         return $port === null ? null : (int) $port;
     }
 
-    /** The previous version is back: the site, and the operator's rules that followed the new one, on its port. */
+    /** The previous version is back: the site, and the operator's rules the redeploy moved, on its port. */
     public function routeBack(): void
     {
         $state = new GenerationState($this->project->username());
@@ -205,19 +205,37 @@ final class RoutingSnapshot
             return;
         }
         $served = $entry['details']['app_port'] ?? null;
-        $left = $entry['left'] ?? null;
-        if (($entry['applied'] ?? false) === true && $served !== null) {
+        if ($served !== null) {
             try {
-                $followed = array_values(array_map('intval', (array) ($entry['followed'] ?? [])));
-                if ($followed !== [] && $left !== null && (int) $left !== (int) $served) {
-                    (new RouteSwitch($this->project->system(), $this->project->username()))->move([(int) $left => (int) $served], $followed);
+                // The new version's port, and a second copy's should its routes not have gone back yet.
+                $from = [(int) ($entry['left'] ?? $this->project->userModel()->getAppPort())];
+                foreach ((array) ($state->get(GenerationState::NEXT)['routes'] ?? []) as $copy) {
+                    $from[] = (int) $copy;
                 }
+                $this->putHandRulesBack($entry, $from);
                 $this->project->networking()->applyRoutes($this->project->userModel(), (int) $served);
             } catch (\Throwable $e) {
                 Log::warning("Could not route {$this->project->username()} back to its previous version: " . $e->getMessage());
             }
         }
         $state->forget(GenerationState::ROUTES);
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     * @param list<int> $from
+     */
+    private function putHandRulesBack(array $entry, array $from): void
+    {
+        $recorded = [];
+        foreach ((array) ($entry['hand'] ?? []) as $rule) {
+            if (is_array($rule) && isset($rule['id'], $rule['port'])) {
+                $recorded[] = ['id' => (int) $rule['id'], 'port' => (int) $rule['port']];
+            }
+        }
+        if ($recorded !== []) {
+            (new RouteSwitch($this->project->system(), $this->project->username()))->putBack($recorded, $from);
+        }
     }
 
     /** @return ?array<string, mixed> */

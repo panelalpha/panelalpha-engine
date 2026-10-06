@@ -170,23 +170,54 @@ class GenerationSweepTest extends TestCase
         $this->assertClosedAsInterrupted();
     }
 
+    /**
+     * A port change 3000 -> 8080 killed after traffic was back on 8080: the
+     * enabled rules got there through the second copy, the disabled one by
+     * following the new version. All of them go back with the previous one.
+     */
     public function test_a_new_version_that_stopped_answering_is_replaced_by_the_previous_one(): void
     {
         $this->appPort = 8080;
-        $hand = $this->rule(false, 8080);
-        $this->interrupted(gated: true, applied: true, followed: [$hand]);
+        $http = $this->rule(false, 8080);
+        $tcp = $this->rule(false, 8080, 'tcp', 25691);
+        $off = $this->rule(false, 8080, 'http', 18693, enabled: false);
+        $edited = $this->rule(false, 9001, 'http', 18694);
+        $this->interrupted(
+            gated: true,
+            applied: true,
+            hand: [['id' => $http, 'port' => 3000], ['id' => $tcp, 'port' => 3000], ['id' => $off, 'port' => 3000], ['id' => $edited, 'port' => 3000]],
+            followed: [$off],
+        );
         $this->answers = [8080 => 500, 3000 => 200];
 
         $done = GenerationSweep::settleInterrupted($this->project());
 
         $this->assertSame('previous version started again', $done[0]);
         $this->assertRan(self::UP . " '--remove-orphans' '--no-build'");
-        $this->assertSame(3000, ProxyRule::find($hand)->upstream_port, 'back with the previous version');
+        $this->assertSame(3000, ProxyRule::find($http)->upstream_port, 'back with the previous version');
+        $this->assertSame(3000, ProxyRule::find($tcp)->upstream_port);
+        $this->assertSame(3000, ProxyRule::find($off)->upstream_port);
+        $this->assertFalse(ProxyRule::find($off)->enabled);
+        $this->assertSame(9001, ProxyRule::find($edited)->upstream_port, 'its owner pointed it elsewhere meanwhile');
         $this->assertSame([3000], $this->routed);
         $this->assertStringContainsString(
             'because the new version passed its health check but no longer answers (it answers HTTP 500); it answers',
             $this->lastLine()
         );
+    }
+
+    /** Killed after the second copy's routes went to 8080 but before the new version was noted as taking traffic. */
+    public function test_a_restore_moves_everything_back_even_before_the_new_version_was_noted_as_serving(): void
+    {
+        $this->appPort = 8080;
+        $http = $this->rule(false, 8080);
+        $this->interrupted(gated: true, applied: false, hand: [['id' => $http, 'port' => 3000]]);
+        $this->answers = [8080 => 500, 3000 => 200];
+
+        GenerationSweep::settleInterrupted($this->project());
+
+        $this->assertSame(3000, ProxyRule::find($http)->upstream_port);
+        $this->assertSame([3000], $this->routed, 'the site\'s own rules too');
     }
 
     public function test_with_nothing_of_the_previous_version_left_the_new_one_stays_and_the_log_says_it_does_not_answer(): void
@@ -220,9 +251,10 @@ class GenerationSweepTest extends TestCase
 
     /**
      * @param ?array<string, mixed> $next
-     * @param list<int> $followed
+     * @param list<array{id: int, port: int}> $hand
+     * @param list<int> $followed what an earlier engine noted instead
      */
-    private function interrupted(bool $gated, ?array $next = null, bool $applied = false, array $followed = [], bool $finished = false): void
+    private function interrupted(bool $gated, ?array $next = null, bool $applied = false, array $hand = [], array $followed = [], bool $finished = false): void
     {
         $logger = DeployLogger::start($this->username);
         $logger->stage(DeployLogger::STAGE_RUNNING);
@@ -242,7 +274,7 @@ class GenerationSweepTest extends TestCase
             'gated' => $gated,
             'deploy' => $this->deployId,
             'owner' => $gone,
-        ] + ($followed === [] ? [] : ['followed' => $followed]));
+        ] + ($hand === [] ? [] : ['hand' => $hand]) + ($followed === [] ? [] : ['followed' => $followed]));
         $state->put(GenerationState::IMAGES, ['containers' => [['id' => 'old1', 'image' => self::OLD_IMAGE, 'ref' => 'project-app']]]);
         $state->put(GenerationState::CHECKOUT, ['path' => '/home/u/.project-prev', 'containers' => ['old1'], 'binds' => false, 'owner' => $gone]);
         if ($next !== null) {
@@ -250,11 +282,11 @@ class GenerationSweepTest extends TestCase
         }
     }
 
-    private function rule(bool $generated, int $port): int
+    private function rule(bool $generated, int $port, string $transport = 'http', ?int $listen = null, bool $enabled = true): int
     {
         return (int) ProxyRule::query()->create([
-            'owner_scope' => 'user', 'username' => $this->username, 'enabled' => true, 'transport' => 'http',
-            'listen_port' => $generated ? 443 : 18691, 'upstream_host' => $this->username,
+            'owner_scope' => 'user', 'username' => $this->username, 'enabled' => $enabled, 'transport' => $transport,
+            'listen_port' => $listen ?? ($generated ? 443 : 18691), 'upstream_host' => $this->username,
             'upstream_port' => $port, 'is_generated' => $generated,
         ])->id;
     }
