@@ -1100,6 +1100,48 @@ remove_renamed_containers() {
     done
 }
 
+# A container whose start failed on its network (a host port held elsewhere)
+# stays Created, and Docker later "starts" it with no network at all: compose
+# says Started and exits 0. Remove those so `up` creates them afresh.
+remove_unstarted_containers() {
+    local id
+    for id in $(docker ps -aq --filter "label=com.docker.compose.project=shared-hosting" 2>/dev/null || true); do
+        if docker inspect -f '{{.State.Status}} {{len .NetworkSettings.Networks}}' "$id" 2>/dev/null |
+            grep -qE '^created |^running 0$'; then
+            echo_info "Removing $(docker inspect -f '{{.Name}}' "$id" 2>/dev/null): its last start failed, so it would run without a network"
+            docker rm -f "$id" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
+# Every enabled service must run attached to a network; `up -d` exiting 0 does
+# not say so (see above). Waits a minute for a restarting one.
+check_engine_stack() {
+    local compose=/opt/panelalpha/shared-hosting/docker-compose.yml
+    local waited=0 services svc id state down
+    services=$(docker compose -f "$compose" config --services)
+    while :; do
+        down=''
+        for svc in $services; do
+            id=$(docker ps -aq --filter "label=com.docker.compose.project=shared-hosting" \
+                --filter "label=com.docker.compose.service=${svc}" \
+                --filter "label=com.docker.compose.oneoff=False" 2>/dev/null | head -n1)
+            state=$(docker inspect -f '{{.State.Status}} {{len .NetworkSettings.Networks}}' "$id" 2>/dev/null || true)
+            case "$state" in
+            '') down="${down} ${svc}(missing)" ;;
+            'running 0') down="${down} ${svc}(no network)" ;;
+            running\ *) ;;
+            *) down="${down} ${svc}(${state% *})" ;;
+            esac
+        done
+        [ -z "$down" ] && return 0
+        [ "$waited" -ge 60 ] && break
+        sleep 5
+        waited=$((waited + 5))
+    done
+    echo_error "These engine services are not running:${down}"
+}
+
 install_panelalpha_engine() {
 
     PUBLIC_HOST=$(ip route get 8.8.8.8 | sed -n '/src/{s/.*src *\([^ ]*\).*/\1/p;q}')
@@ -1242,8 +1284,13 @@ EOF
     docker network inspect pash-tenants >/dev/null 2>&1 ||
         echo_error "The accounts' network pash-tenants could not be created; the tenant-network-firewall messages above say why"
 
-    # run docker stack
-    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml up -d
+    # run docker stack. --remove-orphans drops containers of services this
+    # compose file does not define, which may hold a port one of its services
+    # needs: going to a release without cache-registry-writer, that container
+    # still holds 127.0.0.1:5000 against cache-registry.
+    remove_unstarted_containers
+    docker compose -f /opt/panelalpha/shared-hosting/docker-compose.yml up -d --remove-orphans
+    check_engine_stack
 
     # run database migrations
     wait_for_database
@@ -2200,6 +2247,10 @@ if [ -n "$DEPLOY_REPO" ]; then
     echo_info "Deploying ${DEPLOY_REPO_LABEL}"
     deploy_repository
 fi
+
+# Later steps restart services (sites-http, the certificate's `up -d`); report
+# success only for a stack that is still up.
+check_engine_stack
 
 update_progress 100 "Finishing installation"
 finish_installation

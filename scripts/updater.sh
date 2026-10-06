@@ -57,17 +57,21 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-tmp="$(mktemp)"
-# set -e leaves on a failed update; the trap removes the installer either way
+dir="$(mktemp -d)"
+# set -e leaves on a failed update; the trap removes the downloads either way
 # and keeps the exit code.
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -rf "$dir"' EXIT
 echo "[INFO] Redirecting Engine update to ${GET_BASE}/engine (GitHub)..."
-if ! curl -fsSL --max-time 60 -o "$tmp" "${GET_BASE}/engine"; then
+if ! curl -fsSL --max-time 60 -o "$dir/engine" "${GET_BASE}/engine"; then
     echo "[ERROR] Failed to fetch ${GET_BASE}/engine" >&2
     exit 1
 fi
+# The bootstrap runs a get.sh found beside it. Otherwise it downloads get.sh to
+# a temp file and execs it, which skips its own cleanup and leaves the file.
+# A private directory also means nobody else's get.sh can be the one beside it.
+curl -fsSL --max-time 60 -o "$dir/get.sh" "${GET_BASE}/get.sh" || rm -f "$dir/get.sh"
 
 # Always non-interactive here: API / at(1) have no TTY. get-engine sets ENTRY=engine;
 # with shared-hosting present the wrapper chooses update.
 # Not exec: the trap must outlive the installer to remove it.
-sh "$tmp" --no-tui "${forward[@]}"
+sh "$dir/engine" --no-tui "${forward[@]}"

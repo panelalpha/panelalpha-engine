@@ -1,8 +1,8 @@
 #!/bin/bash
 # Exercises deploy-from-source.sh against a local "host": ssh and rsync are
 # shims that drop the host name, so the upload and the bootstrap call run here.
-# Checks that bootstrap arguments survive the remote shell word for word, and
-# that the upload keeps the API suite's host config.
+# Checks that bootstrap arguments survive the remote shell word for word, that
+# the upload keeps the API suite's host config, and what it writes to `version`.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,6 +31,7 @@ printf '#!/bin/bash\nprintf "%%s\\n" "$@" >"%s/argv"\n' "$WORK_DIR" >"$WORK_DIR/
 echo 'EXAMPLE=new' >"$WORK_DIR/src/tests/api/env/.env.example"
 echo 'API_TOKEN=host-only' >"$WORK_DIR/remote/tests/api/env/.env"
 echo 'APP_KEY=before-last-configure' >"$WORK_DIR/remote/core/.env.pae-backup"
+echo 'stale0000' >"$WORK_DIR/remote/version"
 
 failures=0
 expect() { # expect <label> <expected> <actual>
@@ -58,6 +59,20 @@ rm -f "$WORK_DIR/argv"
 PATH="$WORK_DIR/bin:$PATH" bash "$WORK_DIR/src/scripts/tools/deploy-from-source.sh" fakehost \
     --remote-dir "$WORK_DIR/remote" >/dev/null 2>&1
 expect "no bootstrap arguments pass none" "" "$(cat "$WORK_DIR/argv" 2>/dev/null)"
+
+# `version` names the uploaded commit, and only a commit.
+expect "a tree outside git leaves no version behind" "no file" "$(cat "$WORK_DIR/remote/version" 2>/dev/null || echo 'no file')"
+git -C "$WORK_DIR/src" init -q
+git -C "$WORK_DIR/src" add -A
+git -C "$WORK_DIR/src" -c user.name=t -c user.email=t@example.com commit -qm one
+PATH="$WORK_DIR/bin:$PATH" bash "$WORK_DIR/src/scripts/tools/deploy-from-source.sh" fakehost \
+    --remote-dir "$WORK_DIR/remote" >/dev/null 2>&1
+expect "a clean tree writes its commit to version" \
+    "$(git -C "$WORK_DIR/src" rev-parse HEAD)" "$(cat "$WORK_DIR/remote/version" 2>/dev/null)"
+echo 'local edit' >"$WORK_DIR/src/untracked.txt"
+PATH="$WORK_DIR/bin:$PATH" bash "$WORK_DIR/src/scripts/tools/deploy-from-source.sh" fakehost \
+    --remote-dir "$WORK_DIR/remote" >/dev/null 2>&1
+expect "a tree with changes removes version" "no file" "$(cat "$WORK_DIR/remote/version" 2>/dev/null || echo 'no file')"
 
 [ "$failures" -eq 0 ] && echo "All passed." || echo "${failures} failed."
 exit "$failures"

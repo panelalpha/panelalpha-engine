@@ -85,6 +85,17 @@ if [ "$DRY_RUN" = 1 ]; then
     exit 0
 fi
 
+# `version` is excluded above, so an earlier install's commit would outlive the
+# upload and updates would compare against it. Name this tree's commit, or
+# none when the tree has changes no commit holds.
+if [ -z "$(git -C "$ENGINE_DIR" status --porcelain 2>/dev/null)" ] &&
+    COMMIT=$(git -C "$ENGINE_DIR" rev-parse --verify HEAD 2>/dev/null); then
+    ssh "$TARGET" "printf '%s\n' $COMMIT >$(printf '%q' "${REMOTE_DIR}/version")"
+else
+    echo ">>> The tree has uncommitted changes or no git history; removing ${REMOTE_DIR}/version"
+    ssh "$TARGET" "rm -f $(printf '%q' "${REMOTE_DIR}/version")"
+fi
+
 echo ">>> Bootstrapping on ${TARGET}"
 # ssh joins its arguments into one string for the remote shell, so quote each
 # bootstrap argument: `--services "core mail"` must arrive as two words, not three.
