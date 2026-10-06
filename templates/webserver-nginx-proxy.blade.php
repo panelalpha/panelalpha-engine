@@ -61,9 +61,14 @@ http {
 
     # The 4k page-size default turns an upstream's large headers (a Next.js or
     # SvelteKit Link: preload list, many cookies) into a 502. Bodies still stream.
-    proxy_buffer_size 32k;
+    # The whole header block must fit, so 128k lets a 64 KB header through. A
+    # request holds it until it ends, so an SSE stream keeps one while it runs
+    # and a WebSocket keeps two (one per direction) while it is open.
+    proxy_buffer_size 128k;
     proxy_buffers 8 32k;
-    proxy_busy_buffers_size 64k;
+    proxy_busy_buffers_size 128k;
+    # gRPC response metadata has its own buffer, page-sized by default, held per call.
+    grpc_buffer_size 128k;
 
     include /opt/panelalpha/shared-hosting/webserver-config/nginx-proxy/cloudflare-realip[.]conf;
     include /etc/nginx/conf.d/*.conf;
