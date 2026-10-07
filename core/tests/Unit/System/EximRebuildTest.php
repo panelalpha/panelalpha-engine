@@ -109,6 +109,25 @@ class EximRebuildTest extends TestCase
         $this->assertStringContainsString('REMOTE_SMTP_SMARTHOST_PROTOCOL = smtps', $transport);
     }
 
+    /** Exim splits dc_smarthost on single colons: measured, a plain IPv6 address was routed to host `2001`. */
+    public function test_an_ipv6_smarthost_is_bracketed_with_its_colons_doubled(): void
+    {
+        $this->assertSame('[2001::db8::::25]::587', Exim::smarthost('2001:db8::25', '587'));
+        $this->assertSame('[::::1]::2525', Exim::smarthost('::1', '2525'));
+        $this->assertSame('192.0.2.10::587', Exim::smarthost('192.0.2.10', '587'));
+        $this->assertSame('smtp.example.net::465', Exim::smarthost('smtp.example.net', '465'));
+
+        $system = $this->recordingSystem();
+        $this->eximWithConfig($system, [
+            'smarthost_provider' => 'amazon_ses',
+            'amazon_ses_smtp_endpoint' => '2001:db8::25',
+            'amazon_ses_starttls_port' => '587',
+        ])->rebuildEximConfig();
+
+        $updateConf = file_get_contents($this->tmpRoot . '/config/exim/update-exim4.conf.conf');
+        $this->assertStringContainsString("dc_smarthost='[2001::db8::::25]::587'", $updateConf);
+    }
+
     public function test_rebuild_empty_provider_uses_internet_type(): void
     {
         $system = $this->recordingSystem();

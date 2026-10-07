@@ -62,11 +62,11 @@ class Exim
                 break;
             case 'amazon_ses':
                 $type = 'smarthost';
-                $smarthost = $config['amazon_ses_smtp_endpoint'] . '::' . $config['amazon_ses_starttls_port'];
+                $smarthost = self::smarthost($config['amazon_ses_smtp_endpoint'], $config['amazon_ses_starttls_port']);
                 break;
             case 'smtp':
                 $type = 'smarthost';
-                $smarthost = $config['smtp_host'] . '::' . $config['smtp_port'];
+                $smarthost = self::smarthost($config['smtp_host'], $config['smtp_port']);
                 break;
         }
 
@@ -134,6 +134,20 @@ class Exim
         $this->system->filesystem()->filePutContents($transportPath, $transport);
 
         $this->applyConfig();
+    }
+
+    /**
+     * `dc_smarthost` for one host: `<host>::<port>`. Exim reads it as a
+     * colon-separated list, so an IPv6 address goes in brackets with its
+     * colons doubled; written plain, `2001:db8::25` became host `2001`.
+     */
+    public static function smarthost(string $host, string $port): string
+    {
+        if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
+            $host = '[' . str_replace(':', '::', $host) . ']';
+        }
+
+        return $host . '::' . $port;
     }
 
     /**

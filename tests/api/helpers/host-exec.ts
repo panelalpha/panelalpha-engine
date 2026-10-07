@@ -207,3 +207,19 @@ export async function stageFileForArtisan(
   const onHost = await hostExec.run('sh', ['-c', `printf '%s' ${quoted} > ${path}`]);
   return onHost.exitCode === 0 ? path : null;
 }
+
+/** Removes a file {@link stageFileForArtisan} wrote, wherever it went. */
+export async function unstageFileForArtisan(hostExec: HostExec, path: string): Promise<void> {
+  await hostExec.run('docker', [
+    'compose',
+    '-f',
+    ENGINE_COMPOSE_FILE,
+    'exec',
+    '-T',
+    'core',
+    'rm',
+    '-f',
+    path,
+  ]);
+  await hostExec.run('rm', ['-f', path]);
+}

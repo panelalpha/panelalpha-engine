@@ -1169,6 +1169,7 @@ class UserController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'Updated project', content: new OA\JsonContent(ref: '#/components/schemas/User')),
             new OA\Response(response: 404, description: 'Project not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error; domain_taken when the domain is already on this engine', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**

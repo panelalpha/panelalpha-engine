@@ -21,7 +21,13 @@ test.describe('Exim configuration', () => {
   });
 
   test.afterEach(async ({ api }) => {
-    await api.updateEximConfigRaw(original).catch(() => undefined);
+    // A refused restore would leave this test's configuration for every test after it.
+    const restored = await api.updateEximConfigRaw(original);
+    expectOneOf(
+      restored.status,
+      APPLIED,
+      `restoring the Exim config: ${JSON.stringify(restored.body)}`
+    );
   });
 
   test('the configuration is readable and matches its schema', async ({ api }) => {
@@ -118,15 +124,15 @@ test.describe('Exim configuration', () => {
   });
 
   /**
-   * The SMTP host ends up in Exim's configuration file. Shell metacharacters in
-   * it must never reach a shell — the endpoint may refuse them or store them
-   * escaped, but the engine must stay responsive either way.
+   * The SMTP host becomes Exim's smarthost in its configuration file. Anything
+   * that is not a hostname or an IP address is refused before the configuration
+   * is saved or applied.
    */
   const shellPayloads = ['; rm -rf /', '| cat /etc/passwd', '$(whoami)', '`whoami`', '\n/bin/sh'];
 
   for (const payload of shellPayloads) {
     test(
-      `a smtp_host containing ${JSON.stringify(payload)} is contained`,
+      `a smtp_host containing ${JSON.stringify(payload)} is refused`,
       {
         tag: ['@security'],
       },
@@ -138,10 +144,9 @@ test.describe('Exim configuration', () => {
           smtp_port: '587',
         });
 
-        expectOneOf(response.status, [200, 204, 400, 422, 500]);
-
-        // Whatever the endpoint decided, the engine still has to answer.
-        expect((await api.getEximConfig()).data).toBeTruthy();
+        expect(response.status, JSON.stringify(response.body)).toBe(422);
+        expect((response.body as { errors?: object }).errors).toHaveProperty('smtp_host');
+        expect((await api.getEximConfig()).data, 'nothing was saved').toEqual(original);
       }
     );
   }
@@ -187,8 +192,9 @@ test.describe('Exim test email', () => {
   ] as const;
 
   for (const [label, email] of oversizedRecipients) {
-    test(`${label} is handled`, async ({ api }) => {
-      expectOneOf((await api.sendEximTestEmailRaw({ email })).status, [...HANDLED, 413]);
+    test(`${label} is refused`, async ({ api }) => {
+      const response = await api.sendEximTestEmailRaw({ email });
+      expect(response.status, JSON.stringify(response.body)).toBe(422);
     });
   }
 

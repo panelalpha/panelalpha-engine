@@ -20,6 +20,9 @@ export const Timeouts = {
   /** Git clone + image build + health probe for a live DinD deploy. */
   deploy: 600_000,
 
+  /** A project delete refused while a job works on it: cancel that job and try again (2 minutes). */
+  projectDelete: 120_000,
+
   /** Poll budget for one supported-app deploy. */
   supportedAppDeploy: 1_800_000,
 

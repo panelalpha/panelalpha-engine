@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Http\Requests\Concerns\ReportsProblems;
 use App\Rules\AccountMemoryLimit;
+use App\Rules\FreeMainDomain;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UserUpdateRequest extends FormRequest
@@ -28,7 +29,11 @@ class UserUpdateRequest extends FormRequest
         return [
             // Same hostname grammar as UserStoreRequest: the domain becomes a vhost
             // filename, a certificate path and a directory under the account.
-            'domain' => 'string|regex:/^(?!:\/\/)(?=.{1,255}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i',
+            'domain' => [
+                'string',
+                'regex:/^(?!:\/\/)(?=.{1,255}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i',
+                new FreeMainDomain((string) $this->route('username')),
+            ],
             'email' => 'nullable|email',
             // -1 is the documented "unlimited" sentinel for disk space only;
             // the other limits have no negative meaning, and a negative one

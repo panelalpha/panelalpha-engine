@@ -1,7 +1,7 @@
 import { expect, test } from '@/fixtures/test-options';
 import { uniqueId } from '@/helpers/random';
 import { skipUnless } from '@/helpers/test-helpers';
-import { stageFileForArtisan } from '@/helpers/host-exec';
+import { stageFileForArtisan, unstageFileForArtisan } from '@/helpers/host-exec';
 import { Timeouts } from '@/config/timeouts';
 import { healthFromRaw } from '@/helpers/app-health';
 
@@ -121,18 +121,22 @@ test.describe('pae-artisan command parity', () => {
       uploadContents
     );
     skipUnless(staged, 'Could not stage a file where artisan can read it.');
-    const uploaded = await hostExec!.pae([
-      'project:file:upload',
-      user.username,
-      staged,
-      `--path=${destDir}`,
-    ]);
-    expect(uploaded.exitCode).toBe(0);
-    const readBack = await api.getFileContent(
-      user.username,
-      `${destDir}/${staged.split('/').pop() ?? filename}`
-    );
-    expect(readBack).toContain(uploadContents);
+    try {
+      const uploaded = await hostExec!.pae([
+        'project:file:upload',
+        user.username,
+        staged,
+        `--path=${destDir}`,
+      ]);
+      expect(uploaded.exitCode).toBe(0);
+      const readBack = await api.getFileContent(
+        user.username,
+        `${destDir}/${staged.split('/').pop() ?? filename}`
+      );
+      expect(readBack).toContain(uploadContents);
+    } finally {
+      await unstageFileForArtisan(hostExec!, staged);
+    }
   });
 
   test('project:deploy:log is readable for a DinD user', async ({ hostExec, userFactory }) => {

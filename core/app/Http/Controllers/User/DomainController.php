@@ -354,6 +354,7 @@ class DomainController extends Controller
         responses: [
             new OA\Response(response: 200, description: 'Domain updated', content: new OA\JsonContent(ref: '#/components/schemas/Domain')),
             new OA\Response(response: 404, description: 'Not found', content: new OA\JsonContent(ref: '#/components/schemas/ErrorResponse')),
+            new OA\Response(response: 422, description: 'Validation error, or an alias already on this engine', content: new OA\JsonContent(ref: '#/components/schemas/ValidationErrorResponse')),
         ],
     )]
     /**
@@ -417,7 +418,8 @@ class DomainController extends Controller
                         'aliases' => 'Invalid alias domain name.'
                     ]);
                 }
-                if ($domain->findOtherDomainByNameOrAlias($alias)) {
+                // What addAlias() refuses, tunnel hostnames included; it would throw a bare 500.
+                if (!$domain->isAliasAvailable($alias)) {
                     throw ValidationException::withMessages([
                         'aliases' => "Domain alias {$alias} is not available",
                     ]);

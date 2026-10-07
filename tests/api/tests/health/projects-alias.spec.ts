@@ -51,6 +51,7 @@ test.describe('projects alias', () => {
   });
 
   test('POST /projects rejects X-Deploy-Stream (sync create stays on /users)', async ({
+    api,
     authedRequest,
     settings,
   }) => {
@@ -60,7 +61,11 @@ test.describe('projects alias', () => {
       headers: { 'X-Deploy-Stream': 'ndjson' },
       data: { username, domain },
     });
-    expect(response.status()).toBe(400);
-    await authedRequest.delete(`projects/${username}`).catch(() => undefined);
+    try {
+      expect(response.status()).toBe(400);
+    } finally {
+      // There only if the engine wrongly created it.
+      await api.deleteUserSafe(username);
+    }
   });
 });

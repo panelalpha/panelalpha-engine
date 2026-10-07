@@ -9,8 +9,11 @@ import {
   type User,
   type UserUsage,
 } from '@/types';
+import { type APIResponse, type TestInfo, test } from '@playwright/test';
 import { Timeouts } from '@/config/timeouts';
+import { delay } from '@/helpers/retry';
 import { taskIdFromBody, waitForTask } from '@/helpers/task-helpers';
+import { type ApiTransport } from '../api-transport';
 import { EngineApiBase } from '../engine-api-base';
 
 /**
@@ -109,16 +112,27 @@ export class UsersApi extends EngineApiBase {
   }
 
   async deleteUser(username: string): Promise<void> {
-    const response = await this.api.delete(`projects/${username}`);
-    await this.assertOk(response);
+    await this.assertOk(await deleteProject(this.api, username));
   }
 
   /**
-   * Deletes a user (raw) ignoring status to ease cleanup flows
+   * Deletes a project in cleanup, where it may never have been created: a 404
+   * is fine. Throws when the project is still there afterwards, so a cleanup
+   * that did not happen is not silent.
    */
   async deleteUserSafe(username: string): Promise<number> {
-    const response = await this.api.delete(`projects/${username}`);
-    return response.status();
+    const response = await deleteProject(this.api, username);
+    const status = response.status();
+    if (response.ok() || status === 404) {
+      return status;
+    }
+    if ((await this.api.get(`projects/${username}`)).status() === 404) {
+      return status;
+    }
+    const body = await response.text().catch(() => '<unreadable body>');
+    throw new Error(
+      `Project ${username} is still on the engine: DELETE answered ${status} ${body}`
+    );
   }
 
   /**
@@ -302,5 +316,51 @@ export class UsersApi extends EngineApiBase {
       `projects/${username}/domains/${encodeURIComponent(domain)}/visitors/${dimension}${suffix}`
     );
     return this.rawCall(response);
+  }
+}
+
+/**
+ * DELETE /projects/{username}, sent again while the engine answers 409 because
+ * a job works on the project. The task the refusal names is cancelled, once;
+ * a task still stopping, or a deploy or push without one, is waited out.
+ */
+async function deleteProject(api: ApiTransport, username: string): Promise<APIResponse> {
+  let deadline: number | undefined;
+  const cancelled = new Set<string>();
+  for (;;) {
+    const response = await api.delete(`projects/${username}`);
+    if (response.status() !== 409 || (deadline !== undefined && Date.now() >= deadline)) {
+      return response;
+    }
+    if (deadline === undefined) {
+      deadline = Date.now() + Timeouts.projectDelete;
+      makeRoomInTheTest(Timeouts.projectDelete + 15_000);
+    }
+    const { message } = (await response.json().catch(() => ({}))) as { message?: unknown };
+    const task =
+      typeof message === 'string' ? /\/tasks\/(\d+)\/cancel/.exec(message)?.[1] : undefined;
+    if (task !== undefined && !cancelled.has(task)) {
+      cancelled.add(task);
+      await api.post(`tasks/${task}/cancel`);
+    } else {
+      await delay(2_000);
+    }
+  }
+}
+
+/**
+ * Lengthens the running test by the retry budget, so a delete that never frees
+ * up fails with its own message, not as the test's timeout. Outside a test
+ * there is nothing to lengthen.
+ */
+function makeRoomInTheTest(ms: number): void {
+  let info: TestInfo;
+  try {
+    info = test.info();
+  } catch {
+    return;
+  }
+  if (info.timeout > 0) {
+    info.setTimeout(info.timeout + ms);
   }
 }
